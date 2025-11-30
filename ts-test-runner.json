@@ -1,7 +1,7 @@
 {
-  "srcDir": "C:/Users/oleks/OneDrive/Desktop/streamix/projects/libraries/streamix/src/lib",
-  "testDir": "C:/Users/oleks/OneDrive/Desktop/streamix/projects/libraries/streamix/src/tests",
-  "outDir": "C:/Users/oleks/OneDrive/Desktop/streamix/dist/.vite-jasmine-build/",
+  "srcDir": "C:/Users/oleks/Desktop/streamix",
+  "testDir": "C:/Users/oleks/Desktop/streamix",
+  "outDir": "C:/Users/oleks/Desktop/streamix/dist/.vite-jasmine-build/",
   "browser": "chrome",
   "headless": false,
   "port": 8888,
@@ -10,7 +10,7 @@
     "sourcemap": true,
     "minify": false,
     "preserveModules": true,
-    "preserveModulesRoot": "C:/Users/oleks/OneDrive/Desktop/streamix"
+    "preserveModulesRoot": "C:/Users/oleks/Desktop/streamix"
   },
   "jasmineConfig": {
     "env": {
@@ -25,7 +25,7 @@
     "reporter": "console"
   },
   "htmlOptions": {
-    "title": "Jasmine Tests Runner",
+    "title": "Jasmine Test Runner",
     "includeSourceScripts": true,
     "includeSpecScripts": true
   }
