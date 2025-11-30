@@ -4,6 +4,7 @@
   "outDir": "C:/Users/oleks/Desktop/streamix/dist/.vite-jasmine-build/",
   "browser": "chrome",
   "headless": false,
+  "coverage": true,
   "port": 8888,
   "viteBuildOptions": {
     "target": "es2022",
