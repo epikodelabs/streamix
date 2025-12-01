@@ -1,7 +1,7 @@
 {
-  "srcDir": "C:/Users/oleks/Desktop/streamix/projects/libraries/streamix/src/lib",
-  "testDir": "C:/Users/oleks/Desktop/streamix/projects/libraries/streamix/src/tests",
-  "outDir": "C:/Users/oleks/Desktop/streamix/dist/.vite-jasmine-build/",
+  "srcDir": "./projects/libraries/streamix/src/lib",
+  "testDir": "./projects/libraries/streamix/src/tests",
+  "outDir": "./dist/.vite-jasmine-build/",
   "browser": "chrome",
   "headless": false,
   "coverage": true,
@@ -11,7 +11,7 @@
     "sourcemap": true,
     "minify": false,
     "preserveModules": true,
-    "preserveModulesRoot": "C:/Users/oleks/Desktop/streamix"
+    "preserveModulesRoot": "."
   },
   "jasmineConfig": {
     "env": {
