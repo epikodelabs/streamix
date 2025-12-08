@@ -5,6 +5,102 @@ import { scheduler } from "./scheduler";
 import { createSubscription, Subscription } from "./subscription";
 
 /**
+ * Drains an async iterator, emitting values to one or more receivers with abort support.
+ *
+ * This utility function encapsulates the common pattern of:
+ * - Iterating through an async iterator
+ * - Checking abort signals between iterations
+ * - Emitting values through the scheduler
+ * - Handling errors inline
+ * - Managing natural completion vs abort
+ *
+ * Supports both single-receiver and multi-receiver (multicast) scenarios.
+ *
+ * @template T The type of values yielded by the iterator
+ *
+ * @param iterator The async iterator to drain
+ * @param getReceivers Function that returns receiver(s) and their subscription(s)
+ * @param signal Abort signal to stop iteration
+ *
+ * @example
+ * ```typescript
+ * // Single receiver
+ * await drainIterator(
+ *   iterator,
+ *   () => [{ receiver, subscription }],
+ *   signal
+ * );
+ *
+ * // Multiple receivers (multicast)
+ * await drainIterator(
+ *   iterator,
+ *   () => Array.from(activeSubscriptions),
+ *   signal
+ * );
+ * ```
+ */
+async function drainIterator<T>(
+  iterator: AsyncIterator<T>,
+  getReceivers: () => Array<{ receiver: Receiver<T>; subscription: Subscription }>,
+  signal: AbortSignal
+): Promise<void> {
+  try {
+    while (!signal.aborted) {
+      const result = await iterator.next();
+      
+      if (signal.aborted) break;
+      if (result.done) break;
+
+      const value = result.value;
+      const receivers = getReceivers();
+
+      // Deliver value to active receivers
+      scheduler.enqueue(async () => {
+        for (const { receiver, subscription } of receivers) {
+          if (!subscription.unsubscribed) {
+            try {
+              await receiver.next?.(value);
+            } catch (err) {
+              try {
+                await receiver.error?.(err instanceof Error ? err : new Error(String(err)));
+              } catch {}
+            }
+          }
+        }
+      });
+    }
+  } catch (err) {
+    if (!signal.aborted) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      const receivers = getReceivers();
+      scheduler.enqueue(async () => {
+        for (const { receiver, subscription } of receivers) {
+          if (!subscription.unsubscribed) {
+            try {
+              await receiver.error?.(error);
+            } catch {}
+          }
+        }
+      });
+    }
+  } finally {
+    // Complete remaining receivers on natural completion only
+    if (!signal.aborted) {
+      const receivers = getReceivers();
+      scheduler.enqueue(async () => {
+        for (const { receiver, subscription } of receivers) {
+          if (!subscription.unsubscribed) {
+            try {
+              await receiver.complete?.();
+            } catch {}
+          }
+        }
+      });
+    }
+  }
+}
+
+/**
  * Represents a reactive stream that supports subscriptions and operator chaining.
  *
  * A stream is a sequence of values over time that can be subscribed to for notifications.
@@ -268,14 +364,8 @@ export function createStream<T>(
    *
    * This internal function:
    * - Creates and executes the async generator
-   * - Iterates through yielded values until completion or abort
-   * - Distributes each value to all active subscribers via scheduler
-   * - Handles errors by propagating them to all subscribers
+   * - Uses drainIterator to handle iteration and distribution to all subscribers
    * - Performs cleanup when done (natural completion or abort)
-   * - Completes remaining subscribers on natural termination
-   *
-   * The loop respects the abort signal and stops immediately when signaled.
-   * All value/error/completion emissions go through the scheduler to maintain ordering.
    *
    * @param genFn The generator function to execute
    * @param controller The abort controller for cancellation
@@ -287,62 +377,14 @@ export function createStream<T>(
 
       try {
         iterator = genFn()[Symbol.asyncIterator]();
-        
-        while (!signal.aborted) {
-          const result = await iterator.next();
-          
-          if (signal.aborted) break;
-          if (result.done) break;
-
-          const value = result.value;
-          const subscribers = Array.from(activeSubscriptions);
-
-          // Deliver value to active subscribers
-          scheduler.enqueue(async () => {
-            for (const { receiver, subscription } of subscribers) {
-              if (!subscription.unsubscribed) {
-                try {
-                  await receiver.next?.(value);
-                } catch (err) {
-                  try {
-                    await receiver.error?.(err instanceof Error ? err : new Error(String(err)));
-                  } catch {}
-                }
-              }
-            }
-          });
-        }
-      } catch (err) {
-        if (!signal.aborted) {
-          const error = err instanceof Error ? err : new Error(String(err));
-          const subscribers = Array.from(activeSubscriptions);
-          scheduler.enqueue(async () => {
-            for (const { receiver, subscription } of subscribers) {
-              if (!subscription.unsubscribed) {
-                try {
-                  await receiver.error?.(error);
-                } catch {}
-              }
-            }
-          });
-        }
+        await drainIterator(
+          iterator,
+          () => Array.from(activeSubscriptions),
+          signal
+        );
       } finally {
         if (iterator?.return) {
           try { await iterator.return(); } catch {}
-        }
-        
-        // Complete remaining subscribers on natural completion only
-        if (!signal.aborted) {
-          const subscribers = Array.from(activeSubscriptions);
-          scheduler.enqueue(async () => {
-            for (const { receiver, subscription } of subscribers) {
-              if (!subscription.unsubscribed) {
-                try {
-                  await receiver.complete?.();
-                } catch {}
-              }
-            }
-          });
         }
         isRunning = false;
       }
@@ -432,9 +474,8 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
      * Creates a subscription that:
      * - Converts the source stream to an async iterator
      * - Applies all operators in sequence to build the transformation pipeline
-     * - Iterates through the pipeline, emitting values via scheduler
+     * - Drains the pipeline using the drainIterator utility
      * - Handles abort signals for clean cancellation
-     * - Manages error propagation and completion
      * - Cleans up the iterator chain on unsubscribe
      *
      * @param cb Optional callback or receiver for handling stream events
@@ -463,39 +504,11 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
         });
       });
 
-      (async () => {
-        try {
-          while (!signal.aborted) {
-            const result = await currentIterator.next();
-            
-            if (signal.aborted) break;
-            if (result.done) break;
-
-            scheduler.enqueue(async () => {
-              if (!subscription.unsubscribed) {
-                try {
-                  await receiver.next?.(result.value);
-                } catch (err) {
-                  try {
-                    await receiver.error?.(err instanceof Error ? err : new Error(String(err)));
-                  } catch {}
-                }
-              }
-            });
-          }
-        } catch (err: any) {
-          if (!signal.aborted && !subscription.unsubscribed) {
-            scheduler.enqueue(async () => await receiver.error?.(err));
-          }
-        } finally {
-          // Complete on natural completion (not abort)
-          if (!signal.aborted && !subscription.unsubscribed) {
-            scheduler.enqueue(async () => {
-              await receiver.complete?.();
-            });
-          }
-        }
-      })();
+      drainIterator(
+        currentIterator,
+        () => [{ receiver, subscription }],
+        signal
+      );
 
       return subscription;
     },
