@@ -5,41 +5,87 @@ import { scheduler } from "./scheduler";
 import { createSubscription, Subscription } from "./subscription";
 
 /* -------------------------------------------------------------------------- */
-/*                             Abort Helper (safe)                             */
+/*                               Helper utilities                             */
 /* -------------------------------------------------------------------------- */
 
 /**
  * Resolves when the given AbortSignal fires.
  * If the signal is already aborted, resolves immediately.
- *
- * This preserves the original semantics where `abort` can win a Promise.race()
- * synchronously.
  */
 function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
-  return new Promise<void>(resolve =>
-    signal.addEventListener("abort", () => resolve(), { once: true })
+  return new Promise(resolve =>
+    signal.addEventListener("abort", resolve as any, { once: true })
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*                          Iterator Draining (core)                           */
-/* -------------------------------------------------------------------------- */
+/**
+ * Wraps a receiver so that all `next`, `error`, and `complete` calls
+ * are dispatched through the scheduler.
+ *
+ * This preserves the original semantics:
+ * - All user callbacks happen in scheduled microtasks.
+ * - Errors thrown in `next` are routed to `error` but do NOT terminate the stream.
+ * - Errors thrown in `error`/`complete` are swallowed.
+ */
+function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
+  const wrapped: Receiver<T> = {};
+
+  if (receiver.next) {
+    wrapped.next = (value: T) =>
+      scheduler.enqueue(async () => {
+        try {
+          await receiver.next!(value);
+        } catch (err) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          if (receiver.error) {
+            try {
+              await receiver.error(error);
+            } catch {
+              // swallow secondary errors
+            }
+          }
+        }
+      });
+  }
+
+  if (receiver.error) {
+    wrapped.error = (err: any) =>
+      scheduler.enqueue(async () => {
+        try {
+          await receiver.error!(err);
+        } catch {
+          // swallow errors from error handlers
+        }
+      });
+  }
+
+  if (receiver.complete) {
+    wrapped.complete = () =>
+      scheduler.enqueue(async () => {
+        try {
+          await receiver.complete!();
+        } catch {
+          // swallow errors from completion handlers
+        }
+      });
+  }
+
+  return wrapped;
+}
 
 /**
- * Drains an async iterator using Promise.race() to support abort semantics.
+ * Drains an async iterator with abort support and scheduled delivery.
  *
- * This preserves the original behavior:
- *  - iterator.next() races against an abort signal
- *  - values delivered via scheduler
- *  - errors forwarded via scheduler
- *  - completion delivered via scheduler (only if not aborted)
- *  - iterator.return() is called in all cases
- *
- * @template T
- * @param iterator Async iterator to drain
- * @param getReceivers Returns current receivers + subscriptions
- * @param signal Abort signal used to interrupt iteration
+ * Semantics:
+ * - Uses Promise.race between `iterator.next()` and abort signal.
+ * - On each value:
+ *   - calls `receiver.next` for all active receivers (wrapped → scheduled).
+ * - On generator error:
+ *   - calls `receiver.error` for all active receivers.
+ *   - then completes them in the `finally` block (natural end path).
+ * - On abort:
+ *   - iterator is finalized, but no `complete` is called here.
  */
 async function drainIterator<T>(
   iterator: AsyncIterator<T>,
@@ -50,7 +96,6 @@ async function drainIterator<T>(
 
   try {
     while (true) {
-      // Preserves the original race semantics:
       const winner = await Promise.race([
         abortPromise.then(() => ({ aborted: true } as const)),
         iterator.next().then(result => ({ result })),
@@ -64,115 +109,96 @@ async function drainIterator<T>(
       const value = result.value;
       const receivers = getReceivers();
 
-      scheduler.enqueue(async () => {
-        for (const { receiver, subscription } of receivers) {
-          if (!subscription.unsubscribed) {
-            try {
-              await receiver.next?.(value);
-            } catch (err) {
-              const error = err instanceof Error ? err : new Error(String(err));
-              try { await receiver.error?.(error); } catch {}
-            }
-          }
+      for (const { receiver, subscription } of receivers) {
+        if (!subscription.unsubscribed) {
+          receiver.next?.(value);
         }
-      });
+      }
     }
-
   } catch (err) {
     if (!signal.aborted) {
       const error = err instanceof Error ? err : new Error(String(err));
       const receivers = getReceivers();
 
-      scheduler.enqueue(async () => {
-        for (const { receiver, subscription } of receivers) {
-          if (!subscription.unsubscribed) {
-            try { await receiver.error?.(error); } catch {}
-          }
+      for (const { receiver, subscription } of receivers) {
+        if (!subscription.unsubscribed) {
+          receiver.error?.(error);
         }
-      });
+      }
     }
-
   } finally {
-    // Always attempt generator cleanup
     if (iterator.return) {
-      try { await iterator.return(); } catch {}
+      try {
+        await iterator.return();
+      } catch {
+        // ignore iterator finalization errors
+      }
     }
 
-    // COMPLETE only on natural completion
+    // Only complete on natural completion (not abort)
     if (!signal.aborted) {
       const receivers = getReceivers();
-
-      scheduler.enqueue(async () => {
-        for (const { receiver, subscription } of receivers) {
-          if (!subscription.unsubscribed) {
-            try { await receiver.complete?.(); } catch {}
-          }
+      for (const { receiver, subscription } of receivers) {
+        if (!subscription.unsubscribed) {
+          receiver.complete?.();
         }
-      });
+      }
     }
   }
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                 Stream type                                 */
+/*                                   Stream                                   */
 /* -------------------------------------------------------------------------- */
 
 export type Stream<T = any> = {
   type: "stream" | "subject";
   name?: string;
   pipe: OperatorChain<T>;
-  subscribe: (callback?: ((value: T) => CallbackReturnType) | Receiver<T>) => Subscription;
+  subscribe: (
+    callback?: ((value: T) => CallbackReturnType) | Receiver<T>
+  ) => Subscription;
   query: () => Promise<T>;
 };
 
 /* -------------------------------------------------------------------------- */
-/*                               createStream()                                */
+/*                               createStream()                               */
 /* -------------------------------------------------------------------------- */
 
 /**
  * Creates a multicast stream backed by an async generator.
  *
- * Behavior (identical to original):
- *  - Start generator on first subscriber
- *  - Share values with all subscribers (multicast)
- *  - Abort generator when last subscriber unsubscribes
- *  - Restart generator if new subscriber arrives after completion
- *  - Deliver next/error/complete via scheduler (microtask sync model)
+ * - Starts generator on first subscriber.
+ * - Shares values across all subscribers (multicast).
+ * - Aborts generator when the last subscriber unsubscribes.
+ * - Restarts generator if new subscribers arrive after teardown.
  */
 export function createStream<T>(
   name: string,
   generatorFn: () => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
-
   const activeSubscriptions = new Set<{ receiver: Receiver<T>; subscription: Subscription }>();
   let isRunning = false;
-  let abortController = new AbortController(); // must never be null
+  let abortController = new AbortController();
 
-  /**
-   * Subscribe to the stream.
-   */
   const subscribe = (
     callbackOrReceiver?: ((value: T) => CallbackReturnType) | Receiver<T>
   ): Subscription => {
+    const baseReceiver = createReceiver(callbackOrReceiver);
+    const receiver = wrapReceiver(baseReceiver);
 
-    const receiver = createReceiver(callbackOrReceiver);
     let subscription!: Subscription;
 
     subscription = createSubscription(async () => {
-      // Remove receiver
-      for (const sub of activeSubscriptions) {
-        if (sub.subscription === subscription) {
-          activeSubscriptions.delete(sub);
+      const entry = [...activeSubscriptions].find(
+        s => s.subscription === subscription
+      );
 
-          scheduler.enqueue(async () => {
-            try { await sub.receiver.complete?.(); }
-            catch (err) { console.warn("Error completing cancelled receiver:", err); }
-          });
-          break;
-        }
+      if (entry) {
+        activeSubscriptions.delete(entry);
+        entry.receiver.complete?.();
       }
 
-      // If last subscriber → abort generator
       if (activeSubscriptions.size === 0) {
         abortController.abort();
         isRunning = false;
@@ -181,7 +207,6 @@ export function createStream<T>(
 
     activeSubscriptions.add({ receiver, subscription });
 
-    // Start generator if needed
     if (!isRunning) {
       isRunning = true;
       abortController = new AbortController();
@@ -191,14 +216,10 @@ export function createStream<T>(
     return subscription;
   };
 
-  /**
-   * Internal multicast loop.
-   */
   const startMulticastLoop = (
     genFn: () => AsyncGenerator<T>,
     controller: AbortController
   ) => {
-
     (async () => {
       const signal = controller.signal;
       const iterator = genFn()[Symbol.asyncIterator]();
@@ -216,7 +237,8 @@ export function createStream<T>(
   };
 
   let self: Stream<T>;
-  const pipe = ((...ops: Operator<any, any>[]) => pipeStream(self, ops)) as OperatorChain<T>;
+  const pipe = ((...ops: Operator<any, any>[]) =>
+    pipeStream(self, ops)) as OperatorChain<T>;
 
   self = {
     type: "stream",
@@ -230,23 +252,22 @@ export function createStream<T>(
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                pipeStream()                                 */
+/*                                pipeStream()                                */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Pipes a stream through a chain of operators, producing a new derived stream.
+ * Pipes a source stream through a chain of operators, producing a derived stream.
  *
- * Behavior preserved exactly:
- *  - each subscription creates a fresh operator iterator chain
- *  - source is consumed via eachValueFrom(source)
- *  - unsubscribe aborts only this derived iterator, not the source
- *  - errors and completions propagate through scheduler
+ * Each subscription to the derived stream:
+ *  - builds a fresh iterator chain from the source via `eachValueFrom(source)`,
+ *  - applies all operators in order,
+ *  - drains the iterator with abort support,
+ *  - delivers values via scheduled receivers.
  */
 export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
   source: Stream<TIn>,
   operators: [...Ops]
 ): Stream<any> {
-
   const pipedStream: Stream<any> = {
     name: `${source.name}-sink`,
     type: "stream",
@@ -255,22 +276,26 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
       pipeStream(source, [...operators, ...nextOps])) as OperatorChain<any>,
 
     subscribe(cb?: ((value: any) => CallbackReturnType) | Receiver<any>) {
-      const receiver = createReceiver(cb);
+      const baseReceiver = createReceiver(cb);
+      const receiver = wrapReceiver(baseReceiver);
 
       const sourceIterator =
         eachValueFrom(source)[Symbol.asyncIterator]() as AsyncIterator<TIn>;
 
       let iterator: AsyncIterator<any> = sourceIterator;
-      for (const op of operators) iterator = op.apply(iterator);
+      for (const op of operators) {
+        iterator = op.apply(iterator);
+      }
 
       const abortController = new AbortController();
       const signal = abortController.signal;
 
       const subscription = createSubscription(async () => {
         abortController.abort();
-        scheduler.enqueue(async () => { await receiver.complete?.(); });
+        receiver.complete?.();
       });
 
+      // Fire-and-forget: errors and completion are handled inside drainIterator + receiver wrappers
       drainIterator(
         iterator,
         () => [{ receiver, subscription }],
