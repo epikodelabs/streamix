@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that skips values from the source stream while a predicate returns true.
@@ -15,7 +15,7 @@ import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Ope
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const skipWhile = <T = any>(
-  predicate: (value: T) => CallbackReturnType<boolean>
+  predicate: (value: T) => MaybePromise<boolean>
 ) =>
   createOperator<T, T>('skipWhile', function (this: Operator, source) {
     let skipping = true;

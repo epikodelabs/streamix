@@ -1,5 +1,5 @@
-import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Operator, Stream } from "../abstractions";
-import { eachValueFrom } from '../converters';
+import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream } from "../abstractions";
+import { eachValueFrom, fromAny } from '../converters';
 
 /**
  * Options to configure the recursive traversal behavior.
@@ -38,8 +38,8 @@ export type RecurseOptions = {
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const recurse = <T = any>(
-  condition: (value: T) => CallbackReturnType<boolean>,
-  project: (value: T) => Stream<T>,
+  condition: (value: T) => MaybePromise<boolean>,
+  project: (value: T) => (Stream<T> | MaybePromise<T> | Array<T>),
   options: RecurseOptions = {}
 ) =>
   createOperator<T, T>('recurse', function (this: Operator, source) {
@@ -51,7 +51,7 @@ export const recurse = <T = any>(
       if (options.maxDepth !== undefined && depth >= options.maxDepth) return;
       if (!await condition(value)) return;
 
-      for await (const child of eachValueFrom(project(value))) {
+      for await (const child of eachValueFrom(fromAny(project(value)))) {
         const item = { value: child, depth: depth + 1 };
         if (options.traversal === 'breadth') {
           queue.push(item);

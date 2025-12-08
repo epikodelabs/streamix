@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, DONE, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that emits values from the source stream only if
@@ -16,7 +16,7 @@ import { createOperator, createStreamResult, DONE, Operator } from '../abstracti
  */
 
 export const distinctUntilChanged = <T = any>(
-  comparator?: (prev: T, curr: T) => boolean
+  comparator?: (prev: T, curr: T) => MaybePromise<boolean>
 ) =>
   createOperator<T, T>('distinctUntilChanged', function (this: Operator, source, context) {
     let lastValue: T | undefined;
@@ -29,9 +29,8 @@ export const distinctUntilChanged = <T = any>(
 
           if (result.done) return DONE;
 
-          // Check if the value is different from the last one
-          const isDistinct = !hasLast ||
-            !(comparator ? comparator(lastValue!, result.value) : lastValue === result.value);
+          // Check if the value is different from the last one.
+          const isDistinct = !hasLast || !(comparator ? await comparator(lastValue!, result.value) : lastValue === result.value);
 
           if (isDistinct) {
             // If distinct, update state and return

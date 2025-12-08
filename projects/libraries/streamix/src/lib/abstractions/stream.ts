@@ -1,7 +1,7 @@
 import { eachValueFrom, firstValueFrom } from "../converters";
-import { createStreamContext, PipelineContext, StreamResult } from "./context";
-import { Operator, OperatorChain, patchOperator } from "./operator";
-import { CallbackReturnType, createReceiver, Receiver } from "./receiver";
+import { Operator, OperatorChain } from "./operator";
+import { createReceiver, MaybePromise, Receiver } from "./receiver";
+import { scheduler } from "./scheduler";
 import { createSubscription, Subscription } from "./subscription";
 
 
@@ -57,223 +57,272 @@ export interface StreamGenerator<T> extends StreamIterator<T> {
 }
 
 /**
- * Represents a reactive stream that supports subscriptions and operator chaining.
+ * A reactive stream representing a sequence of values over time.
  *
- * A stream is a sequence of values over time that can be subscribed to for notifications.
- * It is a foundational concept in reactive programming, providing a unified way to handle
- * asynchronous data flows, such as events, data from APIs, or values from an async generator.
+ * Streams support:
+ * - **Subscription** to receive asynchronous values.
+ * - **Operator chaining** through `.pipe()`.
+ * - **Querying** the first emitted value.
  *
- * @template T The type of the values emitted by the stream.
+ * Two variants exist:
+ * - `"stream"` — automatically driven, typically created by `createStream()`.
+ * - `"subject"` — manually driven (not implemented here but retained for API symmetry).
+ *
+ * @template T The value type emitted by the stream.
  */
 export type Stream<T = any> = {
-  /**
-   * A type discriminator to differentiate between stream types.
-   * `stream` indicates a cold, multicastable stream originating from a generator.
-   * `subject` would indicate a hot stream that can be manually controlled.
-   */
+  /** Identifies the underlying behavior of the stream. */
   type: "stream" | "subject";
-  /**
-   * An optional, human-readable name for the stream, useful for debugging and logging.
-   */
+
+  /** Human-readable name primarily for debugging and introspection. */
   name?: string;
+
   /**
-   * A method to chain stream operators.
+   * Creates a new derived stream by applying one or more `Operator`s.
    *
-   * This is a critical part of the stream's composability. It takes one or more
-   * `Operator`s and returns a new `Stream` that applies each operator's
-   * transformation in order.
-   * @example
-   * ```typescript
-   * const numberStream = createStream('numbers', async function*() {
-   *   yield 1; yield 2; yield 3;
-   * });
-   *
-   * const doubledStream = numberStream.pipe(
-   *   map(value => value * 2),
-   *   filter(value => value > 3)
-   * );
-   * ```
+   * Operators compose into an async-iterator pipeline, transforming emitted values.
    */
   pipe: OperatorChain<T>;
+
   /**
-   * Subscribes a listener to the stream to receive emitted values.
+   * Subscribes to the stream.
    *
-   * Subscribing starts the stream's execution. Multiple subscriptions will
-   * multicast the same values to all listeners.
-   *
-   * @param callback An optional function or `Receiver` object to handle
-   * values, errors, and completion of the stream.
-   * @returns A `Subscription` object which can be used to unsubscribe and
-   * stop listening to the stream.
+   * A callback or Receiver will be invoked for each next/error/complete event.
+   * Returns a `Subscription` that may be used to unsubscribe.
    */
-  subscribe: (callback?: ((value: T) => CallbackReturnType) | Receiver<T>) => Subscription;
+  subscribe: (
+    callback?: ((value: T) => MaybePromise) | Receiver<T>
+  ) => Subscription;
+
   /**
-   * Queries the stream for its first emitted value and resolves when that value arrives.
+   * Convenience method for retrieving the first emitted value.
    *
-   * This method is useful for scenarios where you only need a single value from the stream,
-   * such as a one-off API request or a single button click. It automatically unsubscribes
-   * after the first value is received.
-   *
-   * @returns A promise that resolves with the first value emitted by the stream.
+   * Internally subscribes, resolves on the first `next`, and then unsubscribes.
    */
   query: () => Promise<T>;
 };
 
+/** Internal subscriber bookkeeping type. */
+type SubscriberEntry<T> = { receiver: Receiver<T>; subscription: Subscription };
+
 /**
- * Creates a multicast stream from an async generator function.
+ * Returns a promise resolving when an AbortSignal becomes aborted.
  *
- * A **multicast stream** (also known as a hot stream) starts executing its work
- * (running the `generatorFn`) when the first subscriber joins. All subsequent
- * subscriptions will share the same underlying generator execution, receiving
- * the same values from that single source. This is different from a typical
- * cold stream, where each subscription would trigger a new, independent execution.
+ * If already aborted, resolves immediately.
+ */
+function waitForAbort(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise(resolve =>
+    signal.addEventListener("abort", resolve as any, { once: true })
+  );
+}
+
+/**
+ * Wraps a `Receiver<T>` so all lifecycle callbacks (`next`, `error`, `complete`)
+ * run inside the scheduler’s microtask queue.
  *
- * The stream manages the subscription lifecycle and performs graceful teardown
- * of the generator when there are no more active subscribers.
+ * Guarantees:
+ * - All user callbacks are async-scheduled.
+ * - Errors thrown inside `next` are forwarded to `error` (if provided).
+ * - Secondary errors inside `error` or `complete` are swallowed.
+ */
+function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
+  const wrapped: Receiver<T> = {};
+
+  const safeSchedule = (cb: () => MaybePromise) =>
+    scheduler.enqueue(cb).catch(() => {});
+
+  if (receiver.next) {
+    wrapped.next = (value: T) => safeSchedule(async () => {
+      try {
+        await receiver.next!(value);
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        if (receiver.error) {
+          receiver.error!(error);
+        }
+      }
+    });
+  }
+
+  if (receiver.error) {
+    wrapped.error = (err: any) => safeSchedule(() => receiver.error!(err));
+  }
+
+  if (receiver.complete) {
+    wrapped.complete = () => safeSchedule(() => receiver.complete!());
+  }
+
+  return wrapped;
+}
+
+/**
+ * Drains an async iterator and dispatches yielded values to one or more receivers.
  *
- * @template T The type of the values that the stream will emit.
- * @param name A human-readable name for the stream, useful for debugging.
- * @param generatorFn An async generator function that defines the source of the stream's
- * values. The generator's `yield` statements push values to the stream.
- * @returns A new `Stream` instance.
+ * Behavior:
+ * - Uses `Promise.race` to respond to either `iterator.next()` or an abort event.
+ * - Forwards values to all receivers whose subscriptions are still active.
+ * - Forwards generator-thrown errors to receivers via `error`.
+ * - Completes receivers on natural completion (`done: true`), not on abort.
+ * - Ensures iterator finalization via `return()` if provided.
+ *
+ * The receiver callbacks (`next`, `error`, `complete`) are already wrapped to run
+ * inside the scheduler, so this function does *not* itself schedule work.
+ */
+async function drainIterator<T>(
+  iterator: AsyncIterator<T>,
+  getReceivers: () => Array<SubscriberEntry<T>>,
+  signal: AbortSignal
+): Promise<void> {
+  const abortPromise = waitForAbort(signal);
+
+  try {
+    while (true) {
+      const winner = await Promise.race([
+        abortPromise.then(() => ({ aborted: true } as const)),
+        iterator.next().then(result => ({ result })),
+      ]);
+
+      if ("aborted" in winner || signal.aborted) break;
+
+      const { result } = winner;
+      if (result.done) break;
+
+      const receivers = getReceivers();
+      for (const { receiver, subscription } of receivers) {
+        if (!subscription.unsubscribed) {
+          receiver.next?.(result.value);
+        }
+      }
+    }
+  } catch (err) {
+    // Only generator-thrown errors reach here (not subscriber errors).
+    if (!signal.aborted) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      for (const { receiver, subscription } of getReceivers()) {
+        if (!subscription.unsubscribed) receiver.error?.(error);
+      }
+    }
+  } finally {
+    // Always try to finalize iterator
+    if (iterator.return) {
+      try {
+        await iterator.return();
+      } catch {}
+    }
+
+    // Only naturally-complete subscribers on non-abort
+    if (!signal.aborted) {
+      for (const { receiver, subscription } of getReceivers()) {
+        if (!subscription.unsubscribed) receiver.complete?.();
+      }
+    }
+  }
+}
+
+/**
+ * Creates a **multicast reactive stream** backed by an async generator.
+ *
+ * Semantics:
+ * - The generator runs once per group of subscribers.
+ * - Adding the first subscriber starts the generator.
+ * - Values are shared across all subscribers (hot multicast).
+ * - When the last subscriber unsubscribes, the generator is aborted.
+ * - A later subscriber causes the generator to start again (cold-restart).
+ *
+ * Scheduler guarantees:
+ * - All receiver callbacks (`next`, `error`, `complete`) run in scheduled microtasks.
+ *
+ * @template T Value type emitted by the generator.
+ * @param name Optional human-readable stream label.
+ * @param generatorFn Function producing an async iterator yielding values for subscribers.
  */
 export function createStream<T>(
   name: string,
   generatorFn: () => AsyncGenerator<T, void, unknown>,
   context?: PipelineContext
 ): Stream<T> {
-  void context;
-  const activeSubscriptions = new Set<{
-    receiver: Receiver<T>;
-    subscription: Subscription;
-  }>();
+  const activeSubscriptions = new Set<SubscriberEntry<T>>();
   let isRunning = false;
   let abortController = new AbortController();
 
+  const getActiveReceivers = () => Array.from(activeSubscriptions);
+
+  const startMulticastLoop = () => {
+    isRunning = true;
+    abortController = new AbortController();
+
+    (async () => {
+      const signal = abortController.signal;
+      const iterator = generatorFn()[Symbol.asyncIterator]();
+
+      try {
+        await drainIterator(iterator, getActiveReceivers, signal);
+      } finally {
+        isRunning = false;
+      }
+    })();
+  };
+
   const subscribe = (
-    callbackOrReceiver?: ((value: T) => CallbackReturnType) | Receiver<T>
+    callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
   ): Subscription => {
-    const receiver = createReceiver(callbackOrReceiver);
-    const subscription = createSubscription(() => {
-      for (const sub of activeSubscriptions) {
-        if (sub.subscription === subscription) {
-          activeSubscriptions.delete(sub);
-          try {
-            sub.receiver.complete?.();
-          } catch (error) {
-            console.warn("Error completing cancelled receiver:", error);
-          }
-          break;
-        }
+    const receiver = wrapReceiver(createReceiver(callbackOrReceiver));
+    let subscription!: Subscription;
+
+    subscription = createSubscription(async () => {
+      const entry = getActiveReceivers().find(
+        s => s.subscription === subscription
+      );
+
+      if (entry) {
+        activeSubscriptions.delete(entry);
+        entry.receiver.complete?.();
       }
 
       if (activeSubscriptions.size === 0) {
         abortController.abort();
-        isRunning = false;
       }
     });
 
     activeSubscriptions.add({ receiver, subscription });
 
     if (!isRunning) {
-      isRunning = true;
-      startMulticastLoop(generatorFn, abortController.signal);
+      startMulticastLoop();
     }
 
     return subscription;
   };
 
-  const startMulticastLoop = (
-    genFn: () => AsyncGenerator<T, void, unknown>,
-    signal: AbortSignal
-  ) => {
-    (async () => {
-      let currentIterator: AsyncIterator<T> | null = null;
-
-      const abortPromise = new Promise<void>((resolve) => {
-        if (signal.aborted) resolve();
-        else signal.addEventListener("abort", () => resolve(), { once: true });
-      });
-
-      try {
-        currentIterator = genFn()[Symbol.asyncIterator]();
-        while (true) {
-          const winner = await Promise.race([
-            abortPromise.then(() => ({ aborted: true } as const)),
-            currentIterator.next().then(result => ({ result }))
-          ]);
-
-          if ("aborted" in winner || signal.aborted) break;
-          const result = winner.result;
-          if (result.done) break;
-
-          const subscribers = Array.from(activeSubscriptions);
-          await Promise.all(
-            subscribers.map(async ({ receiver }) => {
-              try {
-                await receiver.next?.(result.value);
-              } catch (error) {
-                console.warn("Subscriber error:", error);
-              }
-            })
-          );
-        }
-      } catch (err) {
-        if (!signal.aborted) {
-          const error = err instanceof Error ? err : new Error(String(err));
-          const subscribers = Array.from(activeSubscriptions);
-          await Promise.all(
-            subscribers.map(async ({ receiver }) => {
-              try {
-                await receiver.error?.(error);
-              } catch {}
-            })
-          );
-        }
-      } finally {
-        if (currentIterator?.return) {
-          try {
-            await currentIterator.return();
-          } catch {}
-        }
-
-        const subscribers = Array.from(activeSubscriptions);
-        await Promise.all(
-          subscribers.map(async ({ receiver }) => {
-            try {
-              await receiver.complete?.();
-            } catch {}
-          })
-        );
-
-        isRunning = false;
-      }
-    })();
-  };
-
-  // We must define self first so pipe can capture it
   let self: Stream<T>;
+  const pipe = ((...ops: Operator<any, any>[]) =>
+    pipeStream(self, ops)) as OperatorChain<T>;
 
-  // Create pipe function that uses self
-  const pipe = ((...operators: Operator<any, any>[]) => {
-    return pipeStream(self, operators, context);
-  }) as OperatorChain<T>;
-
-  // Now define self, closing over pipe
   self = {
     type: "stream",
     name,
     pipe,
     subscribe,
-    query: () => firstValueFrom(self)
+    query: () => firstValueFrom(self),
   };
 
   return self;
 }
 
 /**
- * Pipes a stream through a series of transformation operators,
- * returning a new derived stream.
+ * Pipes a source stream through a chain of operators to produce a **derived stream**.
+ *
+ * For each subscription:
+ * - A fresh iterator is created from the source via `eachValueFrom()`.
+ * - All operators transform the iterator in sequence.
+ * - `drainIterator` consumes the transformed iterator until completion or abort.
+ *
+ * Unlike `createStream`, piped streams are **unicast**:
+ * - Each subscriber gets an independent execution of the operator pipeline.
+ * - Only the source stream remains multicast.
+ *
+ * @template TIn  Input value type.
+ * @template Ops  Tuple of operators used to transform the pipeline.
  */
 export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
   source: Stream<TIn>,
@@ -281,67 +330,39 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
   context?: PipelineContext
 ): Stream<any> {
   const pipedStream: Stream<any> = {
-    name: `${source.name}-sink`,
-    type: 'stream',
+    name: `${source.name}-piped`,
+    type: "stream",
 
-    pipe: ((...nextOps: Operator<any, any>[]) => {
-      const allOps = [...operators, ...nextOps];
-      return pipeStream(source, allOps, context);
-    }) as OperatorChain<any>,
+    pipe: ((...nextOps: Operator<any, any>[]) =>
+      pipeStream(source, [...operators, ...nextOps])) as OperatorChain<any>,
 
-    subscribe(cb?: ((value: any) => CallbackReturnType) | Receiver<any>) {
-      const receiver = createReceiver(cb);
-      let streamContext = context ? createStreamContext(this, context) : undefined;
-      const sourceIterator = eachValueFrom(source)[Symbol.asyncIterator]() as StreamIterator<TIn>;
-      let currentIterator: StreamIterator<any> = sourceIterator;
+    subscribe(cb?: ((value: any) => MaybePromise) | Receiver<any>) {
+      const receiver = wrapReceiver(createReceiver(cb));
 
-      for (const op of operators) {
-        const patchedOp = patchOperator(op);
-        currentIterator = patchedOp.apply(currentIterator, streamContext);
-      }
+      const sourceIterator =
+        eachValueFrom(source)[Symbol.asyncIterator]() as AsyncIterator<TIn>;
+
+      let iterator: AsyncIterator<any> = sourceIterator;
+      for (const op of operators) iterator = op.apply(iterator);
 
       const abortController = new AbortController();
-      const { signal } = abortController;
+      const signal = abortController.signal;
 
-      const abortPromise = new Promise<void>((resolve) => {
-        if (signal.aborted) resolve();
-        else signal.addEventListener("abort", () => resolve(), { once: true });
-      });
-
-      (async () => {
-        try {
-          while (true) {
-            const winner = await Promise.race([
-              abortPromise.then(() => ({ aborted: true } as const)),
-              currentIterator.next().then(result => ({ result }))
-            ]);
-
-            if ("aborted" in winner || signal.aborted) break;
-            const result = winner.result;
-            if (result.done) break;
-
-            await receiver.next?.(result.value);
-          }
-        } catch (err: any) {
-          if (!signal.aborted) {
-            await receiver.error?.(err);
-          }
-        } finally {
-          await receiver.complete?.();
-        }
-      })();
-
-      return createSubscription(async () => {
+      const subscription = createSubscription(async () => {
         abortController.abort();
-        if (currentIterator.return) {
-          await currentIterator.return().catch(() => {});
-        }
+        receiver.complete?.();
       });
+
+      drainIterator(iterator, () => [{ receiver, subscription }], signal).catch(
+        () => {}
+      );
+
+      return subscription;
     },
 
-    async query() {
+    query() {
       return firstValueFrom(pipedStream);
-    }
+    },
   };
 
   return pipedStream;

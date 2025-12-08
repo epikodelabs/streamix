@@ -1,47 +1,54 @@
-import { createStream, PipelineContext, Stream } from '../abstractions';
+import { Receiver, Stream } from '../abstractions';
+import { createSubject } from '../subjects';
 
 /**
- * Creates a stream that emits the time elapsed between each animation frame.
+ * Creates a reactive stream that emits the time delta (in milliseconds) between
+ * consecutive `requestAnimationFrame` calls.
  *
- * This is useful for building animations, games, or any time-based logic
- * that needs to be synchronized with the browser's rendering cycle. The stream
- * will emit a `number` representing the time in milliseconds since the last frame.
+ * This stream provides a convenient way to track frame updates in animations,
+ * game loops, or other time-sensitive operations. Each subscriber receives
+ * a stream of `number` values representing the elapsed time since the previous frame.
  *
- * @returns {Stream<number>} A stream that emits the delta time for each animation frame.
+ * **Behavior:**
+ * - When a subscriber subscribes, a new RAF loop starts immediately.
+ * - The first emitted value is the delta between the first and second RAF callbacks.
+ * - Each subsequent frame emits the delta since the previous frame.
+ * - When the subscriber unsubscribes, the RAF loop is canceled to avoid unnecessary CPU usage.
+ *
+ * @returns {Stream<number>} A stream emitting the time delta between frames.
  */
-export function onAnimationFrame(context?: PipelineContext): Stream<number> {
-  return createStream<number>('onAnimationFrame', async function* () {
-    let resolveNext: ((value: number) => void) | null = null;
+export function onAnimationFrame(): Stream<number> {
+  const subject = createSubject<number>();
+
+  const originalSubscribe = subject.subscribe;
+  subject.subscribe = (callback?: ((value: number) => void) | Receiver<number>) => {
+    const subscription = originalSubscribe.call(subject, callback);
+
     let lastTime = performance.now();
     let rafId: number | null = null;
 
     const tick = (now: number) => {
       const delta = now - lastTime;
       lastTime = now;
-
-      resolveNext?.(delta);
-      resolveNext = null;
-
-      requestNextFrame();
-    };
-
-    const requestNextFrame = () => {
+      subject.next(delta);
       rafId = requestAnimationFrame(tick);
     };
 
-    requestNextFrame();
+    rafId = requestAnimationFrame(tick);
 
-    try {
-      while (true) {
-        const delta = await new Promise<number>((resolve) => {
-          resolveNext = resolve;
-        });
-        yield delta;
-      }
-    } finally {
+    const originalOnUnsubscribe = subscription.onUnsubscribe;
+    subscription.onUnsubscribe = () => {
+      originalOnUnsubscribe?.call(subscription);
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
+        rafId = null;
       }
-    }
-  }, context);
+      subscription.unsubscribe();
+    };
+
+    return subscription;
+  };
+
+  subject.name = 'onAnimationFrame';
+  return subject;
 }

@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, createStreamResult, Operator, Stream, StreamContext, StreamResult, Subscription } from "../abstractions";
+import { createOperator, MaybePromise, Operator, Stream, Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../streams";
 
@@ -20,12 +20,12 @@ import { createSubject } from "../streams";
  * @template R The type of values emitted by the inner and output streams.
  * @param project A function that maps a source value and its index to either:
  *   - a {@link Stream<R>},
- *   - a {@link CallbackReturnType<R>} (value or promise),
+ *   - a {@link MaybePromise<R>} (value or promise),
  *   - or an array of `R`.
  * @returns An {@link Operator} instance suitable for use in a stream's `pipe` method.
  */
 export function switchMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | CallbackReturnType<R> | Array<R>
+  project: (value: T, index: number) => (Stream<R> | MaybePromise<R> | Array<R>)
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source, context) {
     const output = createSubject<R>();

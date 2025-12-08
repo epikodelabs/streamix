@@ -29,9 +29,6 @@
       "@actioncrew/streamix/http": [
         "./projects/libraries/streamix/http/src/lib/index.ts"
       ],
-      "@actioncrew/streamix/testing": [
-        "./projects/libraries/streamix/testing/src/lib/index.ts"
-      ],
       "@actioncrew/streamix/coroutine": [
         "./projects/libraries/streamix/coroutine/src/lib/index.ts"
       ],

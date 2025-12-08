@@ -1,5 +1,5 @@
-import { createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
-import { CallbackReturnType } from "./../abstractions/receiver";
+import { createOperator, DONE, NEXT, Operator } from "../abstractions";
+import { MaybePromise } from "./../abstractions/receiver";
 
 /**
  * Creates a stream operator that emits only the last value from the source stream
@@ -19,7 +19,7 @@ import { CallbackReturnType } from "./../abstractions/receiver";
  */
 
 export const last = <T = any>(
-  predicate?: (value: T) => CallbackReturnType<boolean>
+  predicate?: (value: T) => MaybePromise<boolean>
 ) =>
   createOperator<T, T>("last", function (this: Operator, source, context) {
 

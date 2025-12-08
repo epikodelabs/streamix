@@ -1,16 +1,17 @@
 import {
-  CallbackReturnType,
   createReceiver,
   createSubscription,
+  scheduler as globalScheduler,
+  MaybePromise,
   Operator,
-  PipelineContext,
   pipeStream,
   Receiver,
+  Scheduler,
   Stream,
   Subscription
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { createQueue, createSubjectBuffer } from "../primitives";
+import { createSubjectBuffer } from "../primitives";
 
 /**
  * A `Subject` is a special type of `Stream` that can be manually pushed new values.
@@ -62,23 +63,22 @@ export type Subject<T = any> = Stream<T> & {
  * @template T The type of the values that the subject will emit.
  * @returns {Subject<T>} A new Subject instance.
  */
-export function createSubject<T = any>(context?: PipelineContext): Subject<T> {
-  const buffer = createSubjectBuffer<{ value: T, phantom?: boolean }>();
-  const queue = createQueue();
+export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): Subject<T> {
+  const buffer = createSubjectBuffer<T>();
   let latestValue: T | undefined = undefined;
   let isCompleted = false;
   let hasError = false;
 
-  const next = function (value: T) {
+  const next = (value: T) => {
     latestValue = value;
-    queue.enqueue(async () => {
+    scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
       await buffer.write({ value });
     });
   };
 
   const complete = () => {
-    queue.enqueue(async () => {
+    scheduler.enqueue(async () => {
       if (isCompleted) return;
       isCompleted = true;
       await buffer.complete();
@@ -86,7 +86,7 @@ export function createSubject<T = any>(context?: PipelineContext): Subject<T> {
   };
 
   const error = (err: any) => {
-    queue.enqueue(async () => {
+    scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
       hasError = true;
       isCompleted = true;
@@ -95,7 +95,7 @@ export function createSubject<T = any>(context?: PipelineContext): Subject<T> {
     });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => CallbackReturnType) | Receiver<T>): Subscription => {
+  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
     const receiver = createReceiver(callbackOrReceiver);
 
     let unsubscribing = false;
@@ -104,15 +104,13 @@ export function createSubject<T = any>(context?: PipelineContext): Subject<T> {
     const subscription = createSubscription(() => {
       if (!unsubscribing) {
         unsubscribing = true;
-        queue.enqueue(async () => {
-          if (readerId !== null) {
-            await buffer.detachReader(readerId);
-          }
+        scheduler.enqueue(async () => {
+          if (readerId !== null) await buffer.detachReader(readerId);
         });
       }
     });
 
-    queue.enqueue(() => buffer.attachReader()).then(async (id: number) => {
+    scheduler.enqueue(() => buffer.attachReader()).then(async (id: number) => {
       readerId = id;
       try {
         while (true) {
