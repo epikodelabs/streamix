@@ -13,21 +13,19 @@ import { createSubject, timer } from "../streams";
 export function buffer<T = any>(period: number) {
   return createOperator<T, T[]>("buffer", function (this: Operator, source, context) {
     const output = createSubject<T[]>();
-    let buffer: T[] = [];
-    let pendingResults: StreamResult[] = []; // Track actual pending results
+    const sc = context?.currentStreamContext();
+
+    let buffer: StreamResult<T>[] = [];
     let completed = false;
 
     const flush = () => {
       if (buffer.length > 0) {
-        // Resolve all pending results for this buffer
-        if (context && pendingResults.length > 0) {
-          pendingResults.forEach(pendingResult => {
-            context.resolvePending(this, pendingResult);
-          });
-          pendingResults = []; // Clear the tracking array
-        }
-        
-        output.next(buffer);
+        // Emit an array of the actual values
+        const values = buffer.map((r) => r.value!);
+        output.next(values);
+
+        // Resolve all pending results for this flush
+        buffer.forEach((r) => sc?.resolvePending(this, r));
         buffer = [];
       }
     };
@@ -46,14 +44,11 @@ export function buffer<T = any>(period: number) {
     };
 
     const fail = (err: any) => {
-      // Mark any remaining pending results as phantom
-      if (context && pendingResults.length > 0) {
-        pendingResults.forEach(pendingResult => {
-          context.markPhantom(this, pendingResult);
-        });
-        pendingResults = [];
+      // resolve all pending before error
+      if (buffer.length > 0) {
+        buffer.forEach((r) => sc?.markPhantom(this, r));
+        buffer = [];
       }
-      
       output.error(err);
       cleanup();
     };
@@ -68,30 +63,24 @@ export function buffer<T = any>(period: number) {
     (async () => {
       try {
         while (true) {
-          const result = await source.next();
-
+          const result: StreamResult<T> = createStreamResult(await source.next());
           if (result.done) break;
 
-          // Create and mark this value as pending in the context
-          if (context) {
-            const pendingResult = createStreamResult({
-              value: result.value,
-              done: false
-            });
-            context.markPending(this, pendingResult);
-            pendingResults.push(pendingResult); // Keep reference to the actual pending result
-          }
+          // Mark this value as pending in the context
+          sc?.markPending(this, result);
 
           // Add to buffer
-          buffer.push(result.value);
+          buffer.push(result);
         }
       } catch (err) {
-        fail(err);
+        cleanup();
+        output.error(err);
       } finally {
         flushAndComplete();
       }
     })();
 
-    return eachValueFrom<T[]>(output)[Symbol.asyncIterator]();
+    const iterable = eachValueFrom<T[]>(output);
+    return iterable[Symbol.asyncIterator]();
   });
 }

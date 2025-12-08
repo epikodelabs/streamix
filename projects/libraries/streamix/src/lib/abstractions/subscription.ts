@@ -1,4 +1,4 @@
-import { MaybePromise } from "../abstractions";
+import { CallbackReturnType } from "../abstractions";
 
 /**
  * Represents a subscription to a stream-like source.
@@ -23,19 +23,7 @@ export type Subscription = {
    * @returns A `CallbackReturnType` which can be a `Promise<void>` if the cleanup
    * is asynchronous.
    */
-  unsubscribe(): MaybePromise;
-
-  /**
-   * Optional callback that is executed when the subscription is unsubscribed.
-   *
-   * - Use this to release resources such as event listeners, timers, or observers.
-   * - This callback is scheduled asynchronously to maintain consistent execution
-   *   order relative to other scheduled tasks.
-   * - It is only invoked **once**, even if `unsubscribe()` is called multiple times.
-   *
-   * @returns A `CallbackReturnType` which can be `void` or a `Promise<void>`.
-   */
-  onUnsubscribe?: () => MaybePromise;
+  unsubscribe(): CallbackReturnType;
 };
 
 /**
@@ -51,25 +39,27 @@ export type Subscription = {
  * @returns A new `Subscription` instance.
  */
 export function createSubscription(
-  onUnsubscribe?: () => MaybePromise
+  onUnsubscribe?: () => CallbackReturnType
 ): Subscription {
+  let _unsubscribing = false;
   let _unsubscribed = false;
+
+  const unsubscribe = async (): Promise<void> => {
+    if (!_unsubscribing) {
+      _unsubscribing = true;
+      try {
+        await onUnsubscribe?.();
+        _unsubscribed = true;
+      } catch (err) {
+        console.error("Error during unsubscribe callback:", err);
+      }
+    }
+  };
 
   return {
     get unsubscribed() {
       return _unsubscribed;
     },
-    unsubscribe: async function (): Promise<void> {
-      if (!_unsubscribed) {
-        _unsubscribed = true;
-        try {
-          await this.onUnsubscribe?.();
-          _unsubscribed = true;
-        } catch (err) {
-          console.error("Error during unsubscribe callback:", err);
-        }
-      }
-    },
-    onUnsubscribe
+    unsubscribe
   };
 }

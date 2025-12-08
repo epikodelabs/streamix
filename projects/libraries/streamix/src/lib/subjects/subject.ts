@@ -1,17 +1,15 @@
 import {
+  CallbackReturnType,
   createReceiver,
   createSubscription,
-  scheduler as globalScheduler,
-  MaybePromise,
   Operator,
   pipeStream,
   Receiver,
-  Scheduler,
   Stream,
   Subscription
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { createSubjectBuffer } from "../primitives";
+import { createQueue, createSubjectBuffer } from "../primitives";
 
 /**
  * A `Subject` is a special type of `Stream` that can be manually pushed new values.
@@ -63,22 +61,23 @@ export type Subject<T = any> = Stream<T> & {
  * @template T The type of the values that the subject will emit.
  * @returns {Subject<T>} A new Subject instance.
  */
-export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): Subject<T> {
-  const buffer = createSubjectBuffer<T>();
+export function createSubject<T = any>(): Subject<T> {
+  const buffer = createSubjectBuffer<{ value: T, phantom?: boolean }>();
+  const queue = createQueue();
   let latestValue: T | undefined = undefined;
   let isCompleted = false;
   let hasError = false;
 
-  const next = (value: T) => {
+  const next = function (value: T) {
     latestValue = value;
-    scheduler.enqueue(async () => {
+    queue.enqueue(async () => {
       if (isCompleted || hasError) return;
       await buffer.write({ value });
     });
   };
 
   const complete = () => {
-    scheduler.enqueue(async () => {
+    queue.enqueue(async () => {
       if (isCompleted) return;
       isCompleted = true;
       await buffer.complete();
@@ -86,7 +85,7 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
   };
 
   const error = (err: any) => {
-    scheduler.enqueue(async () => {
+    queue.enqueue(async () => {
       if (isCompleted || hasError) return;
       hasError = true;
       isCompleted = true;
@@ -95,7 +94,7 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
+  const subscribe = (callbackOrReceiver?: ((value: T) => CallbackReturnType) | Receiver<T>): Subscription => {
     const receiver = createReceiver(callbackOrReceiver);
 
     let unsubscribing = false;
@@ -104,13 +103,15 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     const subscription = createSubscription(() => {
       if (!unsubscribing) {
         unsubscribing = true;
-        scheduler.enqueue(async () => {
-          if (readerId !== null) await buffer.detachReader(readerId);
+        queue.enqueue(async () => {
+          if (readerId !== null) {
+            await buffer.detachReader(readerId);
+          }
         });
       }
     });
 
-    scheduler.enqueue(() => buffer.attachReader()).then(async (id: number) => {
+    queue.enqueue(() => buffer.attachReader()).then(async (id: number) => {
       readerId = id;
       try {
         while (true) {
@@ -143,7 +144,7 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
       return latestValue;
     },
     pipe(...operators: Operator<any, any>[]): Stream<any> {
-      return pipeStream(this, operators, context);
+      return pipeStream(this, ...operators);
     },
     subscribe,
     async query(): Promise<T> {

@@ -1,6 +1,6 @@
 import { eachValueFrom, expand, from } from '@actioncrew/streamix';
 
-describe('expand', () => {
+describe('Expand Stream (RxJS-like)', () => {
   it('should handle errors thrown by the project function', async () => {
     const error = new Error('Project function error');
     const project = (value: number) => {

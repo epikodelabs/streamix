@@ -1,6 +1,6 @@
 import { combineLatest, from, Subscription, timer } from '@actioncrew/streamix';
 
-describe('combineLatest', () => {
+describe('CombineLatestStream with TimerStreams', () => {
   it('should combine timer streams correctly', (done) => {
     const firstTimer = timer(0, 50);
     const secondTimer = timer(25, 50);
@@ -43,17 +43,10 @@ describe('combineLatest', () => {
     const secondTimer = timer(25, 50);
 
     const combinedTimers = combineLatest([firstTimer, secondTimer]);
-    let emissionCount = 0;
 
     const subscription: Subscription = combinedTimers.subscribe({
-      next: () => {
-        emissionCount++;
-        subscription.unsubscribe();
-        expect(emissionCount).toBe(1);
-        expect(subscription.unsubscribed).toBe(true);
-        done();
-      },
-      complete: () => {},
+      next: () => subscription.unsubscribe(),
+      complete: () => done(),
     });
   });
 

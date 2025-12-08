@@ -13,6 +13,8 @@ import { createOperator, createStreamResult, DONE, Operator } from "../abstracti
  */
 export const ignoreElements = <T>() =>
   createOperator<T, never>("ignoreElements", function (this: Operator, source, context) {
+    const sc = context?.currentStreamContext();
+
     return {
       next: async () => {
         while (true) {
@@ -24,7 +26,7 @@ export const ignoreElements = <T>() =>
 
           // For every value received, we return a phantom.
           // The value is not passed along, but the event is still signaled.
-          await context?.markPhantom(this, result);
+          await sc?.phantomHandler(this, result.value);
         }
       }
     };

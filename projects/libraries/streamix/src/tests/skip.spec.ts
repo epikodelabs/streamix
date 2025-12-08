@@ -1,6 +1,6 @@
 import { from, skip } from '@actioncrew/streamix';
 
-describe('skip', () => {
+describe('skip operator', () => {
   it('should skip the specified number of emissions', (done) => {
     const testStream = from([1, 2, 3, 4, 5]);
     const countToSkip = 3;

@@ -1,6 +1,6 @@
 import { count, createSubject, eachValueFrom, max, min, Stream } from '@actioncrew/streamix';
 
-describe('min', () => {
+describe('min operator', () => {
   let subject: ReturnType<typeof createSubject<number>>;
   let source: Stream<number>;
 
@@ -47,7 +47,7 @@ describe('min', () => {
   });
 });
 
-describe('max', () => {
+describe('max operator', () => {
   let subject: ReturnType<typeof createSubject<number>>;
   let source: Stream<number>;
 
@@ -94,7 +94,7 @@ describe('max', () => {
   });
 });
 
-describe('count', () => {
+describe('count operator', () => {
   let subject: ReturnType<typeof createSubject<number>>;
   let source: Stream<number>;
 

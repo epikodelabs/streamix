@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, Operator } from "../abstractions";
+import { CallbackReturnType, createOperator, createStreamResult, DONE, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that invokes a finalizer callback upon stream termination.
@@ -13,37 +13,11 @@ import { createOperator, DONE, MaybePromise, Operator } from "../abstractions";
  * It can be synchronous or return a Promise.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const finalize = <T = any>(callback: () => MaybePromise) => {
-  // Shared state across all subscriptions - moved outside createOperator
-  let finalized = false;
-  let completed = false;
-  let finalizationPromise: Promise<void> | null = null;
+export const finalize = <T = any>(callback: () => CallbackReturnType) =>
+  createOperator<T, T>("finalize", function (this: Operator, source) {
+    let finalized = false;
+    let completed = false;
 
-  const doFinalize = async () => {
-    if (!finalized) {
-      finalized = true;
-      completed = true;
-      
-      // Create finalization promise if it doesn't exist
-      if (!finalizationPromise) {
-        finalizationPromise = (async () => {
-          try {
-            await callback?.();
-          } catch (error) {
-            // Log error but don't throw to prevent unhandled promise rejection
-            console.error('Finalization callback error:', error);
-          }
-        })();
-      }
-      
-      await finalizationPromise;
-    } else if (finalizationPromise) {
-      // Wait for existing finalization to complete
-      await finalizationPromise;
-    }
-  };
-
-  return createOperator<T, T>("finalize", function (this: Operator, source) {
     return {
       next: async () => {
         while (true) {
@@ -54,18 +28,28 @@ export const finalize = <T = any>(callback: () => MaybePromise) => {
           try {
             const result = createStreamResult(await source.next());
 
+            if (result.done && !finalized) {
+              finalized = true;
+              completed = true;
+              await callback?.();
+              return DONE;
+            }
+
             if (result.done) {
-              await doFinalize();
+              completed = true;
               return DONE;
             }
 
             return result;
           } catch (err) {
-            await doFinalize();
+            if (!finalized) {
+              finalized = true;
+              completed = true;
+              await callback?.();
+            }
             throw err;
           }
         }
       }
     };
   });
-};

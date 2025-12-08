@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
+import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that tests if all values from the source stream satisfy a predicate.
@@ -19,7 +19,7 @@ import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstracti
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const every = <T = any>(
-  predicate: (value: T, index: number) => MaybePromise<boolean>
+  predicate: (value: T, index: number) => CallbackReturnType<boolean>
 ) =>
   createOperator<T, boolean>("every", function (this: Operator, source) {
     let index = 0;

@@ -25,56 +25,40 @@ export interface InspectableStream<T = any> extends Stream<T> {
  */
 export function inspectable<T>(source: Stream<T>): InspectableStream<T> {
   // One PipelineContext for the entire source pipeline
-  const context = createPipelineContext({
-    logLevel: LogLevel.WARN,
-    flowLogLevel: LogLevel.DEBUG,
+  const pipelineContext = createPipelineContext({
+    logLevel: LogLevel.INFO,
     phantomHandler: (operator, streamContext, result) => {
       streamContext.logFlow('phantom', operator, result, 'Phantom value dropped');
     },
   });
 
+  // Root StreamContext for the source stream itself
+  const rootContext = createStreamContext(pipelineContext, source);
+
   function createInspectableStream<S>(
     upstream: Stream<any>,
-    operators: Operator<any, any>[]
+    operators: Operator<any, any>[],
+    parentContext: PipelineContext
   ): InspectableStream<S> {
-    const upstreamSc = context ? createStreamContext(upstream, context) : undefined;
+    const streamContext = createStreamContext(parentContext, upstream);
 
-    // Create the piped stream object
     const pipedStream: InspectableStream<S> = {
       name: `${upstream.name}-sink`,
       type: "stream",
-      context: context,
+      context: parentContext,
 
       pipe<U>(...nextOps: Operator<any, any>[]): InspectableStream<U> {
-        // Combine current operators with new ones for proper chaining
-        const allOperators = [...operators, ...nextOps];
-        return createInspectableStream<U>(upstream, allOperators);
+        return createInspectableStream<U>(pipedStream, nextOps, parentContext);
       },
 
       subscribe(cb?: any): Subscription {
         const receiver = createReceiver(cb);
-        const sourceIterator: StreamIterator<any> = eachValueFrom(upstream)[Symbol.asyncIterator]();
+        let iterator: StreamIterator<any> = eachValueFrom(upstream)[Symbol.asyncIterator]();
 
-        // Create a logging wrapper for the source iterator
-        const loggingSourceIterator = {
-          async next() {
-            const result = await sourceIterator.next();
-            if (!result.done) {
-              upstreamSc?.logFlow('emitted', null as any, result.value, 'Emitted source value');
-            }
-            return result;
-          },
-          return: sourceIterator.return?.bind(sourceIterator),
-          throw: sourceIterator.throw?.bind(sourceIterator),
-          [Symbol.asyncIterator]() { return this; }
-        };
-
-        let iterator: StreamIterator<any> = loggingSourceIterator;
-
-        // Apply all operators in sequence
+        // Apply operators
         for (const op of operators) {
           const patched = patchOperator(op);
-          iterator = patched.apply(iterator, upstreamSc);
+          iterator = patched.apply(iterator, parentContext);
         }
 
         const abortController = new AbortController();
@@ -84,9 +68,6 @@ export function inspectable<T>(source: Stream<T>): InspectableStream<T> {
           if (signal.aborted) resolve();
           else signal.addEventListener("abort", () => resolve(), { once: true });
         });
-
-        // Create sink context for the final stream
-        const sinkSc = context ? createStreamContext(pipedStream, context) : undefined;
 
         (async () => {
           try {
@@ -101,23 +82,24 @@ export function inspectable<T>(source: Stream<T>): InspectableStream<T> {
               const { result } = winner;
               if (result.done) break;
 
-              sinkSc?.logFlow('resolved', null as any, result.value, 'Emitted sink value');
+              const streamResult = streamContext.createResult({ value: result.value });
+              streamContext.logFlow('resolved', null as any, streamResult, 'Emitted value');
+
               await receiver.next?.(result.value);
             }
           } catch (err: any) {
-            sinkSc?.logFlow('error', null as any, undefined, String(err));
+            streamContext.logFlow('error', null as any, undefined, String(err));
             await receiver.error?.(err);
           } finally {
             await receiver.complete?.();
-            await upstreamSc?.finalize();
-            await sinkSc?.finalize();
+            await streamContext.finalize();
           }
         })();
 
         return createSubscription(async () => {
           abortController.abort();
-          if (sourceIterator.return) {
-            await sourceIterator.return().catch(() => {});
+          if (iterator.return) {
+            await iterator.return().catch(() => {});
           }
         });
       },
@@ -130,20 +112,17 @@ export function inspectable<T>(source: Stream<T>): InspectableStream<T> {
     return pipedStream;
   }
 
-  // For the root stream with no operators yet
   const decorated: InspectableStream<T> = {
     ...source,
-    context: context,
+    context: pipelineContext,
 
     pipe<S>(...operators: Operator<any, any>[]): InspectableStream<S> {
-      return createInspectableStream<S>(source, operators);
+      return createInspectableStream<S>(source, operators, pipelineContext);
     },
 
     subscribe(cb?: any): Subscription {
       const receiver = createReceiver(cb);
       let iterator: StreamIterator<T> = eachValueFrom(source)[Symbol.asyncIterator]();
-
-      const sc = context ? createStreamContext(source, context) : undefined;
 
       const abortController = new AbortController();
       const { signal } = abortController;
@@ -166,15 +145,17 @@ export function inspectable<T>(source: Stream<T>): InspectableStream<T> {
             const { result } = winner;
             if (result.done) break;
 
-            sc?.logFlow('resolved', null as any, result.value, 'Emitted source value');
+            const streamResult = rootContext.createResult({ value: result.value });
+            rootContext.logFlow('resolved', null as any, streamResult, 'Emitted value');
+
             await receiver.next?.(result.value);
           }
         } catch (err: any) {
-          sc?.logFlow('error', null as any, undefined, String(err));
+          rootContext.logFlow('error', null as any, undefined, String(err));
           await receiver.error?.(err);
         } finally {
           await receiver.complete?.();
-          await sc?.finalize();
+          await rootContext.finalize();
         }
       })();
 

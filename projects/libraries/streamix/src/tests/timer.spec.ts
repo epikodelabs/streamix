@@ -1,6 +1,6 @@
 import { timer } from '@actioncrew/streamix';
 
-describe('timer', () => {
+describe('TimerStream', () => {
   it('should emit values at specified interval', (done) => {
     const intervalMs = 100;
     const timerStream = timer(0, intervalMs); // Starting at 0 and emitting every intervalMs

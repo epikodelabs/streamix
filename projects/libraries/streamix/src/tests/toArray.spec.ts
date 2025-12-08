@@ -1,6 +1,6 @@
 import { createSubject, eachValueFrom, Stream, toArray } from '@actioncrew/streamix';
 
-describe('toArray', () => {
+describe('toArray operator', () => {
   let subject: ReturnType<typeof createSubject<number>>;
   let source: Stream<number>;
 

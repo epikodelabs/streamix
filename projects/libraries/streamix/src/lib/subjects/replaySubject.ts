@@ -1,16 +1,15 @@
 import {
+  CallbackReturnType,
   createReceiver,
   createSubscription,
-  MaybePromise,
   Operator,
   pipeStream,
   Receiver,
-  scheduler,
   Stream,
   Subscription,
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { createReplayBuffer, ReplayBuffer } from "../primitives";
+import { createQueue, createReplayBuffer, ReplayBuffer } from "../primitives";
 import { Subject } from "./subject";
 
 /**
@@ -32,28 +31,30 @@ export type ReplaySubject<T = any> = Subject<T>;
  * the latest values it has emitted and "replays" them to any new subscribers.
  * This allows late subscribers to receive past values they may have missed.
  *
- * This subject provides asynchronous delivery and scheduling via a global scheduler.
+ * This subject does not provide synchronous access to its value, and will
+ * throw an error if the `snappy` getter is used.
  *
  * @template T The type of the values the subject will emit.
- * @param {number} [capacity=Infinity] The maximum number of past values to buffer and replay to new subscribers.
+ * @param {number} [capacity=Infinity] The maximum number of past values to buffer and replay to new subscribers. Use `Infinity` for an unbounded buffer.
  * @returns {ReplaySubject<T>} A new ReplaySubject instance.
  */
-export function createReplaySubject<T = any>(capacity: number = Infinity, context?: PipelineContext): ReplaySubject<T> {
+export function createReplaySubject<T = any>(capacity: number = Infinity): ReplaySubject<T> {
   const buffer = createReplayBuffer<T>(capacity) as ReplayBuffer;
+  const queue = createQueue();
   let isCompleted = false;
   let hasError = false;
   let latestValue: T | undefined = undefined;
 
-  const next = (value: T) => {
+  const next = function (value: T) {
     latestValue = value;
-    scheduler.enqueue(async () => {
+    queue.enqueue(async () => {
       if (isCompleted || hasError) return;
       await buffer.write(value);
     });
   };
 
   const complete = () => {
-    scheduler.enqueue(async () => {
+    queue.enqueue(async () => {
       if (isCompleted) return;
       isCompleted = true;
       await buffer.complete();
@@ -61,7 +62,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity, contex
   };
 
   const error = (err: any) => {
-    scheduler.enqueue(async () => {
+    queue.enqueue(async () => {
       if (isCompleted || hasError) return;
       hasError = true;
       isCompleted = true;
@@ -70,17 +71,17 @@ export function createReplaySubject<T = any>(capacity: number = Infinity, contex
     });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
+  const subscribe = (callbackOrReceiver?: ((value: T) => CallbackReturnType) | Receiver<T>): Subscription => {
     const receiver = createReceiver(callbackOrReceiver);
 
     let unsubscribing = false;
     let readerId: number | null = null;
-    let readerLatestValue: T | undefined;
+    let latestValue: T | undefined;
 
     const subscription = createSubscription(() => {
       if (!unsubscribing) {
         unsubscribing = true;
-        scheduler.enqueue(async () => {
+        queue.enqueue(async () => {
           if (readerId !== null) {
             await buffer.detachReader(readerId);
           }
@@ -88,14 +89,15 @@ export function createReplaySubject<T = any>(capacity: number = Infinity, contex
       }
     });
 
-    scheduler.enqueue(() => buffer.attachReader()).then(async (id: number) => {
+    queue.enqueue(() => buffer.attachReader()).then(async (id: number) => {
       readerId = id;
       try {
         while (true) {
-          const result = await buffer.read(readerId);
-          if (result.done) break;
-          readerLatestValue = result.value;
-          await receiver.next(readerLatestValue!);
+          const { value, done } = await buffer.read(readerId);
+          if (done) break;
+
+          latestValue = value;
+          await receiver.next(latestValue!);
         }
       } catch (err: any) {
         await receiver.error(err);
@@ -108,7 +110,9 @@ export function createReplaySubject<T = any>(capacity: number = Infinity, contex
     });
 
     Object.assign(subscription, {
-      value: () => readerLatestValue
+      value: () => {
+        return latestValue;
+      }
     });
 
     return subscription;
@@ -118,7 +122,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity, contex
     type: "subject",
     name: "replaySubject",
     pipe(...operators: Operator<any, any>[]): Stream<any> {
-      return pipeStream(this, operators, context);
+      return pipeStream(this, ...operators);
     },
     subscribe,
     async query(): Promise<T> {

@@ -1,7 +1,7 @@
 import { from, slidingPair } from "@actioncrew/streamix";
 
 
-describe('slidingPair', () => {
+describe('slidingPair Operator', () => {
   it('should emit pairs of consecutive values', (done) => {
     const testStream = from([1, 2, 3, 4]);
     const pairedStream = testStream.pipe(slidingPair());

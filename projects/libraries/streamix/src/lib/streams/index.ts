@@ -6,7 +6,6 @@ export * from './compute';
 export * from './concat';
 export * from './defer';
 export * from './EMPTY';
-export * from './forkJoin';
 export * from './from';
 export * from './fromEvent';
 export * from './fromPromise';

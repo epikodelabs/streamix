@@ -1,6 +1,6 @@
 import { createSubject, eachValueFrom, reduce, Stream } from '@actioncrew/streamix';
 
-describe('reduce', () => {
+describe('reduce operator', () => {
   let subject: ReturnType<typeof createSubject<number>>;
   let source: Stream<number>;
 

@@ -10,7 +10,7 @@ function collect<T>(stream: StreamGenerator<T>): Promise<T[]> {
   })();
 }
 
-describe('loop', () => {
+describe('loop operator', () => {
   it('should emit a sequence of values while the condition is true', async () => {
     const result = await collect(eachValueFrom(loop(0, x => x < 5, x => x + 1)));
     expect(result).toEqual([0, 1, 2, 3, 4]);

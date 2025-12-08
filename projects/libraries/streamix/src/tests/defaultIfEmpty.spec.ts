@@ -1,6 +1,6 @@
 import { concatMap, createSubject, defaultIfEmpty, EMPTY, of } from '@actioncrew/streamix';
 
-describe('defaultIfEmpty', () => {
+describe('DefaultIfEmptyOperator', () => {
   it('should emit the default value if no values are emitted', (done) => {
     const stream = createSubject();
     const defaultValue = 'Default Value';

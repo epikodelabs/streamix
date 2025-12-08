@@ -1,53 +1,44 @@
-import { Receiver, Stream } from '../abstractions';
-import { createSubject } from '../subjects';
+import { createStream, Stream } from '../abstractions';
 
 /**
  * Creates a stream that emits the dimensions (width and height) of a given
  * DOM element whenever it is resized.
  *
- * Automatically unsubscribes and completes if the element is removed from the DOM.
+ * This stream is a reactive wrapper around the `ResizeObserver` API,
+ * providing a way to respond to changes in an element's size, which is
+ * especially useful for responsive layouts or dynamic components.
  *
- * @param element The DOM element to observe for size changes.
- * @returns A Stream emitting objects with `width` and `height` properties.
+ * The stream emits the element's initial dimensions upon subscription, and
+ * subsequently emits a new value whenever the element's size changes.
+ *
+ * @param {Element} element The DOM element to observe for size changes.
+ * @returns {Stream<{ width: number; height: number }>} A stream that emits an object with the element's `width` and `height` properties.
  */
-export function onResize(element: HTMLElement): Stream<{ width: number; height: number }> {
-  const subject = createSubject<{ width: number; height: number }>();
-  subject.name = 'onResize';
+export function onResize(element: Element): Stream<{ width: number; height: number }> {
+  return createStream('onResize', async function* () {
+    let resolveNext: ((value: { width: number; height: number }) => void) | null = null;
 
-  const originalSubscribe = subject.subscribe;
-  subject.subscribe = (callback?: ((value: { width: number; height: number }) => void) | Receiver<{ width: number; height: number }>) => {
-    const subscription = originalSubscribe.call(subject, callback);
-
-    const listener = (entries: ResizeObserverEntry[]) => {
+    const observer = new ResizeObserver((entries) => {
       const { width, height } = entries[0]?.contentRect ?? { width: 0, height: 0 };
-      subject.next({ width, height });
-    };
-
-    const resizeObserver = new ResizeObserver(listener);
-    resizeObserver.observe(element);
-
-    // Watch for DOM removal
-    const removalObserver = new MutationObserver(() => {
-      if (!document.body.contains(element)) {
-        subject.complete?.();
-      }
+      resolveNext?.({ width, height });
+      resolveNext = null;
     });
-    removalObserver.observe(document.body, { childList: true, subtree: true });
 
-    const cleanup = () => {
-      resizeObserver.unobserve(element);
-      resizeObserver.disconnect();
-      removalObserver.disconnect();
-      subscription.unsubscribe();
-    };
+    observer.observe(element);
 
-    const originalOnUnsubscribe = subscription.onUnsubscribe;
-    subscription.onUnsubscribe = () => {
-      originalOnUnsubscribe?.call(subscription);
-      cleanup();
-    };
-    return subscription;
-  };
+    try {
+      const rect = element.getBoundingClientRect();
+      yield { width: rect.width, height: rect.height };
 
-  return subject;
+      while (true) {
+        const size = await new Promise<{ width: number; height: number }>((resolve) => {
+          resolveNext = resolve;
+        });
+        yield size;
+      }
+    } finally {
+      observer.unobserve(element);
+      observer.disconnect();
+    }
+  });
 }

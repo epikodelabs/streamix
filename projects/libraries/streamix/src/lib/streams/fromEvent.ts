@@ -1,5 +1,4 @@
-import { Receiver, Stream } from '../abstractions';
-import { createSubject } from '../subjects';
+import { createStream, Stream } from '../abstractions';
 
 /**
  * Creates a stream that emits events of the specified type from the given EventTarget.
@@ -13,30 +12,46 @@ import { createSubject } from '../subjects';
  * @param {string} event The name of the event to listen for (e.g., 'click', 'keydown').
  * @returns {Stream<T>} A stream that emits the event objects as they occur.
  */
-export function fromEvent(target: EventTarget, event: string): Stream<Event> {
-  const subject = createSubject<Event>(); // Create a subject to emit event values.
-
-  const originalSubscribe = subject.subscribe; // Capture original subscribe method.
-  subject.subscribe = (callback?: ((value: Event) => void) | Receiver<Event>) => {
-    const subscription = originalSubscribe.call(subject, callback);
+export function fromEvent<T extends Event = Event>(
+  target: EventTarget,
+  event: string
+): Stream<T> {
+  async function* generator() {
+    let eventQueue: T[] = [];
+    let resolveNext: ((event: T) => void) | null = null;
+    let isListening = true;
 
     const listener = (ev: Event) => {
-      if (!subject.completed()) {
-        subject.next(ev); // Emit the event directly into the subject's stream
+      if (!isListening) return;
+
+      const typedEvent = ev as T;
+
+      if (resolveNext) {
+        resolveNext(typedEvent);
+        resolveNext = null;
+      } else {
+        eventQueue.push(typedEvent);
       }
     };
 
     target.addEventListener(event, listener);
 
-    const originalOnUnsubscribe = subscription.onUnsubscribe;
-    subscription.onUnsubscribe = () => {
-      originalOnUnsubscribe?.call(subscription);
-      target.removeEventListener(event, listener); // Cleanup listener on unsubscribe
-    };
+    try {
+      while (isListening) {
+        if (eventQueue.length > 0) {
+          yield eventQueue.shift()!;
+        } else {
+          const nextEvent = await new Promise<T>((resolve) => {
+            resolveNext = resolve;
+          });
+          yield nextEvent;
+        }
+      }
+    } finally {
+      isListening = false;
+      target.removeEventListener(event, listener);
+    }
+  }
 
-    return subscription;
-  };
-
-  subject.name = 'fromEvent';
-  return subject;
+  return createStream<T>('fromEvent', generator);
 }

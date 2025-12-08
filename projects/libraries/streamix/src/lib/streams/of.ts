@@ -1,4 +1,4 @@
-import { createStream, MaybePromise, Stream } from '../abstractions';
+import { createStream, Stream } from '../abstractions';
 
 /**
  * Creates a stream that emits a single value and then completes.
@@ -9,11 +9,11 @@ import { createStream, MaybePromise, Stream } from '../abstractions';
  * "hot" stream from a predefined value.
  *
  * @template T The type of the value to be emitted.
- * @param {MaybePromise<T>} value The single value to emit.
+ * @param {T} value The single value to emit.
  * @returns {Stream<T>} A new stream that emits the value and then completes.
  */
-export function of<T = any>(value: MaybePromise<T>): Stream<T> {
+export function of<T = any>(value: T): Stream<T> {
   return createStream<T>('of', async function* () {
-    yield await value;
+    yield value;
   });
 }

@@ -1,5 +1,5 @@
 import { createStream, Stream } from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
+import { eachValueFrom } from '../converters';
 
 /**
  * Creates a stream that chooses between two streams based on a condition.
@@ -9,19 +9,19 @@ import { eachValueFrom, fromAny } from '../converters';
  *
  * @template T The type of the values in the streams.
  * @param {() => boolean} condition A function that returns a boolean to determine which stream to use. It is called when the iif stream is subscribed to.
- * @param {Stream<T> | Promise<T> | Array<T>} trueStream The stream to subscribe to if the condition is `true`.
- * @param {Stream<T> | Promise<T> | Array<T>} falseStream The stream to subscribe to if the condition is `false`.
+ * @param {Stream<T>} trueStream The stream to subscribe to if the condition is `true`.
+ * @param {Stream<T>} falseStream The stream to subscribe to if the condition is `false`.
  * @returns {Stream<T>} A new stream that emits values from either `trueStream` or `falseStream` based on the condition.
  */
 export function iif<T = any>(
   condition: () => boolean,
-  trueStream: (Stream<T> | Promise<T> | Array<T>),
-  falseStream: (Stream<T> | Promise<T> | Array<T>)
+  trueStream: Stream<T>,
+  falseStream: Stream<T>
 ): Stream<T> {
   async function* generator(): AsyncGenerator<T, void, unknown> {
     // Evaluate condition lazily when the stream starts
     const sourceStream = condition() ? trueStream : falseStream;
-    const asyncIterable = eachValueFrom<T>(fromAny(sourceStream));
+    const asyncIterable = eachValueFrom<T>(sourceStream);
     const iterator = asyncIterable[Symbol.asyncIterator]();
 
     try {
@@ -42,5 +42,5 @@ export function iif<T = any>(
     }
   }
 
-  return createStream<T>('iif', generator, context);
+  return createStream<T>('iif', generator);
 }

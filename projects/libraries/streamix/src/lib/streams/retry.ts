@@ -1,5 +1,4 @@
 import { createStream, Stream } from "../abstractions";
-import { fromAny } from "../converters";
 
 /**
  * Creates a stream that subscribes to a source factory and retries on error.
@@ -12,23 +11,22 @@ import { fromAny } from "../converters";
  * If all retry attempts fail, the final error is propagated.
  *
  * @template T The type of values emitted by the stream.
- * @param {() => (Stream<T> | Promise<T>)} factory A function that returns a new stream instance for each subscription attempt.
+ * @param {() => Stream<T>} factory A function that returns a new stream instance for each subscription attempt.
  * @param {number} [maxRetries=3] The maximum number of times to retry the stream. A value of 0 means no retries.
  * @param {number} [delay=1000] The time in milliseconds to wait before each retry attempt.
  * @returns {Stream<T>} A new stream that applies the retry logic.
  */
 export function retry<T = any>(
-  factory: () => (Stream<T> | Promise<T>),
+  factory: () => Stream<T>,
   maxRetries: number = 3,
-  delay: number = 1000,
-  context?: PipelineContext
+  delay: number = 1000
 ): Stream<T> {
   return createStream<T>("retry", async function* () {
     let retryCount = 0;
 
     while (retryCount <= maxRetries) {
       try {
-        const sourceStream = fromAny(factory());
+        const sourceStream = factory();
         const values: T[] = [];
         let streamError: any = null;
         let completed = false;
@@ -69,5 +67,5 @@ export function retry<T = any>(
         await new Promise<void>((resolve) => setTimeout(resolve, delay));
       }
     }
-  }, context);
+  });
 }

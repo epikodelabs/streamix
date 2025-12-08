@@ -1,5 +1,5 @@
-import { createOperator, DONE, NEXT, Operator } from "../abstractions";
-import { MaybePromise } from "./../abstractions/receiver";
+import { createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
+import { CallbackReturnType } from "./../abstractions/receiver";
 
 /**
  * Creates a stream operator that emits only the last value from the source stream
@@ -17,11 +17,11 @@ import { MaybePromise } from "./../abstractions/receiver";
  * @throws {Error} Throws an error with the message "No elements in sequence" if no
  * matching value is found before the source stream completes.
  */
-
 export const last = <T = any>(
-  predicate?: (value: T) => MaybePromise<boolean>
+  predicate?: (value: T) => CallbackReturnType<boolean>
 ) =>
   createOperator<T, T>("last", function (this: Operator, source, context) {
+    const sc = context?.currentStreamContext();
 
     let lastValue: T | undefined = undefined;
     let hasMatch = false;
@@ -32,7 +32,7 @@ export const last = <T = any>(
         while (true) {
           if (finished) return DONE;
 
-          const result = await source.next(); // REMOVED createStreamResult wrapper
+          const result = createStreamResult(await source.next());
 
           if (result.done) {
             finished = true;
@@ -45,18 +45,10 @@ export const last = <T = any>(
 
           if (matches) {
             if (hasMatch) {
-              // Previous last value becomes phantom - use proper phantom handling
-              const phantomValue = lastValue!;
+              // Previous last value becomes phantom
+              const phantom = lastValue!;
               lastValue = value;
-
-              if (context) {
-                const phantomResult = createStreamResult({
-                  value: phantomValue,
-                  type: 'phantom',
-                  done: true
-                });
-                context.markPhantom(this, phantomResult);
-              }
+              await sc?.phantomHandler(this, phantom);
               continue;
             } else {
               lastValue = value;
@@ -64,15 +56,8 @@ export const last = <T = any>(
               continue;
             }
           } else {
-            // Non-matching values are phantoms - use proper phantom handling
-            if (context) {
-              const phantomResult = createStreamResult({
-                value: value,
-                type: 'phantom',
-                done: true
-              });
-              context.markPhantom(this, phantomResult);
-            }
+            // Non-matching values are phantoms
+            await sc?.phantomHandler(this, value);
           }
         }
       }

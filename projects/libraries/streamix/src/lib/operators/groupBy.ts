@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
+import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
 
 /**
  * Represents a grouped item with its original value and the associated key.
@@ -29,7 +29,7 @@ export type GroupItem<T = any, K = any> = {
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const groupBy = <T = any, K = any>(
-  keySelector: (value: T) => MaybePromise<K>
+  keySelector: (value: T) => CallbackReturnType<K>
 ) =>
   createOperator<T, GroupItem<T, K>>("groupBy", function (this: Operator, source) {
     let completed = false;

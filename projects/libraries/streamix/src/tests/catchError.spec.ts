@@ -1,6 +1,6 @@
 import { catchError, createSubject, map, Subject } from '@actioncrew/streamix';
 
-describe('catchError', () => {
+describe('CatchErrorOperator Functional Test', () => {
   let subject: Subject;
   let handlerMock: jasmine.Spy;
 

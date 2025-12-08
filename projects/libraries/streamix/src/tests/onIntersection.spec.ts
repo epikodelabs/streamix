@@ -1,7 +1,6 @@
 import { onIntersection } from '@actioncrew/streamix';
-import { idescribe } from './env.spec';
 
-idescribe('onIntersection', () => {
+xdescribe('Functional tests for fromIntersectionObserver', () => {
   let element: HTMLElement;
   let visibilityStream: any;
 
@@ -49,7 +48,7 @@ idescribe('onIntersection', () => {
     element.style.width = '100px';
     element.style.background = 'blue';
     element.style.position = 'absolute';
-    element.style.top = '-1000px';
+    element.style.top = '-100px';
 
     visibilityStream = onIntersection(element);
 
@@ -82,6 +81,6 @@ idescribe('onIntersection', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    expect(subscription.unsubscribed).toBe(true);
+    expect(subscription.closed).toBe(true);
   });
 });

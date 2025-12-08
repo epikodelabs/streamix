@@ -1,6 +1,6 @@
 import { buffer, createSubject, eachValueFrom, Stream } from "@actioncrew/streamix";
 
-describe("buffer", () => {
+describe("buffer operator", () => {
   let source: Stream<number>;
   let subject: ReturnType<typeof createSubject<number>>;
 
@@ -79,33 +79,31 @@ describe("buffer", () => {
     const duration = 100;
     const buffered = source.pipe(buffer(duration));
     let error: any = null;
-    let started = false;
 
-    const consumer = (async () => {
-      try {
-        for await (const _ of eachValueFrom(buffered)) {
-          started = true;
-          void _;
+    const consumerReady = new Promise<void>((resolve) => {
+      (async () => {
+        try {
+          for await (const _ of eachValueFrom(buffered)) {
+            resolve(); // Consumer is active
+            void _;
+          }
+        } catch (err) {
+          error = err;
         }
-      } catch (err) {
-        error = err;
-      }
-    })();
+      })();
+    });
 
-    // Wait for consumer to start
-    while (!started) {
-      subject.next(1); // Emit a value to start the stream
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    // Wait until consumer is actively listening
+    queueMicrotask(async () => {
+      await consumerReady;
 
-    // Trigger error
-    subject.error(new Error("Test error"));
+      subject.error(new Error("Test error"));
 
-    // Wait for consumer to catch error
-    await consumer;
+      // Wait for the error to propagate
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
-    // Assert
-    expect(error?.message).toBe("Test error");
+      expect(error?.message).toBe("Test error");
+    });
   });
 
   it("should emit empty arrays if no values are received in the interval", async () => {

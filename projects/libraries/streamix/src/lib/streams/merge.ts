@@ -1,5 +1,5 @@
-import { createStream, Stream } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
+import { createStream, Stream, StreamResult } from "../abstractions";
+import { eachValueFrom } from "../converters";
 
 /**
  * Merges multiple source streams into a single stream, emitting values as they arrive from any source.
@@ -12,18 +12,18 @@ import { eachValueFrom, fromAny } from "../converters";
  * errors, the merged stream immediately errors.
  *
  * @template T The type of the values in the streams.
- * @param {(Stream<T> | Promise<T> | Array<T>)[]} sources An array of streams to be merged.
+ * @param {Stream<T>[]} sources An array of streams to be merged.
  * @returns {Stream<T>} A new stream that emits values from all input streams.
  */
-export function merge<T = any>(...sources: (Stream<T> | Promise<T> | Array<T>)[]): Stream<T> {
+export function merge<T = any>(...sources: Stream<T>[]): Stream<T> {
   return createStream<T>('merge', async function* () {
     if (sources.length === 0) return;
 
-    const iterators = sources.map(s => eachValueFrom(fromAny(s))[Symbol.asyncIterator]());
-    const nextPromises: Array<Promise<IteratorResult<T>> | null> = iterators.map(it => it.next());
+    const iterators = sources.map(s => eachValueFrom(s)[Symbol.asyncIterator]());
+    const nextPromises: Array<Promise<StreamResult<T>> | null> = iterators.map(it => it.next());
     let activeCount = iterators.length;
 
-    const reflect = (promise: Promise<StreamResult>, index: number) =>
+    const reflect = (promise: Promise<StreamResult<T>>, index: number) =>
       promise.then(
         result => ({ ...result, index, status: 'fulfilled' as const }),
         error => ({ error, index, status: 'rejected' as const })
@@ -66,5 +66,5 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T> | Array<T>)[]
         }
       }
     }
-  }, context);
+  });
 }
