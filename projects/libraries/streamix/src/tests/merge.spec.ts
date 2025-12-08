@@ -1,11 +1,11 @@
 import { from, merge } from '@actioncrew/streamix';
 
-describe('merge', () => {
+describe('MergeStream', () => {
   it('should merge values from multiple sources', (done) => {
     const source1 = from(['source1_value1', 'source1_value2']);
     const source2 = from(['source2_value1', 'source2_value2']);
 
-    const mergeStream = merge([source1, source2]);
+    const mergeStream = merge(source1, source2);
 
     const emittedValues: any[] = [];
     const subscription = mergeStream.subscribe({
@@ -28,7 +28,7 @@ describe('merge', () => {
     const source1 = from(['source1_value1', 'source1_value2']);
     const source2 = from(['source2_value1', 'source2_value2']);
 
-    const mergeStream = merge([source1, source2]);
+    const mergeStream = merge(source1, source2);
 
     let subscriptionCalls = 0;
 

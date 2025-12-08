@@ -37,7 +37,7 @@ export function eachValueFrom<T = any>(stream: Stream<T>): StreamGenerator<T> {
           const r = resolveNext;
           resolveNext = null;
           rejectNext = null;
-          r(NEXT(value) as IteratorResult<T>);
+          r(NEXT(value));
         } else {
           queue.push(value);
         }
@@ -58,7 +58,7 @@ export function eachValueFrom<T = any>(stream: Stream<T>): StreamGenerator<T> {
           const r = resolveNext;
           resolveNext = null;
           rejectNext = null;
-          r(DONE as IteratorResult<T>);
+          r(DONE);
         }
         subscription.unsubscribe();
       },

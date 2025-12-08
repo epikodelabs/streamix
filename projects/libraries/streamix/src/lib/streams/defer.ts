@@ -1,5 +1,5 @@
 import { createStream, Stream } from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
+import { eachValueFrom } from '../converters';
 
 /**
  * Creates a stream that defers the creation of an inner stream until it is
@@ -11,15 +11,15 @@ import { eachValueFrom, fromAny } from '../converters';
  * call to the `factory` and create a fresh stream instance.
  *
  * @template T The type of the values in the inner stream.
- * @param {() => (Stream<T> | Promise<T> | Array<T>)} factory A function that returns the stream to be subscribed to.
+ * @param {() => Stream<T>} factory A function that returns the stream to be subscribed to.
  * @returns {Stream<T>} A new stream that defers subscription to the inner stream.
  */
-export function defer<T = any>(factory: () => (Stream<T> | Promise<T> | Array<T>)): Stream<T> {
+export function defer<T = any>(factory: () => Stream<T>): Stream<T> {
   async function* generator() {
     const innerStream = factory();
 
     try {
-      const iterator = eachValueFrom<T>(fromAny(innerStream));
+      const iterator = eachValueFrom<T>(innerStream);
       try {
         for await (const value of iterator) {
           yield value;
@@ -38,5 +38,5 @@ export function defer<T = any>(factory: () => (Stream<T> | Promise<T> | Array<T>
     }
   }
 
-  return createStream<T>('defer', generator, context);
+  return createStream<T>('defer', generator);
 }

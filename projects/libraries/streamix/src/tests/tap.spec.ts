@@ -1,6 +1,6 @@
 import { catchError, endWith, finalize, from, startWith, tap } from '@actioncrew/streamix';
 
-describe('tap', () => {
+describe('tap operator', () => {
   it('should perform side effects for each emission', (done) => {
     const testStream = from([1, 2, 3]);
     const sideEffectFn = jasmine.createSpy('sideEffectFn');

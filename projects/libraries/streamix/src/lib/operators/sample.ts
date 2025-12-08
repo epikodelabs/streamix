@@ -15,9 +15,10 @@ import { createSubject, Subject } from '../streams';
  */
 export const sample = <T = any>(period: number) =>
   createOperator<T, T>('sample', function (this: Operator, source, context) {
+    const sc = context?.currentStreamContext();
     const output: Subject<T> = createSubject<T>();
 
-    let lastResult: StreamResult | undefined;
+    let lastResult: StreamResult<T> | undefined;
     let skipped = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -27,10 +28,10 @@ export const sample = <T = any>(period: number) =>
 
         if (skipped) {
           // Mark as phantom if the last value was skipped
-          context?.markPhantom(this, lastResult);
+          sc?.markPhantom(this, lastResult);
         } else {
           output.next(lastResult.value!);
-          context?.resolvePending(this, lastResult);
+          sc?.resolvePending(this, lastResult);
         }
 
         skipped = true;
@@ -47,17 +48,16 @@ export const sample = <T = any>(period: number) =>
         startSampling();
 
         while (true) {
-          const result: StreamResult = createStreamResult(await source.next());
-
+          const result: StreamResult<T> = createStreamResult(await source.next());
           if (result.done) break;
 
           // Previous lastResult becomes phantom if it existed and was skipped
           if (lastResult && skipped) {
-            context?.markPhantom(this, lastResult);
+            sc?.markPhantom(this, lastResult);
           }
 
           // Track new result as pending
-          context?.markPending(this, result);
+          sc?.markPending(this, result);
           lastResult = result;
           skipped = false;
         }
@@ -65,10 +65,10 @@ export const sample = <T = any>(period: number) =>
         // Emit final value
         if (lastResult) {
           output.next(lastResult.value!);
-          context?.resolvePending(this, lastResult);
+          sc?.resolvePending(this, lastResult);
         }
       } catch (err) {
-        if (lastResult) context?.resolvePending(this, lastResult);
+        if (lastResult) sc?.resolvePending(this, lastResult);
         output.error(err);
       } finally {
         stopSampling();

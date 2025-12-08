@@ -1,5 +1,5 @@
-import { createOperator, Operator, Stream } from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
+import { createOperator, createStreamResult, Operator, Stream } from '../abstractions';
+import { eachValueFrom } from '../converters';
 import { createSubject } from '../streams';
 
 /**
@@ -20,43 +20,53 @@ import { createSubject } from '../streams';
  * should stop skipping values.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
-  return createOperator<T, T>('skipUntil', function (this: Operator, source: AsyncIterator<T>) {
+export function skipUntil<T = any>(notifier: Stream) {
+  return createOperator<T, T>('skipUntil', function (this: Operator, source, context) {
     const output = createSubject<T>();
+    const sc = context?.currentStreamContext();
     let canEmit = false;
 
-    // Subscribe to notifier
-    const notifierSubscription = fromAny(notifier).subscribe({
+    // Subscribe to notifier as an async iterator
+    let notifierSubscription = notifier.subscribe({
       next: () => {
         canEmit = true;
         notifierSubscription.unsubscribe();
       },
-      error: (err) => {
-        notifierSubscription.unsubscribe();
+      error: (err: any) => {
         output.error(err);
-        output.complete();
+        notifierSubscription.unsubscribe();
       },
       complete: () => {
         notifierSubscription.unsubscribe();
       },
     });
 
-    // Process source
-    (async () => {
+
+    // Process source async iterator
+    setTimeout(async () => {
       try {
         while (true) {
-          const { done, value } = await source.next();
-          if (done) break;
-          if (canEmit) output.next(value);
+          const result = createStreamResult(await source.next());
+          if (result.done) {
+            output.complete();
+            break;
+          }
+
+          if (canEmit) {
+            output.next(result.value);
+          } else {
+            // If we are still skipping, emit a phantom value.
+            await sc?.phantomHandler(this, result.value);
+          }
         }
       } catch (err) {
         if (!output.completed()) output.error(err);
       } finally {
         output.complete();
-        notifierSubscription.unsubscribe();
       }
-    })();
+    }, 0);
 
-    return eachValueFrom(output)[Symbol.asyncIterator]();
+    const iterable = eachValueFrom<T>(output);
+    return iterable[Symbol.asyncIterator]();
   });
 }

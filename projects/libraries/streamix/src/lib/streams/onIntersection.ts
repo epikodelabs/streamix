@@ -1,5 +1,4 @@
-import { Receiver, Stream } from '../abstractions';
-import { createSubject } from '../subjects';
+import { createStream, Stream } from '../abstractions';
 
 /**
  * Creates a stream that emits `true` when a given element enters the
@@ -16,45 +15,29 @@ import { createSubject } from '../subjects';
  */
 export function onIntersection(
   element: Element,
-  options?: IntersectionObserverInit,
-  context?: PipelineContext
+  options?: IntersectionObserverInit
 ): Stream<boolean> {
-  const subject = createSubject<boolean>();
-  subject.name = 'onIntersection';
-
-  const originalSubscribe = subject.subscribe;
-  subject.subscribe = (callback?: ((value: boolean) => void) | Receiver<boolean>) => {
-    const subscription = originalSubscribe.call(subject, callback);
+  return createStream<boolean>('onIntersection', async function* () {
+    let resolveNext: ((value: boolean) => void) | null = null;
 
     const observer = new IntersectionObserver((entries) => {
-      subject.next(entries[0]?.isIntersecting ?? false);
+      const isIntersecting = entries[0]?.isIntersecting ?? false;
+      resolveNext?.(isIntersecting);
+      resolveNext = null;
     }, options);
 
     observer.observe(element);
 
-    const cleanup = () => {
+    try {
+      while (true) {
+        const value = await new Promise<boolean>((resolve) => {
+          resolveNext = resolve;
+        });
+        yield value;
+      }
+    } finally {
       observer.unobserve(element);
       observer.disconnect();
-      mutationObserver.disconnect();
-      subscription.unsubscribe();
-    };
-
-    const mutationObserver = new MutationObserver(() => {
-      if (!document.body.contains(element)) {
-        subscription.unsubscribe();
-        subject.complete?.();
-      }
-    });
-
-    mutationObserver.observe(document.body, { childList: true, subtree: true });
-
-    const originalOnUnsubscribe = subscription.onUnsubscribe;
-    subscription.onUnsubscribe = () => {
-      originalOnUnsubscribe?.call(subscription);
-      cleanup();
-    };
-    return subscription;
-  };
-
-  return subject;
+    }
+  });
 }

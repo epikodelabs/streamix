@@ -1,6 +1,6 @@
 import { EMPTY } from '@actioncrew/streamix';
 
-describe('EMPTY', () => {
+describe('EmptyStream', () => {
   it('should auto-complete without emitting any values', async () => {
     const emptyStream = EMPTY;
 
@@ -15,7 +15,9 @@ describe('EMPTY', () => {
       }
     })
   });
+});
 
+describe('EMPTY constant', () => {
   it('should behave the same as an instance of EmptyStream', async () => {
     let emittedValues: any[] = [];
     const subscription = EMPTY.subscribe({

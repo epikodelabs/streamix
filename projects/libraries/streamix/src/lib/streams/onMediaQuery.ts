@@ -1,74 +1,46 @@
-import { Receiver, Stream } from '../abstractions';
-import { createBehaviorSubject } from '../streams';
+import { createStream, Stream } from '../abstractions';
 
 /**
- * Creates a reactive stream that emits `true` or `false` whenever a CSS media query
- * matches or stops matching.
+ * Creates a stream that emits `true` or `false` when a CSS media query's
+ * status changes.
  *
- * This stream allows you to reactively track viewport changes, orientation, or
- * other media features in a consistent, subscription-based way.
+ * This is a reactive wrapper around the `window.matchMedia` API,
+ * allowing you to easily react to changes in screen size, orientation,
+ * or other media features. The stream emits the initial match status upon
+ * subscription and then emits a new value for every subsequent change.
  *
- * **Behavior:**
- * - The initial match status is emitted immediately upon subscription.
- * - Subsequent changes are emitted whenever the media query's match state changes.
- * - Each subscriber has its own listener, which is cleaned up when unsubscribing.
- *
- * @param mediaQueryString A valid CSS media query string (e.g., "(min-width: 600px)").
- * @returns {Stream<boolean>} A stream emitting `true` if the query matches, `false` otherwise.
+ * @param {string} mediaQueryString The CSS media query string to match (e.g., "(min-width: 600px)").
+ * @returns {Stream<boolean>} A stream that emits `true` if the media query matches, and `false` otherwise.
  */
 export function onMediaQuery(mediaQueryString: string): Stream<boolean> {
-  if (typeof window === 'undefined' || !window.matchMedia) {
-    console.warn('matchMedia is not supported in this environment');
-    return createBehaviorSubject<boolean>(false);
-  }
-
-  const mql = window.matchMedia(mediaQueryString);
-  const subject = createBehaviorSubject<boolean>(mql.matches);
-  subject.name = 'onMediaQuery';
-
-  let listenerCount = 0;
-  let listener: ((event: MediaQueryListEvent) => void) | null = null;
-
-  const originalSubscribe = subject.subscribe;
-  subject.subscribe = (callback?: ((value: boolean) => void) | Receiver<boolean>) => {
-    // Set up listener on first subscription
-    if (listenerCount === 0) {
-      listener = (event: MediaQueryListEvent) => {
-        subject.next(event.matches);
-      };
-      
-      if (typeof mql.addEventListener === 'function') {
-        mql.addEventListener('change', listener);
-      } else if (typeof (mql as any).addListener === 'function') {
-        (mql as any).addListener(listener);
-      }
+  return createStream<boolean>('onMediaQuery', async function* () {
+    if (typeof window === 'undefined' || !window.matchMedia) {
+      console.warn('matchMedia is not supported in this environment');
+      return;
     }
-    
-    listenerCount++;
-    const subscription = originalSubscribe.call(subject, callback);
 
-    const cleanup = () => {
-      listenerCount--;
-      subscription.unsubscribe();
-      
-      // Remove listener when last subscriber unsubscribes
-      if (listenerCount === 0 && listener) {
-        if (typeof mql.removeEventListener === 'function') {
-          mql.removeEventListener('change', listener);
-        } else if (typeof (mql as any).removeListener === 'function') {
-          (mql as any).removeListener(listener);
-        }
-        listener = null;
+    const mediaQueryList = window.matchMedia(mediaQueryString);
+    let resolveNext: ((value: boolean) => void) | null = null;
+
+    const listener = (event: MediaQueryListEvent) => {
+      resolveNext?.(event.matches);
+      resolveNext = null;
+    };
+
+    mediaQueryList.addEventListener('change', listener);
+
+    try {
+      // Emit initial match result immediately
+      yield mediaQueryList.matches;
+
+      while (true) {
+        const next = await new Promise<boolean>((resolve) => {
+          resolveNext = resolve;
+        });
+        yield next;
       }
-    };
-
-    const originalOnUnsubscribe = subscription.onUnsubscribe;
-    subscription.onUnsubscribe = () => {
-      originalOnUnsubscribe?.call(subscription);
-      cleanup();
-    };
-    return subscription;
-  };
-
-  return subject;
+    } finally {
+      mediaQueryList.removeEventListener('change', listener);
+    }
+  });
 }

@@ -1,6 +1,6 @@
 import { audit, createSubject } from '@actioncrew/streamix';
 
-describe('audit', () => {
+describe('audit operator', () => {
   let input: ReturnType<typeof createSubject<number>>;
 
   beforeEach(() => {

@@ -1,4 +1,4 @@
-import { createStream, PipelineContext, Stream } from "../abstractions";
+import { createStream, Stream } from "../abstractions";
 import { Coroutine, CoroutineMessage } from "../operators/coroutine";
 
 /**
@@ -51,53 +51,53 @@ export interface SeizedWorker<T = any, R = T> {
 export function seize<T = any, R = T>(
   task: Coroutine<T, R>,
   onMessage: (message: CoroutineMessage) => void,
-  onError: (error: Error) => void,
-  context?: PipelineContext
+  onError: (error: Error) => void
 ): Stream<SeizedWorker> {
   return createStream("seize", async function* () {
+    // Seize a worker from the pool
     const { worker, workerId } = await task.getIdleWorker();
     let disposed = false;
-    const ac = new AbortController();
-    const signal = ac.signal;
 
-    const cleanup = () => {
-      if (!disposed) {
-        disposed = true;
-        worker.removeEventListener("message", messageHandler);
-        worker.removeEventListener("error", errorHandler);
-        task.returnWorker(workerId);
-        ac.abort();
-      }
-    };
-
+    // Setup worker message handler
     const messageHandler = (event: MessageEvent<CoroutineMessage>) => {
-      if (event.data.workerId === workerId) {
-        onMessage(event.data);
+      const msg = event.data;
+      if (msg.workerId === workerId) {
+        // Pass the message to the provided callback
+        onMessage(msg);
       }
     };
-    worker.addEventListener("message", messageHandler);
+    worker.addEventListener('message', messageHandler);
 
+    // Setup worker error handler
     const errorHandler = (event: ErrorEvent) => {
+      // Pass the error to the provided callback
       onError(event.error);
-      if (!disposed) {
-        ac.abort();
-      }
     };
-    worker.addEventListener("error", errorHandler);
-
-    const seizedWorker: SeizedWorker<T, R> = {
-      workerId,
-      sendTask: (data: T) => task.assignTask(workerId, data),
-      release: cleanup,
-    };
+    worker.addEventListener('error', errorHandler);
 
     try {
-      yield seizedWorker;
+      // Yield the seized worker interface
+      yield {
+        workerId,
+        sendTask: (data: T) => task.assignTask(workerId, data),
+        release: () => {
+          if (!disposed) {
+            disposed = true;
+            worker.removeEventListener('message', messageHandler);
+            worker.removeEventListener('error', errorHandler);
+            task.returnWorker(workerId);
+          }
+        }
+      };
 
-      // Wait until release or iterator is abandoned
-      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+      // Keep alive until disposed
+      await new Promise<void>(() => {});
     } finally {
-      cleanup();
+      if (!disposed) {
+        worker.removeEventListener('message', messageHandler);
+        worker.removeEventListener('error', errorHandler);
+        task.returnWorker(workerId);
+      }
     }
-  }, context);
+  });
 }

@@ -1,6 +1,6 @@
 import { filter, from } from '@actioncrew/streamix';
 
-describe('filter', () => {
+describe('FilterOperator', () => {
   it('should allow values that pass the predicate', (done) => {
     const testStream = from([1, 2, 3, 4, 5]);
     const predicate = (value: number) => value % 2 === 0;
@@ -23,15 +23,13 @@ describe('filter', () => {
     const predicate = (value: number) => value > 3;
 
     const filteredStream = testStream.pipe(filter(predicate));
-    let emittedCount = 0;
 
     filteredStream.subscribe({
-      next: (value) => {
-        emittedCount++;
-        fail(`Unexpected value emitted: ${value}`);
+      next: () => {
+        fail('Unexpected value emitted');
+        done();
       },
       complete: () => {
-        expect(emittedCount).toBe(0); // ✅ Add expectation
         done();
       },
       error: done.fail,

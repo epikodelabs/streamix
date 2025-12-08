@@ -1,6 +1,5 @@
-import { createOperator, MaybePromise, Operator, Stream } from "../abstractions";
+import { CallbackReturnType, createOperator, createStreamContext, createStreamResult, DONE, NEXT, Operator, Stream, StreamResult } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
-import { createSubject, Subject } from "../streams";
 
 /**
  * Creates a stream operator that maps each value from the source stream to a new
@@ -18,100 +17,56 @@ import { createSubject, Subject } from "../streams";
  * @param project A function that takes a value from the source stream and its index,
  * and returns either:
  *   - a {@link Stream<R>},
- *   - a {@link MaybePromise<R>} (value or promise),
+ *   - a {@link CallbackReturnType<R>} (value or promise),
  *   - or an array of `R`.
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
 export const concatMap = <T = any, R = T>(
-  project: (value: T, index: number) => (Stream<R> | MaybePromise<R> | Array<R>)
+  project: (value: T, index: number) => Stream<R> | CallbackReturnType<R> | Array<R>
 ) =>
-  createOperator<T, R>("concatMap", function (this: Operator, source, context) {
-    const output: Subject<R> = createSubject<R>();
+  createOperator<T, R>("concatMap", function (this : Operator, source, context) {
+    const sc = context?.currentStreamContext();
+    let outerIndex = 0;
+    let innerIterator: AsyncIterator<R> | null = null;
+    let result: StreamResult<T> | null = null;
+    let innerHadEmissions = false;
 
-    let index = 0;
-    let outerCompleted = false;
-    let errorOccurred = false;
-    let currentInnerCompleted = true;
-    let pendingValues: T[] = [];
-
-    const processNextInner = async () => {
-      if (pendingValues.length === 0 || !currentInnerCompleted) return;
-
-      currentInnerCompleted = false;
-      const outerValue = pendingValues.shift()!;
-
-      let innerSc: StreamContext | undefined;
-
-      try {
-        const innerStream = fromAny(project(outerValue, index++));
-        innerSc = context?.pipeline.registerStream(innerStream);
-        let innerHadEmissions = false;
-
-        for await (const val of eachValueFrom(innerStream)) {
-          let result = createStreamResult({ value: val });
-          if (errorOccurred) break;
-
-          output.next(result.value);
-          innerHadEmissions = true;
-
-          innerSc?.logFlow("emitted", this, val, "Inner stream emitted");
-        }
-
-        if (!innerHadEmissions && !errorOccurred && innerSc) {
-          const phantomResult = createStreamResult({
-            value: outerValue,
-            type: 'phantom',
-            done: true
-          });
-          innerSc.markPhantom(this, phantomResult);
-        }
-      } catch (err) {
-        if (!errorOccurred) {
-          errorOccurred = true;
-          output.error(err);
-          innerSc?.logFlow("error", this, undefined, String(err));
-        }
-      } finally {
-        innerSc && await context?.pipeline.unregisterStream(innerSc.streamId);
-
-        currentInnerCompleted = true;
-
-        if (pendingValues.length > 0) {
-          processNextInner();
-        } else if (outerCompleted && pendingValues.length === 0) {
-          output.complete();
-        }
-      }
-    };
-
-    (async () => {
-      try {
+    return {
+      next: async () => {
         while (true) {
-          const result = createStreamResult(await source.next());
-          if (result.done) break;
-          if (errorOccurred) break;
+          // If no active inner iterator, pull the next outer value
+          if (!innerIterator) {
+            result = createStreamResult(await source.next());
 
-          pendingValues.push(result.value);
+            if (result.done) return DONE;
 
-          context?.logFlow("emitted", this, result.value, "Outer value received");
+            // Initialize inner stream
+            innerHadEmissions = false;
 
-          if (currentInnerCompleted) {
-            processNextInner();
+            const innerStream = fromAny(project(result.value, outerIndex++));
+            context && createStreamContext(context, innerStream);
+            innerIterator = eachValueFrom(innerStream);
           }
-        }
 
-        outerCompleted = true;
+          // Pull next value from inner stream
+          const innerResult = await innerIterator.next();
 
-        if (pendingValues.length === 0 && currentInnerCompleted && !errorOccurred) {
-          output.complete();
-        }
-      } catch (err) {
-        if (!errorOccurred) {
-          errorOccurred = true;
-          output.error(err);
-        }
-      }
-    })();
+          if (innerResult.done) {
+            innerIterator = null;
 
-    return eachValueFrom<R>(output);
+            // If inner stream emitted nothing, produce a phantom
+            if (!innerHadEmissions && result !== null) {
+              await sc?.phantomHandler(this, result.value);
+            }
+
+            // Otherwise continue to next outer value
+            continue;
+          }
+
+          // Mark that inner stream produced a value
+          innerHadEmissions = true;
+          return NEXT(innerResult.value);
+        }
+      },
+    };
   });

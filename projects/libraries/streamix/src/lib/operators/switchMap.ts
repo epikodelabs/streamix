@@ -1,4 +1,4 @@
-import { createOperator, MaybePromise, Operator, Stream, Subscription } from "../abstractions";
+import { CallbackReturnType, createOperator, createStreamContext, createStreamResult, Operator, Stream, StreamResult, Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../streams";
 
@@ -20,24 +20,23 @@ import { createSubject } from "../streams";
  * @template R The type of values emitted by the inner and output streams.
  * @param project A function that maps a source value and its index to either:
  *   - a {@link Stream<R>},
- *   - a {@link MaybePromise<R>} (value or promise),
+ *   - a {@link CallbackReturnType<R>} (value or promise),
  *   - or an array of `R`.
  * @returns An {@link Operator} instance suitable for use in a stream's `pipe` method.
  */
 export function switchMap<T = any, R = any>(
-  project: (value: T, index: number) => (Stream<R> | MaybePromise<R> | Array<R>)
+  project: (value: T, index: number) => Stream<R> | CallbackReturnType<R> | Array<R>
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source, context) {
     const output = createSubject<R>();
+    const sc = context?.currentStreamContext();
 
     let currentSubscription: Subscription | null = null;
-    let currentInnerSc: StreamContext | undefined;
-
     let inputCompleted = false;
     let currentInnerStreamId = 0;
     let index = 0;
     let innerHadEmissions = false;
-    let pendingPhantom: StreamResult | null = null;
+    let pendingPhantom: StreamResult<T> | null = null;
 
     const checkComplete = () => {
       if (inputCompleted && !currentSubscription) {
@@ -49,48 +48,29 @@ export function switchMap<T = any, R = any>(
       // Cancel previous inner stream
       if (currentSubscription) {
         if (!innerHadEmissions && pendingPhantom) {
-          await currentInnerSc?.markPhantom(this, pendingPhantom);
+          await sc?.phantomHandler(this, pendingPhantom.value);
         }
 
         currentSubscription.unsubscribe();
         currentSubscription = null;
-
-        // Unregister old stream
-        if (currentInnerSc) {
-          context?.pipeline.unregisterStream(currentInnerSc.streamId);
-          currentInnerSc = undefined;
-        }
       }
 
       innerHadEmissions = false;
       pendingPhantom = null;
-
-      // Register new inner stream
-      currentInnerSc = context?.pipeline.registerStream(innerStream);
 
       currentSubscription = innerStream.subscribe({
         next: (value) => {
           if (streamId === currentInnerStreamId) {
             innerHadEmissions = true;
             output.next(value);
-            currentInnerSc?.logFlow("emitted", this, value, "Inner stream emitted");
           }
         },
         error: (err) => {
-          if (streamId === currentInnerStreamId) {
-            output.error(err);
-          }
+          if (streamId === currentInnerStreamId) output.error(err);
         },
         complete: () => {
           if (streamId === currentInnerStreamId) {
             currentSubscription = null;
-
-            // Unregister on completion
-            if (currentInnerSc) {
-              context?.pipeline.unregisterStream(currentInnerSc.streamId);
-              currentInnerSc = undefined;
-            }
-
             checkComplete();
           }
         },
@@ -101,7 +81,6 @@ export function switchMap<T = any, R = any>(
       try {
         while (true) {
           const result = createStreamResult(await source.next());
-
           if (result.done) break;
 
           // Track outer value in case inner stream emits nothing
@@ -109,10 +88,7 @@ export function switchMap<T = any, R = any>(
 
           const streamId = ++currentInnerStreamId;
           const innerStream = fromAny(project(result.value, index++));
-
-          // Log outer emission
-          context?.logFlow("emitted", this, result.value, "Outer value received");
-
+          context && createStreamContext(context, innerStream);
           await subscribeToInner(innerStream, streamId);
         }
 
@@ -123,6 +99,7 @@ export function switchMap<T = any, R = any>(
       }
     })();
 
-    return eachValueFrom<R>(output);
+    const iterable = eachValueFrom<R>(output);
+    return iterable[Symbol.asyncIterator]();
   });
 }

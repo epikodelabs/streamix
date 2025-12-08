@@ -1,6 +1,6 @@
 import { from, groupBy, map, merge, mergeMap, of, tap } from '@actioncrew/streamix';
 
-describe('groupBy', () => {
+describe('groupBy and custom partitioning', () => {
   it('should partition values using groupBy and sort them by key', (done) => {
     let result: any[] = [];
     const groupsMap = new Map<string, any[]>(); // Store latest group values
@@ -43,7 +43,7 @@ describe('groupBy', () => {
     const groupsMap = new Map<string, any[]>(); // Store latest group values
 
     // Use mergeMap to combine all partitioned streams into one observable
-    const source$ = merge(partitionedStreams).pipe(
+    const source$ = merge(...partitionedStreams).pipe(
       groupBy((value: string) => value.startsWith('Low') ? 'low' : 'high'),
       mergeMap((groupItem: { key: string, value: string }) => {
         const key = groupItem.key; // Get the group key ('low' or 'high')

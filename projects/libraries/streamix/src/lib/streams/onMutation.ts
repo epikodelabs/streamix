@@ -1,55 +1,41 @@
-import { Receiver, Stream } from '../abstractions';
-import { createSubject } from '../subjects';
+import { createStream, Stream } from '../abstractions';
 
 /**
  * Creates a stream that emits an array of `MutationRecord` objects whenever
  * a change is detected on a given DOM element.
  *
- * Automatically unsubscribes if the element is removed from the DOM.
+ * This function provides a reactive wrapper around the browser's native
+ * `MutationObserver` API, making it easy to respond to changes in the DOM,
+ * such as a change in attributes, child nodes, or character data. The stream
+ * will continue to emit values for as long as it is subscribed to.
  *
- * @param element The DOM element to observe for mutations.
- * @param options An optional object specifying which DOM changes to observe.
- * @returns A Stream emitting arrays of `MutationRecord`s.
+ * @param {Element} element The DOM element to observe for mutations.
+ * @param {MutationObserverInit} [options] An optional object specifying which DOM changes to observe. Defaults to observing all changes.
+ * @returns {Stream<MutationRecord[]>} A stream that emits an array of `MutationRecord`s.
  */
 export function onMutation(
   element: Element,
-  options?: MutationObserverInit,
-  context?: PipelineContext
+  options?: MutationObserverInit
 ): Stream<MutationRecord[]> {
-  const subject = createSubject<MutationRecord[]>();
-  subject.name = 'onMutation';
-
-  const originalSubscribe = subject.subscribe;
-  subject.subscribe = (callback?: ((value: MutationRecord[]) => void) | Receiver<MutationRecord[]>) => {
-    const subscription = originalSubscribe.call(subject, callback);
+  return createStream<MutationRecord[]>('onMutation', async function* () {
+    let resolveNext: ((value: MutationRecord[]) => void) | null = null;
 
     const observer = new MutationObserver((mutations) => {
-      subject.next([...mutations]);
+      resolveNext?.([...mutations]); // emit a copy
+      resolveNext = null;
     });
 
     observer.observe(element, options);
 
-    // Watch for DOM removal
-    const removalObserver = new MutationObserver(() => {
-      if (!document.body.contains(element)) {
-        subject.complete?.();
+    try {
+      while (true) {
+        const mutations = await new Promise<MutationRecord[]>((resolve) => {
+          resolveNext = resolve;
+        });
+        yield mutations;
       }
-    });
-    removalObserver.observe(document.body, { childList: true, subtree: true });
-
-    const cleanup = () => {
+    } finally {
       observer.disconnect();
-      removalObserver.disconnect();
-      subscription.unsubscribe();
-    };
-
-    const originalOnUnsubscribe = subscription.onUnsubscribe;
-    subscription.onUnsubscribe = () => {
-      originalOnUnsubscribe?.call(subscription);
-      cleanup();
-    };
-    return subscription;
-  };
-
-  return subject;
+    }
+  });
 }

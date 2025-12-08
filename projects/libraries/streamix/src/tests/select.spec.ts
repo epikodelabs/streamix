@@ -1,6 +1,6 @@
 import { createSubject, eachValueFrom, select } from '@actioncrew/streamix';
 
-describe('select', () => {
+describe('select operator tests', () => {
   let subject: any;
   let source: any;
 

@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, Operator } from '../abstractions';
+import { CallbackReturnType, createOperator, createStreamResult, DONE, Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that catches errors from the source stream and handles them.
@@ -20,7 +20,7 @@ import { createOperator, DONE, MaybePromise, Operator } from '../abstractions';
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const catchError = <T = any>(
-  handler: (error: any) => MaybePromise = () => {} // Handler still returns void
+  handler: (error: any) => CallbackReturnType = () => {} // Handler still returns void
 ) =>
   createOperator<T, T>('catchError', function (this: Operator, source) {
     let errorCaughtAndHandled = false;
