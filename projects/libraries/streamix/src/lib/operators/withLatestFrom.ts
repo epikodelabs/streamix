@@ -1,15 +1,13 @@
 import {
-  CallbackReturnType,
-  createOperator,
-  createReceiver,
-  createStreamResult,
-  createSubscription,
-  Operator,
-  Receiver,
-  Stream,
-  Subscription
+    createOperator,
+    createReceiver,
+    MaybePromise,
+    Operator,
+    Receiver,
+    Stream,
+    Subscription
 } from "../abstractions";
-import { eachValueFrom } from "../converters";
+import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../streams";
 
 /**
@@ -30,7 +28,7 @@ import { createSubject } from "../streams";
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  * The output stream emits tuples of `[T, ...R]`.
  */
-export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(...streams: { [K in keyof R]: Stream<R[K]> }) {
+export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(...streams: { [K in keyof R]: (Stream<R[K]> | Promise<R[K]> | Array<R[K]>)}) {
   return createOperator<T, [T, ...R]>("withLatestFrom", function (this: Operator, source) {
     const output = createSubject<[T, ...R]>();
     const latestValues: any[] = new Array(streams.length).fill(undefined);
@@ -38,7 +36,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(..
     const subscriptions: Subscription[] = [];
 
     for (let i = 0; i < streams.length; i++) {
-      const subscription = streams[i].subscribe({
+      const subscription = fromAny(streams[i]).subscribe({
         next: (value) => {
           latestValues[i] = value;
           hasValue[i] = true;
@@ -91,12 +89,12 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(..
 
     const originalSubscribe = output.subscribe;
     output.subscribe = (
-      callbackOrReceiver?: ((value: [T, ...R]) => CallbackReturnType) | Receiver<[T, ...R]>
+      callbackOrReceiver?: ((value: [T, ...R]) => MaybePromise) | Receiver<[T, ...R]>
     ): Subscription => {
       const receiver = createReceiver(callbackOrReceiver);
       const subscription = originalSubscribe.call(output, receiver);
 
-      return createSubscription(() => {
+      subscription.onUnsubscribe = () => {
         abortController.abort();
         subscription.unsubscribe();
         subscriptions.forEach(sub => sub.unsubscribe());
@@ -104,7 +102,9 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(..
         if (typeof iterator.return === "function") {
           iterator.return().catch(() => {});
         }
-      });
+      };
+
+      return subscription;
     };
 
     const iterable = eachValueFrom<[T, ...R]>(output);

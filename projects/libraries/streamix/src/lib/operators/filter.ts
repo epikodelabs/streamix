@@ -1,5 +1,5 @@
-import { createOperator, createStreamResult, NEXT, Operator } from '../abstractions';
-import { CallbackReturnType } from './../abstractions/receiver';
+import { createOperator, NEXT, Operator } from '../abstractions';
+import { MaybePromise } from './../abstractions/receiver';
 
 /**
  * Creates a stream operator that filters values emitted by the source stream.
@@ -18,7 +18,7 @@ import { CallbackReturnType } from './../abstractions/receiver';
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const filter = <T = any>(
-  predicateOrValue: ((value: T, index: number) => CallbackReturnType<boolean>) | T | T[]
+  predicateOrValue: ((value: T, index: number) => MaybePromise<boolean>) | T | T[]
 ) =>
   createOperator<T, T>('filter', function (this: Operator, source, context) {
     let index = 0;
@@ -33,7 +33,7 @@ export const filter = <T = any>(
           let shouldInclude = false;
 
           if (typeof predicateOrValue === 'function') {
-            shouldInclude = await (predicateOrValue as (value: T, index: number) => CallbackReturnType<boolean>)(value, index);
+            shouldInclude = await (predicateOrValue as (value: T, index: number) => MaybePromise<boolean>)(value, index);
           } else if (Array.isArray(predicateOrValue)) {
             shouldInclude = predicateOrValue.includes(value);
           } else {

@@ -1,4 +1,4 @@
-import { CallbackReturnType, createReceiver, createStream, PipelineContext, Receiver, Stream, Subscription } from '../abstractions';
+import { createReceiver, createStream, MaybePromise, Receiver, Stream, Subscription } from '../abstractions';
 
 /**
  * Creates an empty stream that emits no values and completes immediately.
@@ -26,7 +26,7 @@ export const empty = <T = any>(context?: PipelineContext): Stream<T> => {
   }, context);
 
   // Empty stream does not subscribe to any source
-  const subscribe = (callbackOrReceiver?: ((value: T) => CallbackReturnType) | Receiver<T>): Subscription => {
+  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
     const receiver = createReceiver(callbackOrReceiver);
 
     // No data is emitted, immediately complete the receiver

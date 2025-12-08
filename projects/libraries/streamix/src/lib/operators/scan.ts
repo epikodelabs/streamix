@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that accumulates values from the source stream,
@@ -18,7 +18,7 @@ import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Ope
  */
 
 export const scan = <T = any, R = any>(
-  accumulator: (acc: R, value: T, index: number) => CallbackReturnType<R>,
+  accumulator: (acc: R, value: T, index: number) => MaybePromise<R>,
   seed: R
 ) =>
   createOperator<T, R>("scan", function (this: Operator, source) {
