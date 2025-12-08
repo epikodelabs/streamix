@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, Operator, StreamResult } from "../abstractions";
+import { createOperator, Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { createSubject, timer } from "../streams";
 
@@ -11,11 +11,9 @@ import { createSubject, timer } from "../streams";
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
 export function buffer<T = any>(period: number) {
-  return createOperator<T, T[]>("buffer", function (this: Operator, source, context) {
+  return createOperator<T, T[]>("buffer", function (this: Operator, source) {
     const output = createSubject<T[]>();
-    const sc = context?.currentStreamContext();
-
-    let buffer: StreamResult<T>[] = [];
+    let buffer: IteratorResult<T>[] = [];
     let completed = false;
 
     const flush = () => {
@@ -25,7 +23,6 @@ export function buffer<T = any>(period: number) {
         output.next(values);
 
         // Resolve all pending results for this flush
-        buffer.forEach((r) => sc?.resolvePending(this, r));
         buffer = [];
       }
     };
@@ -46,7 +43,6 @@ export function buffer<T = any>(period: number) {
     const fail = (err: any) => {
       // resolve all pending before error
       if (buffer.length > 0) {
-        buffer.forEach((r) => sc?.markPhantom(this, r));
         buffer = [];
       }
       output.error(err);
@@ -63,11 +59,8 @@ export function buffer<T = any>(period: number) {
     (async () => {
       try {
         while (true) {
-          const result: StreamResult<T> = createStreamResult(await source.next());
+          const result: IteratorResult<T> = await source.next();
           if (result.done) break;
-
-          // Mark this value as pending in the context
-          sc?.markPending(this, result);
 
           // Add to buffer
           buffer.push(result);

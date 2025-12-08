@@ -1,4 +1,4 @@
-import { DONE, NEXT, Stream, StreamGenerator } from "../abstractions";
+import { DONE, NEXT, Stream } from "../abstractions";
 
 /**
  * Converts a `Stream` into an async generator, yielding each emitted value.
@@ -23,7 +23,7 @@ import { DONE, NEXT, Stream, StreamGenerator } from "../abstractions";
  * @param stream The source stream to convert.
  * @returns An async generator that yields the values from the stream.
  */
-export function eachValueFrom<T = any>(stream: Stream<T>): StreamGenerator<T> {
+export function eachValueFrom<T = any>(stream: Stream<T>): AsyncGenerator<T> {
   async function* generator(): AsyncGenerator<T> {
     let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
     let rejectNext: ((error: any) => void) | null = null;
@@ -95,6 +95,5 @@ export function eachValueFrom<T = any>(stream: Stream<T>): StreamGenerator<T> {
     }
   }
 
-  // Cast the native AsyncGenerator to StreamGenerator
-  return generator() as unknown as StreamGenerator<T>;
+  return generator();
 }

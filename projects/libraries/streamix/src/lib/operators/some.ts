@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that tests if at least one value from the source stream satisfies a predicate.
@@ -19,10 +19,9 @@ import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Ope
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const some = <T = any>(
-  predicate: (value: T, index: number) => CallbackReturnType<boolean>
+  predicate: (value: T, index: number) => MaybePromise<boolean>
 ) =>
-  createOperator<T, boolean>('some', function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
+  createOperator<T, boolean>('some', function (this: Operator, source) {
     let evaluated = false;
     let found = false;
     let index = 0;
@@ -35,7 +34,7 @@ export const some = <T = any>(
 
         try {
           while (true) {
-            const result = createStreamResult(await source.next());
+            const result = await source.next();
 
             if (result.done) break;
 
@@ -43,8 +42,6 @@ export const some = <T = any>(
               found = true;
               break; // Predicate matched
             }
-
-            await sc?.phantomHandler(this, result.value);
           }
         } finally {
           evaluated = true;

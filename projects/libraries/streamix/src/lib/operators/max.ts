@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, DONE, NEXT, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that emits the maximum value from the source stream.
@@ -11,10 +11,9 @@ import { createOperator, createStreamResult, DONE, NEXT, Operator } from '../abs
  * @returns An `Operator` instance usable in a stream's `pipe` method.
  */
 export const max = <T = any>(
-  comparator?: (a: T, b: T) => number | Promise<number>
+  comparator?: (a: T, b: T) => MaybePromise<number>
 ) =>
-  createOperator<T, T>("max", function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
+  createOperator<T, T>("max", function (this: Operator, source) {
     let maxValue: T | undefined;
     let hasMax = false;
     let emittedMax = false;
@@ -29,7 +28,7 @@ export const max = <T = any>(
             return DONE;
           }
 
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
 
           if (result.done) {
             // Emit final max if exists
@@ -54,8 +53,6 @@ export const max = <T = any>(
             // previous max becomes phantom
             maxValue = value;
           }
-
-          await sc?.phantomHandler(this, maxValue!);
         }
       },
     };

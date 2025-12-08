@@ -1,6 +1,6 @@
-import { eachValueFrom, loop, StreamGenerator } from '@actioncrew/streamix';
+import { eachValueFrom, loop } from '@actioncrew/streamix';
 
-function collect<T>(stream: StreamGenerator<T>): Promise<T[]> {
+function collect<T>(stream: AsyncGenerator<T>): Promise<T[]> {
   const result: T[] = [];
   return (async () => {
     for await (const v of stream) {
@@ -10,7 +10,7 @@ function collect<T>(stream: StreamGenerator<T>): Promise<T[]> {
   })();
 }
 
-describe('loop operator', () => {
+describe('loop', () => {
   it('should emit a sequence of values while the condition is true', async () => {
     const result = await collect(eachValueFrom(loop(0, x => x < 5, x => x + 1)));
     expect(result).toEqual([0, 1, 2, 3, 4]);

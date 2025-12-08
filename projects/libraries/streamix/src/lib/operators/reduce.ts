@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that accumulates all values from the source stream
@@ -15,19 +15,17 @@ import { createOperator, createStreamResult, DONE, NEXT, Operator } from "../abs
  * @returns An `Operator` instance usable in a stream's `pipe` method.
  */
 export const reduce = <T = any, A = any>(
-  accumulator: (acc: A, value: T) => Promise<A> | A,
+  accumulator: (acc: A, value: T) => MaybePromise<A>,
   seed: A
 ) =>
-  createOperator<T, A>("reduce", function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
-
+  createOperator<T, A>("reduce", function (this: Operator, source) {
     let finalValue: A = seed;
     let emittedFinal = false;
 
     return {
       next: async () => {
         while (true) {
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
 
           if (result.done) {
             if (!emittedFinal) {
@@ -39,9 +37,6 @@ export const reduce = <T = any, A = any>(
 
           // Accumulate value
           finalValue = await accumulator(finalValue, result.value);
-
-          // Treat intermediate accumulated value as phantom
-          await sc?.phantomHandler(this, finalValue);
         }
       },
     };

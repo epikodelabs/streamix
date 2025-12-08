@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, NEXT, Operator } from "../abstractions";
 import { Coroutine } from "./coroutine";
 
 /**
@@ -75,7 +75,7 @@ export function cascade<T = any, R = any>(
             return DONE;
           }
 
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
           if (result.done) {
             completed = true;
             return DONE;

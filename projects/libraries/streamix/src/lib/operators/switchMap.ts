@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, createStreamContext, createStreamResult, Operator, Stream, StreamResult, Subscription } from "../abstractions";
+import { createOperator, MaybePromise, Operator, Stream, Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../streams";
 
@@ -20,23 +20,20 @@ import { createSubject } from "../streams";
  * @template R The type of values emitted by the inner and output streams.
  * @param project A function that maps a source value and its index to either:
  *   - a {@link Stream<R>},
- *   - a {@link CallbackReturnType<R>} (value or promise),
+ *   - a {@link MaybePromise<R>} (value or promise),
  *   - or an array of `R`.
  * @returns An {@link Operator} instance suitable for use in a stream's `pipe` method.
  */
 export function switchMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | CallbackReturnType<R> | Array<R>
+  project: (value: T, index: number) => (Stream<R> | MaybePromise<R> | Array<R>)
 ) {
-  return createOperator<T, R>("switchMap", function (this: Operator, source, context) {
+  return createOperator<T, R>("switchMap", function (this: Operator, source) {
     const output = createSubject<R>();
-    const sc = context?.currentStreamContext();
 
     let currentSubscription: Subscription | null = null;
     let inputCompleted = false;
     let currentInnerStreamId = 0;
     let index = 0;
-    let innerHadEmissions = false;
-    let pendingPhantom: StreamResult<T> | null = null;
 
     const checkComplete = () => {
       if (inputCompleted && !currentSubscription) {
@@ -47,21 +44,13 @@ export function switchMap<T = any, R = any>(
     const subscribeToInner = async (innerStream: Stream<R>, streamId: number) => {
       // Cancel previous inner stream
       if (currentSubscription) {
-        if (!innerHadEmissions && pendingPhantom) {
-          await sc?.phantomHandler(this, pendingPhantom.value);
-        }
-
         currentSubscription.unsubscribe();
         currentSubscription = null;
       }
 
-      innerHadEmissions = false;
-      pendingPhantom = null;
-
       currentSubscription = innerStream.subscribe({
         next: (value) => {
           if (streamId === currentInnerStreamId) {
-            innerHadEmissions = true;
             output.next(value);
           }
         },
@@ -80,15 +69,11 @@ export function switchMap<T = any, R = any>(
     (async () => {
       try {
         while (true) {
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
           if (result.done) break;
-
-          // Track outer value in case inner stream emits nothing
-          pendingPhantom = result;
 
           const streamId = ++currentInnerStreamId;
           const innerStream = fromAny(project(result.value, index++));
-          context && createStreamContext(context, innerStream);
           await subscribeToInner(innerStream, streamId);
         }
 

@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits only the first element from the source stream
@@ -19,7 +19,7 @@ import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Ope
  * @throws {Error} Throws an error with the message "No elements in sequence" if no matching
  * value is found before the source stream completes.
  */
-export const first = <T = any>(predicate?: (value: T) => CallbackReturnType<boolean>) =>
+export const first = <T = any>(predicate?: (value: T) => MaybePromise<boolean>) =>
   createOperator<T, T>('first', function (this: Operator, source) {
     let found = false;
     let firstValue: T | undefined;
@@ -36,7 +36,7 @@ export const first = <T = any>(predicate?: (value: T) => CallbackReturnType<bool
         }
 
         while (!found) {
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
           if (result.done) {
             sourceDone = true;
             throw new Error("No elements in sequence");

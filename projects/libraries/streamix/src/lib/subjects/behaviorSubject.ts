@@ -1,15 +1,16 @@
 import {
-  CallbackReturnType,
-  createReceiver,
-  createSubscription,
-  Operator,
-  pipeStream,
-  Receiver,
-  Stream,
-  Subscription
+    createReceiver,
+    createSubscription,
+    MaybePromise,
+    Operator,
+    pipeStream,
+    Receiver,
+    scheduler,
+    Stream,
+    Subscription
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { createBehaviorSubjectBuffer, createQueue } from "../primitives";
+import { createBehaviorSubjectBuffer } from "../primitives";
 import { Subject } from "./subject";
 
 /**
@@ -45,21 +46,20 @@ export type BehaviorSubject<T = any> = Subject<T> & {
  */
 export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
   const buffer = createBehaviorSubjectBuffer<T>(initialValue);
-  const queue = createQueue();
   let latestValue = initialValue;
   let isCompleted = false;
   let hasError = false;
 
-  const next = function (value: T) {
+  const next = (value: T) => {
     latestValue = value;
-    queue.enqueue(async () => {
+    scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
       await buffer.write(value);
     });
   };
 
   const complete = () => {
-    queue.enqueue(async () => {
+    scheduler.enqueue(async () => {
       if (isCompleted) return;
       isCompleted = true;
       await buffer.complete();
@@ -67,7 +67,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
   };
 
   const error = (err: any) => {
-    queue.enqueue(async () => {
+    scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
       hasError = true;
       isCompleted = true;
@@ -76,16 +76,15 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => CallbackReturnType) | Receiver<T>): Subscription => {
+  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
     const receiver = createReceiver(callbackOrReceiver);
-
     let unsubscribing = false;
     let readerId: number | null = null;
 
     const subscription = createSubscription(() => {
       if (!unsubscribing) {
         unsubscribing = true;
-        queue.enqueue(async () => {
+        scheduler.enqueue(async () => {
           if (readerId !== null) {
             await buffer.detachReader(readerId);
           }
@@ -93,14 +92,13 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       }
     });
 
-    queue.enqueue(() => buffer.attachReader()).then(async (id: number) => {
+    scheduler.enqueue(() => buffer.attachReader()).then(async (id: number) => {
       readerId = id;
       try {
         while (true) {
-          const { value, done } = await buffer.read(readerId);
-          if (done) break;
-
-          await receiver.next(value);
+          const result = await buffer.read(readerId);
+          if (result.done) break;
+          await receiver.next(result.value);
         }
       } catch (err: any) {
         await receiver.error(err);
@@ -126,7 +124,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       return latestValue;
     },
     pipe(...operators: Operator<any, any>[]): Stream<any> {
-      return pipeStream(this, ...operators);
+      return pipeStream(this, operators);
     },
     subscribe,
     async query(): Promise<T> {

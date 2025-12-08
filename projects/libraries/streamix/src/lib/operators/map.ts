@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Operator, StreamResult } from '../abstractions';
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that applies a transformation function to each value
@@ -17,20 +17,20 @@ import { CallbackReturnType, createOperator, createStreamResult, DONE, NEXT, Ope
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const map = <T = any, R = any>(
-  transform: (value: T, index: number) => CallbackReturnType<R>
+  transform: (value: T, index: number) => MaybePromise<R>
 ) =>
   createOperator<T, R>('map', function (this: Operator, source) {
     let index = 0;
     let completed = false;
 
     return {
-      async next(): Promise<StreamResult<R>> {
+      async next(): Promise<IteratorResult<R>> {
         while (true) {
           if (completed) {
             return DONE;
           }
 
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
           if (result.done) {
             completed = true;
             return DONE;

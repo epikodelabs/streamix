@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, Operator, StreamResult } from "../abstractions";
+import { createOperator, Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { createSubject, Subject } from "../streams";
 
@@ -14,20 +14,16 @@ import { createSubject, Subject } from "../streams";
  * @returns An Operator instance for use in a stream pipeline.
  */
 export function debounce<T = any>(duration: number) {
-  return createOperator<T, T>("debounce", function (this: Operator, source, context) {
+  return createOperator<T, T>("debounce", function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
-    const sc = context?.currentStreamContext();
     let timeoutId: ReturnType<typeof setTimeout> | undefined = undefined;
-    let latestResult: StreamResult<T> | undefined = undefined;
+    let latestResult: IteratorResult<T> | undefined = undefined;
     let isCompleted = false;
 
     const flush = () => {
       if (latestResult !== undefined) {
         // Emit the latest value
         output.next(latestResult.value!);
-
-        // Resolve pending in context
-        sc?.resolvePending(this, latestResult);
 
         latestResult = undefined;
       }
@@ -42,7 +38,7 @@ export function debounce<T = any>(duration: number) {
     (async () => {
       try {
         while (true) {
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
 
           if (result.done) {
             isCompleted = true;
@@ -54,13 +50,6 @@ export function debounce<T = any>(duration: number) {
             break;
           }
 
-          // If a pending value exists and the timer is active, mark it as phantom
-          if (timeoutId !== undefined && latestResult !== undefined) {
-            sc?.markPhantom(this, latestResult);
-          }
-
-          // Add the new result to pending set
-          sc?.markPending(this, result);
           latestResult = result;
 
           // Reset the timer
@@ -68,7 +57,6 @@ export function debounce<T = any>(duration: number) {
           timeoutId = setTimeout(flush, duration);
         }
       } catch (err) {
-        if (latestResult) sc?.resolvePending(this, latestResult);
         output.error(err);
       } finally {
         isCompleted = true;

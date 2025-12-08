@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, NEXT, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits pairs of values from the source stream,
@@ -28,7 +28,7 @@ export const slidingPair = <T = any>() =>
             return DONE;
           }
 
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
 
           if (result.done) {
             completed = true;
