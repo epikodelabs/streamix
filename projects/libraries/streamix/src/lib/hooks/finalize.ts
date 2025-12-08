@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, DONE, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that invokes a finalizer callback upon stream termination.
@@ -13,7 +13,7 @@ import { CallbackReturnType, createOperator, DONE, Operator } from "../abstracti
  * It can be synchronous or return a Promise.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const finalize = <T = any>(callback: () => CallbackReturnType) => {
+export const finalize = <T = any>(callback: () => MaybePromise) => {
   // Shared state across all subscriptions - moved outside createOperator
   let finalized = false;
   let completed = false;

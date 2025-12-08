@@ -1,13 +1,13 @@
 import {
-  CallbackReturnType,
-  createReceiver,
-  createSubscription,
-  Operator,
-  pipeStream,
-  Receiver,
-  scheduler,
-  Stream,
-  Subscription
+    createReceiver,
+    createSubscription,
+    MaybePromise,
+    Operator,
+    pipeStream,
+    Receiver,
+    scheduler,
+    Stream,
+    Subscription
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { createBehaviorSubjectBuffer } from "../primitives";
@@ -76,7 +76,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => CallbackReturnType) | Receiver<T>): Subscription => {
+  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
     const receiver = createReceiver(callbackOrReceiver);
     let unsubscribing = false;
     let readerId: number | null = null;

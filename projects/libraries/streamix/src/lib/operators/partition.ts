@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
 import { GroupItem } from "./groupBy";
 
 /**
@@ -19,7 +19,7 @@ import { GroupItem } from "./groupBy";
  * emitting objects of type `GroupItem<T, "true" | "false">`.
  */
 export const partition = <T = any>(
-  predicate: (value: T, index: number) => CallbackReturnType<boolean>
+  predicate: (value: T, index: number) => MaybePromise<boolean>
 ) =>
   createOperator<T, GroupItem<T, "true" | "false">>('partition', function (this: Operator, source) {
     let index = 0;

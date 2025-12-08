@@ -1,6 +1,6 @@
 import { eachValueFrom, firstValueFrom } from "../converters";
 import { Operator, OperatorChain } from "./operator";
-import { CallbackReturnType, createReceiver, Receiver } from "./receiver";
+import { createReceiver, MaybePromise, Receiver } from "./receiver";
 import { scheduler } from "./scheduler";
 import { createSubscription, Subscription } from "./subscription";
 
@@ -39,7 +39,7 @@ export type Stream<T = any> = {
    * Returns a `Subscription` that may be used to unsubscribe.
    */
   subscribe: (
-    callback?: ((value: T) => CallbackReturnType) | Receiver<T>
+    callback?: ((value: T) => MaybePromise) | Receiver<T>
   ) => Subscription;
 
   /**
@@ -77,7 +77,7 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
 function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
   const wrapped: Receiver<T> = {};
 
-  const safeSchedule = (cb: () => CallbackReturnType) =>
+  const safeSchedule = (cb: () => MaybePromise) =>
     scheduler.enqueue(cb).catch(() => {});
 
   if (receiver.next) {
@@ -212,7 +212,7 @@ export function createStream<T>(
   };
 
   const subscribe = (
-    callbackOrReceiver?: ((value: T) => CallbackReturnType) | Receiver<T>
+    callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
   ): Subscription => {
     const receiver = wrapReceiver(createReceiver(callbackOrReceiver));
     let subscription!: Subscription;
@@ -282,7 +282,7 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
     pipe: ((...nextOps: Operator<any, any>[]) =>
       pipeStream(source, [...operators, ...nextOps])) as OperatorChain<any>,
 
-    subscribe(cb?: ((value: any) => CallbackReturnType) | Receiver<any>) {
+    subscribe(cb?: ((value: any) => MaybePromise) | Receiver<any>) {
       const receiver = wrapReceiver(createReceiver(cb));
 
       const sourceIterator =

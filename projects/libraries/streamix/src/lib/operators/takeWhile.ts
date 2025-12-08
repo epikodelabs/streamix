@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits values from the source stream as long as
@@ -19,7 +19,7 @@ import { CallbackReturnType, createOperator, DONE, NEXT, Operator } from "../abs
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const takeWhile = <T = any>(
-  predicate: (value: T) => CallbackReturnType<boolean>
+  predicate: (value: T) => MaybePromise<boolean>
 ) =>
   createOperator<T, T>("takeWhile", function (this: Operator, source) {
     let active = true;

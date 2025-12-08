@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, DONE, NEXT, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that emits values from the source stream only if
@@ -15,7 +15,7 @@ import { CallbackReturnType, createOperator, DONE, NEXT, Operator } from '../abs
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const distinctUntilChanged = <T = any>(
-  comparator?: (prev: T, curr: T) => CallbackReturnType<boolean>
+  comparator?: (prev: T, curr: T) => MaybePromise<boolean>
 ) =>
   createOperator<T, T>('distinctUntilChanged', function (this: Operator, source) {
     // State variables to keep track of the last emitted value.

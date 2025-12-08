@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, DONE, NEXT, Operator, Stream } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -38,8 +38,8 @@ export type RecurseOptions = {
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const recurse = <T = any>(
-  condition: (value: T) => CallbackReturnType<boolean>,
-  project: (value: T) => (Stream<T> | CallbackReturnType<T> | Array<T>),
+  condition: (value: T) => MaybePromise<boolean>,
+  project: (value: T) => (Stream<T> | MaybePromise<T> | Array<T>),
   options: RecurseOptions = {}
 ) =>
   createOperator<T, T>('recurse', function (this: Operator, source) {

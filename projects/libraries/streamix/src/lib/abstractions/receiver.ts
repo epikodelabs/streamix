@@ -8,7 +8,7 @@
  *
  * @template T The type of the value returned by the callback.
  */
-export type CallbackReturnType<T = any> = (T | Promise<T>);
+export type MaybePromise<T = any> = (T | Promise<T>);
 
 /**
  * Defines a receiver interface for handling a stream's lifecycle events.
@@ -26,16 +26,16 @@ export type Receiver<T = any> = {
    * A function called for each new value emitted by the stream.
    * @param value The value emitted by the stream.
    */
-  next?: (value: T) => CallbackReturnType;
+  next?: (value: T) => MaybePromise;
   /**
    * A function called if the stream encounters an error.
    * @param err The error that occurred.
    */
-  error?: (err: Error) => CallbackReturnType;
+  error?: (err: Error) => MaybePromise;
   /**
    * A function called when the stream has completed successfully and will emit no more values.
    */
-  complete?: () => CallbackReturnType;
+  complete?: () => MaybePromise;
 };
 
 /**
@@ -70,7 +70,7 @@ export type StrictReceiver<T = any> = Required<Receiver<T>> & { readonly complet
  * @returns A new `StrictReceiver` instance with normalized handlers and completion tracking.
  */
 export function createReceiver<T = any>(
-  callbackOrReceiver?: ((value: T) => CallbackReturnType) | Receiver<T>
+  callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
 ): StrictReceiver<T> {
   let _completed = false;
   let _processing = false;

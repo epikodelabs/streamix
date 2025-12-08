@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, DONE, NEXT, Operator, Stream } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -19,20 +19,20 @@ export interface ForkOption<T = any, R = any> {
    * @param index The zero-based index of the value in the source stream.
    * @returns A boolean or a `Promise<boolean>` indicating whether this option matches.
    */
-  on: (value: T, index: number) => CallbackReturnType<boolean>;
+  on: (value: T, index: number) => MaybePromise<boolean>;
 
   /**
    * Handler function called for values that match the predicate.
    *
    * Can return:
    * - a {@link Stream<R>}
-   * - a {@link CallbackReturnType<R>} (value or promise)
+   * - a {@link MaybePromise<R>} (value or promise)
    * - an array of `R`
    *
    * @param value The source value that matched the predicate.
    * @returns A stream, value, promise, or array to be flattened and emitted.
    */
-  handler: (value: T) => (Stream<R> | CallbackReturnType<R> | Array<R>);
+  handler: (value: T) => (Stream<R> | MaybePromise<R> | Array<R>);
 }
 
 /**

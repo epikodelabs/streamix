@@ -1,5 +1,5 @@
 import { createOperator, Operator } from '../abstractions';
-import { CallbackReturnType } from './../abstractions/receiver';
+import { MaybePromise } from './../abstractions/receiver';
 
 /**
  * Creates a stream operator that performs a side-effect for each value from the source
@@ -16,7 +16,7 @@ import { CallbackReturnType } from './../abstractions/receiver';
  * from the stream and can be synchronous or asynchronous.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const tap = <T = any>(tapFunction: (value: T) => CallbackReturnType<any>) =>
+export const tap = <T = any>(tapFunction: (value: T) => MaybePromise<any>) =>
   createOperator<T, T>('tap', function (this: Operator, source) {
     return {
       next: async () => {

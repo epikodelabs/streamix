@@ -1,14 +1,14 @@
 import {
-  CallbackReturnType,
-  createReceiver,
-  createSubscription,
-  scheduler as globalScheduler,
-  Operator,
-  pipeStream,
-  Receiver,
-  Scheduler,
-  Stream,
-  Subscription
+    createReceiver,
+    createSubscription,
+    scheduler as globalScheduler,
+    MaybePromise,
+    Operator,
+    pipeStream,
+    Receiver,
+    Scheduler,
+    Stream,
+    Subscription
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { createSubjectBuffer } from "../primitives";
@@ -95,7 +95,7 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => CallbackReturnType) | Receiver<T>): Subscription => {
+  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
     const receiver = createReceiver(callbackOrReceiver);
     let unsubscribing = false;
     let readerId: number | null = null;
