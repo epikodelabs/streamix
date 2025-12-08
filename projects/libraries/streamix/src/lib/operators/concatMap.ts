@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, DONE, NEXT, Operator, Stream } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
@@ -17,12 +17,12 @@ import { eachValueFrom, fromAny } from "../converters";
  * @param project A function that takes a value from the source stream and its index,
  * and returns either:
  *   - a {@link Stream<R>},
- *   - a {@link CallbackReturnType<R>} (value or promise),
+ *   - a {@link MaybePromise<R>} (value or promise),
  *   - or an array of `R`.
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
 export const concatMap = <T = any, R = T>(
-  project: (value: T, index: number) => (Stream<R> | CallbackReturnType<R> | Array<R>)
+  project: (value: T, index: number) => (Stream<R> | MaybePromise<R> | Array<R>)
 ) =>
   createOperator<T, R>("concatMap", function (this : Operator, source) {
     let outerIndex = 0;

@@ -1,4 +1,4 @@
-import { CallbackReturnType, createStream, Stream } from '../abstractions';
+import { createStream, MaybePromise, Stream } from '../abstractions';
 
 /**
  * Creates a stream that emits values in a loop based on a condition and an
@@ -11,14 +11,14 @@ import { CallbackReturnType, createStream, Stream } from '../abstractions';
  *
  * @template T The type of the values in the stream.
  * @param {T} initialValue The starting value for the loop.
- * @param {(value: T) => CallbackReturnType<boolean>} condition A function that returns `true` to continue the loop and `false` to stop.
- * @param {(value: T) => CallbackReturnType<T>} iterateFn A function that returns the next value in the sequence.
+ * @param {(value: T) => MaybePromise<boolean>} condition A function that returns `true` to continue the loop and `false` to stop.
+ * @param {(value: T) => MaybePromise<T>} iterateFn A function that returns the next value in the sequence.
  * @returns {Stream<T>} A stream that emits the generated sequence of values.
  */
 export function loop<T = any>(
   initialValue: T,
-  condition: (value: T) => CallbackReturnType<boolean>,
-  iterateFn: (value: T) => CallbackReturnType<T>
+  condition: (value: T) => MaybePromise<boolean>,
+  iterateFn: (value: T) => MaybePromise<T>
 ): Stream<T> {
   let currentValue = initialValue;
 

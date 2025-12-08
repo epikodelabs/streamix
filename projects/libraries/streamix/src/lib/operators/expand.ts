@@ -1,4 +1,4 @@
-import { CallbackReturnType, Stream } from '../abstractions';
+import { MaybePromise, Stream } from '../abstractions';
 import { recurse, RecurseOptions } from './recurse';
 
 /**
@@ -20,7 +20,7 @@ import { recurse, RecurseOptions } from './recurse';
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const expand = <T = any>(
-  project: (value: T) => (Stream<T> | CallbackReturnType<T> | Array<T>),
+  project: (value: T) => (Stream<T> | MaybePromise<T> | Array<T>),
   options: RecurseOptions = {}
 ) =>
   recurse<T>(

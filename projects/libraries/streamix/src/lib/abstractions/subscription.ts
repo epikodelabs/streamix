@@ -1,4 +1,4 @@
-import { CallbackReturnType } from "../abstractions";
+import { MaybePromise } from "../abstractions";
 
 /**
  * Represents a subscription to a stream-like source.
@@ -23,7 +23,7 @@ export type Subscription = {
    * @returns A `CallbackReturnType` which can be a `Promise<void>` if the cleanup
    * is asynchronous.
    */
-  unsubscribe(): CallbackReturnType;
+  unsubscribe(): MaybePromise;
 
   /**
    * Optional callback that is executed when the subscription is unsubscribed.
@@ -35,7 +35,7 @@ export type Subscription = {
    *
    * @returns A `CallbackReturnType` which can be `void` or a `Promise<void>`.
    */
-  onUnsubscribe?: () => CallbackReturnType;
+  onUnsubscribe?: () => MaybePromise;
 };
 
 /**
@@ -51,7 +51,7 @@ export type Subscription = {
  * @returns A new `Subscription` instance.
  */
 export function createSubscription(
-  onUnsubscribe?: () => CallbackReturnType
+  onUnsubscribe?: () => MaybePromise
 ): Subscription {
   let _unsubscribed = false;
 

@@ -1,5 +1,5 @@
 import { createOperator, DONE, NEXT, Operator } from "../abstractions";
-import { CallbackReturnType } from './../abstractions/receiver';
+import { MaybePromise } from './../abstractions/receiver';
 
 /**
  * Creates a stream operator that emits only distinct values from the source stream.
@@ -19,7 +19,7 @@ import { CallbackReturnType } from './../abstractions/receiver';
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const unique = <T = any, K = any>(
-  keySelector?: (value: T) => CallbackReturnType<K>
+  keySelector?: (value: T) => MaybePromise<K>
 ) =>
   createOperator<T, T>("unique", function (this: Operator, source) {
     const seen = new Set<K | T>();

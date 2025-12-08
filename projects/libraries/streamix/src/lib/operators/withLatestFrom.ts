@@ -1,11 +1,11 @@
 import {
-  CallbackReturnType,
-  createOperator,
-  createReceiver,
-  Operator,
-  Receiver,
-  Stream,
-  Subscription
+    createOperator,
+    createReceiver,
+    MaybePromise,
+    Operator,
+    Receiver,
+    Stream,
+    Subscription
 } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../streams";
@@ -89,7 +89,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(..
 
     const originalSubscribe = output.subscribe;
     output.subscribe = (
-      callbackOrReceiver?: ((value: [T, ...R]) => CallbackReturnType) | Receiver<[T, ...R]>
+      callbackOrReceiver?: ((value: [T, ...R]) => MaybePromise) | Receiver<[T, ...R]>
     ): Subscription => {
       const receiver = createReceiver(callbackOrReceiver);
       const subscription = originalSubscribe.call(output, receiver);
