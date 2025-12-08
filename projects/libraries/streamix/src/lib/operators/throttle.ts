@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, Operator, StreamResult } from '../abstractions';
+import { createOperator, Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, Subject } from '../streams';
 
@@ -14,17 +14,15 @@ import { createSubject, Subject } from '../streams';
  * @returns An Operator instance that applies throttling to the source stream.
  */
 export const throttle = <T = any>(duration: number) =>
-  createOperator<T, T>('throttle', function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
+  createOperator<T, T>('throttle', function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
     let lastEmit = 0;
-    let pendingResult: StreamResult<T> | undefined;
+    let pendingResult: IteratorResult<T> | undefined;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const flushPending = () => {
       if (pendingResult !== undefined) {
         output.next(pendingResult.value!);
-        sc?.resolvePending(this, pendingResult);
         pendingResult = undefined;
       }
       timer = null;
@@ -34,7 +32,7 @@ export const throttle = <T = any>(duration: number) =>
     (async () => {
       try {
         while (true) {
-          const result: StreamResult<T> = createStreamResult(await source.next());
+          const result: IteratorResult<T> = await source.next();
           if (result.done) break;
 
           const now = Date.now();
@@ -43,13 +41,7 @@ export const throttle = <T = any>(duration: number) =>
             output.next(result.value);
             lastEmit = now;
           } else {
-            // Previous value is superseded → phantom if any
-            if (pendingResult !== undefined) {
-              sc?.markPhantom(this, pendingResult);
-            }
 
-            // Add current value as pending
-            sc?.markPending(this, result);
             pendingResult = result;
 
             // Schedule trailing emit
@@ -63,7 +55,6 @@ export const throttle = <T = any>(duration: number) =>
         // Source completed → flush trailing pending
         if (pendingResult !== undefined) flushPending();
       } catch (err) {
-        if (pendingResult) sc?.resolvePending(this, pendingResult);
         output.error(err);
       } finally {
         if (timer) {

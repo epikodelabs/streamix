@@ -1,4 +1,4 @@
-import { CallbackReturnType, createStream, Stream } from "../abstractions";
+import { createStream, MaybePromise, Stream } from "../abstractions";
 import { from } from "../streams";
 
 /**
@@ -9,7 +9,7 @@ import { from } from "../streams";
  *
  * Supported inputs:
  * - A {@link Stream<R>} (returned as-is).
- * - A {@link CallbackReturnType<R>} (a value or a promise resolving to a value),
+ * - A {@link MaybePromise<R>} (a value or a promise resolving to a value),
  *   wrapped into a single–emission stream.
  * - An array of `R`, converted into a stream using {@link from}.
  *
@@ -18,7 +18,7 @@ import { from } from "../streams";
  * a promise, or an array of values.
  * @returns A {@link Stream<R>} representing the given input.
  */
-export function fromAny<R = any>(value: Stream<R> | CallbackReturnType<R> | Array<R>): Stream<R> {
+export function fromAny<R = any>(value: Stream<R> | MaybePromise<R> | Array<R>): Stream<R> {
   if (value && typeof value === 'object' && 'type' in value && ['stream', 'subject'].includes(value.type)) {
     return value as Stream<R>;
   }
@@ -28,6 +28,6 @@ export function fromAny<R = any>(value: Stream<R> | CallbackReturnType<R> | Arra
   }
 
   return createStream("wrapped", async function* () {
-    yield await (value as CallbackReturnType<R>);
+    yield await (value as MaybePromise<R>);
   });
 }

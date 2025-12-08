@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, createStreamContext, createStreamResult, Operator, Stream } from '../abstractions';
+import { createOperator, MaybePromise, Operator, Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject, Subject } from '../streams';
 
@@ -20,16 +20,15 @@ import { createSubject, Subject } from '../streams';
  * @template R The type of values emitted by the inner and output streams.
  * @param project A function that maps a source value and its index to either:
  *   - a {@link Stream<R>},
- *   - a {@link CallbackReturnType<R>} (value or promise),
+ *   - a {@link MaybePromise<R>} (value or promise),
  *   - or an array of `R`.
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
 export function mergeMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | CallbackReturnType<R> | Array<R>,
+  project: (value: T, index: number) => (Stream<R> | MaybePromise<R> | Array<R>),
 ) {
-  return createOperator<T, R>('mergeMap', function (this: Operator, source, context) {
+  return createOperator<T, R>('mergeMap', function (this: Operator, source) {
     const output: Subject<R> = createSubject<R>();
-    const sc = context?.currentStreamContext();
 
     let index = 0;
     let activeInner = 0;
@@ -37,13 +36,11 @@ export function mergeMap<T = any, R = any>(
     let errorOccurred = false;
 
     // Process each inner stream concurrently.
-    const processInner = async (innerStream: Stream<R>, outerValue: T) => {
-      let innerStreamHadEmissions = false;
+    const processInner = async (innerStream: Stream<R>) => {
       try {
         for await (const val of eachValueFrom(innerStream)) {
           if (errorOccurred) break;
           output.next(val);
-          innerStreamHadEmissions = true;
         }
       } catch (err) {
         if (!errorOccurred) {
@@ -52,10 +49,6 @@ export function mergeMap<T = any, R = any>(
         }
       } finally {
         activeInner--;
-        // If the inner stream had no emissions, signal a phantom.
-        if (!innerStreamHadEmissions && !errorOccurred) {
-          await sc?.phantomHandler(this, outerValue);
-        }
         if (outerCompleted && activeInner === 0 && !errorOccurred) {
           output.complete();
         }
@@ -65,15 +58,13 @@ export function mergeMap<T = any, R = any>(
     (async () => {
       try {
         while (true) {
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
           if (result.done) break;
           if (errorOccurred) break;
 
-          const innerStream = fromAny(project(result.value, index++));
-          context && createStreamContext(context, innerStream);
-
+          const inner = fromAny(project(result.value, index++));
           activeInner++;
-          processInner(innerStream, result.value); // Pass outerValue
+          processInner(inner);
         }
 
         outerCompleted = true;

@@ -1,5 +1,4 @@
-import { createStreamResult, PipelineContext, StreamResult } from "./context";
-import { Stream, StreamIterator } from "./stream";
+import { Stream } from "./stream";
 
 /**
  * A constant representing a completed stream result.
@@ -7,45 +6,40 @@ import { Stream, StreamIterator } from "./stream";
  * Always `{ done: true, value: undefined }`.
  * Used to signal the end of a stream.
  */
-export const DONE: StreamResult<any> = createStreamResult({ done: true, value: undefined });
+export const DONE: { readonly done: true; readonly value: undefined; } = { done: true, value: undefined } as const;
 /**
  * Factory function to create a normal stream result.
  *
  * @template R The type of the emitted value.
  * @param value The value to emit downstream.
- * @returns A `StreamResult<R>` object with `{ done: false, value }`.
+ * @returns A `IteratorResult<R>` object with `{ done: false, value }`.
  */
-export const NEXT = <R = any>(value: R) => createStreamResult({ done: false, value });
+export const NEXT = <R = any>(value: R): { readonly done: false; readonly value: R; } => ({ done: false, value }) as const;
 
 /**
- * Represents a stream operator that transforms values from an input stream into an output stream.
+ * A stream operator that transforms a value from an input stream to an output stream.
  *
  * Operators are the fundamental building blocks for composing stream transformations.
- * They consume values from an input `StreamIterator<T>` and produce transformed values
- * through a new `StreamIterator<R>`. Operators can be chained together using `pipe`.
+ * They are functions that take one stream and return another, allowing for a chain of operations.
  *
- * @template T The type of values consumed by the operator (input).
- * @template R The type of values produced by the operator (output).
+ * @template T The type of the value being consumed by the operator.
+ * @template R The type of the value being produced by the operator.
  */
 export type Operator<T = any, R = T> = {
   /**
-   * An optional human-readable name for the operator, useful for debugging or logging.
+   * An optional name for the operator, useful for debugging.
    */
   name?: string;
-
   /**
-   * A type discriminator identifying this object as an operator.
+   * A type discriminator to identify this object as an operator.
    */
-  type: "operator";
-
+  type: 'operator';
   /**
-   * The core transformation function of the operator.
-   *
-   * @param source The source async stream iterator providing values of type `T`.
-   * @param context Additional metadata or utilities provided by the pipeline.
-   * @returns A new async stream iterator that yields values of type `R`.
+   * The core function that defines the operator's transformation logic. It takes an
+   * asynchronous iterator of type `T` and returns a new asynchronous iterator of type `R`.
+   * @param source The source async iterator to apply the transformation to.
    */
-  apply: (source: StreamIterator<T>, context?: PipelineContext) => StreamIterator<R>;
+  apply: (source: AsyncIterator<T>) => AsyncIterator<R>;
 };
 
 /**
@@ -62,12 +56,12 @@ export type Operator<T = any, R = T> = {
  */
 export function createOperator<T = any, R = T>(
   name: string,
-  transformFn: (source: StreamIterator<T>, context?: PipelineContext) => StreamIterator<R>
+  transformFn: (source: AsyncIterator<T>) => AsyncIterator<R>
 ): Operator<T, R> {
   return {
     name,
     type: 'operator',
-    apply: transformFn,
+    apply: transformFn
   };
 }
 
@@ -244,64 +238,3 @@ export interface OperatorChain<T> {
 
   (...operators: Operator<any, any>[]): Stream<any>;
 };
-
-/**
- * Patches a stream operator to add observability and pipeline context management.
- * * This higher-order function wraps an existing `Operator` to automatically handle
- * the `PipeContext` lifecycle, such as pushing and popping the operator's name
- * onto the `operatorStack` for each value processed. This provides a transparent
- * way to track the flow of data through a stream pipeline for debugging and
- * tracing purposes without each operator needing to manage the context manually.
- * * The patched operator's `apply` method intercepts the stream and returns a new
- * iterator that decorates the original one. The `next()` method of this new iterator
- * pushes the operator's name to the stack before the original operation and pops it
- * off after the value is processed, ensuring the stack accurately represents the
- * current position in the pipeline.
- *
- * @template TIn The type of the values in the input stream.
- * @template TOut The type of the values in the output stream.
- * @param operator The original `Operator` to be patched.
- * @returns A new `Operator` instance with patched behavior for context management.
- */
-export function patchOperator<TIn, TOut>(
-  operator: Operator<TIn, TOut>
-): Operator<TIn, TOut> {
-  const originalApply = operator.apply;
-
-  return {
-    name: operator.name,
-    type: operator.type,
-    apply: (source: StreamIterator<TIn>, context?: PipelineContext) => {
-      const originalIterator = originalApply.call(operator, source, context);
-      context?.operators.push(operator);
-
-      return {
-        async next(): Promise<StreamResult<TOut>> {
-
-          const result = await originalIterator.next.apply(originalIterator);
-
-          // context.pipeline.operatorStack.pop();
-          return createStreamResult<TOut>({
-            ...result,
-          });
-        },
-
-        return: async (): Promise<StreamResult<TOut>> => {
-          if (originalIterator.return) {
-            const res = await originalIterator.return();
-            return createStreamResult<TOut>({ ...res });
-          }
-          return createStreamResult<TOut>({ done: true, value: undefined });
-        },
-
-        throw: async (err?: any): Promise<StreamResult<TOut>> => {
-          if (originalIterator.throw) {
-            const res = await originalIterator.throw(err);
-            return createStreamResult<TOut>({ ...res });
-          }
-          return createStreamResult<TOut>({ done: true, value: undefined, error: err });
-        },
-      };
-    },
-  };
-}

@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, DONE, NEXT, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that emits values from the source stream only if
@@ -15,10 +15,9 @@ import { createOperator, createStreamResult, DONE, NEXT, Operator } from '../abs
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const distinctUntilChanged = <T = any>(
-  comparator?: (prev: T, curr: T) => boolean
+  comparator?: (prev: T, curr: T) => MaybePromise<boolean>
 ) =>
-  createOperator<T, T>('distinctUntilChanged', function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
+  createOperator<T, T>('distinctUntilChanged', function (this: Operator, source) {
     // State variables to keep track of the last emitted value.
     let lastValue: T | undefined;
     let hasLast = false;
@@ -28,24 +27,19 @@ export const distinctUntilChanged = <T = any>(
       next: async () => {
         while (true) {
           // Await the next value from the source stream.
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
 
           // If the source stream is done, we are also done.
           if (result.done) return DONE;
 
           // Check if the value is different from the last one.
-          const isDistinct = !hasLast || !(comparator ? comparator(lastValue!, result.value) : lastValue === result.value);
+          const isDistinct = !hasLast || !(comparator ? await comparator(lastValue!, result.value) : lastValue === result.value);
 
           if (isDistinct) {
-            // If the value is distinct, we update our state and return it as a normal StreamResult.
+            // If the value is distinct, we update our state and return it as a normal IteratorResult.
             lastValue = result.value;
             hasLast = true;
             return NEXT(result.value);
-          } else {
-            // If the value is a consecutive duplicate, we do not update the lastValue,
-            // and instead, we return a phantom StreamResult to signal that a value was dropped.
-            await sc?.phantomHandler(this, result.value);
-            continue;
           }
         }
       },

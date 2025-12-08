@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, DONE, NEXT, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that emits the minimum value from the source stream.
@@ -24,11 +24,9 @@ import { createOperator, createStreamResult, DONE, NEXT, Operator } from '../abs
  * @returns An `Operator` instance usable in a stream's `pipe` method.
  */
 export const min = <T = any>(
-  comparator?: (a: T, b: T) => number | Promise<number>
+  comparator?: (a: T, b: T) => MaybePromise<number>
 ) =>
-  createOperator<T, T>("min", function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
-
+  createOperator<T, T>("min", function (this: Operator, source) {
     let minValue: T | undefined;
     let hasMin = false;
     let emittedMin = false;
@@ -36,7 +34,7 @@ export const min = <T = any>(
     return {
       next: async () => {
         while (true) {
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
 
           if (result.done) {
             // Emit the final minimum once
@@ -58,11 +56,8 @@ export const min = <T = any>(
           const cmp = comparator ? await comparator(value, minValue!) : (value < minValue! ? -1 : 1);
 
           if (cmp < 0) {
-            // previous min becomes phantom
             minValue = value;
           }
-
-          await sc?.phantomHandler(this, minValue!);
         }
       },
     };

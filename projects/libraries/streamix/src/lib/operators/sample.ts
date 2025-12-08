@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, Operator, StreamResult } from '../abstractions';
+import { createOperator, Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, Subject } from '../streams';
 
@@ -14,11 +14,10 @@ import { createSubject, Subject } from '../streams';
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
 export const sample = <T = any>(period: number) =>
-  createOperator<T, T>('sample', function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
+  createOperator<T, T>('sample', function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
 
-    let lastResult: StreamResult<T> | undefined;
+    let lastResult: IteratorResult<T> | undefined;
     let skipped = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -26,12 +25,8 @@ export const sample = <T = any>(period: number) =>
       intervalId = setInterval(async () => {
         if (!lastResult) return;
 
-        if (skipped) {
-          // Mark as phantom if the last value was skipped
-          sc?.markPhantom(this, lastResult);
-        } else {
+        if (!skipped) {
           output.next(lastResult.value!);
-          sc?.resolvePending(this, lastResult);
         }
 
         skipped = true;
@@ -48,16 +43,9 @@ export const sample = <T = any>(period: number) =>
         startSampling();
 
         while (true) {
-          const result: StreamResult<T> = createStreamResult(await source.next());
+          const result: IteratorResult<T> = await source.next();
           if (result.done) break;
 
-          // Previous lastResult becomes phantom if it existed and was skipped
-          if (lastResult && skipped) {
-            sc?.markPhantom(this, lastResult);
-          }
-
-          // Track new result as pending
-          sc?.markPending(this, result);
           lastResult = result;
           skipped = false;
         }
@@ -65,10 +53,8 @@ export const sample = <T = any>(period: number) =>
         // Emit final value
         if (lastResult) {
           output.next(lastResult.value!);
-          sc?.resolvePending(this, lastResult);
         }
       } catch (err) {
-        if (lastResult) sc?.resolvePending(this, lastResult);
         output.error(err);
       } finally {
         stopSampling();

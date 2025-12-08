@@ -1,5 +1,5 @@
-import { createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
-import { CallbackReturnType } from "./../abstractions/receiver";
+import { createOperator, DONE, NEXT, Operator } from "../abstractions";
+import { MaybePromise } from "./../abstractions/receiver";
 
 /**
  * Creates a stream operator that emits only the last value from the source stream
@@ -18,11 +18,9 @@ import { CallbackReturnType } from "./../abstractions/receiver";
  * matching value is found before the source stream completes.
  */
 export const last = <T = any>(
-  predicate?: (value: T) => CallbackReturnType<boolean>
+  predicate?: (value: T) => MaybePromise<boolean>
 ) =>
-  createOperator<T, T>("last", function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
-
+  createOperator<T, T>("last", function (this: Operator, source) {
     let lastValue: T | undefined = undefined;
     let hasMatch = false;
     let finished = false;
@@ -32,7 +30,7 @@ export const last = <T = any>(
         while (true) {
           if (finished) return DONE;
 
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
 
           if (result.done) {
             finished = true;
@@ -45,19 +43,13 @@ export const last = <T = any>(
 
           if (matches) {
             if (hasMatch) {
-              // Previous last value becomes phantom
-              const phantom = lastValue!;
               lastValue = value;
-              await sc?.phantomHandler(this, phantom);
               continue;
             } else {
               lastValue = value;
               hasMatch = true;
               continue;
             }
-          } else {
-            // Non-matching values are phantoms
-            await sc?.phantomHandler(this, value);
           }
         }
       }

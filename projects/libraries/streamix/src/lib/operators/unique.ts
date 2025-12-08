@@ -1,5 +1,5 @@
-import { createOperator, createStreamResult, DONE, NEXT, Operator } from "../abstractions";
-import { CallbackReturnType } from './../abstractions/receiver';
+import { createOperator, DONE, NEXT, Operator } from "../abstractions";
+import { MaybePromise } from './../abstractions/receiver';
 
 /**
  * Creates a stream operator that emits only distinct values from the source stream.
@@ -19,16 +19,15 @@ import { CallbackReturnType } from './../abstractions/receiver';
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const unique = <T = any, K = any>(
-  keySelector?: (value: T) => CallbackReturnType<K>
+  keySelector?: (value: T) => MaybePromise<K>
 ) =>
-  createOperator<T, T>("unique", function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
+  createOperator<T, T>("unique", function (this: Operator, source) {
     const seen = new Set<K | T>();
 
     return {
       next: async () => {
         while (true) {
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
           if (result.done) return DONE;
 
           const key = keySelector ? await keySelector(result.value) : result.value;
@@ -37,9 +36,6 @@ export const unique = <T = any, K = any>(
             seen.add(key);
             return NEXT(result.value);
           }
-
-          // duplicate → still emit as phantom
-          await sc?.phantomHandler(this, result.value);
         }
       }
     };

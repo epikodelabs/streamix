@@ -1,5 +1,5 @@
-import { createOperator, createStreamResult, NEXT, Operator } from '../abstractions';
-import { CallbackReturnType } from './../abstractions/receiver';
+import { createOperator, NEXT, Operator } from '../abstractions';
+import { MaybePromise } from './../abstractions/receiver';
 
 /**
  * Creates a stream operator that filters values emitted by the source stream.
@@ -18,23 +18,22 @@ import { CallbackReturnType } from './../abstractions/receiver';
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const filter = <T = any>(
-  predicateOrValue: ((value: T, index: number) => CallbackReturnType<boolean>) | T | T[]
+  predicateOrValue: ((value: T, index: number) => MaybePromise<boolean>) | T | T[]
 ) =>
-  createOperator<T, T>('filter', function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
+  createOperator<T, T>('filter', function (this: Operator, source) {
     let index = 0;
 
     return {
       next: async () => {
         while (true) {
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
           if (result.done) return result;
 
           const value = result.value;
           let shouldInclude = false;
 
           if (typeof predicateOrValue === 'function') {
-            shouldInclude = await (predicateOrValue as (value: T, index: number) => CallbackReturnType<boolean>)(value, index);
+            shouldInclude = await (predicateOrValue as (value: T, index: number) => MaybePromise<boolean>)(value, index);
           } else if (Array.isArray(predicateOrValue)) {
             shouldInclude = predicateOrValue.includes(value);
           } else {
@@ -43,12 +42,9 @@ export const filter = <T = any>(
 
           if (shouldInclude) {
             index++; // Increment index only if included
-            // If the value passes the filter, return it as a normal StreamResult.
+            // If the value passes the filter, return it as a normal IteratorResult.
             return NEXT(value);
           }
-
-          // If the value is filtered out, return a phantom StreamResult to signal the dropped value.
-          await sc?.phantomHandler(this, value);
         }
       }
     };

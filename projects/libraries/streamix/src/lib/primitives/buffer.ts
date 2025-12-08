@@ -1,4 +1,3 @@
-import { DONE, NEXT, StreamResult } from "../abstractions";
 import { createLock } from "./lock";
 import { createSemaphore } from "./semaphore";
 
@@ -25,16 +24,16 @@ export type CyclicBuffer<T = any> = {
    * Reads the next available value for a specific reader.
    * This operation will wait if no new value is available.
    * @param {number} readerId The ID of the reader.
-   * @returns {Promise<StreamResult<T>>} A promise that resolves with the next value or signals completion.
+   * @returns {Promise<IteratorResult<T, void>>} A promise that resolves with the next value or signals completion.
    */
-  read(readerId: number): Promise<StreamResult<T>>;
+  read(readerId: number): Promise<IteratorResult<T, void>>;
   /**
    * Peeks at the next available value for a specific reader without consuming it.
    * This is a non-blocking check.
    * @param {number} readerId The ID of the reader.
-   * @returns {Promise<StreamResult<T>>} A promise that resolves with the next value, an `undefined` value if none is available, or signals completion.
+   * @returns {Promise<IteratorResult<T, void>>} A promise that resolves with the next value, an `undefined` value if none is available, or signals completion.
    */
-  peek(readerId: number): Promise<StreamResult<T>>;
+  peek(readerId: number): Promise<IteratorResult<T, void>>;
   /**
    * Completes the buffer, signaling that no more values will be written.
    * All active readers will receive a completion signal after consuming any remaining buffered values.
@@ -83,20 +82,24 @@ export type SubjectBuffer<T = any> = CyclicBuffer<T> & {
  * @returns {SubjectBuffer<T>} An object representing the single-value buffer.
  */
 export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
-  let error: Error | undefined = undefined;
   let isCompleted = false;
-  let hasValue = false;
-  let value: T | undefined = undefined;
-  let version = 0;
+  let hasError = false;
+
+  // Unified buffer storing both values and errors
+  const buffer: (T | { __error: Error })[] = [];
 
   const readers = new Map<number, {
-    lastSeenVersion: number;
+    readIndex: number;
     isActive: boolean;
   }>();
 
   let nextReaderId = 0;
   const waitingReaders: (() => void)[] = [];
   const lock = createLock();
+
+  // Helper: detect error items
+  const isErrorItem = (x: any): x is { __error: Error } => 
+    x && typeof x === 'object' && '__error' in x;
 
   const notifyReaders = () => {
     const toNotify = [...waitingReaders];
@@ -108,12 +111,9 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     const releaseLock = await lock();
     try {
       if (isCompleted) throw new Error("Cannot write to completed buffer");
-      if (error) throw new Error("Cannot write after error");
+      if (hasError) throw new Error("Cannot write after error");
 
-      value = item;
-      hasValue = true;
-      error = undefined;
-      version++;
+      buffer.push(item);
       notifyReaders();
     } finally {
       releaseLock();
@@ -125,10 +125,8 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     try {
       if (isCompleted) throw new Error("Cannot write error to completed buffer");
 
-      error = err;
-      hasValue = true;
-      value = undefined;
-      version++;
+      buffer.push({ __error: err });
+      hasError = true;
       notifyReaders();
     } finally {
       releaseLock();
@@ -140,9 +138,9 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     try {
       const readerId = nextReaderId++;
 
-      // Subject semantics: start from current version (miss any existing value)
+      // Subject semantics: start from current position (miss any existing values)
       readers.set(readerId, {
-        lastSeenVersion: version,
+        readIndex: buffer.length, // Start reading from next value
         isActive: true
       });
 
@@ -161,27 +159,31 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     }
   };
 
-  const read = async (readerId: number): Promise<StreamResult<T>> => {
+  const read = async (readerId: number): Promise<IteratorResult<T, void>> => {
     while (true) {
       const releaseLock = await lock();
-      let result: StreamResult<T> | null = null;
+      let result: IteratorResult<T, void> | null = null;
 
       try {
         const reader = readers.get(readerId);
         if (!reader || !reader.isActive) {
-          return DONE;
+          return { done: true, value: undefined } as IteratorResult<T>;
         }
 
-        if (hasValue && reader.lastSeenVersion < version) {
-          if (error) {
-            reader.lastSeenVersion = version;
-            throw error;
+        // Check if there's an item to read
+        if (reader.readIndex < buffer.length) {
+          const item = buffer[reader.readIndex];
+          reader.readIndex++;
+          
+          if (isErrorItem(item)) {
+            throw item.__error;
           }
-
-          result = NEXT(value as T);
-          reader.lastSeenVersion = version;
-        } else if (isCompleted) {
-          return DONE;
+          
+          result = { value: item as T, done: false };
+        }
+        // Check if completed (only after all items are read)
+        else if (isCompleted && reader.readIndex >= buffer.length) {
+          return { done: true, value: undefined } as IteratorResult<T>;
         }
       } finally {
         releaseLock();
@@ -197,24 +199,30 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     }
   };
 
-  const peek = async (readerId: number): Promise<StreamResult<T>> => {
+  const peek = async (readerId: number): Promise<IteratorResult<T, void>> => {
     const release = await lock();
     try {
       const reader = readers.get(readerId);
       if (!reader || !reader.isActive) {
-        return DONE;
+        return { done: true, value: undefined } as IteratorResult<T>;
       }
 
-      if (hasValue && reader.lastSeenVersion < version) {
-        if (error) throw error;
-        return NEXT(value as T);
+      // Check if there's an item to peek
+      if (reader.readIndex < buffer.length) {
+        const item = buffer[reader.readIndex];
+        
+        if (isErrorItem(item)) {
+          throw item.__error;
+        }
+        
+        return { value: item as T, done: false };
       }
 
-      if (isCompleted) {
-        return DONE;
+      if (isCompleted && reader.readIndex >= buffer.length) {
+        return { done: true, value: undefined } as IteratorResult<T>;
       }
 
-      return NEXT(undefined as T);
+      return { value: undefined as T, done: false };
     } finally {
       release();
     }
@@ -240,11 +248,13 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     detachReader,
     completed: (readerId: number) => {
       const reader = readers.get(readerId);
-      return !reader || !reader.isActive || (isCompleted && reader.lastSeenVersion >= version);
+      if (!reader || !reader.isActive) return true;
+      
+      const allItemsRead = reader.readIndex >= buffer.length;
+      return allItemsRead && (isCompleted || hasError);
     }
   };
 }
-
 /**
  * Creates a BehaviorSubject-like buffer.
  *
@@ -258,75 +268,158 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
  */
 export function createBehaviorSubjectBuffer<T = any>(initialValue?: T): SubjectBuffer<T> {
   const subject = createSubjectBuffer<T>();
-  let currentValue: T | undefined = initialValue;
+  let currentValue: T | { __error: Error } | undefined = initialValue;
   let hasCurrentValue = arguments.length > 0;
 
-  // Track original readers to manage BehaviorSubject semantics
+  // Track which readers need to receive the initial value
   const behaviorReaders = new Map<number, boolean>(); // readerId -> hasReceivedInitialValue
+  
+  // Track completion state locally
+  let isCompleted = false;
+  
+  const lock = createLock();
+
+  // Helper: detect error items
+  const isErrorItem = (x: any): x is { __error: Error } => 
+    x && typeof x === 'object' && '__error' in x;
 
   return {
     async write(value: T): Promise<void> {
-      currentValue = value;
-      hasCurrentValue = true;
-      await subject.write(value);
+      const release = await lock();
+      try {
+        if (isCompleted) throw new Error("Cannot write to completed buffer");
+        
+        currentValue = value;
+        hasCurrentValue = true;
+        await subject.write(value);
+      } finally {
+        release();
+      }
     },
 
     async error(err: Error): Promise<void> {
-      await subject.error(err);
+      const release = await lock();
+      try {
+        if (isCompleted) throw new Error("Cannot error a completed buffer");
+        
+        // Store error as current value (wrapped) and write to buffer
+        const errorItem = { __error: err };
+        currentValue = errorItem;
+        hasCurrentValue = true;
+        await subject.error(err);
+      } finally {
+        release();
+      }
     },
 
     async attachReader(): Promise<number> {
-      const readerId = await subject.attachReader();
+      const release = await lock();
+      try {
+        const readerId = await subject.attachReader();
 
-      // BehaviorSubject semantics: if we have a current value,
-      // we need to make sure this reader gets it
-      if (hasCurrentValue) {
-        behaviorReaders.set(readerId, false); // hasn't received initial value yet
-      } else {
-        behaviorReaders.set(readerId, true); // no initial value to receive
+        // BehaviorSubject semantics: track if reader needs initial value
+        if (hasCurrentValue) {
+          behaviorReaders.set(readerId, false); // hasn't received initial value yet
+        } else {
+          behaviorReaders.set(readerId, true); // no initial value to receive
+        }
+
+        return readerId;
+      } finally {
+        release();
       }
-
-      return readerId;
     },
-
+    
     async detachReader(readerId: number): Promise<void> {
-      behaviorReaders.delete(readerId);
-      await subject.detachReader(readerId);
+      const release = await lock();
+      try {
+        behaviorReaders.delete(readerId);
+        await subject.detachReader(readerId);
+      } finally {
+        release();
+      }
     },
 
-    async read(readerId: number): Promise<StreamResult<T>> {
-      // Check if this reader needs to receive the initial/current value first
-      const needsInitialValue = behaviorReaders.get(readerId) === false;
+    async read(readerId: number): Promise<IteratorResult<T, void>> {
+      const release = await lock();
+      try {
+        if (isCompleted) {
+          return { value: undefined, done: true };
+        }
+        
+        // Check if this reader needs to receive the initial/current value first
+        const needsInitial = behaviorReaders.get(readerId) === false;
 
-      if (needsInitialValue && hasCurrentValue) {
-        // Mark that this reader has now received the initial value
-        behaviorReaders.set(readerId, true);
-        return NEXT(currentValue as T);
+        if (needsInitial && hasCurrentValue) {
+          // Mark that this reader has now received the initial value
+          behaviorReaders.set(readerId, true);
+          
+          // If current value is an error, throw it
+          if (isErrorItem(currentValue)) {
+            throw currentValue.__error;
+          }
+          
+          return { value: currentValue as T, done: false };
+        }
+      } finally {
+        release();
       }
 
       // Otherwise, delegate to the underlying subject
+      // (which will handle errors in the buffer and throw them)
       return await subject.read(readerId);
     },
 
-    async peek(readerId: number): Promise<StreamResult<T>> {
-      // For BehaviorSubject, peek should return current value if available
-      if (hasCurrentValue && behaviorReaders.has(readerId)) {
-        return NEXT(currentValue as T);
+    async peek(readerId: number): Promise<IteratorResult<T, void>> {
+      const release = await lock();
+      try {
+        // Check if reader needs initial value
+        const needsInitial = behaviorReaders.get(readerId) === false;
+        
+        if (needsInitial && hasCurrentValue) {
+          // Don't mark as received for peek - it's non-consuming
+          if (isErrorItem(currentValue)) {
+            throw currentValue.__error;
+          }
+          return { value: currentValue as T, done: false };
+        }
+
+        // If reader has received initial value or no initial value exists,
+        // check if there's a current value to peek
+        if (hasCurrentValue && behaviorReaders.has(readerId)) {
+          if (isErrorItem(currentValue)) {
+            throw currentValue.__error;
+          }
+          return { value: currentValue as T, done: false };
+        }
+      } finally {
+        release();
       }
 
       return await subject.peek(readerId);
     },
 
     async complete(): Promise<void> {
-      await subject.complete();
+      const release = await lock();
+      try {
+        isCompleted = true;
+        await subject.complete();
+      } finally {
+        release();
+      }
     },
 
     completed(readerId: number): boolean {
+      if (isCompleted) {
+        return true;
+      }
       return subject.completed(readerId);
     },
 
     get value(): T | undefined {
-      return hasCurrentValue ? currentValue : undefined;
+      if (!hasCurrentValue) return undefined;
+      if (isErrorItem(currentValue)) return undefined;
+      return currentValue as T;
     }
   };
 }
@@ -476,11 +569,11 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
   }
 
   // Read next value for reader
-  async function read(id: number): Promise<StreamResult<T>> {
+  async function read(id: number): Promise<IteratorResult<T, void>> {
     while (true) {
       const release = await lock();
       const st = readers.get(id);
-      if (!st) { release(); return DONE; }
+      if (!st) { release(); return { value: undefined, done: true }; }
       const off = st.offset;
       if (off < totalWritten) {
         const item = buffer[getIndex(off)];
@@ -488,9 +581,9 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
         release();
         if (isErrorItem(item)) throw item.__error;
         releaseSlot(off);
-        return NEXT(item as T);
+        return { value: item as T, done: false };
       }
-      if (isCompleted) { release(); return DONE; }
+      if (isCompleted) { release(); return { value: undefined, done: true }; }
       release();
       await notifier.wait();
     }
@@ -509,19 +602,19 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
   }
 
   // Peek latest
-  const peek = async function(id: number): Promise<StreamResult<T>> {
+  const peek = async function(id: number): Promise<IteratorResult<T>> {
     const release = await lock();
     try {
       const st = readers.get(id);
 
       // Check if reader is detached
       if (!st) {
-        return DONE;
+        return { value: undefined as any, done: true };
       }
 
       // Check if no data available to peek
       if (totalWritten === 0 || st.offset >= totalWritten) {
-        return DONE;
+        return { value: undefined as any, done: true };
       }
 
       const readPos = st.offset;
@@ -532,7 +625,7 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
         throw item.__error;
       }
 
-      return NEXT(item as T);
+      return { value: item as T, done: false };
     } finally {
       release();
     }

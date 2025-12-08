@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, createStreamResult, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits values from the source stream as long as
@@ -19,34 +19,28 @@ import { CallbackReturnType, createOperator, createStreamResult, NEXT, Operator 
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const takeWhile = <T = any>(
-  predicate: (value: T) => CallbackReturnType<boolean>
+  predicate: (value: T) => MaybePromise<boolean>
 ) =>
-  createOperator<T, T>("takeWhile", function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
-    let active = true; // controls real values
+  createOperator<T, T>("takeWhile", function (this: Operator, source) {
+    let active = true;
 
     return {
       next: async () => {
-        while (true) {
-          const result = createStreamResult(await source.next());
-
-          if (result.done) return result;
-
-          if (!active) {
-            await sc?.phantomHandler(this, result.value);
-            continue;
-          }
-
-          const pass = await predicate(result.value);
-          if (!pass) {
-            active = false;
-            // turn this failed one into phantom too
-            await sc?.phantomHandler(this, result.value);
-            continue;
-          }
-
-          return NEXT(result.value);
+        if (!active) {
+          return DONE;
         }
+
+        const result = await source.next();
+
+        if (result.done) return result;
+
+        const pass = await predicate(result.value);
+        if (!pass) {
+          active = false;
+          return { done: true, value: undefined }; // signal completion
+        }
+
+        return NEXT(result.value);
       },
     };
   });

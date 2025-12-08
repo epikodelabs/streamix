@@ -1,4 +1,4 @@
-import { CallbackReturnType, createOperator, createStreamContext, createStreamResult, DONE, NEXT, Operator, Stream, StreamResult } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
@@ -17,35 +17,31 @@ import { eachValueFrom, fromAny } from "../converters";
  * @param project A function that takes a value from the source stream and its index,
  * and returns either:
  *   - a {@link Stream<R>},
- *   - a {@link CallbackReturnType<R>} (value or promise),
+ *   - a {@link MaybePromise<R>} (value or promise),
  *   - or an array of `R`.
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
 export const concatMap = <T = any, R = T>(
-  project: (value: T, index: number) => Stream<R> | CallbackReturnType<R> | Array<R>
+  project: (value: T, index: number) => (Stream<R> | MaybePromise<R> | Array<R>)
 ) =>
-  createOperator<T, R>("concatMap", function (this : Operator, source, context) {
-    const sc = context?.currentStreamContext();
+  createOperator<T, R>("concatMap", function (this : Operator, source) {
     let outerIndex = 0;
     let innerIterator: AsyncIterator<R> | null = null;
-    let result: StreamResult<T> | null = null;
-    let innerHadEmissions = false;
+    let result: IteratorResult<T> | null = null;
 
     return {
       next: async () => {
         while (true) {
           // If no active inner iterator, pull the next outer value
           if (!innerIterator) {
-            result = createStreamResult(await source.next());
+            result = await source.next();
 
             if (result.done) return DONE;
 
             // Initialize inner stream
-            innerHadEmissions = false;
-
-            const innerStream = fromAny(project(result.value, outerIndex++));
-            context && createStreamContext(context, innerStream);
-            innerIterator = eachValueFrom(innerStream);
+            innerIterator = eachValueFrom<R>(
+              fromAny(project(result.value, outerIndex++))
+            );
           }
 
           // Pull next value from inner stream
@@ -54,17 +50,11 @@ export const concatMap = <T = any, R = T>(
           if (innerResult.done) {
             innerIterator = null;
 
-            // If inner stream emitted nothing, produce a phantom
-            if (!innerHadEmissions && result !== null) {
-              await sc?.phantomHandler(this, result.value);
-            }
-
             // Otherwise continue to next outer value
             continue;
           }
 
           // Mark that inner stream produced a value
-          innerHadEmissions = true;
           return NEXT(innerResult.value);
         }
       },

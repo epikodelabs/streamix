@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, DONE, NEXT, Operator, StreamResult } from "../abstractions";
+import { createOperator, DONE, NEXT, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that counts the number of items emitted by the source stream.
@@ -16,11 +16,11 @@ export const count = <T = any>() =>
     let total = 0;
 
     return {
-      async next(): Promise<StreamResult<number>> {
+      async next(): Promise<IteratorResult<number>> {
         if (counted) return DONE;
 
         while (true) {
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
           if (result.done) break;
 
           total++;

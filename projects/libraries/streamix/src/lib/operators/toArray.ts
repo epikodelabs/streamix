@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, DONE, NEXT, Operator, StreamResult } from "../abstractions";
+import { createOperator, DONE, NEXT, Operator } from "../abstractions";
 
 /**
  * Collects all emitted values from the source stream into an array
@@ -8,9 +8,8 @@ import { createOperator, createStreamResult, DONE, NEXT, Operator, StreamResult 
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
 export const toArray = <T = any>() =>
-  createOperator<T, T[]>("toArray", function (this: Operator, source, context) {
-    const sc = context?.currentStreamContext();
-    const collected: StreamResult<T>[] = [];
+  createOperator<T, T[]>("toArray", function (this: Operator, source) {
+    const collected: IteratorResult<T>[] = [];
     let completed = false;
     let emitted = false;
 
@@ -22,22 +21,18 @@ export const toArray = <T = any>() =>
             return DONE;
           }
 
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
 
           if (result.done) {
             completed = true;
             if (!emitted) {
               emitted = true;
-              // Resolve all pending results
-              collected.forEach((r) => sc?.resolvePending(this, r));
               // Emit the final array of values
               return NEXT(collected.map((r) => r.value!));
             }
             continue;
           }
 
-          // Mark the value as pending
-          sc?.markPending(this, result);
           collected.push(result);
         }
       },

@@ -1,4 +1,4 @@
-import { createOperator, createStreamResult, Operator, StreamResult } from '../abstractions';
+import { createOperator, Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../streams';
 
@@ -15,17 +15,15 @@ import { createSubject } from '../streams';
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const audit = <T = any>(duration: number) =>
-  createOperator<T, T>('audit', function (this: Operator, source, context) {
+  createOperator<T, T>('audit', function (this: Operator, source) {
     const output = createSubject<T>();
-    const sc = context?.currentStreamContext();
 
-    let lastResult: StreamResult<T> | undefined = undefined;
+    let lastResult: IteratorResult<T> | undefined = undefined;
     let timerId: ReturnType<typeof setTimeout> | undefined = undefined;
 
     const flush = () => {
       if (lastResult !== undefined) {
         output.next(lastResult.value!);
-        sc?.resolvePending(this, lastResult);
         lastResult = undefined;
       }
       timerId = undefined;
@@ -38,7 +36,7 @@ export const audit = <T = any>(duration: number) =>
     (async () => {
       try {
         while (true) {
-          const result = createStreamResult(await source.next());
+          const result = await source.next();
 
           // Stream completed
           if (result.done) {
@@ -48,14 +46,8 @@ export const audit = <T = any>(duration: number) =>
             break;
           }
 
-          // If a previous value is still pending, mark it as phantom
-          if (timerId !== undefined && lastResult !== undefined) {
-            sc?.markPhantom(this, lastResult);
-          }
-
           // Add new value to pending set and buffer it
           lastResult = result;
-          sc?.markPending(this, lastResult);
 
           // Start a new timer if not active
           if (timerId === undefined) {
@@ -64,7 +56,6 @@ export const audit = <T = any>(duration: number) =>
         }
       } catch (err) {
         output.error(err);
-        if (lastResult) sc?.resolvePending(this, lastResult);
       } finally {
         if (timerId !== undefined) {
           clearTimeout(timerId);
