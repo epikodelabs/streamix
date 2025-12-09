@@ -1,4 +1,4 @@
-import { MaybePromise, Operator } from '../abstractions';
+import { MaybePromise, Operator, isPromiseLike } from '../abstractions';
 import { select } from "./select";
 
 /**
@@ -26,7 +26,8 @@ export const elementNth = <T = any>(
   const indexIterator: AsyncGenerator<number> = (async function* () {
     let iteration = 0;
     while (true) {
-      const nextIndex = await indexPattern(iteration);
+      const nextIndexResult = indexPattern(iteration);
+      const nextIndex = isPromiseLike(nextIndexResult) ? await nextIndexResult : nextIndexResult;
       if (nextIndex === undefined) break;
       yield nextIndex;
       iteration++;

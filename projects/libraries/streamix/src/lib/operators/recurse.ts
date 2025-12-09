@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream, isPromiseLike } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -49,7 +49,8 @@ export const recurse = <T = any>(
 
     const enqueueChildren = async (value: T, depth: number) => {
       if (options.maxDepth !== undefined && depth >= options.maxDepth) return;
-      if (!await condition(value)) return;
+      const shouldRecurse = condition(value);
+      if (isPromiseLike(shouldRecurse) ? !(await shouldRecurse) : !shouldRecurse) return;
 
       for await (const child of eachValueFrom(fromAny(project(value)))) {
         const item = { value: child, depth: depth + 1 };

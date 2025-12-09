@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream, isPromiseLike } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -76,7 +76,8 @@ export const fork = <T = any, R = any>(options: ForkOption<T, R>[]) =>
             outerValue = result.value;
 
             for (const option of options) {
-              if (await option.on(outerValue!, outerIndex++)) {
+              const predicateResult = option.on(outerValue!, outerIndex++);
+              if (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) {
                 matched = option;
                 break;
               }

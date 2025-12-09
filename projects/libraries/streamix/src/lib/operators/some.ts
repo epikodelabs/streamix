@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from "../abstractions";
 
 /**
  * Creates a stream operator that tests if at least one value from the source stream satisfies a predicate.
@@ -38,7 +38,8 @@ export const some = <T = any>(
 
             if (result.done) break;
 
-            if (await predicate(result.value, index++)) {
+            const predicateResult = predicate(result.value, index++);
+            if (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) {
               found = true;
               break; // Predicate matched
             }

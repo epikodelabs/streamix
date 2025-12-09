@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from "../abstractions";
 
 /**
  * Creates a stream operator that emits only the first element from the source stream
@@ -43,7 +43,9 @@ export const first = <T = any>(predicate?: (value: T) => MaybePromise<boolean>) 
           }
 
           const value = result.value;
-          if (!predicate || await predicate(value)) {
+          const predicateResult = predicate ? predicate(value) : true;
+          const matches = predicate ? (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) : predicateResult;
+          if (matches) {
             found = true;
             firstValue = value;
             return NEXT(firstValue!);

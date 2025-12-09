@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from "../abstractions";
 
 /**
  * Creates a stream operator that emits a default value if the source stream is empty.
@@ -12,7 +12,7 @@ import { createOperator, DONE, NEXT, Operator } from "../abstractions";
  * @param defaultValue The value to emit if the source stream is empty.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const defaultIfEmpty = <T = any>(defaultValue: T) =>
+export const defaultIfEmpty = <T = any>(defaultValue: MaybePromise<T>) =>
   createOperator<T, T>("defaultIfEmpty", function(this: Operator, source) {
     let emitted = false;
     let completed = false;
@@ -35,7 +35,8 @@ export const defaultIfEmpty = <T = any>(defaultValue: T) =>
           if (!emitted) {
             // Source was empty, emit default value
             completed = true;
-            return NEXT(defaultValue);
+            const value = isPromiseLike(defaultValue) ? await defaultValue : defaultValue;
+            return NEXT(value);
           }
 
           // Source had values, just complete

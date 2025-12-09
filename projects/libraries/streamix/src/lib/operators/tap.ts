@@ -1,4 +1,4 @@
-import { createOperator, MaybePromise, Operator } from '../abstractions';
+import { createOperator, MaybePromise, Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that performs a side-effect for each value from the source
@@ -24,7 +24,10 @@ export const tap = <T = any>(tapFunction: (value: T) => MaybePromise<any>) =>
 
           if (result.done) return result;
 
-          await tapFunction(result.value); // side-effect
+          const tapResult = tapFunction(result.value); // side-effect
+          if (isPromiseLike(tapResult)) {
+            await tapResult;
+          }
           return result;
         }
       }
