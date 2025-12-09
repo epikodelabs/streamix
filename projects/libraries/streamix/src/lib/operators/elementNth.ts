@@ -1,5 +1,4 @@
-import { Operator } from '../abstractions';
-import { MaybePromise } from './../abstractions/receiver';
+import { MaybePromise, Operator } from '../abstractions';
 import { select } from "./select";
 
 /**

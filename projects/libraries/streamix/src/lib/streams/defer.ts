@@ -1,4 +1,4 @@
-import { createStream, Stream } from '../abstractions';
+import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -11,15 +11,16 @@ import { eachValueFrom, fromAny } from '../converters';
  * call to the `factory` and create a fresh stream instance.
  *
  * @template T The type of the values in the inner stream.
- * @param {() => (Stream<T> | Promise<T> | Array<T>)} factory A function that returns the stream to be subscribed to.
+ * @param {() => (Stream<T> | MaybePromise<T> | Array<T>)} factory A function that returns the stream to be subscribed to.
  * @returns {Stream<T>} A new stream that defers subscription to the inner stream.
  */
-export function defer<T = any>(factory: () => (Stream<T> | Promise<T> | Array<T>)): Stream<T> {
+export function defer<T = any>(factory: () => (MaybePromise<Stream<T> | Array<T> | T>)): Stream<T> {
   async function* generator() {
     const innerStream = factory();
+    const resolved = isPromiseLike(innerStream) ? await innerStream : innerStream;
 
     try {
-      const iterator = eachValueFrom<T>(fromAny(innerStream));
+      const iterator = eachValueFrom<T>(fromAny(resolved));
       try {
         for await (const value of iterator) {
           yield value;

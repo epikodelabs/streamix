@@ -1,4 +1,4 @@
-import { createStream, Stream } from "../abstractions";
+import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractions";
 import { fromAny } from "../converters";
 
 /**
@@ -12,22 +12,26 @@ import { fromAny } from "../converters";
  * If all retry attempts fail, the final error is propagated.
  *
  * @template T The type of values emitted by the stream.
- * @param {() => (Stream<T> | Promise<T>)} factory A function that returns a new stream instance for each subscription attempt.
- * @param {number} [maxRetries=3] The maximum number of times to retry the stream. A value of 0 means no retries.
- * @param {number} [delay=1000] The time in milliseconds to wait before each retry attempt.
+ * @param {() => (Stream<T> | MaybePromise<T>)} factory A function that returns a new stream instance for each subscription attempt.
+ * @param {MaybePromise<number>} [maxRetries=3] The maximum number of times to retry the stream. A value of 0 means no retries.
+ * @param {MaybePromise<number>} [delay=1000] The time in milliseconds to wait before each retry attempt.
  * @returns {Stream<T>} A new stream that applies the retry logic.
  */
 export function retry<T = any>(
-  factory: () => (Stream<T> | Promise<T>),
-  maxRetries: number = 3,
-  delay: number = 1000
+  factory: () => (MaybePromise<Stream<T> | T>),
+  maxRetries: MaybePromise<number> = 3,
+  delay: MaybePromise<number> = 1000
 ): Stream<T> {
   return createStream<T>("retry", async function* () {
+    const resolvedMaxRetries = isPromiseLike(maxRetries) ? await maxRetries : maxRetries;
+    const resolvedDelay = isPromiseLike(delay) ? await delay : delay;
+
     let retryCount = 0;
 
-    while (retryCount <= maxRetries) {
+    while (retryCount <= resolvedMaxRetries) {
       try {
-        const sourceStream = fromAny(factory());
+        const produced = factory();
+        const sourceStream = fromAny(isPromiseLike(produced) ? await produced : produced);
         const values: T[] = [];
         let streamError: any = null;
         let completed = false;
@@ -61,11 +65,13 @@ export function retry<T = any>(
         }
       } catch (error) {
         retryCount++;
-        if (retryCount > maxRetries) {
+        if (retryCount > resolvedMaxRetries) {
           throw error;
         }
 
-        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        if (resolvedDelay !== undefined) {
+          await new Promise<void>((resolve) => setTimeout(resolve, resolvedDelay));
+        }
       }
     }
   });

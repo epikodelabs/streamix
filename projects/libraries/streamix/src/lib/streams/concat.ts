@@ -1,4 +1,4 @@
-import { createStream, Stream } from "../abstractions";
+import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
@@ -13,14 +13,14 @@ import { eachValueFrom, fromAny } from "../converters";
  * stop processing the remaining streams.
  *
  * @template T The type of the values in the streams.
- * @param {(Stream<T> | Promise<T> | Array<T>)[]} sources An array of streams to concatenate.
+ * @param {(Stream<T> | MaybePromise<T> | Array<T> | Promise<Stream<T>> | Promise<Array<T>>)[]} sources An array of streams to concatenate.
  * @returns {Stream<T>} A new stream that emits values from all input streams in sequence.
  */
-export function concat<T = any>(...sources: (Stream<T> | Promise<T> | Array<T>)[]): Stream<T> {
+export function concat<T = any>(...sources: Array<MaybePromise<Stream<T> | Array<T> | T>>): Stream<T> {
   async function* generator() {
     for (const source of sources) {
-
-      const iterator = eachValueFrom(fromAny(source));
+      const resolvedSource = isPromiseLike(source) ? await source : source;
+      const iterator = eachValueFrom(fromAny(resolvedSource));
 
       try {
         for await (const value of iterator) {

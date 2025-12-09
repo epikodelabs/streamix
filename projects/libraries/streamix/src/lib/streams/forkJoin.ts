@@ -1,14 +1,14 @@
-import { createStream, Stream } from "../abstractions";
+import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractions";
 import { eachValueFrom } from "../converters";
 
 /**
  * Waits for all streams to complete and emits an array of their last values.
  *
  * @template T The type of the last values emitted by each stream.
- * @param streams An iterable of Stream<T>
+ * @param streams An iterable of Stream<T> or promises resolving to them.
  * @returns Stream<T[]>
  */
-export function forkJoin<T = any>(streams: Iterable<Stream<T>>): Stream<T[]> {
+export function forkJoin<T = any>(streams: Iterable<MaybePromise<Stream<T>>>): Stream<T[]> {
   async function* generator() {
     const promises: Promise<void>[] = [];
 
@@ -18,7 +18,7 @@ export function forkJoin<T = any>(streams: Iterable<Stream<T>>): Stream<T[]> {
 
     // Subscribe to each stream
     for (let i = 0; i < streamsArray.length; i++) {
-      const stream = streamsArray[i];
+      const stream = isPromiseLike(streamsArray[i]) ? await streamsArray[i] : streamsArray[i] as any;
 
       const p = (async () => {
         let last: T | undefined;

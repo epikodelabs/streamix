@@ -1,4 +1,4 @@
-import { createStream, Stream } from "../abstractions";
+import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractions";
 import { Coroutine, CoroutineMessage } from "../operators/coroutine";
 
 /**
@@ -43,50 +43,52 @@ export interface SeizedWorker<T = any, R = T> {
  *
  * @template T The type of data sent to the worker.
  * @template R The type of data returned from the worker.
- * @param {Coroutine<T, R>} task The coroutine instance managing the worker pool.
- * @param {(message: CoroutineMessage) => void} onMessage A callback function to handle messages received from the seized worker.
- * @param {(error: Error) => void} onError A callback function to handle errors originating from the seized worker.
+ * @param {Coroutine<T, R> | PromiseLike<Coroutine<T, R>>} task The coroutine instance managing the worker pool.
+ * @param {(message: CoroutineMessage) => MaybePromise<void>} onMessage A callback function to handle messages received from the seized worker.
+ * @param {(error: Error) => MaybePromise<void>} onError A callback function to handle errors originating from the seized worker.
  * @returns {Stream<SeizedWorker<T, R>>} A stream that yields a single `SeizedWorker` object.
  */
 export function seize<T = any, R = T>(
-  task: Coroutine<T, R>,
-  onMessage: (message: CoroutineMessage) => void,
-  onError: (error: Error) => void
+  task: MaybePromise<Coroutine<T, R>>,
+  onMessage: (message: CoroutineMessage) => MaybePromise<void>,
+  onError: (error: Error) => MaybePromise<void>
 ): Stream<SeizedWorker> {
   return createStream("seize", async function* () {
-    const { worker, workerId } = await task.getIdleWorker();
+    const resolvedTask = isPromiseLike(task) ? await task : task;
+    const { worker, workerId } = await resolvedTask.getIdleWorker();
     let disposed = false;
     const ac = new AbortController();
     const signal = ac.signal;
+
+    const messageHandler = async (event: MessageEvent<CoroutineMessage>) => {
+      if (event.data.workerId === workerId) {
+        await onMessage(event.data);
+      }
+    };
+    const errorHandler = async (event: ErrorEvent) => {
+      await onError(event.error);
+      if (!disposed) {
+        ac.abort();
+      }
+    };
 
     const cleanup = () => {
       if (!disposed) {
         disposed = true;
         worker.removeEventListener("message", messageHandler);
         worker.removeEventListener("error", errorHandler);
-        task.returnWorker(workerId);
+        resolvedTask.returnWorker(workerId);
         ac.abort();
       }
     };
 
-    const messageHandler = (event: MessageEvent<CoroutineMessage>) => {
-      if (event.data.workerId === workerId) {
-        onMessage(event.data);
-      }
-    };
     worker.addEventListener("message", messageHandler);
 
-    const errorHandler = (event: ErrorEvent) => {
-      onError(event.error);
-      if (!disposed) {
-        ac.abort();
-      }
-    };
     worker.addEventListener("error", errorHandler);
 
     const seizedWorker: SeizedWorker<T, R> = {
       workerId,
-      sendTask: (data: T) => task.assignTask(workerId, data),
+      sendTask: (data: T) => resolvedTask.assignTask(workerId, data),
       release: cleanup,
     };
 

@@ -1,4 +1,4 @@
-import { createOperator, Operator } from "../abstractions";
+import { createOperator, MaybePromise, Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { createSubject, timer } from "../streams";
 
@@ -10,7 +10,7 @@ import { createSubject, timer } from "../streams";
  * @param period Time in milliseconds between each buffer flush.
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
-export function buffer<T = any>(period: number) {
+export function buffer<T = any>(period: MaybePromise<number>) {
   return createOperator<T, T[]>("buffer", function (this: Operator, source) {
     const output = createSubject<T[]>();
     let buffer: IteratorResult<T>[] = [];

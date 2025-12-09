@@ -1,4 +1,4 @@
-import { createStream, Stream } from '../abstractions';
+import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -11,11 +11,11 @@ import { eachValueFrom, fromAny } from '../converters';
  * Errors from any stream propagate immediately.
  *
  * @template {readonly unknown[]} T - A tuple type representing the combined values from the streams.
- * @param { { [K in keyof T]: (Stream<T[K]> | Promise<T[K]> | Array<T[K]>) } } streams - An array of streams to combine.
+ * @param { { [K in keyof T]: (Stream<T[K]> | MaybePromise<T[K]> | Array<T[K]> | Promise<Stream<T[K]>>) } } streams - An array of streams to combine.
  * @returns {Stream<T>} A new stream that emits an array of values.
  */
 export function zip<T extends readonly unknown[] = any[]>(
-  streams: { [K in keyof T]: (Stream<T[K]> | Promise<T[K]> | Array<T[K]>) }
+  streams: { [K in keyof T]: MaybePromise<Stream<T[K]> | Array<T[K]> | T[K]> }
 ): Stream<T> {
   // Note: controller is currently unused for aborting from outside
   // You may want to expose it or remove if unused
@@ -26,7 +26,11 @@ export function zip<T extends readonly unknown[] = any[]>(
     if (streams.length === 0) return;
 
     // Create async iterators for all streams
-    const iterators = streams.map(s => eachValueFrom(fromAny(s))[Symbol.asyncIterator]());
+    const resolvedStreams = [];
+    for (const s of streams) {
+      resolvedStreams.push(isPromiseLike(s) ? await s : s);
+    }
+    const iterators = resolvedStreams.map(s => eachValueFrom(fromAny(s))[Symbol.asyncIterator]());
 
     // Buffers to hold emitted values per stream, typed per stream output
     const buffers: { [K in keyof T]: T[K][] } = streams.map(() => []) as any;

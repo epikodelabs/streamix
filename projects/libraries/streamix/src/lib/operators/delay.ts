@@ -1,4 +1,4 @@
-import { createOperator, Operator } from '../abstractions';
+import { createOperator, isPromiseLike, MaybePromise, Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, Subject } from '../streams';
 
@@ -13,18 +13,23 @@ import { createSubject, Subject } from '../streams';
  * @param ms The time in milliseconds to delay each value.
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
-export function delay<T = any>(ms: number) {
+export function delay<T = any>(ms: MaybePromise<number>) {
   return createOperator<T, T>('delay', function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
+    let resolvedMs: number | undefined = undefined;
 
     (async () => {
       try {
+        resolvedMs = isPromiseLike(ms) ? await ms : ms;
+
         while (true) {
           const result: IteratorResult<T> = await source.next();
           if (result.done) break;
 
           // Delay emission
-          await new Promise((resolve) => setTimeout(resolve, ms));
+          if (resolvedMs !== undefined) {
+            await new Promise((resolve) => setTimeout(resolve, resolvedMs));
+          }
 
           // Emit downstream
           output.next(result.value);

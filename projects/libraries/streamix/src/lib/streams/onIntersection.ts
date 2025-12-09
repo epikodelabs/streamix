@@ -1,4 +1,4 @@
-import { Receiver, Stream } from '../abstractions';
+import { isPromiseLike, MaybePromise, Receiver, Stream } from '../abstractions';
 import { createSubject } from '../subjects';
 
 /**
@@ -10,13 +10,13 @@ import { createSubject } from '../subjects';
  * triggering events when an element becomes visible. The stream will
  * emit a value each time the intersection status changes.
  *
- * @param {Element} element The DOM element to observe for intersection changes.
- * @param {IntersectionObserverInit} [options] Optional configuration for the observer, such as root, root margin, and threshold.
+ * @param {Element | PromiseLike<Element>} element The DOM element to observe for intersection changes.
+ * @param {IntersectionObserverInit | PromiseLike<IntersectionObserverInit>} [options] Optional configuration for the observer, such as root, root margin, and threshold.
  * @returns {Stream<boolean>} A stream that emits `true` if the element is intersecting the viewport, and `false` otherwise.
  */
 export function onIntersection(
-  element: Element,
-  options?: IntersectionObserverInit
+  element: MaybePromise<Element>,
+  options?: MaybePromise<IntersectionObserverInit>
 ): Stream<boolean> {
   const subject = createSubject<boolean>();
   subject.name = 'onIntersection';
@@ -24,28 +24,42 @@ export function onIntersection(
   const originalSubscribe = subject.subscribe;
   subject.subscribe = (callback?: ((value: boolean) => void) | Receiver<boolean>) => {
     const subscription = originalSubscribe.call(subject, callback);
+    let resolvedElement: Element | undefined;
+    let resolvedOptions: IntersectionObserverInit | undefined;
+    let observer: IntersectionObserver | undefined;
+    let mutationObserver: MutationObserver | undefined;
+    let disposed = false;
 
-    const observer = new IntersectionObserver((entries) => {
-      subject.next(entries[0]?.isIntersecting ?? false);
-    }, options);
+    (async () => {
+      resolvedElement = isPromiseLike(element) ? await element : element;
+      resolvedOptions = isPromiseLike(options) ? await options : options;
+      if (disposed) return;
 
-    observer.observe(element);
+      observer = new IntersectionObserver((entries) => {
+        subject.next(entries[0]?.isIntersecting ?? false);
+      }, resolvedOptions);
+
+      observer.observe(resolvedElement);
+
+      mutationObserver = new MutationObserver(() => {
+        if (resolvedElement && !document.body.contains(resolvedElement)) {
+          subscription.unsubscribe();
+          subject.complete?.();
+        }
+      });
+
+      mutationObserver.observe(document.body, { childList: true, subtree: true });
+    })();
 
     const cleanup = () => {
-      observer.unobserve(element);
-      observer.disconnect();
-      mutationObserver.disconnect();
+      disposed = true;
+      if (observer && resolvedElement) {
+        observer.unobserve(resolvedElement);
+        observer.disconnect();
+      }
+      mutationObserver?.disconnect();
       subscription.unsubscribe();
     };
-
-    const mutationObserver = new MutationObserver(() => {
-      if (!document.body.contains(element)) {
-        subscription.unsubscribe();
-        subject.complete?.();
-      }
-    });
-
-    mutationObserver.observe(document.body, { childList: true, subtree: true });
 
     const originalOnUnsubscribe = subscription.onUnsubscribe;
     subscription.onUnsubscribe = () => {

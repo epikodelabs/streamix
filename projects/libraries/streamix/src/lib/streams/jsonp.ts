@@ -1,4 +1,4 @@
-import { createStream, Stream } from '../abstractions';
+import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractions';
 
 /**
  * Creates a stream that performs a JSONP request and emits the resulting data once.
@@ -10,16 +10,19 @@ import { createStream, Stream } from '../abstractions';
  * value and then completes.
  *
  * @template T The type of the JSONP data to be emitted.
- * @param {string} url The URL to make the JSONP request to.
- * @param {string} [callbackParam='callback'] The name of the query parameter for the callback function.
+ * @param {MaybePromise<string>} url The URL to make the JSONP request to.
+ * @param {MaybePromise<string>} [callbackParam='callback'] The name of the query parameter for the callback function.
  * @returns {Stream<T>} A new stream that emits the JSONP data and then completes.
  */
-export function jsonp<T = any>(url: string, callbackParam = 'callback'): Stream<T> {
+export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePromise<string> = 'callback'): Stream<T> {
   return createStream<T>('jsonp', async function* () {
-    const uniqueCallbackName = `${callbackParam}_${Math.random().toString(36).slice(2)}`;
+    const resolvedUrl = isPromiseLike(url) ? await url : url;
+    const resolvedCallbackParam = isPromiseLike(callbackParam) ? await callbackParam : callbackParam;
+
+    const uniqueCallbackName = `${resolvedCallbackParam}_${Math.random().toString(36).slice(2)}`;
     const script = document.createElement('script');
 
-    const fullUrl = `${url}${url.includes('?') ? '&' : '?'}${callbackParam}=${encodeURIComponent(uniqueCallbackName)}`;
+    const fullUrl = `${resolvedUrl}${resolvedUrl.includes('?') ? '&' : '?'}${resolvedCallbackParam}=${encodeURIComponent(uniqueCallbackName)}`;
 
     // Promise that resolves when JSONP callback fires or rejects on error
     const dataPromise = new Promise<T>((resolve, reject) => {

@@ -1,4 +1,4 @@
-import { createStream, MaybePromise, Stream } from '../abstractions';
+import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractions';
 
 /**
  * Creates a stream that emits a single value and then completes.
@@ -14,6 +14,7 @@ import { createStream, MaybePromise, Stream } from '../abstractions';
  */
 export function of<T = any>(value: MaybePromise<T>): Stream<T> {
   return createStream<T>('of', async function* () {
-    yield await value;
+    const resolved = isPromiseLike(value) ? await value : value;
+    yield resolved;
   });
 }

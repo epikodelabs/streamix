@@ -1,4 +1,4 @@
-import { createOperator, Operator } from "../abstractions";
+import { createOperator, isPromiseLike, MaybePromise, Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { createSubject, Subject } from "../streams";
 
@@ -13,12 +13,13 @@ import { createSubject, Subject } from "../streams";
  * @param duration The debounce duration in milliseconds.
  * @returns An Operator instance for use in a stream pipeline.
  */
-export function debounce<T = any>(duration: number) {
+export function debounce<T = any>(duration: MaybePromise<number>) {
   return createOperator<T, T>("debounce", function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
     let timeoutId: ReturnType<typeof setTimeout> | undefined = undefined;
     let latestResult: IteratorResult<T> | undefined = undefined;
     let isCompleted = false;
+    let resolvedDuration: number | undefined = undefined;
 
     const flush = () => {
       if (latestResult !== undefined) {
@@ -37,6 +38,8 @@ export function debounce<T = any>(duration: number) {
 
     (async () => {
       try {
+        resolvedDuration = isPromiseLike(duration) ? await duration : duration;
+
         while (true) {
           const result = await source.next();
 
@@ -54,7 +57,9 @@ export function debounce<T = any>(duration: number) {
 
           // Reset the timer
           if (timeoutId !== undefined) clearTimeout(timeoutId);
-          timeoutId = setTimeout(flush, duration);
+          if (resolvedDuration !== undefined) {
+            timeoutId = setTimeout(flush, resolvedDuration);
+          }
         }
       } catch (err) {
         output.error(err);

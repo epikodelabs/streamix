@@ -1,4 +1,4 @@
-import { createStream, Stream } from "../abstractions";
+import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
@@ -12,14 +12,19 @@ import { eachValueFrom, fromAny } from "../converters";
  * errors, the merged stream immediately errors.
  *
  * @template T The type of the values in the streams.
- * @param {(Stream<T> | Promise<T> | Array<T>)[]} sources An array of streams to be merged.
+ * @param {(Stream<T> | MaybePromise<T> | Array<T> | Promise<Stream<T>> | Promise<Array<T>>)[]} sources An array of streams to be merged.
  * @returns {Stream<T>} A new stream that emits values from all input streams.
  */
-export function merge<T = any>(...sources: (Stream<T> | Promise<T> | Array<T>)[]): Stream<T> {
+export function merge<T = any>(...sources: Array<MaybePromise<Stream<T> | Array<T> | T>>): Stream<T> {
   return createStream<T>('merge', async function* () {
     if (sources.length === 0) return;
 
-    const iterators = sources.map(s => eachValueFrom(fromAny(s))[Symbol.asyncIterator]());
+    const resolvedSources = [];
+    for (const source of sources) {
+      resolvedSources.push(isPromiseLike(source) ? await source : source);
+    }
+
+    const iterators = resolvedSources.map(s => eachValueFrom(fromAny(s))[Symbol.asyncIterator]());
     const nextPromises: Array<Promise<IteratorResult<T>> | null> = iterators.map(it => it.next());
     let activeCount = iterators.length;
 
