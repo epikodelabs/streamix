@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that emits the minimum value from the source stream.
@@ -53,7 +53,8 @@ export const min = <T = any>(
             continue;
           }
 
-          const cmp = comparator ? await comparator(value, minValue!) : (value < minValue! ? -1 : 1);
+          const cmpResult = comparator ? comparator(value, minValue!) : (value < minValue! ? -1 : 1);
+          const cmp = isPromiseLike(cmpResult) ? await cmpResult : cmpResult;
 
           if (cmp < 0) {
             minValue = value;

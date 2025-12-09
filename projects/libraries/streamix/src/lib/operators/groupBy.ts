@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from "../abstractions";
 
 /**
  * Represents a grouped item with its original value and the associated key.
@@ -47,7 +47,8 @@ export const groupBy = <T = any, K = any>(
             return DONE;
           }
 
-          const key = await keySelector(result.value);
+          const keyResult = keySelector(result.value);
+          const key = isPromiseLike(keyResult) ? await keyResult : keyResult;
           return NEXT({ key, value: result.value });
         }
       }

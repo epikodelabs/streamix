@@ -1,4 +1,4 @@
-import { createOperator, DONE, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, Operator, isPromiseLike } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../streams';
 
@@ -39,23 +39,20 @@ import { createSubject } from '../streams';
  * @param context The JavaScript task queue context to schedule emissions on.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const observeOn = <T = any>(context: "microtask" | "macrotask" | "idle") => {
-  const schedule = (fn: () => void) => {
-    if (context === 'microtask') {
-      queueMicrotask(fn);
-    } else if (context === 'macrotask') {
-      setTimeout(fn, 0);
-    } else {
-      requestIdleCallback(fn);
-    }
-  };
-
+export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotask" | "idle">) => {
   return createOperator<T, T>('observeOn', function (this: Operator, source) {
     const output = createSubject<T>();
     const scheduledPromises: Promise<void>[] = [];
 
     (async () => {
       try {
+        const contextValue = isPromiseLike(context) ? await context : context;
+        const schedule = contextValue === 'microtask'
+          ? (fn: () => void) => queueMicrotask(fn)
+          : contextValue === 'macrotask'
+            ? (fn: () => void) => setTimeout(fn, 0)
+            : (fn: () => void) => requestIdleCallback(fn);
+
         while (true) {
           const result = await source.next();
           if (result.done) break;

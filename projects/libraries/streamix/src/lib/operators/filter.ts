@@ -1,4 +1,4 @@
-import { createOperator, MaybePromise, NEXT, Operator } from '../abstractions';
+import { createOperator, MaybePromise, NEXT, Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that filters values emitted by the source stream.
@@ -32,7 +32,8 @@ export const filter = <T = any>(
           let shouldInclude = false;
 
           if (typeof predicateOrValue === 'function') {
-            shouldInclude = await (predicateOrValue as (value: T, index: number) => MaybePromise<boolean>)(value, index);
+            const predicateResult = (predicateOrValue as (value: T, index: number) => MaybePromise<boolean>)(value, index);
+            shouldInclude = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
           } else if (Array.isArray(predicateOrValue)) {
             shouldInclude = predicateOrValue.includes(value);
           } else {

@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from "../abstractions";
 
 /**
  * Creates a stream operator that emits only distinct values from the source stream.
@@ -29,7 +29,8 @@ export const unique = <T = any, K = any>(
           const result = await source.next();
           if (result.done) return DONE;
 
-          const key = keySelector ? await keySelector(result.value) : result.value;
+          const selectedKey = keySelector ? keySelector(result.value) : result.value;
+          const key = isPromiseLike(selectedKey) ? await selectedKey : selectedKey;
 
           if (!seen.has(key)) {
             seen.add(key);

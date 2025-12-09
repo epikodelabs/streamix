@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from "../abstractions";
 
 /**
  * Creates a stream operator that accumulates values from the source stream,
@@ -40,7 +40,8 @@ export const scan = <T = any, R = any>(
             return DONE;
           }
 
-          acc = await accumulator(acc, result.value, index++);
+          const accumulated = accumulator(acc, result.value, index++);
+          acc = isPromiseLike(accumulated) ? await accumulated : accumulated;
           return NEXT(acc);
         }
       },

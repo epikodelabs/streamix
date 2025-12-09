@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that catches errors from the source stream and handles them.
@@ -45,7 +45,10 @@ export const catchError = <T = any>(
           } catch (error) {
             // An error occurred from the source
             if (!errorCaughtAndHandled) { // Only handle the first error
-              await handler(error); // Call the provided handler
+              const handlerResult = handler(error);
+              if (isPromiseLike(handlerResult)) {
+                await handlerResult; // Call the provided handler
+              }
               errorCaughtAndHandled = true; // Mark as handled
               completed = true;
               // After handling, this operator completes

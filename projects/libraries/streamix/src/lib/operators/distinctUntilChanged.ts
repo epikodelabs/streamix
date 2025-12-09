@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that emits values from the source stream only if
@@ -32,8 +32,18 @@ export const distinctUntilChanged = <T = any>(
           // If the source stream is done, we are also done.
           if (result.done) return DONE;
 
+          if (!hasLast) {
+            lastValue = result.value;
+            hasLast = true;
+            return NEXT(result.value);
+          }
+
           // Check if the value is different from the last one.
-          const isDistinct = !hasLast || !(comparator ? await comparator(lastValue!, result.value) : lastValue === result.value);
+          const comparison = comparator ? comparator(lastValue!, result.value) : (lastValue === result.value);
+          const isSame = comparator
+            ? (isPromiseLike(comparison) ? await comparison : comparison)
+            : comparison;
+          const isDistinct = !isSame;
 
           if (isDistinct) {
             // If the value is distinct, we update our state and return it as a normal IteratorResult.

@@ -1,4 +1,4 @@
-import { Operator } from "../abstractions";
+import { MaybePromise, Operator, isPromiseLike } from "../abstractions";
 import { select } from "./select";
 
 /**
@@ -15,10 +15,11 @@ import { select } from "./select";
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  * @throws {Error} Throws an error if `targetIndex` is a negative number.
  */
-export const elementAt = <T = any>(targetIndex: number): Operator<T, T> =>
+export const elementAt = <T = any>(targetIndex: MaybePromise<number>): Operator<T, T> =>
   select<T>(async function* () {
-    if (targetIndex < 0) {
-      throw new Error(`Invalid index: ${targetIndex}. Index must be non-negative.`);
+    const resolvedIndex = isPromiseLike(targetIndex) ? await targetIndex : targetIndex;
+    if (resolvedIndex < 0) {
+      throw new Error(`Invalid index: ${resolvedIndex}. Index must be non-negative.`);
     }
-    yield targetIndex; // Yield only the target index
+    yield resolvedIndex; // Yield only the target index
   }());

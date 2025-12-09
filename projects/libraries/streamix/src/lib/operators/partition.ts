@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from "../abstractions";
 import { GroupItem } from "./groupBy";
 
 /**
@@ -38,7 +38,8 @@ export const partition = <T = any>(
             return DONE;
           }
 
-          const key = await predicate(result.value, index++) ? "true" : "false";
+          const predicateResult = predicate(result.value, index++);
+          const key = (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) ? "true" : "false";
           return NEXT({ key, value: result.value } as GroupItem<T, "true" | "false">);
         }
       }

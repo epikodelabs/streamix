@@ -1,4 +1,4 @@
-import { createOperator, Operator, Stream } from "../abstractions";
+import { createOperator, MaybePromise, Operator, Stream, Subscription, isPromiseLike } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../subjects";
 
@@ -18,40 +18,49 @@ import { createSubject } from "../subjects";
  * @param notifier The stream that acts as a gatekeeper.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
+export function delayUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | Array<R> | R>) {
   return createOperator<T, T>("delayUntil", function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
     let canEmit = false;
     const buffer: T[] = [];
+    let notifierSubscription: Subscription | undefined;
 
-    const notifierSubscription = fromAny(notifier).subscribe({
-      next: () => {
-        // The gate is open. Flush the buffer and start live emission.
-        if (!canEmit) { // Only run the flush on the *first* emission
-          canEmit = true;
-          for (const v of buffer) output.next(v);
-          buffer.length = 0;
-        }
-        // Unsubscribe from the notifier immediately after the first next()
-        notifierSubscription.unsubscribe();
-      },
-      error: (err) => {
-        // If notifier errors, the output stream errors
-        notifierSubscription.unsubscribe();
-        output.error(err);
+    const setupNotifier = async () => {
+      try {
+        const resolvedNotifier = isPromiseLike(notifier) ? await notifier : notifier;
+        notifierSubscription = fromAny(resolvedNotifier as Stream<R> | R | Array<R>).subscribe({
+          next: () => {
+            // The gate is open. Flush the buffer and start live emission.
+            if (!canEmit) { // Only run the flush on the *first* emission
+              canEmit = true;
+              for (const v of buffer) output.next(v);
+              buffer.length = 0;
+            }
+            // Unsubscribe from the notifier immediately after the first next()
+            notifierSubscription?.unsubscribe();
+          },
+          error: (err) => {
+            notifierSubscription?.unsubscribe();
+            output.error(err);
+            output.complete();
+          },
+          complete: () => {
+            notifierSubscription?.unsubscribe();
+            // If the notifier completes before emitting (i.e., !canEmit), 
+            // the buffered values are discarded, but the source can now emit.
+            if (!canEmit) {
+              canEmit = true;
+              buffer.length = 0;
+            }
+          },
+        });
+      } catch (err) {
+        output.error(err instanceof Error ? err : new Error(String(err)));
         output.complete();
-        // Note: output.error() is a terminal event, no need for output.complete()
-      },
-      complete: () => {
-        notifierSubscription.unsubscribe();
-        // If the notifier completes before emitting (i.e., !canEmit), 
-        // the buffered values are discarded, but the source can now emit.
-        if (!canEmit) {
-          canEmit = true;
-          buffer.length = 0;
-        }
-      },
-    });
+      }
+    };
+
+    setupNotifier();
 
     (async () => {
       try {
@@ -69,7 +78,7 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
         output.error(err);
       } finally {
         output.complete();
-        notifierSubscription.unsubscribe();
+        notifierSubscription?.unsubscribe();
       }
     })();
 

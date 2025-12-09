@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that applies a transformation function to each value
@@ -36,7 +36,8 @@ export const map = <T = any, R = any>(
             return DONE;
           }
 
-          const transformedValue = await transform(result.value, index++);
+          const transformedResult = transform(result.value, index++);
+          const transformedValue = isPromiseLike(transformedResult) ? await transformedResult : transformedResult;
           return NEXT(transformedValue);
         }
       },

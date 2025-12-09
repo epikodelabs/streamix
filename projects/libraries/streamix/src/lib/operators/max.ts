@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that emits the maximum value from the source stream.
@@ -47,7 +47,8 @@ export const max = <T = any>(
             continue;
           }
 
-          let cmp = comparator ? await comparator(value, maxValue!) : (value > maxValue! ? 1 : -1);
+          const cmpResult = comparator ? comparator(value, maxValue!) : (value > maxValue! ? 1 : -1);
+          const cmp = isPromiseLike(cmpResult) ? await cmpResult : cmpResult;
 
           if (cmp > 0) {
             // previous max becomes phantom

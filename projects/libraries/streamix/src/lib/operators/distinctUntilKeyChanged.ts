@@ -1,4 +1,4 @@
-import { createOperator, MaybePromise, NEXT, Operator } from '../abstractions';
+import { createOperator, MaybePromise, NEXT, Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that filters out consecutive values from the source
@@ -15,13 +15,21 @@ import { createOperator, MaybePromise, NEXT, Operator } from '../abstractions';
  * strict inequality (`!==`) is used.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const distinctUntilKeyChanged = <T extends object = any>(
-  key: keyof T,
-  comparator?: (prev: T[typeof key], curr: T[typeof key]) => MaybePromise<boolean>
+export const distinctUntilKeyChanged = <T extends object = any, K extends keyof T = keyof T>(
+  key: MaybePromise<K>,
+  comparator?: (prev: T[K], curr: T[K]) => MaybePromise<boolean>
 ): Operator<T, T> =>
   createOperator<T, T>('distinctUntilKeyChanged', function (this: Operator, source) {
     let lastValue: T | undefined;
     let isFirst = true;
+    let resolvedKey: K | undefined;
+
+    const getKey = async () => {
+      if (resolvedKey === undefined) {
+        resolvedKey = isPromiseLike(key) ? await key : key;
+      }
+      return resolvedKey;
+    };
 
     return {
       next: async () => {
@@ -30,12 +38,21 @@ export const distinctUntilKeyChanged = <T extends object = any>(
           if (result.done) return result;
 
           const current = result.value;
+          const currentKey = await getKey();
 
-          const isDistinct = isFirst || (
-            comparator
-              ? !(await comparator(lastValue![key], current[key]))
-              : lastValue![key] !== current[key]
-          );
+          if (isFirst) {
+            isFirst = false;
+            lastValue = current;
+            return NEXT(current);
+          }
+
+          const comparison = comparator
+            ? comparator(lastValue![currentKey], current[currentKey])
+            : lastValue![currentKey] === current[currentKey];
+          const isSame = comparator
+            ? (isPromiseLike(comparison) ? await comparison : comparison)
+            : comparison;
+          const isDistinct = !isSame;
 
           isFirst = false;
 

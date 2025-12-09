@@ -1,4 +1,4 @@
-import { DONE, NEXT, Operator, createOperator } from "../abstractions";
+import { DONE, MaybePromise, NEXT, Operator, createOperator, isPromiseLike } from "../abstractions";
 
 /**
  * Buffers a fixed number of values from the source stream and emits them as arrays,
@@ -8,9 +8,23 @@ import { DONE, NEXT, Operator, createOperator } from "../abstractions";
  * @param bufferSize The maximum number of values per buffer (default: Infinity).
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
-export const bufferCount = <T = any>(bufferSize: number = Infinity) =>
+export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity) =>
   createOperator<T, T[]>("bufferCount", function (this: Operator, source) {
     let completed = false;
+    let resolvedBufferSize: number | undefined;
+    const resolveBufferSize = (): MaybePromise<number> => {
+      if (resolvedBufferSize !== undefined) {
+        return resolvedBufferSize;
+      }
+      if (isPromiseLike(bufferSize)) {
+        return bufferSize.then((val) => {
+          resolvedBufferSize = val;
+          return val;
+        });
+      }
+      resolvedBufferSize = bufferSize;
+      return resolvedBufferSize;
+    };
 
     return {
       next: async () => {
@@ -18,7 +32,9 @@ export const bufferCount = <T = any>(bufferSize: number = Infinity) =>
 
         const buffer: IteratorResult<T>[] = [];
 
-        while (buffer.length < bufferSize) {
+        const sizeOrPromise = resolveBufferSize();
+        const size = isPromiseLike(sizeOrPromise) ? await sizeOrPromise : sizeOrPromise;
+        while (buffer.length < size) {
           const result = await source.next();
 
           if (result.done) {
