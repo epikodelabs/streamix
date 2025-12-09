@@ -1,4 +1,4 @@
-import { createOperator, Operator } from '../abstractions';
+import { createOperator, isPromiseLike, MaybePromise, Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, Subject } from '../streams';
 
@@ -13,15 +13,19 @@ import { createSubject, Subject } from '../streams';
  * @param period The time in milliseconds between each emission.
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
-export const sample = <T = any>(period: number) =>
+export const sample = <T = any>(period: MaybePromise<number>) =>
   createOperator<T, T>('sample', function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
 
     let lastResult: IteratorResult<T> | undefined;
     let skipped = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
+    let resolvedPeriod: number | undefined = undefined;
 
     const startSampling = () => {
+      if (resolvedPeriod === undefined) {
+        return;
+      }
       intervalId = setInterval(async () => {
         if (!lastResult) return;
 
@@ -30,7 +34,7 @@ export const sample = <T = any>(period: number) =>
         }
 
         skipped = true;
-      }, period);
+      }, resolvedPeriod);
     };
 
     const stopSampling = () => {
@@ -40,6 +44,8 @@ export const sample = <T = any>(period: number) =>
 
     (async () => {
       try {
+        resolvedPeriod = isPromiseLike(period) ? await period : period;
+
         startSampling();
 
         while (true) {

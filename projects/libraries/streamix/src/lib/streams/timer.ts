@@ -1,4 +1,4 @@
-import { createStream, Stream } from '../abstractions';
+import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractions';
 
 /**
  * Creates a timer stream that emits numbers starting from 0.
@@ -12,17 +12,20 @@ import { createStream, Stream } from '../abstractions';
  * If not provided, it defaults to `delayMs`.
  * @returns {Stream<number>} A stream that emits incrementing numbers (0, 1, 2, ...).
  */
-export function timer(delayMs = 0, intervalMs?: number): Stream<number> {
-  const actualInterval = intervalMs ?? delayMs;
-
+export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromise<number>): Stream<number> {
   async function* timerGenerator() {
+    const resolvedDelay = isPromiseLike(delayMs) ? await delayMs : delayMs;
+    const resolvedInterval = intervalMs !== undefined
+      ? (isPromiseLike(intervalMs) ? await intervalMs : intervalMs)
+      : resolvedDelay;
+
     let count = 0;
 
     const sleep = (ms: number) =>
       new Promise<void>(resolve => setTimeout(resolve, ms));
 
-    if (delayMs > 0) {
-      await sleep(delayMs);
+    if (resolvedDelay > 0) {
+      await sleep(resolvedDelay);
     } else {
       // yield in next microtask to avoid sync emission on subscribe
       await Promise.resolve();
@@ -31,7 +34,7 @@ export function timer(delayMs = 0, intervalMs?: number): Stream<number> {
     yield count++;
 
     while (true) {
-      await sleep(actualInterval);
+      await sleep(resolvedInterval);
       yield count++;
     }
   }

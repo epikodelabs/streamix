@@ -1,4 +1,4 @@
-import { createOperator, Operator } from '../abstractions';
+import { createOperator, isPromiseLike, MaybePromise, Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../streams';
 
@@ -14,12 +14,13 @@ import { createSubject } from '../streams';
  * @param duration The time in milliseconds to wait before emitting the latest value.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const audit = <T = any>(duration: number) =>
+export const audit = <T = any>(duration: MaybePromise<number>) =>
   createOperator<T, T>('audit', function (this: Operator, source) {
     const output = createSubject<T>();
 
     let lastResult: IteratorResult<T> | undefined = undefined;
     let timerId: ReturnType<typeof setTimeout> | undefined = undefined;
+    let resolvedDuration: number | undefined = undefined;
 
     const flush = () => {
       if (lastResult !== undefined) {
@@ -30,11 +31,16 @@ export const audit = <T = any>(duration: number) =>
     };
 
     const startTimer = () => {
-      timerId = setTimeout(() => flush(), duration);
+      if (resolvedDuration === undefined) {
+        return;
+      }
+      timerId = setTimeout(() => flush(), resolvedDuration);
     };
 
     (async () => {
       try {
+        resolvedDuration = isPromiseLike(duration) ? await duration : duration;
+
         while (true) {
           const result = await source.next();
 

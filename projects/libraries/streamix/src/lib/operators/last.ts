@@ -1,5 +1,4 @@
-import { createOperator, DONE, NEXT, Operator } from "../abstractions";
-import { MaybePromise } from "./../abstractions/receiver";
+import { createOperator, DONE, MaybePromise, NEXT, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits only the last value from the source stream

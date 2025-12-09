@@ -1,4 +1,4 @@
-import { createStream, MaybePromise, Stream } from '../abstractions';
+import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractions';
 
 /**
  * Creates a stream that emits values in a loop based on a condition and an
@@ -10,21 +10,20 @@ import { createStream, MaybePromise, Stream } from '../abstractions';
  * calculate the next value in the sequence.
  *
  * @template T The type of the values in the stream.
- * @param {T} initialValue The starting value for the loop.
+ * @param {MaybePromise<T>} initialValue The starting value for the loop.
  * @param {(value: T) => MaybePromise<boolean>} condition A function that returns `true` to continue the loop and `false` to stop.
  * @param {(value: T) => MaybePromise<T>} iterateFn A function that returns the next value in the sequence.
  * @returns {Stream<T>} A stream that emits the generated sequence of values.
  */
 export function loop<T = any>(
-  initialValue: T,
+  initialValue: MaybePromise<T>,
   condition: (value: T) => MaybePromise<boolean>,
   iterateFn: (value: T) => MaybePromise<T>
 ): Stream<T> {
-  let currentValue = initialValue;
-
   return createStream<T>(
     'loop',
     async function* (): AsyncGenerator<T, void, unknown> {
+      let currentValue = isPromiseLike(initialValue) ? await initialValue : initialValue;
       while (await condition(currentValue)) {
         yield currentValue;
         currentValue = await iterateFn(currentValue);

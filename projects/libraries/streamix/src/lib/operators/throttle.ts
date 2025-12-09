@@ -1,4 +1,4 @@
-import { createOperator, Operator } from '../abstractions';
+import { createOperator, isPromiseLike, MaybePromise, Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, Subject } from '../streams';
 
@@ -13,12 +13,13 @@ import { createSubject, Subject } from '../streams';
  * @param duration The throttle duration in milliseconds.
  * @returns An Operator instance that applies throttling to the source stream.
  */
-export const throttle = <T = any>(duration: number) =>
+export const throttle = <T = any>(duration: MaybePromise<number>) =>
   createOperator<T, T>('throttle', function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
     let lastEmit = 0;
     let pendingResult: IteratorResult<T> | undefined;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let resolvedDuration: number | undefined = undefined;
 
     const flushPending = () => {
       if (pendingResult !== undefined) {
@@ -31,12 +32,19 @@ export const throttle = <T = any>(duration: number) =>
 
     (async () => {
       try {
+        resolvedDuration = isPromiseLike(duration) ? await duration : duration;
+
         while (true) {
           const result: IteratorResult<T> = await source.next();
           if (result.done) break;
 
           const now = Date.now();
-          if (now - lastEmit >= duration) {
+          if (resolvedDuration === undefined) {
+            pendingResult = result;
+            continue;
+          }
+
+          if (now - lastEmit >= resolvedDuration) {
             // Emit immediately
             output.next(result.value);
             lastEmit = now;
@@ -46,7 +54,7 @@ export const throttle = <T = any>(duration: number) =>
 
             // Schedule trailing emit
             if (!timer) {
-              const delay = duration - (now - lastEmit);
+              const delay = resolvedDuration - (now - lastEmit);
               timer = setTimeout(flushPending, delay);
             }
           }

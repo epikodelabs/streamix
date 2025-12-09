@@ -1,6 +1,6 @@
 import { eachValueFrom, firstValueFrom } from "../converters";
-import { Operator, OperatorChain } from "./operator";
-import { createReceiver, MaybePromise, Receiver } from "./receiver";
+import { MaybePromise, Operator, OperatorChain } from "./operator";
+import { createReceiver, Receiver } from "./receiver";
 import { scheduler } from "./scheduler";
 import { createSubscription, Subscription } from "./subscription";
 

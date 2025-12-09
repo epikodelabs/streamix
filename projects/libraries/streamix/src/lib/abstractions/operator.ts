@@ -1,6 +1,27 @@
 import { Stream } from "./stream";
 
 /**
+ * Represents a value that can either be a synchronous return or a promise that
+ * resolves to the value.
+ *
+ * This type is used to support both synchronous and asynchronous callbacks
+ * within stream handlers, providing flexibility without requiring every
+ * handler to be an async function.
+ *
+ * @template T The type of the value returned by the callback.
+ */
+export type MaybePromise<T = any> = (T | Promise<T>);
+
+/**
+ * Type guard that checks whether a value behaves like a promise.
+ *
+ * We avoid relying on `instanceof Promise` so that promise-like values from
+ * different realms or custom thenables are still treated correctly.
+ */
+export const isPromiseLike = <T = any>(value: MaybePromise<T>): value is Promise<T> =>
+  !!value && typeof (value as any).then === 'function';
+
+/**
  * A constant representing a completed stream result.
  *
  * Always `{ done: true, value: undefined }`.

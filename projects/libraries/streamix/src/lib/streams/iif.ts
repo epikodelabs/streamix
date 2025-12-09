@@ -1,4 +1,4 @@
-import { createStream, Stream } from '../abstractions';
+import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -8,20 +8,22 @@ import { eachValueFrom, fromAny } from '../converters';
  * for dynamic stream selection based on runtime state.
  *
  * @template T The type of the values in the streams.
- * @param {() => boolean} condition A function that returns a boolean to determine which stream to use. It is called when the iif stream is subscribed to.
- * @param {Stream<T> | Promise<T> | Array<T>} trueStream The stream to subscribe to if the condition is `true`.
- * @param {Stream<T> | Promise<T> | Array<T>} falseStream The stream to subscribe to if the condition is `false`.
+ * @param {() => MaybePromise<boolean>} condition A function that returns a boolean to determine which stream to use. It is called when the iif stream is subscribed to.
+ * @param {Stream<T> | MaybePromise<T> | Array<T>} trueStream The stream to subscribe to if the condition is `true`.
+ * @param {Stream<T> | MaybePromise<T> | Array<T>} falseStream The stream to subscribe to if the condition is `false`.
  * @returns {Stream<T>} A new stream that emits values from either `trueStream` or `falseStream` based on the condition.
  */
 export function iif<T = any>(
-  condition: () => boolean,
-  trueStream: (Stream<T> | Promise<T> | Array<T>),
-  falseStream: (Stream<T> | Promise<T> | Array<T>)
+  condition: () => MaybePromise<boolean>,
+  trueStream: MaybePromise<Stream<T> | Array<T> | T>,
+  falseStream: MaybePromise<Stream<T> | Array<T> | T>
 ): Stream<T> {
   async function* generator(): AsyncGenerator<T, void, unknown> {
     // Evaluate condition lazily when the stream starts
-    const sourceStream = condition() ? trueStream : falseStream;
-    const asyncIterable = eachValueFrom<T>(fromAny(sourceStream));
+    const conditionResult = await condition();
+    const chosen = conditionResult ? trueStream : falseStream;
+    const resolvedChosen = isPromiseLike(chosen) ? await chosen : chosen;
+    const asyncIterable = eachValueFrom<T>(fromAny(resolvedChosen));
     const iterator = asyncIterable[Symbol.asyncIterator]();
 
     try {

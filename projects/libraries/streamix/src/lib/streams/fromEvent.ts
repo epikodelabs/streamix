@@ -1,4 +1,4 @@
-import { Receiver, Stream } from '../abstractions';
+import { isPromiseLike, MaybePromise, Receiver, Stream } from '../abstractions';
 import { createSubject } from '../subjects';
 
 /**
@@ -9,16 +9,19 @@ import { createSubject } from '../subjects';
  * will emit a new event object each time the event is dispatched.
  *
  * @template {Event} T The type of the event to listen for. Defaults to a generic `Event`.
- * @param {EventTarget} target The event target to listen to (e.g., a DOM element, `window`, or `document`).
- * @param {string} event The name of the event to listen for (e.g., 'click', 'keydown').
+ * @param {EventTarget | PromiseLike<EventTarget>} target The event target to listen to (e.g., a DOM element, `window`, or `document`).
+ * @param {string | PromiseLike<string>} event The name of the event to listen for (e.g., 'click', 'keydown').
  * @returns {Stream<T>} A stream that emits the event objects as they occur.
  */
-export function fromEvent(target: EventTarget, event: string): Stream<Event> {
+export function fromEvent(target: MaybePromise<EventTarget>, event: MaybePromise<string>): Stream<Event> {
   const subject = createSubject<Event>(); // Create a subject to emit event values.
 
   const originalSubscribe = subject.subscribe; // Capture original subscribe method.
   subject.subscribe = (callback?: ((value: Event) => void) | Receiver<Event>) => {
     const subscription = originalSubscribe.call(subject, callback);
+
+    let resolvedTarget: EventTarget;
+    let resolvedEvent: string;
 
     const listener = (ev: Event) => {
       if (!subject.completed()) {
@@ -26,12 +29,18 @@ export function fromEvent(target: EventTarget, event: string): Stream<Event> {
       }
     };
 
-    target.addEventListener(event, listener);
+    (async () => {
+      resolvedTarget = isPromiseLike(target) ? await target : target;
+      resolvedEvent = isPromiseLike(event) ? await event : event;
+      resolvedTarget.addEventListener(resolvedEvent, listener);
+    })();
 
     const originalOnUnsubscribe = subscription.onUnsubscribe;
     subscription.onUnsubscribe = () => {
       originalOnUnsubscribe?.call(subscription);
-      target.removeEventListener(event, listener); // Cleanup listener on unsubscribe
+      if (resolvedTarget && resolvedEvent) {
+        resolvedTarget.removeEventListener(resolvedEvent, listener); // Cleanup listener on unsubscribe
+      }
     };
 
     return subscription;
