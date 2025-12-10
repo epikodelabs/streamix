@@ -13,12 +13,14 @@ import { eachValueFrom, fromAny } from "../converters";
  * stop processing the remaining streams.
  *
  * @template T The type of the values in the streams.
- * @param {(Stream<T> | MaybePromise<T> | Array<T> | Promise<Stream<T>> | Promise<Array<T>>)[]} sources An array of streams to concatenate.
+ * @param {MaybePromise<Array<Stream<T> | Array<T> | T>>} sources Streams/values (or a promise of an array) to concatenate.
  * @returns {Stream<T>} A new stream that emits values from all input streams in sequence.
  */
-export function concat<T = any>(...sources: Array<MaybePromise<Stream<T> | Array<T> | T>>): Stream<T> {
+export function concat<T = any>(sources: MaybePromise<Array<Stream<T> | Array<T> | T>>): Stream<T> {
   async function* generator() {
-    for (const source of sources) {
+    const resolvedSources = isPromiseLike(sources) ? await sources : sources;
+
+    for (const source of resolvedSources) {
       const resolvedSource = isPromiseLike(source) ? await source : source;
       const iterator = eachValueFrom(fromAny(resolvedSource));
 

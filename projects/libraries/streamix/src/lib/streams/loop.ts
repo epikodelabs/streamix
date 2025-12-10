@@ -17,16 +17,23 @@ import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractio
  */
 export function loop<T = any>(
   initialValue: MaybePromise<T>,
-  condition: (value: T) => MaybePromise<boolean>,
-  iterateFn: (value: T) => MaybePromise<T>
+  condition: MaybePromise<(value: T) => boolean>,
+  iterateFn: MaybePromise<(value: T) => T>
 ): Stream<T> {
   return createStream<T>(
     'loop',
     async function* (): AsyncGenerator<T, void, unknown> {
+      const resolvedCondition = isPromiseLike(condition) ? await condition : condition;
+      const resolvedIterate = isPromiseLike(iterateFn) ? await iterateFn : iterateFn;
+
       let currentValue = isPromiseLike(initialValue) ? await initialValue : initialValue;
-      while (await condition(currentValue)) {
+      while (true) {
+        const shouldContinue = resolvedCondition(currentValue);
+        const continueValue = isPromiseLike(shouldContinue) ? await shouldContinue : shouldContinue;
+        if (!continueValue) break;
         yield currentValue;
-        currentValue = await iterateFn(currentValue);
+        const nextValue = resolvedIterate(currentValue);
+        currentValue = isPromiseLike(nextValue) ? await nextValue : nextValue;
       }
     }
   );

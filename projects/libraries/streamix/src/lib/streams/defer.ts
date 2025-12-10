@@ -14,13 +14,12 @@ import { eachValueFrom, fromAny } from '../converters';
  * @param {() => (Stream<T> | MaybePromise<T> | Array<T>)} factory A function that returns the stream to be subscribed to.
  * @returns {Stream<T>} A new stream that defers subscription to the inner stream.
  */
-export function defer<T = any>(factory: () => (MaybePromise<Stream<T> | Array<T> | T>)): Stream<T> {
+export function defer<T = any>(factory: MaybePromise<() => (Stream<T> | Array<T> | T)>): Stream<T> {
   async function* generator() {
-    const innerStream = factory();
-    const resolved = isPromiseLike(innerStream) ? await innerStream : innerStream;
+    const innerStream = (isPromiseLike(factory) ? await factory : factory)();
 
     try {
-      const iterator = eachValueFrom<T>(fromAny(resolved));
+      const iterator = eachValueFrom<T>(fromAny(innerStream));
       try {
         for await (const value of iterator) {
           yield value;

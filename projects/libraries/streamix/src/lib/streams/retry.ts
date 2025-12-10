@@ -18,19 +18,20 @@ import { fromAny } from "../converters";
  * @returns {Stream<T>} A new stream that applies the retry logic.
  */
 export function retry<T = any>(
-  factory: () => (MaybePromise<Stream<T> | T>),
+  factory: MaybePromise<() => (Stream<T> | T)>,
   maxRetries: MaybePromise<number> = 3,
   delay: MaybePromise<number> = 1000
 ): Stream<T> {
   return createStream<T>("retry", async function* () {
     const resolvedMaxRetries = isPromiseLike(maxRetries) ? await maxRetries : maxRetries;
     const resolvedDelay = isPromiseLike(delay) ? await delay : delay;
+    const resolvedFactory = isPromiseLike(factory) ? await factory : factory;
 
     let retryCount = 0;
 
     while (retryCount <= resolvedMaxRetries) {
       try {
-        const produced = factory();
+        const produced = resolvedFactory();
         const sourceStream = fromAny(isPromiseLike(produced) ? await produced : produced);
         const values: T[] = [];
         let streamError: any = null;

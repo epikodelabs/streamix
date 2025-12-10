@@ -11,28 +11,29 @@ import { eachValueFrom, fromAny } from "../converters";
  * value. The output stream completes when all source streams have completed.
  *
  * @template {unknown[]} T A tuple type representing the combined values from the streams.
- * @param {{ [K in keyof T]: MaybePromise<Stream<T[K]> | Array<T[K]> | T[K]> }} streams An array of streams to combine.
+ * @param {{ [K in keyof T]: MaybePromise<Stream<T[K]> | Array<T[K]> | T[K]> }} streams An array (or promise of one) of streams/values to combine.
  * @returns {Stream<T>} A new stream that emits a tuple of the latest values from all source streams.
  */
 export function combineLatest<T extends unknown[] = any[]>(
-  streams: { [K in keyof T]: MaybePromise<Stream<T[K]> | Array<T[K]> | T[K]> }
+  streams: MaybePromise<{ [K in keyof T]: Stream<T[K]> | Array<T[K]> | T[K] }>
 ): Stream<T> {
   async function* generator() {
-    if (streams.length === 0) return;
+    const resolvedStreamsInput = isPromiseLike(streams) ? await streams : streams;
+    if (resolvedStreamsInput.length === 0) return;
 
     const resolvedStreams = [];
-    for (const s of streams) {
+    for (const s of resolvedStreamsInput) {
       resolvedStreams.push(isPromiseLike(s) ? await s : s);
     }
 
     const latestValues: Partial<T>[] = [];
-    const hasEmitted = new Array(streams.length).fill(false);
+    const hasEmitted = new Array(resolvedStreams.length).fill(false);
     let completedStreams = 0;
 
     const asyncIterables = resolvedStreams.map((stream) => eachValueFrom(fromAny(stream)));
     const iterators = asyncIterables.map((it) => it[Symbol.asyncIterator]());
 
-    const promisesByIndex: Array<Promise<any> | null> = new Array(streams.length).fill(null);
+    const promisesByIndex: Array<Promise<any> | null> = new Array(resolvedStreams.length).fill(null);
 
     const createPromise = (index: number) => {
       const promise = iterators[index]
@@ -47,12 +48,12 @@ export function combineLatest<T extends unknown[] = any[]>(
     };
 
     // Initialize
-    for (let i = 0; i < streams.length; i++) {
+    for (let i = 0; i < resolvedStreams.length; i++) {
       createPromise(i);
     }
 
     try {
-      while (completedStreams < streams.length) {
+      while (completedStreams < resolvedStreams.length) {
         const result = await Promise.race(
           promisesByIndex.filter((p): p is Promise<any> => p !== null)
         );
