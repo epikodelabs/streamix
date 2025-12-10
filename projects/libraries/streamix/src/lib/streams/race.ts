@@ -21,10 +21,16 @@ export function race<T extends readonly unknown[] = any[]>(
   streams: MaybePromise<{ [K in keyof T]: Stream<T[K]> | Array<T[K]> | T[K] }>
 ): Stream<T[number]> {
   return createStream<T[number]>('race', async function* () {
-    const resolvedStreams = isPromiseLike(streams) ? await streams : streams;
-    if (!resolvedStreams || resolvedStreams.length === 0) return;
+    const resolvedStreamsArray = isPromiseLike(streams) ? await streams : streams;
+    // Normalize tuple-like object to array
+    const entries = Object.values(resolvedStreamsArray) as Array<MaybePromise<Stream<T[number]> | Array<T[number]> | T[number]>>;
+    if (entries.length === 0) return;
 
-    const controllers = new Array(resolvedStreams.length).fill(null).map(() => new AbortController());
+    const controllers = new Array(entries.length).fill(null).map(() => new AbortController());
+    const resolvedStreams = [];
+    for (const s of entries) {
+      resolvedStreams.push(isPromiseLike(s) ? await s : s);
+    }
     const iterators = resolvedStreams.map((s) => eachValueFrom(fromAny(s))[Symbol.asyncIterator]());
 
     try {

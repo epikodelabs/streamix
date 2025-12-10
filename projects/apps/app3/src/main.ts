@@ -72,14 +72,14 @@ const setupBreathingEffect = (element: HTMLElement): Stream<number> => {
       targetScale = direction === 1 ? 1.05 : 0.95;
     }),
     concatMap(() =>
-      merge(
+      merge([
         fromEvent(element, 'mouseenter').pipe(
           map(() => (targetScale = 1.1)) // Trigger scale increase on mouse enter
         ),
         fromEvent(element, 'mouseleave').pipe(
           map(() => (targetScale = 1.05)) // Reset scale on mouse leave
         )
-      )
+      ])
     )
   );
 };
@@ -258,12 +258,12 @@ document.addEventListener('DOMContentLoaded', function () {
     .pipe(
       tap(drawParticles),
       concatMap(() =>
-        merge(
+        merge([
           fromEvent(window, 'resize').pipe(
             debounce(200), // Debounce resize events
             map(updateCanvasSize)
           )
-        )
+        ])
       )
     )
     .subscribe();
