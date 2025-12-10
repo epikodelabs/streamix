@@ -16,8 +16,8 @@ My pipelines looked like this:
 
 ```javascript
 const userDashboard$ = userId$.pipe(
-  switchMap(id => 
-    combineLatest([ getUserProfile(id), getUserPosts(id) ])
+  switchMap(id =>
+    combineLatest(getUserProfile(id), getUserPosts(id))
   ),
   mergeMap(([profile, posts]) => 
     from(posts).pipe(

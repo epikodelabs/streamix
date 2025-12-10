@@ -7,7 +7,7 @@ describe('merge', () => {
       from(['source2_value1', 'source2_value2']),
     ];
 
-    const mergeStream = merge(sources);
+    const mergeStream = merge(...sources);
 
     const emittedValues: any[] = [];
     const subscription = mergeStream.subscribe({
@@ -32,7 +32,7 @@ describe('merge', () => {
       from(['source2_value1', 'source2_value2']),
     ];
 
-    const mergeStream = merge(sources);
+    const mergeStream = merge(...sources);
 
     let subscriptionCalls = 0;
 

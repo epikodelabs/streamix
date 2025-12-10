@@ -5,15 +5,30 @@ import { eachValueFrom } from "../converters";
  * Waits for all streams to complete and emits an array of their last values.
  *
  * @template T The type of the last values emitted by each stream.
- * @param streams An iterable (or promise of one) of Stream<T> / MaybePromise<Stream<T>> entries.
+ * @param streams Streams to join; arrays/iterables are also accepted for backward compatibility.
  * @returns Stream<T[]>
  */
-export function forkJoin<T = any>(streams: MaybePromise<Iterable<Stream<T>>>): Stream<T[]> {
+export function forkJoin<T = any>(
+  ...streams: Array<MaybePromise<Stream<T> | Iterable<Stream<T>>>>
+): Stream<T[]> {
   async function* generator() {
     const promises: Promise<void>[] = [];
 
-    const resolvedStreamsIterable = isPromiseLike(streams) ? await streams : streams;
-    const streamsArray = Array.from(resolvedStreamsIterable);
+    const resolvedInputs = await Promise.all(
+      streams.map(async (stream) => (isPromiseLike(stream) ? await stream : stream))
+    );
+
+    let streamsArray: Array<Stream<T>> = [];
+    if (resolvedInputs.length === 1) {
+      const [first] = resolvedInputs;
+      if (first && typeof first === "object" && Symbol.iterator in first) {
+        streamsArray = Array.from(first as Iterable<Stream<T>>);
+      } else {
+        streamsArray = [first as Stream<T>];
+      }
+    } else {
+      streamsArray = resolvedInputs as Array<Stream<T>>;
+    }
     const results = new Array(streamsArray.length);
     const finished = new Array(streamsArray.length).fill(false);
 

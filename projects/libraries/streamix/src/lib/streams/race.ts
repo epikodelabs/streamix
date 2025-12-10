@@ -18,7 +18,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * @returns {Stream<T[number]>} A new stream that emits values from the first stream to produce a value.
  */
 export function race<T extends readonly unknown[] = any[]>(
-  streams: MaybePromise<{ [K in keyof T]: Stream<T[K]> | Array<T[K]> | T[K] }>
+  streams: { [K in keyof T]: MaybePromise<Stream<T[K]> | Array<T[K]> | T[K]> }
 ): Stream<T[number]> {
   return createStream<T[number]>('race', async function* () {
     const resolvedStreamsArray = isPromiseLike(streams) ? await streams : streams;

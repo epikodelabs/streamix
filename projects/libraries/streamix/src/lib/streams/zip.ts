@@ -2,72 +2,119 @@ import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractio
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
- * Combines multiple streams by emitting an array of values,
- * only when all streams have emitted at least one value.
+ * Combines multiple streams by emitting an array of values (a tuple),
+ * only when all streams have a value ready (one-by-one, synchronized).
  *
- * After emitting, it waits for the next value from all streams.
- *
+ * It waits for the next value from all streams to form the next tuple.
  * The stream completes when any of the input streams complete.
  * Errors from any stream propagate immediately.
  *
- * @template {readonly unknown[]} T - A tuple type representing the combined values from the streams.
- * @param { { [K in keyof T]: (Stream<T[K]> | MaybePromise<T[K]> | Array<T[K]> | Promise<Stream<T[K]>>) } } streams - An array of streams to combine.
- * @returns {Stream<T>} A new stream that emits an array of values.
+ * @template T - A tuple type representing the combined values from the streams.
+ * @param streams Streams to combine.
+ * @returns {Stream<T>} A new stream that emits a synchronized tuple of values.
  */
 export function zip<T extends readonly unknown[] = any[]>(
-  streams: MaybePromise<{ [K in keyof T]: Stream<T[K]> | Array<T[K]> | T[K] }>[]
+  ...streams: Array<MaybePromise<Stream<T[number]> | Array<T[number]> | T[number]>>
 ): Stream<T> {
-  // Note: controller is currently unused for aborting from outside
-  // You may want to expose it or remove if unused
-  const controller = new AbortController();
-  const signal = controller.signal;
-
+  
   return createStream<T>('zip', async function* (): AsyncGenerator<T, void, unknown> {
-    if (streams.length === 0) return;
+    
+    // --- 1. Initialization and Setup ---
+    const iterators: AsyncIterator<any>[] = [];
+    const nextPromises: (Promise<IteratorResult<any>> | null)[] = [];
+    let activeCount: number;
 
-    // Create async iterators for all streams
-    const resolvedStreams = [];
-    for (const s of streams) {
-      resolvedStreams.push(isPromiseLike(s) ? await s : s);
-    }
-    const iterators = resolvedStreams.map(s => eachValueFrom(fromAny(s))[Symbol.asyncIterator]());
-
-    // Buffers to hold emitted values per stream, typed per stream output
-    const buffers: { [K in keyof T]: T[K][] } = streams.map(() => []) as any;
-
-    // Track active streams count
-    let activeCount = streams.length;
+    // Corrected initialization: Use Array<any[]> which is compatible with push,
+    // and cast the result at the end when necessary.
+    const buffers: Array<any[]> = [];
 
     try {
-      while (activeCount > 0 && !signal.aborted) {
-        // Request next value for buffers that are empty
-        await Promise.all(iterators.map(async (it, i) => {
-          if (buffers[i].length === 0) {
-            const { done, value } = await it.next();
-            if (done) {
-              activeCount--;
-            } else {
-              buffers[i].push(value);
-            }
-          }
-        }));
+      // Resolve top-level promises and structure
+      const resolvedInputs = await Promise.all(
+        streams.map(async (s) => (isPromiseLike(s) ? await s : s))
+      );
 
-        // Check if all buffers have at least one value
-        const canEmit = buffers.every(buffer => buffer.length > 0);
-        if (canEmit) {
-          // Yield one zipped tuple of values
-          yield buffers.map(buffer => buffer.shift()!) as unknown as T;
+      const normalizedStreams = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
+        ? resolvedInputs[0]
+        : resolvedInputs) as Array<Stream<T[number]> | Array<T[number]> | T[number]>;
+
+      if (normalizedStreams.length === 0) return;
+
+      activeCount = normalizedStreams.length;
+      
+      // Create iterators, initial nextPromises, and buffers
+      for (const s of normalizedStreams) {
+        // Handle inner promises/values/arrays for the stream source itself
+        const streamSource = isPromiseLike(s) ? await s : s;
+        
+        const iterator = eachValueFrom(fromAny(streamSource))[Symbol.asyncIterator]();
+        iterators.push(iterator);
+        nextPromises.push(iterator.next());
+        buffers.push([]); // <-- Now correctly uses Array.push
+      }
+
+      // Helper to wrap promises for index tracking and error handling
+      const reflect = (promise: Promise<IteratorResult<any>>, index: number) =>
+        promise.then(
+          result => ({ ...result, index, status: 'fulfilled' as const }),
+          error => ({ error, index, status: 'rejected' as const })
+        );
+
+      // --- 2. Main Zipping Loop ---
+      while (activeCount > 0) {
+        
+        // Race all currently pending next() promises
+        const race = Promise.race(
+          nextPromises
+            .map((p, i) => (p ? reflect(p, i) : null))
+            .filter(Boolean) as Promise<
+              | { index: number; value: any; done: boolean; status: 'fulfilled' }
+              | { index: number; error: any; status: 'rejected' }
+            >[]
+        );
+
+        const winner = await race;
+
+        // --- A. Handle Error ---
+        if (winner.status === 'rejected') {
+          throw winner.error; // Propagate error immediately
         }
 
-        // If any stream completed and we can't emit full tuple, end
-        if (activeCount < streams.length && !canEmit) {
+        const { value, done, index: winnerIndex } = winner;
+        
+        // --- B. Handle Completion (The "Zip Rule") ---
+        if (done) {
+          activeCount = 0; // Completion of ANY stream means the zip stream completes
           break;
         }
+
+        // --- C. Handle Value Reception ---
+        // 1. Buffer the received value
+        buffers[winnerIndex].push(value);
+
+        // 2. Immediately queue the next next() call for the winning stream
+        nextPromises[winnerIndex] = iterators[winnerIndex].next();
+        
+        // 3. Check for Emission Opportunity (all buffers have a value)
+        if (buffers.every(buffer => buffer.length > 0)) {
+          // Yield one zipped tuple of values
+          // Note: The map operation shifts out values and must be cast back to the tuple type T
+          const tuple = buffers.map(buffer => buffer.shift()!) as unknown as T;
+          yield tuple;
+        }
       }
+    } catch (error) {
+      throw error; // Re-throw the error for the stream consumer
     } finally {
-      // Cleanup iterators
+      // --- 3. Cleanup All Iterators ---
+      // Ensure all active iterators are closed
       await Promise.all(
-        iterators.map(it => it.return?.(undefined).catch(() => {}))
+        iterators.map(it => {
+          if (it.return) {
+            return it.return(undefined).catch(() => {});
+          }
+          return Promise.resolve();
+        })
       );
     }
   });
