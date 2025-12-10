@@ -41,7 +41,7 @@ describe('loop', () => {
     const stream = loop(1, x => x <= 3, x => x * 2); // 1, 2, 4 (stops)
     const values: number[] = [];
 
-    for await (const v of eachValueFrom(stream)) {
+    for await (const v of stream) {
       values.push(v);
     }
 

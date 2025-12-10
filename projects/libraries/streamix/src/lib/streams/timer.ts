@@ -20,22 +20,46 @@ export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromi
       : resolvedDelay;
 
     let count = 0;
-
+    let cancelled = false;
+    let timeoutId: any = null;
     const sleep = (ms: number) =>
-      new Promise<void>(resolve => setTimeout(resolve, ms));
+      new Promise<void>((resolve) => {
+        timeoutId = setTimeout(() => {
+          timeoutId = null;
+          if (!cancelled) resolve();
+        }, ms);
+      });
 
-    if (resolvedDelay > 0) {
-      await sleep(resolvedDelay);
-    } else {
-      // yield in next microtask to avoid sync emission on subscribe
-      await Promise.resolve();
-    }
+    const clearPending = () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
 
-    yield count++;
+    try {
+      const start = performance.now();
+      let nextTime = start + (resolvedDelay > 0 ? resolvedDelay : 0);
 
-    while (true) {
-      await sleep(resolvedInterval);
+      if (resolvedDelay > 0) {
+        await sleep(Math.max(0, nextTime - performance.now()));
+      } else {
+        await Promise.resolve();
+        nextTime = performance.now();
+      }
+
       yield count++;
+      nextTime += resolvedInterval;
+
+      while (true) {
+        const waitMs = Math.max(0, nextTime - performance.now());
+        await sleep(waitMs);
+        yield count++;
+        nextTime += resolvedInterval;
+      }
+    } finally {
+      cancelled = true;
+      clearPending();
     }
   }
 

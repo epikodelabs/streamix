@@ -1,13 +1,14 @@
 import {
-    createReceiver,
-    createSubscription,
-    MaybePromise,
-    Operator,
-    pipeStream,
-    Receiver,
-    scheduler,
-    Stream,
-    Subscription,
+  createAsyncGenerator,
+  createReceiver,
+  createSubscription,
+  MaybePromise,
+  Operator,
+  pipeStream,
+  Receiver,
+  scheduler,
+  Stream,
+  Subscription,
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { createReplayBuffer, ReplayBuffer } from "../primitives";
@@ -70,8 +71,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
-    const receiver = createReceiver(callbackOrReceiver);
+  const registerReceiver = (receiver: Receiver<T>): Subscription => {
     let unsubscribing = false;
     let readerId: number | null = null;
     let readerLatestValue: T | undefined;
@@ -94,15 +94,15 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
           const result = await buffer.read(readerId);
           if (result.done) break;
           readerLatestValue = result.value;
-          await receiver.next(readerLatestValue!);
+          await receiver.next?.(readerLatestValue!);
         }
       } catch (err: any) {
-        await receiver.error(err);
+        await receiver.error?.(err);
       } finally {
         if (!unsubscribing && readerId !== null) {
           await buffer.detachReader(readerId);
         }
-        await receiver.complete();
+        await receiver.complete?.();
       }
     });
 
@@ -111,6 +111,11 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     });
 
     return subscription;
+  };
+
+  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
+    const receiver = createReceiver(callbackOrReceiver);
+    return registerReceiver(receiver);
   };
 
   const replaySubject: ReplaySubject<T> = {
@@ -130,6 +135,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     complete,
     completed: () => isCompleted,
     error,
+    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
   };
 
   return replaySubject;

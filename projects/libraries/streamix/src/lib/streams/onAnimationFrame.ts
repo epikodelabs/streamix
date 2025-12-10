@@ -1,4 +1,4 @@
-import { Receiver, Stream } from '../abstractions';
+import { createAsyncGenerator, Receiver, Stream } from '../abstractions';
 import { createSubject } from '../subjects';
 
 /**
@@ -20,34 +20,69 @@ import { createSubject } from '../subjects';
 export function onAnimationFrame(): Stream<number> {
   const subject = createSubject<number>();
 
+  const raf =
+    typeof requestAnimationFrame === "function"
+      ? requestAnimationFrame
+      : ((cb: FrameRequestCallback) =>
+          setTimeout(() => cb(performance.now()), 16)) as unknown as typeof requestAnimationFrame;
+
+  const caf =
+    typeof cancelAnimationFrame === "function"
+      ? cancelAnimationFrame
+      : ((id: any) => clearTimeout(id)) as unknown as typeof cancelAnimationFrame;
+
+  let rafId: number | null = null;
+  let subscriberCount = 0;
+  let stopped = true;
+  let lastTime = performance.now();
+
+  const startLoop = () => {
+    if (!stopped) return;
+    stopped = false;
+    lastTime = performance.now();
+    const tick = (now: number) => {
+      if (stopped) return;
+      const delta = now - lastTime;
+      lastTime = now;
+      subject.next(delta);
+      rafId = raf(tick);
+    };
+    rafId = raf(tick);
+  };
+
+  const stopLoop = () => {
+    if (stopped) return;
+    stopped = true;
+    if (rafId !== null) {
+      caf(rafId);
+      rafId = null;
+    }
+  };
+
   const originalSubscribe = subject.subscribe;
   subject.subscribe = (callback?: ((value: number) => void) | Receiver<number>) => {
     const subscription = originalSubscribe.call(subject, callback);
 
-    let lastTime = performance.now();
-    let rafId: number | null = null;
-
-    const tick = (now: number) => {
-      const delta = now - lastTime;
-      lastTime = now;
-      subject.next(delta);
-      rafId = requestAnimationFrame(tick);
-    };
-
-    rafId = requestAnimationFrame(tick);
+    subscriberCount++;
+    if (subscriberCount === 1) {
+      startLoop();
+    }
 
     const originalOnUnsubscribe = subscription.onUnsubscribe;
     subscription.onUnsubscribe = () => {
-      originalOnUnsubscribe?.call(subscription);
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
+      subscriberCount = Math.max(0, subscriberCount - 1);
+      if (subscriberCount === 0) {
+        stopLoop();
       }
-      subscription.unsubscribe();
+      originalOnUnsubscribe?.call(subscription);
     };
 
     return subscription;
   };
+
+  // Ensure async iteration also starts/stops the shared loop
+  subject[Symbol.asyncIterator] = () =>
+    createAsyncGenerator((receiver) => subject.subscribe(receiver));
 
   subject.name = 'onAnimationFrame';
   return subject;

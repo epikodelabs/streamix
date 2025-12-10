@@ -1,14 +1,15 @@
 import {
-    createReceiver,
-    createSubscription,
-    scheduler as globalScheduler,
-    MaybePromise,
-    Operator,
-    pipeStream,
-    Receiver,
-    Scheduler,
-    Stream,
-    Subscription
+  createAsyncGenerator,
+  createReceiver,
+  createSubscription,
+  scheduler as globalScheduler,
+  MaybePromise,
+  Operator,
+  pipeStream,
+  Receiver,
+  Scheduler,
+  Stream,
+  Subscription
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { createSubjectBuffer } from "../primitives";
@@ -95,8 +96,7 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
-    const receiver = createReceiver(callbackOrReceiver);
+  const registerReceiver = (receiver: Receiver<T>): Subscription => {
     let unsubscribing = false;
     let readerId: number | null = null;
 
@@ -115,15 +115,15 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
         while (true) {
           const result = await buffer.read(readerId);
           if (result.done) break;
-          await receiver.next(result.value);
+          await receiver.next?.(result.value);
         }
       } catch (err: any) {
-        await receiver.error(err);
+        await receiver.error?.(err);
       } finally {
         if (!unsubscribing && readerId !== null) {
           await buffer.detachReader(readerId);
         }
-        await receiver.complete();
+        await receiver.complete?.();
       }
     });
 
@@ -132,6 +132,11 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     });
 
     return subscription;
+  };
+
+  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
+    const receiver = createReceiver(callbackOrReceiver);
+    return registerReceiver(receiver);
   };
 
   const subject: Subject<T> = {
@@ -151,6 +156,7 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     complete,
     completed: () => isCompleted,
     error,
+    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
   };
 
   return subject;

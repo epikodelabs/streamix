@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits values from the source stream as long as
@@ -32,13 +32,13 @@ export const takeWhile = <T = any>(
 
         const result = await source.next();
 
-        if (result.done) return result;
+        if (result.done) return DONE;
 
         const predicateResult = predicate(result.value);
         const pass = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
         if (!pass) {
           active = false;
-          return { done: true, value: undefined }; // signal completion
+          return DONE;
         }
 
         return NEXT(result.value);

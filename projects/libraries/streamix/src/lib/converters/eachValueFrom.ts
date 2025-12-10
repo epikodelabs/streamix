@@ -1,14 +1,14 @@
-import { DONE, NEXT, Stream } from "../abstractions";
+import { Stream } from "../abstractions";
 
 /**
  * Converts a `Stream` into an async generator, yielding each emitted value.
  * Distinguishes between undefined values and stream completion.
  *
  * This function creates a bridge between the push-based nature of a stream and
- * the pull-based nature of an async generator. It subscribes to the stream and
- * buffers incoming values in a queue. When the generator is iterated over
- * (e.g., in a `for await...of` loop), it first yields any buffered values
- * before asynchronously waiting for the next value to be pushed.
+ * the pull-based nature of an async generator. It relies on the stream's
+ * async-iterable interface (backed by the same multicast machinery used for
+ * subscriptions), so `for await...of eachValueFrom(stream)` is equivalent to
+ * `for await...of stream`.
  *
  * The generator handles all stream events:
  * - Each yielded value corresponds to a `next` event, including undefined values.
@@ -24,76 +24,13 @@ import { DONE, NEXT, Stream } from "../abstractions";
  * @returns An async generator that yields the values from the stream.
  */
 export function eachValueFrom<T = any>(stream: Stream<T>): AsyncGenerator<T> {
-  async function* generator(): AsyncGenerator<T> {
-    let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
-    let rejectNext: ((error: any) => void) | null = null;
-    let completed = false;
-    let error: any = null;
-    const queue: T[] = [];
+  const iterator = stream[Symbol.asyncIterator]();
 
-    const subscription = stream.subscribe({
-      next(value: T) {
-        if (resolveNext) {
-          const r = resolveNext;
-          resolveNext = null;
-          rejectNext = null;
-          r(NEXT(value));
-        } else {
-          queue.push(value);
-        }
-      },
-      error(err: any) {
-        error = err;
-        if (rejectNext) {
-          const r = rejectNext;
-          resolveNext = null;
-          rejectNext = null;
-          r(err);
-        }
-        subscription.unsubscribe();
-      },
-      complete() {
-        completed = true;
-        if (resolveNext) {
-          const r = resolveNext;
-          resolveNext = null;
-          rejectNext = null;
-          r(DONE);
-        }
-        subscription.unsubscribe();
-      },
-    });
-
-    try {
-      while (true) {
-        if (error) throw error;
-
-        if (queue.length > 0) {
-          yield queue.shift()!;
-        } else if (completed) {
-          break;
-        } else {
-          try {
-            const result = await new Promise<IteratorResult<T>>((resolve, reject) => {
-              resolveNext = resolve;
-              rejectNext = reject;
-            });
-
-            if (result.done) {
-              break;
-            } else {
-              yield result.value as T;
-            }
-          } catch (err) {
-            error = err;
-            throw error;
-          }
-        }
-      }
-    } finally {
-      subscription.unsubscribe();
-    }
+  // Some iterators only satisfy AsyncIterator; ensure AsyncGenerator shape by
+  // making `[Symbol.asyncIterator]` return itself.
+  if (typeof (iterator as any)[Symbol.asyncIterator] !== "function") {
+    (iterator as any)[Symbol.asyncIterator] = () => iterator;
   }
 
-  return generator();
+  return iterator as AsyncGenerator<T>;
 }

@@ -3,8 +3,7 @@
  * Comprehensive emission logging and pipeline context management for reactive streaming systems.
  */
 
-import { Operator } from "./operator";
-import { CallbackReturnType } from "./receiver";
+import { MaybePromise, Operator } from "./operator";
 import { Stream } from "./stream";
 
 // -------------------------------
@@ -58,10 +57,10 @@ export interface StreamContext {
   streamId: string;
   pendingResults: Set<StreamResult<any>>;
   timestamp: number;
-  phantomHandler: (operator: Operator, value: any) => CallbackReturnType;
-  resolvePending: (operator: Operator, result: StreamResult<any>) => CallbackReturnType;
-  markPhantom: (operator: Operator, result: StreamResult<any>) => CallbackReturnType;
-  markPending: (operator: Operator, result: StreamResult<any>) => CallbackReturnType;
+  phantomHandler: (operator: Operator, value: any) => MaybePromise;
+  resolvePending: (operator: Operator, result: StreamResult<any>) => MaybePromise;
+  markPhantom: (operator: Operator, result: StreamResult<any>) => MaybePromise;
+  markPending: (operator: Operator, result: StreamResult<any>) => MaybePromise;
   createResult: <T>(options?: Partial<StreamResult<T>>) => StreamResult<T>;
   logFlow(eventType: 'pending' | 'resolved' | 'phantom' | 'error',
     operator: Operator, result?: StreamResult<any>, message?: string
@@ -74,7 +73,7 @@ export interface PipelineContext {
   operators: Operator[];
   flowLoggingEnabled: boolean;
   operatorStack(operator: Operator): string;
-  phantomHandler: (operator: Operator, streamContext: StreamContext, value: any) => CallbackReturnType;
+  phantomHandler: (operator: Operator, streamContext: StreamContext, value: any) => MaybePromise;
   activeStreams: Map<string, StreamContext>;
   flags: { isPending: boolean; isFinalized: boolean };
   streamStack: StreamContext[];
@@ -233,12 +232,10 @@ export function createStreamContext(pipelineContext: PipelineContext, stream: St
     pendingResults.delete(result);
   };
 
-  const resolvePending = (operator: Operator, result: StreamResult<any>) => {
-    result.type = 'done';
-    result.done = true;
+  const resolvePending = async (operator: Operator, result: StreamResult<any>) => {
     pendingResults.delete(result);
     logEvent(pipelineContext.logLevel, streamId, pipelineContext.operatorStack(operator), `Resolved result:`, result);
-    return result.resolve();
+    await result.resolve();
   };
 
   const logFlow = (eventType: 'pending' | 'resolved' | 'phantom' | 'error',
@@ -280,7 +277,7 @@ export function createStreamContext(pipelineContext: PipelineContext, stream: St
 // PipelineContext Factory
 // -------------------------------
 
-export function createPipelineContext(options: { phantomHandler?: (operator: Operator, s: StreamContext, value: any) => CallbackReturnType; logLevel?: LogLevel } = {}): PipelineContext {
+export function createPipelineContext(options: { phantomHandler?: (operator: Operator, s: StreamContext, value: any) => MaybePromise; logLevel?: LogLevel } = {}): PipelineContext {
   const activeStreams = new Map<string, StreamContext>();
   const streamStack: StreamContext[] = [];
 
