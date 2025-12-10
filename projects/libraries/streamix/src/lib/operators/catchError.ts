@@ -20,12 +20,11 @@ import { createOperator, DONE, isPromiseLike, MaybePromise, Operator } from '../
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const catchError = <T = any>(
-  handler: MaybePromise<((error: any) => void)> = () => {} // Handler still returns void
+  handler: (error: any) => MaybePromise<void> = () => {}
 ) =>
   createOperator<T, T>('catchError', function (this: Operator, source) {
     let errorCaughtAndHandled = false;
     let completed = false;
-    const resolvedHandlerPromise = isPromiseLike(handler) ? handler : Promise.resolve(handler);
 
     return {
       next: async () => {
@@ -46,8 +45,7 @@ export const catchError = <T = any>(
           } catch (error) {
             // An error occurred from the source
             if (!errorCaughtAndHandled) { // Only handle the first error
-              const handlerFn = await resolvedHandlerPromise;
-              const handlerResult = handlerFn(error);
+              const handlerResult = handler(error);
               if (isPromiseLike(handlerResult)) await handlerResult;
               errorCaughtAndHandled = true; // Mark as handled
               completed = true;

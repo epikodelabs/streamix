@@ -1,5 +1,7 @@
 import { createStream, MaybePromise, Stream } from "../abstractions";
 
+type WebSocketFactory = (url: string) => MaybePromise<WebSocket>;
+
 /**
  * A stream that represents a WebSocket-like interface.
  * Extends a standard Stream with a `.send()` method to send messages.
@@ -12,9 +14,6 @@ export type WebSocketStream<T = any> = Stream<T> & {
   /** Close the WebSocket and stop the generator */
   close: () => void;
 };
-
-/** Factory type for dependency injection of WebSocket (mockable in tests) */
-export type WebSocketFactory = (url: string) => WebSocket;
 
 /**
  * Creates a WebSocket stream for bidirectional communication with a server.
@@ -31,7 +30,7 @@ export type WebSocketFactory = (url: string) => WebSocket;
  */
 export function webSocket<T = any>(
   url: MaybePromise<string>,
-  factory: MaybePromise<WebSocketFactory> = (u: string) => new WebSocket(u)
+  factory: WebSocketFactory = (u: string) => new WebSocket(u)
 ): WebSocketStream<T> {
   const messageQueue: T[] = [];
   const sendQueue: T[] = [];
@@ -44,12 +43,10 @@ export function webSocket<T = any>(
   // Helper to initialize the WebSocket
   const initWebSocket = async () => {
     try {
-      const [resolvedUrl, resolvedFactory] = await Promise.all([
-        Promise.resolve(url),
-        Promise.resolve(factory)
-      ]);
-      
-      socket = resolvedFactory(resolvedUrl);
+      const resolvedUrl = isPromise(url) ? await url : (url as string);
+      const resolvedFactory = isPromise(factory) ? await factory : factory;
+
+      socket = await resolvedFactory(resolvedUrl);
       setupSocketHandlers();
     } catch (error) {
       done = true;
@@ -60,9 +57,7 @@ export function webSocket<T = any>(
     }
   };
 
-  // Check if we can initialize synchronously
-  const urlIsPromise = url && typeof (url as any).then === 'function';
-  const factoryIsPromise = factory && typeof (factory as any).then === 'function';
+  const isPromise = (v: any): v is Promise<any> => v && typeof v.then === "function";
   
   const setupSocketHandlers = () => {
     if (!socket) return;
@@ -94,45 +89,36 @@ export function webSocket<T = any>(
       }
     };
 
-    const onClose = () => {
+    const closeWithError = (err: Error) => {
       done = true;
       isOpen = false;
       if (rejectNext) {
-        rejectNext(new Error("WebSocket closed"));
+        rejectNext(err);
         resolveNext = rejectNext = null;
       }
     };
 
-    const onError = () => {
-      done = true;
-      isOpen = false;
-      if (rejectNext) {
-        rejectNext(new Error("WebSocket error"));
-        resolveNext = rejectNext = null;
-      }
-    };
+    const onClose = () => closeWithError(new Error("WebSocket closed"));
+    const onError = () => closeWithError(new Error("WebSocket error"));
 
     socket.addEventListener("open", onOpen);
     socket.addEventListener("message", onMessage);
     socket.addEventListener("close", onClose);
     socket.addEventListener("error", onError);
+
+    // Cleanup helper
+    cleanupHandlers = () => {
+      socket?.removeEventListener("open", onOpen);
+      socket?.removeEventListener("message", onMessage);
+      socket?.removeEventListener("close", onClose);
+      socket?.removeEventListener("error", onError);
+    };
   };
 
-  if (!urlIsPromise && !factoryIsPromise) {
-    // Synchronous initialization
-    try {
-      const syncUrl = url as string;
-      const syncFactory = factory as WebSocketFactory;
-      socket = syncFactory(syncUrl);
-      setupSocketHandlers();
-    } catch (error) {
-      done = true;
-      // Error will be thrown when generator tries to yield
-    }
-  } else {
-    // Asynchronous initialization - start it but don't wait
-    initWebSocket();
-  }
+  let cleanupHandlers: (() => void) | null = null;
+
+  // Start initialization (sync or async)
+  initWebSocket();
 
   async function* generator() {
     try {
@@ -165,14 +151,9 @@ export function webSocket<T = any>(
         }
       }
     } finally {
-      if (socket) {
-        // Clean up event listeners
-        const cleanup = () => {
-          const listeners = socket!;
-          listeners.close();
-        };
-        
-        cleanup();
+      cleanupHandlers?.();
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close();
       }
     }
   };

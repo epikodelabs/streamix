@@ -14,14 +14,13 @@ import { eachValueFrom, fromAny } from '../converters';
  * @returns {Stream<T>} A new stream that emits values from either `trueStream` or `falseStream` based on the condition.
  */
 export function iif<T = any>(
-  condition: MaybePromise<() => boolean>,
+  condition: () => MaybePromise<boolean>,
   trueStream: MaybePromise<Stream<T> | Array<T> | T>,
   falseStream: MaybePromise<Stream<T> | Array<T> | T>
 ): Stream<T> {
   async function* generator(): AsyncGenerator<T, void, unknown> {
     // Evaluate condition lazily when the stream starts
-    const conditionFn = isPromiseLike(condition) ? await condition : condition;
-    const conditionResult = conditionFn();
+    const conditionResult = condition();
     const resolvedCondition = isPromiseLike(conditionResult) ? await conditionResult : conditionResult;
     const chosen = resolvedCondition ? trueStream : falseStream;
     const resolvedChosen = isPromiseLike(chosen) ? await chosen : chosen;
