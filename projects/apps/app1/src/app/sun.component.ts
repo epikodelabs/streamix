@@ -146,7 +146,7 @@ export class AppSunComponent implements AfterViewInit, OnDestroy {
       }),
       switchMap(() =>
         interval(33).pipe(
-          withLatestFrom(rays$, resize$),
+          withLatestFrom([rays$, resize$]),
           tap(([_, raysData, canvasSize]) => {
             // Check if dimensions have changed during an active interval frame
             // This ensures that if a resize happens mid-frame, it's also handled.
