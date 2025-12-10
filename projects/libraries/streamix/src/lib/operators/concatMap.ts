@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream, isPromiseLike } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, Operator, Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
@@ -22,7 +22,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
 export const concatMap = <T = any, R = T>(
-  project: MaybePromise<(value: T, index: number) => (Stream<R> | Promise<R> | Array<R>)>
+  project: (value: T, index: number) => MaybePromise<(Stream<R> | Promise<R> | Array<R>)>
 ) =>
   createOperator<T, R>("concatMap", function (this : Operator, source) {
     let outerIndex = 0;
@@ -38,11 +38,9 @@ export const concatMap = <T = any, R = T>(
 
             if (result.done) return DONE;
 
-            const projector = isPromiseLike(project) ? await project : project;
-            // Initialize inner stream
-            innerIterator = eachValueFrom<R>(
-              fromAny(projector(result.value, outerIndex++))
-            );
+            const projected = project(result.value, outerIndex++);
+            const normalized = isPromiseLike(projected) ? await projected : projected;
+            innerIterator = eachValueFrom<R>(fromAny(normalized));
           }
 
           // Pull next value from inner stream

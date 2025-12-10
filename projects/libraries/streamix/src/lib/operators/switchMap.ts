@@ -1,4 +1,4 @@
-import { createOperator, MaybePromise, Operator, Stream, Subscription } from "../abstractions";
+import { createOperator, isPromiseLike, MaybePromise, Operator, Stream, Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../streams";
 
@@ -25,7 +25,7 @@ import { createSubject } from "../streams";
  * @returns An {@link Operator} instance suitable for use in a stream's `pipe` method.
  */
 export function switchMap<T = any, R = any>(
-  project: (value: T, index: number) => (Stream<R> | MaybePromise<R> | Array<R>)
+  project: (value: T, index: number) => MaybePromise<Stream<R>| Array<R> | R>
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source) {
     const output = createSubject<R>();
@@ -73,7 +73,9 @@ export function switchMap<T = any, R = any>(
           if (result.done) break;
 
           const streamId = ++currentInnerStreamId;
-          const innerStream = fromAny(project(result.value, index++));
+          const projected = project(result.value, index++);
+          const normalized = isPromiseLike(projected) ? await projected : projected;
+          const innerStream = fromAny(normalized);
           await subscribeToInner(innerStream, streamId);
         }
 
