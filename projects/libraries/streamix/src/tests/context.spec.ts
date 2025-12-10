@@ -28,7 +28,6 @@ describe('context', () => {
     await ctx.resolvePending(operator, result);
 
     await ctx.finalize();
-    pipeline.unregisterStream(ctx.streamId);
     expect(ctx.pendingResults.size).toBe(0);
   });
 });

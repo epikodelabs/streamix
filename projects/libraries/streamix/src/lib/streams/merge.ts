@@ -19,9 +19,11 @@ export function merge<T = any, R extends readonly unknown[] = any[]>(
   ...sources: { [K in keyof R]: MaybePromise<Stream<R[K]> | Array<R[K]> | R[K]> }
 ): Stream<T> {
   return createStream<T>('merge', async function* () {
-    const resolvedInputs = await Promise.all(
-      sources.map(async (source) => (isPromiseLike(source) ? await source : source))
-    );
+    const resolvedInputs: any[] = [];
+    for (const src of sources) {
+      resolvedInputs.push(isPromiseLike(src) ? await src : src);
+    }
+    
     const resolvedSourcesRoot = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
       ? resolvedInputs[0]
       : resolvedInputs) as Array<Stream<T> | Array<T> | T>;

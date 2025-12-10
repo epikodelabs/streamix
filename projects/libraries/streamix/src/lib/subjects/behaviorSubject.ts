@@ -2,6 +2,7 @@ import {
   createAsyncGenerator,
   createReceiver,
   createSubscription,
+  isPromiseLike,
   MaybePromise,
   Operator,
   pipeStream,
@@ -51,11 +52,17 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
   let isCompleted = false;
   let hasError = false;
 
-  const next = (value: T) => {
-    latestValue = value;
+  const next = (value: MaybePromise<T>) => {
+    // Keep snappy in sync for synchronous values
+    if (!isPromiseLike(value)) {
+      latestValue = value;
+    }
+
     scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
-      await buffer.write(value);
+      const resolved = isPromiseLike(value) ? await value : value;
+      latestValue = resolved;
+      await buffer.write(resolved);
     });
   };
 
@@ -67,12 +74,13 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     });
   };
 
-  const error = (err: any) => {
+  const error = (err: MaybePromise<any>) => {
     scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
+      const resolvedErr = isPromiseLike(err) ? await err : err;
       hasError = true;
       isCompleted = true;
-      await buffer.error(err);
+      await buffer.error(resolvedErr);
       await buffer.complete();
     });
   };

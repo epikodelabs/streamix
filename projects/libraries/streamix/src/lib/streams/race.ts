@@ -1,5 +1,5 @@
-import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
+import { createStream, MaybePromise, Stream } from "../abstractions";
+import { fromAny } from "../converters";
 
 /**
  * Returns a stream that races multiple input streams.
@@ -21,11 +21,11 @@ export function race<T extends readonly unknown[] = any[]>(
   ...streams: Array<MaybePromise<Stream<T[number]> | Array<T[number]> | T[number]>>
 ): Stream<T[number]> {
   return createStream<T[number]>('race', async function* () {
-    const resolvedStreams = isPromiseLike(streams) ? await streams : streams;
+    const resolvedStreams = streams;
     if (!resolvedStreams || resolvedStreams.length === 0) return;
 
     const controllers = new Array(resolvedStreams.length).fill(null).map(() => new AbortController());
-    const iterators = resolvedStreams.map((s) => eachValueFrom(fromAny(s))[Symbol.asyncIterator]());
+    const iterators = resolvedStreams.map((s) => fromAny(s)[Symbol.asyncIterator]());
 
     try {
       while (true) {

@@ -2,6 +2,7 @@ import {
   createAsyncGenerator,
   createReceiver,
   createSubscription,
+  isPromiseLike,
   MaybePromise,
   Operator,
   pipeStream,
@@ -45,11 +46,15 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
   let hasError = false;
   let latestValue: T | undefined = undefined;
 
-  const next = (value: T) => {
-    latestValue = value;
+  const next = (value: MaybePromise<T>) => {
+    if (!isPromiseLike(value)) {
+      latestValue = value;
+    }
     scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
-      await buffer.write(value);
+      const resolved = isPromiseLike(value) ? await value : value;
+      latestValue = resolved;
+      await buffer.write(resolved);
     });
   };
 
@@ -61,12 +66,13 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     });
   };
 
-  const error = (err: any) => {
+  const error = (err: MaybePromise<any>) => {
     scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
+      const resolvedErr = isPromiseLike(err) ? await err : err;
       hasError = true;
       isCompleted = true;
-      await buffer.error(err);
+      await buffer.error(resolvedErr);
       await buffer.complete();
     });
   };
