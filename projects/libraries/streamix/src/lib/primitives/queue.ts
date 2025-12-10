@@ -16,12 +16,18 @@ export function createQueue() {
   const enqueue = (operation: () => Promise<any>): Promise<any> => {
     pendingCount++;
 
-    // Create the chained promise that will execute the operation
-    const result = last
-      .then(() => operation())
-      .finally(() => {
-        pendingCount--;
-      });
+    let result: Promise<any>;
+    try {
+      // Create the chained promise that will execute the operation
+      result = last.then(() => operation());
+    } catch (err) {
+      result = Promise.reject(err);
+    }
+
+    // Ensure pendingCount decrements even if the operation throws synchronously
+    result = result.finally(() => {
+      pendingCount--;
+    });
 
     // Chain the next operation (with error handling to prevent queue lock)
     // This maintains the sequential order regardless of operation success/failure

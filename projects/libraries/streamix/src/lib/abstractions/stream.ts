@@ -1,4 +1,4 @@
-import { eachValueFrom, firstValueFrom } from "../converters";
+import { firstValueFrom } from "../converters";
 import { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, Receiver } from "./receiver";
 import { scheduler } from "./scheduler";
@@ -11,6 +11,7 @@ import { createSubscription, Subscription } from "./subscription";
  * - **Subscription** to receive asynchronous values.
  * - **Operator chaining** through `.pipe()`.
  * - **Querying** the first emitted value.
+ * - **Async iteration** via `for await...of`.
  *
  * Two variants exist:
  * - `"stream"` — automatically driven, typically created by `createStream()`.
@@ -18,7 +19,7 @@ import { createSubscription, Subscription } from "./subscription";
  *
  * @template T The value type emitted by the stream.
  */
-export type Stream<T = any> = {
+export type Stream<T = any> = AsyncIterable<T> & {
   /** Identifies the underlying behavior of the stream. */
   type: "stream" | "subject";
 
@@ -48,6 +49,9 @@ export type Stream<T = any> = {
    * Internally subscribes, resolves on the first `next`, and then unsubscribes.
    */
   query: () => Promise<T>;
+
+  /** Allows direct async iteration: `for await (const value of stream) { ... }`. */
+  [Symbol.asyncIterator](): AsyncGenerator<T>;
 };
 
 /** Internal subscriber bookkeeping type. */
@@ -63,6 +67,91 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
   return new Promise(resolve =>
     signal.addEventListener("abort", resolve as any, { once: true })
   );
+}
+
+/**
+ * Creates a pull-based async iterator view over a stream's push-based events.
+ *
+ * This powers both `eachValueFrom` and direct `for await...of` consumption.
+ * It registers a receiver with the stream, buffers incoming values, and yields
+ * them to the consumer until completion or error. The underlying subscription
+ * is always cleaned up when iteration ends or the consumer stops early.
+ */
+export function createAsyncGenerator<T = any>(
+  register: (receiver: Receiver<T>) => Subscription
+): AsyncGenerator<T> {
+  async function* generator(): AsyncGenerator<T> {
+    let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
+    let rejectNext: ((error: any) => void) | null = null;
+    let completed = false;
+    let error: any = null;
+    const queue: T[] = [];
+
+    const subscription = register({
+      next(value: T) {
+        if (resolveNext) {
+          const r = resolveNext;
+          resolveNext = null;
+          rejectNext = null;
+          r({ done: false, value });
+        } else {
+          queue.push(value);
+        }
+      },
+      error(err: any) {
+        error = err;
+        if (rejectNext) {
+          const r = rejectNext;
+          resolveNext = null;
+          rejectNext = null;
+          r(err);
+        }
+        subscription.unsubscribe();
+      },
+      complete() {
+        completed = true;
+        if (resolveNext) {
+          const r = resolveNext;
+          resolveNext = null;
+          rejectNext = null;
+          r({ done: true, value: undefined });
+        }
+        subscription.unsubscribe();
+      },
+    });
+
+    try {
+      while (true) {
+        if (error) throw error;
+
+        if (queue.length > 0) {
+          yield queue.shift()!;
+        } else if (completed) {
+          break;
+        } else {
+          try {
+            const result = await new Promise<IteratorResult<T>>((resolve, reject) => {
+              resolveNext = resolve;
+              rejectNext = reject;
+            });
+
+            if (result.done) {
+              break;
+            } else {
+              yield result.value as T;
+            }
+          } catch (err) {
+            error = err;
+            throw error;
+          }
+        }
+      }
+    } finally {
+      subscription.unsubscribe();
+    }
+  }
+
+  return generator();
 }
 
 /**
@@ -211,10 +300,8 @@ export function createStream<T>(
     })();
   };
 
-  const subscribe = (
-    callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
-  ): Subscription => {
-    const receiver = wrapReceiver(createReceiver(callbackOrReceiver));
+  const registerReceiver = (receiver: Receiver<T>): Subscription => {
+    const wrapped = wrapReceiver(receiver);
     let subscription!: Subscription;
 
     subscription = createSubscription(async () => {
@@ -232,13 +319,19 @@ export function createStream<T>(
       }
     });
 
-    activeSubscriptions.add({ receiver, subscription });
+    activeSubscriptions.add({ receiver: wrapped, subscription });
 
     if (!isRunning) {
       startMulticastLoop();
     }
 
     return subscription;
+  };
+
+  const subscribe = (
+    callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
+  ): Subscription => {
+    return registerReceiver(createReceiver(callbackOrReceiver));
   };
 
   let self: Stream<T>;
@@ -251,6 +344,7 @@ export function createStream<T>(
     pipe,
     subscribe,
     query: () => firstValueFrom(self),
+    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
   };
 
   return self;
@@ -260,7 +354,7 @@ export function createStream<T>(
  * Pipes a source stream through a chain of operators to produce a **derived stream**.
  *
  * For each subscription:
- * - A fresh iterator is created from the source via `eachValueFrom()`.
+ * - A fresh iterator is created from the source's async-iterable interface.
  * - All operators transform the iterator in sequence.
  * - `drainIterator` consumes the transformed iterator until completion or abort.
  *
@@ -283,33 +377,37 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
       pipeStream(source, [...operators, ...nextOps])) as OperatorChain<any>,
 
     subscribe(cb?: ((value: any) => MaybePromise) | Receiver<any>) {
-      const receiver = wrapReceiver(createReceiver(cb));
-
-      const sourceIterator =
-        eachValueFrom(source)[Symbol.asyncIterator]() as AsyncIterator<TIn>;
-
-      let iterator: AsyncIterator<any> = sourceIterator;
-      for (const op of operators) iterator = op.apply(iterator);
-
-      const abortController = new AbortController();
-      const signal = abortController.signal;
-
-      const subscription = createSubscription(async () => {
-        abortController.abort();
-        receiver.complete?.();
-      });
-
-      drainIterator(iterator, () => [{ receiver, subscription }], signal).catch(
-        () => {}
-      );
-
-      return subscription;
+      return registerReceiver(createReceiver(cb));
     },
 
     query() {
       return firstValueFrom(pipedStream);
     },
+    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
   };
+
+  function registerReceiver(receiver: Receiver<any>): Subscription {
+    const wrapped = wrapReceiver(receiver);
+
+    const sourceIterator = source[Symbol.asyncIterator]() as AsyncIterator<TIn>;
+
+    let iterator: AsyncIterator<any> = sourceIterator;
+    for (const op of operators) iterator = op.apply(iterator);
+
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+
+    const subscription = createSubscription(async () => {
+      abortController.abort();
+      wrapped.complete?.();
+    });
+
+    drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(
+      () => {}
+    );
+
+    return subscription;
+  }
 
   return pipedStream;
 }

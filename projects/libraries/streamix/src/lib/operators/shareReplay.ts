@@ -34,11 +34,10 @@ export function shareReplay<T = any>(bufferSize: number = Infinity) {
       (async () => {
         try {
           while (true) {
-            let result = await source.next();
+            const result = await source.next();
             if (result.done) break;
 
             output.next(result.value);
-            result = await source.next();
           }
         } catch (err) {
           output.error(err);

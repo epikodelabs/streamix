@@ -1,13 +1,14 @@
 import {
-    createReceiver,
-    createSubscription,
-    MaybePromise,
-    Operator,
-    pipeStream,
-    Receiver,
-    scheduler,
-    Stream,
-    Subscription
+  createAsyncGenerator,
+  createReceiver,
+  createSubscription,
+  MaybePromise,
+  Operator,
+  pipeStream,
+  Receiver,
+  scheduler,
+  Stream,
+  Subscription
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { createBehaviorSubjectBuffer } from "../primitives";
@@ -76,8 +77,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
-    const receiver = createReceiver(callbackOrReceiver);
+  const registerReceiver = (receiver: Receiver<T>): Subscription => {
     let unsubscribing = false;
     let readerId: number | null = null;
 
@@ -98,15 +98,15 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
         while (true) {
           const result = await buffer.read(readerId);
           if (result.done) break;
-          await receiver.next(result.value);
+          await receiver.next?.(result.value);
         }
       } catch (err: any) {
-        await receiver.error(err);
+        await receiver.error?.(err);
       } finally {
         if (!unsubscribing && readerId !== null) {
           await buffer.detachReader(readerId);
         }
-        await receiver.complete();
+        await receiver.complete?.();
       }
     });
 
@@ -115,6 +115,11 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     });
 
     return subscription;
+  };
+
+  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
+    const receiver = createReceiver(callbackOrReceiver);
+    return registerReceiver(receiver);
   };
 
   const subject: BehaviorSubject<T> = {
@@ -134,6 +139,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     complete,
     completed: () => isCompleted,
     error,
+    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
   };
 
   return subject;

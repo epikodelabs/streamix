@@ -8,15 +8,14 @@ import { eachValueFrom } from "../converters";
  * @param streams Streams to join; arrays/iterables are also accepted for backward compatibility.
  * @returns Stream<T[]>
  */
-export function forkJoin<T = any>(
-  ...streams: Array<MaybePromise<Stream<T> | Iterable<Stream<T>>>>
+export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
+  ...sources: { [K in keyof R]: MaybePromise<Stream<R[K]> | Array<R[K]> | R[K]> }
 ): Stream<T[]> {
   async function* generator() {
-    const promises: Promise<void>[] = [];
-
-    const resolvedInputs = await Promise.all(
-      streams.map(async (stream) => (isPromiseLike(stream) ? await stream : stream))
-    );
+    const resolvedInputs: any[] = [];
+    for (const src of sources) {
+      resolvedInputs.push(isPromiseLike(src) ? await src : src);
+    }
 
     let streamsArray: Array<Stream<T>> = [];
     if (resolvedInputs.length === 1) {
@@ -30,36 +29,25 @@ export function forkJoin<T = any>(
       streamsArray = resolvedInputs as Array<Stream<T>>;
     }
     const results = new Array(streamsArray.length);
-    const finished = new Array(streamsArray.length).fill(false);
 
-    // Subscribe to each stream
-    for (let i = 0; i < streamsArray.length; i++) {
-      const stream = isPromiseLike(streamsArray[i]) ? await streamsArray[i] : streamsArray[i];
+    const promises = streamsArray.map(async (stream, index) => {
+      const resolved = isPromiseLike(stream) ? await stream : stream;
+      let last: T | undefined;
+      let hasValue = false;
 
-      const p = (async () => {
-        let last: T | undefined;
-        let hasValue = false;
+      for await (const value of eachValueFrom(resolved)) {
+        last = value;
+        hasValue = true;
+      }
 
-        for await (const value of eachValueFrom(stream)) {
-          last = value;
-          hasValue = true;
-        }
+      if (!hasValue) {
+        throw new Error("forkJoin: one of the streams completed without emitting any value");
+      }
 
-        if (!hasValue) {
-          throw new Error("forkJoin: one of the streams completed without emitting any value");
-        }
+      results[index] = last;
+    });
 
-        results[i] = last;
-        finished[i] = true;
-      })();
-
-      promises.push(p);
-    }
-
-    // Wait for all streams to finish
     await Promise.all(promises);
-
-    // Yield the collected last values
     yield results as T[];
   }
 
