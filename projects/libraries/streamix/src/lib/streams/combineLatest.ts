@@ -11,14 +11,28 @@ import { eachValueFrom, fromAny } from "../converters";
  * value. The output stream completes when all source streams have completed.
  *
  * @template {unknown[]} T A tuple type representing the combined values from the streams.
- * @param {{ [K in keyof T]: MaybePromise<Stream<T[K]> | Array<T[K]> | T[K]> }} streams An array (or promise of one) of streams/values to combine.
+ * @param streams Streams/values to combine.
  * @returns {Stream<T>} A new stream that emits a tuple of the latest values from all source streams.
  */
 export function combineLatest<T extends unknown[] = any[]>(
-  streams: MaybePromise<{ [K in keyof T]: Stream<T[K]> | Array<T[K]> | T[K] }>
+  ...streams: Array<
+    MaybePromise<
+      | Stream<T[number]>
+      | Array<T[number]>
+      | T[number]
+      | Array<Stream<T[number]> | Array<T[number]> | T[number]>
+    >
+  >
 ): Stream<T> {
   async function* generator() {
-    const resolvedStreamsInput = isPromiseLike(streams) ? await streams : streams;
+    const resolvedInputs = await Promise.all(
+      streams.map(async (s) => (isPromiseLike(s) ? await s : s))
+    );
+
+    const resolvedStreamsInput = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
+      ? resolvedInputs[0]
+      : resolvedInputs) as Array<Stream<T[number]> | Array<T[number]> | T[number]>;
+
     if (resolvedStreamsInput.length === 0) return;
 
     const resolvedStreams = [];

@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream, isPromiseLike } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, Operator, Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -51,13 +51,17 @@ export interface ForkOption<T = any, R = any> {
  *
  * @template T The type of values in the source stream.
  * @template R The type of values emitted by the output stream.
- * @param options Array of {@link ForkOption} objects defining predicates and handlers.
+ * @param options {@link ForkOption} objects defining predicates and handlers.
  * @returns An {@link Operator} instance suitable for use in a stream's `pipe` method.
  *
  * @throws {Error} If a source value does not match any predicate.
  */
-export const fork = <T = any, R = any>(options: ForkOption<T, R>[]) =>
+export const fork = <T = any, R = any>(...options: Array<MaybePromise<ForkOption<T, R>>>) =>
   createOperator<T, R>('fork', function (this: Operator, source) {
+    const resolvedOptions = options.flatMap(option =>
+      Array.isArray(option) ? option : [option]
+    );
+
     let outerIndex = 0;
     let innerIterator: AsyncIterator<R> | null = null;
     let outerValue: T | undefined;
@@ -72,10 +76,10 @@ export const fork = <T = any, R = any>(options: ForkOption<T, R>[]) =>
               return DONE;
             }
 
-            let matched: typeof options[number] | undefined;
+            let matched: typeof resolvedOptions[number] | undefined;
             outerValue = result.value;
 
-            for (const option of options) {
+            for (const option of resolvedOptions) {
               const predicateResult = option.on(outerValue!, outerIndex++);
               if (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) {
                 matched = option;

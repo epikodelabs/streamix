@@ -16,7 +16,7 @@ describe('fork', () => {
   it('should handle multiple emissions and match the correct stream', (done) => {
     const result: string[] = [];
 
-    source$ = from([1, 5, 10, 20]).pipe(fork(options));
+    source$ = from([1, 5, 10, 20]).pipe(fork(...options));
 
     source$.subscribe({
       next: (value: any) => result.push(value),
@@ -30,7 +30,7 @@ describe('fork', () => {
   it('should match the correct stream based on conditions', (done) => {
     const result: string[] = [];
 
-    const source$ = from([1, 10, 20]).pipe(fork(options));
+    const source$ = from([1, 10, 20]).pipe(fork(...options));
 
     source$.subscribe({
       next: (value: any) => result.push(value),
@@ -50,7 +50,7 @@ describe('fork', () => {
       { on: (value: number) => value === 100, handler: () => of('Invalid number') },
     ];
 
-    const source$ = from([1, 5, 10, 20]).pipe(fork(invalidOptions)); // Emissions: 1, 5, 10, 20
+    const source$ = from([1, 5, 10, 20]).pipe(fork(...invalidOptions)); // Emissions: 1, 5, 10, 20
 
     source$.subscribe({
       next: (value: any) => result.push(value),
@@ -72,7 +72,7 @@ describe('fork', () => {
       handler: customStream,
     });
 
-    const source$ = of(10).pipe(fork(options)); // Single emission: 10
+    const source$ = of(10).pipe(fork(...options)); // Single emission: 10
 
     source$.subscribe({
       next: (value: any) => result.push(value),

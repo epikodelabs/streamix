@@ -5,7 +5,7 @@ describe('combineLatest', () => {
     const firstTimer = timer(0, 50);
     const secondTimer = timer(25, 50);
 
-    const combinedTimers = combineLatest([firstTimer, secondTimer]);
+    const combinedTimers = combineLatest(firstTimer, secondTimer);
     const expectedValues = [
       [0, 0],
       [1, 0],
@@ -42,7 +42,7 @@ describe('combineLatest', () => {
     const firstTimer = timer(0, 50);
     const secondTimer = timer(25, 50);
 
-    const combinedTimers = combineLatest([firstTimer, secondTimer]);
+    const combinedTimers = combineLatest(firstTimer, secondTimer);
     let emissionCount = 0;
 
     const subscription: Subscription = combinedTimers.subscribe({
@@ -61,7 +61,7 @@ describe('combineLatest', () => {
     const firstTimer = timer(0, 50);
     const secondTimer = timer(25, 50);
 
-    const combinedTimers = combineLatest([firstTimer, secondTimer]);
+    const combinedTimers = combineLatest(firstTimer, secondTimer);
     const expectedValues = [
       [0, 0],
       [1, 0],
@@ -96,7 +96,7 @@ describe('combineLatest', () => {
     const secondTimer = timer(250, 500);
     const thirdTimer = timer(100, 500);
 
-    const combinedTimers = combineLatest([firstTimer, secondTimer, thirdTimer]);
+    const combinedTimers = combineLatest(firstTimer, secondTimer, thirdTimer);
     const expectedValues = [
       [0, 0, 0],
       [1, 0, 0],
@@ -133,7 +133,7 @@ describe('combineLatest', () => {
   it('should combine from streams and complete after the third emission', (done) => {
     const firstStream = from([0, 1, 2]);
     const secondStream = from([0, 1, 2]);
-    const combinedStream = combineLatest([firstStream, secondStream]);
+    const combinedStream = combineLatest(firstStream, secondStream);
     let nextCalled = false;
 
     const subscription = combinedStream.subscribe({

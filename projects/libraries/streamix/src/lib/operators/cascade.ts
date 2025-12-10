@@ -32,18 +32,20 @@ export interface CoroutineLike<T = any, R = T> extends Operator<T, R> {
 }
 
 
-export function cascade<A, B>(tasks: MaybePromise<[Coroutine<A, B>]>): CoroutineLike<A, B>;
+export function cascade<A, B>(...tasks: [MaybePromise<Coroutine<A, B>>]): CoroutineLike<A, B>;
 
 export function cascade<A, B, C>(
-  tasks: MaybePromise<[Coroutine<A, B>, Coroutine<B, C>]>
+  ...tasks: [MaybePromise<Coroutine<A, B>>, MaybePromise<Coroutine<B, C>>]
 ): CoroutineLike<A, C>;
 
 export function cascade<A, B, C, D>(
-  tasks: MaybePromise<[Coroutine<A, B>, Coroutine<B, C>, Coroutine<C, D>]>
+  ...tasks: [MaybePromise<Coroutine<A, B>>, MaybePromise<Coroutine<B, C>>, MaybePromise<Coroutine<C, D>>]
 ): CoroutineLike<A, D>;
 
 
-export function cascade<T = any, R = any>(tasks: MaybePromise<Coroutine<any, any>[]>): CoroutineLike<T, R>;
+export function cascade<T = any, R = any>(
+  ...tasks: Array<MaybePromise<Coroutine<any, any>>>
+): CoroutineLike<T, R>;
 
 /**
  * Chains multiple coroutine tasks sequentially, creating a single `CoroutineLike` operator.
@@ -56,16 +58,20 @@ export function cascade<T = any, R = any>(tasks: MaybePromise<Coroutine<any, any
  *
  * @template T The input type of the first coroutine.
  * @template R The output type of the last coroutine.
- * @param {Coroutine<any, any>[]} tasks An array of coroutines to chain.
+ * @param tasks Coroutines to chain.
  * @returns {CoroutineLike<T, R>} A `CoroutineLike` operator representing the entire cascaded pipeline.
  */
 export function cascade<T = any, R = any>(
-  tasks: MaybePromise<Coroutine<any, any>[]>
+  ...tasks: Array<MaybePromise<Coroutine<any, any>>>
 ): CoroutineLike<T, R> {
   let cachedTasks: Coroutine<any, any>[] | null = null;
   const getTasks = async () => {
     if (cachedTasks === null) {
-      cachedTasks = isPromiseLike(tasks) ? await tasks : tasks;
+      const resolvedTasks = await Promise.all(tasks.map(async (task) => {
+        const resolved = isPromiseLike(task) ? await task : task;
+        return Array.isArray(resolved) ? resolved : [resolved];
+      }));
+      cachedTasks = resolvedTasks.flat();
     }
     return cachedTasks;
   };

@@ -106,7 +106,7 @@ export class AppSandComponent implements AfterViewInit, OnDestroy {
       tap(() => this.isMouseOver = false)
     );
 
-    this.mergeStream$ = merge([mouseMove$, mouseEnter$, mouseLeave$]);
+    this.mergeStream$ = merge(mouseMove$, mouseEnter$, mouseLeave$);
     this.subscriptions.push(
       this.mergeStream$.subscribe()
     );

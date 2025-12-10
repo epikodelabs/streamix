@@ -5,7 +5,7 @@ describe('withLatestFrom', () => {
     const mainStream = from([1, 2, 3]);
     const otherStream = from(['A', 'B', 'C']);
 
-    const combinedStream = mainStream.pipe(withLatestFrom([otherStream]));
+    const combinedStream = mainStream.pipe(withLatestFrom(otherStream));
 
     let results: any[] = [];
 
@@ -25,7 +25,7 @@ describe('withLatestFrom', () => {
     const mainStream = from([1, 2, 3]);
     const otherStream = from(['A', 'B', 'C', 'D', 'E']);
 
-    const combinedStream = mainStream.pipe(withLatestFrom([otherStream]));
+    const combinedStream = mainStream.pipe(withLatestFrom(otherStream));
 
     let results: any[] = [];
 
@@ -51,7 +51,7 @@ describe('withLatestFrom', () => {
     const mainStream = from([1, 2, 3]);
     const otherStream = from(['A']);
 
-    const combinedStream = mainStream.pipe(withLatestFrom([otherStream]));
+    const combinedStream = mainStream.pipe(withLatestFrom(otherStream));
 
     let results: any[] = [];
 
