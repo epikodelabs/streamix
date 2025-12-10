@@ -6,7 +6,7 @@ idescribe("cascade", () => {
     const c1 = coroutine((x: number) => x + 1);
     const c2 = coroutine((x: number) => x * 2);
 
-    const cascaded = cascade(c1, c2);
+    const cascaded = cascade([c1, c2]);
 
     const result = await cascaded.processTask(3); // (3 + 1) * 2
     expect(result).toBe(8);
@@ -24,7 +24,7 @@ idescribe("cascade", () => {
       yield 3;
     });
 
-    const cascaded = cascade(c1, c2);
+    const cascaded = cascade([c1, c2]);
 
     const results: number[] = [];
     for await (const v of eachValueFrom(stream.pipe(cascaded))) {
@@ -44,7 +44,7 @@ idescribe("cascade", () => {
       return x * 2;
     });
 
-    const cascaded = cascade(c1, c2);
+    const cascaded = cascade([c1, c2]);
 
     try {
       await cascaded.processTask(1); // (1+1) => 2, then boom
@@ -68,7 +68,7 @@ idescribe("cascade", () => {
       finalize: async () => finalized.push("c2"),
     } as any;
 
-    const cascaded = cascade(c1, c2);
+    const cascaded = cascade([c1, c2]);
 
     const result = await cascaded.processTask(5);
     expect(result).toBe(12);
@@ -78,7 +78,7 @@ idescribe("cascade", () => {
   });
 
   it("should handle empty cascades gracefully", async () => {
-    const cascaded = cascade(); // no tasks
+    const cascaded = cascade([]); // no tasks
     const result = await cascaded.processTask(42);
 
     expect(result).toBe(42);

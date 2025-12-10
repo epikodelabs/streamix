@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, Operator } from "../abstractions";
 import { Coroutine } from "./coroutine";
 
 /**
@@ -32,21 +32,18 @@ export interface CoroutineLike<T = any, R = T> extends Operator<T, R> {
 }
 
 
-export function cascade<A, B>(c1: Coroutine<A, B>): CoroutineLike<A, B>;
+export function cascade<A, B>(tasks: MaybePromise<[Coroutine<A, B>]>): CoroutineLike<A, B>;
 
 export function cascade<A, B, C>(
-  c1: Coroutine<A, B>,
-  c2: Coroutine<B, C>
+  tasks: MaybePromise<[Coroutine<A, B>, Coroutine<B, C>]>
 ): CoroutineLike<A, C>;
 
 export function cascade<A, B, C, D>(
-  c1: Coroutine<A, B>,
-  c2: Coroutine<B, C>,
-  c3: Coroutine<C, D>
+  tasks: MaybePromise<[Coroutine<A, B>, Coroutine<B, C>, Coroutine<C, D>]>
 ): CoroutineLike<A, D>;
 
 
-export function cascade<T = any, R = any>(...tasks: Coroutine<any, any>[]): CoroutineLike<T, R>;
+export function cascade<T = any, R = any>(tasks: MaybePromise<Coroutine<any, any>[]>): CoroutineLike<T, R>;
 
 /**
  * Chains multiple coroutine tasks sequentially, creating a single `CoroutineLike` operator.
@@ -63,8 +60,16 @@ export function cascade<T = any, R = any>(...tasks: Coroutine<any, any>[]): Coro
  * @returns {CoroutineLike<T, R>} A `CoroutineLike` operator representing the entire cascaded pipeline.
  */
 export function cascade<T = any, R = any>(
-  ...tasks: Coroutine<any, any>[]
+  tasks: MaybePromise<Coroutine<any, any>[]>
 ): CoroutineLike<T, R> {
+  let cachedTasks: Coroutine<any, any>[] | null = null;
+  const getTasks = async () => {
+    if (cachedTasks === null) {
+      cachedTasks = isPromiseLike(tasks) ? await tasks : tasks;
+    }
+    return cachedTasks;
+  };
+
   const operator = createOperator<T, R>("cascade", function (this: Operator, source) {
     let completed = false;
 
@@ -82,7 +87,8 @@ export function cascade<T = any, R = any>(
           }
 
           let taskResult: any = result.value;
-          for (const task of tasks) {
+          const resolvedTasks = await getTasks();
+          for (const task of resolvedTasks) {
             taskResult = await task.processTask(taskResult);
           }
 
@@ -103,13 +109,15 @@ export function cascade<T = any, R = any>(
   const coroutineLike: CoroutineLike<T, R> = Object.assign(operator, {
     async processTask(data: T) {
       let result: any = data;
-      for (const task of tasks) {
+      const tasksList = await getTasks();
+      for (const task of tasksList) {
         result = await task.processTask(result);
       }
       return result as R;
     },
     async finalize() {
-      for (const task of tasks) {
+      const tasksList = await getTasks();
+      for (const task of tasksList) {
         await task.finalize();
       }
     }
@@ -117,3 +125,4 @@ export function cascade<T = any, R = any>(
 
   return coroutineLike;
 }
+
