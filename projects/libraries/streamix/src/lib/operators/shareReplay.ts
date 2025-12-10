@@ -1,4 +1,4 @@
-import { createOperator, Operator } from '../abstractions';
+import { createOperator, MaybePromise, Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createReplaySubject, ReplaySubject } from '../streams';
 
@@ -19,7 +19,7 @@ import { createReplaySubject, ReplaySubject } from '../streams';
  * @param bufferSize The number of last values to replay to new subscribers. Defaults to `Infinity`.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export function shareReplay<T = any>(bufferSize: number = Infinity) {
+export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity) {
   let isConnected = false;
   let output: ReplaySubject<T> | undefined;
 

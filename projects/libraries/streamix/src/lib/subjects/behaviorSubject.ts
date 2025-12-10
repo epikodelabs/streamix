@@ -46,14 +46,25 @@ export type BehaviorSubject<T = any> = Subject<T> & {
  * @param {T} initialValue The value that the subject will hold upon creation.
  * @returns {BehaviorSubject<T>} A new BehaviorSubject instance.
  */
-export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
+export function createBehaviorSubject<T = any>(initialValue: MaybePromise<T>): BehaviorSubject<T> {
   const buffer = createBehaviorSubjectBuffer<T>(initialValue);
-  let latestValue = initialValue;
+  let latestValue: T | undefined;
   let isCompleted = false;
   let hasError = false;
 
+  // Only set latestValue if initialValue is synchronous
+  if (isPromiseLike(initialValue)) {
+    // Async initial value - don't set latestValue until resolved
+    Promise.resolve(initialValue).then((resolved) => {
+      latestValue = resolved;
+    });
+  } else {
+    // Sync initial value - set immediately
+    latestValue = initialValue;
+  }
+
   const next = (value: MaybePromise<T>) => {
-    // Keep snappy in sync for synchronous values
+    // Keep snappy in sync for synchronous values only
     if (!isPromiseLike(value)) {
       latestValue = value;
     }
@@ -134,7 +145,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     type: "subject",
     name: "behaviorSubject",
     get snappy() {
-      return latestValue;
+      return latestValue as T;
     },
     pipe(...operators: Operator<any, any>[]): Stream<any> {
       return pipeStream(this, operators);
