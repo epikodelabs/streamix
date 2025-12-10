@@ -14,21 +14,26 @@ import { eachValueFrom, fromAny } from "../converters";
  * If the winning stream emits an error, the output stream will emit that error.
  *
  * @template {readonly unknown[]} T - A tuple type representing the combined values from the streams.
- * @param {MaybePromise<{ [K in keyof T]: Stream<T[K]> | Array<T[K]> | T[K] }>} streams - Streams (or a promise of them) to race against each other.
+ * @param streams Streams to race against each other.
  * @returns {Stream<T[number]>} A new stream that emits values from the first stream to produce a value.
  */
 export function race<T extends readonly unknown[] = any[]>(
-  streams: { [K in keyof T]: MaybePromise<Stream<T[K]> | Array<T[K]> | T[K]> }
+  ...streams: Array<MaybePromise<Stream<T[number]> | Array<T[number]> | T[number]>>
 ): Stream<T[number]> {
   return createStream<T[number]>('race', async function* () {
-    const resolvedStreamsArray = isPromiseLike(streams) ? await streams : streams;
-    // Normalize tuple-like object to array
-    const entries = Object.values(resolvedStreamsArray) as Array<MaybePromise<Stream<T[number]> | Array<T[number]> | T[number]>>;
-    if (entries.length === 0) return;
+    const resolvedInputs = await Promise.all(
+      streams.map(async (s) => (isPromiseLike(s) ? await s : s))
+    );
 
-    const controllers = new Array(entries.length).fill(null).map(() => new AbortController());
+    const normalizedStreams = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
+      ? resolvedInputs[0]
+      : resolvedInputs) as Array<Stream<T[number]> | Array<T[number]> | T[number]>;
+
+    if (normalizedStreams.length === 0) return;
+
+    const controllers = new Array(normalizedStreams.length).fill(null).map(() => new AbortController());
     const resolvedStreams = [];
-    for (const s of entries) {
+    for (const s of normalizedStreams) {
       resolvedStreams.push(isPromiseLike(s) ? await s : s);
     }
     const iterators = resolvedStreams.map((s) => eachValueFrom(fromAny(s))[Symbol.asyncIterator]());
