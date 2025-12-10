@@ -15,7 +15,7 @@ import { eachValueFrom, fromAny } from '../converters';
  * @returns {Stream<T>} A new stream that emits an array of values.
  */
 export function zip<T extends readonly unknown[] = any[]>(
-  streams: { [K in keyof T]: MaybePromise<Stream<T[K]> | Array<T[K]> | T[K]> }
+  streams: MaybePromise<{ [K in keyof T]: Stream<T[K]> | Array<T[K]> | T[K] }>[]
 ): Stream<T> {
   // Note: controller is currently unused for aborting from outside
   // You may want to expose it or remove if unused

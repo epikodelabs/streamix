@@ -12,16 +12,17 @@ import { eachValueFrom, fromAny } from "../converters";
  * errors, the merged stream immediately errors.
  *
  * @template T The type of the values in the streams.
- * @param {(Stream<T> | MaybePromise<T> | Array<T> | Promise<Stream<T>> | Promise<Array<T>>)[]} sources An array of streams to be merged.
+ * @param {MaybePromise<Array<Stream<T> | Array<T> | T>>} sources Streams/values (or promise of array) to merge.
  * @returns {Stream<T>} A new stream that emits values from all input streams.
  */
-export function merge<T = any>(...sources: Array<MaybePromise<Stream<T> | Array<T> | T>>): Stream<T> {
+export function merge<T = any>(sources: MaybePromise<Array<Stream<T> | Array<T> | T>>): Stream<T> {
   return createStream<T>('merge', async function* () {
-    if (sources.length === 0) return;
+    const resolvedSourcesRoot = isPromiseLike(sources) ? await sources : sources;
+    if (resolvedSourcesRoot.length === 0) return;
 
     const resolvedSources = [];
-    for (const source of sources) {
-      resolvedSources.push(isPromiseLike(source) ? await source : source);
+    for (const source of resolvedSourcesRoot) {
+        resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
 
     const iterators = resolvedSources.map(s => eachValueFrom(fromAny(s))[Symbol.asyncIterator]());

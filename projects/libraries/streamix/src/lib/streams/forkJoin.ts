@@ -5,20 +5,21 @@ import { eachValueFrom } from "../converters";
  * Waits for all streams to complete and emits an array of their last values.
  *
  * @template T The type of the last values emitted by each stream.
- * @param streams An iterable of Stream<T> or promises resolving to them.
+ * @param streams An iterable (or promise of one) of Stream<T> / MaybePromise<Stream<T>> entries.
  * @returns Stream<T[]>
  */
-export function forkJoin<T = any>(streams: Iterable<MaybePromise<Stream<T>>>): Stream<T[]> {
+export function forkJoin<T = any>(streams: MaybePromise<Iterable<Stream<T>>>): Stream<T[]> {
   async function* generator() {
     const promises: Promise<void>[] = [];
 
-    const streamsArray = Array.from(streams);
+    const resolvedStreamsIterable = isPromiseLike(streams) ? await streams : streams;
+    const streamsArray = Array.from(resolvedStreamsIterable);
     const results = new Array(streamsArray.length);
     const finished = new Array(streamsArray.length).fill(false);
 
     // Subscribe to each stream
     for (let i = 0; i < streamsArray.length; i++) {
-      const stream = isPromiseLike(streamsArray[i]) ? await streamsArray[i] : streamsArray[i] as any;
+      const stream = isPromiseLike(streamsArray[i]) ? await streamsArray[i] : streamsArray[i];
 
       const p = (async () => {
         let last: T | undefined;

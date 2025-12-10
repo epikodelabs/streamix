@@ -8,12 +8,11 @@ import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractio
  * error. The stream will emit exactly one value before it completes.
  *
  * @template T The type of the value that the promise resolves to.
- * @param {Promise<T> | MaybePromise<T>} promise The promise to convert into a stream.
+ * @param {MaybePromise<T>} promise The promise to convert into a stream.
  * @returns {Stream<T>} A new stream that emits the resolved value of the promise.
  */
-export function fromPromise<T = any>(promise: MaybePromise<Promise<T> | T>): Stream<T> {
+export function fromPromise<T = any>(promise: MaybePromise<T>): Stream<T> {
   return createStream<T>('fromPromise', async function* () {
-    const resolvedPromise = isPromiseLike(promise) ? await promise : promise;
-    yield await resolvedPromise;
+    yield isPromiseLike(promise) ? await promise : promise;
   });
 }
