@@ -1,11 +1,12 @@
 import {
-    createOperator,
-    createReceiver,
-    MaybePromise,
-    Operator,
-    Receiver,
-    Stream,
-    Subscription
+  createOperator,
+  createReceiver,
+  isPromiseLike,
+  MaybePromise,
+  Operator,
+  Receiver,
+  Stream,
+  Subscription
 } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../streams";
@@ -28,25 +29,32 @@ import { createSubject } from "../streams";
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  * The output stream emits tuples of `[T, ...R]`.
  */
-export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(...streams: { [K in keyof R]: (Stream<R[K]> | Promise<R[K]> | Array<R[K]>)}) {
+export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(streams: MaybePromise<{ [K in keyof R]: (Stream<R[K]> | Promise<R[K]> | Array<R[K]>)}>) {
   return createOperator<T, [T, ...R]>("withLatestFrom", function (this: Operator, source) {
     const output = createSubject<[T, ...R]>();
-    const latestValues: any[] = new Array(streams.length).fill(undefined);
-    const hasValue: boolean[] = new Array(streams.length).fill(false);
+    let latestValues: any[] = [];
+    let hasValue: boolean[] = [];
     const subscriptions: Subscription[] = [];
 
-    for (let i = 0; i < streams.length; i++) {
-      const subscription = fromAny(streams[i]).subscribe({
-        next: (value) => {
-          latestValues[i] = value;
-          hasValue[i] = true;
-        },
-        error: (err) => {
-          output.error(err);
-        }
-      });
-      subscriptions.push(subscription);
-    }
+    (async () => {
+      const resolvedStreams = isPromiseLike(streams) ? await streams : streams;
+      const streamEntries = Object.values(resolvedStreams) as Array<Stream<R[number]> | Promise<R[number]> | Array<R[number]>>;
+      latestValues = new Array(streamEntries.length).fill(undefined);
+      hasValue = new Array(streamEntries.length).fill(false);
+
+      for (let i = 0; i < streamEntries.length; i++) {
+        const subscription = fromAny(streamEntries[i]).subscribe({
+          next: (value) => {
+            latestValues[i] = value;
+            hasValue[i] = true;
+          },
+          error: (err) => {
+            output.error(err);
+          }
+        });
+        subscriptions.push(subscription);
+      }
+    })();
 
     const abortController = new AbortController();
     const { signal } = abortController;
@@ -74,7 +82,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(..
 
           if (result.done) break;
 
-          if (hasValue.every(Boolean)) {
+          if (hasValue.length > 0 && hasValue.every(Boolean)) {
             output.next([result.value, ...latestValues] as [T, ...R]);
           }
         }
