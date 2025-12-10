@@ -147,7 +147,7 @@ export class AppRainComponent implements AfterViewInit, OnDestroy {
           // For subsequent frames, use withLatestFrom to get the most current data.
           // It's important to keep `drops$` and `resize$` as sources for withLatestFrom,
           // so that if they emit new values (e.g., on resize), those are picked up.
-          withLatestFrom(drops$, resize$),
+          withLatestFrom([drops$, resize$]),
           tap(([_, drops, canvasSize]) => {
             // Check if dimensions have changed during an active interval frame
             if (this.canvas.width !== canvasSize.width || this.canvas.height !== canvasSize.height) {
