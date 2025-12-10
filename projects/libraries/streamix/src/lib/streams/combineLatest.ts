@@ -15,19 +15,13 @@ import { eachValueFrom, fromAny } from "../converters";
  * @returns {Stream<T>} A new stream that emits a tuple of the latest values from all source streams.
  */
 export function combineLatest<T extends unknown[] = any[]>(
-  ...streams: Array<
-    MaybePromise<
-      | Stream<T[number]>
-      | Array<T[number]>
-      | T[number]
-      | Array<Stream<T[number]> | Array<T[number]> | T[number]>
-    >
-  >
+  ...sources: Array<MaybePromise<Stream<T[number]> | Array<T[number]> | T[number]>>
 ): Stream<T> {
   async function* generator() {
-    const resolvedInputs = await Promise.all(
-      streams.map(async (s) => (isPromiseLike(s) ? await s : s))
-    );
+    const resolvedInputs: any[] = [];
+    for (const src of sources) {
+      resolvedInputs.push(isPromiseLike(src) ? await src : src);
+    }
 
     const resolvedStreamsInput = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
       ? resolvedInputs[0]

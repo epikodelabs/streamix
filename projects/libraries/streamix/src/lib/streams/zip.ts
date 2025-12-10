@@ -14,13 +14,14 @@ import { eachValueFrom, fromAny } from '../converters';
  * @returns {Stream<T>} A new stream that emits a synchronized tuple of values.
  */
 export function zip<T extends readonly unknown[] = any[]>(
-  ...streams: Array<MaybePromise<Stream<T[number]> | Array<T[number]> | T[number]>>
+  ...sources: Array<MaybePromise<Stream<T[number]> | Array<T[number]> | T[number]>>
 ): Stream<T> {
 
   return createStream<T>('zip', async function* (): AsyncGenerator<T, void, unknown> {
-    const resolvedInputs = await Promise.all(
-      streams.map(async (s) => (isPromiseLike(s) ? await s : s))
-    );
+    const resolvedInputs: any[] = [];
+    for (const src of sources) {
+      resolvedInputs.push(isPromiseLike(src) ? await src : src);
+    }
 
     const normalizedStreams = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
       ? resolvedInputs[0]

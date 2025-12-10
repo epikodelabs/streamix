@@ -1,6 +1,6 @@
 import { createSubject, from, map } from '@actioncrew/streamix';
 
-describe('AsyncIterable streams', () => {
+describe('stream', () => {
   it('allows base streams to be consumed with for-await', async () => {
     const values: number[] = [];
 
