@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator, Stream, isPromiseLike } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, Operator, Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -39,7 +39,7 @@ export type RecurseOptions = {
  */
 export const recurse = <T = any>(
   condition: (value: T) => MaybePromise<boolean>,
-  project: (value: T) => (Stream<T> | MaybePromise<T> | Array<T>),
+  project: (value: T) => MaybePromise<Stream<T> | Array<T> | T>,
   options: RecurseOptions = {}
 ) =>
   createOperator<T, T>('recurse', function (this: Operator, source) {
@@ -52,7 +52,10 @@ export const recurse = <T = any>(
       const shouldRecurse = condition(value);
       if (isPromiseLike(shouldRecurse) ? !(await shouldRecurse) : !shouldRecurse) return;
 
-      for await (const child of eachValueFrom(fromAny(project(value)))) {
+      const projected = project(value);
+      const normalized = isPromiseLike(projected) ? await projected : projected;
+
+      for await (const child of eachValueFrom(fromAny(normalized))) {
         const item = { value: child, depth: depth + 1 };
         if (options.traversal === 'breadth') {
           queue.push(item);

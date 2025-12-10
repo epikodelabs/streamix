@@ -1,4 +1,4 @@
-import { createOperator, Operator, Stream } from '../abstractions';
+import { createOperator, MaybePromise, Operator, Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from '../streams';
 
@@ -19,7 +19,7 @@ import { createSubject } from '../streams';
  * should complete.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export function takeUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
+export function takeUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | R>) {
   return createOperator<T, T>('takeUntil', function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
     let stop = false;

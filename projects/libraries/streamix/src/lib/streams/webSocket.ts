@@ -1,7 +1,5 @@
 import { createStream, MaybePromise, Stream } from "../abstractions";
 
-type WebSocketFactory = (url: string) => MaybePromise<WebSocket>;
-
 /**
  * A stream that represents a WebSocket-like interface.
  * Extends a standard Stream with a `.send()` method to send messages.
@@ -30,7 +28,7 @@ export type WebSocketStream<T = any> = Stream<T> & {
  */
 export function webSocket<T = any>(
   url: MaybePromise<string>,
-  factory: WebSocketFactory = (u: string) => new WebSocket(u)
+  factory: (url: string) => MaybePromise<WebSocket> = (u: string) => new WebSocket(u)
 ): WebSocketStream<T> {
   const messageQueue: T[] = [];
   const sendQueue: T[] = [];
@@ -44,9 +42,8 @@ export function webSocket<T = any>(
   const initWebSocket = async () => {
     try {
       const resolvedUrl = isPromise(url) ? await url : (url as string);
-      const resolvedFactory = isPromise(factory) ? await factory : factory;
-
-      socket = await resolvedFactory(resolvedUrl);
+      const created = factory(resolvedUrl);
+      socket = isPromise(created) ? await created : created;
       setupSocketHandlers();
     } catch (error) {
       done = true;
@@ -58,7 +55,7 @@ export function webSocket<T = any>(
   };
 
   const isPromise = (v: any): v is Promise<any> => v && typeof v.then === "function";
-  
+
   const setupSocketHandlers = () => {
     if (!socket) return;
 

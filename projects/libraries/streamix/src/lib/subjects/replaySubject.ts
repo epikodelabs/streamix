@@ -40,7 +40,7 @@ export type ReplaySubject<T = any> = Subject<T>;
  * @param {number} [capacity=Infinity] The maximum number of past values to buffer and replay to new subscribers.
  * @returns {ReplaySubject<T>} A new ReplaySubject instance.
  */
-export function createReplaySubject<T = any>(capacity: number = Infinity): ReplaySubject<T> {
+export function createReplaySubject<T = any>(capacity: MaybePromise<number> = Infinity): ReplaySubject<T> {
   const buffer = createReplayBuffer<T>(capacity) as ReplayBuffer;
   let isCompleted = false;
   let hasError = false;

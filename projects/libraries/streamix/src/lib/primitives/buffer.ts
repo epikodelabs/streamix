@@ -1,3 +1,4 @@
+import { isPromiseLike, MaybePromise } from "../abstractions";
 import { createLock } from "./lock";
 import { createSemaphore } from "./semaphore";
 
@@ -255,6 +256,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     }
   };
 }
+
 /**
  * Creates a BehaviorSubject-like buffer.
  *
@@ -266,29 +268,49 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
  * @param {T} [initialValue] The optional initial value to hold upon creation.
  * @returns {SubjectBuffer<T>} A new SingleValueBuffer instance.
  */
-export function createBehaviorSubjectBuffer<T = any>(initialValue?: T): SubjectBuffer<T> {
+export function createBehaviorSubjectBuffer<T = any>(initialValue?: MaybePromise<T>): SubjectBuffer<T> {
   const subject = createSubjectBuffer<T>();
-  let currentValue: T | { __error: Error } | undefined = initialValue;
-  let hasCurrentValue = arguments.length > 0;
+  let currentValue: T | { __error: Error } | undefined;
+  let hasCurrentValue = false;
+  const hasInitial = arguments.length > 0;
+  
+  let initPromise: Promise<void> | null = null;
 
   // Track which readers need to receive the initial value
-  const behaviorReaders = new Map<number, boolean>(); // readerId -> hasReceivedInitialValue
-  
+  const behaviorReaders = new Map<number, boolean>();
+
   // Track completion state locally
   let isCompleted = false;
-  
+  let hasError = false;
+
   const lock = createLock();
 
   // Helper: detect error items
-  const isErrorItem = (x: any): x is { __error: Error } => 
+  const isErrorItem = (x: any): x is { __error: Error } =>
     x && typeof x === 'object' && '__error' in x;
+
+  // Handle initialization
+  if (hasInitial && isPromiseLike(initialValue)) {
+    // Async init only
+    initPromise = initialValue.then((resolved) => {
+      currentValue = resolved as T;
+      hasCurrentValue = true;
+      initPromise = null; // Clear after resolution
+    });
+  } else if (hasInitial) {
+    // Sync init
+    currentValue = initialValue as T;
+    hasCurrentValue = true;
+  }
 
   return {
     async write(value: T): Promise<void> {
+      if (initPromise) await initPromise;
       const release = await lock();
       try {
         if (isCompleted) throw new Error("Cannot write to completed buffer");
-        
+        if (hasError) throw new Error("Cannot write after error");
+
         currentValue = value;
         hasCurrentValue = true;
         await subject.write(value);
@@ -298,11 +320,12 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: T): SubjectB
     },
 
     async error(err: Error): Promise<void> {
+      if (initPromise) await initPromise;
       const release = await lock();
       try {
         if (isCompleted) throw new Error("Cannot error a completed buffer");
-        
-        // Store error as current value (wrapped) and write to buffer
+        hasError = true;
+
         const errorItem = { __error: err };
         currentValue = errorItem;
         hasCurrentValue = true;
@@ -313,15 +336,15 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: T): SubjectB
     },
 
     async attachReader(): Promise<number> {
+      if (initPromise) await initPromise;
       const release = await lock();
       try {
         const readerId = await subject.attachReader();
 
-        // BehaviorSubject semantics: track if reader needs initial value
         if (hasCurrentValue) {
-          behaviorReaders.set(readerId, false); // hasn't received initial value yet
+          behaviorReaders.set(readerId, false);
         } else {
-          behaviorReaders.set(readerId, true); // no initial value to receive
+          behaviorReaders.set(readerId, true);
         }
 
         return readerId;
@@ -329,8 +352,9 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: T): SubjectB
         release();
       }
     },
-    
+
     async detachReader(readerId: number): Promise<void> {
+      if (initPromise) await initPromise;
       const release = await lock();
       try {
         behaviorReaders.delete(readerId);
@@ -341,52 +365,38 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: T): SubjectB
     },
 
     async read(readerId: number): Promise<IteratorResult<T, void>> {
+      if (initPromise) await initPromise;
       const release = await lock();
       try {
         if (isCompleted) {
           return { value: undefined, done: true };
         }
-        
-        // Check if this reader needs to receive the initial/current value first
+
         const needsInitial = behaviorReaders.get(readerId) === false;
 
         if (needsInitial && hasCurrentValue) {
-          // Mark that this reader has now received the initial value
           behaviorReaders.set(readerId, true);
-          
-          // If current value is an error, throw it
+
           if (isErrorItem(currentValue)) {
             throw currentValue.__error;
           }
-          
+
           return { value: currentValue as T, done: false };
         }
       } finally {
         release();
       }
 
-      // Otherwise, delegate to the underlying subject
-      // (which will handle errors in the buffer and throw them)
       return await subject.read(readerId);
     },
 
     async peek(readerId: number): Promise<IteratorResult<T, void>> {
+      if (initPromise) await initPromise;
       const release = await lock();
       try {
-        // Check if reader needs initial value
         const needsInitial = behaviorReaders.get(readerId) === false;
-        
-        if (needsInitial && hasCurrentValue) {
-          // Don't mark as received for peek - it's non-consuming
-          if (isErrorItem(currentValue)) {
-            throw currentValue.__error;
-          }
-          return { value: currentValue as T, done: false };
-        }
 
-        // If reader has received initial value or no initial value exists,
-        // check if there's a current value to peek
-        if (hasCurrentValue && behaviorReaders.has(readerId)) {
+        if (needsInitial && hasCurrentValue) {
           if (isErrorItem(currentValue)) {
             throw currentValue.__error;
           }
@@ -400,6 +410,7 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: T): SubjectB
     },
 
     async complete(): Promise<void> {
+      if (initPromise) await initPromise;
       const release = await lock();
       try {
         isCompleted = true;
@@ -410,7 +421,7 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: T): SubjectB
     },
 
     completed(readerId: number): boolean {
-      if (isCompleted) {
+      if (isCompleted || hasError) {
         return true;
       }
       return subject.completed(readerId);
@@ -467,8 +478,9 @@ export function createNotifier() {
  * @param {number} capacity The maximum number of past values to buffer. Use `Infinity` for an unbounded buffer.
  * @returns {ReplayBuffer<T>} An object representing the replay buffer.
  */
-export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
-  const isInfinite = !isFinite(capacity);
+export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): ReplayBuffer<T> {
+  let resolvedCapacity: number | null = isPromiseLike(capacity) ? null : (capacity as number);
+  let isInfinite = resolvedCapacity === null ? false : !isFinite(resolvedCapacity);
   const buffer: (T | { __error: Error })[] = [];
 
   let writeIndex = 0;
@@ -476,6 +488,7 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
   let nextReaderId = 0;
   let isCompleted = false;
   let hasError = false;
+  let semaphore = resolvedCapacity === null ? undefined : (!isInfinite ? createSemaphore(resolvedCapacity) : undefined);
 
   type ReaderState = { offset: number };
   const readers = new Map<number, ReaderState>();
@@ -483,13 +496,20 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
   const notifier = createNotifier();
 
   const lock = createLock();
-  const semaphore = isInfinite ? undefined : createSemaphore(capacity);
+
+  const ensureCapacity = async () => {
+    if (resolvedCapacity !== null) return;
+    const resolved = isPromiseLike(capacity) ? await capacity : (capacity as number);
+    resolvedCapacity = resolved;
+    isInfinite = !isFinite(resolved);
+    semaphore = isInfinite ? undefined : createSemaphore(resolved);
+  };
 
   // Helper: detect error items
   const isErrorItem = (x: any): x is { __error: Error } => x && typeof x === 'object' && '__error' in x;
 
   // Map absolute index to circular index
-  const getIndex = (abs: number) => isInfinite ? abs : abs % capacity;
+  const getIndex = (abs: number) => isInfinite ? abs : abs % (resolvedCapacity ?? Infinity);
 
   // Release a slot when all readers have consumed it
   const releaseSlot = (abs: number) => {
@@ -507,7 +527,7 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
   const writeInternal = (item: T | { __error: Error }) => {
     const abs = totalWritten;
     buffer[getIndex(abs)] = item;
-    if (!isInfinite) writeIndex = (writeIndex + 1) % capacity;
+    if (!isInfinite && resolvedCapacity !== null) writeIndex = (writeIndex + 1) % resolvedCapacity;
     totalWritten++;
     if (readers.size > 0) slotCounters.set(abs, readers.size);
     notifier.signalAll();
@@ -517,9 +537,10 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
   async function write(value: T): Promise<void> {
     const release = await lock();
     try {
+      await ensureCapacity();
       if (isCompleted) throw new Error("Cannot write to completed buffer");
       if (hasError) throw new Error("Cannot write after error");
-      if (!isInfinite && totalWritten >= capacity && readers.size > 0) {
+      if (!isInfinite && resolvedCapacity !== null && totalWritten >= resolvedCapacity && readers.size > 0) {
         await semaphore!.acquire();
       }
       writeInternal(value);
@@ -532,6 +553,7 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
   async function error(err: Error): Promise<void> {
     const release = await lock();
     try {
+      await ensureCapacity();
       if (isCompleted) throw new Error("Cannot write error to completed buffer");
       hasError = true;
       writeInternal({ __error: err });
@@ -544,8 +566,9 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
   async function attachReader(): Promise<number> {
     const release = await lock();
     try {
+      await ensureCapacity();
       const id = nextReaderId++;
-      const start = Math.max(0, totalWritten - (isInfinite ? totalWritten : capacity));
+      const start = Math.max(0, totalWritten - (isInfinite ? totalWritten : (resolvedCapacity ?? totalWritten)));
       readers.set(id, { offset: start });
       return id;
     } finally {
@@ -593,6 +616,7 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
   async function complete(): Promise<void> {
     const release = await lock();
     try {
+      await ensureCapacity();
       isCompleted = true;
       notifier.signalAll();
       semaphore?.release();
@@ -605,6 +629,7 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
   const peek = async function(id: number): Promise<IteratorResult<T>> {
     const release = await lock();
     try {
+      await ensureCapacity();
       const st = readers.get(id);
 
       // Check if reader is detached
@@ -618,7 +643,7 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
       }
 
       const readPos = st.offset;
-      const idx = isInfinite ? readPos : readPos % capacity;
+      const idx = isInfinite ? readPos : readPos % (resolvedCapacity ?? Infinity);
       const item = buffer[idx];
 
       if (isErrorItem(item)) {
@@ -640,7 +665,8 @@ export function createReplayBuffer<T = any>(capacity: number): ReplayBuffer<T> {
   // Snapshot
   function getBuffer(): T[] {
     const res: T[] = [];
-    const start = Math.max(0, totalWritten - (isInfinite ? totalWritten : capacity));
+    const cap = resolvedCapacity ?? Infinity;
+    const start = Math.max(0, totalWritten - (isInfinite ? totalWritten : cap));
     for (let i = start; i < totalWritten; i++) {
       const item = buffer[getIndex(i)];
       if (!isErrorItem(item)) res.push(item as T);

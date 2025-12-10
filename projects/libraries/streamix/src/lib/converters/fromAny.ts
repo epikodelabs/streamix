@@ -1,5 +1,6 @@
-import { createStream, MaybePromise, Stream } from "../abstractions";
+import { createStream, MaybePromise, Stream, isPromiseLike } from "../abstractions";
 import { from } from "../streams";
+import { eachValueFrom } from "./eachValueFrom";
 
 /**
  * Converts a wide variety of input values into a {@link Stream}.
@@ -18,16 +19,40 @@ import { from } from "../streams";
  * a promise, or an array of values.
  * @returns A {@link Stream<R>} representing the given input.
  */
-export function fromAny<R = any>(value: Stream<R> | MaybePromise<R> | Array<R>): Stream<R> {
-  if (value && typeof value === 'object' && 'type' in value && ['stream', 'subject'].includes(value.type)) {
-    return value as Stream<R>;
+export function fromAny<R = any>(value: MaybePromise<Stream<R> | Array<R> | R>): Stream<R> {
+  // Fast path for immediate (non-promise) inputs
+  if (!isPromiseLike(value)) {
+    if (value && typeof value === 'object' && 'type' in value && ['stream', 'subject'].includes((value as any).type)) {
+      return value as Stream<R>;
+    }
+
+    if (Array.isArray(value)) {
+      return from(value);
+    }
+
+    return createStream("wrapped", async function* () {
+      yield value as R;
+    });
   }
 
-  if(Array.isArray(value)) {
-    return from(value);
-  }
-
+  // Promise-like input: resolve then normalize
   return createStream("wrapped", async function* () {
-    yield await (value as MaybePromise<R>);
+    const resolved = await value;
+
+    if (resolved && typeof resolved === 'object' && 'type' in (resolved as any) && ['stream', 'subject'].includes((resolved as any).type)) {
+      for await (const v of eachValueFrom(resolved as Stream<R>)) {
+        yield v;
+      }
+      return;
+    }
+
+    if (Array.isArray(resolved)) {
+      for (const v of resolved) {
+        yield v as R;
+      }
+      return;
+    }
+
+    yield resolved as R;
   });
 }
