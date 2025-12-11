@@ -1,4 +1,4 @@
-import { createSubject, eachValueFrom, Stream, unique } from '@actioncrew/streamix';
+import { createSubject, Stream, unique } from '@actioncrew/streamix';
 
 describe('unique', () => {
   let subject: ReturnType<typeof createSubject<any>>;
@@ -14,7 +14,7 @@ describe('unique', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(uniqueStream)) {
+      for await (const value of uniqueStream) {
         results.push(value);
       }
     })();
@@ -35,7 +35,7 @@ describe('unique', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(uniqueStream)) {
+      for await (const value of uniqueStream) {
         results.push(value);
       }
     })();
@@ -59,7 +59,7 @@ describe('unique', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(uniqueStream)) {
+      for await (const value of uniqueStream) {
         results.push(value);
       }
     })();
@@ -84,7 +84,7 @@ describe('unique', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(uniqueStream)) {
+      for await (const value of uniqueStream) {
         results.push(value);
       }
     })();
@@ -101,7 +101,7 @@ describe('unique', () => {
 
     (async () => {
       try {
-        for await (const _ of eachValueFrom(uniqueStream)) {
+        for await (const _ of uniqueStream) {
           void _;
         }
       } catch (err) {
@@ -120,7 +120,7 @@ describe('unique', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(uniqueStream)) {
+      for await (const value of uniqueStream) {
         results.push(value);
       }
     })();

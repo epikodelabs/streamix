@@ -1,4 +1,4 @@
-import { createSubject, eachValueFrom, elementAt, elementNth } from '@actioncrew/streamix';
+import { createSubject, elementAt, elementNth } from '@actioncrew/streamix';
 
 describe('elementNth', () => {
   let subject: any;
@@ -15,7 +15,7 @@ describe('elementNth', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(nthStream)) {
+      for await (const value of nthStream) {
         results.push(value);
       }
     })();
@@ -36,7 +36,7 @@ describe('elementNth', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(nthStream)) {
+      for await (const value of nthStream) {
         results.push(value);
       }
     })();
@@ -55,7 +55,7 @@ describe('elementNth', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(elementAtStream)) {
+      for await (const value of elementAtStream) {
         results.push(value);
       }
     })();
@@ -76,7 +76,7 @@ describe('elementNth', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(elementAtStream)) {
+      for await (const value of elementAtStream) {
         results.push(value);
       }
     })();

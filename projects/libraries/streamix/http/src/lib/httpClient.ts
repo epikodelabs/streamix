@@ -1,4 +1,4 @@
-import { createReplaySubject, createStream, eachValueFrom, Stream } from '@actioncrew/streamix';
+import { createReplaySubject, createStream, Stream } from '@actioncrew/streamix';
 
 /**
  * Represents a stream of HTTP responses.
@@ -400,7 +400,7 @@ export const useTimeout = (ms: number): Middleware => {
  *   const responseStream = client.get("/data", readJson);
  *
  *   try {
- *     for await (const value of eachValueFrom(responseStream)) {
+ *     for await (const value of responseStream) {
  *       console.log("Received data:", value);
  *     }
  *   } catch (error) {
@@ -423,7 +423,7 @@ export const useTimeout = (ms: number): Middleware => {
  *   const responseStream = client.post("/items");
  *
  *   try {
- *     for await (const value of eachValueFrom(responseStream)) {
+ *     for await (const value of responseStream) {
  *       console.log("Post response:", value);
  *     }
  *   } catch (error) {
@@ -557,7 +557,7 @@ export const createHttpClient = (): HttpClient => {
 
     const stream = createStream('httpData', async function* () {
       const ctx = await promise;
-      yield* await eachValueFrom(ctx.data!);
+      yield* ctx.data!;
     }) as HttpStream<T>;
 
     stream.abort = () => abortController.abort();

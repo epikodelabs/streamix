@@ -1,4 +1,4 @@
-import { compute, coroutine, eachValueFrom } from "@actioncrew/streamix";
+import { compute, coroutine } from "@actioncrew/streamix";
 import { idescribe } from "./env.spec";
 
 idescribe("compute", () => {
@@ -20,7 +20,7 @@ idescribe("compute", () => {
     const stream = compute<number>(co, 5);
 
     const results: number[] = [];
-    for await (const v of eachValueFrom(stream)) {
+    for await (const v of stream) {
       results.push(v);
     }
 
@@ -37,8 +37,8 @@ idescribe("compute", () => {
     const r1: number[] = [];
     const r2: number[] = [];
 
-    for await (const v of eachValueFrom(stream1)) r1.push(v);
-    for await (const v of eachValueFrom(stream2)) r2.push(v);
+    for await (const v of stream1) r1.push(v);
+    for await (const v of stream2) r2.push(v);
 
     expect(r1).toEqual([2]); // 1+1
     expect(r2).toEqual([6]); // 5+1
@@ -59,7 +59,7 @@ idescribe("compute", () => {
     const stream = compute(co, 99);
 
     try {
-      for await (const _ of eachValueFrom(stream)) {
+      for await (const _ of stream) {
         // should not reach here
       }
       fail("Expected error to be thrown");
@@ -80,7 +80,7 @@ idescribe("compute", () => {
     const stream = compute<number>(co, 4);
 
     const results: number[] = [];
-    for await (const v of eachValueFrom(stream)) {
+    for await (const v of stream) {
       results.push(v);
     }
 

@@ -1,4 +1,4 @@
-import { count, createSubject, eachValueFrom, max, min, Stream } from '@actioncrew/streamix';
+import { count, createSubject, max, min, Stream } from '@actioncrew/streamix';
 
 describe('min', () => {
   let subject: ReturnType<typeof createSubject<number>>;
@@ -14,7 +14,7 @@ describe('min', () => {
     const results: number[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(minStream)) {
+      for await (const value of minStream) {
         results.push(value);
       }
     })();
@@ -34,7 +34,7 @@ describe('min', () => {
 
     (async () => {
       try {
-        for await (const _ of eachValueFrom(minStream)) {}
+        for await (const _ of minStream) {}
       } catch (err) {
         error = err;
       }
@@ -61,7 +61,7 @@ describe('max', () => {
     const results: number[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(maxStream)) {
+      for await (const value of maxStream) {
         results.push(value);
       }
     })();
@@ -81,7 +81,7 @@ describe('max', () => {
 
     (async () => {
       try {
-        for await (const _ of eachValueFrom(maxStream)) {}
+        for await (const _ of maxStream) {}
       } catch (err) {
         error = err;
       }
@@ -108,7 +108,7 @@ describe('count', () => {
     const results: number[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(countStream)) {
+      for await (const value of countStream) {
         results.push(value);
       }
     })();
@@ -127,7 +127,7 @@ describe('count', () => {
     const results: number[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(countStream)) {
+      for await (const value of countStream) {
         results.push(value);
       }
     })();
@@ -144,7 +144,7 @@ describe('count', () => {
 
     (async () => {
       try {
-        for await (const _ of eachValueFrom(countStream)) {}
+        for await (const _ of countStream) {}
       } catch (err) {
         error = err;
       }

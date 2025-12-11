@@ -68,5 +68,5 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
       }
     })();
 
-    return eachValueFrom(output)[Symbol.asyncIterator]();
+    return eachValueFrom(output);
   });

@@ -1,4 +1,4 @@
-import { createStream, eachValueFrom, retry } from "@actioncrew/streamix";
+import { createStream, retry } from "@actioncrew/streamix";
 
 describe('retry', () => {
   it('should retry the stream once on error and emit correct values', async () => {
@@ -20,7 +20,7 @@ describe('retry', () => {
     const result: number[] = [];
     const stream$ = retry(factory, 3, 1000);
 
-    for await (const value of eachValueFrom(stream$)) {
+    for await (const value of stream$) {
       result.push(value);
     }
 
@@ -39,7 +39,7 @@ describe('retry', () => {
     const result: number[] = [];
     const stream$ = retry(factory, 3, 1000);
 
-    for await (const value of eachValueFrom(stream$)) {
+    for await (const value of stream$) {
       result.push(value);
     }
 
@@ -59,7 +59,7 @@ describe('retry', () => {
     const stream$ = retry(factory, 2, 500);
 
     try {
-      for await (const value of eachValueFrom(stream$)) {
+      for await (const value of stream$) {
         result.push(value);
       }
     } catch (error: any) {
@@ -88,7 +88,7 @@ describe('retry', () => {
     const stream$ = retry(factory, 3, 1000);
 
     try {
-      for await (const value of eachValueFrom(stream$)) {
+      for await (const value of stream$) {
         result.push(value);
       }
     } catch {

@@ -1,4 +1,4 @@
-import { eachValueFrom, expand, from } from '@actioncrew/streamix';
+import { expand, from } from '@actioncrew/streamix';
 
 describe('expand', () => {
   it('should handle errors thrown by the project function', async () => {
@@ -13,7 +13,7 @@ describe('expand', () => {
     let caughtError: Error | undefined;
 
     try {
-      for await (const value of eachValueFrom(stream.pipe(expand(project)))) {
+      for await (const value of stream.pipe(expand(project))) {
         result.push(value);
       }
     } catch (e) {
@@ -31,7 +31,7 @@ describe('expand', () => {
     };
 
     const result: number[] = [];
-    for await (const value of eachValueFrom(from([1]).pipe(expand(project)))) {
+    for await (const value of from([1]).pipe(expand(project))) {
       result.push(value);
     }
 
@@ -46,7 +46,7 @@ describe('expand', () => {
     };
 
     const result: number[] = [];
-    for await (const value of eachValueFrom(from([1]).pipe(expand(project, { traversal: 'breadth' })))) {
+    for await (const value of from([1]).pipe(expand(project, { traversal: 'breadth' }))) {
       result.push(value);
     }
 
@@ -57,9 +57,7 @@ describe('expand', () => {
     const project = (v: number) => from([v + 1]);
 
     const result: number[] = [];
-    for await (const value of eachValueFrom(
-      from([1]).pipe(expand(project, { maxDepth: 2 }))
-    )) {
+    for await (const value of from([1]).pipe(expand(project, { maxDepth: 2 }))) {
       result.push(value);
     }
 
@@ -71,9 +69,7 @@ describe('expand', () => {
     const project = (v: number) => from([v + 1]);
 
     const result: number[] = [];
-    for await (const value of eachValueFrom(
-      from([]).pipe(expand(project))
-    )) {
+    for await (const value of from([]).pipe(expand(project))) {
       result.push(value);
     }
 
@@ -87,7 +83,7 @@ describe('expand', () => {
     };
 
     const result: number[] = [];
-    for await (const value of eachValueFrom(from([1]).pipe(expand(project)))) {
+    for await (const value of from([1]).pipe(expand(project))) {
       result.push(value);
     }
 

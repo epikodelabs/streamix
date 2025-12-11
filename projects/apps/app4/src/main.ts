@@ -1,4 +1,4 @@
-import { catchError, eachValueFrom } from '@actioncrew/streamix';
+import { catchError } from '@actioncrew/streamix';
 import {
   createHttpClient,
   readChunks,
@@ -33,7 +33,7 @@ async function fetchData() {
   const responseStream = client.get('/data', readJson);
 
   try {
-    for await (const value of eachValueFrom(responseStream)) {
+    for await (const value of responseStream) {
       console.log('Received data:', value);
     }
   } catch (error) {
@@ -63,7 +63,7 @@ async function postData() {
   );
 
   try {
-    for await (const value of eachValueFrom(responseStream)) {
+    for await (const value of responseStream) {
       console.log('Post response:', value);
     }
   } catch (error) {
@@ -76,7 +76,7 @@ async function testBinary() {
   client.withDefaults(useBase('http://localhost:3000'));
   const responseStream = client.get('/binary', readFull);
   try {
-    for await (const value of eachValueFrom(responseStream)) {
+    for await (const value of responseStream) {
       console.log('Binary data:', value);
     }
   } catch (error) {
@@ -91,7 +91,7 @@ async function testNotFound() {
     .get('/not-found', readText)
     .pipe(catchError(() => console.log('Not found as expected')));
   try {
-    for await (const value of eachValueFrom(responseStream)) {
+    for await (const value of responseStream) {
       console.log('Not found response:', value);
     }
   } catch (error) {
@@ -106,7 +106,7 @@ async function testRedirect() {
 
   const responseStream = client.get('/auto-redirect', readJson);
   try {
-    for await (const value of eachValueFrom(responseStream)) {
+    for await (const value of responseStream) {
       console.log('Redirect response:', value);
     }
   } catch (error) {
@@ -121,7 +121,7 @@ async function testManualRedirect() {
 
   const responseStream = client.get('/manual-redirect', readJson);
   try {
-    for await (const value of eachValueFrom(responseStream)) {
+    for await (const value of responseStream) {
       console.log('Redirect response:', value);
     }
   } catch (error) {
@@ -137,7 +137,7 @@ async function testTimeout() {
     .get('/timeout', readText)
     .pipe(catchError(() => console.log('Timeout as expected')));
   try {
-    for await (const value of eachValueFrom(responseStream)) {
+    for await (const value of responseStream) {
       console.error('Error timeout response:', value);
     }
   } catch (error) {
@@ -170,7 +170,7 @@ async function testOllama() {
   let fullResponse = '';
 
   try {
-    for await (const value of eachValueFrom(responseStream)) {
+    for await (const value of responseStream) {
       if (value && value?.chunk?.response) {
         fullResponse += value.chunk.response;
       }

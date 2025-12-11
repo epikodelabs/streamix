@@ -1,4 +1,4 @@
-import { createSubject, distinctUntilKeyChanged, eachValueFrom, Stream } from '@actioncrew/streamix';
+import { createSubject, distinctUntilKeyChanged, Stream } from '@actioncrew/streamix';
 
 describe('distinctUntilKeyChanged', () => {
   let subject: ReturnType<typeof createSubject<any>>;
@@ -14,7 +14,7 @@ describe('distinctUntilKeyChanged', () => {
     const results: any[] = [];
 
     const consumptionPromise = (async () => {
-      for await (const value of eachValueFrom(distinctStream)) {
+      for await (const value of distinctStream) {
         results.push(value);
       }
     })();
@@ -40,7 +40,7 @@ describe('distinctUntilKeyChanged', () => {
     const results: any[] = [];
 
     const consumptionPromise = (async () => {
-      for await (const value of eachValueFrom(distinctStream)) {
+      for await (const value of distinctStream) {
         results.push(value);
       }
     })();
@@ -62,7 +62,7 @@ describe('distinctUntilKeyChanged', () => {
     const results: any[] = [];
 
     const consumptionPromise = (async () => {
-      for await (const value of eachValueFrom(distinctStream)) {
+      for await (const value of distinctStream) {
         results.push(value);
       }
     })();
@@ -80,7 +80,7 @@ describe('distinctUntilKeyChanged', () => {
 
     const consumptionPromise = (async () => {
       try {
-        for await (const _ of eachValueFrom(distinctStream)) {
+        for await (const _ of distinctStream) {
           void _;
         }
       } catch (err) {

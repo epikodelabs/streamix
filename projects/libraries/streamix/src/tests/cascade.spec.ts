@@ -1,4 +1,4 @@
-import { cascade, coroutine, createStream, eachValueFrom } from "@actioncrew/streamix";
+import { cascade, coroutine, createStream } from "@actioncrew/streamix";
 import { idescribe } from "./env.spec";
 
 idescribe("cascade", () => {
@@ -27,7 +27,7 @@ idescribe("cascade", () => {
     const cascaded = cascade(c1, c2);
 
     const results: number[] = [];
-    for await (const v of eachValueFrom(stream.pipe(cascaded))) {
+    for await (const v of stream.pipe(cascaded)) {
       results.push(v);
     }
 

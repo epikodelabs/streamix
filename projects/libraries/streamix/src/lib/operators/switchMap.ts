@@ -86,7 +86,6 @@ export function switchMap<T = any, R = any>(
       }
     })();
 
-    const iterable = eachValueFrom<R>(output);
-    return iterable[Symbol.asyncIterator]();
+    return eachValueFrom(output);
   });
 }

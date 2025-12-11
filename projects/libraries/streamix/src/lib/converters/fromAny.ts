@@ -1,6 +1,5 @@
 import { createStream, MaybePromise, Stream, isPromiseLike } from "../abstractions";
 import { from } from "../streams";
-import { eachValueFrom } from "./eachValueFrom";
 
 /**
  * Converts a wide variety of input values into a {@link Stream}.
@@ -40,7 +39,7 @@ export function fromAny<R = any>(value: MaybePromise<Stream<R> | Array<R> | R>):
     const resolved = await value;
 
     if (resolved && typeof resolved === 'object' && 'type' in (resolved as any) && ['stream', 'subject'].includes((resolved as any).type)) {
-      for await (const v of eachValueFrom(resolved as Stream<R>)) {
+      for await (const v of resolved as Stream<R>) {
         yield v;
       }
       return;

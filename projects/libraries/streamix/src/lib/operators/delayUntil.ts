@@ -82,6 +82,6 @@ export function delayUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | Ar
       }
     })();
 
-    return eachValueFrom(output)[Symbol.asyncIterator]();
+    return eachValueFrom(output);
   });
 }

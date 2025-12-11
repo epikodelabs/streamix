@@ -4,14 +4,15 @@ import { createSubject } from '../streams';
 
 /**
  * Creates a stream operator that emits the latest value from the source stream
- * at most once per specified duration, while managing pending and phantom states.
+ * at most once per specified duration.
  *
- * Every value is added to the PipeContext.pendingResults set. If a new value arrives
- * while the timer is active, the previous value is marked as phantom and removed
- * from pending. The last value is resolved when emitted downstream or upon completion.
+ * Each incoming value is stored as the "latest"; a timer emits that latest value
+ * when the duration elapses. If the source completes before emission, the last
+ * buffered value is flushed before completing.
  *
  * @template T The type of the values in the stream.
- * @param duration The time in milliseconds to wait before emitting the latest value.
+ * @param duration The time in milliseconds (or a promise resolving to it) to wait
+ * before emitting the latest value. The duration is resolved once when the operator starts.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const audit = <T = any>(duration: MaybePromise<number>) =>
@@ -71,6 +72,5 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
       }
     })();
 
-    const iterable = eachValueFrom<T>(output);
-    return iterable[Symbol.asyncIterator]();
+    return eachValueFrom(output);
   });

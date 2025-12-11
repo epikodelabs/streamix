@@ -49,7 +49,6 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
             output.next(result.value);
             lastEmit = now;
           } else {
-
             pendingResult = result;
 
             // Schedule trailing emit
@@ -60,7 +59,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
           }
         }
 
-        // Source completed → flush trailing pending
+        // Source completed – flush trailing pending
         if (pendingResult !== undefined) flushPending();
       } catch (err) {
         output.error(err);
@@ -73,5 +72,5 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
       }
     })();
 
-    return eachValueFrom(output)[Symbol.asyncIterator]();
+    return eachValueFrom(output);
   });

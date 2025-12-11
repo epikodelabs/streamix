@@ -1,4 +1,4 @@
-import { createSubject, eachValueFrom, Stream, toArray } from '@actioncrew/streamix';
+import { createSubject, Stream, toArray } from '@actioncrew/streamix';
 
 describe('toArray', () => {
   let subject: ReturnType<typeof createSubject<number>>;
@@ -14,7 +14,7 @@ describe('toArray', () => {
     const results: number[][] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(toArrayStream)) {
+      for await (const value of toArrayStream) {
         results.push(value);
       }
     })();
@@ -33,7 +33,7 @@ describe('toArray', () => {
     const results: number[][] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(toArrayStream)) {
+      for await (const value of toArrayStream) {
         results.push(value);
       }
     })();
@@ -50,7 +50,7 @@ describe('toArray', () => {
 
     (async () => {
       try {
-        for await (const _ of eachValueFrom(toArrayStream)) {
+        for await (const _ of toArrayStream) {
           void _;
         }
       } catch (err) {
@@ -69,7 +69,7 @@ describe('toArray', () => {
     const results: number[][] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(toArrayStream)) {
+      for await (const value of toArrayStream) {
         results.push(value);
       }
     })();
@@ -88,7 +88,7 @@ describe('toArray', () => {
     const results: number[][] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(toArrayStream)) {
+      for await (const value of toArrayStream) {
         results.push(value);
       }
     })();

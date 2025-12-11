@@ -22,10 +22,12 @@ import { createSubject } from "../streams";
  *
  * The operator is "gated" and will not emit any values until all provided streams
  * have emitted at least one value.
+ * Inputs may be streams, plain values, arrays, or promises of those shapes; a single
+ * array argument is treated the same as passing values variadically.
  *
  * @template T The type of the values in the source stream.
  * @template R The tuple type of the values from the other streams (e.g., [R1, R2, R3]).
- * @param streams Streams to combine with the source stream.
+ * @param streams Streams (or values/arrays/promises) to combine with the source stream.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  * The output stream emits tuples of `[T, ...R]`.
  */
@@ -147,7 +149,6 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
     };
 
     // Return the async iterator for stream piping compatibility
-    const iterable = eachValueFrom<[T, ...R]>(output);
-    return iterable[Symbol.asyncIterator]();
+    return eachValueFrom(output);
   });
 }

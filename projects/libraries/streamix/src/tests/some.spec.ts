@@ -1,4 +1,4 @@
-import { createSubject, eachValueFrom, some, Stream } from '@actioncrew/streamix';
+import { createSubject, some, Stream } from '@actioncrew/streamix';
 
 describe('some', () => {
   let subject: ReturnType<typeof createSubject<number>>;
@@ -15,7 +15,7 @@ describe('some', () => {
     const results: boolean[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(someStream)) {
+      for await (const value of someStream) {
         results.push(value);
       }
     })();
@@ -35,7 +35,7 @@ describe('some', () => {
     const results: boolean[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(someStream)) {
+      for await (const value of someStream) {
         results.push(value);
       }
     })();
@@ -54,7 +54,7 @@ describe('some', () => {
     const results: boolean[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(someStream)) {
+      for await (const value of someStream) {
         results.push(value);
       }
     })();
@@ -72,7 +72,7 @@ describe('some', () => {
 
     (async () => {
       try {
-        for await (const _ of eachValueFrom(someStream)) {}
+        for await (const _ of someStream) {}
       } catch (err) {
         error = err;
       }
@@ -90,7 +90,7 @@ describe('some', () => {
     let completed = false;
 
     (async () => {
-      for await (const _ of eachValueFrom(someStream)) {
+      for await (const _ of someStream) {
         completed = true;
       }
     })();
@@ -109,7 +109,7 @@ describe('some', () => {
     let completed = false;
 
     (async () => {
-      for await (const _ of eachValueFrom(someStream)) {
+      for await (const _ of someStream) {
         completed = true;
       }
     })();
