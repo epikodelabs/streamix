@@ -1,4 +1,4 @@
-import { eachValueFrom, firstValueFrom } from "../converters";
+import { firstValueFrom } from "../converters";
 import { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, Receiver } from "./receiver";
 import { scheduler } from "./scheduler";
@@ -290,7 +290,7 @@ export function createStream<T>(
 
     (async () => {
       const signal = abortController.signal;
-      const iterator = eachValueFrom(generatorFn());
+      const iterator = generatorFn()[Symbol.asyncIterator]();
 
       try {
         await drainIterator(iterator, getActiveReceivers, signal);
@@ -389,7 +389,7 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
   function registerReceiver(receiver: Receiver<any>): Subscription {
     const wrapped = wrapReceiver(receiver);
 
-    const sourceIterator = eachValueFrom(source) as AsyncIterator<TIn>;
+    const sourceIterator = (source)[Symbol.asyncIterator]();
 
     let iterator: AsyncIterator<any> = sourceIterator;
     for (const op of operators) iterator = op.apply(iterator);
