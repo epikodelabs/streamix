@@ -35,13 +35,19 @@ export function inspectable<T>(source: Stream<T>): InspectableStream<T> {
   // Root StreamContext for the source stream itself
   const rootContext = createStreamContext(pipelineContext, source);
 
-  // Helper to patch operator with context
-  function patchOperatorWithContext<T, R>(op: Operator<T, R>, ctx: PipelineContext): Operator<T, R> {
+  // Helper to register operator with context
+  function registerOperator<T, R>(op: Operator<T, R>, ctx: PipelineContext): void {
     if (!ctx.operators.includes(op)) {
       ctx.operators.push(op);
     }
-    return op;
   }
+
+  // Create a no-op operator for logging when there are no operators
+  const noopOperator: Operator = {
+    name: 'noop',
+    type: 'operator',
+    apply: (source) => source
+  };
 
   function createInspectableStream<S>(
     upstream: Stream<any>,
@@ -67,9 +73,9 @@ export function inspectable<T>(source: Stream<T>): InspectableStream<T> {
         const receiver = createReceiver(cb);
         let iterator: AsyncIterator<any> = eachValueFrom(upstream)[Symbol.asyncIterator]();
 
-        // Apply operators - register them with context first
+        // Register and apply operators
         for (const op of operators) {
-          patchOperatorWithContext(op, parentContext);
+          registerOperator(op, parentContext);
           iterator = op.apply(iterator);
         }
 
@@ -95,13 +101,13 @@ export function inspectable<T>(source: Stream<T>): InspectableStream<T> {
               if (result.done) break;
 
               const streamResult = streamContext.createResult({ value: result.value });
-              const lastOp = operators.length > 0 ? operators[operators.length - 1] : null;
+              const lastOp = operators.length > 0 ? operators[operators.length - 1] : noopOperator;
               streamContext.logFlow('resolved', lastOp, streamResult, 'Emitted value');
 
               await receiver.next?.(result.value);
             }
           } catch (err: any) {
-            const lastOp = operators.length > 0 ? operators[operators.length - 1] : null;
+            const lastOp = operators.length > 0 ? operators[operators.length - 1] : noopOperator;
             streamContext.logFlow('error', lastOp, undefined, String(err));
             await receiver.error?.(err);
           } finally {
@@ -165,12 +171,12 @@ export function inspectable<T>(source: Stream<T>): InspectableStream<T> {
             if (result.done) break;
 
             const streamResult = rootContext.createResult({ value: result.value });
-            rootContext.logFlow('resolved', null, streamResult, 'Emitted value');
+            rootContext.logFlow('resolved', noopOperator, streamResult, 'Emitted value');
 
             await receiver.next?.(result.value);
           }
         } catch (err: any) {
-          rootContext.logFlow('error', null, undefined, String(err));
+          rootContext.logFlow('error', noopOperator, undefined, String(err));
           await receiver.error?.(err);
         } finally {
           await receiver.complete?.();
