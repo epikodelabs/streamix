@@ -1,4 +1,4 @@
-import { MaybePromise, Stream } from '../abstractions';
+import { MaybePromise, Operator, Stream } from '../abstractions';
 import { recurse, RecurseOptions } from './recurse';
 
 /**
@@ -22,7 +22,7 @@ import { recurse, RecurseOptions } from './recurse';
 export const expand = <T = any>(
   project: (value: T) => MaybePromise<Stream<T> | Array<T> | T>,
   options: RecurseOptions = {}
-) =>
+): Operator<T, T> =>
   recurse<T>(
     () => true,
     project,
