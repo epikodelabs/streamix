@@ -1,4 +1,4 @@
-import { CallbackReturnType, StreamContext } from "@actioncrew/streamix";
+import { MaybePromise, StreamContext } from "@actioncrew/streamix";
 
 /**
  * Enhanced subscription lifecycle states for comprehensive inspection.
@@ -85,7 +85,7 @@ export interface InspectableSubscription extends Subscription {
 /**
  * Hook function for custom subscription inspection and monitoring.
  */
-export type SubscriptionInspectionHook = (event: SubscriptionEvent, subscription: InspectableSubscription) => CallbackReturnType;
+export type SubscriptionInspectionHook = (event: SubscriptionEvent, subscription: InspectableSubscription) => MaybePromise;
 
 /**
  * Represents a subscription to a stream-like source with enhanced inspection capabilities.
@@ -94,7 +94,7 @@ export type Subscription = {
   /** A boolean flag indicating whether the subscription has been terminated */
   readonly unsubscribed: boolean;
   /** Terminates the subscription and any associated listening process */
-  unsubscribe(): CallbackReturnType;
+  unsubscribe(): MaybePromise;
 };
 
 /**
@@ -174,7 +174,7 @@ class SubscriptionRegistry {
  * Integrates with the existing context management and flow logging system.
  */
 export function createInspectableSubscription(
-  onUnsubscribe?: () => CallbackReturnType,
+  onUnsubscribe?: () => MaybePromise,
   streamContext?: StreamContext,
   options: {
     enableInspection?: boolean;
@@ -356,7 +356,7 @@ export function createInspectableSubscription(
  * Creates a basic subscription (legacy compatibility).
  */
 export function createSubscription(
-  onUnsubscribe?: () => CallbackReturnType
+  onUnsubscribe?: () => MaybePromise
 ): Subscription {
   const inspectable = createInspectableSubscription(onUnsubscribe, undefined, {
     enableInspection: false
