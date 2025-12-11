@@ -1,5 +1,5 @@
 import { createStream, MaybePromise, Stream } from "../abstractions";
-import { fromAny } from "../converters";
+import { eachValueFrom, fromAny } from "../converters";
 
 /**
  * Returns a stream that races multiple input streams.
@@ -25,7 +25,7 @@ export function race<T extends readonly unknown[] = any[]>(
     if (!resolvedStreams || resolvedStreams.length === 0) return;
 
     const controllers = new Array(resolvedStreams.length).fill(null).map(() => new AbortController());
-    const iterators = resolvedStreams.map((s) => fromAny(s)[Symbol.asyncIterator]());
+    const iterators = resolvedStreams.map((s) => eachValueFrom(fromAny(s)));
 
     try {
       while (true) {

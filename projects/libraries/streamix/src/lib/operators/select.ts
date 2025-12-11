@@ -1,22 +1,14 @@
 import { createOperator, Operator } from "../abstractions";
 
-function toStreamGenerator<T>(gen: AsyncGenerator<T>): AsyncGenerator<T> {
-  const iterator = gen as unknown as AsyncGenerator<T>;
-  iterator[Symbol.asyncIterator] = () => iterator;
-  return iterator;
-}
-
 /**
  * Creates a stream operator that emits only the values at the specified indices from a source stream.
  *
  * This operator takes an `indexIterator` (which can be a synchronous or asynchronous iterator
  * of numbers) and uses it to determine which values from the source stream should be emitted.
- * It effectively acts as a filter, but one that operates on the position of the elements
- * rather than their content.
- *
- * The operator consumes the source stream and internally buffers its values. At the same time,
- * it pulls indices from the provided iterator. When the current element's index matches an index
- * from the iterator, the element is emitted. This allows for flexible and dynamic data sampling.
+ * It acts as a positional filter: each source value is inspected once, and if its zero-based
+ * index matches the next index yielded by `indexIterator`, that value is emitted. No buffering
+ * of past values occurs. If the iterator completes, the operator completes regardless of
+ * remaining source values.
  *
  * @template T The type of the values in the source and output streams.
  * @param indexIterator An iterator or async iterator that provides the zero-based indices
@@ -46,18 +38,19 @@ export const select = <T = any>(
 
     const asyncIndexIterator = toAsyncIterator(indexIterator);
 
-    let currentIndex = 0;
-    let nextTargetIndexPromise = asyncIndexIterator.next();
-
     async function* generator() {
+      let currentIndex = 0;
+      let nextTargetIndexPromise = asyncIndexIterator.next();
+
       while (true) {
         const result: IteratorResult<T> = await source.next();
         if (result.done) break;
 
-        const nextTargetIndex = (await nextTargetIndexPromise).value;
-        const indexDone = (await nextTargetIndexPromise).done;
+        const targetIndexResult = await nextTargetIndexPromise;
+        
+        if (targetIndexResult.done) return;
 
-        if (indexDone) return;
+        const nextTargetIndex = targetIndexResult.value;
 
         if (currentIndex === nextTargetIndex) {
           yield result.value;
@@ -70,5 +63,6 @@ export const select = <T = any>(
       }
     }
 
-    return toStreamGenerator(generator())[Symbol.asyncIterator]();
+    // Return the async iterator directly - operators work with AsyncIterator<T>
+    return generator();
   });

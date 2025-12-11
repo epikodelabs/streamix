@@ -24,8 +24,7 @@ export function iif<T = any>(
     const resolvedCondition = isPromiseLike(conditionResult) ? await conditionResult : conditionResult;
     const chosen = resolvedCondition ? trueStream : falseStream;
     const resolvedChosen = isPromiseLike(chosen) ? await chosen : chosen;
-    const asyncIterable = eachValueFrom<T>(fromAny(resolvedChosen));
-    const iterator = asyncIterable[Symbol.asyncIterator]();
+    const iterator = eachValueFrom(fromAny<T>(resolvedChosen));
 
     try {
       while (true) {

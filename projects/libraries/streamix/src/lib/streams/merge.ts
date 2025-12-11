@@ -35,7 +35,7 @@ export function merge<T = any, R extends readonly unknown[] = any[]>(
         resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
 
-    const iterators = resolvedSources.map(s => eachValueFrom(fromAny(s))[Symbol.asyncIterator]());
+    const iterators = resolvedSources.map(s => eachValueFrom(fromAny(s)));
     const nextPromises: Array<Promise<IteratorResult<T>> | null> = iterators.map(it => it.next());
     let activeCount = iterators.length;
 

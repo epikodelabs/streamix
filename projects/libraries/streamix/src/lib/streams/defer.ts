@@ -20,7 +20,7 @@ export function defer<T = any>(factory: () => MaybePromise<(Stream<T> | Array<T>
     const innerStream = isPromiseLike(produced) ? await produced : produced;
 
     try {
-      const iterator = eachValueFrom<T>(fromAny(innerStream));
+      const iterator = eachValueFrom(fromAny<T>(innerStream));
       try {
         for await (const value of iterator) {
           yield value;

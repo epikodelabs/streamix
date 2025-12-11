@@ -1,4 +1,4 @@
-import { createSubject, eachValueFrom, sample } from '@actioncrew/streamix';
+import { createSubject, sample } from '@actioncrew/streamix';
 
 describe("sample", () => {
   let subject: any;
@@ -13,7 +13,7 @@ describe("sample", () => {
     const results: number[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(sampled)) {
+      for await (const value of sampled) {
         results.push(value);
       }
     })();
@@ -36,7 +36,7 @@ describe("sample", () => {
     let completed = false;
 
     (async () => {
-      for await (const _ of eachValueFrom(sampled)) {
+      for await (const _ of sampled) {
         void _;
       }
       completed = true;
@@ -55,7 +55,7 @@ describe("sample", () => {
     const results: number[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(sampled)) {
+      for await (const value of sampled) {
         results.push(value);
       }
     })();
@@ -71,7 +71,7 @@ describe("sample", () => {
     const results: number[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(sampled)) {
+      for await (const value of sampled) {
         results.push(value);
       }
     })();

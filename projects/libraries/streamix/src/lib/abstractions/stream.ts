@@ -1,4 +1,4 @@
-import { firstValueFrom } from "../converters";
+import { eachValueFrom, firstValueFrom } from "../converters";
 import { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, Receiver } from "./receiver";
 import { scheduler } from "./scheduler";
@@ -14,8 +14,8 @@ import { createSubscription, Subscription } from "./subscription";
  * - **Async iteration** via `for await...of`.
  *
  * Two variants exist:
- * - `"stream"` — automatically driven, typically created by `createStream()`.
- * - `"subject"` — manually driven (not implemented here but retained for API symmetry).
+ * - `"stream"`: automatically driven, typically created by `createStream()`.
+ * - `"subject"`: manually driven (not implemented here but retained for API symmetry).
  *
  * @template T The value type emitted by the stream.
  */
@@ -156,7 +156,7 @@ export function createAsyncGenerator<T = any>(
 
 /**
  * Wraps a `Receiver<T>` so all lifecycle callbacks (`next`, `error`, `complete`)
- * run inside the scheduler’s microtask queue.
+ * run inside the scheduler's microtask queue.
  *
  * Guarantees:
  * - All user callbacks are async-scheduled.
@@ -290,7 +290,7 @@ export function createStream<T>(
 
     (async () => {
       const signal = abortController.signal;
-      const iterator = generatorFn()[Symbol.asyncIterator]();
+      const iterator = eachValueFrom(generatorFn());
 
       try {
         await drainIterator(iterator, getActiveReceivers, signal);
@@ -389,7 +389,7 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
   function registerReceiver(receiver: Receiver<any>): Subscription {
     const wrapped = wrapReceiver(receiver);
 
-    const sourceIterator = source[Symbol.asyncIterator]() as AsyncIterator<TIn>;
+    const sourceIterator = eachValueFrom(source) as AsyncIterator<TIn>;
 
     let iterator: AsyncIterator<any> = sourceIterator;
     for (const op of operators) iterator = op.apply(iterator);

@@ -52,7 +52,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
     if (isSync) {
       if (!output) output = createReplaySubject<T>(resolvedSize!);
       if (!isConnected) connectSource(source);
-      return eachValueFrom<T>(output)[Symbol.asyncIterator]();
+      return eachValueFrom(output);
     }
 
     // Long path: Promise, wrap in async generator
@@ -62,7 +62,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       }
       if (!output) output = createReplaySubject<T>(resolvedSize);
       if (!isConnected) connectSource(source);
-      yield* eachValueFrom<T>(output);
+      yield* eachValueFrom(output);
     })();
   });
 }

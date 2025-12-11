@@ -32,7 +32,7 @@ export function zip<T extends readonly unknown[] = any[]>(
     const iterators = await Promise.all(
       normalizedStreams.map(async (s) => {
         const streamSource = isPromiseLike(s) ? await s : s;
-        return eachValueFrom(fromAny(streamSource))[Symbol.asyncIterator]();
+        return eachValueFrom(fromAny(streamSource));
       })
     );
 

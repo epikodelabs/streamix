@@ -38,7 +38,7 @@ export function mergeMap<T = any, R = any>(
     // Process each inner stream concurrently.
     const processInner = async (innerStream: Stream<R>) => {
       try {
-        for await (const val of eachValueFrom(innerStream)) {
+        for await (const val of innerStream) {
           if (errorOccurred) break;
           output.next(val);
         }
@@ -81,6 +81,6 @@ export function mergeMap<T = any, R = any>(
       }
     })();
 
-    return eachValueFrom<R>(output);
+    return eachValueFrom(output);
   });
 }

@@ -40,7 +40,7 @@ export const concatMap = <T = any, R = T>(
 
             const projected = project(result.value, outerIndex++);
             const normalized = isPromiseLike(projected) ? await projected : projected;
-            innerIterator = eachValueFrom<R>(fromAny(normalized));
+            innerIterator = eachValueFrom(fromAny<R>(normalized));
           }
 
           // Pull next value from inner stream

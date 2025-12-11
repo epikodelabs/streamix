@@ -1,4 +1,4 @@
-import { concat, createStream, eachValueFrom, from } from '@actioncrew/streamix';
+import { concat, createStream, from } from '@actioncrew/streamix';
 
 
 describe('concat', () => {
@@ -73,7 +73,7 @@ describe('concat', () => {
     let caughtError: any = null;
 
     try {
-      for await (const _ of eachValueFrom(concatenated)) {
+      for await (const _ of concatenated) {
         // do nothing, just consume
       }
     } catch (err) {

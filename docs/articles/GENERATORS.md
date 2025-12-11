@@ -64,7 +64,7 @@ async function* fetchUserData(userId) {
 I still loved operators, so Streamix was the perfect fit — Rx-style operators applied to generator streams:
 
 ```typescript
-import { Stream, debounceTime, distinctUntilChanged, eachValueFrom } from '@actioncrew/streamix';
+import { Stream, debounceTime, distinctUntilChanged } from '@actioncrew/streamix';
 
 async function* searchFeature(searchInput: Stream<string>) {
   const processed = searchInput.pipe(
@@ -72,7 +72,7 @@ async function* searchFeature(searchInput: Stream<string>) {
     distinctUntilChanged()
   );
 
-  for await (const query of eachValueFrom(processed)) {
+  for await (const query of processed) {
     if (query.trim()) {
       const results = await searchAPI(query);
       yield* results;
@@ -100,7 +100,7 @@ Generator pipeline (readable and testable):
 
 ```typescript
 async function* buildUserDashboard(userId$: Stream<T>) {
-  for await (const id of eachValueFrom(userId$)) {
+  for await (const id of userId$) {
     const profile = await getUserProfile(id);
     const posts = await getUserPosts(id);
     yield { id, profile, posts };
@@ -164,7 +164,7 @@ async function* search(searchInput: Stream<T>) {
     distinctUntilChanged()
   );
 
-  for await (const query of eachValueFrom(debounced)) {
+  for await (const query of debounced) {
     if (query) {
       try {
         yield* await searchAPI(query);
@@ -201,7 +201,7 @@ Not every async operation needs another observable.
 ## 🎪 **Try It Yourself**
 
 ```javascript
-import { pipe, map, filter, take, eachValueFrom } from '@actioncrew/streamix';
+import { pipe, map, filter, take } from '@actioncrew/streamix';
 
 async function* processData() {
   const numbers = from([1,2,3,4,5,6,7,8,9,10]).pipe(
@@ -209,7 +209,7 @@ async function* processData() {
     map(n => n * 2),
     take(3)
   );
-  yield* eachValueFrom(numbers); // 4, 8, 12
+  yield* numbers; // 4, 8, 12
 }
 ```
 

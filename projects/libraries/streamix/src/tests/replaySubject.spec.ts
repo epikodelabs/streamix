@@ -1,4 +1,4 @@
-import { createReplayBuffer, createReplaySubject, createSemaphore, eachValueFrom } from '@actioncrew/streamix';
+import { createReplayBuffer, createReplaySubject, createSemaphore } from '@actioncrew/streamix';
 
 describe('createReplaySubject', () => {
   it('should emit values to subscribers in real-time as well as replay buffered values', async () => {
@@ -36,7 +36,7 @@ describe('createReplaySubject', () => {
     subject.next(3);
 
     const result: number[] = [];
-    for await (const value of eachValueFrom(subject)) {
+    for await (const value of subject) {
       result.push(value);
       if (result.length === 3) break;
     }
@@ -52,7 +52,7 @@ describe('createReplaySubject', () => {
     subject.next(3); // buffer = [2, 3]
 
     const result: number[] = [];
-    for await (const value of eachValueFrom(subject)) {
+    for await (const value of subject) {
       result.push(value);
       if (result.length === 2) break;
     }

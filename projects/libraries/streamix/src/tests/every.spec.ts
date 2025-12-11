@@ -1,4 +1,4 @@
-import { createSubject, eachValueFrom, every, Stream } from '@actioncrew/streamix';
+import { createSubject, every, Stream } from '@actioncrew/streamix';
 
 describe('every', () => {
   let subject: ReturnType<typeof createSubject<number>>;
@@ -15,7 +15,7 @@ describe('every', () => {
     const results: boolean[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(everyStream)) {
+      for await (const value of everyStream) {
         results.push(value);
       }
     })();
@@ -35,7 +35,7 @@ describe('every', () => {
     const results: boolean[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(everyStream)) {
+      for await (const value of everyStream) {
         results.push(value);
       }
     })();
@@ -54,7 +54,7 @@ describe('every', () => {
     const results: boolean[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(everyStream)) {
+      for await (const value of everyStream) {
         results.push(value);
       }
     })();
@@ -72,7 +72,7 @@ describe('every', () => {
 
     (async () => {
       try {
-        for await (const _ of eachValueFrom(everyStream)) {
+        for await (const _ of everyStream) {
           void _;
         }
       } catch (err) {
@@ -92,7 +92,7 @@ describe('every', () => {
     let completed = false;
 
     (async () => {
-      for await (const _ of eachValueFrom(everyStream)) {
+      for await (const _ of everyStream) {
         void _;
         completed = true;
       }
@@ -112,7 +112,7 @@ describe('every', () => {
     let completed = false;
 
     (async () => {
-      for await (const _ of eachValueFrom(everyStream)) {
+      for await (const _ of everyStream) {
         void _;
         completed = true;
       }

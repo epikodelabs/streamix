@@ -1,4 +1,4 @@
-import { bufferCount, createSubject, eachValueFrom, Stream } from "@actioncrew/streamix";
+import { bufferCount, createSubject, Stream } from "@actioncrew/streamix";
 
 describe("bufferCount", () => {
   let source: Stream<number>;
@@ -14,7 +14,7 @@ describe("bufferCount", () => {
     const results: number[][] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(buffered)) {
+      for await (const value of buffered) {
         results.push(value);
       }
     })();
@@ -36,7 +36,7 @@ describe("bufferCount", () => {
     const results: number[][] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(buffered)) {
+      for await (const value of buffered) {
         results.push(value);
       }
     })();
@@ -55,7 +55,7 @@ describe("bufferCount", () => {
 
     (async () => {
       try {
-        for await (const _ of eachValueFrom(buffered)) {
+        for await (const _ of buffered) {
           void _;
         }
       } catch (err) {
@@ -74,7 +74,7 @@ describe("bufferCount", () => {
     const results: number[][] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(buffered)) {
+      for await (const value of buffered) {
         results.push(value);
       }
     })();

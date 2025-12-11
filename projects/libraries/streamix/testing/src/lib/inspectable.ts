@@ -71,7 +71,7 @@ export function inspectable<T>(source: Stream<T>): InspectableStream<T> {
 
       subscribe(cb?: any): Subscription {
         const receiver = createReceiver(cb);
-        let iterator: AsyncIterator<any> = eachValueFrom(upstream)[Symbol.asyncIterator]();
+        let iterator: AsyncIterator<any> = eachValueFrom(upstream);
 
         // Register and apply operators
         for (const op of operators) {
@@ -147,7 +147,7 @@ export function inspectable<T>(source: Stream<T>): InspectableStream<T> {
 
     subscribe(cb?: any): Subscription {
       const receiver = createReceiver(cb);
-      let iterator: AsyncIterator<T> = eachValueFrom(source)[Symbol.asyncIterator]();
+      let iterator: AsyncIterator<T> = eachValueFrom(source);
 
       const abortController = new AbortController();
       const { signal } = abortController;

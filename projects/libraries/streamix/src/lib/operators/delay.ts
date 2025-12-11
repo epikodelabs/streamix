@@ -41,6 +41,6 @@ export function delay<T = any>(ms: MaybePromise<number>) {
       }
     })();
 
-    return eachValueFrom(output)[Symbol.asyncIterator]();
+    return eachValueFrom(output);
   });
 }

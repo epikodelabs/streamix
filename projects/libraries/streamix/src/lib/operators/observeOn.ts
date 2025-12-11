@@ -78,7 +78,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
       }
     })();
 
-    const iterator = eachValueFrom<T>(output)[Symbol.asyncIterator]();
+    const iterator = eachValueFrom(output);
     let completed = false;
 
     return {

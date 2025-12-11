@@ -1,4 +1,4 @@
-import { eachValueFrom, from, recurse, Stream } from '@actioncrew/streamix';
+import { from, recurse, Stream } from '@actioncrew/streamix';
 
 describe('recurse', () => {
   it('should recurse depth-first by default', async () => {
@@ -12,7 +12,7 @@ describe('recurse', () => {
     const result: number[] = [];
     const outputStream = stream.pipe(recurse(condition, project));
 
-    for await (const value of eachValueFrom(outputStream)) {
+    for await (const value of outputStream) {
       result.push(value);
     }
 
@@ -30,7 +30,7 @@ describe('recurse', () => {
     const result: number[] = [];
     const outputStream = stream.pipe(recurse(condition, project, { traversal: 'breadth' }));
 
-    for await (const value of eachValueFrom(outputStream)) {
+    for await (const value of outputStream) {
       result.push(value);
     }
 
@@ -48,7 +48,7 @@ describe('recurse', () => {
     const result: number[] = [];
     const outputStream = stream.pipe(recurse(condition, project, { maxDepth: 2 }));
 
-    for await (const value of eachValueFrom(outputStream)) {
+    for await (const value of outputStream) {
       result.push(value);
     }
 
@@ -66,7 +66,7 @@ describe('recurse', () => {
     const result: number[] = [];
     const outputStream = stream.pipe(recurse(condition, project));
 
-    for await (const value of eachValueFrom(outputStream)) {
+    for await (const value of outputStream) {
       result.push(value);
     }
 
@@ -84,7 +84,7 @@ describe('recurse', () => {
     const result: number[] = [];
     const outputStream = stream.pipe(recurse(condition, project));
 
-    for await (const value of eachValueFrom(outputStream)) {
+    for await (const value of outputStream) {
       result.push(value);
     }
 

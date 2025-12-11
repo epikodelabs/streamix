@@ -1,4 +1,4 @@
-import { createSubject, eachValueFrom, select } from '@actioncrew/streamix';
+import { createSubject, select } from '@actioncrew/streamix';
 
 describe('select', () => {
   let subject: any;
@@ -16,7 +16,7 @@ describe('select', () => {
 
     // Create a promise that resolves when consumption is complete
     const consumptionPromise = (async () => {
-      for await (const value of eachValueFrom(selectStream)) {
+      for await (const value of selectStream) {
         results.push(value);
       }
     })();
@@ -40,7 +40,7 @@ describe('select', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(selectStream)) {
+      for await (const value of selectStream) {
         results.push(value);
       }
     })();
@@ -59,7 +59,7 @@ describe('select', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(selectStream)) {
+      for await (const value of selectStream) {
         results.push(value);
       }
     })();
@@ -78,7 +78,7 @@ describe('select', () => {
     const results: any[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(selectStream)) {
+      for await (const value of selectStream) {
         results.push(value);
       }
     })();

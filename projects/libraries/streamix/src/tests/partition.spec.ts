@@ -1,4 +1,4 @@
-import { createStream, eachValueFrom, partition } from '@actioncrew/streamix';
+import { createStream, partition } from '@actioncrew/streamix';
 
 describe('partition', () => {
 
@@ -6,7 +6,7 @@ describe('partition', () => {
     const trueValues: T[] = [];
     const falseValues: T[] = [];
 
-    for await (const { key, value } of eachValueFrom(source)) {
+    for await (const { key, value } of source) {
       if (key === "true") {
         trueValues.push(value);
       } else {

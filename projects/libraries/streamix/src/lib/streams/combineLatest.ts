@@ -38,8 +38,9 @@ export function combineLatest<T extends unknown[] = any[]>(
     const hasEmitted = new Array(resolvedStreams.length).fill(false);
     let completedStreams = 0;
 
-    const asyncIterables = resolvedStreams.map((stream) => eachValueFrom(fromAny(stream)));
-    const iterators = asyncIterables.map((it) => it[Symbol.asyncIterator]());
+    const iterators = resolvedStreams.map((stream) =>
+      eachValueFrom(fromAny(stream))
+    );
 
     const promisesByIndex: Array<Promise<any> | null> = new Array(resolvedStreams.length).fill(null);
 

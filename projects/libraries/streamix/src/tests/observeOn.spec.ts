@@ -1,4 +1,4 @@
-import { createStream, eachValueFrom, observeOn } from "@actioncrew/streamix";
+import { createStream, observeOn } from "@actioncrew/streamix";
 
 describe('observeOn', () => {
   let originalRequestIdleCallback: typeof requestIdleCallback;
@@ -33,7 +33,7 @@ describe('observeOn', () => {
     const observeOnStream = stream.pipe(observeOn('microtask'));
     
     const consumePromise = (async () => {
-      for await (const value of eachValueFrom(observeOnStream)) {
+      for await (const value of observeOnStream) {
         emissionOrder.push(`value-${value}`);
         values.push(value);
       }
@@ -61,7 +61,7 @@ describe('observeOn', () => {
     
     setTimeout(async () => {
       try {
-        for await (const value of eachValueFrom(observeOnStream)) {
+        for await (const value of observeOnStream) {
           values.push(value);
         }
         
@@ -85,7 +85,7 @@ describe('observeOn', () => {
     
     setTimeout(async () => {
       try {
-        for await (const value of eachValueFrom(observeOnStream)) {
+        for await (const value of observeOnStream) {
           values.push(value);
         }
         
@@ -110,7 +110,7 @@ describe('observeOn', () => {
     const values: number[] = [];
     
     try {
-      for await (const value of eachValueFrom(observeOnStream)) {
+      for await (const value of observeOnStream) {
         values.push(value);
       }
       fail('Should have thrown an error');
@@ -129,7 +129,7 @@ describe('observeOn', () => {
 
     const observeOnStream = stream.pipe(observeOn('microtask'));
     
-    for await (const value of eachValueFrom(observeOnStream)) {
+    for await (const value of observeOnStream) {
       values.push(value);
     }
 

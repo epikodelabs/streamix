@@ -57,6 +57,6 @@ export function skipUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | R>)
       }
     })();
 
-    return eachValueFrom(output)[Symbol.asyncIterator]();
+    return eachValueFrom(output);
   });
 }

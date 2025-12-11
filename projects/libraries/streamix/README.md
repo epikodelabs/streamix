@@ -65,7 +65,7 @@ pnpm add @actioncrew/streamix
 ### Basic Stream Operations
 
 ```typescript
-import { eachValueFrom, range, map, filter, take } from '@actioncrew/streamix';
+import { range, map, filter, take } from '@actioncrew/streamix';
 
 // Create a stream of numbers, transform them, and consume
 const stream = range(1, 100)
@@ -76,7 +76,7 @@ const stream = range(1, 100)
   );
 
 // Consume the stream
-for await (const value of eachValueFrom(stream)) {
+for await (const value of stream) {
   console.log(value); // 6, 12, 18, 24, 30
 }
 ```
@@ -84,7 +84,7 @@ for await (const value of eachValueFrom(stream)) {
 ### Handling User Events
 
 ```typescript
-import { eachValueFrom, fromEvent, debounce, map } from '@actioncrew/streamix';
+import { fromEvent, debounce, map } from '@actioncrew/streamix';
 
 // Debounced search as user types
 const searchInput = document.getElementById('search');
@@ -95,7 +95,7 @@ const searchStream = fromEvent(searchInput, 'input')
     filter(text => text.length > 2)
   );
 
-for await (const searchTerm of eachValueFrom(searchStream)) {
+for await (const searchTerm of searchStream) {
   console.log('Searching for:', searchTerm);
   // Perform search...
 }
@@ -138,12 +138,12 @@ const processedStream = sourceStream
 Manually control stream emissions:
 
 ```typescript
-import { eachValueFrom, Subject, createSubject } from '@actioncrew/streamix';
+import { Subject, createSubject } from '@actioncrew/streamix';
 
 const subject = createSubject<string>();
 
 // Subscribe to the subject
-for await (const value of eachValueFrom(subject)) {
+for await (const value of subject) {
   console.log('Received:', value);
 }
 
@@ -160,7 +160,7 @@ subject.complete();
 Streamix includes a powerful HTTP client perfect for reactive applications:
 
 ```typescript
-import { eachValueFrom, map, retry } from '@actioncrew/streamix';
+import { map, retry } from '@actioncrew/streamix';
 import { 
   createHttpClient, 
   readJson, 
@@ -182,7 +182,7 @@ const dataStream = retry(() => client.get("/users", readJson), 3)
     map(users => users.filter(user => user.active))
   );
 
-for await (const activeUsers of eachValueFrom(dataStream)) {
+for await (const activeUsers of dataStream) {
   console.log('Active users:', activeUsers);
 }
 ```
@@ -195,7 +195,6 @@ Here's how to build a live search with API calls and error handling:
 
 ```typescript
 import {
-  eachValueFrom,
   fromEvent,
   fromPromise,
   debounce, 
@@ -222,7 +221,7 @@ const searchResults = fromEvent(searchInput, 'input')
     startWith({ results: [], query: '' })
   );
 
-for await (const result of eachValueFrom(searchResults)) {
+for await (const result of searchResults) {
   if (result.error) {
     resultsDiv.innerHTML = `<p class="error">${result.error}</p>`;
   } else {

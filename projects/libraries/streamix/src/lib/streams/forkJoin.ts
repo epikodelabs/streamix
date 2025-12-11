@@ -1,5 +1,4 @@
 import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractions";
-import { eachValueFrom } from "../converters";
 
 /**
  * Waits for all streams to complete and emits an array of their last values.
@@ -35,7 +34,7 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
       let last: T | undefined;
       let hasValue = false;
 
-      for await (const value of eachValueFrom(resolved)) {
+      for await (const value of resolved) {
         last = value;
         hasValue = true;
       }

@@ -1,4 +1,4 @@
-import { createSubject, eachValueFrom, reduce, Stream } from '@actioncrew/streamix';
+import { createSubject, reduce, Stream } from '@actioncrew/streamix';
 
 describe('reduce', () => {
   let subject: ReturnType<typeof createSubject<number>>;
@@ -14,7 +14,7 @@ describe('reduce', () => {
     const results: number[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(accumulatedStream)) {
+      for await (const value of accumulatedStream) {
         results.push(value);
       }
     })();
@@ -33,7 +33,7 @@ describe('reduce', () => {
     const results: number[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(accumulatedStream)) {
+      for await (const value of accumulatedStream) {
         results.push(value);
       }
     })();
@@ -50,7 +50,7 @@ describe('reduce', () => {
 
     (async () => {
       try {
-        for await (const _ of eachValueFrom(accumulatedStream)) {
+        for await (const _ of accumulatedStream) {
           void _;
         }
       } catch (err) {
@@ -69,7 +69,7 @@ describe('reduce', () => {
     const results: number[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(accumulatedStream)) {
+      for await (const value of accumulatedStream) {
         results.push(value);
       }
     })();
@@ -89,7 +89,7 @@ describe('reduce', () => {
     const results: string[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(accumulatedStream)) {
+      for await (const value of accumulatedStream) {
         results.push(value);
       }
     })();
@@ -109,7 +109,7 @@ describe('reduce', () => {
     const results: string[] = [];
 
     (async () => {
-      for await (const value of eachValueFrom(accumulatedStream)) {
+      for await (const value of accumulatedStream) {
         results.push(value);
       }
     })();

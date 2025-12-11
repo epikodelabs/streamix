@@ -1,4 +1,4 @@
-import { coroutine, CoroutineMessage, createStream, eachValueFrom } from "@actioncrew/streamix";
+import { coroutine, CoroutineMessage, createStream } from "@actioncrew/streamix";
 import { idescribe } from "./env.spec";
 
 idescribe('coroutine', () => {
@@ -142,7 +142,7 @@ idescribe('coroutine', () => {
     });
 
     const processed: number[] = [];
-    for await (const v of eachValueFrom(stream.pipe(co))) {
+    for await (const v of stream.pipe(co)) {
       processed.push(v as number);
     }
 
@@ -250,7 +250,7 @@ idescribe('coroutine', () => {
     let errorCaught = false;
 
     try {
-      for await (const v of eachValueFrom(stream.pipe(co))) {
+      for await (const v of stream.pipe(co)) {
         processed.push(v as any);
       }
     } catch (err: any) {

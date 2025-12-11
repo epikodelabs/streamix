@@ -73,7 +73,6 @@ export function buffer<T = any>(period: MaybePromise<number>) {
       }
     })();
 
-    const iterable = eachValueFrom<T[]>(output);
-    return iterable[Symbol.asyncIterator]();
+    return eachValueFrom(output);
   });
 }

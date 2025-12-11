@@ -1,10 +1,10 @@
-import { createSubject, eachValueFrom, throttle } from '@actioncrew/streamix';
+import { createSubject, throttle } from '@actioncrew/streamix';
 
 describe('throttle', () => {
   it('should emit first value immediately and throttle subsequent values', async () => {
     const output: number[] = [];
     const subject = createSubject<number>();
-    const iter = eachValueFrom(subject.pipe(throttle<number>(50)));
+    const iter = subject.pipe(throttle<number>(50));
 
     (async () => {
       for await (const v of iter) {
@@ -32,7 +32,7 @@ describe('throttle', () => {
 
   it('should complete after source completes', async () => {
     const subject = createSubject<number>();
-    const iter = eachValueFrom(subject.pipe(throttle<number>(50)));
+    const iter = subject.pipe(throttle<number>(50));
 
     let completed = false;
     (async () => {
@@ -51,7 +51,7 @@ describe('throttle', () => {
 
   it('should forward errors from the source', async () => {
     const subject = createSubject<number>();
-    const iter = eachValueFrom(subject.pipe(throttle<number>(50)));
+    const iter = subject.pipe(throttle<number>(50));
 
     let caught: any = null;
     (async () => {
