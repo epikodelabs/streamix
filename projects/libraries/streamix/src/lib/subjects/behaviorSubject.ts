@@ -2,7 +2,6 @@ import {
   createAsyncGenerator,
   createReceiver,
   createSubscription,
-  isPromiseLike,
   MaybePromise,
   Operator,
   pipeStream,
@@ -46,34 +45,17 @@ export type BehaviorSubject<T = any> = Subject<T> & {
  * @param {T} initialValue The value that the subject will hold upon creation.
  * @returns {BehaviorSubject<T>} A new BehaviorSubject instance.
  */
-export function createBehaviorSubject<T = any>(initialValue: MaybePromise<T>): BehaviorSubject<T> {
+export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
   const buffer = createBehaviorSubjectBuffer<T>(initialValue);
-  let latestValue: T | undefined;
+  let latestValue = initialValue;
   let isCompleted = false;
   let hasError = false;
 
-  // Only set latestValue if initialValue is synchronous
-  if (isPromiseLike(initialValue)) {
-    // Async initial value - don't set latestValue until resolved
-    Promise.resolve(initialValue).then((resolved) => {
-      latestValue = resolved;
-    });
-  } else {
-    // Sync initial value - set immediately
-    latestValue = initialValue;
-  }
-
-  const next = (value: MaybePromise<T>) => {
-    // Keep snappy in sync for synchronous values only
-    if (!isPromiseLike(value)) {
-      latestValue = value;
-    }
-
+  const next = (value: T) => {
+    latestValue = value;
     scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
-      const resolved = isPromiseLike(value) ? await value : value;
-      latestValue = resolved;
-      await buffer.write(resolved);
+      await buffer.write(value);
     });
   };
 
@@ -85,13 +67,12 @@ export function createBehaviorSubject<T = any>(initialValue: MaybePromise<T>): B
     });
   };
 
-  const error = (err: MaybePromise<any>) => {
+  const error = (err: any) => {
     scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
-      const resolvedErr = isPromiseLike(err) ? await err : err;
       hasError = true;
       isCompleted = true;
-      await buffer.error(resolvedErr);
+      await buffer.error(err);
       await buffer.complete();
     });
   };
@@ -145,7 +126,7 @@ export function createBehaviorSubject<T = any>(initialValue: MaybePromise<T>): B
     type: "subject",
     name: "behaviorSubject",
     get snappy() {
-      return latestValue as T;
+      return latestValue;
     },
     pipe(...operators: Operator<any, any>[]): Stream<any> {
       return pipeStream(this, operators);

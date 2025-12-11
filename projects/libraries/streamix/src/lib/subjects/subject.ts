@@ -3,7 +3,6 @@ import {
   createReceiver,
   createSubscription,
   scheduler as globalScheduler,
-  isPromiseLike,
   MaybePromise,
   Operator,
   pipeStream,
@@ -26,11 +25,10 @@ import { createSubjectBuffer } from "../primitives";
 export type Subject<T = any> = Stream<T> & {
   /**
    * Pushes the next value to all active subscribers.
-   * Accepts sync or async values.
-   * @param {MaybePromise<T>} value The value to emit.
+   * @param {T} value The value to emit.
    * @returns {void}
    */
-  next(value: MaybePromise<T>): void;
+  next(value: T): void;
   /**
    * Signals that the subject has completed and will emit no more values.
    * This completion signal is sent to all subscribers.
@@ -39,11 +37,11 @@ export type Subject<T = any> = Stream<T> & {
   complete(): void;
   /**
    * Signals that the subject has terminated with an error.
-   * The error (sync or async) is sent to all subscribers, and the subject is marked as completed.
-   * @param {MaybePromise<any>} err The error to emit.
+   * The error is sent to all subscribers, and the subject is marked as completed.
+   * @param {any} err The error to emit.
    * @returns {void}
    */
-  error(err: MaybePromise<any>): void;
+  error(err: any): void;
   /**
    * Checks if the subject has been completed.
    * @returns {boolean} `true` if the subject has completed, `false` otherwise.
@@ -72,15 +70,11 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
   let isCompleted = false;
   let hasError = false;
 
-  const next = (value: MaybePromise<T>) => {
-    if (!isPromiseLike(value)) {
-      latestValue = value;
-    }
+  const next = (value: T) => {
+    latestValue = value;
     scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
-      const resolved = isPromiseLike(value) ? await value : value;
-      latestValue = resolved;
-      await buffer.write(resolved);
+      await buffer.write(value);
     });
   };
 
@@ -92,13 +86,12 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     });
   };
 
-  const error = (err: MaybePromise<any>) => {
+  const error = (err: any) => {
     scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
-      const resolvedErr = isPromiseLike(err) ? await err : err;
       hasError = true;
       isCompleted = true;
-      await buffer.error(resolvedErr);
+      await buffer.error(err);
       await buffer.complete();
     });
   };
