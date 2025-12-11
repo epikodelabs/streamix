@@ -23,8 +23,13 @@ import { createReplaySubject, ReplaySubject } from '../streams';
 export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity) {
   let isConnected = false;
   let output: ReplaySubject<T> | undefined;
+  let resolvedSize: number | undefined;
+  const isSync = !isPromiseLike(bufferSize);
   
-  // Shared source connection logic
+  if (isSync) {
+    resolvedSize = bufferSize;
+  }
+  
   const connectSource = (source: AsyncIterator<T>) => {
     isConnected = true;
     (async () => {
@@ -42,27 +47,21 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
     })();
   };
 
-  // Short path: plain value
-  if (!isPromiseLike(bufferSize)) {
-    return createOperator<T, T>('shareReplay', function (this: Operator, source) {
-      if (!output) output = createReplaySubject<T>(bufferSize);
+  return createOperator<T, T>('shareReplay', function (this: Operator, source) {
+    // Short path: plain value, return synchronously
+    if (isSync) {
+      if (!output) output = createReplaySubject<T>(resolvedSize!);
       if (!isConnected) connectSource(source);
       return eachValueFrom<T>(output)[Symbol.asyncIterator]();
-    });
-  }
+    }
 
-  // Long path: Promise - resolve once and cache
-  let resolvedSize: number | undefined;
-  
-  return createOperator<T, T>('shareReplay', function (this: Operator, source) {
+    // Long path: Promise, wrap in async generator
     return (async function* () {
       if (resolvedSize === undefined) {
         resolvedSize = await bufferSize;
       }
-      
       if (!output) output = createReplaySubject<T>(resolvedSize);
       if (!isConnected) connectSource(source);
-
       yield* eachValueFrom<T>(output);
     })();
   });
