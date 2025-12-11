@@ -64,7 +64,6 @@ export function createSubscription(
         _unsubscribed = true;
         try {
           await this.onUnsubscribe?.();
-          _unsubscribed = true;
         } catch (err) {
           console.error("Error during unsubscribe callback:", err);
         }

@@ -2,7 +2,6 @@ import {
   createAsyncGenerator,
   createReceiver,
   createSubscription,
-  isPromiseLike,
   MaybePromise,
   Operator,
   pipeStream,
@@ -40,21 +39,17 @@ export type ReplaySubject<T = any> = Subject<T>;
  * @param {number} [capacity=Infinity] The maximum number of past values to buffer and replay to new subscribers.
  * @returns {ReplaySubject<T>} A new ReplaySubject instance.
  */
-export function createReplaySubject<T = any>(capacity: MaybePromise<number> = Infinity): ReplaySubject<T> {
+export function createReplaySubject<T = any>(capacity: number = Infinity): ReplaySubject<T> {
   const buffer = createReplayBuffer<T>(capacity) as ReplayBuffer;
   let isCompleted = false;
   let hasError = false;
   let latestValue: T | undefined = undefined;
 
-  const next = (value: MaybePromise<T>) => {
-    if (!isPromiseLike(value)) {
-      latestValue = value;
-    }
+  const next = (value: T) => {
+    latestValue = value;
     scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
-      const resolved = isPromiseLike(value) ? await value : value;
-      latestValue = resolved;
-      await buffer.write(resolved);
+      await buffer.write(value);
     });
   };
 
@@ -66,13 +61,12 @@ export function createReplaySubject<T = any>(capacity: MaybePromise<number> = In
     });
   };
 
-  const error = (err: MaybePromise<any>) => {
+  const error = (err: any) => {
     scheduler.enqueue(async () => {
       if (isCompleted || hasError) return;
-      const resolvedErr = isPromiseLike(err) ? await err : err;
       hasError = true;
       isCompleted = true;
-      await buffer.error(resolvedErr);
+      await buffer.error(err);
       await buffer.complete();
     });
   };

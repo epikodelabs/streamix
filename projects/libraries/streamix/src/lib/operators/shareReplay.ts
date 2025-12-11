@@ -1,4 +1,4 @@
-import { createOperator, MaybePromise, Operator } from '../abstractions';
+import { createOperator, isPromiseLike, MaybePromise, Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createReplaySubject, ReplaySubject } from '../streams';
 
@@ -17,37 +17,53 @@ import { createReplaySubject, ReplaySubject } from '../streams';
  *
  * @template T The type of the values in the stream.
  * @param bufferSize The number of last values to replay to new subscribers. Defaults to `Infinity`.
+ *                   Can be a Promise that resolves to a number.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity) {
   let isConnected = false;
   let output: ReplaySubject<T> | undefined;
-
-  return createOperator<T, T>('shareReplay', function (this: Operator, source) {
-    if (!output) {
-      output = createReplaySubject<T>(bufferSize);
-    }
-
-    if (!isConnected) {
-      isConnected = true;
-
-      (async () => {
-        try {
-          while (true) {
-            const result = await source.next();
-            if (result.done) break;
-
-            output.next(result.value);
-          }
-        } catch (err) {
-          output.error(err);
-        } finally {
-          output.complete();
+  
+  // Shared source connection logic
+  const connectSource = (source: AsyncIterator<T>) => {
+    isConnected = true;
+    (async () => {
+      try {
+        while (true) {
+          const result = await source.next();
+          if (result.done) break;
+          output!.next(result.value);
         }
-      })();
-    }
+      } catch (err) {
+        output!.error(err);
+      } finally {
+        output!.complete();
+      }
+    })();
+  };
 
-    const iterable = eachValueFrom<T>(output);
-    return iterable[Symbol.asyncIterator]();
+  // Short path: plain value
+  if (!isPromiseLike(bufferSize)) {
+    return createOperator<T, T>('shareReplay', function (this: Operator, source) {
+      if (!output) output = createReplaySubject<T>(bufferSize);
+      if (!isConnected) connectSource(source);
+      return eachValueFrom<T>(output)[Symbol.asyncIterator]();
+    });
+  }
+
+  // Long path: Promise - resolve once and cache
+  let resolvedSize: number | undefined;
+  
+  return createOperator<T, T>('shareReplay', function (this: Operator, source) {
+    return (async function* () {
+      if (resolvedSize === undefined) {
+        resolvedSize = await bufferSize;
+      }
+      
+      if (!output) output = createReplaySubject<T>(resolvedSize);
+      if (!isConnected) connectSource(source);
+
+      yield* eachValueFrom<T>(output);
+    })();
   });
 }
