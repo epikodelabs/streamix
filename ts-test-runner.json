@@ -1,16 +1,23 @@
 {
-  "srcDir": "./projects/libraries/streamix/src/lib",
-  "testDir": "./projects/libraries/streamix/src/tests",
-  "outDir": "./dist/.vite-jasmine-build/",
+  "srcDirs": [
+    "./projects/libraries/streamix/src/lib"
+  ],
+  "testDirs": [
+    "./projects/libraries/streamix/src/tests"
+  ],
+  "exclude": [
+    "**/node_modules/**"
+  ],
+  "preserveOutputs": false,
+  "outDir": "dist/.vite-jasmine-build",
   "browser": "chrome",
   "headless": false,
-  "coverage": true,
   "port": 8888,
   "viteBuildOptions": {
     "target": "es2022",
     "sourcemap": true,
     "minify": false,
-    "preserveModules": true,
+    "preserveModules": false,
     "preserveModulesRoot": "."
   },
   "jasmineConfig": {
@@ -18,16 +25,9 @@
       "stopSpecOnExpectationFailure": false,
       "random": true,
       "timeout": 120000
-    },
-    "browser": {
-      "name": "chrome",
-      "headless": false
-    },
-    "reporter": "console"
+    }
   },
   "htmlOptions": {
-    "title": "Jasmine Test Runner",
-    "includeSourceScripts": true,
-    "includeSpecScripts": true
+    "title": "Jasmine Tests Runner"
   }
 }

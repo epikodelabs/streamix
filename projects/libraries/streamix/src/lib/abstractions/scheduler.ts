@@ -5,8 +5,8 @@
  * State is held in a closure, and operations are returned as pure functions.
  */
 export type Scheduler = {
-  enqueue: (fn: () => Promise<any> | void) => Promise<any>;
-  flush: () => Promise<any>; // manually drain if needed
+  enqueue: <T>(fn: () => Promise<T> | T) => Promise<T>;
+  flush: () => Promise<void>;
 };
 
 /**
@@ -18,47 +18,79 @@ export type Scheduler = {
  * it is rethrown asynchronously to avoid blocking subsequent tasks in the queue.
  *
  * @returns {Scheduler} An object with methods to enqueue tasks and flush the queue.
- * @property {(fn: () => Promise<void> | void) => void} enqueue
+ * @property {(fn: () => Promise<T> | T) => Promise<T>} enqueue
  *   Adds a task to the queue. The task may be synchronous or asynchronous.
  * @property {() => Promise<void>} flush
  *   Waits until all scheduled tasks have completed execution.
  */
 export function createScheduler(): Scheduler {
-  let queue: (() => Promise<void> | void)[] = [];
-  let running = false;
+  type Task<T = void> = () => Promise<T> | T;
+  const queue: Task[] = [];
+  let isRunning = false;
+  let pendingFlush: (() => void) | null = null;
 
-  const run = async () => {
-    if (running) return;
-    running = true;
-
-    while (queue.length > 0) {
-      const fn = queue.shift()!;
-      try {
-        await fn();
-      } catch (err) {
-        setTimeout(() => { throw err; }, 0);
-      }
+  const processNext = async (): Promise<void> => {
+    if (isRunning || queue.length === 0) {
+      return;
     }
 
-    running = false;
+    isRunning = true;
+    const task = queue.shift()!;
+
+    try {
+      await task();
+    } catch (error) {
+      // Re-throw error asynchronously to avoid blocking the queue
+      setTimeout(() => { throw error; }, 0);
+    } finally {
+      isRunning = false;
+      
+      // Check if there are more tasks or if someone is waiting for flush
+      if (queue.length > 0) {
+        void processNext();
+      } else if (pendingFlush) {
+        pendingFlush();
+        pendingFlush = null;
+      }
+    }
   };
 
-  const enqueue = <T = void>(fn: () => Promise<T> | T): Promise<T> => {
+  const enqueue = <T>(fn: Task<T>): Promise<T> => {
     return new Promise<T>((resolve, reject) => {
-      queue.push(async () => {
+      // Wrap the user function to capture its result
+      const wrappedTask: Task = async () => {
         try {
-          const result = await fn();
-          resolve(result);
-        } catch (err) {
-          reject(err);
+          const result = fn();
+          // Handle both synchronous and asynchronous functions
+          const value = result instanceof Promise ? await result : result;
+          resolve(value);
+        } catch (error) {
+          reject(error);
+          throw error; // Re-throw for the scheduler's error handling
         }
-      });
-      void run(); // trigger drain
+      };
+
+      queue.push(wrappedTask);
+      
+      // Start processing if not already running
+      if (!isRunning) {
+        void processNext();
+      }
     });
   };
 
-  const flush = async () => {
-    await run();
+  const flush = (): Promise<void> => {
+    if (queue.length === 0 && !isRunning) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve) => {
+      pendingFlush = () => resolve();
+      // Ensure processing starts if it's stalled
+      if (!isRunning && queue.length > 0) {
+        void processNext();
+      }
+    });
   };
 
   return { enqueue, flush };

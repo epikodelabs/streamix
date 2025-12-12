@@ -276,8 +276,13 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: MaybePromise
   
   let initPromise: Promise<void> | null = null;
 
-  // Track which readers need to receive the initial value
-  const behaviorReaders = new Map<number, boolean>();
+  type ReaderState = {
+    initialPending: boolean;
+    initialValue?: T | { __error: Error };
+  };
+
+  // Track which readers need to receive the initial value snapshot
+  const behaviorReaders = new Map<number, ReaderState>();
 
   // Track completion state locally
   let isCompleted = false;
@@ -313,6 +318,12 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: MaybePromise
 
         currentValue = value;
         hasCurrentValue = true;
+        // If a reader hasn't consumed its initial snapshot yet, refresh it to the latest write
+        behaviorReaders.forEach(state => {
+          if (state.initialPending) {
+            state.initialValue = value;
+          }
+        });
         await subject.write(value);
       } finally {
         release();
@@ -325,10 +336,16 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: MaybePromise
       try {
         if (isCompleted) throw new Error("Cannot error a completed buffer");
         hasError = true;
+        isCompleted = true;
 
         const errorItem = { __error: err };
         currentValue = errorItem;
         hasCurrentValue = true;
+        behaviorReaders.forEach(state => {
+          if (state.initialPending) {
+            state.initialValue = errorItem;
+          }
+        });
         await subject.error(err);
       } finally {
         release();
@@ -341,11 +358,13 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: MaybePromise
       try {
         const readerId = await subject.attachReader();
 
-        if (hasCurrentValue) {
-          behaviorReaders.set(readerId, false);
-        } else {
-          behaviorReaders.set(readerId, true);
-        }
+        const snapshot = hasCurrentValue ? currentValue : undefined;
+        const initialPending = hasCurrentValue && (!isCompleted || hasError);
+
+        behaviorReaders.set(readerId, {
+          initialPending,
+          initialValue: snapshot
+        });
 
         return readerId;
       } finally {
@@ -368,20 +387,17 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: MaybePromise
       if (initPromise) await initPromise;
       const release = await lock();
       try {
-        if (isCompleted) {
-          return { value: undefined, done: true };
-        }
+        const readerState = behaviorReaders.get(readerId);
+        if (readerState?.initialPending) {
+          readerState.initialPending = false;
 
-        const needsInitial = behaviorReaders.get(readerId) === false;
+          if (readerState.initialValue !== undefined) {
+            if (isErrorItem(readerState.initialValue)) {
+              throw readerState.initialValue.__error;
+            }
 
-        if (needsInitial && hasCurrentValue) {
-          behaviorReaders.set(readerId, true);
-
-          if (isErrorItem(currentValue)) {
-            throw currentValue.__error;
+            return { value: readerState.initialValue as T, done: false };
           }
-
-          return { value: currentValue as T, done: false };
         }
       } finally {
         release();
@@ -394,13 +410,13 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: MaybePromise
       if (initPromise) await initPromise;
       const release = await lock();
       try {
-        const needsInitial = behaviorReaders.get(readerId) === false;
+        const readerState = behaviorReaders.get(readerId);
 
-        if (needsInitial && hasCurrentValue) {
-          if (isErrorItem(currentValue)) {
-            throw currentValue.__error;
+        if (readerState?.initialPending && readerState.initialValue !== undefined) {
+          if (isErrorItem(readerState.initialValue)) {
+            throw readerState.initialValue.__error;
           }
-          return { value: currentValue as T, done: false };
+          return { value: readerState.initialValue as T, done: false };
         }
       } finally {
         release();
@@ -421,8 +437,13 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: MaybePromise
     },
 
     completed(readerId: number): boolean {
+      const readerState = behaviorReaders.get(readerId);
+      const awaitingInitial = readerState?.initialPending && readerState.initialValue !== undefined;
+
+      if (awaitingInitial) return false;
+
       if (isCompleted || hasError) {
-        return true;
+        return subject.completed(readerId);
       }
       return subject.completed(readerId);
     },
