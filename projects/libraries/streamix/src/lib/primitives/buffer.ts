@@ -114,6 +114,9 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
       if (isCompleted) throw new Error("Cannot write to completed buffer");
       if (hasError) throw new Error("Cannot write after error");
 
+      // Fast path: if there are no readers, drop the value (subjects don't replay past values).
+      if (readers.size === 0) return;
+
       buffer.push(item);
       notifyReaders();
     } finally {
@@ -125,6 +128,12 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     const releaseLock = await lock();
     try {
       if (isCompleted) throw new Error("Cannot write error to completed buffer");
+
+      // Fast path: if there are no readers, just mark error and exit (late readers won't see past values).
+      if (readers.size === 0) {
+        hasError = true;
+        return;
+      }
 
       buffer.push({ __error: err });
       hasError = true;
@@ -268,7 +277,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
  * @param {T} [initialValue] The optional initial value to hold upon creation.
  * @returns {SubjectBuffer<T>} A new SingleValueBuffer instance.
  */
-export function createBehaviorSubjectBuffer<T = any>(initialValue?: MaybePromise<T>): SubjectBuffer<T> {
+export function createBehaviorSubjectBuffer<T = any>(initialValue: MaybePromise<T>): SubjectBuffer<T> {
   const subject = createSubjectBuffer<T>();
   let currentValue: T | { __error: Error } | undefined;
   let hasCurrentValue = false;
@@ -316,6 +325,8 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: MaybePromise
         if (isCompleted) throw new Error("Cannot write to completed buffer");
         if (hasError) throw new Error("Cannot write after error");
 
+        const hasReaders = behaviorReaders.size > 0;
+
         currentValue = value;
         hasCurrentValue = true;
         // If a reader hasn't consumed its initial snapshot yet, refresh it to the latest write
@@ -324,7 +335,11 @@ export function createBehaviorSubjectBuffer<T = any>(initialValue?: MaybePromise
             state.initialValue = value;
           }
         });
-        await subject.write(value);
+        // Avoid pushing into the subject buffer when no readers are attached;
+        // late readers will get `currentValue` via their initial snapshot.
+        if (hasReaders) {
+          await subject.write(value);
+        }
       } finally {
         release();
       }
