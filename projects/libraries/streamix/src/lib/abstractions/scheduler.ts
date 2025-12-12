@@ -1,3 +1,5 @@
+import { isPromiseLike } from "./operator";
+
 /**
  * Functional Scheduler
  *
@@ -62,7 +64,7 @@ export function createScheduler(): Scheduler {
         try {
           const result = fn();
           // Handle both synchronous and asynchronous functions
-          const value = result instanceof Promise ? await result : result;
+          const value = isPromiseLike(result) ? await result : result;
           resolve(value);
         } catch (error) {
           reject(error);
