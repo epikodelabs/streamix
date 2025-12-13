@@ -1,5 +1,5 @@
 import { isPromiseLike, MaybePromise } from "../abstractions";
-import { createLock } from "./lock";
+import { createLock, ReleaseFn } from "./lock";
 import { createSemaphore } from "./semaphore";
 
 export type CyclicBuffer<T = any> = {
@@ -50,13 +50,40 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
   type BufferItem = T | ErrorMarker;
   
   const buffer: BufferItem[] = [];
-  const readers = new Map<number, { readIndex: number; isActive: boolean }>();
+  const readers = new Map<number, { nextIndex: number; isActive: boolean }>();
   const notifier = createNotifier();
   const lock = createLock();
   
   let nextReaderId = 0;
   let isCompleted = false;
   let hasError = false;
+  let baseIndex = 0;
+
+  const pruneBuffer = () => {
+    if (buffer.length === 0) return;
+
+    if (readers.size === 0) {
+      baseIndex += buffer.length;
+      buffer.length = 0;
+      return;
+    }
+
+    let minNext = Infinity;
+    for (const reader of readers.values()) {
+      if (!reader.isActive) continue;
+      if (reader.nextIndex < minNext) {
+        minNext = reader.nextIndex;
+      }
+    }
+
+    if (minNext === Infinity) return;
+
+    const drop = minNext - baseIndex;
+    if (drop > 0) {
+      buffer.splice(0, drop);
+      baseIndex += drop;
+    }
+  };
 
   const write = async (item: T): Promise<void> => {
     const release = await lock();
@@ -96,7 +123,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     try {
       const readerId = nextReaderId++;
       readers.set(readerId, {
-        readIndex: buffer.length,
+        nextIndex: baseIndex + buffer.length,
         isActive: true
       });
       return readerId;
@@ -112,6 +139,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
       if (reader) {
         reader.isActive = false;
         readers.delete(readerId);
+        pruneBuffer();
       }
     } finally {
       release();
@@ -128,9 +156,13 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
           return { done: true, value: undefined };
         }
 
-        if (reader.readIndex < buffer.length) {
-          const item = buffer[reader.readIndex++];
-          
+        const availableEnd = baseIndex + buffer.length;
+        if (reader.nextIndex < availableEnd) {
+          const relativeIndex = reader.nextIndex - baseIndex;
+          const item = buffer[relativeIndex];
+          reader.nextIndex++;
+          pruneBuffer();
+
           if (isErrorMarker(item)) {
             throw item.__error;
           }
@@ -138,7 +170,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
           return { value: item as T, done: false };
         }
         
-        if (isCompleted && reader.readIndex >= buffer.length) {
+        if (isCompleted && reader.nextIndex >= availableEnd) {
           return { done: true, value: undefined };
         }
       } finally {
@@ -157,8 +189,10 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
         return { done: true, value: undefined };
       }
 
-      if (reader.readIndex < buffer.length) {
-        const item = buffer[reader.readIndex];
+      const availableEnd = baseIndex + buffer.length;
+      if (reader.nextIndex < availableEnd) {
+        const relativeIndex = reader.nextIndex - baseIndex;
+        const item = buffer[relativeIndex];
         
         if (isErrorMarker(item)) {
           throw item.__error;
@@ -167,7 +201,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
         return { value: item as T, done: false };
       }
 
-      if (isCompleted && reader.readIndex >= buffer.length) {
+      if (isCompleted && reader.nextIndex >= availableEnd) {
         return { done: true, value: undefined };
       }
 
@@ -191,7 +225,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     const reader = readers.get(readerId);
     if (!reader || !reader.isActive) return true;
     
-    const allItemsRead = reader.readIndex >= buffer.length;
+    const allItemsRead = reader.nextIndex >= baseIndex + buffer.length;
     return allItemsRead && (isCompleted || hasError);
   };
 
@@ -524,7 +558,8 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
 
   const write = async (value: T): Promise<void> => {
     await ensureCapacity();
-    const release = await lock();
+    let release: ReleaseFn | null = null;
+    release = await lock();
     
     try {
       if (isCompleted) throw new Error("Cannot write to completed buffer");
@@ -535,8 +570,9 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
           resolvedCapacity !== null && 
           totalWritten >= resolvedCapacity && 
           readers.size > 0) {
-        // Need to wait for semaphore
-        release(); // Release lock while waiting to avoid deadlock
+        release();
+        release = null;
+
         const semRelease = await semaphore!.acquire();
         const reacquire = await lock();
         try {
@@ -550,7 +586,7 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
       
       writeInternal(value);
     } finally {
-      if (release) release();
+      release?.();
     }
   };
 

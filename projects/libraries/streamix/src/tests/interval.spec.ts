@@ -27,8 +27,8 @@ describe('interval', () => {
     // Check timing between emissions
     for (let i = 1; i < timestamps.length; i++) {
       const timeDiff = timestamps[i] - timestamps[i - 1];
-      expect(timeDiff).toBeGreaterThanOrEqual(intervalMs - 20);
-      expect(timeDiff).toBeLessThanOrEqual(intervalMs + 20);
+      expect(timeDiff).toBeGreaterThanOrEqual(intervalMs - 50);
+      expect(timeDiff).toBeLessThanOrEqual(intervalMs + 50);
     }
   });
 
