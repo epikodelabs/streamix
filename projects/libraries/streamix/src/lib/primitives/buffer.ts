@@ -1,40 +1,71 @@
+// Assuming these imports are available from your project structure
 import { isPromiseLike, MaybePromise } from "../abstractions";
-import { createLock, ReleaseFn } from "./lock";
-import { createSemaphore } from "./semaphore";
+import { createLock, createSemaphore, ReleaseFn } from "../primitives";
 
+/** Unique Symbol used to identify an ErrorMarker object within the buffer. */
+const ERROR_SYMBOL = Symbol('__ERROR_MARKER');
+
+/** Represents an error value stored in the buffer. */
+type ErrorMarker = { readonly [ERROR_SYMBOL]: Error };
+
+/** Creates a sealed ErrorMarker object. */
+const createErrorMarker = (err: Error): ErrorMarker => ({ [ERROR_SYMBOL]: err });
+
+/** Type guard to check if an object is an ErrorMarker. */
+const isErrorMarker = (x: any): x is ErrorMarker => 
+  x && typeof x === 'object' && ERROR_SYMBOL in x;
+
+// --- Interface Definitions ---
+
+/**
+ * Core interface for a buffer that supports concurrent reading and writing.
+ * It models an asynchronous iterable stream.
+ */
 export type CyclicBuffer<T = any> = {
+  /** Writes a value to the buffer, making it available for readers. */
   write(value: T): Promise<void>;
+  /** Writes an error to the buffer, which will be thrown by readers. */
   error(err: Error): Promise<void>;
+  /** Reads the next available item, waiting if the buffer is empty. */
   read(readerId: number): Promise<IteratorResult<T, void>>;
+  /** Peeks at the next available item without consuming it. */
   peek(readerId: number): Promise<IteratorResult<T, void>>;
+  /** Completes the buffer, signaling readers that no more items will arrive. */
   complete(): Promise<void>;
+  /** Registers a new reader and returns its unique ID. */
   attachReader(): Promise<number>;
+  /** Removes a reader and may trigger buffer pruning/memory cleanup. */
   detachReader(readerId: number): Promise<void>;
+  /** Checks if the buffer has completed or errored for a specific reader. */
   completed(readerId: number): boolean;
 };
 
+/** Extends CyclicBuffer for "Subject" behavior, providing access to the current value. */
 export type SubjectBuffer<T = any> = CyclicBuffer<T> & {
+  /** Gets the latest non-error value written to the buffer, or undefined. */
   get value(): T | undefined;
 };
 
+/** Extends CyclicBuffer for "Replay" behavior, providing access to the history. */
 export type ReplayBuffer<T = any> = CyclicBuffer<T> & {
+  /** Gets an array containing all currently buffered values (the replay history). */
   get buffer(): T[];
 };
 
-// Use original error marker format to maintain compatibility
-type ErrorMarker = { readonly __error: Error };
-const createErrorMarker = (err: Error): ErrorMarker => ({ __error: err });
-const isErrorMarker = (x: any): x is ErrorMarker => 
-  x && typeof x === 'object' && '__error' in x;
+// --- Notifier Implementation ---
 
 /**
- * Simple notifier (revert to original implementation)
+ * Simple condition variable implementation based on Promises.
+ * Used to signal waiting readers when new data arrives or completion/error occurs.
  */
 export function createNotifier() {
   let waitingResolvers: (() => void)[] = [];
   return {
+    /** Returns a Promise that resolves when signal() or signalAll() is called. */
     wait: () => new Promise<void>(resolve => waitingResolvers.push(resolve)),
+    /** Signals a single waiting reader. */
     signal: () => waitingResolvers.shift()?.(),
+    /** Signals all waiting readers. */
     signalAll: () => { 
       const resolvers = waitingResolvers;
       waitingResolvers = [];
@@ -43,8 +74,13 @@ export function createNotifier() {
   };
 }
 
+// --- Create Subject Buffer ---
+
 /**
- * Create Subject Buffer - optimized but compatible
+ * Creates a Subject Buffer. It acts as a queuing stream:
+ * 1. Values are buffered only if active readers are present.
+ * 2. New readers DO NOT receive past values (non-replaying).
+ * 3. Multiple writes are delivered to readers in order (queued).
  */
 export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
   type BufferItem = T | ErrorMarker;
@@ -59,15 +95,18 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
   let hasError = false;
   let baseIndex = 0;
 
+  /** Removes consumed items from the buffer to reclaim memory. */
   const pruneBuffer = () => {
     if (buffer.length === 0) return;
 
+    // If no readers, reset state
     if (readers.size === 0) {
       baseIndex += buffer.length;
       buffer.length = 0;
       return;
     }
 
+    // Find the oldest unread index across all active readers
     let minNext = Infinity;
     for (const reader of readers.values()) {
       if (!reader.isActive) continue;
@@ -91,7 +130,6 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
       if (isCompleted) throw new Error("Cannot write to completed buffer");
       if (hasError) throw new Error("Cannot write after error");
       
-      // No readers = no buffering needed for Subject
       if (readers.size === 0) return;
 
       buffer.push(item);
@@ -108,10 +146,9 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
       
       hasError = true;
       
-      // No readers = just mark error
-      if (readers.size === 0) return;
-
-      buffer.push(createErrorMarker(err));
+      if (readers.size > 0) {
+        buffer.push(createErrorMarker(err));
+      }
       notifier.signalAll();
     } finally {
       release();
@@ -122,6 +159,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     const release = await lock();
     try {
       const readerId = nextReaderId++;
+      // Reader starts reading from the current end (no replay)
       readers.set(readerId, {
         nextIndex: baseIndex + buffer.length,
         isActive: true
@@ -148,12 +186,17 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
 
   const read = async (readerId: number): Promise<IteratorResult<T, void>> => {
     while (true) {
-      const release = await lock();
+      let release: ReleaseFn | undefined;
+      let result: IteratorResult<T, void> | undefined;
+      let shouldWait = false;
+      
+      release = await lock();
       
       try {
         const reader = readers.get(readerId);
         if (!reader || !reader.isActive) {
-          return { done: true, value: undefined };
+          result = { done: true, value: undefined };
+          return result;
         }
 
         const availableEnd = baseIndex + buffer.length;
@@ -164,20 +207,22 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
           pruneBuffer();
 
           if (isErrorMarker(item)) {
-            throw item.__error;
+            throw item[ERROR_SYMBOL];
           }
           
-          return { value: item as T, done: false };
-        }
-        
-        if (isCompleted && reader.nextIndex >= availableEnd) {
-          return { done: true, value: undefined };
+          result = { value: item as T, done: false };
+        } else if (isCompleted) {
+          result = { done: true, value: undefined };
+        } else {
+          shouldWait = true;
         }
       } finally {
         release();
       }
-
-      await notifier.wait();
+      
+      if (result) return result;
+      // Optimization: release lock before awaiting signal
+      if (shouldWait) await notifier.wait();
     }
   };
 
@@ -195,7 +240,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
         const item = buffer[relativeIndex];
         
         if (isErrorMarker(item)) {
-          throw item.__error;
+          throw item[ERROR_SYMBOL];
         }
         
         return { value: item as T, done: false };
@@ -241,12 +286,18 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
   };
 }
 
+// --- Create BehaviorSubject Buffer ---
+
 /**
- * Create BehaviorSubject Buffer - optimized but compatible
+ * Creates a BehaviorSubject Buffer. It extends the Subject Buffer by:
+ * 1. Storing the single latest value (or error).
+ * 2. Delivering the latest value to new readers upon attachment (replaying 1 item).
+ * 3. Exposing the current value via the `.value` getter.
  */
 export function createBehaviorSubjectBuffer<T = any>(
   initialValue?: MaybePromise<T>
 ): SubjectBuffer<T> {
+  // Uses the fixed Subject buffer for handling subsequent writes
   const subject = createSubjectBuffer<T>();
   const hasInitial = arguments.length > 0;
   
@@ -261,7 +312,8 @@ export function createBehaviorSubjectBuffer<T = any>(
   };
 
   type ReaderState = {
-    initialPending: boolean;
+    // True if the reader still needs to read the initial snapshot value
+    initialPending: boolean; 
     initialValue?: BufferItem;
   };
 
@@ -351,7 +403,8 @@ export function createBehaviorSubjectBuffer<T = any>(
         const readerId = await subject.attachReader();
 
         const snapshot = state.hasCurrentValue ? state.currentValue : undefined;
-        const initialPending = state.hasCurrentValue && (!state.isCompleted || state.hasError);
+        // Reader needs the initial value if we have one AND the stream hasn't already errored/completed
+        const initialPending = state.hasCurrentValue && (!state.isCompleted || state.hasError); 
 
         behaviorReaders.set(readerId, {
           initialPending,
@@ -386,7 +439,7 @@ export function createBehaviorSubjectBuffer<T = any>(
 
           if (readerState.initialValue !== undefined) {
             if (isErrorMarker(readerState.initialValue)) {
-              throw readerState.initialValue.__error;
+              throw readerState.initialValue[ERROR_SYMBOL];
             }
             return { value: readerState.initialValue as T, done: false };
           }
@@ -395,6 +448,7 @@ export function createBehaviorSubjectBuffer<T = any>(
         release();
       }
 
+      // If no initial value needed, delegate to the underlying subject queue
       return await subject.read(readerId);
     },
 
@@ -406,7 +460,7 @@ export function createBehaviorSubjectBuffer<T = any>(
         const readerState = behaviorReaders.get(readerId);
         if (readerState?.initialPending && readerState.initialValue !== undefined) {
           if (isErrorMarker(readerState.initialValue)) {
-            throw readerState.initialValue.__error;
+            throw readerState.initialValue[ERROR_SYMBOL];
           }
           return { value: readerState.initialValue as T, done: false };
         }
@@ -430,6 +484,7 @@ export function createBehaviorSubjectBuffer<T = any>(
 
     completed(readerId: number): boolean {
       const readerState = behaviorReaders.get(readerId);
+      // A reader is NOT completed if it's still waiting to emit its initial value
       const awaitingInitial = readerState?.initialPending && readerState.initialValue !== undefined;
 
       if (awaitingInitial) return false;
@@ -444,79 +499,77 @@ export function createBehaviorSubjectBuffer<T = any>(
   };
 }
 
+// --- Create Replay Buffer ---
+
 /**
- * Create Replay Buffer - fixed version that works with tests
+ * Creates a Replay Buffer with a fixed capacity. It acts as a history stream:
+ * 1. Buffers the last 'capacity' number of items (circular buffer).
+ * 2. New readers start from the oldest available item within the capacity window (replaying).
+ * 3. Supports backpressure via a Semaphore when the buffer is full.
  */
 export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): ReplayBuffer<T> {
   type BufferItem = T | ErrorMarker;
   
-  // Initialize with default values
+  // State variables
   let resolvedCapacity: number | null = null;
   let buffer: BufferItem[] = [];
   let isInfinite = false;
-  let writeIndex = 0;
-  let totalWritten = 0;
+  let writeIndex = 0; // The index in the circular buffer for the next write
+  let totalWritten = 0; // Absolute count of all items ever written
   
   const readers = new Map<number, { offset: number }>();
-  const slotCounters = new Map<number, number>();
+  // Counts how many readers still need to read an item at absolute index 'abs'
+  const slotCounters = new Map<number, number>(); 
   const notifier = createNotifier();
   const lock = createLock();
   
   let nextReaderId = 0;
   let isCompleted = false;
   let hasError = false;
-  let semaphore: ReturnType<typeof createSemaphore> | undefined;
+  let semaphore: ReturnType<typeof createSemaphore> | undefined; // Used for backpressure
   
-  // Track initialization state
   let isInitialized = false;
   let initPromise: Promise<void> | null = null;
 
+  /** Ensures capacity and semaphore are set up, waiting if capacity is a promise. */
   const ensureCapacity = async (): Promise<void> => {
     if (isInitialized) return;
-    
     if (initPromise) {
       await initPromise;
       return;
     }
     
-    if (!isPromiseLike(capacity)) {
-      // Synchronous initialization
-      resolvedCapacity = capacity as number;
+    // Logic for synchronous and asynchronous capacity resolution...
+    const initializer = async (capVal: number) => {
+      resolvedCapacity = capVal;
       isInfinite = !isFinite(resolvedCapacity);
       buffer = isInfinite ? [] : new Array(resolvedCapacity);
       
       if (!isInfinite) {
         semaphore = createSemaphore(resolvedCapacity);
       }
-      
       isInitialized = true;
-      return;
+    };
+
+    if (isPromiseLike(capacity)) {
+      initPromise = (async () => {
+        await initializer(await capacity);
+        initPromise = null;
+      })();
+      await initPromise;
+    } else {
+      await initializer(capacity as number);
     }
-    
-    // Asynchronous initialization
-    initPromise = (async () => {
-      const resolved = await capacity;
-      resolvedCapacity = resolved;
-      isInfinite = !isFinite(resolvedCapacity);
-      buffer = isInfinite ? [] : new Array(resolvedCapacity);
-      
-      if (!isInfinite) {
-        semaphore = createSemaphore(resolvedCapacity);
-      }
-      
-      isInitialized = true;
-      initPromise = null;
-    })();
-    
-    await initPromise;
   };
 
+  /** Converts an absolute index to the index within the circular buffer array. */
   const getIndex = (abs: number): number => {
     if (isInfinite) return abs;
     if (resolvedCapacity === null || resolvedCapacity === 0) return 0;
     return abs % resolvedCapacity;
   };
 
+  /** Decrements slot counter for a consumed item and releases semaphore if needed. */
   const releaseSlot = (abs: number): void => {
     const cnt = slotCounters.get(abs);
     if (!cnt) return;
@@ -531,15 +584,14 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
     }
   };
 
+  /** Internal function to perform the actual buffer write under the lock. */
   const writeInternal = (item: BufferItem): void => {
     const abs = totalWritten;
     const idx = getIndex(abs);
     
-    // Ensure buffer has capacity
     if (isInfinite) {
       buffer.push(item);
     } else {
-      // For fixed capacity, ensure array is properly sized
       if (idx >= buffer.length) {
         buffer.length = idx + 1;
       }
@@ -558,35 +610,46 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
 
   const write = async (value: T): Promise<void> => {
     await ensureCapacity();
+    
+    let needsBackpressureWait = false;
     let release: ReleaseFn | null = null;
+    
     release = await lock();
     
     try {
       if (isCompleted) throw new Error("Cannot write to completed buffer");
       if (hasError) throw new Error("Cannot write after error");
       
-      // For bounded buffers with active readers, apply backpressure
+      // Check for backpressure condition (bounded buffer, full, and active readers)
       if (!isInfinite && 
           resolvedCapacity !== null && 
           totalWritten >= resolvedCapacity && 
           readers.size > 0) {
-        release();
-        release = null;
-
-        const semRelease = await semaphore!.acquire();
-        const reacquire = await lock();
-        try {
-          writeInternal(value);
-        } finally {
-          reacquire();
-          semRelease();
-        }
-        return;
+        needsBackpressureWait = true;
+      } else {
+        writeInternal(value);
       }
-      
-      writeInternal(value);
     } finally {
       release?.();
+    }
+    
+    if (needsBackpressureWait) {
+      // 1. Wait on semaphore (this is where backpressure occurs)
+      const semRelease = await semaphore!.acquire();
+      
+      // 2. Reacquire lock to safely check state and write
+      const reacquire = await lock();
+      try {
+        if (isCompleted) {
+           semRelease(); // Immediately release permit since we won't write
+           throw new Error("Cannot write to completed buffer");
+        }
+        writeInternal(value);
+      } finally {
+        reacquire();
+        // 3. Release semaphore permit after writing (handled by releaseSlot on read)
+        semRelease();
+      }
     }
   };
 
@@ -611,6 +674,7 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
     try {
       const id = nextReaderId++;
       const cap = resolvedCapacity ?? Infinity;
+      // Reader starts at the oldest item in the replay window
       const start = Math.max(0, totalWritten - (isInfinite ? totalWritten : cap));
       
       readers.set(id, { offset: start });
@@ -630,7 +694,7 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
       const { offset } = readerState;
       readers.delete(id);
       
-      // Release all unconsumed slots
+      // Release all unconsumed slots for the detached reader
       for (let i = offset; i < totalWritten; i++) {
         releaseSlot(i);
       }
@@ -645,36 +709,49 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
     await ensureCapacity();
     
     while (true) {
-      const release = await lock();
+      let release: ReleaseFn | undefined;
+      let result: IteratorResult<T, void> | undefined;
+      let shouldWait = false;
+      let slotToRelease: number | undefined;
+
+      release = await lock();
       
-      const readerState = readers.get(id);
-      if (!readerState) {
-        release();
-        return { value: undefined, done: true };
-      }
-      
-      const offset = readerState.offset;
-      
-      if (offset < totalWritten) {
-        const item = buffer[getIndex(offset)];
-        readerState.offset++;
-        release();
-        
-        if (isErrorMarker(item)) {
-          throw item.__error;
+      try {
+        const readerState = readers.get(id);
+        if (!readerState) {
+          result = { value: undefined, done: true };
+          return result;
         }
         
-        releaseSlot(offset);
-        return { value: item as T, done: false };
-      }
-      
-      if (isCompleted) {
+        const offset = readerState.offset;
+        
+        if (offset < totalWritten) {
+          const item = buffer[getIndex(offset)];
+          readerState.offset++;
+          slotToRelease = offset; // Mark slot consumed
+
+          if (isErrorMarker(item)) {
+            throw item[ERROR_SYMBOL];
+          }
+          
+          result = { value: item as T, done: false };
+        } else if (isCompleted) {
+          result = { value: undefined, done: true };
+        } else {
+          shouldWait = true;
+        }
+      } finally {
         release();
-        return { value: undefined, done: true };
       }
       
-      release();
-      await notifier.wait();
+      // Release slot count/semaphore outside of the main buffer lock
+      if (slotToRelease !== undefined) {
+        releaseSlot(slotToRelease); 
+      }
+      
+      if (result) return result;
+      // Optimization: release lock before awaiting signal
+      if (shouldWait) await notifier.wait();
     }
   };
 
@@ -695,7 +772,7 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
       const item = buffer[getIndex(readerState.offset)];
       
       if (isErrorMarker(item)) {
-        throw item.__error;
+        throw item[ERROR_SYMBOL];
       }
 
       return { value: item as T, done: false };
@@ -712,11 +789,9 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
       isCompleted = true;
       notifier.signalAll();
       
-      // Release all semaphore permits to unblock any waiting writes
-      if (semaphore) {
-        const cap = resolvedCapacity!;
-        // Release all permits (capacity times)
-        for (let i = 0; i < cap; i++) {
+      // Release all semaphore permits to unblock any waiting writers
+      if (semaphore && resolvedCapacity) {
+        for (let i = 0; i < resolvedCapacity; i++) {
           semaphore.release();
         }
       }
@@ -733,6 +808,7 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
   const getBuffer = (): T[] => {
     const result: T[] = [];
     const cap = resolvedCapacity ?? Infinity;
+    // Calculate the absolute index of the start of the replay window
     const start = Math.max(0, totalWritten - (isInfinite ? totalWritten : cap));
     
     for (let i = start; i < totalWritten; i++) {
