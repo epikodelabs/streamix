@@ -11,6 +11,6 @@
   ],
   "eslint.alwaysShowStatus": true,  // Show ESLint status in the status bar
   "eslint.workingDirectories": [
-    "../projects/streamix/src",                         // Ensure ESLint works for your source directory
+    "../projects/libraries/streamix/src",                         // Ensure ESLint works for your source directory
   ]
 }
