@@ -32,6 +32,9 @@
       "@actioncrew/streamix/coroutine": [
         "./projects/libraries/streamix/coroutine/src/lib/index.ts"
       ],
+      "@actioncrew/streamix/tracing": [
+        "./projects/libraries/streamix/tracing/src/lib/index.ts"
+      ],
       "@actioncrew/streamix": [
         "./projects/libraries/streamix/src/lib/index.ts"
       ]

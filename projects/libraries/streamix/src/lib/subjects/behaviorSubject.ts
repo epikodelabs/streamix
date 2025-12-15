@@ -2,6 +2,7 @@ import {
   createAsyncGenerator,
   createReceiver,
   createSubscription,
+  generateStreamId,
   MaybePromise,
   Operator,
   pipeStream,
@@ -125,6 +126,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
   const subject: BehaviorSubject<T> = {
     type: "subject",
     name: "behaviorSubject",
+    id: generateStreamId(),
     get snappy() {
       return latestValue;
     },

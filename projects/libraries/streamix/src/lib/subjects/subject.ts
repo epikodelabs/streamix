@@ -2,6 +2,7 @@ import {
   createAsyncGenerator,
   createReceiver,
   createSubscription,
+  generateStreamId,
   scheduler as globalScheduler,
   MaybePromise,
   Operator,
@@ -142,6 +143,7 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
   const subject: Subject<T> = {
     type: "subject",
     name: "subject",
+    id: generateStreamId(),
     get snappy() {
       return latestValue;
     },

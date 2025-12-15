@@ -2,6 +2,7 @@ import {
   createAsyncGenerator,
   createReceiver,
   createSubscription,
+  generateStreamId,
   MaybePromise,
   Operator,
   pipeStream,
@@ -121,6 +122,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
   const replaySubject: ReplaySubject<T> = {
     type: "subject",
     name: "replaySubject",
+    id: generateStreamId(),
     pipe(...operators: Operator<any, any>[]): Stream<any> {
       return pipeStream(this, operators);
     },
