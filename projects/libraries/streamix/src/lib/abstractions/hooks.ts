@@ -29,11 +29,11 @@ let streamIdCounter = 0;
 let subscriptionIdCounter = 0;
 
 export function generateStreamId(): string {
-  return `str_${++streamIdCounter}_${Date.now()}`;
+  return `str_${++streamIdCounter}`;
 }
 
 export function generateSubscriptionId(): string {
-  return `sub_${++subscriptionIdCounter}_${Date.now()}`;
+  return `sub_${++subscriptionIdCounter}`;
 }
 
 export function registerRuntimeHooks(hooks: StreamRuntimeHooks): void {

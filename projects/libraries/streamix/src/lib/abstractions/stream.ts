@@ -354,7 +354,7 @@ export function createStream<T>(
   let self!: Stream<T>;
 
   const pipe = ((...ops: Operator<any, any>[]) =>
-    pipeStream(self, ops)) as OperatorChain<T>;
+    pipeSourceThrough(self, ops)) as OperatorChain<T>;
 
   self = {
     type: "stream",
@@ -399,7 +399,7 @@ export function createStream<T>(
  *
  * @returns A new unicast `Stream` derived from the source.
  */
-export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
+export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
   source: Stream<TIn>,
   operators: [...Ops]
 ): Stream<any> {
@@ -409,7 +409,7 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
     type: "stream",
     
     pipe: ((...nextOps: Operator<any, any>[]) =>
-      pipeStream(source, [...operators, ...nextOps])) as OperatorChain<any>,
+      pipeSourceThrough(source, [...operators, ...nextOps])) as OperatorChain<any>,
 
     subscribe(cb?: ((value: any) => MaybePromise) | Receiver<any>) {
       return registerReceiver(createReceiver(cb));
