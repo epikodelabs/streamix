@@ -1,16 +1,16 @@
 import {
-  createAsyncGenerator,
-  createReceiver,
-  createSubscription,
-  generateStreamId,
-  scheduler as globalScheduler,
-  MaybePromise,
-  Operator,
-  pipeStream,
-  Receiver,
-  Scheduler,
-  Stream,
-  Subscription
+    createAsyncGenerator,
+    createReceiver,
+    createSubscription,
+    generateStreamId,
+    scheduler as globalScheduler,
+    MaybePromise,
+    Operator,
+    pipeSourceThrough,
+    Receiver,
+    Scheduler,
+    Stream,
+    Subscription
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { createSubjectBuffer } from "../primitives";
@@ -148,7 +148,7 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
       return latestValue;
     },
     pipe(...steps: Operator<any, any>[]): Stream<any> {
-      return pipeStream(this, steps);
+      return pipeSourceThrough(this, steps);
     },
     subscribe,
     async query(): Promise<T> {

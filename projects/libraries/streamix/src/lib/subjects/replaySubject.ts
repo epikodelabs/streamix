@@ -1,15 +1,15 @@
 import {
-  createAsyncGenerator,
-  createReceiver,
-  createSubscription,
-  generateStreamId,
-  MaybePromise,
-  Operator,
-  pipeStream,
-  Receiver,
-  scheduler,
-  Stream,
-  Subscription,
+    createAsyncGenerator,
+    createReceiver,
+    createSubscription,
+    generateStreamId,
+    MaybePromise,
+    Operator,
+    pipeSourceThrough,
+    Receiver,
+    scheduler,
+    Stream,
+    Subscription,
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { createReplayBuffer, ReplayBuffer } from "../primitives";
@@ -124,7 +124,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     name: "replaySubject",
     id: generateStreamId(),
     pipe(...operators: Operator<any, any>[]): Stream<any> {
-      return pipeStream(this, operators);
+      return pipeSourceThrough(this, operators);
     },
     subscribe,
     async query(): Promise<T> {
