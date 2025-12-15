@@ -1,4 +1,5 @@
 import { firstValueFrom } from "../converters";
+import { generateStreamId, generateSubscriptionId, getRuntimeHooks } from "./hooks";
 import { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, Receiver } from "./receiver";
 import { scheduler } from "./scheduler";
@@ -25,6 +26,14 @@ export type Stream<T = any> = AsyncIterable<T> & {
 
   /** Human-readable name primarily for debugging and introspection. */
   name?: string;
+
+  /**
+   * Internal unique identifier of the stream instance.
+   *
+   * Used by runtime hooks (e.g. tracing, profiling, devtools).
+   * Not part of the public reactive API.
+   */
+  id: string;
 
   /**
    * Creates a new derived stream by applying one or more `Operator`s.
@@ -260,24 +269,38 @@ async function drainIterator<T>(
 /**
  * Creates a **multicast reactive stream** backed by an async generator.
  *
- * Semantics:
- * - The generator runs once per group of subscribers.
- * - Adding the first subscriber starts the generator.
- * - Values are shared across all subscribers (hot multicast).
- * - When the last subscriber unsubscribes, the generator is aborted.
- * - A later subscriber causes the generator to start again (cold-restart).
+ * ## Semantics
+ * - The generator runs **once per active subscriber group**.
+ * - The **first subscriber** starts the generator.
+ * - Emitted values are **shared across all subscribers** (hot multicast).
+ * - When the **last subscriber unsubscribes**, the generator is aborted.
+ * - A later subscriber causes the generator to **restart** (cold restart).
  *
- * Scheduler guarantees:
- * - All receiver callbacks (`next`, `error`, `complete`) run in scheduled microtasks.
+ * ## Scheduler guarantees
+ * - All receiver callbacks (`next`, `error`, `complete`) are executed inside
+ *   the scheduler's microtask queue.
  *
- * @template T Value type emitted by the generator.
+ * ## Runtime hooks
+ * If runtime hooks are registered (e.g. tracing, profiling, devtools),
+ * `onCreateStream` is invoked with the generated stream identifier.
+ *
+ * @template T
  * @param name Optional human-readable stream label.
- * @param generatorFn Function producing an async iterator yielding values for subscribers.
+ * @param generatorFn Function producing an async generator yielding values.
+ *
+ * @returns A multicast `Stream<T>` instance.
  */
 export function createStream<T>(
   name: string,
   generatorFn: () => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
+  const id = generateStreamId();
+
+  getRuntimeHooks()?.onCreateStream?.({
+    id,
+    name,
+  });
+
   const activeSubscriptions = new Set<SubscriberEntry<T>>();
   let isRunning = false;
   let abortController = new AbortController();
@@ -328,21 +351,17 @@ export function createStream<T>(
     return subscription;
   };
 
-  const subscribe = (
-    callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
-  ): Subscription => {
-    return registerReceiver(createReceiver(callbackOrReceiver));
-  };
+  let self!: Stream<T>;
 
-  let self: Stream<T>;
   const pipe = ((...ops: Operator<any, any>[]) =>
     pipeStream(self, ops)) as OperatorChain<T>;
 
   self = {
     type: "stream",
     name,
+    id, // internal identifier (non-breaking)
     pipe,
-    subscribe,
+    subscribe: cb => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(self),
     [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
   };
@@ -351,19 +370,34 @@ export function createStream<T>(
 }
 
 /**
- * Pipes a source stream through a chain of operators to produce a **derived stream**.
+ * Pipes a source stream through a chain of operators to create a **derived stream**.
  *
- * For each subscription:
- * - A fresh iterator is created from the source's async-iterable interface.
- * - All operators transform the iterator in sequence.
- * - `drainIterator` consumes the transformed iterator until completion or abort.
+ * ## Semantics
+ * - Derived streams are **unicast**.
+ * - Each subscriber receives an **independent execution** of the operator pipeline.
+ * - The source stream remains multicast; only the pipeline is per-subscriber.
  *
- * Unlike `createStream`, piped streams are **unicast**:
- * - Each subscriber gets an independent execution of the operator pipeline.
- * - Only the source stream remains multicast.
+ * ## Execution model
+ * For every subscription:
+ * 1. A fresh async iterator is created from the source stream.
+ * 2. Runtime hooks may wrap the source iterator and operator chain.
+ * 3. Operators are applied sequentially.
+ * 4. The resulting iterator is drained until completion or unsubscribe.
  *
- * @template TIn  Input value type.
- * @template Ops  Tuple of operators used to transform the pipeline.
+ * ## Runtime hooks
+ * If registered, `onPipeStream` may:
+ * - Wrap the source iterator (e.g. value emission tracing).
+ * - Replace or wrap operators.
+ * - Wrap the final iterator (e.g. delivery tracking).
+ *
+ * Hooks are **optional** and impose **zero overhead** when not present.
+ *
+ * @template TIn
+ * @template Ops
+ * @param source Source stream to pipe from.
+ * @param operators Operator chain applied to the source.
+ *
+ * @returns A new unicast `Stream` derived from the source.
  */
 export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
   source: Stream<TIn>,
@@ -371,8 +405,9 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
 ): Stream<any> {
   const pipedStream: Stream<any> = {
     name: `${source.name}-piped`,
+    id: generateStreamId(),
     type: "stream",
-
+    
     pipe: ((...nextOps: Operator<any, any>[]) =>
       pipeStream(source, [...operators, ...nextOps])) as OperatorChain<any>,
 
@@ -383,16 +418,49 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
     query() {
       return firstValueFrom(pipedStream);
     },
+
     [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
   };
 
   function registerReceiver(receiver: Receiver<any>): Subscription {
     const wrapped = wrapReceiver(receiver);
 
-    const sourceIterator = (source)[Symbol.asyncIterator]();
+    const subscriptionId = generateSubscriptionId();
+    const hooks = getRuntimeHooks();
 
-    let iterator: AsyncIterator<any> = sourceIterator;
-    for (const op of operators) iterator = op.apply(iterator);
+    // Base source iterator
+    let iterator: AsyncIterator<any> =
+      source[Symbol.asyncIterator]();
+
+    let ops: Operator<any, any>[] = operators;
+    let finalWrap:
+      | ((it: AsyncIterator<any>) => AsyncIterator<any>)
+      | undefined;
+
+    // Allow runtime hooks to patch the pipeline
+    if (hooks?.onPipeStream) {
+      const patch = hooks.onPipeStream({
+        streamName: source.name,
+        streamId: source.id,
+        subscriptionId,
+        source: iterator,
+        operators: ops,
+      });
+
+      if (patch?.source) iterator = patch.source;
+      if (patch?.operators) ops = patch.operators;
+      if (patch?.final) finalWrap = patch.final;
+    }
+
+    // Apply operators
+    for (const op of ops) {
+      iterator = op.apply(iterator);
+    }
+
+    // Final wrapping (delivery, instrumentation, etc.)
+    if (finalWrap) {
+      iterator = finalWrap(iterator);
+    }
 
     const abortController = new AbortController();
     const signal = abortController.signal;
@@ -402,9 +470,11 @@ export function pipeStream<TIn, Ops extends Operator<any, any>[]>(
       wrapped.complete?.();
     });
 
-    drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(
-      () => {}
-    );
+    drainIterator(
+      iterator,
+      () => [{ receiver: wrapped, subscription }],
+      signal
+    ).catch(() => {});
 
     return subscription;
   }
