@@ -2,43 +2,6 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "type": "node",
-      "request": "launch",
-      "name": "Run Jasmine Test (ESM Loader)",
-      "runtimeExecutable": "node",
-      "runtimeArgs": [
-        "--loader",
-        "./esm-loader.mjs",
-        "./node_modules/jasmine/bin/jasmine.js",
-        "--config=spec/support/jasmine.json"
-      ],
-      "args": ["${file}"],
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen",
-      "sourceMaps": false,
-      "skipFiles": ["<node_internals>/**"],
-      "outFiles": ["${workspaceFolder}/dist/**/*.js"]
-    },
-    {
-      "type": "node",
-      "request": "launch",
-      "name": "Debug Jasmine Test (ESM Loader)",
-      "runtimeExecutable": "node",
-      "runtimeArgs": [
-        "--loader",
-        "./esm-loader.mjs",
-        "./node_modules/jasmine/bin/jasmine.js",
-        "--config=spec/support/jasmine.json"
-      ],
-      "args": ["${file}"],
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "internalConsoleOptions": "neverOpen",
-      "sourceMaps": true,
-      "skipFiles": ["<node_internals>/**"]
-    },
-    {
       "name": "ng serve",
       "type": "chrome",
       "request": "launch",
@@ -51,7 +14,30 @@
       "request": "launch",
       "preLaunchTask": "npm: test",
       "url": "http://localhost:9876/debug.html",
-      "runtimeArgs": ["--headless"]
+      "runtimeArgs": [
+        "--headless"
+      ]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug current spec (ts-jasmine-cli)",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--loader",
+        "@actioncrew/ts-test-runner/esm-loader.mjs",
+        "--enable-source-maps"
+      ],
+      "program": "${workspaceFolder}/node_modules/@actioncrew/ts-test-runner/bin/ts-jasmine-cli",
+      "args": [
+        "--spec",
+        "${file}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
     }
   ]
 }

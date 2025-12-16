@@ -55,5 +55,11 @@
     "vitepress": "1.6.4"
   },
   "type": "module",
-  "sideEffects": false
+  "sideEffects": false,
+  "exports": {
+    ".": "./projects/libraries/streamix/src/lib/index.ts",
+    "./coroutine": "./projects/libraries/streamix/coroutine/src/lib/index.ts",
+    "./http": "./projects/libraries/streamix/http/src/lib/index.ts",
+    "./tracing": "./projects/libraries/streamix/tracing/src/lib/index.ts"
+  }
 }

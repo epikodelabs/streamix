@@ -3,18 +3,20 @@
 import "@actioncrew/streamix/tracing"; // ⬅️ registers runtime hooks (REQUIRED)
 
 import {
-    createOperator,
-    createStream,
-    filter,
-    map,
-    scheduler,
+  buffer,
+  createOperator,
+  createStream,
+  filter,
+  map,
+  mergeMap,
+  scheduler,
 } from "@actioncrew/streamix";
 
 import {
-    disableTracing,
-    enableTracing,
-    ValueTrace,
-    ValueTracer,
+  disableTracing,
+  enableTracing,
+  ValueTrace,
+  ValueTracer,
 } from "@actioncrew/streamix/tracing";
 
 // ---------------------------------------------------------------------------
@@ -24,7 +26,7 @@ import {
 async function waitForCompletion(
   subscribe: (handlers: { complete?: () => void; error?: () => void }) => void
 ): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<void>((resolve) => {
     subscribe({
       complete: () => resolve(),
       error: () => resolve(), // error still ends the stream
@@ -199,7 +201,73 @@ describe("Streamix Tracing – operator chain", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("Streamix Tracing – operator error", () => {
+describe("Streamix Tracing - expanded operators", () => {
+  let tracer: TestTracer;
+
+  beforeEach(() => {
+    tracer = new TestTracer();
+    enableTracing(tracer);
+  });
+
+  afterEach(() => {
+    disableTracing();
+    tracer.clear();
+  });
+
+  it("traces mergeMap expansions", async () => {
+    const received: number[] = [];
+
+    const stream = createStream("numbers", async function* () {
+      yield 1;
+    });
+
+    await waitForCompletion(({ complete }) => {
+      stream
+        .pipe(mergeMap(value => [value, value + 10]))
+        .subscribe({
+          next: value => received.push(value),
+          complete,
+        });
+    });
+
+    expect(received).toEqual([1, 11]);
+    expect(tracer.delivered.length).toBe(received.length);
+
+    const steps = tracer.delivered.map(trace => trace.operatorSteps[0]);
+    expect(steps.every(step => step?.operatorName.includes("mergeMap"))).toBeTrue();
+    expect(steps.some(step => step?.outcome === "expanded")).toBeTrue();
+  });
+
+  it("tracks buffered arrays as traced values", async () => {
+    const received: number[][] = [];
+
+    const stream = createStream("numbers", async function* () {
+      yield 1;
+      yield 2;
+    });
+
+    await waitForCompletion(({ complete }) => {
+      stream
+        .pipe(buffer(50))
+        .subscribe({
+          next: value => received.push(value),
+          complete,
+        });
+    });
+
+    expect(received).toEqual([[1, 2]]);
+    expect(tracer.delivered.length).toBe(1);
+
+    const trace = tracer.delivered[0];
+    expect(trace.operatorSteps.length).toBe(1);
+    expect(trace.operatorSteps[0].operatorName).toContain("buffer");
+    expect(trace.finalValue).toEqual([1, 2]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("Streamix Tracing - operator error", () => {
   let tracer: TestTracer;
 
   beforeEach(() => {
