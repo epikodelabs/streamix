@@ -172,7 +172,8 @@ export class ValueTracer {
     valueId: string,
     operatorIndex: number,
     outputValue: any,
-    wasFiltered: boolean = false
+    wasFiltered: boolean = false,
+    outcome: OperatorOutcome = "transformed"
   ): string | null {
     const trace = this.traces.get(valueId);
     if (!trace) return null;
@@ -200,7 +201,7 @@ export class ValueTracer {
       this.onValueDropped?.(trace);
       return null;
     } else {
-      step.outcome = "transformed";
+      step.outcome = outcome;
       step.outputValue = outputValue;
       trace.state = "processing";
       trace.finalValue = outputValue;
@@ -557,15 +558,31 @@ export function wrapOperatorWithTracing<T, R>(
               return { done: false, value: wrappedOutput };
             }
 
-            // Fallback: Untraced or expanded value (keep existing logic)
-            const valueId = generateValueId();
-            const wrappedOutput = wrapValueForTracing(outputValue, {
-              valueId,
-              streamId,
-              subscriptionId,
-            });
+        // Fallback: Untraced or expanded value (keep existing logic)
+        const expandedValueId = generateValueId();
+        tracer.startTrace(
+          expandedValueId,
+          streamId,
+          undefined,
+          subscriptionId,
+          outputValue
+        );
+        tracer.enterOperator(expandedValueId, operatorIndex, operatorName, outputValue);
+        tracer.exitOperator(
+          expandedValueId,
+          operatorIndex,
+          outputValue,
+          false,
+          "expanded"
+        );
 
-            return { done: false, value: wrappedOutput };
+        const wrappedOutput = wrapValueForTracing(outputValue, {
+          valueId: expandedValueId,
+          streamId,
+          subscriptionId,
+        });
+
+        return { done: false, value: wrappedOutput };
           } catch (error) {
             // --- 🔑 FIX 4: Trace error for all pending inputs (FIFO) before re-throwing ---
             const err = error instanceof Error ? error : new Error(String(error));
