@@ -22,13 +22,15 @@ import {
 // ---------------------------------------------------------------------------
 
 async function waitForCompletion(
-  subscribe: (handlers: { complete?: () => void; error?: () => void }) => void
+  subscribe: (handlers: { complete?: () => void; error?: (err: any) => void }) => void
 ): Promise<void> {
-  return new Promise<void>((resolve) => {
-    subscribe({
+  return new Promise<void>((resolve, reject) => {
+    const handlers = {
       complete: () => resolve(),
-      error: () => resolve(), // error still ends the stream
-    });
+      error: (err: any) => { reject(err); handlers.complete!(); }, // Now handlers is in scope
+    };
+    
+    subscribe(handlers);
   }).finally(async () => {
     // ensure all scheduled microtasks complete
     await scheduler.flush();
@@ -462,9 +464,9 @@ describe("Streamix Tracing - operator error", () => {
 
     await waitForCompletion(({ error }) => {
       stream.pipe(boom).subscribe({
-        error: () => {
+        error: (err) => {
           errorCaught = true;
-          error?.();
+          error?.(err);
         },
       });
     });
@@ -498,7 +500,7 @@ describe("Streamix Tracing - operator error", () => {
     });
 
     await waitForCompletion(({ error }) => {
-      stream.pipe(boom).subscribe({ error: () => error?.() });
+      stream.pipe(boom).subscribe({ error: (err) => error?.(err) });
     });
 
     expect(tracer.filtered.length).toBe(0);

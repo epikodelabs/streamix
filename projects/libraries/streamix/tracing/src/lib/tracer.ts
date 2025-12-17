@@ -133,6 +133,14 @@ export class ValueTracer {
     Object.assign(this, options);
   }
 
+  private evictIfNeeded() {
+    if (this.traces.size <= this.maxTraces) return;
+    const oldest = this.traces.keys().next().value;
+    if (!oldest) return;
+    this.traces.delete(oldest);
+    this.active.delete(oldest);
+  }
+
   /* ------------------------------------------------------------------------
    * PUBLIC EVENT SUBSCRIPTION API
    * ---------------------------------------------------------------------- */
@@ -206,17 +214,98 @@ export class ValueTracer {
 
     this.traces.set(valueId, trace);
     this.active.add(valueId);
-
-    if (this.traces.size > this.maxTraces) {
-      const oldest = this.traces.keys().next().value;
-      if (oldest) {
-        this.traces.delete(oldest);
-        this.active.delete(oldest);
-      }
-    }
+    this.evictIfNeeded();
 
     this.onValueEmitted?.(trace);
     return trace;
+  }
+
+  /**
+   * Creates a derived trace for an "expanded" output value.
+   *
+   * Expanded traces are NOT new source emissions, so they do not trigger
+   * `onValueEmitted`. They still participate in delivery / stats / downstream
+   * operator tracing.
+   */
+  createExpandedTrace(
+    baseValueId: string,
+    operatorIndex: number,
+    operatorName: string,
+    expandedValue: any
+  ): string {
+    const base = this.traces.get(baseValueId);
+    const now = Date.now();
+    const valueId = generateValueId();
+
+    if (!base) {
+      const trace: ValueTrace = {
+        valueId,
+        streamId: "unknown",
+        streamName: undefined,
+        subscriptionId: "unknown",
+        emittedAt: now,
+        state: "processing",
+        sourceValue: expandedValue,
+        finalValue: expandedValue,
+        operatorSteps: [
+          {
+            operatorIndex,
+            operatorName,
+            enteredAt: now,
+            exitedAt: now,
+            outcome: "expanded",
+            inputValue: undefined,
+            outputValue: expandedValue,
+          },
+        ],
+        operatorDurations: new Map(),
+      };
+
+      this.traces.set(valueId, trace);
+      this.active.add(valueId);
+      this.evictIfNeeded();
+      return valueId;
+    }
+
+    const operatorSteps = base.operatorSteps
+      .filter(s => s.operatorIndex <= operatorIndex)
+      .map(s => ({ ...s }));
+
+    const step =
+      operatorSteps.find(s => s.operatorIndex === operatorIndex) ??
+      (() => {
+        const created: OperatorStep = {
+          operatorIndex,
+          operatorName,
+          enteredAt: now,
+          inputValue: base.finalValue ?? base.sourceValue,
+        };
+        operatorSteps.push(created);
+        return created;
+      })();
+
+    step.operatorName = operatorName;
+    step.exitedAt = now;
+    step.outcome = "expanded";
+    step.outputValue = expandedValue;
+
+    const trace: ValueTrace = {
+      valueId,
+      streamId: base.streamId,
+      streamName: base.streamName,
+      subscriptionId: base.subscriptionId,
+      emittedAt: base.emittedAt,
+      state: "processing",
+      sourceValue: base.sourceValue,
+      finalValue: expandedValue,
+      operatorSteps,
+      operatorDurations: new Map(base.operatorDurations),
+    };
+
+    this.traces.set(valueId, trace);
+    this.active.add(valueId);
+    this.evictIfNeeded();
+    return valueId;
   }
 
   enterOperator(
@@ -287,20 +376,50 @@ export class ValueTracer {
     valueId: string,
     operatorIndex: number,
     operatorName: string,
-    targetValueId: string
+    targetValueId: string,
+    outputValue?: any
   ) {
     const trace = this.traces.get(valueId);
     if (!trace) return;
 
+    const now = Date.now();
+    const step = trace.operatorSteps.find(
+      s => s.operatorIndex === operatorIndex && !s.exitedAt
+    );
+
+    if (step) {
+      step.exitedAt = now;
+      step.outcome = "collapsed";
+      step.outputValue = outputValue;
+      trace.operatorDurations.set(step.operatorName, step.exitedAt - step.enteredAt);
+    }
+
     trace.state = "collapsed";
     trace.collapsedInto = { operatorIndex, operatorName, targetValueId };
+    trace.droppedReason = {
+      operatorIndex,
+      operatorName,
+      reason: "collapsed",
+    };
     this.active.delete(valueId);
-    this.onValueCollapsed?.(trace, trace.operatorSteps.at(-1)!);
+    this.onValueCollapsed?.(trace, step ?? trace.operatorSteps.at(-1)!);
   }
 
   errorInOperator(valueId: string, operatorIndex: number, error: Error) {
     const trace = this.traces.get(valueId);
     if (!trace) return;
+
+    const now = Date.now();
+    const step = trace.operatorSteps.find(
+      s => s.operatorIndex === operatorIndex && !s.exitedAt
+    );
+
+    if (step) {
+      step.exitedAt = now;
+      step.outcome = "errored";
+      step.error = error;
+      trace.operatorDurations.set(step.operatorName, step.exitedAt - step.enteredAt);
+    }
 
     trace.state = "errored";
     trace.droppedReason = {
@@ -438,6 +557,15 @@ registerRuntimeHooks({
     const tracer = getGlobalTracer();
     if (!tracer) return;
 
+    const describeOperator = (op: { name?: string }, i: number) =>
+      op.name ?? `op${i}`;
+
+    const wrapSynthetic = (value: any) => {
+      const id = generateValueId();
+      tracer.startTrace(id, streamId, streamName, subscriptionId, value);
+      return wrap(value, { valueId: id, streamId, subscriptionId });
+    };
+
     return {
       source: {
         async next() {
@@ -445,25 +573,188 @@ registerRuntimeHooks({
           if (r.done) return r;
           const id = generateValueId();
           tracer.startTrace(id, streamId, streamName, subscriptionId, r.value);
-          return { done: false, value: wrap(r.value, { valueId: id, streamId, subscriptionId }) };
+          return {
+            done: false,
+            value: wrap(r.value, { valueId: id, streamId, subscriptionId }),
+          };
         },
+        return: source.return?.bind(source),
+        throw: source.throw?.bind(source),
       },
 
-      operators: operators.map((op, i) =>
-        createOperator(`traced_${op.name ?? i}`, src => ({
-          async next() {
-            const r = await src.next();
-            if (r.done) return r;
-            const meta = r.value.meta;
-            const value = unwrap(r.value);
-            tracer.enterOperator(meta.valueId, i, op.name ?? `op${i}`, value);
-            const out = await op.apply({ next: async () => ({ done: false, value }) }).next();
-            if (out.done) return out;
-            tracer.exitOperator(meta.valueId, i, out.value);
-            return { done: false, value: wrap(out.value, meta) };
-          },
-        }))
-      ),
+      operators: operators.map((op, i) => {
+        const operatorName = describeOperator(op, i);
+        const kind =
+          operatorName === "filter"
+            ? "filter"
+            : operatorName === "buffer"
+              ? "buffer"
+              : operatorName === "mergeMap"
+                ? "mergeMap"
+                : "default";
+
+        type Meta = TracedWrapper<any>["meta"];
+        type InputEntry = { meta: Meta; value: any };
+
+        return createOperator(`traced_${operatorName}`, src => {
+          const inputQueue: InputEntry[] = [];
+          let currentExpandBase: InputEntry | null = null;
+
+          const rawSource: AsyncIterator<any> = {
+            async next() {
+              const r = await src.next();
+              if (r.done) return r;
+
+              const wrapped = r.value as TracedWrapper<any>;
+              const meta = wrapped.meta;
+              const value = unwrap(wrapped);
+
+              inputQueue.push({ meta, value });
+              tracer.enterOperator(meta.valueId, i, operatorName, value);
+
+              return { done: false, value };
+            },
+            return: src.return?.bind(src),
+            throw: src.throw?.bind(src),
+          };
+
+          const inner = op.apply(rawSource);
+
+          return {
+            async next() {
+              try {
+                const out = await inner.next();
+
+                if (out.done) {
+                  if (kind === "filter" && inputQueue.length > 0) {
+                    for (const entry of inputQueue) {
+                      tracer.exitOperator(entry.meta.valueId, i, entry.value, true);
+                    }
+                    inputQueue.length = 0;
+                  }
+
+                  return out;
+                }
+
+                const outputValue = out.value;
+
+                if (kind === "buffer" && Array.isArray(outputValue)) {
+                  const n = outputValue.length;
+                  const consumed = inputQueue.splice(0, n);
+                  const carrier = consumed[0];
+
+                  if (!carrier) {
+                    return { done: false, value: wrapSynthetic(outputValue) };
+                  }
+
+                  tracer.exitOperator(
+                    carrier.meta.valueId,
+                    i,
+                    outputValue,
+                    false,
+                    "collapsed"
+                  );
+
+                  for (const entry of consumed.slice(1)) {
+                    tracer.collapseValue(
+                      entry.meta.valueId,
+                      i,
+                      operatorName,
+                      carrier.meta.valueId,
+                      outputValue
+                    );
+                  }
+
+                  return { done: false, value: wrap(outputValue, carrier.meta) };
+                }
+
+                if (kind === "filter") {
+                  const passed = inputQueue.at(-1);
+                  if (!passed) {
+                    return { done: false, value: wrapSynthetic(outputValue) };
+                  }
+
+                  const filtered = inputQueue.slice(0, -1);
+                  inputQueue.length = 0;
+
+                  for (const entry of filtered) {
+                    tracer.exitOperator(entry.meta.valueId, i, entry.value, true);
+                  }
+
+                  tracer.exitOperator(
+                    passed.meta.valueId,
+                    i,
+                    outputValue,
+                    false,
+                    "transformed"
+                  );
+
+                  return { done: false, value: wrap(outputValue, passed.meta) };
+                }
+
+                if (kind === "mergeMap") {
+                  const matchIndex = inputQueue.findIndex(entry =>
+                    Object.is(entry.value, outputValue)
+                  );
+
+                  if (matchIndex >= 0) {
+                    const entry = inputQueue.splice(matchIndex, 1)[0];
+                    currentExpandBase = entry;
+
+                    tracer.exitOperator(
+                      entry.meta.valueId,
+                      i,
+                      outputValue,
+                      false,
+                      "transformed"
+                    );
+
+                    return { done: false, value: wrap(outputValue, entry.meta) };
+                  }
+
+                  const base = currentExpandBase ?? inputQueue[0];
+                  if (!base) {
+                    return { done: false, value: wrapSynthetic(outputValue) };
+                  }
+
+                  const expandedId = tracer.createExpandedTrace(
+                    base.meta.valueId,
+                    i,
+                    operatorName,
+                    outputValue
+                  );
+
+                  const meta: Meta = { ...base.meta, valueId: expandedId };
+                  return { done: false, value: wrap(outputValue, meta) };
+                }
+
+                const entry = inputQueue.shift();
+                if (!entry) {
+                  return { done: false, value: wrapSynthetic(outputValue) };
+                }
+
+                tracer.exitOperator(
+                  entry.meta.valueId,
+                  i,
+                  outputValue,
+                  false,
+                  "transformed"
+                );
+
+                return { done: false, value: wrap(outputValue, entry.meta) };
+              } catch (error) {
+                const last = inputQueue.at(-1) ?? currentExpandBase;
+                if (last) {
+                  tracer.errorInOperator(last.meta.valueId, i, error as Error);
+                }
+                throw error;
+              }
+            },
+            return: inner.return?.bind(inner),
+            throw: inner.throw?.bind(inner),
+          };
+        });
+      }),
 
       final: it => ({
         async next() {
@@ -471,6 +762,8 @@ registerRuntimeHooks({
           if (!r.done) tracer.markDelivered(r.value.meta.valueId);
           return r.done ? r : { done: false, value: unwrap(r.value) };
         },
+        return: it.return?.bind(it),
+        throw: it.throw?.bind(it),
       }),
     };
   },
