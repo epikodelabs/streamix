@@ -22,12 +22,19 @@ import {
 // ---------------------------------------------------------------------------
 
 async function waitForCompletion(
-  subscribe: (handlers: { complete?: () => void; error?: (err: any) => void }) => void
+  subscribe: (handlers: { complete?: () => void; error?: (err: any) => void }) => void,
+  options?: { allowError?: boolean }
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const handlers = {
       complete: () => resolve(),
-      error: (err: any) => { reject(err); handlers.complete!(); }, // Now handlers is in scope
+      error: (err: any) => {
+        if (options?.allowError) {
+          resolve();
+          return;
+        }
+        reject(err);
+      },
     };
     
     subscribe(handlers);
@@ -311,7 +318,9 @@ describe("Streamix Tracing - expanded operators", () => {
       );
     });
 
-    expect(received).toEqual([1, 11, 21, 2, 12, 22]);
+    // `mergeMap` merges inner streams concurrently; output order is not guaranteed.
+    expect(received.length).toBe(6);
+    expect(received).toEqual(jasmine.arrayContaining([1, 11, 21, 2, 12, 22]));
     expect(tracer.emitted.length).toBe(2);
     expect(tracer.delivered.length).toBe(6);
 
@@ -469,7 +478,7 @@ describe("Streamix Tracing - operator error", () => {
           error?.(err);
         },
       });
-    });
+    }, { allowError: true });
 
     expect(errorCaught).toBe(true);
     expect(tracer.emitted.length).toBe(1);
@@ -501,7 +510,7 @@ describe("Streamix Tracing - operator error", () => {
 
     await waitForCompletion(({ error }) => {
       stream.pipe(boom).subscribe({ error: (err) => error?.(err) });
-    });
+    }, { allowError: true });
 
     expect(tracer.filtered.length).toBe(0);
     expect(tracer.collapsed.length).toBe(0);
