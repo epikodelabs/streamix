@@ -334,6 +334,57 @@ export class ValueTracer {
     return [...this.traces.values()];
   }
 
+  /**
+   * Retrieves all values that were filtered out
+   * @returns Array of filtered value traces
+   */
+  getFilteredValues(): ValueTrace[] {
+    return this.getAllTraces().filter(t => t.state === "filtered");
+  }
+
+  /**
+   * Retrieves all values that were collapsed
+   * @returns Array of collapsed value traces
+   */
+  getCollapsedValues(): ValueTrace[] {
+    return this.getAllTraces().filter(t => t.state === "collapsed");
+  }
+
+  /**
+   * Retrieves all values that were successfully delivered
+   * @returns Array of delivered value traces
+   */
+  getDeliveredValues(): ValueTrace[] {
+    return this.getAllTraces().filter(t => t.state === "delivered");
+  }
+
+  /**
+   * Retrieves all values that were dropped (filtered or errored)
+   * @returns Array of dropped value traces
+   */
+  getDroppedValues(): ValueTrace[] {
+    return this.getAllTraces().filter(t => t.droppedReason !== undefined);
+  }
+
+  /**
+   * Calculates statistics about traced values
+   * @returns Object containing counts and rates
+   */
+  getStats() {
+    const all = this.getAllTraces();
+    return {
+      total: all.length,
+      emitted: all.filter(t => t.state === "emitted").length,
+      processing: all.filter(t => t.state === "processing").length,
+      delivered: all.filter(t => t.state === "delivered").length,
+      filtered: all.filter(t => t.state === "filtered").length,
+      collapsed: all.filter(t => t.state === "collapsed").length,
+      errored: all.filter(t => t.state === "errored").length,
+      dropRate:
+        all.length > 0 ? (this.getDroppedValues().length / all.length) * 100 : 0,
+    };
+  }
+
   clear() {
     this.traces.clear();
     this.active.clear();
