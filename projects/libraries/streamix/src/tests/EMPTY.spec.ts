@@ -1,6 +1,6 @@
 import { EMPTY } from '@actioncrew/streamix';
 
-describe('EMPTY', () => {
+describe('empty', () => {
   it('should auto-complete without emitting any values', async () => {
     const emptyStream = EMPTY;
 

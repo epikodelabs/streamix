@@ -4,7 +4,7 @@ import {
   createSubjectBuffer,
 } from "@actioncrew/streamix";
 
-describe("buffer primitives", () => {
+describe("bufferPrimitives", () => {
   describe("createSubjectBuffer", () => {
     it("peek returns done:true after completion when reader is caught up", async () => {
       const buf = createSubjectBuffer<number>();
@@ -82,4 +82,3 @@ describe("buffer primitives", () => {
     });
   });
 });
-
