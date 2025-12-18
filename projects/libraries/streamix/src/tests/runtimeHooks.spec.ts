@@ -1,6 +1,6 @@
 import { createStream, map, registerRuntimeHooks, scheduler } from "@actioncrew/streamix";
 
-describe("stream runtime hooks", () => {
+describe("runtimeHooks", () => {
   let previousHooks: any;
 
   beforeEach(() => {

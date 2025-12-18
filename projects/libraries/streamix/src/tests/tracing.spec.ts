@@ -79,7 +79,7 @@ export class TestTracer extends ValueTracer {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("Streamix Tracing – basic flow", () => {
+describe("tracingBasicFlow", () => {
   let tracer: TestTracer;
 
   beforeEach(() => {
@@ -124,7 +124,7 @@ describe("Streamix Tracing – basic flow", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("Streamix Tracing – filtering", () => {
+describe("tracingFiltering", () => {
   let tracer: TestTracer;
 
   beforeEach(() => {
@@ -209,7 +209,7 @@ describe("Streamix Tracing – filtering", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("Streamix Tracing – operator chain", () => {
+describe("tracingOperatorChain", () => {
   let tracer: TestTracer;
 
   beforeEach(() => {
@@ -261,7 +261,7 @@ describe("Streamix Tracing – operator chain", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("Streamix Tracing - expanded operators", () => {
+describe("tracingExpandedOperators", () => {
   let tracer: TestTracer;
 
   beforeEach(() => {
@@ -335,7 +335,7 @@ describe("Streamix Tracing - expanded operators", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("Streamix Tracing - collapsing operators", () => {
+describe("tracingCollapsingOperators", () => {
   let tracer: TestTracer;
 
   beforeEach(() => {
@@ -441,7 +441,7 @@ describe("Streamix Tracing - collapsing operators", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("Streamix Tracing - operator error", () => {
+describe("tracingOperatorError", () => {
   let tracer: TestTracer;
 
   beforeEach(() => {
@@ -520,7 +520,7 @@ describe("Streamix Tracing - operator error", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("Streamix Tracing – stats", () => {
+describe("tracingStats", () => {
   let tracer: TestTracer;
 
   beforeEach(() => {
@@ -568,7 +568,7 @@ describe("Streamix Tracing – stats", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("Streamix Tracing – disabled", () => {
+describe("tracingDisabled", () => {
   let tracer: TestTracer;
 
   beforeEach(() => {
