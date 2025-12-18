@@ -55,4 +55,46 @@ describe('forkJoin', () => {
     await done;
     expect(results).toEqual([[20, 'y']]);
   });
+
+  it('should accept a single stream argument', async () => {
+    const results: any[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      forkJoin(from([1, 2, 3])).subscribe({
+        next: (value) => results.push(value),
+        complete: resolve,
+        error: reject,
+      });
+    });
+
+    expect(results).toEqual([[3]]);
+  });
+
+  it('should accept a single array argument containing streams', async () => {
+    const results: any[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      forkJoin([from([1, 2]), from(['a']), from([true, false])]).subscribe({
+        next: (value) => results.push(value),
+        complete: resolve,
+        error: reject,
+      });
+    });
+
+    expect(results).toEqual([[2, 'a', false]]);
+  });
+
+  it('should accept streams inside an array as promises', async () => {
+    const results: any[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      forkJoin([Promise.resolve(from([1])), Promise.resolve(from(['x']))]).subscribe({
+        next: (value) => results.push(value),
+        complete: resolve,
+        error: reject,
+      });
+    });
+
+    expect(results).toEqual([[1, 'x']]);
+  });
 });

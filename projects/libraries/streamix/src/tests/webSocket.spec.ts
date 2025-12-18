@@ -5,6 +5,7 @@ class MockWebSocket {
   static instances: MockWebSocket[] = [];
   readyState = 0;
   sent: string[] = [];
+  throwOnSend = false;
   onopen: (() => void) | null = null;
   onmessage: ((ev: MessageEvent) => void) | null = null;
   onclose: (() => void) | null = null;
@@ -22,6 +23,9 @@ class MockWebSocket {
     (this as any)[`on${event}`] = null;
   }
   send(data: string) {
+    if (this.throwOnSend) {
+      throw new Error("Send failed");
+    }
     this.sent.push(data);
   }
   close() {
@@ -35,6 +39,9 @@ class MockWebSocket {
   }
   triggerMessage(data: any) {
     this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
+  }
+  triggerRawMessage(data: string) {
+    this.onmessage?.({ data } as MessageEvent);
   }
   triggerClose() {
     this.readyState = 3;
@@ -109,5 +116,115 @@ idescribe("webSocket", () => {
     await iterator.return?.(undefined);
     stream.close();
     expect(lastWs.close).toHaveBeenCalled();
+  });
+
+  it("should reject when incoming message is not valid JSON", async () => {
+    const stream = webSocket<any>("ws://test", factory);
+    const iterator = eachValueFrom(stream);
+
+    const next = iterator.next();
+    setTimeout(() => lastWs.triggerRawMessage("{"), 1);
+
+    await expectAsync(next).toBeRejected();
+  });
+
+  it("should reject a pending read when stream.close() is called", async () => {
+    const stream = webSocket<any>("ws://test", factory);
+    const iterator = eachValueFrom(stream);
+
+    const next = iterator.next();
+    stream.close();
+
+    await expectAsync(next).toBeRejectedWithError("WebSocket closed");
+  });
+
+  it("should not send after stream is closed", async () => {
+    const stream = webSocket<any>("ws://test", factory);
+    lastWs.triggerOpen();
+
+    stream.close();
+    stream.send({ cmd: "after-close" });
+
+    expect(lastWs.sent).toEqual([]);
+  });
+
+  it("should warn if socket.send throws (open socket)", async () => {
+    const stream = webSocket<any>("ws://test", factory);
+    lastWs.triggerOpen();
+    lastWs.throwOnSend = true;
+
+    const warn = spyOn(console, "warn");
+    stream.send({ cmd: "boom" });
+
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("should warn if flushing queued messages fails on open", async () => {
+    const stream = webSocket<any>("ws://test", factory);
+
+    stream.send({ cmd: "queued" });
+    lastWs.throwOnSend = true;
+
+    const warn = spyOn(console, "warn");
+    lastWs.triggerOpen();
+
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("should warn when trying to send while socket is not open or connecting", async () => {
+    const stream = webSocket<any>("ws://test", factory);
+    lastWs.readyState = 2; // CLOSING
+
+    const warn = spyOn(console, "warn");
+    stream.send({ cmd: "nope" });
+
+    expect(warn).toHaveBeenCalledWith("Cannot send message: WebSocket is not open");
+  });
+
+  it("should error if socket fails to initialize (rejected URL promise)", async () => {
+    const stream = webSocket<any>(Promise.reject(new Error("bad url")), factory);
+    const iterator = eachValueFrom(stream);
+
+    await expectAsync(iterator.next()).toBeRejectedWithError("WebSocket failed to initialize");
+  });
+
+  it("should use the default factory when none is provided", async () => {
+    const originalWebSocket = (globalThis as any).WebSocket;
+    (globalThis as any).WebSocket = MockWebSocket as any;
+
+    try {
+      const stream = webSocket<any>("ws://test-default");
+      const iterator = eachValueFrom(stream);
+
+      const ws = MockWebSocket.instances.at(-1)!;
+      setTimeout(() => {
+        ws.triggerMessage({ ok: true });
+        ws.triggerClose();
+      }, 1);
+
+      const value = await iterator.next();
+      expect(value.value).toEqual({ ok: true });
+    } finally {
+      (globalThis as any).WebSocket = originalWebSocket;
+    }
+  });
+
+  it("should await an async factory result", async () => {
+    let ws: MockWebSocket | undefined;
+    const asyncFactory = jasmine.createSpy("asyncFactory").and.callFake((url: string) => {
+      ws = new MockWebSocket(url);
+      return Promise.resolve(ws as any);
+    });
+
+    const stream = webSocket<any>("ws://test", asyncFactory);
+    const iterator = eachValueFrom(stream);
+
+    setTimeout(() => {
+      ws!.triggerMessage({ v: 1 });
+      ws!.triggerClose();
+    }, 1);
+
+    const value = await iterator.next();
+    expect(value.value).toEqual({ v: 1 });
   });
 });
