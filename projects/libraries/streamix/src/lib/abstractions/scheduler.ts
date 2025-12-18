@@ -3,95 +3,113 @@ import { isPromiseLike } from "./operator";
 /**
  * Functional Scheduler
  *
- * Provides enqueue/run behavior without exposing internal mutable state.
- * State is held in a closure, and operations are returned as pure functions.
+ * - Serializes tasks (FIFO, one-at-a-time)
+ * - Supports sync + async tasks
+ * - Errors reject the enqueue() promise but do NOT poison the queue
+ * - flush() is microtask-stable: it resolves only after the queue stays empty
+ *   across a microtask turn (prevents "flush lies" when tasks enqueue in microtasks)
+ *
+ * Optimizations:
+ * - Minimal per-task allocation: store (fn, resolve, reject) in parallel arrays
+ *   instead of allocating an object per entry.
+ * - Single pump in flight (no redundant processNext chains)
+ * - flush waiters stored as a compact array
  */
 export type Scheduler = {
   enqueue: <T>(fn: () => Promise<T> | T) => Promise<T>;
   flush: () => Promise<void>;
 };
 
-/**
- * Creates a cooperative asynchronous scheduler that serializes operations
- * in a global queue.
- *
- * This scheduler ensures that tasks scheduled via `enqueue` are executed
- * in the order they were added, one at a time. If a task throws an error,
- * it is rethrown asynchronously to avoid blocking subsequent tasks in the queue.
- *
- * @returns {Scheduler} An object with methods to enqueue tasks and flush the queue.
- * @property {(fn: () => Promise<T> | T) => Promise<T>} enqueue
- *   Adds a task to the queue. The task may be synchronous or asynchronous.
- * @property {() => Promise<void>} flush
- *   Waits until all scheduled tasks have completed execution.
- */
 export function createScheduler(): Scheduler {
-  type Task<T = void> = () => Promise<T> | T;
-  const queue: Task[] = [];
-  let isRunning = false;
-  let pendingFlush: (() => void) | null = null;
+  // Parallel arrays reduce object allocations vs {task, resolve, reject} entries.
+  const tasks: Array<() => any> = [];
+  const resolves: Array<(v: any) => void> = [];
+  const rejects: Array<(e: any) => void> = [];
 
-  const processNext = async (): Promise<void> => {
-    if (isRunning || queue.length === 0) {
-      return;
-    }
+  // Multiple concurrent flush callers are supported.
+  let flushResolvers: Array<() => void> = [];
 
-    isRunning = true;
-    const task = queue.shift()!;
+  // True while a pump is running or scheduled.
+  let pumping = false;
 
-    try {
-      await task();
-    } catch (error) {
-      // Re-throw error asynchronously to avoid blocking the queue
-      setTimeout(() => { throw error; }, 0);
-    } finally {
-      isRunning = false;
-      
-      // Check if there are more tasks or if someone is waiting for flush
-      if (queue.length > 0) {
-        void processNext();
-      } else if (pendingFlush) {
-        pendingFlush();
-        pendingFlush = null;
-      }
-    }
-  };
+  // Schedules a microtask without capturing unnecessary state.
+  const scheduleMicrotask = (cb: () => void) => queueMicrotask(cb);
 
-  const enqueue = <T>(fn: Task<T>): Promise<T> => {
-    return new Promise<T>((resolve, reject) => {
-      // Wrap the user function to capture its result
-      const wrappedTask: Task = async () => {
-        try {
-          const result = fn();
-          // Handle both synchronous and asynchronous functions
-          const value = isPromiseLike(result) ? await result : result;
-          resolve(value);
-        } catch (error) {
-          reject(error);
-          throw error; // Re-throw for the scheduler's error handling
-        }
-      };
-
-      queue.push(wrappedTask);
-      
-      // Start processing if not already running
-      if (!isRunning) {
-        void processNext();
+  const resolveFlushIfIdleMicrotaskStable = (): void => {
+    // Important: don't resolve flush immediately when tasks become empty,
+    // because the just-finished task may enqueue more tasks in microtasks.
+    scheduleMicrotask(() => {
+      if (!pumping && tasks.length === 0 && flushResolvers.length) {
+        const current = flushResolvers;
+        flushResolvers = [];
+        for (let i = 0; i < current.length; i++) current[i]();
       }
     });
   };
 
-  const flush = (): Promise<void> => {
-    if (queue.length === 0 && !isRunning) {
-      return Promise.resolve();
+  const pump = async (): Promise<void> => {
+    // If another pump is already running/scheduled, do nothing.
+    if (pumping) return;
+    pumping = true;
+
+    try {
+      while (tasks.length > 0) {
+        // Shift from parallel arrays.
+        const task = tasks.shift()!;
+        const resolve = resolves.shift()!;
+        const reject = rejects.shift()!;
+
+        try {
+          const res = task();
+          const val = isPromiseLike(res) ? await res : res;
+          resolve(val);
+        } catch (err) {
+          // Reject the task promise but keep pumping the rest.
+          reject(err);
+        }
+
+        // Yield between tasks so enqueues coming from promise continuations
+        // can interleave fairly and prevent deep synchronous loops.
+        // (Still preserves FIFO: newly enqueued items go to the end.)
+        await Promise.resolve();
+      }
+    } finally {
+      pumping = false;
+      resolveFlushIfIdleMicrotaskStable();
     }
+  };
+
+  const ensurePump = (): void => {
+    // Schedule pump on a microtask boundary to avoid re-entrancy surprises.
+    if (!pumping) {
+      scheduleMicrotask(() => {
+        // pump() will guard with `pumping` again.
+        void pump();
+      });
+    }
+  };
+
+  const enqueue = <T>(fn: () => Promise<T> | T): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      tasks.push(fn as any);
+      resolves.push(resolve as any);
+      rejects.push(reject as any);
+      ensurePump();
+    });
+  };
+
+  const flush = (): Promise<void> => {
+    // Fast-path
+    if (!pumping && tasks.length === 0) return Promise.resolve();
 
     return new Promise<void>((resolve) => {
-      pendingFlush = () => resolve();
-      // Ensure processing starts if it's stalled
-      if (!isRunning && queue.length > 0) {
-        void processNext();
-      }
+      flushResolvers.push(resolve);
+      // If the queue is non-empty but pump isn't scheduled (edge cases),
+      // ensure it runs.
+      ensurePump();
+      // Also attempt a microtask-stable resolve in case we were already idle
+      // but pumping was true transiently.
+      resolveFlushIfIdleMicrotaskStable();
     });
   };
 
