@@ -25,7 +25,7 @@ import { createSubject } from "../streams";
  * @returns An {@link Operator} instance suitable for use in a stream's `pipe` method.
  */
 export function switchMap<T = any, R = any>(
-  project: (value: T, index: number) => MaybePromise<Stream<R>| Array<R> | R>
+  project: (value: T, index: number) => Stream<R> | MaybePromise<Array<R>> | MaybePromise<R>
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source) {
     const output = createSubject<R>();
