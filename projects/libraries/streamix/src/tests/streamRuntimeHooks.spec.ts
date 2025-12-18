@@ -13,19 +13,24 @@ describe("stream runtime hooks", () => {
 
   it("wrapReceiver converts non-Error throws into Error", async () => {
     registerRuntimeHooks({});
-    const stream = createStream("test", async function* () { yield 1; });
-    const errorSpy = jasmine.createSpy("errorSpy");
-
-    stream.subscribe({
-      next: () => { throw "BAD"; },
-      error: errorSpy,
+    const stream = createStream("test", async function* () {
+      yield 1;
     });
 
-    // This will wait for Task 1 (next) AND Task 2 (error notification)
-    await scheduler.flush();
+    await new Promise<void>((resolve) => {
+      stream.subscribe({
+        next: () => {
+          throw "BAD";
+        },
+        error: (err) => {
+          expect(err).toEqual(jasmine.any(Error));
+          expect((err as Error).message).toBe("BAD");
+          resolve();
+        },
+      });
+    });
 
-    expect(errorSpy).toHaveBeenCalled();
-    expect(errorSpy.calls.mostRecent().args[0].message).toBe("BAD");
+    await scheduler.flush();
   });
 
   it("drainIterator converts non-Error generator throws into Error", async () => {
@@ -35,18 +40,17 @@ describe("stream runtime hooks", () => {
       throw "BOOM";
     });
 
-    const errorSpy = jasmine.createSpy("errorSpy");
-
-    stream.subscribe({
-      error: errorSpy,
+    await new Promise<void>((resolve) => {
+      stream.subscribe({
+        error: (err) => {
+          expect(err).toEqual(jasmine.any(Error));
+          expect((err as Error).message).toBe("BOOM");
+          resolve();
+        },
+      });
     });
 
     await scheduler.flush();
-
-    expect(errorSpy).toHaveBeenCalled();
-    const err = errorSpy.calls.mostRecent().args[0] as Error;
-    expect(err).toEqual(jasmine.any(Error));
-    expect(err.message).toBe("BOOM");
   });
 
   it("applies onCreateStream and onPipeStream patches (source/operators/final)", async () => {
@@ -89,4 +93,3 @@ describe("stream runtime hooks", () => {
     expect(value).toBe(1102); // (1 + 100) + 1 + 1000
   });
 });
-
