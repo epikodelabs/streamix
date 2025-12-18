@@ -60,6 +60,23 @@ describe('fromPromise', () => {
       fail(`Test failed in unexpected way: ${e}`);
     }
   });
+
+  it('should propagate an error from a Promise rejected after a small delay', (done) => {
+    const expectedError = new Error('Delayed promise rejection');
+    const promise = new Promise((_, reject) => {
+      setTimeout(() => reject(expectedError), 10);
+    });
+    const stream = fromPromise(promise);
+
+    stream.subscribe({
+      next: () => fail('Value emitted unexpectedly'),
+      complete: () => fail('Stream completed unexpectedly'),
+      error: (err) => {
+        expect(err).toBe(expectedError);
+        done();
+      }
+    });
+  });
   it('should complete after emitting value', (done) => {
     const value = 'test_value';
     const promise = Promise.resolve(value);
@@ -106,5 +123,35 @@ describe('fromPromise', () => {
     });
 
     subscription.unsubscribe(); // Unsubscribe before running
+  });
+
+  it('should abort an abortable promise factory when unsubscribed', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const emittedValues: any[] = [];
+
+    const stream = fromPromise<string>((signal) => {
+      capturedSignal = signal;
+
+      return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => resolve('late_value'), 50);
+
+        signal.addEventListener('abort', () => {
+          clearTimeout(timeoutId);
+          reject(new Error('Aborted'));
+        }, { once: true });
+      });
+    });
+
+    const subscription = stream.subscribe({
+      next: (value: any) => emittedValues.push(value),
+      error: () => fail('Error emitted unexpectedly'),
+      complete: () => {}
+    });
+
+    await subscription.unsubscribe();
+
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal!.aborted).toBe(true);
+    expect(emittedValues).toEqual([]);
   });
 });

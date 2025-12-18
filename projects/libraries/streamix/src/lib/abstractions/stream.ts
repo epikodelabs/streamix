@@ -64,6 +64,15 @@ export type Stream<T = any> = AsyncIterable<T> & {
 };
 
 /**
+ * Type guard for Stream-like objects.
+ */
+export const isStreamLike = <T = unknown>(value: unknown): value is Stream<T> => {
+  if (!value || (typeof value !== "object" && typeof value !== "function")) return false;
+  const v: any = value as any;
+  return (v.type === "stream" || v.type === "subject") && typeof v[Symbol.asyncIterator] === "function";
+};
+
+/**
  * Internal bookkeeping entry binding a receiver to its subscription.
  *
  * This structure is never exposed publicly and is used only for
@@ -331,7 +340,7 @@ async function drainIterator<T>(
  */
 export function createStream<T>(
   name: string,
-  generatorFn: () => AsyncGenerator<T, void, unknown>
+  generatorFn: (signal: AbortSignal) => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
   const id = generateStreamId();
 
@@ -353,7 +362,7 @@ export function createStream<T>(
 
     (async () => {
       const signal = abortController.signal;
-      const iterator = generatorFn()[Symbol.asyncIterator]();
+      const iterator = generatorFn(signal)[Symbol.asyncIterator]();
 
       try {
         await drainIterator(iterator, getActiveReceivers, signal);
