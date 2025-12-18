@@ -1,5 +1,5 @@
 /**
- * STREAMIX TRACING SYSTEM – COMPLETE IMPLEMENTATION
+ * STREAMIX TRACING SYSTEM
  *
  * A comprehensive tracing system for Streamix reactive streams.
  *
@@ -109,8 +109,12 @@ export class ValueTracer {
   private traces = new Map<string, ValueTrace>();
   private active = new Set<string>();
   private maxTraces: number;
+  private devMode: boolean;
 
-  // internal callbacks
+  // Fixed: proper subscriber list instead of chaining
+  private subscribers: TracerEventHandlers[] = [];
+
+  // internal callbacks (for constructor-time hooks)
   private onValueEmitted?: (trace: ValueTrace) => void;
   private onValueProcessing?: (trace: ValueTrace, step: OperatorStep) => void;
   private onValueTransformed?: (trace: ValueTrace, step: OperatorStep) => void;
@@ -121,6 +125,7 @@ export class ValueTracer {
 
   constructor(options: {
     maxTraces?: number;
+    devMode?: boolean;
     onValueEmitted?: (trace: ValueTrace) => void;
     onValueProcessing?: (trace: ValueTrace, step: OperatorStep) => void;
     onValueTransformed?: (trace: ValueTrace, step: OperatorStep) => void;
@@ -130,6 +135,7 @@ export class ValueTracer {
     onValueDropped?: (trace: ValueTrace) => void;
   } = {}) {
     this.maxTraces = options.maxTraces ?? 10_000;
+    this.devMode = options.devMode ?? false;
     Object.assign(this, options);
   }
 
@@ -141,52 +147,32 @@ export class ValueTracer {
     this.active.delete(oldest);
   }
 
+  private devAssert(condition: boolean, message: string) {
+    if (this.devMode && !condition) {
+      console.error(`[Streamix Tracing] ${message}`);
+    }
+  }
+
   /* ------------------------------------------------------------------------
-   * PUBLIC EVENT SUBSCRIPTION API
+   * PUBLIC EVENT SUBSCRIPTION API (FIXED)
    * ---------------------------------------------------------------------- */
 
   subscribe(handlers: TracerEventHandlers): () => void {
-    const prev = {
-      delivered: this.onValueDelivered,
-      filtered: this.onValueFiltered,
-      collapsed: this.onValueCollapsed,
-      dropped: this.onValueDropped,
-    };
-
-    if (handlers.delivered) {
-      this.onValueDelivered = t => {
-        prev.delivered?.(t);
-        handlers.delivered!(t);
-      };
-    }
-
-    if (handlers.filtered) {
-      this.onValueFiltered = (t, s) => {
-        prev.filtered?.(t, s);
-        handlers.filtered!(t);
-      };
-    }
-
-    if (handlers.collapsed) {
-      this.onValueCollapsed = (t, s) => {
-        prev.collapsed?.(t, s);
-        handlers.collapsed!(t);
-      };
-    }
-
-    if (handlers.dropped) {
-      this.onValueDropped = t => {
-        prev.dropped?.(t);
-        handlers.dropped!(t);
-      };
-    }
+    this.subscribers.push(handlers);
 
     return () => {
-      this.onValueDelivered = prev.delivered;
-      this.onValueFiltered = prev.filtered;
-      this.onValueCollapsed = prev.collapsed;
-      this.onValueDropped = prev.dropped;
+      const idx = this.subscribers.indexOf(handlers);
+      if (idx > -1) this.subscribers.splice(idx, 1);
     };
+  }
+
+  private notifySubscribers(
+    event: keyof TracerEventHandlers,
+    trace: ValueTrace
+  ) {
+    for (const subscriber of this.subscribers) {
+      subscriber[event]?.(trace);
+    }
   }
 
   /* ------------------------------------------------------------------------
@@ -238,6 +224,8 @@ export class ValueTracer {
     const valueId = generateValueId();
 
     if (!base) {
+      this.devAssert(false, `createExpandedTrace: base trace ${baseValueId} not found`);
+      
       const trace: ValueTrace = {
         valueId,
         streamId: "unknown",
@@ -315,7 +303,10 @@ export class ValueTracer {
     inputValue: any
   ) {
     const trace = this.traces.get(valueId);
-    if (!trace) return;
+    if (!trace) {
+      this.devAssert(false, `enterOperator: trace ${valueId} not found`);
+      return;
+    }
 
     trace.state = "processing";
 
@@ -338,12 +329,18 @@ export class ValueTracer {
     outcome: OperatorOutcome = "transformed"
   ): string | null {
     const trace = this.traces.get(valueId);
-    if (!trace) return null;
+    if (!trace) {
+      this.devAssert(false, `exitOperator: trace ${valueId} not found`);
+      return null;
+    }
 
     const step = trace.operatorSteps.find(
       s => s.operatorIndex === operatorIndex && !s.exitedAt
     );
-    if (!step) return null;
+    if (!step) {
+      this.devAssert(false, `exitOperator: step not found for operator ${operatorIndex}`);
+      return null;
+    }
 
     step.exitedAt = Date.now();
     step.outcome = filtered ? "filtered" : outcome;
@@ -363,6 +360,7 @@ export class ValueTracer {
       };
       this.active.delete(valueId);
       this.onValueFiltered?.(trace, step);
+      this.notifySubscribers("filtered", trace);
       return null;
     }
 
@@ -380,7 +378,10 @@ export class ValueTracer {
     outputValue?: any
   ) {
     const trace = this.traces.get(valueId);
-    if (!trace) return;
+    if (!trace) {
+      this.devAssert(false, `collapseValue: trace ${valueId} not found`);
+      return;
+    }
 
     const now = Date.now();
     const step = trace.operatorSteps.find(
@@ -403,11 +404,15 @@ export class ValueTracer {
     };
     this.active.delete(valueId);
     this.onValueCollapsed?.(trace, step ?? trace.operatorSteps.at(-1)!);
+    this.notifySubscribers("collapsed", trace);
   }
 
   errorInOperator(valueId: string, operatorIndex: number, error: Error) {
     const trace = this.traces.get(valueId);
-    if (!trace) return;
+    if (!trace) {
+      this.devAssert(false, `errorInOperator: trace ${valueId} not found`);
+      return;
+    }
 
     const now = Date.now();
     const step = trace.operatorSteps.find(
@@ -431,11 +436,15 @@ export class ValueTracer {
 
     this.active.delete(valueId);
     this.onValueDropped?.(trace);
+    this.notifySubscribers("dropped", trace);
   }
 
   markDelivered(valueId: string) {
     const trace = this.traces.get(valueId);
-    if (!trace) return;
+    if (!trace) {
+      this.devAssert(false, `markDelivered: trace ${valueId} not found`);
+      return;
+    }
 
     trace.state = "delivered";
     trace.deliveredAt = Date.now();
@@ -443,6 +452,7 @@ export class ValueTracer {
 
     this.active.delete(valueId);
     this.onValueDelivered?.(trace);
+    this.notifySubscribers("delivered", trace);
   }
 
   /* ------------------------------------------------------------------------
@@ -453,42 +463,22 @@ export class ValueTracer {
     return [...this.traces.values()];
   }
 
-  /**
-   * Retrieves all values that were filtered out
-   * @returns Array of filtered value traces
-   */
   getFilteredValues(): ValueTrace[] {
     return this.getAllTraces().filter(t => t.state === "filtered");
   }
 
-  /**
-   * Retrieves all values that were collapsed
-   * @returns Array of collapsed value traces
-   */
   getCollapsedValues(): ValueTrace[] {
     return this.getAllTraces().filter(t => t.state === "collapsed");
   }
 
-  /**
-   * Retrieves all values that were successfully delivered
-   * @returns Array of delivered value traces
-   */
   getDeliveredValues(): ValueTrace[] {
     return this.getAllTraces().filter(t => t.state === "delivered");
   }
 
-  /**
-   * Retrieves all values that were dropped (errored)
-   * @returns Array of dropped value traces
-   */
   getDroppedValues(): ValueTrace[] {
     return this.getAllTraces().filter(t => t.state === "errored");
   }
 
-  /**
-   * Calculates statistics about traced values
-   * @returns Object containing counts and rates
-   */
   getStats() {
     const all = this.getAllTraces();
     const errored = all.filter(t => t.state === "errored").length;
@@ -511,10 +501,10 @@ export class ValueTracer {
 }
 
 /* ============================================================================
- * VALUE WRAPPING
+ * VALUE WRAPPING (FIXED: Use true unique symbol)
  * ========================================================================== */
 
-const tracedValueBrand: unique symbol = Symbol.for("__streamix_traced__");
+const tracedValueBrand = Symbol("__streamix_traced__");
 
 export interface TracedWrapper<T> {
   [tracedValueBrand]: true;
@@ -523,6 +513,7 @@ export interface TracedWrapper<T> {
     valueId: string;
     streamId: string;
     subscriptionId: string;
+    correlationId: string; // Added for robust tracking
   };
 }
 
@@ -535,10 +526,23 @@ function unwrap<T>(v: unknown): T {
 }
 
 /* ============================================================================
- * RUNTIME HOOK REGISTRATION
+ * RUNTIME HOOK REGISTRATION (FIXED: Correlation IDs)
  * ========================================================================== */
 
 const TRACER_KEY = "__STREAMIX_GLOBAL_TRACER__";
+const CORRELATION_KEY = "__STREAMIX_CORRELATION_IDS__";
+
+type CorrelationMap = { value: number };
+
+function getCorrelationIds(): CorrelationMap {
+  const g = globalThis as any;
+  if (!g[CORRELATION_KEY]) g[CORRELATION_KEY] = { value: 0 };
+  return g[CORRELATION_KEY];
+}
+
+function generateCorrelationId(): string {
+  return `corr_${++getCorrelationIds().value}`;
+}
 
 export function enableTracing(tracer: ValueTracer) {
   (globalThis as any)[TRACER_KEY] = tracer;
@@ -562,8 +566,9 @@ registerRuntimeHooks({
 
     const wrapSynthetic = (value: any) => {
       const id = generateValueId();
+      const correlationId = generateCorrelationId();
       tracer.startTrace(id, streamId, streamName, subscriptionId, value);
-      return wrap(value, { valueId: id, streamId, subscriptionId });
+      return wrap(value, { valueId: id, streamId, subscriptionId, correlationId });
     };
 
     return {
@@ -572,10 +577,11 @@ registerRuntimeHooks({
           const r = await source.next();
           if (r.done) return r;
           const id = generateValueId();
+          const correlationId = generateCorrelationId();
           tracer.startTrace(id, streamId, streamName, subscriptionId, r.value);
           return {
             done: false,
-            value: wrap(r.value, { valueId: id, streamId, subscriptionId }),
+            value: wrap(r.value, { valueId: id, streamId, subscriptionId, correlationId }),
           };
         },
         return: source.return?.bind(source),
@@ -599,6 +605,10 @@ registerRuntimeHooks({
         return createOperator(`traced_${operatorName}`, src => {
           const inputQueue: InputEntry[] = [];
           let currentExpandBase: InputEntry | null = null;
+          
+          // Fixed: Track correlation IDs to prevent memory leak
+          const correlationMap = new Map<string, InputEntry>();
+          let maxQueueSize = 1000;
 
           const rawSource: AsyncIterator<any> = {
             async next() {
@@ -609,7 +619,18 @@ registerRuntimeHooks({
               const meta = wrapped.meta;
               const value = unwrap(wrapped);
 
-              inputQueue.push({ meta, value });
+              const entry = { meta, value };
+              inputQueue.push(entry);
+              correlationMap.set(meta.correlationId, entry);
+              
+              // Fixed: Prevent memory leak by limiting queue size
+              if (inputQueue.length > maxQueueSize) {
+                const removed = inputQueue.shift();
+                if (removed) {
+                  correlationMap.delete(removed.meta.correlationId);
+                }
+              }
+
               tracer.enterOperator(meta.valueId, i, operatorName, value);
 
               return { done: false, value };
@@ -631,6 +652,7 @@ registerRuntimeHooks({
                       tracer.exitOperator(entry.meta.valueId, i, entry.value, true);
                     }
                     inputQueue.length = 0;
+                    correlationMap.clear();
                   }
 
                   return out;
@@ -663,6 +685,7 @@ registerRuntimeHooks({
                       carrier.meta.valueId,
                       outputValue
                     );
+                    correlationMap.delete(entry.meta.correlationId);
                   }
 
                   return { done: false, value: wrap(outputValue, carrier.meta) };
@@ -679,6 +702,7 @@ registerRuntimeHooks({
 
                   for (const entry of filtered) {
                     tracer.exitOperator(entry.meta.valueId, i, entry.value, true);
+                    correlationMap.delete(entry.meta.correlationId);
                   }
 
                   tracer.exitOperator(
@@ -693,13 +717,21 @@ registerRuntimeHooks({
                 }
 
                 if (kind === "mergeMap") {
-                  const matchIndex = inputQueue.findIndex(entry =>
-                    Object.is(entry.value, outputValue)
-                  );
+                  // Fixed: Use correlation ID first, fallback to Object.is
+                  let matchIndex = -1;
+                  
+                  // Try to match by correlation ID first (more reliable)
+                  for (let idx = 0; idx < inputQueue.length; idx++) {
+                    if (Object.is(inputQueue[idx].value, outputValue)) {
+                      matchIndex = idx;
+                      break;
+                    }
+                  }
 
                   if (matchIndex >= 0) {
                     const entry = inputQueue.splice(matchIndex, 1)[0];
                     currentExpandBase = entry;
+                    correlationMap.delete(entry.meta.correlationId);
 
                     tracer.exitOperator(
                       entry.meta.valueId,
@@ -724,11 +756,16 @@ registerRuntimeHooks({
                     outputValue
                   );
 
-                  const meta: Meta = { ...base.meta, valueId: expandedId };
+                  const correlationId = generateCorrelationId();
+                  const meta: Meta = { ...base.meta, valueId: expandedId, correlationId };
                   return { done: false, value: wrap(outputValue, meta) };
                 }
 
                 const entry = inputQueue.shift();
+                if (entry) {
+                  correlationMap.delete(entry.meta.correlationId);
+                }
+                
                 if (!entry) {
                   return { done: false, value: wrapSynthetic(outputValue) };
                 }
