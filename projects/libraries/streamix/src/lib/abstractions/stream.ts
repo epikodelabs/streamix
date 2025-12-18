@@ -175,42 +175,50 @@ export function createAsyncGenerator<T = any>(
 function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
   const wrapped: Receiver<T> = {};
 
+  const safeSchedule = (cb: () => MaybePromise) =>
+    scheduler.enqueue(cb).catch(() => {});
+
   if (receiver.next) {
-    wrapped.next = (value: T) => {
-      return scheduler.enqueue(async () => {
-        try {
-          await receiver.next!(value);
-        } catch (err) {
-          // Convert non-Error throws to Error objects
-          const error = err instanceof Error ? err : new Error(String(err));
-          if (receiver.error) {
-            // IMPORTANT: Don't await this! We want it to be a separate task.
-            // But we DO need to ensure it's enqueued before this task completes.
-            // The synchronous call to scheduler.enqueue will add it to the queue immediately.
-            scheduler.enqueue(async () => {
-              try {
-                await receiver.error!(error);
-              } catch {
-                // Swallow secondary errors in error handler
-              }
-            }).catch(() => {}); // Catch to prevent unhandled rejection
+    wrapped.next = (value: T) => safeSchedule(async () => {
+      try {
+        await receiver.next!(value);
+      } catch (err) {
+        // Convert non-Error throws to Error objects
+        const error = err instanceof Error ? err : new Error(String(err));
+        if (receiver.error) {
+          // Catch errors in error callback too
+          try {
+            await receiver.error!(error);
+          } catch {
+            // Swallow errors in error callback
           }
-          // Don't re-throw - we've handled the error by scheduling error callback
         }
-      });
-    };
+      }
+    });
   }
 
   if (receiver.error) {
     wrapped.error = (err: any) => {
       // Convert non-Error values to Error objects
       const error = err instanceof Error ? err : new Error(String(err));
-      return scheduler.enqueue(() => receiver.error!(error));
+      return safeSchedule(() => {
+        try {
+          return receiver.error!(error);
+        } catch {
+          // Swallow errors in error callback
+        }
+      });
     };
   }
 
   if (receiver.complete) {
-    wrapped.complete = () => scheduler.enqueue(() => receiver.complete!());
+    wrapped.complete = () => safeSchedule(() => {
+      try {
+        return receiver.complete!();
+      } catch {
+        // Swallow errors in complete callback
+      }
+    });
   }
 
   return wrapped;
@@ -258,16 +266,9 @@ async function drainIterator<T>(
   } catch (err) {
     // Only generator-thrown errors reach here (not subscriber errors).
     if (!signal.aborted) {
-      // Convert non-Error values to Error objects
       const error = err instanceof Error ? err : new Error(String(err));
-      const receivers = getReceivers();
-      
-      // Call error callbacks directly - they're already wrapped to run in scheduler
-      for (const { receiver, subscription } of receivers) {
-        if (!subscription.unsubscribed && receiver.error) {
-          // These are already wrapped, so calling them will schedule properly
-          receiver.error(error);
-        }
+      for (const { receiver, subscription } of getReceivers()) {
+        if (!subscription.unsubscribed) receiver.error?.(error);
       }
     }
   } finally {
@@ -332,17 +333,16 @@ export function createStream<T>(
     isRunning = true;
     abortController = new AbortController();
 
-    const signal = abortController.signal;
-    const iterator = generatorFn()[Symbol.asyncIterator]();
+    (async () => {
+      const signal = abortController.signal;
+      const iterator = generatorFn()[Symbol.asyncIterator]();
 
-    // Schedule the drain operation so it's tracked by the scheduler
-    scheduler.enqueue(async () => {
       try {
         await drainIterator(iterator, getActiveReceivers, signal);
       } finally {
         isRunning = false;
       }
-    }).catch(() => {});
+    })();
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {

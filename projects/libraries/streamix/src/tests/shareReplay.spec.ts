@@ -61,4 +61,37 @@ describe('shareReplay', () => {
       complete: () => { if (errorCount === 2 && completed === false) { done(); completed = true; }},
     });
   });
+
+  it('should support async bufferSize and replay the last N values', done => {
+    let executionCount = 0;
+
+    const source = createStream<number>('source', async function* () {
+      executionCount++;
+      yield 1;
+      yield 2;
+      yield 3;
+    });
+
+    const shared$ = source.pipe(shareReplay(Promise.resolve(2)));
+
+    const values1: number[] = [];
+    const values2: number[] = [];
+
+    shared$.subscribe({
+      next: v => values1.push(v),
+      complete: () => {
+        shared$.subscribe({
+          next: v => values2.push(v),
+          complete: () => {
+            expect(values1).toEqual([1, 2, 3]);
+            expect(values2).toEqual([2, 3]);
+            expect(executionCount).toBe(1);
+            done();
+          },
+          error: done.fail
+        });
+      },
+      error: done.fail
+    });
+  });
 });

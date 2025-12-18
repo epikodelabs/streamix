@@ -54,4 +54,53 @@ describe('debounce', () => {
       },
     });
   });
+
+  it('should support promise-based duration', (done) => {
+    const debouncedStream = from([1, 2, 3]).pipe(debounce(Promise.resolve(10)));
+    const emittedValues: number[] = [];
+
+    debouncedStream.subscribe({
+      next: (value: number) => emittedValues.push(value),
+      complete: () => {
+        expect(emittedValues).toEqual([3]);
+        done();
+      },
+      error: done.fail,
+    });
+  });
+
+  it('should flush on completion when duration is undefined', (done) => {
+    const debouncedStream = from([1, 2, 3]).pipe(debounce(undefined as any));
+    const emittedValues: number[] = [];
+
+    debouncedStream.subscribe({
+      next: (value: number) => emittedValues.push(value),
+      complete: () => {
+        expect(emittedValues).toEqual([3]);
+        done();
+      },
+      error: done.fail,
+    });
+  });
+
+  it('should propagate errors from the source', (done) => {
+    const source$ = createStream<number>("boom", async function* () {
+      yield 1;
+      throw new Error("BOOM");
+    });
+
+    const debouncedStream = source$.pipe(debounce(0));
+
+    const values: number[] = [];
+    debouncedStream.subscribe({
+      next: (v) => values.push(v),
+      error: (err) => {
+        expect(values).toEqual([]); // never flushed before error
+        expect(err).toEqual(jasmine.any(Error));
+        expect((err as Error).message).toBe("BOOM");
+        done();
+      },
+      complete: () => fail("Expected error"),
+    });
+  });
 });

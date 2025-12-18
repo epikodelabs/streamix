@@ -136,10 +136,14 @@ describe('withLatestFrom', () => {
     const combinedStream = mainStream.pipe(withLatestFrom(errorStream));
 
     await new Promise<void>((resolve) => {
+      let sawError = false;
       combinedStream.subscribe({
         next: () => fail('Expected no values'),
-        complete: () => fail('Expected error'),
+        complete: () => {
+          if (!sawError) fail('Expected error');
+        },
         error: (err) => {
+          sawError = true;
           expect(err).toEqual(jasmine.any(Error));
           expect((err as Error).message).toBe('AUX');
           resolve();
@@ -154,21 +158,26 @@ describe('withLatestFrom', () => {
 
     const combined = main$.pipe(withLatestFrom(aux$));
 
-    await new Promise<void>((resolve) => {
+    const done = new Promise<void>((resolve) => {
+      let sawError = false;
       combined.subscribe({
         next: () => fail("Expected no values"),
-        complete: () => fail("Expected error"),
+        complete: () => {
+          if (!sawError) fail("Expected error");
+        },
         error: (err) => {
+          sawError = true;
           expect(err).toEqual(jasmine.any(Error));
           expect((err as Error).message).toBe("AUX_STR");
           resolve();
         },
       });
-
-      aux$.error("AUX_STR");
     });
 
     await scheduler.flush();
+    aux$.error("AUX_STR");
+    await scheduler.flush();
+    await done;
   });
 
   it('should convert non-Error source errors into Error', async () => {
@@ -177,22 +186,28 @@ describe('withLatestFrom', () => {
 
     const combined = main$.pipe(withLatestFrom(aux$));
 
-    await new Promise<void>((resolve) => {
+    const done = new Promise<void>((resolve) => {
+      let sawError = false;
       combined.subscribe({
         next: () => fail("Expected no values"),
-        complete: () => fail("Expected error"),
+        complete: () => {
+          if (!sawError) fail("Expected error");
+        },
         error: (err) => {
+          sawError = true;
           expect(err).toEqual(jasmine.any(Error));
           expect((err as Error).message).toBe("MAIN_STR");
           resolve();
         },
       });
-
-      aux$.next("A");
-      main$.error("MAIN_STR");
     });
 
     await scheduler.flush();
+    aux$.next("A");
+    await scheduler.flush();
+    main$.error("MAIN_STR");
+    await scheduler.flush();
+    await done;
   });
 
   it('unsubscribe does not re-abort after the pipeline is already aborted', async () => {
@@ -203,18 +218,45 @@ describe('withLatestFrom', () => {
 
     let subscription: any;
 
-    await new Promise<void>((resolve) => {
+    const done = new Promise<void>((resolve) => {
+      let sawError = false;
       subscription = combined.subscribe({
         next: () => fail("Expected no values"),
-        complete: () => fail("Expected error"),
-        error: () => resolve(),
+        complete: () => {
+          if (!sawError) fail("Expected error");
+        },
+        error: () => {
+          sawError = true;
+          resolve();
+        },
       });
-
-      aux$.error(new Error("AUX"));
     });
+
+    await scheduler.flush();
+    aux$.error(new Error("AUX"));
+    await scheduler.flush();
+    await done;
 
     subscription.unsubscribe();
     await scheduler.flush();
+  });
+
+  it('auxiliary errors after abort are ignored', async () => {
+    const main$ = createSubject<number>();
+    const aux1$ = createSubject<string>();
+    const aux2$ = createSubject<string>();
+
+    const combined = main$.pipe(withLatestFrom(aux1$, aux2$));
+
+    const errorSpy = jasmine.createSpy("errorSpy");
+    combined.subscribe({ error: errorSpy });
+
+    await scheduler.flush();
+    aux1$.error(new Error("FIRST"));
+    aux2$.error("SECOND");
+    await scheduler.flush();
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
   });
 
   it('abortPromise resolves immediately when already aborted before setup completes', async () => {
