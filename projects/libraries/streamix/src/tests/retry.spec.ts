@@ -98,4 +98,18 @@ describe('retry', () => {
 
     expect(result).toEqual([3, 4]);
   });
+
+  it('should support promise-like options and a promise-produced plain value', async () => {
+    const factory = jasmine.createSpy('factory').and.callFake(() => Promise.resolve(5));
+
+    const result: number[] = [];
+    const stream$ = retry(factory, Promise.resolve(0), undefined as any);
+
+    for await (const value of stream$) {
+      result.push(value);
+    }
+
+    expect(result).toEqual([5]);
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
 });

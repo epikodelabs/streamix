@@ -1,11 +1,5 @@
 import { isPromiseLike } from "./operator";
 
-/**
- * Functional Scheduler
- *
- * Provides enqueue/run behavior without exposing internal mutable state.
- * State is held in a closure, and operations are returned as pure functions.
- */
 export type Scheduler = {
   enqueue: <T>(fn: () => Promise<T> | T) => Promise<T>;
   flush: () => Promise<void>;
@@ -14,84 +8,64 @@ export type Scheduler = {
 /**
  * Creates a cooperative asynchronous scheduler that serializes operations
  * in a global queue.
- *
- * This scheduler ensures that tasks scheduled via `enqueue` are executed
- * in the order they were added, one at a time. If a task throws an error,
- * it is rethrown asynchronously to avoid blocking subsequent tasks in the queue.
- *
- * @returns {Scheduler} An object with methods to enqueue tasks and flush the queue.
- * @property {(fn: () => Promise<T> | T) => Promise<T>} enqueue
- *   Adds a task to the queue. The task may be synchronous or asynchronous.
- * @property {() => Promise<void>} flush
- *   Waits until all scheduled tasks have completed execution.
  */
 export function createScheduler(): Scheduler {
-  type Task<T = void> = () => Promise<T> | T;
-  const queue: Task[] = [];
+  type Task<T = any> = () => Promise<T> | T;
+  const queue: { task: Task; resolve: (val: any) => void; reject: (err: any) => void }[] = [];
   let isRunning = false;
-  let pendingFlush: (() => void) | null = null;
+  let flushResolvers: (() => void)[] = [];
 
   const processNext = async (): Promise<void> => {
-    if (isRunning || queue.length === 0) {
+    // If there's nothing left to do
+    if (queue.length === 0) {
+      isRunning = false;
+      // Resolve all pending flushes because the queue is truly exhausted
+      const currentResolvers = [...flushResolvers];
+      flushResolvers = [];
+      currentResolvers.forEach((resolve) => resolve());
       return;
     }
 
     isRunning = true;
-    const task = queue.shift()!;
+    const { task, resolve, reject } = queue.shift()!;
 
     try {
-      await task();
+      const result = task();
+      const value = isPromiseLike(result) ? await result : result;
+      resolve(value);
     } catch (error) {
-      // Re-throw error asynchronously to avoid blocking the queue
-      setTimeout(() => { throw error; }, 0);
+      // We reject the task's specific promise
+      reject(error);
+      // We do NOT throw globally (no setTimeout). 
+      // This allows the scheduler to move to the next task in the queue.
     } finally {
-      isRunning = false;
-      
-      // Check if there are more tasks or if someone is waiting for flush
-      if (queue.length > 0) {
-        void processNext();
-      } else if (pendingFlush) {
-        pendingFlush();
-        pendingFlush = null;
-      }
+      // Use a microtask to allow any immediate enqueues (from inside the task) 
+      // to hit the queue before we decide if we are "finished".
+      queueMicrotask(() => processNext());
     }
   };
 
   const enqueue = <T>(fn: Task<T>): Promise<T> => {
     return new Promise<T>((resolve, reject) => {
-      // Wrap the user function to capture its result
-      const wrappedTask: Task = async () => {
-        try {
-          const result = fn();
-          // Handle both synchronous and asynchronous functions
-          const value = isPromiseLike(result) ? await result : result;
-          resolve(value);
-        } catch (error) {
-          reject(error);
-          throw error; // Re-throw for the scheduler's error handling
-        }
-      };
+      queue.push({ task: fn, resolve, reject });
 
-      queue.push(wrappedTask);
-      
-      // Start processing if not already running
       if (!isRunning) {
-        void processNext();
+        isRunning = true;
+        // Start processing in the next microtask
+        queueMicrotask(() => processNext());
       }
     });
   };
 
   const flush = (): Promise<void> => {
-    if (queue.length === 0 && !isRunning) {
+    // If idle and queue empty, resolve immediately
+    if (!isRunning && queue.length === 0) {
       return Promise.resolve();
     }
 
+    // Otherwise, join the list of resolvers to be notified when the queue empties
     return new Promise<void>((resolve) => {
-      pendingFlush = () => resolve();
-      // Ensure processing starts if it's stalled
-      if (!isRunning && queue.length > 0) {
-        void processNext();
-      }
+      flushResolvers.push(resolve);
     });
   };
 

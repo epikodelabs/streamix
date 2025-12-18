@@ -217,9 +217,9 @@ export function coroutine<T, R>(
 ): Coroutine<T, R> | ((main: MainTask<T, R>, ...functions: Function[]) => Coroutine<T, R>) {
 
   // This is the implementation function that does the heavy lifting
-  const implementCoroutine = (config: CoroutineConfig, main: MainTask<T, R>, functions: Function[]): Coroutine<T, R> => {
+  const implementCoroutine = (config: CoroutineConfig | undefined, main: MainTask<T, R>, functions: Function[]): Coroutine<T, R> => {
     const maxWorkers = navigator.hardwareConcurrency || 4;
-    const customMessageHandler = config.customMessageHandler;
+    const customMessageHandler = config?.customMessageHandler; // Use optional chaining
 
     const workerPool: { worker: Worker; workerId: number }[] = [];
     const waitingQueue: Array<(entry: { worker: Worker; workerId: number }) => void> = [];
@@ -230,14 +230,16 @@ export function coroutine<T, R>(
     let blobUrlCache: string | null = null;
     let isFinalizing = false;
 
-    const generateWorkerScript = (config: CoroutineConfig): string => {
-      const template = config.template || DEFAULT_WORKER_TEMPLATE;
-      const globals = config.globals || '';
-      const helpers = ([HELPER_SCRIPT, ...(config.helpers || [])]).join('\n');
+    const generateWorkerScript = (config: CoroutineConfig | undefined): string => {
+      // Provide default empty config if config is undefined
+      const safeConfig = config || {};
+      const template = safeConfig.template || DEFAULT_WORKER_TEMPLATE;
+      const globals = safeConfig.globals || '';
+      const helpers = ([HELPER_SCRIPT, ...(safeConfig.helpers || [])]).join('\n');
       const dependencies = functions
         .map((fn) => fn.toString().replace(/function[\s]*\(/, `function ${fn.name || ""}(`))
         .join(';\n');
-      const initCode = config.initCode || '';
+      const initCode = safeConfig.initCode || '';
 
       // Ensure the main task is properly stringified as a function
       const mainTaskBody = main.toString().replace(/function[\s]*\(/, `function ${main.name || ""}(`);
@@ -290,7 +292,7 @@ export function coroutine<T, R>(
 
     const createWorker = async (): Promise<{ worker: Worker; workerId: number }> => {
       const workerId = ++workerIdentifierCounter;
-      const workerBody = generateWorkerScript(config || {});
+      const workerBody = generateWorkerScript(config); // Pass config (which might be undefined)
 
       if (!blobUrlCache) {
         const blob = new Blob([workerBody], { type: "application/javascript" });
@@ -299,11 +301,9 @@ export function coroutine<T, R>(
 
       const worker = new Worker(blobUrlCache, { type: "module" });
 
-      // --- Corrected `createWorker` to pass `worker` and `pendingMessages` to both handlers
       const messageHandler = customMessageHandler
         ? (event: MessageEvent<CoroutineMessage>) => customMessageHandler(event, worker, pendingMessages)
         : (event: MessageEvent<CoroutineMessage>) => defaultMessageHandler(event, worker, pendingMessages);
-      // --- End corrected `createWorker`
 
       worker.addEventListener("message", messageHandler);
       (worker as any).__id = workerId;
@@ -431,11 +431,11 @@ export function coroutine<T, R>(
     // Direct invocation: createCoroutine(mainTask, helper1, ...)
     const main = arg1 as MainTask<T, R>;
     const functions = rest as Function[];
-    const config: CoroutineConfig = {};
+    const config: CoroutineConfig = {}; // Provide empty config
     return implementCoroutine(config, main, functions);
   } else {
     // Higher-order function: createCoroutine(config)(mainTask, helper1, ...)
-    const config = arg1 as CoroutineConfig;
+    const config = arg1 as CoroutineConfig | undefined;
     return (main: MainTask<T, R>, ...functions: Function[]) => implementCoroutine(config, main, functions);
   }
 }
