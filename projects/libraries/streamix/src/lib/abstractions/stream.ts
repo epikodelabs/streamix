@@ -63,37 +63,65 @@ export type Stream<T = any> = AsyncIterable<T> & {
   [Symbol.asyncIterator](): AsyncGenerator<T>;
 };
 
-/** Internal subscriber bookkeeping type. */
-type SubscriberEntry<T> = { receiver: Receiver<T>; subscription: Subscription };
+/**
+ * Internal bookkeeping entry binding a receiver to its subscription.
+ *
+ * This structure is never exposed publicly and is used only for
+ * multicast coordination and cleanup.
+ */
+type SubscriberEntry<T> = {
+  receiver: Receiver<T>;
+  subscription: Subscription;
+};
 
 /**
- * Returns a promise resolving when an AbortSignal becomes aborted.
+ * Returns a promise that resolves when an AbortSignal becomes aborted.
  *
- * If already aborted, resolves immediately.
+ * If the signal is already aborted, the promise resolves immediately.
+ *
+ * @param signal AbortSignal to observe
+ * @returns Promise resolved on abort
  */
 function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
+
   return new Promise(resolve =>
     signal.addEventListener("abort", resolve as any, { once: true })
   );
 }
 
 /**
- * Creates a pull-based async iterator view over a stream's push-based events.
+ * Creates a pull-based async generator view over a stream.
  *
- * This powers both `eachValueFrom` and direct `for await...of` consumption.
- * It registers a receiver with the stream, buffers incoming values, and yields
- * them to the consumer until completion or error. The underlying subscription
- * is always cleaned up when iteration ends or the consumer stops early.
+ * This bridges the push-based subscription model with
+ * the pull-based async-iterator protocol.
+ *
+ * Characteristics:
+ * - Buffers values when the producer is faster than the consumer
+ * - Propagates errors via generator throws
+ * - Guarantees subscription cleanup on completion, error, or early exit
+ *
+ * @template T
+ * @param register Function registering a receiver and returning a subscription
+ * @returns AsyncGenerator yielding stream values
  */
 export function createAsyncGenerator<T = any>(
   register: (receiver: Receiver<T>) => Subscription
 ): AsyncGenerator<T> {
   async function* generator(): AsyncGenerator<T> {
+    /** Resolver for the next awaited iterator result */
     let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
+
+    /** Rejector for the next awaited iterator result */
     let rejectNext: ((error: any) => void) | null = null;
+
+    /** Indicates that the stream has completed */
     let completed = false;
+
+    /** Stores terminal error (if any) */
     let error: any = null;
+
+    /** Value buffer when producer outpaces consumer */
     const queue: T[] = [];
 
     const subscription = register({
@@ -107,6 +135,7 @@ export function createAsyncGenerator<T = any>(
           queue.push(value);
         }
       },
+
       error(err: any) {
         error = err;
         if (rejectNext) {
@@ -117,6 +146,7 @@ export function createAsyncGenerator<T = any>(
         }
         subscription.unsubscribe();
       },
+
       complete() {
         completed = true;
         if (resolveNext) {
@@ -138,20 +168,15 @@ export function createAsyncGenerator<T = any>(
         } else if (completed) {
           break;
         } else {
-          try {
-            const result = await new Promise<IteratorResult<T>>((resolve, reject) => {
-              resolveNext = resolve;
-              rejectNext = reject;
-            });
+          const result = await new Promise<IteratorResult<T>>((resolve, reject) => {
+            resolveNext = resolve;
+            rejectNext = reject;
+          });
 
-            if (result.done) {
-              break;
-            } else {
-              yield result.value as T;
-            }
-          } catch (err) {
-            error = err;
-            throw error;
+          if (result.done) {
+            break;
+          } else {
+            yield result.value as T;
           }
         }
       }
@@ -164,78 +189,85 @@ export function createAsyncGenerator<T = any>(
 }
 
 /**
- * Wraps a `Receiver<T>` so all lifecycle callbacks (`next`, `error`, `complete`)
- * run inside the scheduler's microtask queue.
+ * Wraps a Receiver so all callbacks are executed via the scheduler.
  *
  * Guarantees:
- * - All user callbacks are async-scheduled.
- * - Errors thrown inside `next` are forwarded to `error` (if provided).
- * - Secondary errors inside `error` or `complete` are swallowed.
+ * - All callbacks are async-scheduled (no sync re-entrancy)
+ * - Errors thrown in `next` are forwarded to `error` if present
+ * - Errors in `error` or `complete` are swallowed
+ *
+ * @template T
+ * @param receiver Original receiver
+ * @returns Wrapped receiver
  */
 function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
   const wrapped: Receiver<T> = {};
 
+  /**
+   * Schedules a callback safely, ensuring scheduler errors
+   * do not propagate into the stream core.
+   */
   const safeSchedule = (cb: () => MaybePromise) =>
     scheduler.enqueue(cb).catch(() => {});
 
   if (receiver.next) {
-    wrapped.next = (value: T) => safeSchedule(async () => {
-      try {
-        await receiver.next!(value);
-      } catch (err) {
-        // Convert non-Error throws to Error objects
-        const error = err instanceof Error ? err : new Error(String(err));
-        if (receiver.error) {
-          // Catch errors in error callback too
-          try {
-            await receiver.error!(error);
-          } catch {
-            // Swallow errors in error callback
+    wrapped.next = (value: T) =>
+      safeSchedule(async () => {
+        try {
+          await receiver.next!(value);
+        } catch (err) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          if (receiver.error) {
+            try {
+              await receiver.error!(error);
+            } catch {
+              /* swallowed by design */
+            }
           }
         }
-      }
-    });
+      });
   }
 
   if (receiver.error) {
     wrapped.error = (err: any) => {
-      // Convert non-Error values to Error objects
       const error = err instanceof Error ? err : new Error(String(err));
       return safeSchedule(() => {
         try {
           return receiver.error!(error);
         } catch {
-          // Swallow errors in error callback
+          /* swallowed */
         }
       });
     };
   }
 
   if (receiver.complete) {
-    wrapped.complete = () => safeSchedule(() => {
-      try {
-        return receiver.complete!();
-      } catch {
-        // Swallow errors in complete callback
-      }
-    });
+    wrapped.complete = () =>
+      safeSchedule(() => {
+        try {
+          return receiver.complete!();
+        } catch {
+          /* swallowed */
+        }
+      });
   }
 
   return wrapped;
 }
 
 /**
- * Drains an async iterator and dispatches yielded values to one or more receivers.
+ * Consumes an async iterator and forwards emitted values to receivers.
  *
- * Behavior:
- * - Uses `Promise.race` to respond to either `iterator.next()` or an abort event.
- * - Forwards values to all receivers whose subscriptions are still active.
- * - Forwards generator-thrown errors to receivers via `error`.
- * - Completes receivers on natural completion (`done: true`), not on abort.
- * - Ensures iterator finalization via `return()` if provided.
+ * Semantics:
+ * - Stops on iterator completion or abort
+ * - Abort does NOT trigger `complete`
+ * - Natural completion DOES trigger `complete`
+ * - Generator-thrown errors are forwarded to receivers
  *
- * The receiver callbacks (`next`, `error`, `complete`) are already wrapped to run
- * inside the scheduler, so this function does *not* itself schedule work.
+ * @template T
+ * @param iterator Async iterator to drain
+ * @param getReceivers Function returning active receivers
+ * @param signal Abort signal controlling cancellation
  */
 async function drainIterator<T>(
   iterator: AsyncIterator<T>,
@@ -264,53 +296,38 @@ async function drainIterator<T>(
       }
     }
   } catch (err) {
-    // Only generator-thrown errors reach here (not subscriber errors).
     if (!signal.aborted) {
       const error = err instanceof Error ? err : new Error(String(err));
       for (const { receiver, subscription } of getReceivers()) {
-        if (!subscription.unsubscribed) receiver.error?.(error);
+        if (!subscription.unsubscribed) {
+          receiver.error?.(error);
+        }
       }
     }
   } finally {
-    // Always try to finalize iterator
     if (iterator.return) {
       try {
         await iterator.return();
       } catch {}
     }
 
-    // Only naturally-complete subscribers on non-abort
     if (!signal.aborted) {
       for (const { receiver, subscription } of getReceivers()) {
-        if (!subscription.unsubscribed) receiver.complete?.();
+        if (!subscription.unsubscribed) {
+          receiver.complete?.();
+        }
       }
     }
   }
 }
 
 /**
- * Creates a **multicast reactive stream** backed by an async generator.
- *
- * ## Semantics
- * - The generator runs **once per active subscriber group**.
- * - The **first subscriber** starts the generator.
- * - Emitted values are **shared across all subscribers** (hot multicast).
- * - When the **last subscriber unsubscribes**, the generator is aborted.
- * - A later subscriber causes the generator to **restart** (cold restart).
- *
- * ## Scheduler guarantees
- * - All receiver callbacks (`next`, `error`, `complete`) are executed inside
- *   the scheduler's microtask queue.
- *
- * ## Runtime hooks
- * If runtime hooks are registered (e.g. tracing, profiling, devtools),
- * `onCreateStream` is invoked with the generated stream identifier.
+ * Creates a multicast stream backed by a shared async generator.
  *
  * @template T
- * @param name Optional human-readable stream label.
- * @param generatorFn Function producing an async generator yielding values.
- *
- * @returns A multicast `Stream<T>` instance.
+ * @param name Stream name (debugging / tooling)
+ * @param generatorFn Factory producing an async generator
+ * @returns Multicast Stream instance
  */
 export function createStream<T>(
   name: string,
@@ -318,10 +335,7 @@ export function createStream<T>(
 ): Stream<T> {
   const id = generateStreamId();
 
-  getRuntimeHooks()?.onCreateStream?.({
-    id,
-    name,
-  });
+  getRuntimeHooks()?.onCreateStream?.({ id, name });
 
   const activeSubscriptions = new Set<SubscriberEntry<T>>();
   let isRunning = false;
@@ -329,6 +343,10 @@ export function createStream<T>(
 
   const getActiveReceivers = () => Array.from(activeSubscriptions);
 
+  /**
+   * Starts the shared generator loop.
+   * Called only when transitioning from zero to one subscriber.
+   */
   const startMulticastLoop = () => {
     isRunning = true;
     abortController = new AbortController();
@@ -345,6 +363,12 @@ export function createStream<T>(
     })();
   };
 
+  /**
+   * Registers a receiver and manages generator lifecycle.
+   *
+   * @param receiver Receiver to attach
+   * @returns Subscription controlling the attachment
+   */
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
     const wrapped = wrapReceiver(receiver);
     let subscription!: Subscription;
@@ -381,7 +405,7 @@ export function createStream<T>(
   self = {
     type: "stream",
     name,
-    id, // internal identifier (non-breaking)
+    id,
     pipe,
     subscribe: cb => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(self),
@@ -392,34 +416,14 @@ export function createStream<T>(
 }
 
 /**
- * Pipes a source stream through a chain of operators to create a **derived stream**.
- *
- * ## Semantics
- * - Derived streams are **unicast**.
- * - Each subscriber receives an **independent execution** of the operator pipeline.
- * - The source stream remains multicast; only the pipeline is per-subscriber.
- *
- * ## Execution model
- * For every subscription:
- * 1. A fresh async iterator is created from the source stream.
- * 2. Runtime hooks may wrap the source iterator and operator chain.
- * 3. Operators are applied sequentially.
- * 4. The resulting iterator is drained until completion or unsubscribe.
- *
- * ## Runtime hooks
- * If registered, `onPipeStream` may:
- * - Wrap the source iterator (e.g. value emission tracing).
- * - Replace or wrap operators.
- * - Wrap the final iterator (e.g. delivery tracking).
- *
- * Hooks are **optional** and impose **zero overhead** when not present.
+ * Pipes a source stream through a chain of operators,
+ * producing a derived unicast stream.
  *
  * @template TIn
  * @template Ops
- * @param source Source stream to pipe from.
- * @param operators Operator chain applied to the source.
- *
- * @returns A new unicast `Stream` derived from the source.
+ * @param source Source stream
+ * @param operators Operators applied to the source
+ * @returns Derived unicast Stream
  */
 export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
   source: Stream<TIn>,
@@ -429,7 +433,7 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
     name: `${source.name}-piped`,
     id: generateStreamId(),
     type: "stream",
-    
+
     pipe: ((...nextOps: Operator<any, any>[]) =>
       pipeSourceThrough(source, [...operators, ...nextOps])) as OperatorChain<any>,
 
@@ -444,13 +448,18 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
     [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
   };
 
+  /**
+   * Registers a receiver for a derived (unicast) stream.
+   *
+   * @param receiver Receiver to attach
+   * @returns Subscription controlling execution
+   */
   function registerReceiver(receiver: Receiver<any>): Subscription {
     const wrapped = wrapReceiver(receiver);
 
     const subscriptionId = generateSubscriptionId();
     const hooks = getRuntimeHooks();
 
-    // Base source iterator
     let iterator: AsyncIterator<any> =
       source[Symbol.asyncIterator]();
 
@@ -459,7 +468,6 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
       | ((it: AsyncIterator<any>) => AsyncIterator<any>)
       | undefined;
 
-    // Allow runtime hooks to patch the pipeline
     if (hooks?.onPipeStream) {
       const patch = hooks.onPipeStream({
         streamName: source.name,
@@ -474,12 +482,10 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
       if (patch?.final) finalWrap = patch.final;
     }
 
-    // Apply operators
     for (const op of ops) {
       iterator = op.apply(iterator);
     }
 
-    // Final wrapping (delivery, instrumentation, etc.)
     if (finalWrap) {
       iterator = finalWrap(iterator);
     }
