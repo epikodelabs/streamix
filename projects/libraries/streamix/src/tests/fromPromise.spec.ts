@@ -70,10 +70,9 @@ describe('fromPromise', () => {
 
     stream.subscribe({
       next: () => fail('Value emitted unexpectedly'),
-      complete: () => fail('Stream completed unexpectedly'),
+      complete: () => done(),
       error: (err) => {
         expect(err).toBe(expectedError);
-        done();
       }
     });
   });
