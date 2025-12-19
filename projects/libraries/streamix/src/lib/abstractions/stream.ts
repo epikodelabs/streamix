@@ -439,7 +439,7 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
   operators: [...Ops]
 ): Stream<any> {
   const pipedStream: Stream<any> = {
-    name: `${source.name}-piped`,
+    name: `${source.name}Sink`,
     id: generateStreamId(),
     type: "stream",
 
