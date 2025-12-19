@@ -36,6 +36,25 @@ describe('createBehaviorSubject', () => {
     expect(behaviorSubject.snappy).toBe(999);
   });
 
+  it('should always define snappy on the subject (getter present and readable)', () => {
+    const subject = createBehaviorSubject<number>(1);
+
+    expect('snappy' in subject).toBeTrue();
+
+    const descriptor = Object.getOwnPropertyDescriptor(subject, 'snappy');
+    expect(descriptor).toBeDefined();
+    expect(descriptor?.get).toEqual(jasmine.any(Function));
+
+    expect(subject.snappy).toBe(1);
+
+    subject.next(0);
+    // snappy updates synchronously (even though emissions are scheduled)
+    expect(subject.snappy).toBe(0);
+
+    subject.complete();
+    expect(subject.snappy).toBe(0);
+  });
+
   it('should allow multiple subscribers to receive the same latest value', async () => {
     const subject = createBehaviorSubject<number>(0);
 
