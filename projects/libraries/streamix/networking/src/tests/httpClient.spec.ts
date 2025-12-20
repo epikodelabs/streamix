@@ -1,15 +1,15 @@
 import {
-    createHttpClient,
-    readJson,
-    readStatus,
-    useAccept,
-    useBase,
-    useCustom,
-    useHeader,
-    useOauth,
-    useParams,
-    useRedirect,
-    useRetry,
+  createHttpClient,
+  readJson,
+  readStatus,
+  useAccept,
+  useBase,
+  useCustom,
+  useHeader,
+  useOauth,
+  useParams,
+  useRedirect,
+  useRetry,
 } from '@actioncrew/streamix/networking';
 
 /* -------------------------------------------------- */
@@ -50,7 +50,7 @@ function clientWithFetch(fetch: Function) {
 /* Basic behavior                                     */
 /* -------------------------------------------------- */
 
-describe('HttpClient – basic behavior', () => {
+describe('HttpClient', () => {
   it('streams parsed JSON response', async () => {
     const fetch = mockFetchSequence([
       async () => jsonResponse({ ok: true }),
@@ -73,13 +73,11 @@ describe('HttpClient – basic behavior', () => {
     expect(values[0].status).toBe(204);
     expect(values[0].statusText).toBe('No Content');
   });
-});
 
-/* -------------------------------------------------- */
-/* Middleware                                         */
-/* -------------------------------------------------- */
+  /* -------------------------------------------------- */
+  /* Middleware                                         */
+  /* -------------------------------------------------- */
 
-describe('HttpClient – middleware', () => {
   it('applies base URL and headers', async () => {
     const fetch = jasmine.createSpy('fetch').and.callFake(
       async (req: Request) => {
@@ -117,13 +115,11 @@ describe('HttpClient – middleware', () => {
 
     await collect(client.get('/test', readJson));
   });
-});
 
-/* -------------------------------------------------- */
-/* Abort                                              */
-/* -------------------------------------------------- */
+  /* -------------------------------------------------- */
+  /* Abort                                              */
+  /* -------------------------------------------------- */
 
-describe('HttpClient – abort', () => {
   it('aborts request stream', async () => {
     const fetch = jasmine.createSpy('fetch').and.callFake(
       async () =>
@@ -144,13 +140,11 @@ describe('HttpClient – abort', () => {
       expect(true).toBeTrue();
     }
   });
-});
 
-/* -------------------------------------------------- */
-/* Retry                                              */
-/* -------------------------------------------------- */
+  /* -------------------------------------------------- */
+  /* Retry                                              */
+  /* -------------------------------------------------- */
 
-describe('HttpClient – retry', () => {
   let warnSpy: jasmine.Spy;
 
   beforeEach(() => {
@@ -178,13 +172,11 @@ describe('HttpClient – retry', () => {
     expect(values).toEqual([{ ok: true }]);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
-});
 
-/* -------------------------------------------------- */
-/* OAuth                                              */
-/* -------------------------------------------------- */
+  /* -------------------------------------------------- */
+  /* OAuth                                              */
+  /* -------------------------------------------------- */
 
-describe('HttpClient – OAuth', () => {
   it('throws on 401 (core throws, no retry)', async () => {
     const fetch = mockFetchSequence([
       async () => new Response(null, { status: 401 }),
@@ -209,13 +201,11 @@ describe('HttpClient – OAuth', () => {
     expect(getToken).toHaveBeenCalled();
     expect(refreshToken).not.toHaveBeenCalled();
   });
-});
 
-/* -------------------------------------------------- */
-/* Redirect                                           */
-/* -------------------------------------------------- */
+  /* -------------------------------------------------- */
+  /* Redirect                                           */
+  /* -------------------------------------------------- */
 
-describe('HttpClient – redirect', () => {
   it('follows redirect', async () => {
     const fetch = mockFetchSequence([
       async () =>
@@ -237,13 +227,11 @@ describe('HttpClient – redirect', () => {
     expect(values).toEqual([{ ok: true }]);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
-});
 
-/* -------------------------------------------------- */
-/* Errors                                             */
-/* -------------------------------------------------- */
+  /* -------------------------------------------------- */
+  /* Errors                                             */
+  /* -------------------------------------------------- */
 
-describe('HttpClient – errors', () => {
   it('throws on non-ok response', async () => {
     const fetch = mockFetchSequence([
       async () => new Response('fail', { status: 500 }),
