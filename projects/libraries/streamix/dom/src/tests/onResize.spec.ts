@@ -1,4 +1,4 @@
-import { onResize } from "@actioncrew/streamix";
+import { onResize } from "@actioncrew/streamix/dom";
 import { idescribe } from "./env.spec";
 
 idescribe('onResize', () => {

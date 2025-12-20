@@ -1,4 +1,5 @@
-import { Stream, onMediaQuery } from '@actioncrew/streamix';
+import { Stream } from '@actioncrew/streamix';
+import { onMediaQuery } from '@actioncrew/streamix/dom';
 import { idescribe } from './env.spec';
 
 idescribe('onMediaQuery', () => {

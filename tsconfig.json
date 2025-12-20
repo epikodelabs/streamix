@@ -32,8 +32,8 @@
       "@actioncrew/streamix/dom": [
         "./projects/libraries/streamix/dom/src/lib/index.ts"
       ],
-      "@actioncrew/streamix/http": [
-        "./projects/libraries/streamix/http/src/lib/index.ts"
+      "@actioncrew/streamix/networking": [
+        "./projects/libraries/streamix/networking/src/lib/index.ts"
       ],
       "@actioncrew/streamix/tracing": [
         "./projects/libraries/streamix/tracing/src/lib/index.ts"

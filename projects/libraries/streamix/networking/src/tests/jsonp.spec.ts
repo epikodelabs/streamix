@@ -1,4 +1,5 @@
-import { eachValueFrom, firstValueFrom, jsonp } from "@actioncrew/streamix";
+import { eachValueFrom, firstValueFrom } from "@actioncrew/streamix";
+import { jsonp } from "@actioncrew/streamix/networking";
 import { idescribe } from "./env.spec";
 
 idescribe("jsonp", () => {

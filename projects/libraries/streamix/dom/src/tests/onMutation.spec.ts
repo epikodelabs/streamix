@@ -1,4 +1,4 @@
-import { onMutation } from '@actioncrew/streamix';
+import { onMutation } from '@actioncrew/streamix/dom';
 import { idescribe } from './env.spec';
 
 // Mock DOM element for testing purposes

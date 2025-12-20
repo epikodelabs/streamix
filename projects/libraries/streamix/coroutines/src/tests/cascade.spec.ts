@@ -1,4 +1,5 @@
-import { cascade, coroutine, createStream } from "@actioncrew/streamix";
+import { createStream } from "@actioncrew/streamix";
+import { cascade, coroutine } from "@actioncrew/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe("cascade", () => {

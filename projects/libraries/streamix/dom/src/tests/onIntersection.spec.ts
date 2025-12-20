@@ -1,4 +1,4 @@
-import { onIntersection } from '@actioncrew/streamix';
+import { onIntersection } from '@actioncrew/streamix/dom';
 import { idescribe } from './env.spec';
 
 idescribe('onIntersection', () => {
