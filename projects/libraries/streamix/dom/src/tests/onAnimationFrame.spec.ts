@@ -1,4 +1,5 @@
-import { map, onAnimationFrame, takeWhile } from '@actioncrew/streamix';
+import { map, takeWhile } from '@actioncrew/streamix';
+import { onAnimationFrame } from '@actioncrew/streamix/dom';
 import { idescribe } from './env.spec';
 
 idescribe('onAnimationFrame', () => {

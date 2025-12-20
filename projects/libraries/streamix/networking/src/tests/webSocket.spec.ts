@@ -1,4 +1,5 @@
-import { eachValueFrom, webSocket } from "@actioncrew/streamix";
+import { eachValueFrom } from "@actioncrew/streamix";
+import { webSocket } from "@actioncrew/streamix/networking";
 import { idescribe } from "./env.spec";
 
 class MockWebSocket {

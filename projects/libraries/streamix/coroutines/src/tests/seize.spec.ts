@@ -1,10 +1,10 @@
+import { eachValueFrom } from "@actioncrew/streamix";
 import {
   coroutine,
   CoroutineMessage,
-  eachValueFrom,
   seize,
   SeizedWorker,
-} from "@actioncrew/streamix";
+} from "@actioncrew/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe("seize", () => {
@@ -103,7 +103,7 @@ idescribe("seize", () => {
     const messages: CoroutineMessage[] = [];
     const errors: Error[] = [];
 
-    const stream = seize(co, msg => messages.push(msg), err => errors.push(err));
+    const stream = seize(co, msg => { messages.push(msg); }, err => { errors.push(err); });
 
     const iterator = eachValueFrom(stream);
     const seized: SeizedWorker<number, number> = (await iterator.next()).value;
@@ -155,7 +155,7 @@ idescribe("seize", () => {
 
     let capturedError: any = null;
 
-    const stream = seize(co, () => { }, err => (capturedError = err));
+    const stream = seize(co, () => { }, err => { capturedError = err; });
 
     const iterator = eachValueFrom(stream);
     const seized: SeizedWorker<number, number> = (await iterator.next()).value;
@@ -189,7 +189,7 @@ idescribe("seize", () => {
     (globalThis as any).currentMainTask = (x: number) => x + 1;
 
     const messages: CoroutineMessage[] = [];
-    const stream = seize(co, msg => messages.push(msg), () => { });
+    const stream = seize(co, msg => { messages.push(msg); }, () => { });
 
     const iterator = eachValueFrom(stream);
     const seized: SeizedWorker<number, number> = (await iterator.next()).value;

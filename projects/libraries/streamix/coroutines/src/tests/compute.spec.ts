@@ -1,4 +1,4 @@
-import { compute, coroutine } from "@actioncrew/streamix";
+import { compute, coroutine } from "@actioncrew/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe("compute", () => {

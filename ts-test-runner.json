@@ -1,9 +1,17 @@
 {
   "srcDirs": [
-    "./projects/libraries/streamix/src/lib"
+    "./projects/libraries/streamix/coroutines/src/lib",
+    "./projects/libraries/streamix/dom/src/lib",
+    "./projects/libraries/streamix/networking/src/lib",
+    "./projects/libraries/streamix/src/lib",
+    "./projects/libraries/streamix/tracing/src/lib"
   ],
   "testDirs": [
-    "./projects/libraries/streamix/src/tests"
+    "./projects/libraries/streamix/coroutines/src/tests",
+    "./projects/libraries/streamix/dom/src/tests",
+    "./projects/libraries/streamix/networking/src/tests",
+    "./projects/libraries/streamix/src/tests",
+    "./projects/libraries/streamix/tracing/src/tests"
   ],
   "exclude": [
     "**/node_modules/**"
