@@ -1,8 +1,8 @@
 import {
-    createAsyncGenerator,
-    createSubject,
-    Receiver,
-    Stream
+  createAsyncGenerator,
+  createSubject,
+  Receiver,
+  Stream
 } from "@actioncrew/streamix";
 
 /**
