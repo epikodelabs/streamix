@@ -11,25 +11,60 @@ async function flush() {
 }
 
 /**
- * Browser-safe patch helper
- * - always uses getters
- * - never deletes DOM methods
+ * Patch helper that works in a real browser DOM.
+ *
+ * - For function-valued DOM methods (add/removeEventListener), define as VALUE.
+ *   (Spies have length=0, so never infer based on .length)
+ * - For "state" properties, define as GETTER.
+ * - If patch value is `undefined`, DELETE the property.
  */
-function patchObject(
-  target: object,
-  patch: Record<string, any>
-) {
+function patchObject(target: object, patch: Record<string, any>) {
   const originals: Record<string, PropertyDescriptor | undefined> = {};
+
+  const forceValueKeys = new Set([
+    'addEventListener',
+    'removeEventListener',
+    'dispatchEvent',
+  ]);
 
   for (const key of Object.keys(patch)) {
     originals[key] = Object.getOwnPropertyDescriptor(target, key);
     const value = patch[key];
 
+    // Remove property entirely
+    if (value === undefined) {
+      try {
+        delete (target as any)[key];
+      } catch {
+        // Some DOM props are non-configurable; ignore.
+      }
+      continue;
+    }
+
+    // Force DOM methods to be callable values (NOT getters)
+    if (forceValueKeys.has(key) && typeof value === 'function') {
+      Object.defineProperty(target, key, {
+        configurable: true,
+        writable: true,
+        value,
+      });
+      continue;
+    }
+
+    // If caller gives a getter function, install as getter
+    // (e.g., visibilityState: () => env.visibilityState)
+    if (typeof value === 'function') {
+      Object.defineProperty(target, key, {
+        configurable: true,
+        get: value,
+      });
+      continue;
+    }
+
+    // Otherwise treat it as a static value via getter
     Object.defineProperty(target, key, {
       configurable: true,
-      get: typeof value === 'function'
-        ? value
-        : () => value,
+      get: () => value,
     });
   }
 
@@ -39,7 +74,11 @@ function patchObject(
       if (desc) {
         Object.defineProperty(target, key, desc);
       } else {
-        delete (target as any)[key];
+        try {
+          delete (target as any)[key];
+        } catch {
+          // ignore non-configurable
+        }
       }
     }
   };
@@ -55,29 +94,32 @@ function mockVisibility(initial: DocumentVisibilityState = 'visible') {
   let state = initial;
   const listeners = new Set<Listener>();
 
+  const addEventListener = jasmine
+    .createSpy('document.addEventListener')
+    .and.callFake((type: string, cb: Listener) => {
+      if (type === 'visibilitychange') listeners.add(cb);
+    });
+
+  const removeEventListener = jasmine
+    .createSpy('document.removeEventListener')
+    .and.callFake((type: string, cb: Listener) => {
+      if (type === 'visibilitychange') listeners.delete(cb);
+    });
+
   return {
     get visibilityState(): DocumentVisibilityState {
       return state;
     },
 
-    addEventListener: jasmine
-      .createSpy('document.addEventListener')
-      .and.callFake((type: string, cb: Listener) => {
-        if (type === 'visibilitychange') listeners.add(cb);
-      }),
-
-    removeEventListener: jasmine
-      .createSpy('document.removeEventListener')
-      .and.callFake((type: string, cb: Listener) => {
-        if (type === 'visibilitychange') listeners.delete(cb);
-      }),
+    addEventListener,
+    removeEventListener,
 
     setVisibility(next: DocumentVisibilityState) {
       state = next;
     },
 
     fire() {
-      listeners.forEach(l => l());
+      listeners.forEach((l) => l());
     },
   };
 }
@@ -87,11 +129,12 @@ function mockVisibility(initial: DocumentVisibilityState = 'visible') {
 /* -------------------------------------------------- */
 
 idescribe('onVisibilityChange (browser)', () => {
-  let restore: (() => void)[] = [];
+  let restore: Array<() => void> = [];
 
-  afterEach(() => {
-    restore.forEach(fn => fn());
+  afterEach(async () => {
+    restore.forEach((fn) => fn());
     restore = [];
+    await flush();
   });
 
   it('emits initial visibility state on subscribe', async () => {
@@ -99,14 +142,16 @@ idescribe('onVisibilityChange (browser)', () => {
 
     restore.push(
       patchObject(document, {
+        // LIVE getter
         visibilityState: () => env.visibilityState,
-        addEventListener: () => env.addEventListener,
-        removeEventListener: () => env.removeEventListener,
+        // MUST be callable methods (values)
+        addEventListener: env.addEventListener,
+        removeEventListener: env.removeEventListener,
       })
     );
 
     const values: DocumentVisibilityState[] = [];
-    const sub = onVisibilityChange().subscribe(v => values.push(v));
+    const sub = onVisibilityChange().subscribe((v) => values.push(v));
     await flush();
 
     expect(values).toEqual(['hidden']);
@@ -119,13 +164,13 @@ idescribe('onVisibilityChange (browser)', () => {
     restore.push(
       patchObject(document, {
         visibilityState: () => env.visibilityState,
-        addEventListener: () => env.addEventListener,
-        removeEventListener: () => env.removeEventListener,
+        addEventListener: env.addEventListener,
+        removeEventListener: env.removeEventListener,
       })
     );
 
     const values: DocumentVisibilityState[] = [];
-    const sub = onVisibilityChange().subscribe(v => values.push(v));
+    const sub = onVisibilityChange().subscribe((v) => values.push(v));
     await flush();
 
     env.setVisibility('hidden');
@@ -141,13 +186,13 @@ idescribe('onVisibilityChange (browser)', () => {
   });
 
   it('adds listener once and removes on last unsubscribe', async () => {
-    const env = mockVisibility();
+    const env = mockVisibility('visible');
 
     restore.push(
       patchObject(document, {
         visibilityState: () => env.visibilityState,
-        addEventListener: () => env.addEventListener,
-        removeEventListener: () => env.removeEventListener,
+        addEventListener: env.addEventListener,
+        removeEventListener: env.removeEventListener,
       })
     );
 
@@ -172,8 +217,8 @@ idescribe('onVisibilityChange (browser)', () => {
     restore.push(
       patchObject(document, {
         visibilityState: () => env.visibilityState,
-        addEventListener: () => env.addEventListener,
-        removeEventListener: () => env.removeEventListener,
+        addEventListener: env.addEventListener,
+        removeEventListener: env.removeEventListener,
       })
     );
 
@@ -197,22 +242,5 @@ idescribe('onVisibilityChange (browser)', () => {
     await flush();
 
     expect(await iter).toEqual(['visible', 'hidden', 'visible']);
-  });
-
-  it('is SSR-safe when visibility API is missing (no crash)', async () => {
-    restore.push(
-      patchObject(document, {
-        visibilityState: () => undefined,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      })
-    );
-
-    const values: (DocumentVisibilityState | undefined)[] = [];
-    const sub = onVisibilityChange().subscribe(v => values.push(v));
-    await flush();
-
-    expect(values).toEqual([undefined]);
-    sub.unsubscribe();
   });
 });

@@ -87,7 +87,7 @@ function mockVisibility(initial: DocumentVisibilityState = 'visible') {
 /* Tests                                              */
 /* -------------------------------------------------- */
 
-idescribe('onVisibilityChange (browser)', () => {
+idescribe('onVisibilityChange', () => {
   let restore: (() => void)[] = [];
 
   afterEach(() => {
