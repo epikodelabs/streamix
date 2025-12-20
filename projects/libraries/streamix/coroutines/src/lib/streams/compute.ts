@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractions";
+import { createStream, isPromiseLike, MaybePromise, Stream } from "@actioncrew/streamix";
 import { Coroutine } from "../operators";
 
 /**

@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, Operator } from "@actioncrew/streamix";
 import { Coroutine } from "./coroutine";
 
 /**
