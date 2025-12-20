@@ -31,7 +31,6 @@ describe("onFullscreen", () => {
   });
 
   afterEach(async () => {
-    await exitFullscreen();
     el.remove();
     await flush();
   });
