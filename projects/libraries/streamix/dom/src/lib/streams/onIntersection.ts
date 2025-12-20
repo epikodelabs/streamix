@@ -34,17 +34,20 @@ export function onIntersection(
   subject.name = "onIntersection";
 
   let subscriberCount = 0;
-  let stopped = true;
+  let active = false;
 
-  let resolvedElement: Element | null = null;
-  let resolvedOptions: IntersectionObserverInit | undefined;
-  let observer: IntersectionObserver | null = null;
+  let el: Element | null = null;
+  let io: IntersectionObserver | null = null;
+  let mo: MutationObserver | null = null;
+
+  const subscriptions = new Set<{ unsubscribe: () => void }>();
+
+  /* -------------------------------------------------- */
 
   const start = async () => {
-    if (!stopped) return;
-    stopped = false;
+    if (active) return;
+    active = true;
 
-    // SSR / unsupported guard
     if (
       typeof IntersectionObserver === "undefined" ||
       typeof document === "undefined"
@@ -52,34 +55,51 @@ export function onIntersection(
       return;
     }
 
-    resolvedElement = isPromiseLike(element) ? await element : element;
-    resolvedOptions = isPromiseLike(options) ? await options : options;
+    el = isPromiseLike(element) ? await element : element;
+    const resolvedOptions = isPromiseLike(options) ? await options : options;
 
-    if (stopped || !resolvedElement) return;
+    if (!active || !el) return;
 
-    observer = new IntersectionObserver(entries => {
+    io = new IntersectionObserver(entries => {
       subject.next(entries[0]?.isIntersecting ?? false);
     }, resolvedOptions);
 
-    observer.observe(resolvedElement);
+    io.observe(el);
+
+    // 👇 REQUIRED: detect DOM removal
+    mo = new MutationObserver(() => {
+      if (el && !document.body.contains(el)) {
+        // Force-unsubscribe ALL subscribers
+        for (const sub of subscriptions) {
+          sub.unsubscribe();
+        }
+        subscriptions.clear();
+        stop();
+      }
+    });
+
+    mo.observe(document.body, { childList: true, subtree: true });
   };
 
   const stop = () => {
-    if (stopped) return;
-    stopped = true;
+    if (!active) return;
+    active = false;
 
-    if (observer && resolvedElement) {
-      observer.unobserve(resolvedElement);
-      observer.disconnect();
+    if (io && el) {
+      io.unobserve(el);
+      io.disconnect();
     }
 
-    observer = null;
-    resolvedElement = null;
+    mo?.disconnect();
+
+    io = null;
+    mo = null;
+    el = null;
   };
 
-  /* ------------------------------------------------------------------------
-   * Ref-counted subscription handling
-   * ---------------------------------------------------------------------- */
+  /* -------------------------------------------------- */
+  /* Ref-counted subscription handling                  */
+  /* -------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
   subject.subscribe = (
@@ -87,27 +107,32 @@ export function onIntersection(
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
+    subscriptions.add(sub);
+
     if (++subscriberCount === 1) {
       void start();
     }
 
-    const o = sub.onUnsubscribe;
+    const prev = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {
+      subscriptions.delete(sub);
+
       if (--subscriberCount === 0) {
         stop();
       }
-      o?.call(sub);
+
+      prev?.call(sub);
     };
 
     return sub;
   };
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
+  /* -------------------------------------------------- */
+  /* Async iteration support                            */
+  /* -------------------------------------------------- */
 
   subject[Symbol.asyncIterator] = () =>
-    createAsyncGenerator(receiver => subject.subscribe(receiver));
+    createAsyncGenerator(r => subject.subscribe(r));
 
   return subject;
 }
