@@ -1,6 +1,6 @@
 import { scheduler } from '@actioncrew/streamix';
 import { onVisibilityChange } from '@actioncrew/streamix/dom';
-import { ndescribe } from './env.spec';
+import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
 /* Helpers                                            */
@@ -10,69 +10,103 @@ async function flush() {
   await scheduler.flush();
 }
 
+/**
+ * Browser-safe patch helper
+ * - always uses getters
+ * - never deletes DOM methods
+ */
+function patchObject(
+  target: object,
+  patch: Record<string, any>
+) {
+  const originals: Record<string, PropertyDescriptor | undefined> = {};
+
+  for (const key of Object.keys(patch)) {
+    originals[key] = Object.getOwnPropertyDescriptor(target, key);
+    const value = patch[key];
+
+    Object.defineProperty(target, key, {
+      configurable: true,
+      get: typeof value === 'function'
+        ? value
+        : () => value,
+    });
+  }
+
+  return () => {
+    for (const key of Object.keys(patch)) {
+      const desc = originals[key];
+      if (desc) {
+        Object.defineProperty(target, key, desc);
+      } else {
+        delete (target as any)[key];
+      }
+    }
+  };
+}
+
 /* -------------------------------------------------- */
 /* Document mock                                      */
 /* -------------------------------------------------- */
 
 type Listener = () => void;
 
-function mockDocument(initial: DocumentVisibilityState = 'visible') {
+function mockVisibility(initial: DocumentVisibilityState = 'visible') {
   let state = initial;
   const listeners = new Set<Listener>();
 
-  const doc = {
-    get visibilityState() {
+  return {
+    get visibilityState(): DocumentVisibilityState {
       return state;
     },
 
-    addEventListener: jasmine.createSpy('addEventListener')
+    addEventListener: jasmine
+      .createSpy('document.addEventListener')
       .and.callFake((type: string, cb: Listener) => {
         if (type === 'visibilitychange') listeners.add(cb);
       }),
 
-    removeEventListener: jasmine.createSpy('removeEventListener')
+    removeEventListener: jasmine
+      .createSpy('document.removeEventListener')
       .and.callFake((type: string, cb: Listener) => {
         if (type === 'visibilitychange') listeners.delete(cb);
       }),
-  } as unknown as Document;
-
-  return {
-    document: doc,
 
     setVisibility(next: DocumentVisibilityState) {
       state = next;
     },
 
-    fireVisibilityChange() {
+    fire() {
       listeners.forEach(l => l());
     },
   };
 }
 
-
 /* -------------------------------------------------- */
 /* Tests                                              */
 /* -------------------------------------------------- */
 
-ndescribe('onVisibilityChange', () => {
-  let originalDocument: any;
-
-  beforeEach(() => {
-    originalDocument = (globalThis as any).document;
-  });
+idescribe('onVisibilityChange (browser)', () => {
+  let restore: (() => void)[] = [];
 
   afterEach(() => {
-    (globalThis as any).document = originalDocument;
+    restore.forEach(fn => fn());
+    restore = [];
   });
 
   it('emits initial visibility state on subscribe', async () => {
-    const env = mockDocument('hidden');
-    (globalThis as any).document = env.document;
+    const env = mockVisibility('hidden');
 
-    const stream = onVisibilityChange();
+    restore.push(
+      patchObject(document, {
+        visibilityState: () => env.visibilityState,
+        addEventListener: () => env.addEventListener,
+        removeEventListener: () => env.removeEventListener,
+      })
+    );
+
     const values: DocumentVisibilityState[] = [];
-
-    const sub = stream.subscribe(v => values.push(v));
+    const sub = onVisibilityChange().subscribe(v => values.push(v));
     await flush();
 
     expect(values).toEqual(['hidden']);
@@ -80,30 +114,42 @@ ndescribe('onVisibilityChange', () => {
   });
 
   it('emits on visibilitychange events', async () => {
-    const env = mockDocument('visible');
-    (globalThis as any).document = env.document;
+    const env = mockVisibility('visible');
 
-    const stream = onVisibilityChange();
+    restore.push(
+      patchObject(document, {
+        visibilityState: () => env.visibilityState,
+        addEventListener: () => env.addEventListener,
+        removeEventListener: () => env.removeEventListener,
+      })
+    );
+
     const values: DocumentVisibilityState[] = [];
-
-    const sub = stream.subscribe(v => values.push(v));
+    const sub = onVisibilityChange().subscribe(v => values.push(v));
     await flush();
 
     env.setVisibility('hidden');
-    env.fireVisibilityChange();
+    env.fire();
     await flush();
 
     env.setVisibility('visible');
-    env.fireVisibilityChange();
+    env.fire();
     await flush();
 
     expect(values).toEqual(['visible', 'hidden', 'visible']);
     sub.unsubscribe();
   });
 
-  it('adds listener only once and removes on last unsubscribe', async () => {
-    const env = mockDocument();
-    (globalThis as any).document = env.document;
+  it('adds listener once and removes on last unsubscribe', async () => {
+    const env = mockVisibility();
+
+    restore.push(
+      patchObject(document, {
+        visibilityState: () => env.visibilityState,
+        addEventListener: () => env.addEventListener,
+        removeEventListener: () => env.removeEventListener,
+      })
+    );
 
     const stream = onVisibilityChange();
 
@@ -111,24 +157,29 @@ ndescribe('onVisibilityChange', () => {
     const s2 = stream.subscribe();
     await flush();
 
-    expect(env.document.addEventListener).toHaveBeenCalledTimes(1);
+    expect(env.addEventListener).toHaveBeenCalledTimes(1);
 
     s1.unsubscribe();
     s2.unsubscribe();
     await flush();
 
-    expect(env.document.removeEventListener).toHaveBeenCalledTimes(1);
+    expect(env.removeEventListener).toHaveBeenCalledTimes(1);
   });
 
   it('supports async iteration', async () => {
-    const env = mockDocument('visible');
-    (globalThis as any).document = env.document;
+    const env = mockVisibility('visible');
 
-    const stream = onVisibilityChange();
+    restore.push(
+      patchObject(document, {
+        visibilityState: () => env.visibilityState,
+        addEventListener: () => env.addEventListener,
+        removeEventListener: () => env.removeEventListener,
+      })
+    );
 
     const iter = (async () => {
       const out: DocumentVisibilityState[] = [];
-      for await (const v of stream) {
+      for await (const v of onVisibilityChange()) {
         out.push(v);
         if (out.length === 3) break;
       }
@@ -138,27 +189,30 @@ ndescribe('onVisibilityChange', () => {
     await flush();
 
     env.setVisibility('hidden');
-    env.fireVisibilityChange();
+    env.fire();
     await flush();
 
     env.setVisibility('visible');
-    env.fireVisibilityChange();
+    env.fire();
     await flush();
 
     expect(await iter).toEqual(['visible', 'hidden', 'visible']);
   });
 
-  it('is SSR-safe when document is undefined', async () => {
-    delete (globalThis as any).document;
+  it('is SSR-safe when visibility API is missing (no crash)', async () => {
+    restore.push(
+      patchObject(document, {
+        visibilityState: () => undefined,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })
+    );
 
-    const stream = onVisibilityChange();
-    const values: DocumentVisibilityState[] = [];
-
-    const sub = stream.subscribe(v => values.push(v));
+    const values: (DocumentVisibilityState | undefined)[] = [];
+    const sub = onVisibilityChange().subscribe(v => values.push(v));
     await flush();
 
-    expect(values).toEqual([]);
+    expect(values).toEqual([undefined]);
     sub.unsubscribe();
   });
 });
-

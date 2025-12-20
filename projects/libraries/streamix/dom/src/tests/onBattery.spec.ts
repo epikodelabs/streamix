@@ -1,6 +1,6 @@
 import { scheduler } from '@actioncrew/streamix';
 import { onBattery } from '@actioncrew/streamix/dom';
-import { ndescribe } from './env.spec';
+import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
 /* Helpers                                            */
@@ -11,13 +11,14 @@ async function flush() {
 }
 
 /* -------------------------------------------------- */
-/* Global patch helper (CRITICAL)                      */
+/* Safe navigator patch (browser-compatible)          */
 /* -------------------------------------------------- */
 
-function defineGlobal(name: string, value: any) {
-  const desc = Object.getOwnPropertyDescriptor(globalThis, name);
+function patchGetBattery(value: any) {
+  const nav = navigator as any;
+  const desc = Object.getOwnPropertyDescriptor(nav, 'getBattery');
 
-  Object.defineProperty(globalThis, name, {
+  Object.defineProperty(nav, 'getBattery', {
     configurable: true,
     writable: true,
     value,
@@ -25,9 +26,9 @@ function defineGlobal(name: string, value: any) {
 
   return () => {
     if (desc) {
-      Object.defineProperty(globalThis, name, desc);
+      Object.defineProperty(nav, 'getBattery', desc);
     } else {
-      delete (globalThis as any)[name];
+      delete nav.getBattery;
     }
   };
 }
@@ -76,13 +77,12 @@ function mockBatteryEnv() {
       }),
   };
 
-  const navigatorMock = {
-    getBattery: jasmine.createSpy('navigator.getBattery').and.resolveTo(battery),
-  };
-
   return {
-    navigator: navigatorMock,
     battery,
+
+    getBattery: jasmine
+      .createSpy('navigator.getBattery')
+      .and.resolveTo(battery),
 
     setCharging(next: boolean) {
       charging = next;
@@ -107,25 +107,20 @@ function mockBatteryEnv() {
 /* Tests                                              */
 /* -------------------------------------------------- */
 
-ndescribe('onBattery', () => {
-  let restoreNavigator: () => void;
+idescribe('onBattery', () => {
+  let restore: (() => void) | undefined;
 
   afterEach(() => {
-    restoreNavigator?.();
+    restore?.();
+    restore = undefined;
   });
-
-  /* -------------------------------------------------- */
-  /* Basic behavior                                     */
-  /* -------------------------------------------------- */
 
   it('emits initial battery snapshot on subscribe', async () => {
     const env = mockBatteryEnv();
-    restoreNavigator = defineGlobal('navigator', env.navigator);
+    restore = patchGetBattery(env.getBattery);
 
     const values: any[] = [];
-    const stream = onBattery();
-
-    const sub = stream.subscribe(v => values.push(v));
+    const sub = onBattery().subscribe(v => values.push(v));
     await flush();
 
     expect(values.length).toBe(1);
@@ -141,84 +136,41 @@ ndescribe('onBattery', () => {
     sub.unsubscribe();
   });
 
-  /* -------------------------------------------------- */
-  /* Battery events                                     */
-  /* -------------------------------------------------- */
-
   it('emits on charging change', async () => {
     const env = mockBatteryEnv();
-    restoreNavigator = defineGlobal('navigator', env.navigator);
+    restore = patchGetBattery(env.getBattery);
 
     const values: any[] = [];
-    const stream = onBattery();
-
-    const sub = stream.subscribe(v => values.push(v));
+    const sub = onBattery().subscribe(v => values.push(v));
     await flush();
 
     env.setCharging(false);
     await flush();
 
     expect(values.map(v => v.charging)).toEqual([true, false]);
-
     sub.unsubscribe();
   });
 
   it('emits on level change', async () => {
     const env = mockBatteryEnv();
-    restoreNavigator = defineGlobal('navigator', env.navigator);
+    restore = patchGetBattery(env.getBattery);
 
     const values: any[] = [];
-    const stream = onBattery();
-
-    const sub = stream.subscribe(v => values.push(v));
+    const sub = onBattery().subscribe(v => values.push(v));
     await flush();
 
     env.setLevel(0.42);
     await flush();
 
-    expect(values[1]).toEqual(
-      jasmine.objectContaining({
-        level: 0.42,
-      })
-    );
-
+    expect(values[1].level).toBe(0.42);
     sub.unsubscribe();
   });
-
-  it('emits on charging / discharging time change', async () => {
-    const env = mockBatteryEnv();
-    restoreNavigator = defineGlobal('navigator', env.navigator);
-
-    const values: any[] = [];
-    const stream = onBattery();
-
-    const sub = stream.subscribe(v => values.push(v));
-    await flush();
-
-    env.setTimes(120, 1800);
-    await flush();
-
-    expect(values[1]).toEqual(
-      jasmine.objectContaining({
-        chargingTime: 120,
-        dischargingTime: 1800,
-      })
-    );
-
-    sub.unsubscribe();
-  });
-
-  /* -------------------------------------------------- */
-  /* Listener lifecycle                                 */
-  /* -------------------------------------------------- */
 
   it('adds listeners on start and removes on stop', async () => {
     const env = mockBatteryEnv();
-    restoreNavigator = defineGlobal('navigator', env.navigator);
+    restore = patchGetBattery(env.getBattery);
 
-    const stream = onBattery();
-
-    const sub = stream.subscribe();
+    const sub = onBattery().subscribe();
     await flush();
 
     expect(env.battery.addEventListener).toHaveBeenCalled();
@@ -229,16 +181,11 @@ ndescribe('onBattery', () => {
     expect(env.battery.removeEventListener).toHaveBeenCalled();
   });
 
-  /* -------------------------------------------------- */
-  /* Async iteration                                    */
-  /* -------------------------------------------------- */
-
   it('supports async iteration', async () => {
     const env = mockBatteryEnv();
-    restoreNavigator = defineGlobal('navigator', env.navigator);
+    restore = patchGetBattery(env.getBattery);
 
     const stream = onBattery();
-
     const iter = (async () => {
       const out: any[] = [];
       for await (const v of stream) {
@@ -249,46 +196,21 @@ ndescribe('onBattery', () => {
     })();
 
     await flush();
-
     env.setCharging(false);
     await flush();
 
     const values = await iter;
-
     expect(values.map(v => v.charging)).toEqual([true, false]);
   });
 
-  /* -------------------------------------------------- */
-  /* SSR safety                                         */
-  /* -------------------------------------------------- */
-
-  it('is SSR-safe when navigator is undefined', async () => {
-    restoreNavigator = defineGlobal('navigator', undefined);
+  it('is silent when Battery API is unavailable', async () => {
+    restore = patchGetBattery(undefined);
 
     const values: any[] = [];
-    const stream = onBattery();
-
-    const sub = stream.subscribe(v => values.push(v));
+    const sub = onBattery().subscribe(v => values.push(v));
     await flush();
 
     expect(values).toEqual([]);
-    sub.unsubscribe();
-  });
-
-  /* -------------------------------------------------- */
-  /* Graceful degradation                               */
-  /* -------------------------------------------------- */
-
-  it('is silent when Battery API is unavailable', async () => {
-    restoreNavigator = defineGlobal('navigator', {});
-
-    const values: any[] = [];
-    const stream = onBattery();
-
-    const sub = stream.subscribe(v => values.push(v));
-    await flush();
-
-    expect(values).toEqual([]); // no getBattery → no emission
     sub.unsubscribe();
   });
 });

@@ -1,19 +1,19 @@
 import { scheduler } from '@actioncrew/streamix';
 import { onIdle } from '@actioncrew/streamix/dom';
-import { ndescribe } from './env.spec';
+import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
 /* Helpers                                            */
 /* -------------------------------------------------- */
 
-async function flush() {
-  await scheduler.flush();
-}
+function patchGlobal<K extends keyof typeof globalThis>(
+  key: K,
+  value: any
+) {
+  const obj = globalThis as any;
+  const desc = Object.getOwnPropertyDescriptor(obj, key);
 
-function defineGlobal(name: string, value: any) {
-  const desc = Object.getOwnPropertyDescriptor(globalThis, name);
-
-  Object.defineProperty(globalThis, name, {
+  Object.defineProperty(obj, key, {
     configurable: true,
     writable: true,
     value,
@@ -21,11 +21,15 @@ function defineGlobal(name: string, value: any) {
 
   return () => {
     if (desc) {
-      Object.defineProperty(globalThis, name, desc);
+      Object.defineProperty(obj, key, desc);
     } else {
-      delete (globalThis as any)[name];
+      delete obj[key];
     }
   };
+}
+
+async function flush() {
+  await scheduler.flush();
 }
 
 /* -------------------------------------------------- */
@@ -110,17 +114,12 @@ function mockTimeoutEnv() {
 /* Tests                                              */
 /* -------------------------------------------------- */
 
-ndescribe('onIdle (requestIdleCallback)', () => {
-  let restoreRIC: () => void;
-  let restoreCancelRIC: () => void;
-  let restoreSetTimeout: () => void;
-  let restoreClearTimeout: () => void;
+idescribe('onIdle', () => {
+  let restore: (() => void)[] = [];
 
   afterEach(() => {
-    restoreRIC?.();
-    restoreCancelRIC?.();
-    restoreSetTimeout?.();
-    restoreClearTimeout?.();
+    restore.forEach(fn => fn());
+    restore = [];
   });
 
   /* -------------------------------------------------- */
@@ -130,13 +129,13 @@ ndescribe('onIdle (requestIdleCallback)', () => {
   it('emits idle deadlines using requestIdleCallback', async () => {
     const env = mockRICEnv();
 
-    restoreRIC = defineGlobal('requestIdleCallback', env.requestIdleCallback);
-    restoreCancelRIC = defineGlobal('cancelIdleCallback', env.cancelIdleCallback);
+    restore.push(
+      patchGlobal('requestIdleCallback', env.requestIdleCallback),
+      patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
+    );
 
     const values: IdleDeadline[] = [];
-    const stream = onIdle();
-
-    const sub = stream.subscribe(v => values.push(v));
+    const sub = onIdle().subscribe(v => values.push(v));
     await flush();
 
     env.fireIdle();
@@ -149,16 +148,16 @@ ndescribe('onIdle (requestIdleCallback)', () => {
     sub.unsubscribe();
   });
 
-  it('continues scheduling idle callbacks until unsubscribed', async () => {
+  it('continues scheduling until unsubscribed', async () => {
     const env = mockRICEnv();
 
-    restoreRIC = defineGlobal('requestIdleCallback', env.requestIdleCallback);
-    restoreCancelRIC = defineGlobal('cancelIdleCallback', env.cancelIdleCallback);
+    restore.push(
+      patchGlobal('requestIdleCallback', env.requestIdleCallback),
+      patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
+    );
 
     const values: IdleDeadline[] = [];
-    const stream = onIdle();
-
-    const sub = stream.subscribe(v => values.push(v));
+    const sub = onIdle().subscribe(v => values.push(v));
     await flush();
 
     env.fireIdle();
@@ -166,19 +165,18 @@ ndescribe('onIdle (requestIdleCallback)', () => {
     await flush();
 
     expect(values.length).toBe(2);
-
     sub.unsubscribe();
   });
 
-  it('cancels idle callback when last subscriber unsubscribes', async () => {
+  it('cancels idle callback on unsubscribe', async () => {
     const env = mockRICEnv();
 
-    restoreRIC = defineGlobal('requestIdleCallback', env.requestIdleCallback);
-    restoreCancelRIC = defineGlobal('cancelIdleCallback', env.cancelIdleCallback);
+    restore.push(
+      patchGlobal('requestIdleCallback', env.requestIdleCallback),
+      patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
+    );
 
-    const stream = onIdle();
-
-    const sub = stream.subscribe();
+    const sub = onIdle().subscribe();
     await flush();
 
     sub.unsubscribe();
@@ -194,15 +192,15 @@ ndescribe('onIdle (requestIdleCallback)', () => {
   it('falls back to setTimeout when requestIdleCallback is unavailable', async () => {
     const env = mockTimeoutEnv();
 
-    restoreRIC = defineGlobal('requestIdleCallback', undefined);
-    restoreCancelRIC = defineGlobal('cancelIdleCallback', undefined);
-    restoreSetTimeout = defineGlobal('setTimeout', env.setTimeoutMock);
-    restoreClearTimeout = defineGlobal('clearTimeout', env.clearTimeoutMock);
+    restore.push(
+      patchGlobal('requestIdleCallback', undefined),
+      patchGlobal('cancelIdleCallback', undefined),
+      patchGlobal('setTimeout', env.setTimeoutMock),
+      patchGlobal('clearTimeout', env.clearTimeoutMock)
+    );
 
     const values: IdleDeadline[] = [];
-    const stream = onIdle();
-
-    const sub = stream.subscribe(v => values.push(v));
+    const sub = onIdle().subscribe(v => values.push(v));
     await flush();
 
     env.fireAll();
@@ -217,14 +215,14 @@ ndescribe('onIdle (requestIdleCallback)', () => {
   it('clears timeout on unsubscribe in fallback mode', async () => {
     const env = mockTimeoutEnv();
 
-    restoreRIC = defineGlobal('requestIdleCallback', undefined);
-    restoreCancelRIC = defineGlobal('cancelIdleCallback', undefined);
-    restoreSetTimeout = defineGlobal('setTimeout', env.setTimeoutMock);
-    restoreClearTimeout = defineGlobal('clearTimeout', env.clearTimeoutMock);
+    restore.push(
+      patchGlobal('requestIdleCallback', undefined),
+      patchGlobal('cancelIdleCallback', undefined),
+      patchGlobal('setTimeout', env.setTimeoutMock),
+      patchGlobal('clearTimeout', env.clearTimeoutMock)
+    );
 
-    const stream = onIdle();
-
-    const sub = stream.subscribe();
+    const sub = onIdle().subscribe();
     await flush();
 
     sub.unsubscribe();
@@ -240,14 +238,14 @@ ndescribe('onIdle (requestIdleCallback)', () => {
   it('supports async iteration', async () => {
     const env = mockRICEnv();
 
-    restoreRIC = defineGlobal('requestIdleCallback', env.requestIdleCallback);
-    restoreCancelRIC = defineGlobal('cancelIdleCallback', env.cancelIdleCallback);
-
-    const stream = onIdle();
+    restore.push(
+      patchGlobal('requestIdleCallback', env.requestIdleCallback),
+      patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
+    );
 
     const iter = (async () => {
       const out: IdleDeadline[] = [];
-      for await (const v of stream) {
+      for await (const v of onIdle()) {
         out.push(v);
         if (out.length === 1) break;
       }
@@ -258,26 +256,26 @@ ndescribe('onIdle (requestIdleCallback)', () => {
     env.fireIdle();
     await flush();
 
-    const values = await iter;
-    expect(values.length).toBe(1);
+    expect((await iter).length).toBe(1);
   });
 
   /* -------------------------------------------------- */
   /* SSR safety                                         */
   /* -------------------------------------------------- */
 
-  it('is SSR-safe when setTimeout is unavailable', async () => {
-    restoreSetTimeout = defineGlobal('setTimeout', undefined);
-    restoreClearTimeout = defineGlobal('clearTimeout', undefined);
+  it('is SSR-safe when no scheduler APIs exist', async () => {
+    restore.push(
+      patchGlobal('requestIdleCallback', undefined),
+      patchGlobal('cancelIdleCallback', undefined),
+      patchGlobal('setTimeout', undefined),
+      patchGlobal('clearTimeout', undefined)
+    );
 
     const values: IdleDeadline[] = [];
-    const stream = onIdle();
-
-    const sub = stream.subscribe(v => values.push(v));
+    const sub = onIdle().subscribe(v => values.push(v));
     await flush();
 
     expect(values).toEqual([]);
-
     sub.unsubscribe();
   });
 });
