@@ -1,6 +1,7 @@
 import { createOperator, MaybePromise, Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
-import { createSubject, timer } from "../streams";
+import { timer } from "../streams";
+import { createSubject } from "../subjects";
 
 /**
  * Buffers values from the source stream and emits them as arrays every `period` milliseconds,

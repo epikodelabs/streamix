@@ -1,6 +1,6 @@
 import { createOperator, isPromiseLike, MaybePromise, Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
-import { createSubject } from '../streams';
+import { createSubject } from '../subjects';
 
 /**
  * Creates a stream operator that emits the latest value from the source stream

@@ -1,6 +1,6 @@
 import { createOperator, isPromiseLike, MaybePromise, Operator, Stream, Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
-import { createSubject } from "../streams";
+import { createSubject } from "../subjects";
 
 /**
  * Creates a stream operator that maps each value from the source stream to a new inner stream

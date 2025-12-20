@@ -1,6 +1,6 @@
-import { createOperator, DONE, MaybePromise, Operator, isPromiseLike } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, MaybePromise, Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
-import { createSubject } from '../streams';
+import { createSubject } from '../subjects';
 
 /**
  * Creates a stream operator that schedules the emission of each value from the source

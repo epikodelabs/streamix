@@ -9,7 +9,7 @@ import {
   Subscription
 } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
-import { createSubject } from "../streams";
+import { createSubject } from "../subjects";
 
 /**
  * Creates a stream operator that combines the source stream with the latest values

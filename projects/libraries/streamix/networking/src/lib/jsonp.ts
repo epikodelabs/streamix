@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractions';
+import { createStream, isPromiseLike, MaybePromise, Stream } from '@actioncrew/streamix';
 
 /**
  * Creates a stream that performs a JSONP request and emits the resulting data once.
