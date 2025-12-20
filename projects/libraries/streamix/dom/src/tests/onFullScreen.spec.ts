@@ -1,6 +1,6 @@
 import { scheduler } from '@actioncrew/streamix';
-import { onFullscreen } from '@actioncrew/streamix/dom';
-import { ndescribe } from './env.spec';
+import { onVisibilityChange } from '@actioncrew/streamix/dom';
+import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
 /* Helpers                                            */
@@ -10,67 +10,74 @@ async function flush() {
   await scheduler.flush();
 }
 
-/* -------------------------------------------------- */
-/* Global patch helper (CRITICAL)                      */
-/* -------------------------------------------------- */
+/**
+ * SAFE DOM patch helper
+ * - never removes methods
+ * - supports dynamic getters
+ * - restores descriptors exactly
+ */
+function patchObject(
+  target: object,
+  patch: Record<string, any>
+) {
+  const originals: Record<string, PropertyDescriptor | undefined> = {};
 
-function defineGlobal(name: string, value: any) {
-  const desc = Object.getOwnPropertyDescriptor(globalThis, name);
+  for (const key of Object.keys(patch)) {
+    originals[key] = Object.getOwnPropertyDescriptor(target, key);
+    const value = patch[key];
 
-  Object.defineProperty(globalThis, name, {
-    configurable: true,
-    writable: true,
-    value,
-  });
+    Object.defineProperty(target, key, {
+      configurable: true,
+      get: typeof value === 'function'
+        ? value
+        : () => value,
+    });
+  }
 
   return () => {
-    if (desc) {
-      Object.defineProperty(globalThis, name, desc);
-    } else {
-      delete (globalThis as any)[name];
+    for (const key of Object.keys(patch)) {
+      const desc = originals[key];
+      if (desc) {
+        Object.defineProperty(target, key, desc);
+      } else {
+        delete (target as any)[key];
+      }
     }
   };
 }
 
 /* -------------------------------------------------- */
-/* Fullscreen mock                                    */
+/* Document mock                                      */
 /* -------------------------------------------------- */
 
 type Listener = () => void;
 
-function mockFullscreenEnv(initialFullscreen = false) {
-  let fullscreen = initialFullscreen;
-
+function mockVisibility(initial: DocumentVisibilityState = 'visible') {
+  let state = initial;
   const listeners = new Set<Listener>();
 
-  const doc = {
-    get fullscreenElement() {
-      return fullscreen ? {} : null;
+  return {
+    get visibilityState(): DocumentVisibilityState {
+      return state;
     },
 
     addEventListener: jasmine
       .createSpy('document.addEventListener')
       .and.callFake((type: string, cb: Listener) => {
-        if (type === 'fullscreenchange') listeners.add(cb);
+        if (type === 'visibilitychange') listeners.add(cb);
       }),
 
     removeEventListener: jasmine
       .createSpy('document.removeEventListener')
       .and.callFake((type: string, cb: Listener) => {
-        if (type === 'fullscreenchange') listeners.delete(cb);
+        if (type === 'visibilitychange') listeners.delete(cb);
       }),
-  } as unknown as Document;
 
-  return {
-    document: doc,
-
-    enter() {
-      fullscreen = true;
-      listeners.forEach(l => l());
+    setVisibility(next: DocumentVisibilityState) {
+      state = next;
     },
 
-    exit() {
-      fullscreen = false;
+    fire() {
       listeners.forEach(l => l());
     },
   };
@@ -80,177 +87,133 @@ function mockFullscreenEnv(initialFullscreen = false) {
 /* Tests                                              */
 /* -------------------------------------------------- */
 
-ndescribe('onFullscreen', () => {
-  let restoreDocument: () => void;
+idescribe('onVisibilityChange (browser)', () => {
+  let restore: (() => void)[] = [];
 
   afterEach(() => {
-    restoreDocument?.();
+    restore.forEach(fn => fn());
+    restore = [];
   });
 
-  /* -------------------------------------------------- */
-  /* Basic behavior                                     */
-  /* -------------------------------------------------- */
+  it('emits initial visibility state on subscribe', async () => {
+    const env = mockVisibility('hidden');
 
-  it('emits initial fullscreen state on subscribe', async () => {
-    const env = mockFullscreenEnv(false);
-    restoreDocument = defineGlobal('document', env.document);
-
-    const values: boolean[] = [];
-    const stream = onFullscreen();
-
-    const sub = stream.subscribe(v => values.push(v));
-    await flush();
-
-    expect(values).toEqual([false]);
-
-    sub.unsubscribe();
-  });
-
-  it('emits true when entering fullscreen', async () => {
-    const env = mockFullscreenEnv(false);
-    restoreDocument = defineGlobal('document', env.document);
-
-    const values: boolean[] = [];
-    const stream = onFullscreen();
-
-    const sub = stream.subscribe(v => values.push(v));
-    await flush();
-
-    env.enter();
-    await flush();
-
-    expect(values).toEqual([false, true]);
-
-    sub.unsubscribe();
-  });
-
-  it('emits false when exiting fullscreen', async () => {
-    const env = mockFullscreenEnv(true);
-    restoreDocument = defineGlobal('document', env.document);
-
-    const values: boolean[] = [];
-    const stream = onFullscreen();
-
-    const sub = stream.subscribe(v => values.push(v));
-    await flush();
-
-    env.exit();
-    await flush();
-
-    expect(values).toEqual([true, false]);
-
-    sub.unsubscribe();
-  });
-
-  /* -------------------------------------------------- */
-  /* Listener lifecycle                                 */
-  /* -------------------------------------------------- */
-
-  it('adds listener on start and removes on stop', async () => {
-    const env = mockFullscreenEnv(false);
-    restoreDocument = defineGlobal('document', env.document);
-
-    const stream = onFullscreen();
-
-    const sub = stream.subscribe();
-    await flush();
-
-    expect(env.document.addEventListener).toHaveBeenCalledWith(
-      'fullscreenchange',
-      jasmine.any(Function)
+    restore.push(
+      patchObject(document, {
+        visibilityState: () => env.visibilityState,
+        addEventListener: () => env.addEventListener,
+        removeEventListener: () => env.removeEventListener,
+      })
     );
 
-    sub.unsubscribe();
+    const values: DocumentVisibilityState[] = [];
+    const sub = onVisibilityChange().subscribe(v => values.push(v));
     await flush();
 
-    expect(env.document.removeEventListener).toHaveBeenCalledWith(
-      'fullscreenchange',
-      jasmine.any(Function)
-    );
+    expect(values).toEqual(['hidden']);
+    sub.unsubscribe();
   });
 
-  /* -------------------------------------------------- */
-  /* Async iteration                                    */
-  /* -------------------------------------------------- */
+  it('emits on visibilitychange events', async () => {
+    const env = mockVisibility('visible');
+
+    restore.push(
+      patchObject(document, {
+        visibilityState: () => env.visibilityState,
+        addEventListener: () => env.addEventListener,
+        removeEventListener: () => env.removeEventListener,
+      })
+    );
+
+    const values: DocumentVisibilityState[] = [];
+    const sub = onVisibilityChange().subscribe(v => values.push(v));
+    await flush();
+
+    env.setVisibility('hidden');
+    env.fire();
+    await flush();
+
+    env.setVisibility('visible');
+    env.fire();
+    await flush();
+
+    expect(values).toEqual(['visible', 'hidden', 'visible']);
+    sub.unsubscribe();
+  });
+
+  it('adds listener once and removes on last unsubscribe', async () => {
+    const env = mockVisibility();
+
+    restore.push(
+      patchObject(document, {
+        visibilityState: () => env.visibilityState,
+        addEventListener: () => env.addEventListener,
+        removeEventListener: () => env.removeEventListener,
+      })
+    );
+
+    const stream = onVisibilityChange();
+
+    const s1 = stream.subscribe();
+    const s2 = stream.subscribe();
+    await flush();
+
+    expect(env.addEventListener).toHaveBeenCalledTimes(1);
+
+    s1.unsubscribe();
+    s2.unsubscribe();
+    await flush();
+
+    expect(env.removeEventListener).toHaveBeenCalledTimes(1);
+  });
 
   it('supports async iteration', async () => {
-    const env = mockFullscreenEnv(false);
-    restoreDocument = defineGlobal('document', env.document);
+    const env = mockVisibility('visible');
 
-    const stream = onFullscreen();
+    restore.push(
+      patchObject(document, {
+        visibilityState: () => env.visibilityState,
+        addEventListener: () => env.addEventListener,
+        removeEventListener: () => env.removeEventListener,
+      })
+    );
 
     const iter = (async () => {
-      const out: boolean[] = [];
-      for await (const v of stream) {
+      const out: DocumentVisibilityState[] = [];
+      for await (const v of onVisibilityChange()) {
         out.push(v);
-        if (out.length === 2) break;
+        if (out.length === 3) break;
       }
       return out;
     })();
 
     await flush();
 
-    env.enter();
+    env.setVisibility('hidden');
+    env.fire();
     await flush();
 
-    const values = await iter;
+    env.setVisibility('visible');
+    env.fire();
+    await flush();
 
-    expect(values).toEqual([false, true]);
+    expect(await iter).toEqual(['visible', 'hidden', 'visible']);
   });
 
-  /* -------------------------------------------------- */
-  /* SSR safety                                         */
-  /* -------------------------------------------------- */
+  it('is SSR-safe when visibility API is missing (no crash)', async () => {
+    restore.push(
+      patchObject(document, {
+        visibilityState: () => undefined,
+        addEventListener: () => () => {},
+        removeEventListener: () => () => {},
+      })
+    );
 
-  it('is SSR-safe when document is undefined', async () => {
-    restoreDocument = defineGlobal('document', undefined);
-
-    const values: boolean[] = [];
-    const stream = onFullscreen();
-
-    const sub = stream.subscribe(v => values.push(v));
+    const values: DocumentVisibilityState[] = [];
+    const sub = onVisibilityChange().subscribe(v => values.push(v));
     await flush();
 
-    expect(values).toEqual([]); // silent in SSR
-
-    sub.unsubscribe();
-  });
-
-  /* -------------------------------------------------- */
-  /* Graceful degradation                               */
-  /* -------------------------------------------------- */
-
-  it('works when Fullscreen API is unavailable but document exists', async () => {
-    const listeners = new Set<() => void>();
-
-    const doc = {
-      addEventListener: jasmine
-        .createSpy('document.addEventListener')
-        .and.callFake((_type: string, cb: () => void) => {
-          listeners.add(cb);
-        }),
-
-      removeEventListener: jasmine
-        .createSpy('document.removeEventListener')
-        .and.callFake((_type: string, cb: () => void) => {
-          listeners.delete(cb);
-      }),
-
-      // Fullscreen API is "unavailable"
-      fullscreenElement: undefined,
-    } as unknown as Document;
-
-    restoreDocument = defineGlobal('document', doc);
-
-    const values: boolean[] = [];
-    const stream = onFullscreen();
-
-    const sub = stream.subscribe(v => values.push(v));
-    await flush();
-
-    // Emits initial state (false)
-    expect(values).toEqual([false]);
-
+    expect(values).toEqual([]);
     sub.unsubscribe();
   });
 });
