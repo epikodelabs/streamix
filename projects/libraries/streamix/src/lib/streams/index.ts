@@ -11,7 +11,6 @@ export * from './fromEvent';
 export * from './fromPromise';
 export * from './iif';
 export * from './interval';
-export * from './jsonp';
 export * from './loop';
 export * from './merge';
 export * from './of';
@@ -19,6 +18,5 @@ export * from './race';
 export * from './range';
 export * from './retry';
 export * from './timer';
-export * from './webSocket';
 export * from './zip';
 
