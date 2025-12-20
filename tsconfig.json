@@ -26,11 +26,14 @@
       "dom"
     ],
     "paths": {
+      "@actioncrew/streamix/coroutines": [
+        "./projects/libraries/streamix/coroutines/src/lib/index.ts"
+      ],
+      "@actioncrew/streamix/dom": [
+        "./projects/libraries/streamix/dom/src/lib/index.ts"
+      ],
       "@actioncrew/streamix/http": [
         "./projects/libraries/streamix/http/src/lib/index.ts"
-      ],
-      "@actioncrew/streamix/coroutine": [
-        "./projects/libraries/streamix/coroutine/src/lib/index.ts"
       ],
       "@actioncrew/streamix/tracing": [
         "./projects/libraries/streamix/tracing/src/lib/index.ts"
