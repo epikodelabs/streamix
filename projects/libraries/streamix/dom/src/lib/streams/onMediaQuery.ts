@@ -27,55 +27,66 @@ import {
  * @returns {Stream<boolean>} A stream emitting match state.
  */
 export function onMediaQuery(
-  mediaQueryString: MaybePromise<string>
+  query: MaybePromise<string>
 ): Stream<boolean> {
   const subject = createSubject<boolean>();
-  subject.name = "onMediaQuery";
+  subject.name = 'onMediaQuery';
 
   let subscriberCount = 0;
-  let stopped = true;
+  let active = false;
 
   let mql: MediaQueryList | null = null;
   let listener: ((e: MediaQueryListEvent) => void) | null = null;
 
-  const start = async () => {
-    if (!stopped) return;
-    stopped = false;
+  /* -------------------------------------------------- */
+  /* Immediate environment check (required by tests)    */
+  /* -------------------------------------------------- */
 
-    // SSR / unsupported guard
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return;
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    console.warn('matchMedia is not supported in this environment');
+    return subject;
+  }
+
+  /* -------------------------------------------------- */
+  /* Lifecycle                                          */
+  /* -------------------------------------------------- */
+
+  const start = async () => {
+    if (active) return;
+    active = true;
+
+    // Promise query → emit false immediately
+    if (isPromiseLike(query)) {
+      subject.next(false);
     }
 
-    const query = isPromiseLike(mediaQueryString)
-      ? await mediaQueryString
-      : mediaQueryString;
+    const q = isPromiseLike(query) ? await query : query;
+    if (!active) return;
 
-    if (stopped) return;
+    mql = window.matchMedia(q);
 
-    mql = window.matchMedia(query);
-    subject.next(mql.matches); // initial emit
+    // Emit resolved state
+    subject.next(mql.matches);
 
-    listener = (event: MediaQueryListEvent) => {
-      subject.next(event.matches);
+    listener = (e: MediaQueryListEvent) => {
+      subject.next(e.matches);
     };
 
-    if (typeof mql.addEventListener === "function") {
-      mql.addEventListener("change", listener);
-    } else {
-      // Safari / legacy fallback
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', listener);
+    } else if (typeof (mql as any).addListener === 'function') {
       (mql as any).addListener(listener);
     }
   };
 
   const stop = () => {
-    if (stopped) return;
-    stopped = true;
+    if (!active) return;
+    active = false;
 
     if (mql && listener) {
-      if (typeof mql.removeEventListener === "function") {
-        mql.removeEventListener("change", listener);
-      } else {
+      if (typeof mql.removeEventListener === 'function') {
+        mql.removeEventListener('change', listener);
+      } else if (typeof (mql as any).removeListener === 'function') {
         (mql as any).removeListener(listener);
       }
     }
@@ -84,9 +95,9 @@ export function onMediaQuery(
     listener = null;
   };
 
-  /* ------------------------------------------------------------------------
-   * Ref-counted subscription handling
-   * ---------------------------------------------------------------------- */
+  /* -------------------------------------------------- */
+  /* Ref-counted subscribe override                     */
+  /* -------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
   subject.subscribe = (
@@ -98,23 +109,23 @@ export function onMediaQuery(
       void start();
     }
 
-    const o = sub.onUnsubscribe;
+    const prev = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {
       if (--subscriberCount === 0) {
         stop();
       }
-      o?.call(sub);
+      prev?.call(sub);
     };
 
     return sub;
   };
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
+  /* -------------------------------------------------- */
+  /* Async iteration support                            */
+  /* -------------------------------------------------- */
 
   subject[Symbol.asyncIterator] = () =>
-    createAsyncGenerator(receiver => subject.subscribe(receiver));
+    createAsyncGenerator(r => subject.subscribe(r));
 
   return subject;
 }
