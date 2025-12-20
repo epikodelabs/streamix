@@ -222,7 +222,7 @@ export const useRetry = (
     while (retryCount <= maxRetries) {
       try {
         return await next(context); // Attempt the request
-      } catch (error) {
+      } catch (error: any) {
         if (!shouldRetry(error, context)) {
           throw error; // Do not retry if the error is not retryable
         }
@@ -233,7 +233,11 @@ export const useRetry = (
 
         // Calculate exponential backoff delay
         const delay = backoffBase * Math.pow(2, retryCount);
-        console.warn(`Retry ${retryCount + 1}/${maxRetries} after ${delay}ms due to error:`, error);
+        console.warn(`[http retry] attempt=${retryCount + 1}/${maxRetries} delay=${delay}ms`, {
+          message: error?.message ?? String(error),
+          url: context.url,
+          method: context.method,
+        });
 
         // Wait for the delay before retrying
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -255,37 +259,43 @@ export const useRetry = (
  * handles the change in HTTP method for a 303 See Other redirect.
  */
 export const useRedirect = (maxRedirects: number = 5): Middleware => {
-  return (next) => async (context) => {
-    let redirectCount = 0;
+  return (next) => async (initialContext) => {
+    let context = initialContext;
+    let redirects = 0;
 
-    const handleRedirect = async (context: Context): Promise<Context> => {
-      if (redirectCount >= maxRedirects) {
+    while (true) {
+      const result = await next(context);
+
+      // No redirect → finished
+      if (result.redirectTo === undefined) {
+        return result;
+      }
+
+      redirects++;
+      if (redirects > maxRedirects) {
         throw new Error('Too many redirects');
       }
 
-      const newContext = await next(context);
-
-      if(newContext.redirectTo !== undefined) {
-        const location = newContext.redirectTo;
-        if (!location) {
-          throw new Error('Redirect response missing Location header');
-        }
-
-        newContext.url = new URL(location, newContext.url).toString();
-
-        if (newContext.status === 303) {
-          newContext.method = 'GET';
-          newContext.body = undefined;
-        }
-
-        redirectCount++;
-        return handleRedirect(newContext);
+      const location = result.redirectTo;
+      if (!location) {
+        throw new Error('Redirect response missing Location header');
       }
 
-      return await next(newContext);
-    };
+      // Resolve new URL
+      const nextUrl = new URL(location, result.url).toString();
 
-    return await handleRedirect(context);
+      context = {
+        ...result,
+        url: nextUrl,
+        redirectTo: undefined,
+      };
+
+      // RFC 7231: 303 → GET + drop body
+      if (result.status === 303) {
+        context.method = 'GET';
+        context.body = undefined;
+      }
+    }
   };
 };
 
