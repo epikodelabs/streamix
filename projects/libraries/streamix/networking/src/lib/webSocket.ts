@@ -1,4 +1,4 @@
-import { createStream, MaybePromise, Stream } from "../abstractions";
+import { createStream, MaybePromise, Stream } from "@actioncrew/streamix";
 
 /**
  * A stream that represents a WebSocket-like interface.

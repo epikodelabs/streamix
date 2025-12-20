@@ -1,6 +1,6 @@
 import { createOperator, MaybePromise, Operator, Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
-import { createSubject } from '../streams';
+import { createSubject } from '../subjects';
 
 /**
  * Creates a stream operator that emits all values from the source stream until
