@@ -13,6 +13,11 @@
   "excludeInternal": true,
   "entryPointStrategy": "resolve",
   "readme": "none",
+  "externalSymbolLinkMappings": {
+    "typescript": {
+      "AbortSignal": "#"
+    }
+  },
   "sort": ["source-order"],
   "kindSortOrder": [
     "Document",
