@@ -1,8 +1,5 @@
 // services/image-pipeline.service.ts
 import {
-  cascade,
-  Coroutine,
-  coroutine,
   createSubject,
   filter,
   fromPromise,
@@ -13,6 +10,7 @@ import {
 } from '@actioncrew/streamix';
 import { Injectable, NgZone } from '@angular/core';
 
+import { cascade, coroutine, Coroutine } from '@actioncrew/streamix/coroutines';
 import { compressImage, CompressInput, CompressOutput, FileTask, ProcessedResult, resizeImage, ResizeInput, ResizeOutput } from './image-processing.utils';
 
 @Injectable({ providedIn: 'root' })

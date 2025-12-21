@@ -1,4 +1,6 @@
-import { compute, concatMap, coroutine, debounce, finalize, map, mergeMap, onResize, range, scan, startWith, Stream, tap } from '@actioncrew/streamix';
+import { concatMap, debounce, finalize, map, mergeMap, range, scan, startWith, Stream, tap } from '@actioncrew/streamix';
+import { compute, coroutine } from '@actioncrew/streamix/coroutines';
+import { onResize } from '@actioncrew/streamix/dom';
 import { Component, OnInit } from '@angular/core';
 
 // Main Mandelbrot computation function

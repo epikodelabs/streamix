@@ -13,7 +13,7 @@ import {
   useLogger,
   useRedirect,
   useTimeout,
-} from '@actioncrew/streamix/http';
+} from '@actioncrew/streamix/networking';
 
 async function fetchData() {
   const client = createHttpClient();
