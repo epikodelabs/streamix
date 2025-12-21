@@ -44,6 +44,7 @@
     "express": "4.21.2",
     "jasmine": "5.9.0",
     "ng-packagr": "18.0.0",
+    "prettier": "3.7.4",
     "rollup": "4.52.4",
     "strip-json-comments": "5.0.3",
     "ts-node": "10.9.2",
