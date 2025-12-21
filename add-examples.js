@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { basename } from "path";
 import * as prettier from "prettier";
 import ts from "typescript";
+
 function isFunctionLike(node) {
     return !!node && (ts.isFunctionDeclaration(node) ||
         ts.isFunctionExpression(node) ||
