@@ -5,11 +5,10 @@ import {
   fromEvent,
   map,
   merge,
-  onAnimationFrame,
-  onIntersection,
   Stream,
   tap,
 } from '@actioncrew/streamix';
+import { onAnimationFrame, onIntersection } from '@actioncrew/streamix/dom';
 
 // Text animation setup with Streamix
 const setupTextAnimation = (element: HTMLElement): Stream<void> => {
