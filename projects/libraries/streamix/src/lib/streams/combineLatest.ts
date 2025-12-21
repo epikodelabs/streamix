@@ -11,7 +11,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * value. The output stream completes when all source streams have completed.
  *
  * @template {unknown[]} T A tuple type representing the combined values from the streams.
- * @param streams Streams/values to combine.
+ * @param sources Streams/values to combine.
  * @returns {Stream<T>} A new stream that emits a tuple of the latest values from all source streams.
  */
 export function combineLatest<T extends unknown[] = any[]>(

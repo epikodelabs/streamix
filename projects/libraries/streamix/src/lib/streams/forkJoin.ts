@@ -4,7 +4,7 @@ import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractio
  * Waits for all streams to complete and emits an array of their last values.
  *
  * @template T The type of the last values emitted by each stream.
- * @param streams Streams to join; arrays/iterables are also accepted for backward compatibility.
+ * @param sources Streams to join; arrays/iterables are also accepted for backward compatibility.
  * @returns Stream<T[]>
  */
 export function forkJoin<T = any, R extends readonly unknown[] = any[]>(

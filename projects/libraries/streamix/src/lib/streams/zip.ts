@@ -10,7 +10,7 @@ import { eachValueFrom, fromAny } from '../converters';
  * Errors from any stream propagate immediately.
  *
  * @template T - A tuple type representing the combined values from the streams.
- * @param streams Streams to combine.
+ * @param sources Streams to combine.
  * @returns {Stream<T>} A new stream that emits a synchronized tuple of values.
  */
 export function zip<T extends readonly unknown[] = any[]>(
