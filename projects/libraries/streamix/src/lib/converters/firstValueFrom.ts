@@ -1,4 +1,4 @@
-import { Stream, Subscription } from "../abstractions";
+import type { Stream, Subscription } from "../abstractions";
 
 /**
  * Returns a promise that resolves with the first emitted value from a `Stream`.

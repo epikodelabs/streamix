@@ -1,4 +1,4 @@
-import { Stream } from "./stream";
+import type { Stream } from "./stream";
 
 /**
  * Represents a value that can either be a synchronous return or a promise that

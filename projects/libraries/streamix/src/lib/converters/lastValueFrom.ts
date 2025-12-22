@@ -1,4 +1,4 @@
-import { Stream } from "../abstractions";
+import type { Stream } from "../abstractions";
 
 /**
  * Returns a promise that resolves with the last emitted value from a `Stream`.

@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, MaybePromise, Operator } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that catches errors from the source stream and handles them.

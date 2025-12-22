@@ -1,6 +1,6 @@
-import { createOperator, isPromiseLike, MaybePromise, Operator } from '../abstractions';
+import { createOperator, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
-import { createReplaySubject, ReplaySubject } from '../subjects';
+import { createReplaySubject, type ReplaySubject } from '../subjects';
 
 /**
  * Creates a stream operator that shares a single subscription to the source stream

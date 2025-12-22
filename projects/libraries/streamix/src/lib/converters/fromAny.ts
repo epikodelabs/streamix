@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, isStreamLike, Stream } from "../abstractions";
+import { createStream, isPromiseLike, isStreamLike, type Stream } from "../abstractions";
 
 /**
  * Converts various value types into a Stream.

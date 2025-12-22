@@ -1,4 +1,4 @@
-import { count, createSubject, max, min, Stream } from '@actioncrew/streamix';
+import { count, createSubject, max, min, type Stream } from '@actioncrew/streamix';
 
 describe('min', () => {
   let subject: ReturnType<typeof createSubject<number>>;

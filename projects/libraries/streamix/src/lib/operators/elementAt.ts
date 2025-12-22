@@ -1,4 +1,4 @@
-import { MaybePromise, Operator, isPromiseLike } from "../abstractions";
+import { type MaybePromise, type Operator, isPromiseLike } from "../abstractions";
 import { select } from "./select";
 
 /**

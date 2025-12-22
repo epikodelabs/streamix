@@ -1,9 +1,4 @@
-import {
-    createAsyncGenerator,
-    createSubject,
-    Receiver,
-    Stream
-} from "@actioncrew/streamix";
+import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@actioncrew/streamix";
 
 /**
  * Represents a snapshot of the current network state.

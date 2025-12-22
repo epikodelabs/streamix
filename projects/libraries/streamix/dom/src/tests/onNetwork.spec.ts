@@ -1,5 +1,5 @@
 import { scheduler } from '@actioncrew/streamix';
-import { NetworkState, onNetwork } from '@actioncrew/streamix/dom';
+import { type NetworkState, onNetwork } from '@actioncrew/streamix/dom';
 import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */

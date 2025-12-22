@@ -1,4 +1,4 @@
-import { createReplaySubject, createStream, Stream } from '@actioncrew/streamix';
+import { createReplaySubject, createStream, type Stream } from '@actioncrew/streamix';
 
 /**
  * Represents a stream of HTTP responses.

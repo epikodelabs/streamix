@@ -1,6 +1,7 @@
 // Assuming these imports are available from your project structure
-import { isPromiseLike, MaybePromise } from "../abstractions";
-import { createLock, createSemaphore, ReleaseFn } from "../primitives";
+// Assuming these imports are available from your project structure
+import { isPromiseLike, type MaybePromise } from "../abstractions";
+import { createLock, createSemaphore, type ReleaseFn } from "../primitives";
 
 /** Unique Symbol used to identify an ErrorMarker object within the buffer. */
 const ERROR_SYMBOL = Symbol('__ERROR_MARKER');

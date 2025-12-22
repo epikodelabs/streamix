@@ -1,4 +1,4 @@
-import { createOperator, MaybePromise, Operator, isPromiseLike } from '../abstractions';
+import { createOperator, type MaybePromise, type Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that performs a side-effect for each value from the source

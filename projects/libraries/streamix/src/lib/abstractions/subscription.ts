@@ -1,4 +1,4 @@
-import { MaybePromise } from "../abstractions";
+import type { MaybePromise } from "../abstractions";
 
 /**
  * Represents a subscription to a stream-like source.

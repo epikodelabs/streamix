@@ -1,4 +1,4 @@
-import { createSubject, distinctUntilKeyChanged, Stream } from '@actioncrew/streamix';
+import { createSubject, distinctUntilKeyChanged, type Stream } from '@actioncrew/streamix';
 
 describe('distinctUntilKeyChanged', () => {
   let subject: ReturnType<typeof createSubject<any>>;

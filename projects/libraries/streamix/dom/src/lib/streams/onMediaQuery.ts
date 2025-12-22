@@ -1,11 +1,4 @@
-import {
-  createAsyncGenerator,
-  createSubject,
-  isPromiseLike,
-  MaybePromise,
-  Receiver,
-  Stream
-} from "@actioncrew/streamix";
+import { createAsyncGenerator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@actioncrew/streamix";
 
 /**
  * Creates a reactive stream that emits `true` or `false` whenever a CSS media

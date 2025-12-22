@@ -1,13 +1,4 @@
-import {
-  createOperator,
-  createReceiver,
-  isPromiseLike,
-  MaybePromise,
-  Operator,
-  Receiver,
-  Stream,
-  Subscription
-} from "../abstractions";
+import { createOperator, createReceiver, isPromiseLike, type MaybePromise, type Operator, type Receiver, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
 

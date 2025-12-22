@@ -1,6 +1,6 @@
-import { createOperator, isPromiseLike, MaybePromise, Operator } from "../abstractions";
+import { createOperator, isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
-import { createSubject, Subject } from "../subjects";
+import { createSubject, type Subject } from "../subjects";
 
 /**
  * Creates a stream operator that emits the most recent value from the source stream

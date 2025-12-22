@@ -1,4 +1,4 @@
-import { createSubject, createSubjectBuffer, Subscription } from '@actioncrew/streamix';
+import { createSubject, createSubjectBuffer, type Subscription } from '@actioncrew/streamix';
 
 describe('createSubject', () => {
   it('should not emit values after unsubscribed', (done) => {

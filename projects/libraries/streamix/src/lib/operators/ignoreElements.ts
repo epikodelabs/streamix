@@ -1,4 +1,4 @@
-import { createOperator, DONE, Operator } from "../abstractions";
+import { createOperator, DONE, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that ignores all values emitted by the source stream.

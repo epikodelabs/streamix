@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, Operator } from "../abstractions";
+import { createOperator, DONE, type MaybePromise, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that invokes a finalizer callback upon stream termination.

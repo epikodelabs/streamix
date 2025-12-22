@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
 
 /**
  * Collects all emitted values from the source stream into an array

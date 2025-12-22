@@ -1,5 +1,5 @@
-import { MaybePromise, Operator, Stream } from '../abstractions';
-import { recurse, RecurseOptions } from './recurse';
+import type { MaybePromise, Operator, Stream } from '../abstractions';
+import { recurse, type RecurseOptions } from './recurse';
 
 /**
  * Creates a stream operator that recursively expands each emitted value.

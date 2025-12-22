@@ -1,5 +1,5 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from "../abstractions";
-import { GroupItem } from "./groupBy";
+import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromiseLike } from "../abstractions";
+import type { GroupItem } from "./groupBy";
 
 /**
  * Creates a stream operator that partitions the source stream into two groups based on a predicate.

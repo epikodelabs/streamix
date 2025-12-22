@@ -1,9 +1,9 @@
 import { firstValueFrom } from "../converters";
 import { generateStreamId, generateSubscriptionId, getRuntimeHooks } from "./hooks";
-import { MaybePromise, Operator, OperatorChain } from "./operator";
-import { createReceiver, Receiver } from "./receiver";
+import type { MaybePromise, Operator, OperatorChain } from "./operator";
+import { createReceiver, type Receiver } from "./receiver";
 import { scheduler } from "./scheduler";
-import { createSubscription, Subscription } from "./subscription";
+import { createSubscription, type Subscription } from "./subscription";
 
 /**
  * A reactive stream representing a sequence of values over time.

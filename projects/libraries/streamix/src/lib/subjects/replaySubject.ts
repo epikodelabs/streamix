@@ -1,19 +1,7 @@
-import {
-    createAsyncGenerator,
-    createReceiver,
-    createSubscription,
-    generateStreamId,
-    MaybePromise,
-    Operator,
-    pipeSourceThrough,
-    Receiver,
-    scheduler,
-    Stream,
-    Subscription,
-} from "../abstractions";
+import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { createReplayBuffer, ReplayBuffer } from "../primitives";
-import { Subject } from "./subject";
+import { createReplayBuffer, type ReplayBuffer } from "../primitives";
+import type { Subject } from "./subject";
 
 /**
  * A type alias for a ReplaySubject, which is a type of Subject.

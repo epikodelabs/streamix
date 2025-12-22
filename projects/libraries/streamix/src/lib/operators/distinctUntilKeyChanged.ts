@@ -1,4 +1,4 @@
-import { createOperator, MaybePromise, NEXT, Operator, isPromiseLike } from '../abstractions';
+import { createOperator, type MaybePromise, NEXT, type Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that filters out consecutive values from the source
