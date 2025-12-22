@@ -10,7 +10,7 @@ import {
   scheduler,
 } from "@actioncrew/streamix";
 
-import { disableTracing, enableTracing, type ValueTrace, type ValueTracer } from "@actioncrew/streamix/tracing";
+import { disableTracing, enableTracing, ValueTracer, type ValueTrace } from "@actioncrew/streamix/tracing";
 
 // ---------------------------------------------------------------------------
 // Utils
@@ -254,6 +254,33 @@ describe("Streamix tracing", () => {
 
     expect(tracer.dropped.length).toBe(1);
     expect(tracer.dropped[0].droppedReason?.reason).toBe("errored");
+  });
+
+  it("marks in-flight values as dropped when stream completes early", async () => {
+    const drainAndComplete = createOperator<number, number>(
+      "drainAndComplete",
+      (source) => ({
+        async next() {
+          const r = await source.next();
+          if (r.done) return r;
+          return { done: true, value: undefined } as IteratorResult<number>;
+        },
+      })
+    );
+
+    const stream = createStream("numbers", async function* () {
+      yield 1;
+      yield 2;
+      yield 3;
+    });
+
+    await waitForCompletion(({ complete }) => {
+      stream.pipe(drainAndComplete).subscribe({ complete });
+    });
+
+    expect(tracer.dropped.length).toBe(1);
+    expect(tracer.dropped[0].sourceValue).toBe(1);
+    expect(tracer.dropped[0].droppedReason?.reason).toBe("completed");
   });
 
   // ─────────────────────────────────────────────────────────

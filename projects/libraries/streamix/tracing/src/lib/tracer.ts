@@ -23,6 +23,7 @@ export type ValueState =
   | "transformed"
   | "filtered"
   | "collapsed"
+  | "completed"
   | "errored"
   | "delivered";
 
@@ -31,6 +32,7 @@ export type OperatorOutcome =
   | "filtered"
   | "expanded"
   | "collapsed"
+  | "completed"
   | "errored";
 
 export interface OperatorStep {
@@ -62,7 +64,7 @@ export interface ValueTrace {
   droppedReason?: {
     operatorIndex: number;
     operatorName: string;
-    reason: "filtered" | "collapsed" | "errored";
+    reason: "filtered" | "collapsed" | "completed" | "errored";
     error?: Error;
   };
 
@@ -105,6 +107,10 @@ export type TracerEventHandlers = {
   dropped?: (trace: ValueTrace) => void;
 };
 
+export type TracerSubscriptionEventHandlers = TracerEventHandlers & {
+  complete?: () => void;
+};
+
 export class ValueTracer {
   private traces = new Map<string, ValueTrace>();
   private active = new Set<string>();
@@ -113,6 +119,10 @@ export class ValueTracer {
 
   // Fixed: proper subscriber list instead of chaining
   private subscribers: TracerEventHandlers[] = [];
+  private subscriptionSubscribers = new Map<
+    string,
+    Set<TracerSubscriptionEventHandlers>
+  >();
 
   // internal callbacks (for constructor-time hooks)
   private onValueEmitted?: (trace: ValueTrace) => void;
@@ -166,11 +176,45 @@ export class ValueTracer {
     };
   }
 
+  observeSubscription(
+    subscriptionId: string,
+    handlers: TracerSubscriptionEventHandlers
+  ): () => void {
+    let set = this.subscriptionSubscribers.get(subscriptionId);
+    if (!set) {
+      set = new Set();
+      this.subscriptionSubscribers.set(subscriptionId, set);
+    }
+    set.add(handlers);
+
+    return () => {
+      const current = this.subscriptionSubscribers.get(subscriptionId);
+      if (!current) return;
+      current.delete(handlers);
+      if (current.size === 0) this.subscriptionSubscribers.delete(subscriptionId);
+    };
+  }
+
+  completeSubscription(subscriptionId: string) {
+    const set = this.subscriptionSubscribers.get(subscriptionId);
+    if (!set) return;
+    this.subscriptionSubscribers.delete(subscriptionId);
+    for (const subscriber of set) {
+      subscriber.complete?.();
+    }
+  }
+
   private notifySubscribers(
     event: keyof TracerEventHandlers,
     trace: ValueTrace
   ) {
     for (const subscriber of this.subscribers) {
+      subscriber[event]?.(trace);
+    }
+
+    const scoped = this.subscriptionSubscribers.get(trace.subscriptionId);
+    if (!scoped) return;
+    for (const subscriber of scoped) {
       subscriber[event]?.(trace);
     }
   }
@@ -439,6 +483,36 @@ export class ValueTracer {
     this.notifySubscribers("dropped", trace);
   }
 
+  completeInOperator(valueId: string, operatorIndex: number, operatorName: string) {
+    const trace = this.traces.get(valueId);
+    if (!trace) {
+      this.devAssert(false, `completeInOperator: trace ${valueId} not found`);
+      return;
+    }
+
+    const now = Date.now();
+    const step = trace.operatorSteps.find(
+      s => s.operatorIndex === operatorIndex && !s.exitedAt
+    );
+
+    if (step) {
+      step.exitedAt = now;
+      step.outcome = "completed";
+      trace.operatorDurations.set(step.operatorName, step.exitedAt - step.enteredAt);
+    }
+
+    trace.state = "completed";
+    trace.droppedReason = {
+      operatorIndex,
+      operatorName,
+      reason: "completed",
+    };
+
+    this.active.delete(valueId);
+    this.onValueDropped?.(trace);
+    this.notifySubscribers("dropped", trace);
+  }
+
   markDelivered(valueId: string) {
     const trace = this.traces.get(valueId);
     if (!trace) {
@@ -476,12 +550,15 @@ export class ValueTracer {
   }
 
   getDroppedValues(): ValueTrace[] {
-    return this.getAllTraces().filter(t => t.state === "errored");
+    return this.getAllTraces().filter(
+      t => t.state === "errored" || t.state === "completed"
+    );
   }
 
   getStats() {
     const all = this.getAllTraces();
     const errored = all.filter(t => t.state === "errored").length;
+    const completed = all.filter(t => t.state === "completed").length;
     return {
       total: all.length,
       emitted: all.filter(t => t.state === "emitted").length,
@@ -489,6 +566,7 @@ export class ValueTracer {
       delivered: all.filter(t => t.state === "delivered").length,
       filtered: all.filter(t => t.state === "filtered").length,
       collapsed: all.filter(t => t.state === "collapsed").length,
+      completed,
       errored,
       dropRate: all.length > 0 ? (errored / all.length) * 100 : 0,
     };
@@ -497,6 +575,7 @@ export class ValueTracer {
   clear() {
     this.traces.clear();
     this.active.clear();
+    this.subscriptionSubscribers.clear();
   }
 }
 
@@ -647,12 +726,20 @@ registerRuntimeHooks({
                 const out = await inner.next();
 
                 if (out.done) {
-                  if (kind === "filter" && inputQueue.length > 0) {
-                    for (const entry of inputQueue) {
-                      tracer.exitOperator(entry.meta.valueId, i, entry.value, true);
+                  if (inputQueue.length > 0) {
+                    if (kind === "filter") {
+                      for (const entry of inputQueue) {
+                        tracer.exitOperator(entry.meta.valueId, i, entry.value, true);
+                      }
+                    } else {
+                      for (const entry of inputQueue) {
+                        tracer.completeInOperator(entry.meta.valueId, i, operatorName);
+                      }
                     }
+
                     inputQueue.length = 0;
                     correlationMap.clear();
+                    currentExpandBase = null;
                   }
 
                   return out;
@@ -797,10 +884,25 @@ registerRuntimeHooks({
         async next() {
           const r = await it.next();
           if (!r.done) tracer.markDelivered(r.value.meta.valueId);
+          else tracer.completeSubscription(subscriptionId);
           return r.done ? r : { done: false, value: unwrap(r.value) };
         },
-        return: it.return?.bind(it),
-        throw: it.throw?.bind(it),
+        async return(value?: any) {
+          try {
+            if (it.return) return await it.return(value);
+            return { done: true, value } as IteratorResult<any>;
+          } finally {
+            tracer.completeSubscription(subscriptionId);
+          }
+        },
+        async throw(err?: any) {
+          try {
+            if (it.throw) return await it.throw(err);
+            throw err;
+          } finally {
+            tracer.completeSubscription(subscriptionId);
+          }
+        },
       }),
     };
   },
