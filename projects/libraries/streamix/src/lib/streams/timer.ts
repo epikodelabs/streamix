@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractions';
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
 
 /**
  * Creates a timer stream that emits numbers starting from 0.

@@ -1,17 +1,4 @@
-import {
-    createAsyncGenerator,
-    createReceiver,
-    createSubscription,
-    generateStreamId,
-    scheduler as globalScheduler,
-    MaybePromise,
-    Operator,
-    pipeSourceThrough,
-    Receiver,
-    Scheduler,
-    Stream,
-    Subscription
-} from "../abstractions";
+import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, scheduler as globalScheduler, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, type Scheduler, type Stream, type Subscription } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { createSubjectBuffer } from "../primitives";
 

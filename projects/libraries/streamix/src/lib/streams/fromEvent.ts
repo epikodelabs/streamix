@@ -1,4 +1,4 @@
-import { isPromiseLike, MaybePromise, Receiver, Stream } from '../abstractions';
+import { isPromiseLike, type MaybePromise, type Receiver, type Stream } from '../abstractions';
 import { createSubject } from '../subjects';
 
 /**

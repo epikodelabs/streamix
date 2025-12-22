@@ -1,19 +1,7 @@
-import {
-    createAsyncGenerator,
-    createReceiver,
-    createSubscription,
-    generateStreamId,
-    MaybePromise,
-    Operator,
-    pipeSourceThrough,
-    Receiver,
-    scheduler,
-    Stream,
-    Subscription
-} from "../abstractions";
+import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { createBehaviorSubjectBuffer } from "../primitives";
-import { Subject } from "./subject";
+import type { Subject } from "./subject";
 
 /**
  * A BehaviorSubject is a special type of Subject that maintains

@@ -1,10 +1,5 @@
 import { eachValueFrom } from "@actioncrew/streamix";
-import {
-  coroutine,
-  CoroutineMessage,
-  seize,
-  SeizedWorker,
-} from "@actioncrew/streamix/coroutines";
+import { coroutine, type CoroutineMessage, seize, type SeizedWorker } from "@actioncrew/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe("seize", () => {

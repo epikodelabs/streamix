@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, Operator } from "@actioncrew/streamix";
+import { createOperator, DONE, NEXT, type Operator } from "@actioncrew/streamix";
 
 /**
  * @typedef {object} CoroutineMessage

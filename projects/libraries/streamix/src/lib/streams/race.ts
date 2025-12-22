@@ -1,4 +1,4 @@
-import { createStream, MaybePromise, Stream } from "../abstractions";
+import { createStream, type MaybePromise, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**

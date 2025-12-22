@@ -1,4 +1,4 @@
-import { createOperator, MaybePromise, Operator, Stream } from '../abstractions';
+import { createOperator, type MaybePromise, type Operator, type Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from '../subjects';
 

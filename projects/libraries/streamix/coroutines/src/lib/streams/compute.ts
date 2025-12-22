@@ -1,5 +1,5 @@
-import { createStream, isPromiseLike, MaybePromise, Stream } from "@actioncrew/streamix";
-import { Coroutine } from "../operators";
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from "@actioncrew/streamix";
+import type { Coroutine } from "../operators";
 
 /**
  * Creates a stream that runs a computation task on a worker from a Coroutine pool,

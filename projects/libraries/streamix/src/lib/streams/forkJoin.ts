@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractions";
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
 
 /**
  * Waits for all streams to complete and emits an array of their last values.

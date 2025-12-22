@@ -1,4 +1,4 @@
-import { createReceiver, createStream, MaybePromise, Receiver, Stream, Subscription } from '../abstractions';
+import { createReceiver, createStream, type MaybePromise, type Receiver, type Stream, type Subscription } from '../abstractions';
 
 /**
  * Creates an empty stream that emits no values and completes immediately.

@@ -1,4 +1,4 @@
-import { buffer, createSubject, Stream } from "@actioncrew/streamix";
+import { buffer, createSubject, type Stream } from "@actioncrew/streamix";
 
 describe("buffer", () => {
   let source: Stream<number>;

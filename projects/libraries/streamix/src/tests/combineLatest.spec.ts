@@ -1,4 +1,4 @@
-import { combineLatest, from, Subscription, timer } from '@actioncrew/streamix';
+import { combineLatest, from, type Subscription, timer } from '@actioncrew/streamix';
 
 describe('combineLatest', () => {
   it('should combine timer streams correctly', (done) => {

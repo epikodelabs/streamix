@@ -1,4 +1,4 @@
-import { DONE, MaybePromise, NEXT, Operator, createOperator, isPromiseLike } from "../abstractions";
+import { DONE, type MaybePromise, NEXT, type Operator, createOperator, isPromiseLike } from "../abstractions";
 
 /**
  * Buffers a fixed number of values from the source stream and emits them as arrays,

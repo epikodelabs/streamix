@@ -1,4 +1,4 @@
-import { MaybePromise, Stream } from '../abstractions';
+import type { MaybePromise, Stream } from '../abstractions';
 import { timer } from './timer';
 
 /**

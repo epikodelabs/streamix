@@ -1,4 +1,4 @@
-import { catchError, createSubject, map, Subject } from '@actioncrew/streamix';
+import { catchError, createSubject, map, type Subject } from '@actioncrew/streamix';
 
 describe('catchError', () => {
   let subject: Subject;

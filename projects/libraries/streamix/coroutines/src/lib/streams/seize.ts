@@ -1,5 +1,5 @@
-import { createStream, isPromiseLike, MaybePromise, Stream } from "@actioncrew/streamix";
-import { Coroutine, CoroutineMessage } from "../operators";
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from "@actioncrew/streamix";
+import type { Coroutine, CoroutineMessage } from "../operators";
 
 /**
  * Interface for a worker that has been "seized" from the coroutine pool.

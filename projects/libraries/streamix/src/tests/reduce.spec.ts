@@ -1,4 +1,4 @@
-import { createSubject, reduce, Stream } from '@actioncrew/streamix';
+import { createSubject, reduce, type Stream } from '@actioncrew/streamix';
 
 describe('reduce', () => {
   let subject: ReturnType<typeof createSubject<number>>;

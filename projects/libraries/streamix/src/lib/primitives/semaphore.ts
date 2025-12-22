@@ -1,4 +1,4 @@
-import { ReleaseFn } from "./lock";
+import type { ReleaseFn } from "./lock";
 
 /**
  * An interface for a semaphore, a synchronization primitive for controlling

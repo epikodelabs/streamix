@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that prepends a specified value to the beginning of the stream.

@@ -1,4 +1,4 @@
-import { createOperator, DONE, MaybePromise, NEXT, Operator, isPromiseLike } from '../abstractions';
+import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that skips the first specified number of values from the source stream.

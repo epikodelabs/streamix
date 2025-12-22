@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, MaybePromise, Stream } from '../abstractions';
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
 
 /**
  * Creates a stream that emits values in a loop based on a condition and an

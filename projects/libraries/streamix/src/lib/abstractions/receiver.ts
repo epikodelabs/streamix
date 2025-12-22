@@ -1,4 +1,4 @@
-import { MaybePromise } from "./operator";
+import type { MaybePromise } from "./operator";
 
 /**
  * Defines a receiver interface for handling a stream's lifecycle events.

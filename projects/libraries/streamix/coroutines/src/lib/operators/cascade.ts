@@ -1,5 +1,5 @@
-import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, Operator } from "@actioncrew/streamix";
-import { Coroutine } from "./coroutine";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@actioncrew/streamix";
+import type { Coroutine } from "./coroutine";
 
 /**
  * A coroutine-like operator that can process tasks asynchronously in the background.

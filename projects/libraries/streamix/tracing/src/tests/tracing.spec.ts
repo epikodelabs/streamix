@@ -10,12 +10,7 @@ import {
   scheduler,
 } from "@actioncrew/streamix";
 
-import {
-  disableTracing,
-  enableTracing,
-  ValueTrace,
-  ValueTracer,
-} from "@actioncrew/streamix/tracing";
+import { disableTracing, enableTracing, type ValueTrace, type ValueTracer } from "@actioncrew/streamix/tracing";
 
 // ---------------------------------------------------------------------------
 // Utils

@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, MaybePromise, Stream } from "../abstractions";
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
 
 /**
  * Creates a stream from an asynchronous or synchronous iterable.

@@ -1,9 +1,4 @@
-import {
-    createAsyncGenerator,
-    createSubject,
-    Receiver,
-    Stream
-} from "@actioncrew/streamix";
+import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@actioncrew/streamix";
 
 /**
  * Creates a reactive stream that emits fullscreen state changes.

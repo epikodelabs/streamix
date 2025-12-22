@@ -1,4 +1,4 @@
-import { from, recurse, Stream } from '@actioncrew/streamix';
+import { from, recurse, type Stream } from '@actioncrew/streamix';
 
 describe('recurse', () => {
   it('should recurse depth-first by default', async () => {

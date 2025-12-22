@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, Operator } from "../abstractions";
+import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits a final, specified value after the source stream has completed.

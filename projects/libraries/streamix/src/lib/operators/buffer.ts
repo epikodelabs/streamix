@@ -1,4 +1,4 @@
-import { createOperator, MaybePromise, Operator } from "../abstractions";
+import { createOperator, type MaybePromise, type Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { timer } from "../streams";
 import { createSubject } from "../subjects";

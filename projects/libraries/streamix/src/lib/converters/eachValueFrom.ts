@@ -1,4 +1,4 @@
-import { Stream } from "../abstractions";
+import type { Stream } from "../abstractions";
 
 /**
  * Converts a `Stream` into an async generator, yielding each emitted value.

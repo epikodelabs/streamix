@@ -1,4 +1,4 @@
-import { concatMap, createStream, from, of, Stream } from '@actioncrew/streamix';
+import { concatMap, createStream, from, of, type Stream } from '@actioncrew/streamix';
 
 describe('concatMap', () => {
 
