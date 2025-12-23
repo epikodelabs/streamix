@@ -17,6 +17,7 @@ import { createOperator, registerRuntimeHooks } from "@actioncrew/streamix";
  * TYPES
  * ========================================================================== */
 
+/** Lifecycle state for a traced value. */
 export type ValueState =
   | "emitted"
   | "processing"
@@ -27,6 +28,7 @@ export type ValueState =
   | "errored"
   | "delivered";
 
+/** Outcome for an operator step. */
 export type OperatorOutcome =
   | "transformed"
   | "filtered"
@@ -35,6 +37,7 @@ export type OperatorOutcome =
   | "completed"
   | "errored";
 
+/** Operator execution metadata within a trace. */
 export interface OperatorStep {
   operatorIndex: number;
   operatorName: string;
@@ -46,6 +49,7 @@ export interface OperatorStep {
   error?: Error;
 }
 
+/** Full trace record for a single value. */
 export interface ValueTrace {
   valueId: string;
   streamId: string;
@@ -92,6 +96,7 @@ function getIds(): TraceIds {
   return g[IDS_KEY];
 }
 
+/** Generates a unique trace value identifier. */
 export function generateValueId(): string {
   return `val_${++getIds().value}`;
 }
@@ -100,6 +105,7 @@ export function generateValueId(): string {
  * VALUE TRACER
  * ========================================================================== */
 
+/** Event handlers for tracer lifecycle notifications. */
 export type TracerEventHandlers = {
   delivered?: (trace: ValueTrace) => void;
   filtered?: (trace: ValueTrace) => void;
@@ -107,129 +113,191 @@ export type TracerEventHandlers = {
   dropped?: (trace: ValueTrace) => void;
 };
 
+/** Event handlers for subscription-scoped tracing. */
 export type TracerSubscriptionEventHandlers = TracerEventHandlers & {
   complete?: () => void;
 };
 
-export class ValueTracer {
-  private traces = new Map<string, ValueTrace>();
-  private active = new Set<string>();
-  private maxTraces: number;
-  private devMode: boolean;
+/** Options used to configure a value tracer instance. */
+export interface ValueTracerOptions {
+  maxTraces?: number;
+  devMode?: boolean;
+  onValueEmitted?: (trace: ValueTrace) => void;
+  onValueProcessing?: (trace: ValueTrace, step: OperatorStep) => void;
+  onValueTransformed?: (trace: ValueTrace, step: OperatorStep) => void;
+  onValueFiltered?: (trace: ValueTrace, step: OperatorStep) => void;
+  onValueCollapsed?: (trace: ValueTrace, step: OperatorStep) => void;
+  onValueDelivered?: (trace: ValueTrace) => void;
+  onValueDropped?: (trace: ValueTrace) => void;
+}
 
-  // Fixed: proper subscriber list instead of chaining
-  private subscribers: TracerEventHandlers[] = [];
-  private subscriptionSubscribers = new Map<
-    string,
-    Set<TracerSubscriptionEventHandlers>
-  >();
-
-  // internal callbacks (for constructor-time hooks)
-  private onValueEmitted?: (trace: ValueTrace) => void;
-  private onValueProcessing?: (trace: ValueTrace, step: OperatorStep) => void;
-  private onValueTransformed?: (trace: ValueTrace, step: OperatorStep) => void;
-  private onValueFiltered?: (trace: ValueTrace, step: OperatorStep) => void;
-  private onValueCollapsed?: (trace: ValueTrace, step: OperatorStep) => void;
-  private onValueDelivered?: (trace: ValueTrace) => void;
-  private onValueDropped?: (trace: ValueTrace) => void;
-
-  constructor(options: {
-    maxTraces?: number;
-    devMode?: boolean;
-    onValueEmitted?: (trace: ValueTrace) => void;
-    onValueProcessing?: (trace: ValueTrace, step: OperatorStep) => void;
-    onValueTransformed?: (trace: ValueTrace, step: OperatorStep) => void;
-    onValueFiltered?: (trace: ValueTrace, step: OperatorStep) => void;
-    onValueCollapsed?: (trace: ValueTrace, step: OperatorStep) => void;
-    onValueDelivered?: (trace: ValueTrace) => void;
-    onValueDropped?: (trace: ValueTrace) => void;
-  } = {}) {
-    this.maxTraces = options.maxTraces ?? 10_000;
-    this.devMode = options.devMode ?? false;
-    Object.assign(this, options);
-  }
-
-  private evictIfNeeded() {
-    if (this.traces.size <= this.maxTraces) return;
-    const oldest = this.traces.keys().next().value;
-    if (!oldest) return;
-    this.traces.delete(oldest);
-    this.active.delete(oldest);
-  }
-
-  private devAssert(condition: boolean, message: string) {
-    if (this.devMode && !condition) {
-      console.error(`[Streamix Tracing] ${message}`);
-    }
-  }
-
-  /* ------------------------------------------------------------------------
-   * PUBLIC EVENT SUBSCRIPTION API (FIXED)
-   * ---------------------------------------------------------------------- */
-
-  subscribe(handlers: TracerEventHandlers): () => void {
-    this.subscribers.push(handlers);
-
-    return () => {
-      const idx = this.subscribers.indexOf(handlers);
-      if (idx > -1) this.subscribers.splice(idx, 1);
-    };
-  }
-
-  observeSubscription(
+/** Functional tracer API with state stored in a closure. */
+export interface ValueTracer {
+  subscribe: (handlers: TracerEventHandlers) => () => void;
+  observeSubscription: (
     subscriptionId: string,
     handlers: TracerSubscriptionEventHandlers
-  ): () => void {
-    let set = this.subscriptionSubscribers.get(subscriptionId);
-    if (!set) {
-      set = new Set();
-      this.subscriptionSubscribers.set(subscriptionId, set);
-    }
-    set.add(handlers);
-
-    return () => {
-      const current = this.subscriptionSubscribers.get(subscriptionId);
-      if (!current) return;
-      current.delete(handlers);
-      if (current.size === 0) this.subscriptionSubscribers.delete(subscriptionId);
-    };
-  }
-
-  completeSubscription(subscriptionId: string) {
-    const set = this.subscriptionSubscribers.get(subscriptionId);
-    if (!set) return;
-    this.subscriptionSubscribers.delete(subscriptionId);
-    for (const subscriber of set) {
-      subscriber.complete?.();
-    }
-  }
-
-  private notifySubscribers(
-    event: keyof TracerEventHandlers,
-    trace: ValueTrace
-  ) {
-    for (const subscriber of this.subscribers) {
-      subscriber[event]?.(trace);
-    }
-
-    const scoped = this.subscriptionSubscribers.get(trace.subscriptionId);
-    if (!scoped) return;
-    for (const subscriber of scoped) {
-      subscriber[event]?.(trace);
-    }
-  }
-
-  /* ------------------------------------------------------------------------
-   * TRACE LIFECYCLE
-   * ---------------------------------------------------------------------- */
-
-  startTrace(
+  ) => () => void;
+  completeSubscription: (subscriptionId: string) => void;
+  startTrace: (
     valueId: string,
     streamId: string,
     streamName: string | undefined,
     subscriptionId: string,
     value: any
-  ): ValueTrace {
+  ) => ValueTrace;
+  createExpandedTrace: (
+    baseValueId: string,
+    operatorIndex: number,
+    operatorName: string,
+    expandedValue: any
+  ) => string;
+  enterOperator: (
+    valueId: string,
+    operatorIndex: number,
+    operatorName: string,
+    inputValue: any
+  ) => void;
+  exitOperator: (
+    valueId: string,
+    operatorIndex: number,
+    outputValue: any,
+    filtered?: boolean,
+    outcome?: OperatorOutcome
+  ) => string | null;
+  collapseValue: (
+    valueId: string,
+    operatorIndex: number,
+    operatorName: string,
+    targetValueId: string,
+    outputValue?: any
+  ) => void;
+  errorInOperator: (valueId: string, operatorIndex: number, error: Error) => void;
+  completeInOperator: (
+    valueId: string,
+    operatorIndex: number,
+    operatorName: string
+  ) => void;
+  markDelivered: (valueId: string) => void;
+  getAllTraces: () => ValueTrace[];
+  getFilteredValues: () => ValueTrace[];
+  getCollapsedValues: () => ValueTrace[];
+  getDeliveredValues: () => ValueTrace[];
+  getDroppedValues: () => ValueTrace[];
+  getStats: () => {
+    total: number;
+    emitted: number;
+    processing: number;
+    delivered: number;
+    filtered: number;
+    collapsed: number;
+    completed: number;
+    errored: number;
+    dropRate: number;
+  };
+  clear: () => void;
+}
+
+/**
+ * Creates a new tracer with an isolated internal state container.
+ */
+export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer {
+  const traces = new Map<string, ValueTrace>();
+  const active = new Set<string>();
+
+  // Fixed: proper subscriber list instead of chaining
+  const subscribers: TracerEventHandlers[] = [];
+  const subscriptionSubscribers = new Map<
+    string,
+    Set<TracerSubscriptionEventHandlers>
+  >();
+
+  // internal callbacks (for constructor-time hooks)
+  const {
+    maxTraces = 10_000,
+    devMode = false,
+    onValueEmitted,
+    onValueProcessing,
+    onValueTransformed,
+    onValueFiltered,
+    onValueCollapsed,
+    onValueDelivered,
+    onValueDropped,
+  } = options;
+
+  const evictIfNeeded = () => {
+    if (traces.size <= maxTraces) return;
+    const oldest = traces.keys().next().value;
+    if (!oldest) return;
+    traces.delete(oldest);
+    active.delete(oldest);
+  };
+
+  const devAssert = (condition: boolean, message: string) => {
+    if (devMode && !condition) {
+      console.error(`[Streamix Tracing] ${message}`);
+    }
+  };
+
+  const notifySubscribers = (
+    event: keyof TracerEventHandlers,
+    trace: ValueTrace
+  ) => {
+    for (const subscriber of subscribers) {
+      subscriber[event]?.(trace);
+    }
+
+    const scoped = subscriptionSubscribers.get(trace.subscriptionId);
+    if (!scoped) return;
+    for (const subscriber of scoped) {
+      subscriber[event]?.(trace);
+    }
+  };
+
+  const subscribe = (handlers: TracerEventHandlers): (() => void) => {
+    subscribers.push(handlers);
+
+    return () => {
+      const idx = subscribers.indexOf(handlers);
+      if (idx > -1) subscribers.splice(idx, 1);
+    };
+  };
+
+  const observeSubscription = (
+    subscriptionId: string,
+    handlers: TracerSubscriptionEventHandlers
+  ): (() => void) => {
+    let set = subscriptionSubscribers.get(subscriptionId);
+    if (!set) {
+      set = new Set();
+      subscriptionSubscribers.set(subscriptionId, set);
+    }
+    set.add(handlers);
+
+    return () => {
+      const current = subscriptionSubscribers.get(subscriptionId);
+      if (!current) return;
+      current.delete(handlers);
+      if (current.size === 0) subscriptionSubscribers.delete(subscriptionId);
+    };
+  };
+
+  const completeSubscription = (subscriptionId: string) => {
+    const set = subscriptionSubscribers.get(subscriptionId);
+    if (!set) return;
+    subscriptionSubscribers.delete(subscriptionId);
+    for (const subscriber of set) {
+      subscriber.complete?.();
+    }
+  };
+
+  const startTrace = (
+    valueId: string,
+    streamId: string,
+    streamName: string | undefined,
+    subscriptionId: string,
+    value: any
+  ): ValueTrace => {
     const trace: ValueTrace = {
       valueId,
       streamId,
@@ -242,34 +310,27 @@ export class ValueTracer {
       operatorDurations: new Map(),
     };
 
-    this.traces.set(valueId, trace);
-    this.active.add(valueId);
-    this.evictIfNeeded();
+    traces.set(valueId, trace);
+    active.add(valueId);
+    evictIfNeeded();
 
-    this.onValueEmitted?.(trace);
+    onValueEmitted?.(trace);
     return trace;
-  }
+  };
 
-  /**
-   * Creates a derived trace for an "expanded" output value.
-   *
-   * Expanded traces are NOT new source emissions, so they do not trigger
-   * `onValueEmitted`. They still participate in delivery / stats / downstream
-   * operator tracing.
-   */
-  createExpandedTrace(
+  const createExpandedTrace = (
     baseValueId: string,
     operatorIndex: number,
     operatorName: string,
     expandedValue: any
-  ): string {
-    const base = this.traces.get(baseValueId);
+  ): string => {
+    const base = traces.get(baseValueId);
     const now = Date.now();
     const valueId = generateValueId();
 
     if (!base) {
-      this.devAssert(false, `createExpandedTrace: base trace ${baseValueId} not found`);
-      
+      devAssert(false, `createExpandedTrace: base trace ${baseValueId} not found`);
+
       const trace: ValueTrace = {
         valueId,
         streamId: "unknown",
@@ -293,9 +354,9 @@ export class ValueTracer {
         operatorDurations: new Map(),
       };
 
-      this.traces.set(valueId, trace);
-      this.active.add(valueId);
-      this.evictIfNeeded();
+      traces.set(valueId, trace);
+      active.add(valueId);
+      evictIfNeeded();
       return valueId;
     }
 
@@ -334,21 +395,21 @@ export class ValueTracer {
       operatorDurations: new Map(base.operatorDurations),
     };
 
-    this.traces.set(valueId, trace);
-    this.active.add(valueId);
-    this.evictIfNeeded();
+    traces.set(valueId, trace);
+    active.add(valueId);
+    evictIfNeeded();
     return valueId;
-  }
+  };
 
-  enterOperator(
+  const enterOperator = (
     valueId: string,
     operatorIndex: number,
     operatorName: string,
     inputValue: any
-  ) {
-    const trace = this.traces.get(valueId);
+  ) => {
+    const trace = traces.get(valueId);
     if (!trace) {
-      this.devAssert(false, `enterOperator: trace ${valueId} not found`);
+      devAssert(false, `enterOperator: trace ${valueId} not found`);
       return;
     }
 
@@ -362,19 +423,19 @@ export class ValueTracer {
     };
 
     trace.operatorSteps.push(step);
-    this.onValueProcessing?.(trace, step);
-  }
+    onValueProcessing?.(trace, step);
+  };
 
-  exitOperator(
+  const exitOperator = (
     valueId: string,
     operatorIndex: number,
     outputValue: any,
     filtered = false,
     outcome: OperatorOutcome = "transformed"
-  ): string | null {
-    const trace = this.traces.get(valueId);
+  ): string | null => {
+    const trace = traces.get(valueId);
     if (!trace) {
-      this.devAssert(false, `exitOperator: trace ${valueId} not found`);
+      devAssert(false, `exitOperator: trace ${valueId} not found`);
       return null;
     }
 
@@ -382,7 +443,7 @@ export class ValueTracer {
       s => s.operatorIndex === operatorIndex && !s.exitedAt
     );
     if (!step) {
-      this.devAssert(false, `exitOperator: step not found for operator ${operatorIndex}`);
+      devAssert(false, `exitOperator: step not found for operator ${operatorIndex}`);
       return null;
     }
 
@@ -390,10 +451,7 @@ export class ValueTracer {
     step.outcome = filtered ? "filtered" : outcome;
     step.outputValue = outputValue;
 
-    trace.operatorDurations.set(
-      step.operatorName,
-      step.exitedAt - step.enteredAt
-    );
+    trace.operatorDurations.set(step.operatorName, step.exitedAt - step.enteredAt);
 
     if (filtered) {
       trace.state = "filtered";
@@ -402,28 +460,28 @@ export class ValueTracer {
         operatorName: step.operatorName,
         reason: "filtered",
       };
-      this.active.delete(valueId);
-      this.onValueFiltered?.(trace, step);
-      this.notifySubscribers("filtered", trace);
+      active.delete(valueId);
+      onValueFiltered?.(trace, step);
+      notifySubscribers("filtered", trace);
       return null;
     }
 
     trace.state = "processing";
     trace.finalValue = outputValue;
-    this.onValueTransformed?.(trace, step);
+    onValueTransformed?.(trace, step);
     return valueId;
-  }
+  };
 
-  collapseValue(
+  const collapseValue = (
     valueId: string,
     operatorIndex: number,
     operatorName: string,
     targetValueId: string,
     outputValue?: any
-  ) {
-    const trace = this.traces.get(valueId);
+  ) => {
+    const trace = traces.get(valueId);
     if (!trace) {
-      this.devAssert(false, `collapseValue: trace ${valueId} not found`);
+      devAssert(false, `collapseValue: trace ${valueId} not found`);
       return;
     }
 
@@ -446,15 +504,15 @@ export class ValueTracer {
       operatorName,
       reason: "collapsed",
     };
-    this.active.delete(valueId);
-    this.onValueCollapsed?.(trace, step ?? trace.operatorSteps.at(-1)!);
-    this.notifySubscribers("collapsed", trace);
-  }
+    active.delete(valueId);
+    onValueCollapsed?.(trace, step ?? trace.operatorSteps.at(-1)!);
+    notifySubscribers("collapsed", trace);
+  };
 
-  errorInOperator(valueId: string, operatorIndex: number, error: Error) {
-    const trace = this.traces.get(valueId);
+  const errorInOperator = (valueId: string, operatorIndex: number, error: Error) => {
+    const trace = traces.get(valueId);
     if (!trace) {
-      this.devAssert(false, `errorInOperator: trace ${valueId} not found`);
+      devAssert(false, `errorInOperator: trace ${valueId} not found`);
       return;
     }
 
@@ -478,15 +536,19 @@ export class ValueTracer {
       error,
     };
 
-    this.active.delete(valueId);
-    this.onValueDropped?.(trace);
-    this.notifySubscribers("dropped", trace);
-  }
+    active.delete(valueId);
+    onValueDropped?.(trace);
+    notifySubscribers("dropped", trace);
+  };
 
-  completeInOperator(valueId: string, operatorIndex: number, operatorName: string) {
-    const trace = this.traces.get(valueId);
+  const completeInOperator = (
+    valueId: string,
+    operatorIndex: number,
+    operatorName: string
+  ) => {
+    const trace = traces.get(valueId);
     if (!trace) {
-      this.devAssert(false, `completeInOperator: trace ${valueId} not found`);
+      devAssert(false, `completeInOperator: trace ${valueId} not found`);
       return;
     }
 
@@ -508,15 +570,15 @@ export class ValueTracer {
       reason: "completed",
     };
 
-    this.active.delete(valueId);
-    this.onValueDropped?.(trace);
-    this.notifySubscribers("dropped", trace);
-  }
+    active.delete(valueId);
+    onValueDropped?.(trace);
+    notifySubscribers("dropped", trace);
+  };
 
-  markDelivered(valueId: string) {
-    const trace = this.traces.get(valueId);
+  const markDelivered = (valueId: string) => {
+    const trace = traces.get(valueId);
     if (!trace) {
-      this.devAssert(false, `markDelivered: trace ${valueId} not found`);
+      devAssert(false, `markDelivered: trace ${valueId} not found`);
       return;
     }
 
@@ -524,39 +586,23 @@ export class ValueTracer {
     trace.deliveredAt = Date.now();
     trace.totalDuration = trace.deliveredAt - trace.emittedAt;
 
-    this.active.delete(valueId);
-    this.onValueDelivered?.(trace);
-    this.notifySubscribers("delivered", trace);
-  }
+    active.delete(valueId);
+    onValueDelivered?.(trace);
+    notifySubscribers("delivered", trace);
+  };
 
-  /* ------------------------------------------------------------------------
-   * QUERY API
-   * ---------------------------------------------------------------------- */
+  const getAllTraces = (): ValueTrace[] => [...traces.values()];
+  const getFilteredValues = (): ValueTrace[] =>
+    getAllTraces().filter(t => t.state === "filtered");
+  const getCollapsedValues = (): ValueTrace[] =>
+    getAllTraces().filter(t => t.state === "collapsed");
+  const getDeliveredValues = (): ValueTrace[] =>
+    getAllTraces().filter(t => t.state === "delivered");
+  const getDroppedValues = (): ValueTrace[] =>
+    getAllTraces().filter(t => t.state === "errored" || t.state === "completed");
 
-  getAllTraces(): ValueTrace[] {
-    return [...this.traces.values()];
-  }
-
-  getFilteredValues(): ValueTrace[] {
-    return this.getAllTraces().filter(t => t.state === "filtered");
-  }
-
-  getCollapsedValues(): ValueTrace[] {
-    return this.getAllTraces().filter(t => t.state === "collapsed");
-  }
-
-  getDeliveredValues(): ValueTrace[] {
-    return this.getAllTraces().filter(t => t.state === "delivered");
-  }
-
-  getDroppedValues(): ValueTrace[] {
-    return this.getAllTraces().filter(
-      t => t.state === "errored" || t.state === "completed"
-    );
-  }
-
-  getStats() {
-    const all = this.getAllTraces();
+  const getStats = () => {
+    const all = getAllTraces();
     const errored = all.filter(t => t.state === "errored").length;
     const completed = all.filter(t => t.state === "completed").length;
     return {
@@ -570,13 +616,34 @@ export class ValueTracer {
       errored,
       dropRate: all.length > 0 ? (errored / all.length) * 100 : 0,
     };
-  }
+  };
 
-  clear() {
-    this.traces.clear();
-    this.active.clear();
-    this.subscriptionSubscribers.clear();
-  }
+  const clear = () => {
+    traces.clear();
+    active.clear();
+    subscriptionSubscribers.clear();
+  };
+
+  return {
+    subscribe,
+    observeSubscription,
+    completeSubscription,
+    startTrace,
+    createExpandedTrace,
+    enterOperator,
+    exitOperator,
+    collapseValue,
+    errorInOperator,
+    completeInOperator,
+    markDelivered,
+    getAllTraces,
+    getFilteredValues,
+    getCollapsedValues,
+    getDeliveredValues,
+    getDroppedValues,
+    getStats,
+    clear,
+  };
 }
 
 /* ============================================================================
@@ -585,6 +652,7 @@ export class ValueTracer {
 
 const tracedValueBrand = Symbol("__streamix_traced__");
 
+/** Branded wrapper used to tag traced values flowing through operators. */
 export interface TracedWrapper<T> {
   [tracedValueBrand]: true;
   value: T;
@@ -623,14 +691,17 @@ function generateCorrelationId(): string {
   return `corr_${++getCorrelationIds().value}`;
 }
 
+/** Enables tracing by registering a global tracer instance. */
 export function enableTracing(tracer: ValueTracer) {
   (globalThis as any)[TRACER_KEY] = tracer;
 }
 
+/** Disables tracing by clearing the global tracer instance. */
 export function disableTracing() {
   (globalThis as any)[TRACER_KEY] = null;
 }
 
+/** Returns the current global tracer, if one is registered. */
 export function getGlobalTracer(): ValueTracer | null {
   return (globalThis as any)[TRACER_KEY] ?? null;
 }
