@@ -122,13 +122,7 @@ export type TracerSubscriptionEventHandlers = TracerEventHandlers & {
 export interface ValueTracerOptions {
   maxTraces?: number;
   devMode?: boolean;
-  onValueEmitted?: (trace: ValueTrace) => void;
-  onValueProcessing?: (trace: ValueTrace, step: OperatorStep) => void;
-  onValueTransformed?: (trace: ValueTrace, step: OperatorStep) => void;
-  onValueFiltered?: (trace: ValueTrace, step: OperatorStep) => void;
-  onValueCollapsed?: (trace: ValueTrace, step: OperatorStep) => void;
-  onValueDelivered?: (trace: ValueTrace) => void;
-  onValueDropped?: (trace: ValueTrace) => void;
+  onTraceUpdate?: (trace: ValueTrace, step?: OperatorStep) => void;
 }
 
 /** Functional tracer API with state stored in a closure. */
@@ -216,13 +210,7 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
   const {
     maxTraces = 10_000,
     devMode = false,
-    onValueEmitted,
-    onValueProcessing,
-    onValueTransformed,
-    onValueFiltered,
-    onValueCollapsed,
-    onValueDelivered,
-    onValueDropped,
+    onTraceUpdate,
   } = options;
 
   const evictIfNeeded = () => {
@@ -314,7 +302,7 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
     active.add(valueId);
     evictIfNeeded();
 
-    onValueEmitted?.(trace);
+    onTraceUpdate?.(trace);
     return trace;
   };
 
@@ -423,7 +411,7 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
     };
 
     trace.operatorSteps.push(step);
-    onValueProcessing?.(trace, step);
+    onTraceUpdate?.(trace, step);
   };
 
   const exitOperator = (
@@ -461,14 +449,14 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
         reason: "filtered",
       };
       active.delete(valueId);
-      onValueFiltered?.(trace, step);
+      onTraceUpdate?.(trace, step);
       notifySubscribers("filtered", trace);
       return null;
     }
 
     trace.state = "processing";
     trace.finalValue = outputValue;
-    onValueTransformed?.(trace, step);
+    onTraceUpdate?.(trace, step);
     return valueId;
   };
 
@@ -505,7 +493,7 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
       reason: "collapsed",
     };
     active.delete(valueId);
-    onValueCollapsed?.(trace, step ?? trace.operatorSteps.at(-1)!);
+    onTraceUpdate?.(trace, step ?? trace.operatorSteps.at(-1)!);
     notifySubscribers("collapsed", trace);
   };
 
@@ -537,7 +525,7 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
     };
 
     active.delete(valueId);
-    onValueDropped?.(trace);
+    onTraceUpdate?.(trace, step);
     notifySubscribers("dropped", trace);
   };
 
@@ -571,7 +559,7 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
     };
 
     active.delete(valueId);
-    onValueDropped?.(trace);
+    onTraceUpdate?.(trace, step);
     notifySubscribers("dropped", trace);
   };
 
@@ -587,7 +575,7 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
     trace.totalDuration = trace.deliveredAt - trace.emittedAt;
 
     active.delete(valueId);
-    onValueDelivered?.(trace);
+    onTraceUpdate?.(trace);
     notifySubscribers("delivered", trace);
   };
 

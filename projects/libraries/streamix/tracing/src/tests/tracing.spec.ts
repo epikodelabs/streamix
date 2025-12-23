@@ -49,11 +49,13 @@ function createTestTracer() {
   const dropped: ValueTrace[] = [];
 
   const tracer = createValueTracer({
-    onValueEmitted: (t) => emitted.push(t),
-    onValueDelivered: (t) => delivered.push(t),
-    onValueFiltered: (t) => filtered.push(t),
-    onValueCollapsed: (t) => collapsed.push(t),
-    onValueDropped: (t) => dropped.push(t),
+    onTraceUpdate: (t) => {
+      if (t.state === "emitted") emitted.push(t);
+      else if (t.state === "delivered") delivered.push(t);
+      else if (t.state === "filtered") filtered.push(t);
+      else if (t.state === "collapsed") collapsed.push(t);
+      else if (t.state === "errored" || t.state === "completed") dropped.push(t);
+    },
   });
 
   const baseClear = tracer.clear;
