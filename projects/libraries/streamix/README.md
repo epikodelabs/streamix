@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>A lightweight, high-performance alternative to RxJS</strong><br>
-  Built for modern apps that need reactive streams without the complexity
+  <strong>Reactive streams built on async generators</strong><br>
+  Small bundle, pull-based execution, and a familiar operator API
 </p>
 
 <p align="center">
@@ -23,26 +23,24 @@
   <a href="https://codecov.io/github/actioncrew/streamix" >
     <img src="https://codecov.io/github/actioncrew/streamix/graph/badge.svg?token=ITHDU7JVOI" alt="Code Coverage"/>
   </a>
-  <a href="https://www.npmjs.com/package/@actioncrew/streamix">
-    <img src="https://img.shields.io/badge/AI-Powered-blue" alt="AI-Powered">
-  </a>
 </p>
 
 ---
 
-## 🚀 Why Streamix?
+## 🧭 Why Streamix
 
-Streamix gives you all the power of reactive programming with **90% less complexity** than RxJS. At just **11 KB zipped**, it's perfect for modern applications that need performance without bloat.
+Streamix is a reactive streams library built on async generators. It focuses on a small bundle size and pull-based execution while keeping an API that feels familiar to RxJS users.
 
-### ✨ Key Benefits
+### Highlights
 
-- **🪶 Ultra Lightweight** — Only 9 KB zipped (vs RxJS's ~40 KB)
-- **⚡ High Performance** — Pull-based execution means values are only computed when needed
-- **🎯 Easy to Learn** — Familiar API if you know RxJS, simpler if you don't
-- **🔄 Generator-Powered** — Built on async generators for natural async flow
-- **🌐 HTTP Ready** — Optional HTTP client (~3 KB) for seamless API integration
-- **🧠 Computation-Friendly** — Perfect for heavy processing tasks
-- **👁️ Native DOM Observation** — Built-in streams for intersection, resize, and mutation events
+- Pull-based execution so values are computed when requested
+- Async iterator first, designed for `for await...of`
+- Async callbacks are supported in `subscribe` handlers
+- `query()` retrieves the first emitted value as a promise, then unsubscribes
+- Operators for mapping, filtering, combination, and control flow
+- Subjects for manual emission and multicasting
+- Optional HTTP client and DOM observation utilities
+
 ---
 
 ## 📦 Installation
@@ -60,56 +58,96 @@ pnpm add @actioncrew/streamix
 
 ---
 
-## 🏃‍♂️ Quick Start
+## ⚡ Quick start
 
-### Basic Stream Operations
+### Basic stream operations
 
 ```typescript
 import { range, map, filter, take } from '@actioncrew/streamix';
 
-// Create a stream of numbers, transform them, and consume
 const stream = range(1, 100)
   .pipe(
-    map(x => x * 2),           // Double each number
-    filter(x => x % 3 === 0),  // Keep only multiples of 3
-    take(5)                    // Take first 5 results
+    map(x => x * 2),
+    filter(x => x % 3 === 0),
+    take(5)
   );
 
-// Consume the stream
 for await (const value of stream) {
   console.log(value); // 6, 12, 18, 24, 30
 }
 ```
 
-### Handling User Events
+### Handling user events
 
 ```typescript
-import { fromEvent, debounce, map } from '@actioncrew/streamix';
+import { fromEvent, debounce, map, filter } from '@actioncrew/streamix';
 
-// Debounced search as user types
 const searchInput = document.getElementById('search');
 const searchStream = fromEvent(searchInput, 'input')
   .pipe(
     map(event => event.target.value),
-    debounce(300), // Wait 300ms after user stops typing
+    debounce(300),
     filter(text => text.length > 2)
   );
 
 for await (const searchTerm of searchStream) {
   console.log('Searching for:', searchTerm);
-  // Perform search...
 }
+```
+
+### Subscribe with async callbacks
+
+```typescript
+import { interval } from '@actioncrew/streamix';
+
+const sub = interval(1000).subscribe(async value => {
+  await fetch('/metrics', { method: 'POST', body: JSON.stringify({ value }) });
+});
+
+// Later:
+sub.unsubscribe();
+```
+
+### Subscribe with a receiver
+
+```typescript
+import { interval, take } from '@actioncrew/streamix';
+
+const sub = interval(500)
+  .pipe(take(3))
+  .subscribe({
+    next: value => console.log('tick:', value),
+    error: err => console.error('error:', err),
+    complete: () => console.log('complete'),
+  });
+
+sub.unsubscribe();
+```
+
+### Subscribe and cancel on a condition
+
+```typescript
+import { interval } from '@actioncrew/streamix';
+
+const sub = interval(1000).subscribe(value => {
+  console.log('value:', value);
+  if (value >= 5) {
+    sub.unsubscribe();
+  }
+});
 ```
 
 ---
 
-## 🔧 Core Concepts
+## 🧠 Core concepts
 
 ### Streams
+
 Streams are sequences of values over time, implemented as async generators:
 
 ```typescript
-// Creating a custom stream
+import { createStream } from '@actioncrew/streamix';
+
 async function* numberStream() {
   for (let i = 0; i < 10; i++) {
     yield i;
@@ -117,10 +155,11 @@ async function* numberStream() {
   }
 }
 
-const stream = createStream('numberStream', numberStream);
+const stream = createStream('numbers', numberStream);
 ```
 
 ### Operators
+
 Transform, filter, and combine streams with familiar operators:
 
 ```typescript
@@ -135,48 +174,64 @@ const processedStream = sourceStream
 ```
 
 ### Subjects
+
 Manually control stream emissions:
 
 ```typescript
-import { Subject, createSubject } from '@actioncrew/streamix';
+import { createSubject } from '@actioncrew/streamix';
 
 const subject = createSubject<string>();
 
-// Subscribe to the subject
 for await (const value of subject) {
   console.log('Received:', value);
 }
 
-// Emit values
 subject.next('Hello');
 subject.next('World');
 subject.complete();
 ```
 
+### Query the first value
+
+`query()` retrieves the actual emitted value as a promise, then automatically unsubscribes.
+
+```typescript
+import { interval, take, map } from '@actioncrew/streamix';
+
+const stream = interval(1000).pipe(take(1));
+const first = await stream.query();
+console.log('first:', first);
+
+const transformed = interval(500).pipe(
+  map(value => value * 10),
+  take(1)
+);
+const result = await transformed.query();
+console.log('result:', result);
+```
+
 ---
 
-## 🌐 HTTP Client
+## 🌐 HTTP client
 
-Streamix includes a powerful HTTP client perfect for reactive applications:
+Streamix includes an HTTP client that composes well with streams:
 
 ```typescript
 import { map, retry } from '@actioncrew/streamix';
-import { 
-  createHttpClient, 
-  readJson, 
-  useBase, 
-  useLogger, 
-  useTimeout 
+import {
+  createHttpClient,
+  readJson,
+  useBase,
+  useLogger,
+  useTimeout
 } from '@actioncrew/streamix/http';
 
-// Setup client with middleware
 const client = createHttpClient().withDefaults(
   useBase("https://api.example.com"),
   useLogger(),
   useTimeout(5000)
 );
 
-// Make reactive HTTP requests
 const dataStream = retry(() => client.get("/users", readJson), 3)
   .pipe(
     map(users => users.filter(user => user.active))
@@ -189,20 +244,19 @@ for await (const activeUsers of dataStream) {
 
 ---
 
-## 🎯 Real-World Example
+## 🧪 Real-world example
 
-Here's how to build a live search with API calls and error handling:
+Live search with API calls and basic error handling:
 
 ```typescript
 import {
   fromEvent,
   fromPromise,
-  debounce, 
-  map, 
-  filter, 
-  switchMap, 
-  catchError,
-  startWith 
+  debounce,
+  map,
+  filter,
+  switchMap,
+  startWith
 } from '@actioncrew/streamix';
 
 const searchInput = document.getElementById('search');
@@ -216,8 +270,8 @@ const searchResults = fromEvent(searchInput, 'input')
     switchMap(query => fromPromise(
       fetch(`/api/search?q=${query}`)
         .then(r => r.json())
-        .catch(err => ({ error: 'Search failed', query })))
-    ),
+        .catch(() => ({ error: 'Search failed', query }))
+    )),
     startWith({ results: [], query: '' })
   );
 
@@ -234,9 +288,7 @@ for await (const result of searchResults) {
 
 ---
 
-## 📚 Available Operators
-
-Streamix includes all the operators you need:
+## 🧰 Available operators
 
 ### Transformation
 - `map` - Transform each value
@@ -244,7 +296,7 @@ Streamix includes all the operators you need:
 - `buffer` - Collect values into arrays
 
 ### Filtering
-- `filter` - Keep values that match criteria  
+- `filter` - Keep values that match criteria
 - `take` - Take first N values
 - `takeWhile` - Take while condition is true
 - `skip` - Skip first N values
@@ -259,90 +311,90 @@ Streamix includes all the operators you need:
 ### Utility
 - `tap` - Side effects without changing stream
 - `delay` - Add delays between emissions
-- `retry` - Retry failed operations  
+- `retry` - Retry failed operations
 - `finalize` - Cleanup when stream completes
 - `debounce` - Limit emission rate
 
 ---
 
-## 🎮 Live Demos
+## 🎬 Live demos
 
-Try Streamix in action:
-
-- **🌀 [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)** - Smooth animations with streams
-- **⚙️ [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)** - Mandelbrot set generation
-- **✈️ [Travel Blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w)** - Real-world app example
+- [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
+- [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
+- [Travel Blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w)
 
 ---
 
-## 🔄 Generator-Based Architecture
+## 🧬 Generator-based architecture
 
-Unlike RxJS's push-based approach, Streamix uses **pull-based** async generators:
+Unlike push-based streams, Streamix uses pull-based async generators:
 
 ```typescript
-// Values are only computed when requested
+import { createStream, take } from '@actioncrew/streamix';
+
 async function* expensiveStream() {
   for (let i = 0; i < 1000000; i++) {
-    yield expensiveComputation(i); // Only runs when needed!
+    yield expensiveComputation(i);
   }
 }
 
-// Memory efficient - processes one value at a time
-const stream = createStream('expensiveStream', expensiveStream)
-  .pipe(take(10)); // Only computes first 10 values
+const stream = createStream('calculations', expensiveStream)
+  .pipe(take(10));
 ```
 
-This means:
-- **Better performance** - No wasted computations
-- **Lower memory usage** - Process one value at a time  
-- **Natural backpressure** - Consumer controls the flow
+This enables:
+- On-demand computation
+- Lower memory usage per stream
+- Natural backpressure from the consumer
 
 ---
 
-## 🆚 Streamix vs RxJS
+## 📊 Streamix vs RxJS
 
 | Feature | Streamix | RxJS |
 |---------|----------|------|
-| Bundle Size | 9 KB | ~40 KB |
-| Learning Curve | Gentle | Steep |
-| Performance | Pull-based (efficient) | Push-based |
-| API Complexity | Simple | Complex |
-| Async/Await Support | Native | Limited |
-| Memory Usage | Low | Higher |
+| Bundle size | Small, generator-based core | Larger, broad operator set |
+| Learning curve | Moderate, smaller API surface | Steeper, larger surface area |
+| Execution model | Pull-based | Push-based |
+| Async/await | Native | Limited |
+| Backpressure | Consumer-driven | Requires patterns |
 
 ---
 
-## 📖 Documentation & Resources
+## 📚 Documentation and resources
 
-- **📝 [API Documentation](https://actioncrew.github.io/streamix)** 
-- **📰 [Blog: Exploring Streamix](https://medium.com/p/00d5467f0c01)**
-- **🔄 [Streamix 2.0 Updates](https://medium.com/p/a1eb9e7ce1d7)**
-- **🎯 [Reactive Programming Guide](https://medium.com/p/0bfc206ad41c)**
+- [API Documentation](https://actioncrew.github.io/streamix)
+- [Blog: Exploring Streamix](https://medium.com/p/00d5467f0c01)
+- [Streamix 2.0 Updates](https://medium.com/p/a1eb9e7ce1d7)
+- [Reactive Programming Guide](https://medium.com/p/0bfc206ad41c)
 
 ---
 
 ## 🤝 Contributing
 
-We'd love your help making Streamix even better! Whether it's:
+We welcome issues and pull requests. If you are new to the codebase:
 
-- 🐛 **Bug reports** - Found something broken?
-- 💡 **Feature requests** - Have a great idea?  
-- 📝 **Documentation** - Help others learn
-- 🔧 **Code contributions** - Submit a PR
+- Open an issue with a minimal reproduction for bugs
+- Propose features with a short problem statement and example
+- Improve docs with focused changes
 
-**[📋 Share your feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)** - Tell us how you're using Streamix!
+[Share your feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
 
 ---
 
 ## 📄 License
 
-MIT License - use Streamix however you need!
+MIT License
 
 ---
 
 <p align="center">
-  <strong>Ready to stream? Get started with Streamix today! 🚀</strong><br>
-  <a href="https://www.npmjs.com/package/@actioncrew/streamix">Install from NPM</a> • 
-  <a href="https://github.com/actioncrew/streamix">View on GitHub</a> • 
+  <strong>Get started</strong><br>
+  <a href="https://www.npmjs.com/package/@actioncrew/streamix">Install from NPM</a> -
+  <a href="https://github.com/actioncrew/streamix">View on GitHub</a> -
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
+</p>
+
+<p align="center">
+  ⭐ If Streamix is useful to you, consider giving the repo a <a href="https://github.com/actioncrew/streamix">star</a> ⭐
 </p>
