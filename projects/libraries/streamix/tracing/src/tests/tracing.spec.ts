@@ -10,7 +10,12 @@ import {
   scheduler,
 } from "@actioncrew/streamix";
 
-import { disableTracing, enableTracing, ValueTracer, type ValueTrace } from "@actioncrew/streamix/tracing";
+import {
+  createValueTracer,
+  disableTracing,
+  enableTracing,
+  type ValueTrace,
+} from "@actioncrew/streamix/tracing";
 
 // ---------------------------------------------------------------------------
 // Utils
@@ -34,31 +39,40 @@ async function waitForCompletion(
 // Test tracer
 // ---------------------------------------------------------------------------
 
-class TestTracer extends ValueTracer {
-  emitted: ValueTrace[] = [];
-  delivered: ValueTrace[] = [];
-  filtered: ValueTrace[] = [];
-  collapsed: ValueTrace[] = [];
-  dropped: ValueTrace[] = [];
+type TestTracer = ReturnType<typeof createTestTracer>;
 
-  constructor() {
-    super({
-      onValueEmitted: (t) => this.emitted.push(t),
-      onValueDelivered: (t) => this.delivered.push(t),
-      onValueFiltered: (t) => this.filtered.push(t),
-      onValueCollapsed: (t) => this.collapsed.push(t),
-      onValueDropped: (t) => this.dropped.push(t),
-    });
-  }
+function createTestTracer() {
+  const emitted: ValueTrace[] = [];
+  const delivered: ValueTrace[] = [];
+  const filtered: ValueTrace[] = [];
+  const collapsed: ValueTrace[] = [];
+  const dropped: ValueTrace[] = [];
 
-  override clear() {
-    this.emitted.length = 0;
-    this.delivered.length = 0;
-    this.filtered.length = 0;
-    this.collapsed.length = 0;
-    this.dropped.length = 0;
-    super.clear();
-  }
+  const tracer = createValueTracer({
+    onValueEmitted: (t) => emitted.push(t),
+    onValueDelivered: (t) => delivered.push(t),
+    onValueFiltered: (t) => filtered.push(t),
+    onValueCollapsed: (t) => collapsed.push(t),
+    onValueDropped: (t) => dropped.push(t),
+  });
+
+  const baseClear = tracer.clear;
+
+  return Object.assign(tracer, {
+    emitted,
+    delivered,
+    filtered,
+    collapsed,
+    dropped,
+    clear() {
+      emitted.length = 0;
+      delivered.length = 0;
+      filtered.length = 0;
+      collapsed.length = 0;
+      dropped.length = 0;
+      baseClear();
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +83,7 @@ describe("Streamix tracing", () => {
   let tracer: TestTracer;
 
   beforeEach(() => {
-    tracer = new TestTracer();
+    tracer = createTestTracer();
     enableTracing(tracer);
   });
 
