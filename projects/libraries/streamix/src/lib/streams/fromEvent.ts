@@ -1,0 +1,51 @@
+import { isPromiseLike, type MaybePromise, type Receiver, type Stream } from '../abstractions';
+import { createSubject } from '../subjects';
+
+/**
+ * Creates a stream that emits events of the specified type from the given EventTarget.
+ *
+ * This function provides a reactive way to handle DOM events or other events,
+ * such as mouse clicks, keyboard presses, or custom events. The stream
+ * will emit a new event object each time the event is dispatched.
+ *
+ * @template {Event} T The type of the event to listen for. Defaults to a generic `Event`.
+ * @param {EventTarget | PromiseLike<EventTarget>} target The event target to listen to (e.g., a DOM element, `window`, or `document`).
+ * @param {string | PromiseLike<string>} event The name of the event to listen for (e.g., 'click', 'keydown').
+ * @returns {Stream<T>} A stream that emits the event objects as they occur.
+ */
+export function fromEvent(target: MaybePromise<EventTarget>, event: MaybePromise<string>): Stream<Event> {
+  const subject = createSubject<Event>(); // Create a subject to emit event values.
+
+  const originalSubscribe = subject.subscribe; // Capture original subscribe method.
+  subject.subscribe = (callback?: ((value: Event) => void) | Receiver<Event>) => {
+    const subscription = originalSubscribe.call(subject, callback);
+
+    let resolvedTarget: EventTarget;
+    let resolvedEvent: string;
+
+    const listener = (ev: Event) => {
+      if (!subject.completed()) {
+        subject.next(ev); // Emit the event directly into the subject's stream
+      }
+    };
+
+    (async () => {
+      resolvedTarget = isPromiseLike(target) ? await target : target;
+      resolvedEvent = isPromiseLike(event) ? await event : event;
+      resolvedTarget.addEventListener(resolvedEvent, listener);
+    })();
+
+    const originalOnUnsubscribe = subscription.onUnsubscribe;
+    subscription.onUnsubscribe = () => {
+      originalOnUnsubscribe?.call(subscription);
+      if (resolvedTarget && resolvedEvent) {
+        resolvedTarget.removeEventListener(resolvedEvent, listener); // Cleanup listener on unsubscribe
+      }
+    };
+
+    return subscription;
+  };
+
+  subject.name = 'fromEvent';
+  return subject;
+}

@@ -1,0 +1,69 @@
+body, html, .container {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: transparent;
+  overflow: hidden;
+}
+
+canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  height: 100%;
+  width: 100%;
+}
+
+#mandelbrotCanvas {
+  transition: width 0.3s ease, height 0.3s ease; /* Smooth transition */
+}
+
+#progress-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent overlay */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+#progress-bar {
+  width: 80%;
+  max-width: 400px;
+  background-color: #fff; /* Background color of the bar container */
+  border-radius: 5px;
+  padding: 10px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+  position: relative; /* Positioning context for the text */
+}
+
+#progress {
+  height: 20px;
+  background-color: #4caf50; /* Color of the progress */
+  width: 0; /* Start with width 0 and increase with progress */
+  border-radius: 5px;
+  transition: width 0.3s ease; /* Smooth transition for width change */
+}
+
+#progress-text {
+  position: absolute; /* Position relative to the progress bar container */
+  top: 50%; /* Center vertically */
+  left: 50%; /* Center horizontally */
+  transform: translate(-50%, -50%); /* Adjust for centering */
+  color: #000; /* Text color (change to suit visibility against the background) */
+  font-size: 16px;
+  z-index: 1; /* Ensure the text appears above the progress bar */
+}
+
+.hidden {
+  display: none !important;
+}

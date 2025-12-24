@@ -1,0 +1,422 @@
+body {
+  font-family: 'Arial', sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f4f4f4;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+header {
+  background-color: rgba(255, 255, 255, 0.75); /* Transparent background */
+  color: #333; /* Darker text for contrast */
+  padding: 1rem 2rem;
+  text-align: left; /* Align to the left */
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05); /* Subtle shadow */
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  display: flex; /* Use flexbox */
+  align-items: center; /* Vertically align items */
+  justify-content: space-between; /* Space title and nav */
+  transition: box-shadow 0.3s ease; /* Smooth transition */
+}
+
+header h1 {
+  margin: 0;
+  font-size: 2rem; /* Adjusted font size */
+  font-weight: 600; /* Semi-bold */
+}
+
+header nav {
+  display: flex;
+  gap: 1.5rem; /* Reduced gap */
+  margin-top: 0;
+  font-size: 1rem; /* Adjusted font size */
+}
+
+header nav a {
+  color: #333; /* Darker link color */
+  text-decoration: none;
+  font-weight: 500; /* Medium weight */
+  padding: 0.5rem 1rem;
+  border-radius: 5px;
+  transition: background-color 0.3s ease, color 0.3s ease; /* Smooth transitions */
+}
+
+header nav a:hover {
+  background-color: #f0f0f0; /* Light hover background */
+  color: #007bff; /* Blue hover color */
+}
+
+/* Sticky header shadow on scroll */
+header.sticky {
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  background-color: white;
+}
+
+.hero {
+  background-image: url('https://images.unsplash.com/photo-1507525428034-b723cf961d3e');
+  background-size: cover;
+  background-position: center;
+  color: white;
+  margin: 1rem auto; /* Adjusted margin */
+  padding: 6rem 1rem; /* Reduced padding */
+  text-align: center;
+  position: relative; /* For overlay positioning */
+  opacity: 0;
+  transition: opacity 0.6s ease-out, transform 0.8s ease-out;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.3); /* Semi-transparent overlay */
+  /* background: linear-gradient(to bottom, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.6)); /* Gradient overlay */
+}
+
+.hero * {
+  position: relative; /* Bring text to the front */
+  z-index: 1; /* Ensure text is above the overlay */
+}
+
+.hero h1 {
+  font-size: 3.5rem; /* Adjusted font size */
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3); /* Subtle text shadow */
+  opacity: 0;
+  transition: opacity 0.6s ease-out;
+  font-weight: 700;
+}
+
+.hero p {
+  color: white;
+  font-size: 1.3rem; /* Adjusted font size */
+  font-weight: 500; /* Medium weight */
+}
+
+.posts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  padding: 3rem 1.5rem 1rem;
+}
+
+.post {
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.post.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.post img {
+  width: 100%;
+  height: 250px;
+  object-fit: cover;
+  transition: transform 0.5s ease-in-out;
+}
+
+.post img:hover {
+  transform: scale(1.1);
+}
+
+.post-content {
+  padding: 1.5rem;
+}
+
+.post-content h2 {
+  font-size: 1.8rem;
+  color: #333;
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
+.post-content p {
+  color: #777;
+  font-size: 1rem;
+}
+
+.featured-destinations, .newsletter {
+  padding: 2rem 1.5rem; /* Reduced padding */
+  text-align: center;
+  background: #fff;
+  margin: 1.5rem; /* Reduced margin */
+  border-radius: 12px;
+  box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.featured-destinations h2, .newsletter h2 {
+  font-size: 1.75rem; /* Slightly smaller font size */
+  color: #333;
+  margin-bottom: 1rem; /* Reduced margin */
+}
+
+.featured-destinations p {
+  font-size: 1rem;
+  color: #666;
+  margin-bottom: 1.5rem; /* Adjusted margin */
+}
+
+.featured-destinations .destination-container {
+  position: relative;
+  padding-bottom: 40%; /* Adjusted aspect ratio (e.g., 5:2) for a smaller height */
+  height: 0;
+}
+
+.featured-destinations .image-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 0.8s ease-in-out;
+}
+
+.featured-destinations .image-wrapper.active {
+  opacity: 1;
+}
+
+.featured-destinations img {
+  width: 100%;
+  height: 100%; /* Full height of the container */
+  border-radius: 10px;
+  object-fit: cover; /* Ensure images cover the container */
+}
+
+.featured-destinations .overlay-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.tips-and-updates {
+  display: grid; /* Change to grid */
+  grid-template-columns: 1fr 1fr; /* Two equal columns */
+  gap: 2rem; /* Space between columns */
+  margin: 0rem;
+  padding: 1.5rem; /* Standard padding */
+}
+
+.travel-tips {
+  padding: 3rem 2rem;
+  text-align: center;
+  background: linear-gradient(135deg, #e0f7fa, #b2ebf2); /* Soft gradient background */
+  margin: 0 auto;
+  border-radius: 12px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15); /* Enhanced shadow */
+}
+
+.travel-tips h2 {
+  font-size: 2.5rem; /* Slightly larger heading */
+  color: #2c3e50; /* Darker, more professional color */
+  margin-bottom: 1.8rem;
+  font-weight: 600; /* Semi-bold for emphasis */
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1); /* Subtle text shadow */
+}
+
+.travel-tips p {
+  color: #555;
+  margin-bottom: 2rem;
+  line-height: 1.6;
+  font-size: 1.1rem; /* Slightly larger paragraph text */
+}
+
+.travel-tips ul {
+  list-style-position: inside;
+  padding-left: 0;
+  text-align: left;
+  max-width: 600px;
+  margin: 0 auto;
+  list-style-type: none; /* Remove default bullets */
+}
+
+.travel-tips li {
+  margin-bottom: 1.5rem;
+  padding-left: 1.5rem; /* Space for custom bullet */
+  position: relative; /* For custom bullet positioning */
+  color: #333;
+  line-height: 1.6;
+}
+
+.travel-tips li::before {
+  content: "✓"; /* Checkmark as custom bullet */
+  position: absolute;
+  left: 0;
+  color: #4caf50; /* Green checkmark */
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .travel-tips {
+      padding: 2rem 1.5rem;
+  }
+
+  .travel-tips h2 {
+      font-size: 2.2rem;
+  }
+
+  .travel-tips p {
+      font-size: 1rem;
+  }
+}
+
+.latest-updates {
+  padding: 3rem 2rem;
+  text-align: left; /* Align text to the left */
+  background: linear-gradient(135deg, #f0f8ff, #e1f5fe); /* Light blue gradient */
+  border-radius: 12px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+}
+
+.latest-updates h2 {
+  font-size: 2.5rem;
+  color: #2c3e50;
+  margin-bottom: 1.8rem;
+  font-weight: 600;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.latest-updates p {
+  color: #555;
+  margin-bottom: 2rem;
+  line-height: 1.6;
+  font-size: 1.1rem;
+}
+
+.update-item {
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #eee; /* Subtle divider */
+}
+
+.update-item h3 {
+  font-size: 1.5rem;
+  color: #333;
+  margin-bottom: 0.8rem;
+}
+
+.update-item p {
+  color: #666;
+  margin-bottom: 1rem;
+}
+
+.update-item a {
+  color: #007bff; /* Blue link color */
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.update-item a:hover {
+  text-decoration: underline;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .latest-updates {
+      padding: 2rem 1.5rem;
+  }
+
+  .latest-updates h2 {
+      font-size: 2.2rem;
+  }
+
+  .latest-updates p, .update-item p {
+      font-size: 1rem;
+  }
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 768px) {
+  .tips-and-updates {
+      flex-direction: column; /* Stack sections vertically */
+  }
+}
+
+.newsletter input[type="email"] {
+  padding: 0.8rem;
+  width: 80%;
+  max-width: 400px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  margin-top: 1rem;
+}
+
+.newsletter button {
+  padding: 0.8rem 1.5rem;
+  background-color: #4caf50;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.newsletter button:hover {
+  background-color: #388e3c;
+}
+
+footer {
+  background-color: #333;
+  color: white;
+  text-align: center;
+  padding: 2rem;
+  margin-top: 4rem;
+  box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.1);
+}
+
+footer a {
+  color: #4caf50;
+  text-decoration: none;
+  font-weight: bold;
+  transition: color 0.3s ease;
+}
+
+footer a:hover {
+  color: #388e3c;
+}
+
+.animate-text span {
+  display: inline-block;
+  will-change: transform, opacity;
+}
+
+@media (max-width: 600px) {
+  .posts {
+    grid-template-columns: 1fr;
+  }
+
+  .hero {
+    padding: 4rem 1rem;
+  }
+
+  .hero h1 {
+    font-size: 3rem;
+  }
+
+  .post-content h2 {
+    font-size: 1.5rem;
+  }
+
+  .newsletter input[type="email"] {
+    width: 90%;
+  }
+}

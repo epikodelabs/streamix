@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ng serve",
+      "type": "chrome",
+      "request": "launch",
+      "preLaunchTask": "npm: start",
+      "url": "http://localhost:4200/"
+    },
+    {
+      "name": "ng test",
+      "type": "chrome",
+      "request": "launch",
+      "preLaunchTask": "npm: test",
+      "url": "http://localhost:9876/debug.html",
+      "runtimeArgs": [
+        "--headless"
+      ]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug current spec (ts-jasmine-cli)",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--loader",
+        "@epikodelabs/ts-test-runner/esm-loader.mjs",
+        "--enable-source-maps"
+      ],
+      "program": "${workspaceFolder}/node_modules/@epikodelabs/ts-test-runner/bin/ts-jasmine-cli",
+      "args": [
+        "--spec",
+        "${file}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    }
+  ]
+}

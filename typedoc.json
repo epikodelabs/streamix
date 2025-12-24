@@ -1,0 +1,59 @@
+{
+  "entryPoints": ["projects/libraries/streamix/src/public-api.ts"],
+  "out": "docs/api",
+  "gitRemote": "origin",
+  "gitRevision": "main",
+  "sourceLinkTemplate": "https://github.com/epikodelabslabs/streamix/blob/{gitRevision}/{path}#L{line}", 
+  "plugin": ["typedoc-plugin-markdown"],
+  "theme": "markdown",
+  "hideGenerator": true,
+  "skipErrorChecking": true,
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeInternal": true,
+  "entryPointStrategy": "resolve",
+  "readme": "none",
+  "externalSymbolLinkMappings": {
+    "typescript": {
+      "AbortSignal": "#"
+    }
+  },
+  "sort": ["source-order"],
+  "kindSortOrder": [
+    "Document",
+    "Project",
+    "Module",
+    "Namespace",
+    "Enum",
+    "EnumMember",
+    "Class",
+    "Interface",
+    "TypeAlias",
+    "Constructor",
+    "Property",
+    "Variable",
+    "Function",
+    "Method",
+    "Accessor",
+    "Parameter",
+    "TypeParameter",
+    "TypeLiteral",
+    "CallSignature",
+    "ConstructorSignature",
+    "IndexSignature",
+    "GetSignature",
+    "SetSignature"
+  ],
+  "categorizeByGroup": false,
+  "defaultCategory": "Other",
+  "categoryOrder": [
+    "Classes",
+    "Interfaces",
+    "Types",
+    "Functions",
+    "Variables",
+    "*"
+  ]
+}
+
+
