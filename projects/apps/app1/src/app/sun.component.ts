@@ -12,7 +12,7 @@ import {
   tap,
   timer,
   withLatestFrom,
-} from '@actioncrew/streamix';
+} from '@epikode/streamix';
 import { CommonModule } from '@angular/common';
 import { AfterViewInit, Component, OnDestroy, OnInit } from '@angular/core';
 
@@ -218,3 +218,4 @@ export class AppSunComponent implements AfterViewInit, OnDestroy {
     };
   }
 }
+

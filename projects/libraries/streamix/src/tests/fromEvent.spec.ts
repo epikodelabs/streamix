@@ -1,4 +1,4 @@
-import { fromEvent } from '@actioncrew/streamix';
+import { fromEvent } from '@epikode/streamix';
 import { idescribe } from './env.spec';
 
 idescribe('fromEvent', () => {
@@ -76,3 +76,4 @@ idescribe('fromEvent', () => {
   });
 
 });
+

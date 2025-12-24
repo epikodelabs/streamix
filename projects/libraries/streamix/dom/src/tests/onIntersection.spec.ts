@@ -1,4 +1,4 @@
-import { onIntersection } from '@actioncrew/streamix/dom';
+import { onIntersection } from '@epikode/streamix/dom';
 import { idescribe } from './env.spec';
 
 idescribe('onIntersection', () => {
@@ -85,3 +85,4 @@ idescribe('onIntersection', () => {
     expect(subscription.unsubscribed).toBe(true);
   });
 });
+

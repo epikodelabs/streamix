@@ -1,4 +1,4 @@
-import { createBehaviorSubject, createBehaviorSubjectBuffer } from '@actioncrew/streamix';
+import { createBehaviorSubject, createBehaviorSubjectBuffer } from '@epikode/streamix';
 
 describe('createBehaviorSubject', () => {
   it('should emit the current value to new subscribers immediately', (done) => {
@@ -374,3 +374,4 @@ describe('createBehaviorSubjectBuffer', () => {
     expect(buffer.value).toBeUndefined();
   });
 });
+

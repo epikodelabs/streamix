@@ -1,4 +1,4 @@
-import { createSubject, distinctUntilKeyChanged, type Stream } from '@actioncrew/streamix';
+import { createSubject, distinctUntilKeyChanged, type Stream } from '@epikode/streamix';
 
 describe('distinctUntilKeyChanged', () => {
   let subject: ReturnType<typeof createSubject<any>>;
@@ -95,3 +95,4 @@ describe('distinctUntilKeyChanged', () => {
     expect(error).toEqual(new Error('Test Error'));
   });
 });
+

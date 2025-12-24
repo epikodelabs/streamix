@@ -1,4 +1,4 @@
-import { createSubject, ignoreElements } from "@actioncrew/streamix";
+import { createSubject, ignoreElements } from "@epikode/streamix";
 
 describe("ignoreElements", () => {
   it("should ignore all emitted values and only emit complete", (done) => {

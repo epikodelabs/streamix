@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "@actioncrew/streamix";
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from "@epikode/streamix";
 import type { Coroutine } from "../operators";
 
 /**
@@ -25,3 +25,4 @@ export function compute<T = any>(task: MaybePromise<Coroutine>, params: MaybePro
     yield result;
   });
 }
+

@@ -1,4 +1,4 @@
-import { createReplaySubject, createStream, type Stream } from '@actioncrew/streamix';
+import { createReplaySubject, createStream, type Stream } from '@epikode/streamix';
 
 /**
  * Represents a stream of HTTP responses.
@@ -266,7 +266,7 @@ export const useRedirect = (maxRedirects: number = 5): Middleware => {
     while (true) {
       const result = await next(context);
 
-      // No redirect → finished
+      // No redirect ??? finished
       if (result.redirectTo === undefined) {
         return result;
       }
@@ -290,7 +290,7 @@ export const useRedirect = (maxRedirects: number = 5): Middleware => {
         redirectTo: undefined,
       };
 
-      // RFC 7231: 303 → GET + drop body
+      // RFC 7231: 303 ??? GET + drop body
       if (result.status === 303) {
         context.method = 'GET';
         context.body = undefined;
@@ -852,3 +852,4 @@ export const readFull: ParserFunction<Uint8Array> = async function* (response) {
   // Once all data is collected, yield the full response body as a single chunk
   yield accumulatedData;
 };
+

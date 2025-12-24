@@ -1,4 +1,4 @@
-import { createSubject, forkJoin, from } from '@actioncrew/streamix';
+import { createSubject, forkJoin, from } from '@epikode/streamix';
 
 describe('forkJoin', () => {
   it('should emit last values from all sources', async () => {
@@ -98,3 +98,4 @@ describe('forkJoin', () => {
     expect(results).toEqual([[1, 'x']]);
   });
 });
+

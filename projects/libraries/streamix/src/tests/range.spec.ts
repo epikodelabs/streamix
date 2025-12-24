@@ -1,4 +1,4 @@
-import { range } from "@actioncrew/streamix";
+import { range } from "@epikode/streamix";
 
 describe("range", () => {
   it("should emit the correct range of values", async () => {

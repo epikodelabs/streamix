@@ -1,4 +1,4 @@
-import { createReplayBuffer, createReplaySubject, createSemaphore } from '@actioncrew/streamix';
+import { createReplayBuffer, createReplaySubject, createSemaphore } from '@epikode/streamix';
 
 describe('createReplaySubject', () => {
   it('should emit values to subscribers in real-time as well as replay buffered values', async () => {
@@ -285,3 +285,4 @@ describe('createReplayBuffer', () => {
     expect(buffer2.buffer).toEqual([99]);
   });
 });
+

@@ -1,4 +1,4 @@
-import { timer } from '@actioncrew/streamix';
+import { timer } from '@epikode/streamix';
 
 describe('timer', () => {
   it('should emit values at specified interval', (done) => {
@@ -41,3 +41,4 @@ describe('timer', () => {
     expect(emittedValues.length).toBe(previousLength); // No new emissions should occur after unsubscribe
   });
 });
+

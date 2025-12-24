@@ -1,4 +1,4 @@
-import { createSubject, delay, EMPTY, from, switchMap } from '@actioncrew/streamix';
+import { createSubject, delay, EMPTY, from, switchMap } from '@epikode/streamix';
 
 describe('switchMap', () => {
   it('should switch to new inner streams correctly', (done) => {
@@ -141,3 +141,4 @@ describe('switchMap', () => {
     });
   });
 });
+

@@ -1,4 +1,4 @@
-import { buffer, createSubject, type Stream } from "@actioncrew/streamix";
+import { buffer, createSubject, type Stream } from "@epikode/streamix";
 
 describe("buffer", () => {
   let source: Stream<number>;
@@ -126,3 +126,4 @@ describe("buffer", () => {
     expect(results).toEqual([]);
   });
 });
+

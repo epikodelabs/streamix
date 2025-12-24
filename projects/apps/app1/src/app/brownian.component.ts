@@ -1,4 +1,4 @@
-import { interval, scan, startWith, tap } from '@actioncrew/streamix';
+import { interval, scan, startWith, tap } from '@epikode/streamix';
 import { AfterViewInit, Component, ElementRef, ViewChild } from '@angular/core';
 
 @Component({
@@ -108,3 +108,4 @@ export class AppMotionComponent implements AfterViewInit {
     });
   }
 }
+

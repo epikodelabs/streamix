@@ -1,4 +1,4 @@
-import { createSubject, select } from '@actioncrew/streamix';
+import { createSubject, select } from '@epikode/streamix';
 
 describe('select', () => {
   let subject: any;
@@ -92,3 +92,4 @@ describe('select', () => {
     expect(results).toEqual([1, 3]); // Only values at indexes 0 and 2 should be emitted
   });
 });
+

@@ -1,5 +1,5 @@
 {
-  "name": "@actioncrew/streamix",
+  "name": "@epikode/streamix",
   "version": "2.0.27",
   "description": "Reactive TypeScript library",
   "license": "MIT",
@@ -14,11 +14,12 @@
   "main": "public-api.ts",
   "type": "module",
   "sideEffects": false,
-  "homepage": "https://actioncrew.github.io/streamix/",
+  "homepage": "https://epikodelabs.github.io/streamix/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/actioncrew/streamix.git"
+    "url": "git+https://github.com/epikodelabs/streamix.git"
   },
   "author": "Oleksii Shepel",
   "email": "oleksii.shepel@outlook.com"
 }
+

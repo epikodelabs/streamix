@@ -1,4 +1,4 @@
-import { of } from '@actioncrew/streamix';
+import { of } from '@epikode/streamix';
 
 describe('of', () => {
   it('should emit the given value', (done) => {
@@ -44,3 +44,4 @@ describe('of', () => {
     expect(emittedValues).toEqual([]);
   });
 });
+

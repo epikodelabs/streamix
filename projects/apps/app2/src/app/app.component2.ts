@@ -1,4 +1,4 @@
-import { concatMap, delay, finalize, map, of, range, reduce, scan, Stream, tap } from '@actioncrew/streamix';
+import { concatMap, delay, finalize, map, of, range, reduce, scan, Stream, tap } from '@epikode/streamix';
 import { Component, OnInit } from '@angular/core';
 
 @Component({
@@ -151,3 +151,4 @@ export class AppComponent implements OnInit {
     return this.fractal$;
   }
 }
+

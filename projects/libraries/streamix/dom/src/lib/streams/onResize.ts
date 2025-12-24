@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@actioncrew/streamix";
+import { createAsyncGenerator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikode/streamix";
 
 /**
  * Creates a reactive stream that emits the dimensions of a given DOM element
@@ -121,3 +121,4 @@ export function onResize(
 
   return subject;
 }
+

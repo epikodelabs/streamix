@@ -4,14 +4,14 @@
  * A comprehensive tracing system for Streamix reactive streams.
  *
  * Features:
- * - Tracks value lifecycle from emission → delivery
+ * - Tracks value lifecycle from emission ??? delivery
  * - Supports filter / collapse / expand / error semantics
  * - Preserves type safety by wrapping primitives
  * - Provides public subscription API for observers (tests, trackers)
  * - Integrates via Streamix runtime hooks
  */
 
-import { createOperator, registerRuntimeHooks } from "@actioncrew/streamix";
+import { createOperator, registerRuntimeHooks } from "@epikode/streamix";
 
 /* ============================================================================
  * TYPES
@@ -966,3 +966,4 @@ registerRuntimeHooks({
     };
   },
 });
+

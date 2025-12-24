@@ -1,4 +1,4 @@
-import { createStream, finalize } from "@actioncrew/streamix";
+import { createStream, finalize } from "@epikode/streamix";
 
 describe("finalize", () => {
 
@@ -89,3 +89,4 @@ describe("finalize", () => {
     });
   });
 });
+

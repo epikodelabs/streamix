@@ -1,4 +1,4 @@
-import { createStream, partition } from '@actioncrew/streamix';
+import { createStream, partition } from '@epikode/streamix';
 
 describe('partition', () => {
 
@@ -91,3 +91,4 @@ describe('partition', () => {
     });
   });
 });
+

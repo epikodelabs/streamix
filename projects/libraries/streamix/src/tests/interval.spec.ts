@@ -1,4 +1,4 @@
-import { interval, take } from '@actioncrew/streamix';
+import { interval, take } from '@epikode/streamix';
 
 describe('interval', () => {
   it('should emit values at specified interval', async () => {
@@ -20,7 +20,7 @@ describe('interval', () => {
       });
     });
 
-    // ✅ Expectations run after stream completes
+    // ??? Expectations run after stream completes
     expect(emittedValues.length).toBe(3);
     expect(emittedValues).toEqual([0, 1, 2]);
     
@@ -136,3 +136,4 @@ describe('interval', () => {
     expect(emittedValues.length).toBe(firstLength); // No new emissions after unsubscribe
   });
 });
+

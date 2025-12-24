@@ -1,4 +1,4 @@
-import { expand, from } from '@actioncrew/streamix';
+import { expand, from } from '@epikode/streamix';
 
 describe('expand', () => {
   it('should handle errors thrown by the project function', async () => {
@@ -61,7 +61,7 @@ describe('expand', () => {
       result.push(value);
     }
 
-    // Depth 0: 1 → Depth 1: 2 → Depth 2: 3
+    // Depth 0: 1 ??? Depth 1: 2 ??? Depth 2: 3
     expect(result).toEqual([1, 2, 3]);
   });
 
@@ -90,3 +90,4 @@ describe('expand', () => {
     expect(result).toEqual([1, 2, 3, 4, 5]);
   });
 });
+

@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@actioncrew/streamix";
+import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikode/streamix";
 
 /**
  * Creates a reactive stream that emits the current screen orientation,
@@ -104,3 +104,4 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
 
   return subject;
 }
+

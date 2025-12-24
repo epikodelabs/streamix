@@ -1,4 +1,4 @@
-import { from } from '@actioncrew/streamix';
+import { from } from '@epikode/streamix';
 
 describe('from', () => {
 

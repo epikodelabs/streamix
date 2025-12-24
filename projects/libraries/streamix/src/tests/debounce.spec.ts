@@ -1,4 +1,4 @@
-import { createStream, debounce, from, interval, take } from "@actioncrew/streamix";
+import { createStream, debounce, from, interval, take } from "@epikode/streamix";
 
 describe('debounce', () => {
   it('should debounce values from an array stream', (done) => {
@@ -103,3 +103,4 @@ describe('debounce', () => {
     });
   });
 });
+

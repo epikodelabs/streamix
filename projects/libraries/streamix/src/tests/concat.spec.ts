@@ -1,4 +1,4 @@
-import { concat, createStream, from } from '@actioncrew/streamix';
+import { concat, createStream, from } from '@epikode/streamix';
 
 
 describe('concat', () => {
@@ -84,3 +84,4 @@ describe('concat', () => {
     expect(caughtError.message).toBe(errorMessage);
   });
 });
+

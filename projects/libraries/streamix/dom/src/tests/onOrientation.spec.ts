@@ -1,4 +1,4 @@
-import { onOrientation } from "@actioncrew/streamix/dom";
+import { onOrientation } from "@epikode/streamix/dom";
 import { idescribe } from "./env.spec";
 
 idescribe('onOrientation', () => {

@@ -1,4 +1,4 @@
-import { EMPTY } from '@actioncrew/streamix';
+import { EMPTY } from '@epikode/streamix';
 
 describe('empty', () => {
   it('should auto-complete without emitting any values', async () => {
@@ -29,3 +29,4 @@ describe('empty', () => {
     });
   });
 });
+

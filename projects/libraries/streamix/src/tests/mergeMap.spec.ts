@@ -1,4 +1,4 @@
-import { delay, EMPTY, filter, from, map, mergeMap, take, timer } from '@actioncrew/streamix';
+import { delay, EMPTY, filter, from, map, mergeMap, take, timer } from '@epikode/streamix';
 
 describe('mergeMap', () => {
   it('should merge emissions from inner streams correctly', (done) => {
@@ -173,3 +173,4 @@ describe('mergeMap', () => {
     });
   });
 });
+
