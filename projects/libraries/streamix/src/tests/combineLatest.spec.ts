@@ -1,4 +1,4 @@
-import { combineLatest, from, type Subscription, timer } from '@actioncrew/streamix';
+import { combineLatest, from, type Subscription, timer } from '@epikode/streamix';
 
 describe('combineLatest', () => {
   it('should combine timer streams correctly', (done) => {
@@ -146,3 +146,4 @@ describe('combineLatest', () => {
     });
   });
 });
+

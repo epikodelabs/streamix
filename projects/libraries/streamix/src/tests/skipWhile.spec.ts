@@ -1,4 +1,4 @@
-import { from, skipWhile } from '@actioncrew/streamix';
+import { from, skipWhile } from '@epikode/streamix';
 
 describe('skipWhile', () => {
   it('should skip values while the predicate is true', (done) => {
@@ -43,3 +43,4 @@ describe('skipWhile', () => {
     });
   });
 });
+

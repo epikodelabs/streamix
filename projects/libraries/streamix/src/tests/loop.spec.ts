@@ -1,4 +1,4 @@
-import { loop } from '@actioncrew/streamix';
+import { loop } from '@epikode/streamix';
 
 function collect<T>(stream: AsyncIterable<T>): Promise<T[]> {
   const result: T[] = [];
@@ -61,3 +61,4 @@ describe('loop', () => {
     expect(r2).toEqual([10, 11, 12]);
   });
 });
+

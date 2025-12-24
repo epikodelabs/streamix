@@ -1,4 +1,4 @@
-import { createStream, type MaybePromise, type Stream } from "@actioncrew/streamix";
+import { createStream, type MaybePromise, type Stream } from "@epikode/streamix";
 
 /**
  * A stream that represents a WebSocket-like interface.
@@ -193,3 +193,4 @@ export function webSocket<T = any>(
 
   return stream;
 }
+

@@ -1,5 +1,5 @@
-import { eachValueFrom } from "@actioncrew/streamix";
-import { coroutine, type CoroutineMessage, seize, type SeizedWorker } from "@actioncrew/streamix/coroutines";
+import { eachValueFrom } from "@epikode/streamix";
+import { coroutine, type CoroutineMessage, seize, type SeizedWorker } from "@epikode/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe("seize", () => {
@@ -196,3 +196,4 @@ idescribe("seize", () => {
     await co.finalize();
   });
 });
+

@@ -1,5 +1,5 @@
-import { scheduler } from '@actioncrew/streamix';
-import { onVisibilityChange } from '@actioncrew/streamix/dom';
+import { scheduler } from '@epikode/streamix';
+import { onVisibilityChange } from '@epikode/streamix/dom';
 import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
@@ -200,3 +200,4 @@ idescribe('onVisibilityChange', () => {
     expect(await iter).toEqual(['visible', 'hidden', 'visible']);
   });
 });
+

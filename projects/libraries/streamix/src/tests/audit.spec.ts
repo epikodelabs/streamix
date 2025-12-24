@@ -1,4 +1,4 @@
-import { audit, createSubject } from '@actioncrew/streamix';
+import { audit, createSubject } from '@epikode/streamix';
 
 describe('audit', () => {
   let input: ReturnType<typeof createSubject<number>>;
@@ -110,3 +110,4 @@ describe('audit', () => {
     input.error(new Error('Test Error'));
   });
 });
+

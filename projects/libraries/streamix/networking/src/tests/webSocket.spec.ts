@@ -1,5 +1,5 @@
-import { eachValueFrom } from "@actioncrew/streamix";
-import { webSocket } from "@actioncrew/streamix/networking";
+import { eachValueFrom } from "@epikode/streamix";
+import { webSocket } from "@epikode/streamix/networking";
 import { idescribe } from "./env.spec";
 
 class MockWebSocket {
@@ -229,3 +229,4 @@ idescribe("webSocket", () => {
     expect(value.value).toEqual({ v: 1 });
   });
 });
+

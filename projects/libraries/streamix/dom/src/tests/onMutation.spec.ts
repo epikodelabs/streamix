@@ -1,4 +1,4 @@
-import { onMutation } from '@actioncrew/streamix/dom';
+import { onMutation } from '@epikode/streamix/dom';
 import { idescribe } from './env.spec';
 
 // Mock DOM element for testing purposes
@@ -100,3 +100,4 @@ idescribe('onMutation', () => {
     }, 100);
   });
 });
+

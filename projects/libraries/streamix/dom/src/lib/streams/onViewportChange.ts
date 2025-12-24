@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@actioncrew/streamix";
+import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikode/streamix";
 
 /**
  * Represents a snapshot of the visual viewport.
@@ -131,3 +131,4 @@ export function onViewportChange(): Stream<ViewportState> {
 
   return subject;
 }
+

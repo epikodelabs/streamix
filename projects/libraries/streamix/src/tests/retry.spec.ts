@@ -1,4 +1,4 @@
-import { createStream, retry } from "@actioncrew/streamix";
+import { createStream, retry } from "@epikode/streamix";
 
 describe('retry', () => {
   it('should retry the stream once on error and emit correct values', async () => {
@@ -113,3 +113,4 @@ describe('retry', () => {
     expect(factory).toHaveBeenCalledTimes(1);
   });
 });
+

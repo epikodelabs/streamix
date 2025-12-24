@@ -1,4 +1,4 @@
-import { bufferCount, createSubject, type Stream } from "@actioncrew/streamix";
+import { bufferCount, createSubject, type Stream } from "@epikode/streamix";
 
 describe("bufferCount", () => {
   let source: Stream<number>;
@@ -85,3 +85,4 @@ describe("bufferCount", () => {
     expect(results).toEqual([]);
   });
 });
+

@@ -1,4 +1,4 @@
-import { catchError, endWith, finalize, from, startWith, tap } from '@actioncrew/streamix';
+import { catchError, endWith, finalize, from, startWith, tap } from '@epikode/streamix';
 
 describe('tap', () => {
   it('should perform side effects for each emission', (done) => {
@@ -28,3 +28,4 @@ describe('tap', () => {
     });
   });
 });
+

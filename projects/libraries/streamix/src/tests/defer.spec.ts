@@ -1,4 +1,4 @@
-import { createSubject, defer, type Stream } from '@actioncrew/streamix';
+import { createSubject, defer, type Stream } from '@epikode/streamix';
 
 // Mocking Stream class
 export function mockStream(values: any[], completed = false, error?: Error): Stream<any> {
@@ -75,3 +75,4 @@ describe('defer', () => {
     });
   });
 });
+

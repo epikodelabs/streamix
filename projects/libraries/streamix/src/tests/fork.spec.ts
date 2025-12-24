@@ -1,4 +1,4 @@
-import { fork, from, of } from '@actioncrew/streamix'; // Adjust the import path accordingly
+import { fork, from, of } from '@epikode/streamix'; // Adjust the import path accordingly
 
 describe('fork', () => {
   let source$: any;
@@ -83,3 +83,4 @@ describe('fork', () => {
     });
   });
 });
+

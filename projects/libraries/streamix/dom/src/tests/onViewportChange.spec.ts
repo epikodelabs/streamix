@@ -1,5 +1,5 @@
-import { scheduler } from '@actioncrew/streamix';
-import { onViewportChange } from '@actioncrew/streamix/dom';
+import { scheduler } from '@epikode/streamix';
+import { onViewportChange } from '@epikode/streamix/dom';
 import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
@@ -250,3 +250,4 @@ idescribe('onViewportChange', () => {
     sub.unsubscribe();
   });
 });
+

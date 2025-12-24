@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/LOGO.png?raw=true" alt="Streamix Logo" width="400">
+  <img src="https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/LOGO.png?raw=true" alt="Streamix Logo" width="400">
 </p>
 
 <p align="center">
@@ -8,20 +8,20 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/actioncrew/streamix/workflows/build/badge.svg">
-    <img src="https://github.com/actioncrew/streamix/workflows/build/badge.svg" alt="Build Status">
+  <a href="https://github.com/epikodelabs/streamix/workflows/build/badge.svg">
+    <img src="https://github.com/epikodelabs/streamix/workflows/build/badge.svg" alt="Build Status">
   </a>
-  <a href="https://www.npmjs.com/package/@actioncrew%2Fstreamix">
-    <img src="https://img.shields.io/npm/v/@actioncrew%2Fstreamix.svg?style=flat-square" alt="NPM Version">
+  <a href="https://www.npmjs.com/package/@epikode%2Fstreamix">
+    <img src="https://img.shields.io/npm/v/@epikode%2Fstreamix.svg?style=flat-square" alt="NPM Version">
   </a>
-  <a href="https://www.npmjs.com/package/@actioncrew%2Fstreamix">
-    <img src="https://img.shields.io/npm/dm/@actioncrew%2Fstreamix.svg?style=flat-square" alt="NPM Downloads">
+  <a href="https://www.npmjs.com/package/@epikode%2Fstreamix">
+    <img src="https://img.shields.io/npm/dm/@epikode%2Fstreamix.svg?style=flat-square" alt="NPM Downloads">
   </a>
-  <a href="https://github.com/actioncrew/streamix">
-    <img src="https://raw.githubusercontent.com/actioncrew/streamix/main/projects/libraries/streamix/bundle-size.svg" alt="Bundle Size">
+  <a href="https://github.com/epikodelabs/streamix">
+    <img src="https://raw.githubusercontent.com/epikodelabs/streamix/main/projects/libraries/streamix/bundle-size.svg" alt="Bundle Size">
   </a>
-  <a href="https://codecov.io/github/actioncrew/streamix" >
-    <img src="https://codecov.io/github/actioncrew/streamix/graph/badge.svg?token=ITHDU7JVOI" alt="Code Coverage"/>
+  <a href="https://codecov.io/github/epikodelabs/streamix" >
+    <img src="https://codecov.io/github/epikodelabs/streamix/graph/badge.svg?token=ITHDU7JVOI" alt="Code Coverage"/>
   </a>
 </p>
 
@@ -47,23 +47,23 @@ Streamix is a reactive streams library built on async generators. It focuses on 
 
 ```bash
 # npm
-npm install @actioncrew/streamix
+npm install @epikode/streamix
 
 # yarn
-yarn add @actioncrew/streamix
+yarn add @epikode/streamix
 
 # pnpm
-pnpm add @actioncrew/streamix
+pnpm add @epikode/streamix
 ```
 
 ---
 
-## ⚡ Quick start
+## ??? Quick start
 
 ### Basic stream operations
 
 ```typescript
-import { range, map, filter, take } from '@actioncrew/streamix';
+import { range, map, filter, take } from '@epikode/streamix';
 
 const stream = range(1, 100)
   .pipe(
@@ -80,7 +80,7 @@ for await (const value of stream) {
 ### Handling user events
 
 ```typescript
-import { fromEvent, debounce, map, filter } from '@actioncrew/streamix';
+import { fromEvent, debounce, map, filter } from '@epikode/streamix';
 
 const searchInput = document.getElementById('search');
 const searchStream = fromEvent(searchInput, 'input')
@@ -98,7 +98,7 @@ for await (const searchTerm of searchStream) {
 ### Subscribe with async callbacks
 
 ```typescript
-import { interval } from '@actioncrew/streamix';
+import { interval } from '@epikode/streamix';
 
 const sub = interval(1000).subscribe(async value => {
   await fetch('/metrics', { method: 'POST', body: JSON.stringify({ value }) });
@@ -111,7 +111,7 @@ sub.unsubscribe();
 ### Subscribe with a receiver
 
 ```typescript
-import { interval, take } from '@actioncrew/streamix';
+import { interval, take } from '@epikode/streamix';
 
 const sub = interval(500)
   .pipe(take(3))
@@ -127,7 +127,7 @@ sub.unsubscribe();
 ### Subscribe and cancel on a condition
 
 ```typescript
-import { interval } from '@actioncrew/streamix';
+import { interval } from '@epikode/streamix';
 
 const sub = interval(1000).subscribe(value => {
   console.log('value:', value);
@@ -146,7 +146,7 @@ const sub = interval(1000).subscribe(value => {
 Streams are sequences of values over time, implemented as async generators:
 
 ```typescript
-import { createStream } from '@actioncrew/streamix';
+import { createStream } from '@epikode/streamix';
 
 async function* numberStream() {
   for (let i = 0; i < 10; i++) {
@@ -163,7 +163,7 @@ const stream = createStream('numbers', numberStream);
 Transform, filter, and combine streams with familiar operators:
 
 ```typescript
-import { map, filter, mergeMap, combineLatest } from '@actioncrew/streamix';
+import { map, filter, mergeMap, combineLatest } from '@epikode/streamix';
 
 const processedStream = sourceStream
   .pipe(
@@ -178,7 +178,7 @@ const processedStream = sourceStream
 Manually control stream emissions:
 
 ```typescript
-import { createSubject } from '@actioncrew/streamix';
+import { createSubject } from '@epikode/streamix';
 
 const subject = createSubject<string>();
 
@@ -196,7 +196,7 @@ subject.complete();
 `query()` retrieves the actual emitted value as a promise, then automatically unsubscribes.
 
 ```typescript
-import { interval, take, map } from '@actioncrew/streamix';
+import { interval, take, map } from '@epikode/streamix';
 
 const stream = interval(1000).pipe(take(1));
 const first = await stream.query();
@@ -217,14 +217,14 @@ console.log('result:', result);
 Streamix includes an HTTP client that composes well with streams:
 
 ```typescript
-import { map, retry } from '@actioncrew/streamix';
+import { map, retry } from '@epikode/streamix';
 import {
   createHttpClient,
   readJson,
   useBase,
   useLogger,
   useTimeout
-} from '@actioncrew/streamix/http';
+} from '@epikode/streamix/http';
 
 const client = createHttpClient().withDefaults(
   useBase("https://api.example.com"),
@@ -257,7 +257,7 @@ import {
   filter,
   switchMap,
   startWith
-} from '@actioncrew/streamix';
+} from '@epikode/streamix';
 
 const searchInput = document.getElementById('search');
 const resultsDiv = document.getElementById('results');
@@ -330,7 +330,7 @@ for await (const result of searchResults) {
 Unlike push-based streams, Streamix uses pull-based async generators:
 
 ```typescript
-import { createStream, take } from '@actioncrew/streamix';
+import { createStream, take } from '@epikode/streamix';
 
 async function* expensiveStream() {
   for (let i = 0; i < 1000000; i++) {
@@ -363,7 +363,7 @@ This enables:
 
 ## 📚 Documentation and resources
 
-- [API Documentation](https://actioncrew.github.io/streamix)
+- [API Documentation](https://epikodelabs.github.io/streamix)
 - [Blog: Exploring Streamix](https://medium.com/p/00d5467f0c01)
 - [Streamix 2.0 Updates](https://medium.com/p/a1eb9e7ce1d7)
 - [Reactive Programming Guide](https://medium.com/p/0bfc206ad41c)
@@ -390,11 +390,12 @@ MIT License
 
 <p align="center">
   <strong>Get started</strong><br>
-  <a href="https://www.npmjs.com/package/@actioncrew/streamix">Install from NPM</a> -
-  <a href="https://github.com/actioncrew/streamix">View on GitHub</a> -
+  <a href="https://www.npmjs.com/package/@epikode/streamix">Install from NPM</a> -
+  <a href="https://github.com/epikodelabs/streamix">View on GitHub</a> -
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
 
 <p align="center">
-  ⭐ If Streamix is useful to you, consider giving the repo a <a href="https://github.com/actioncrew/streamix">star</a> ⭐
+  ??? If Streamix is useful to you, consider giving the repo a <a href="https://github.com/epikodelabs/streamix">star</a> ???
 </p>
+

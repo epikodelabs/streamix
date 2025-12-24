@@ -1,4 +1,4 @@
-import { count, createSubject, max, min, type Stream } from '@actioncrew/streamix';
+import { count, createSubject, max, min, type Stream } from '@epikode/streamix';
 
 describe('min', () => {
   let subject: ReturnType<typeof createSubject<number>>;
@@ -156,3 +156,4 @@ describe('count', () => {
     expect(error).toEqual(new Error('Test Error'));
   });
 });
+

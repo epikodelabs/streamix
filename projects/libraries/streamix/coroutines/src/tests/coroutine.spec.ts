@@ -1,5 +1,5 @@
-import { createStream } from "@actioncrew/streamix";
-import { coroutine, type CoroutineMessage } from "@actioncrew/streamix/coroutines";
+import { createStream } from "@epikode/streamix";
+import { coroutine, type CoroutineMessage } from "@epikode/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe('coroutine', () => {
@@ -519,3 +519,4 @@ idescribe('coroutine', () => {
     await co.finalize();
   });
 });
+

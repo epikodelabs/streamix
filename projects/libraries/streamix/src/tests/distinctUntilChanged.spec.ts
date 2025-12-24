@@ -1,4 +1,4 @@
-import { distinctUntilChanged, from } from '@actioncrew/streamix';
+import { distinctUntilChanged, from } from '@epikode/streamix';
 
 
 describe('distinctUntilChanged', () => {
@@ -73,3 +73,4 @@ describe('distinctUntilChanged', () => {
     });
   });
 });
+

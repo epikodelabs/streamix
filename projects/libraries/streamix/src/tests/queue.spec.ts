@@ -1,4 +1,4 @@
-import { createQueue } from '@actioncrew/streamix';
+import { createQueue } from '@epikode/streamix';
 
 describe('createQueue', () => {
   it('executes operations sequentially', async () => {
@@ -30,3 +30,4 @@ describe('createQueue', () => {
     expect(q.isEmpty).toBeTrue();
   });
 });
+

@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@actioncrew/streamix";
+import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikode/streamix";
 
 /**
  * Creates a reactive stream that emits `IdleDeadline` objects whenever
@@ -107,3 +107,4 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
   subject.name = "onIdle";
   return subject;
 }
+

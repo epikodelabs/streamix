@@ -1,4 +1,4 @@
-import { concatMap, createSubject, defaultIfEmpty, EMPTY, of } from '@actioncrew/streamix';
+import { concatMap, createSubject, defaultIfEmpty, EMPTY, of } from '@epikode/streamix';
 
 describe('defaultIfEmpty', () => {
   it('should emit the default value if no values are emitted', (done) => {
@@ -84,3 +84,4 @@ describe('defaultIfEmpty', () => {
     stream.complete();
   });
 });
+

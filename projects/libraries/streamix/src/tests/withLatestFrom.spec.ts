@@ -1,4 +1,4 @@
-import { createStream, createSubject, from, scheduler, withLatestFrom } from '@actioncrew/streamix';
+import { createStream, createSubject, from, scheduler, withLatestFrom } from '@epikode/streamix';
 
 describe('withLatestFrom', () => {
   it('should handle cancellation of the main stream', (done) => {
@@ -286,3 +286,4 @@ describe('withLatestFrom', () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 });
+

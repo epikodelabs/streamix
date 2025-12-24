@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@actioncrew/streamix";
+import { createAsyncGenerator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikode/streamix";
 
 /**
  * Creates a reactive stream that emits `true` when a given element enters
@@ -59,7 +59,7 @@ export function onIntersection(
 
     io.observe(el);
 
-    // 👇 REQUIRED: detect DOM removal
+    // ???? REQUIRED: detect DOM removal
     mo = new MutationObserver(() => {
       if (el && !document.body.contains(el)) {
         // Force-unsubscribe ALL subscribers

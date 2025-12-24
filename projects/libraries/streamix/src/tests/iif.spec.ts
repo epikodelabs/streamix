@@ -1,4 +1,4 @@
-import { from, iif, switchMap } from '@actioncrew/streamix';
+import { from, iif, switchMap } from '@epikode/streamix';
 
 
 describe('iif', () => {
@@ -38,3 +38,4 @@ describe('iif', () => {
     });
   });
 });
+

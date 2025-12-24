@@ -1,4 +1,4 @@
-import { onFullscreen } from "@actioncrew/streamix/dom";
+import { onFullscreen } from "@epikode/streamix/dom";
 import { idescribe } from "./env.spec";
 
 function delay(ms = 0): Promise<void> {

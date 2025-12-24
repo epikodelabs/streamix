@@ -1,4 +1,4 @@
-import { createStream, fromAny } from '@actioncrew/streamix';
+import { createStream, fromAny } from '@epikode/streamix';
 
 describe('fromAny', () => {
   it('should pass through a stream as-is', async () => {

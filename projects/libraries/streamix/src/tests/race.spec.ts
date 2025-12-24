@@ -1,4 +1,4 @@
-import { createStream, createSubject, race } from "@actioncrew/streamix";
+import { createStream, createSubject, race } from "@epikode/streamix";
 
 describe('race', () => {
   it('should only emit values from the winning stream', (done) => {
@@ -170,3 +170,4 @@ describe('race', () => {
     });
   });
 });
+

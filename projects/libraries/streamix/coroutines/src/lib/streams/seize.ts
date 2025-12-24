@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "@actioncrew/streamix";
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from "@epikode/streamix";
 import type { Coroutine, CoroutineMessage } from "../operators";
 
 /**
@@ -102,3 +102,4 @@ export function seize<T = any, R = T>(
     }
   });
 }
+

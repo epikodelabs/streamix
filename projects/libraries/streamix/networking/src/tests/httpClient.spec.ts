@@ -10,7 +10,7 @@ import {
   useParams,
   useRedirect,
   useRetry,
-} from '@actioncrew/streamix/networking';
+} from '@epikode/streamix/networking';
 
 /* -------------------------------------------------- */
 /* Helpers                                            */
@@ -250,3 +250,4 @@ describe('HttpClient', () => {
     }
   });
 });
+

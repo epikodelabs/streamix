@@ -1,4 +1,4 @@
-import { filter, from } from '@actioncrew/streamix';
+import { filter, from } from '@epikode/streamix';
 
 describe('filter', () => {
   it('should allow values that pass the predicate', (done) => {
@@ -31,7 +31,7 @@ describe('filter', () => {
         fail(`Unexpected value emitted: ${value}`);
       },
       complete: () => {
-        expect(emittedCount).toBe(0); // ✅ Add expectation
+        expect(emittedCount).toBe(0); // ??? Add expectation
         done();
       },
       error: done.fail,
@@ -56,3 +56,4 @@ describe('filter', () => {
     });
   });
 });
+

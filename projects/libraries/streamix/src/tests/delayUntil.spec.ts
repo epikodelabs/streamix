@@ -1,4 +1,4 @@
-import { createSubject, delayUntil } from "@actioncrew/streamix"; // Import your delayUntil operator
+import { createSubject, delayUntil } from "@epikode/streamix"; // Import your delayUntil operator
 
 
 describe("delayUntil", () => {
