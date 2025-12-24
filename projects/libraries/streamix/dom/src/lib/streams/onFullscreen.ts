@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikode/streamix";
+import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits fullscreen state changes.
@@ -102,4 +102,5 @@ export function onFullscreen(): Stream<boolean> {
   subject.name = "onFullscreen";
   return subject;
 }
+
 

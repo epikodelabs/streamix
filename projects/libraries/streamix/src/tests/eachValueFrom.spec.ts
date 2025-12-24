@@ -1,4 +1,4 @@
-import { createStream, createSubject, eachValueFrom, EMPTY, firstValueFrom, from, lastValueFrom } from '@epikode/streamix';
+import { createStream, createSubject, eachValueFrom, EMPTY, firstValueFrom, from, lastValueFrom } from '@epikodelabs/streamix';
 
 describe('eachValueFrom', () => {
   it('should get first value from the stream', async () => {
@@ -172,4 +172,5 @@ describe('eachValueFrom', () => {
     expect(generatorFinallyRan).toBeTrue();
   });
 });
+
 

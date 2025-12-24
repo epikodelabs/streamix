@@ -1,4 +1,4 @@
-import { createSubject, throttle } from '@epikode/streamix';
+import { createSubject, throttle } from '@epikodelabs/streamix';
 
 describe('throttle', () => {
   it('should emit first value immediately and throttle subsequent values', async () => {
@@ -70,4 +70,5 @@ describe('throttle', () => {
     expect(caught).toBe(error);
   });
 });
+
 

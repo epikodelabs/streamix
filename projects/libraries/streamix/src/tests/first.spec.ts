@@ -1,4 +1,4 @@
-import { first, from } from "@epikode/streamix";
+import { first, from } from "@epikodelabs/streamix";
 
 describe('first', () => {
   it('should emit the first value even when there is a delay', (done) => {
@@ -71,4 +71,5 @@ describe('first', () => {
     });
   });
 });
+
 

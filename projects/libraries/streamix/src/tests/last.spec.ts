@@ -1,4 +1,4 @@
-import { from, last } from "@epikode/streamix";
+import { from, last } from "@epikodelabs/streamix";
 
 describe('last', () => {
   it('should emit the last value of the stream', (done) => {
@@ -68,4 +68,5 @@ describe('last', () => {
     });
   });
 });
+
 

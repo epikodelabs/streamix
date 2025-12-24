@@ -1,4 +1,4 @@
-import { createBehaviorSubject, createSubject, from, skipUntil } from '@epikode/streamix';
+import { createBehaviorSubject, createSubject, from, skipUntil } from '@epikodelabs/streamix';
 
 describe('skipUntil', () => {
   it('should skip values before notifier emits and emit after that (Immediate Notifier)', async () => {
@@ -176,3 +176,4 @@ describe('skipUntil', () => {
     await promise;
   });
 });
+

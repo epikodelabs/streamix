@@ -7,8 +7,8 @@ import {
   merge,
   Stream,
   tap,
-} from '@epikode/streamix';
-import { onAnimationFrame, onIntersection } from '@epikode/streamix/dom';
+} from '@epikodelabs/streamix';
+import { onAnimationFrame, onIntersection } from '@epikodelabs/streamix/dom';
 
 // Text animation setup with Streamix
 const setupTextAnimation = (element: HTMLElement): Stream<void> => {
@@ -327,4 +327,5 @@ if (newsletter) {
     .pipe(tap(() => (button.style.transform = 'scale(1)')))
     .subscribe();
 }
+
 

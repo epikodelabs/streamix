@@ -1,4 +1,4 @@
-import { from, skip } from '@epikode/streamix';
+import { from, skip } from '@epikodelabs/streamix';
 
 describe('skip', () => {
   it('should skip the specified number of emissions', (done) => {
@@ -52,4 +52,5 @@ describe('skip', () => {
     });
   });
 });
+
 

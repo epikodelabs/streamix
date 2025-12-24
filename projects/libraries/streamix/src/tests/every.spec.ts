@@ -1,4 +1,4 @@
-import { createSubject, every, type Stream } from '@epikode/streamix';
+import { createSubject, every, type Stream } from '@epikodelabs/streamix';
 
 describe('every', () => {
   let subject: ReturnType<typeof createSubject<number>>;
@@ -125,4 +125,5 @@ describe('every', () => {
     expect(completed).toBe(true);
   });
 });
+
 

@@ -1,4 +1,4 @@
-import { onOrientation } from "@epikode/streamix/dom";
+import { onOrientation } from "@epikodelabs/streamix/dom";
 import { idescribe } from "./env.spec";
 
 idescribe('onOrientation', () => {
@@ -117,3 +117,4 @@ idescribe('onOrientation', () => {
     expect(removeListenerSpy).toHaveBeenCalledWith('change', jasmine.any(Function));
   });
 });
+

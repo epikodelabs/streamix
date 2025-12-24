@@ -1,4 +1,4 @@
-import { distinctUntilChanged, from } from '@epikode/streamix';
+import { distinctUntilChanged, from } from '@epikodelabs/streamix';
 
 
 describe('distinctUntilChanged', () => {
@@ -73,4 +73,5 @@ describe('distinctUntilChanged', () => {
     });
   });
 });
+
 

@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from '@epikode/streamix';
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from '@epikodelabs/streamix';
 
 /**
  * Creates a stream that performs a JSONP request and emits the resulting data once.
@@ -50,4 +50,5 @@ export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePr
     }
   });
 }
+
 

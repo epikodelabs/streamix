@@ -1,4 +1,4 @@
-import { from, take } from '@epikode/streamix';
+import { from, take } from '@epikodelabs/streamix';
 
 describe('take', () => {
   it('should take specified number of emissions', (done) => {
@@ -52,4 +52,5 @@ describe('take', () => {
     });
   });
 });
+
 

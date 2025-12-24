@@ -11,7 +11,7 @@
  * - Integrates via Streamix runtime hooks
  */
 
-import { createOperator, registerRuntimeHooks } from "@epikode/streamix";
+import { createOperator, registerRuntimeHooks } from "@epikodelabs/streamix";
 
 /* ============================================================================
  * TYPES
@@ -966,4 +966,5 @@ registerRuntimeHooks({
     };
   },
 });
+
 

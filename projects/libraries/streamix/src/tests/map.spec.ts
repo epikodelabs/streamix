@@ -1,4 +1,4 @@
-import { catchError, from, map } from '@epikode/streamix';
+import { catchError, from, map } from '@epikodelabs/streamix';
 
 describe('map', () => {
   it('should transform values correctly', (done) => {
@@ -40,4 +40,5 @@ describe('map', () => {
     });
   });
 });
+
 

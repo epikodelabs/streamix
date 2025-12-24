@@ -1,4 +1,4 @@
-import "@epikode/streamix/tracing";
+import "@epikodelabs/streamix/tracing";
 
 import {
   buffer,
@@ -8,14 +8,14 @@ import {
   map,
   mergeMap,
   scheduler,
-} from "@epikode/streamix";
+} from "@epikodelabs/streamix";
 
 import {
   createValueTracer,
   disableTracing,
   enableTracing,
   type ValueTrace,
-} from "@epikode/streamix/tracing";
+} from "@epikodelabs/streamix/tracing";
 
 // ---------------------------------------------------------------------------
 // Utils
@@ -342,4 +342,5 @@ describe("Streamix tracing", () => {
     expect(tracer.delivered.length).toBe(0);
   });
 });
+
 

@@ -1,5 +1,5 @@
-import { scheduler } from '@epikode/streamix';
-import { onIdle } from '@epikode/streamix/dom';
+import { scheduler } from '@epikodelabs/streamix';
+import { onIdle } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
@@ -279,4 +279,5 @@ idescribe('onIdle', () => {
     sub.unsubscribe();
   });
 });
+
 

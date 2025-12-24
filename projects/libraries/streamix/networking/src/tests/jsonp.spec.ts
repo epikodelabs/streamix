@@ -1,5 +1,5 @@
-import { eachValueFrom, firstValueFrom } from "@epikode/streamix";
-import { jsonp } from "@epikode/streamix/networking";
+import { eachValueFrom, firstValueFrom } from "@epikodelabs/streamix";
+import { jsonp } from "@epikodelabs/streamix/networking";
 import { idescribe } from "./env.spec";
 
 idescribe("jsonp", () => {
@@ -114,4 +114,5 @@ idescribe("jsonp", () => {
     expect(remainingCallbacks.length).toBe(0);
   });
 });
+
 

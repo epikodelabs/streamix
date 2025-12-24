@@ -1,5 +1,5 @@
-import { scheduler } from '@epikode/streamix';
-import { onBattery } from '@epikode/streamix/dom';
+import { scheduler } from '@epikodelabs/streamix';
+import { onBattery } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
@@ -214,4 +214,5 @@ idescribe('onBattery', () => {
     sub.unsubscribe();
   });
 });
+
 

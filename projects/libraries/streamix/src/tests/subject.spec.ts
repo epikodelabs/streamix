@@ -1,4 +1,4 @@
-import { createSubject, createSubjectBuffer, type Subscription } from '@epikode/streamix';
+import { createSubject, createSubjectBuffer, type Subscription } from '@epikodelabs/streamix';
 
 describe('createSubject', () => {
   it('should not emit values after unsubscribed', (done) => {
@@ -473,4 +473,5 @@ describe('createSubjectBuffer', () => {
     expect((await buffer.read(r)).value).toBe(3);
   });
 });
+
 

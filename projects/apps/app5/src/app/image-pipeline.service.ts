@@ -7,10 +7,10 @@ import {
   Stream,
   switchMap,
   tap,
-} from '@epikode/streamix';
+} from '@epikodelabs/streamix';
 import { Injectable, NgZone } from '@angular/core';
 
-import { cascade, coroutine, Coroutine } from '@epikode/streamix/coroutines';
+import { cascade, coroutine, Coroutine } from '@epikodelabs/streamix/coroutines';
 import { compressImage, CompressInput, CompressOutput, FileTask, ProcessedResult, resizeImage, ResizeInput, ResizeOutput } from './image-processing.utils';
 
 @Injectable({ providedIn: 'root' })
@@ -102,4 +102,5 @@ export class ImagePipelineService {
     this.progressStream.complete();
   }
 }
+
 

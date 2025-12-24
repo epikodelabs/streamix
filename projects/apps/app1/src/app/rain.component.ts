@@ -12,7 +12,7 @@ import {
   tap,
   timer,
   withLatestFrom,
-} from '@epikode/streamix';
+} from '@epikodelabs/streamix';
 import { CommonModule } from '@angular/common';
 import { AfterViewInit, Component, OnDestroy, OnInit } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
@@ -187,4 +187,5 @@ export class AppRainComponent implements AfterViewInit, OnDestroy {
     };
   }
 }
+
 

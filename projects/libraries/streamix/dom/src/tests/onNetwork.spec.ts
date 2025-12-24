@@ -1,5 +1,5 @@
-import { scheduler } from '@epikode/streamix';
-import { type NetworkState, onNetwork } from '@epikode/streamix/dom';
+import { scheduler } from '@epikodelabs/streamix';
+import { type NetworkState, onNetwork } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
@@ -235,4 +235,5 @@ idescribe('onNetwork', () => {
     sub.unsubscribe();
   });
 });
+
 

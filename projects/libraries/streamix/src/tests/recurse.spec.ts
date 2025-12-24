@@ -1,4 +1,4 @@
-import { from, recurse, type Stream } from '@epikode/streamix';
+import { from, recurse, type Stream } from '@epikodelabs/streamix';
 
 describe('recurse', () => {
   it('should recurse depth-first by default', async () => {
@@ -91,4 +91,5 @@ describe('recurse', () => {
     expect(result).toEqual([1]); // Should not recurse beyond initial value because condition is false
   });
 });
+
 

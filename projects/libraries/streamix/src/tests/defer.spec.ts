@@ -1,4 +1,4 @@
-import { createSubject, defer, type Stream } from '@epikode/streamix';
+import { createSubject, defer, type Stream } from '@epikodelabs/streamix';
 
 // Mocking Stream class
 /**
@@ -78,4 +78,5 @@ describe('defer', () => {
     });
   });
 });
+
 

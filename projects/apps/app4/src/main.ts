@@ -1,4 +1,4 @@
-import { catchError } from '@epikode/streamix';
+import { catchError } from '@epikodelabs/streamix';
 import {
   createHttpClient,
   readChunks,
@@ -13,7 +13,7 @@ import {
   useLogger,
   useRedirect,
   useTimeout,
-} from '@epikode/streamix/networking';
+} from '@epikodelabs/streamix/networking';
 
 async function fetchData() {
   const client = createHttpClient();
@@ -247,4 +247,5 @@ document.body.innerHTML +=
   await testManualRedirect();
   await testTimeout();
 })();
+
 

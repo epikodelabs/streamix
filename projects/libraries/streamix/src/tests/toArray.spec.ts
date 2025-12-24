@@ -1,4 +1,4 @@
-import { createSubject, type Stream, toArray } from '@epikode/streamix';
+import { createSubject, type Stream, toArray } from '@epikodelabs/streamix';
 
 describe('toArray', () => {
   let subject: ReturnType<typeof createSubject<number>>;
@@ -100,4 +100,5 @@ describe('toArray', () => {
     expect(results).toEqual([[42]]);  // Single value in array
   });
 });
+
 

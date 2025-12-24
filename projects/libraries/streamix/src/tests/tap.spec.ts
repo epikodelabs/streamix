@@ -1,4 +1,4 @@
-import { catchError, endWith, finalize, from, startWith, tap } from '@epikode/streamix';
+import { catchError, endWith, finalize, from, startWith, tap } from '@epikodelabs/streamix';
 
 describe('tap', () => {
   it('should perform side effects for each emission', (done) => {
@@ -28,4 +28,5 @@ describe('tap', () => {
     });
   });
 });
+
 

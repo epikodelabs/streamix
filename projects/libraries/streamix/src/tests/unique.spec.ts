@@ -1,4 +1,4 @@
-import { createSubject, type Stream, unique } from '@epikode/streamix';
+import { createSubject, type Stream, unique } from '@epikodelabs/streamix';
 
 describe('unique', () => {
   let subject: ReturnType<typeof createSubject<any>>;
@@ -139,4 +139,5 @@ describe('unique', () => {
     ]);
   });
 });
+
 

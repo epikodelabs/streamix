@@ -1,4 +1,4 @@
-import { from, takeWhile } from '@epikode/streamix';
+import { from, takeWhile } from '@epikodelabs/streamix';
 
 describe('takeWhile', () => {
   it('should take emissions while predicate returns true', (done) => {
@@ -52,4 +52,5 @@ describe('takeWhile', () => {
     });
   });
 });
+
 

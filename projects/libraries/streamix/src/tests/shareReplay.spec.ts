@@ -1,4 +1,4 @@
-import { createStream, shareReplay } from '@epikode/streamix';
+import { createStream, shareReplay } from '@epikodelabs/streamix';
 
 describe('shareReplay', () => {
   it('should replay last emitted value to new subscribers', done => {
@@ -95,4 +95,5 @@ describe('shareReplay', () => {
     });
   });
 });
+
 

@@ -1,4 +1,4 @@
-import { delay, from } from '@epikode/streamix';
+import { delay, from } from '@epikodelabs/streamix';
 
 describe('delay', () => {
   it('should delay each value by the specified time', (done) => {
@@ -62,4 +62,5 @@ describe('delay', () => {
     });
   });
 });
+
 

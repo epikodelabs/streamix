@@ -1,4 +1,4 @@
-import { createSubject, reduce, type Stream } from '@epikode/streamix';
+import { createSubject, reduce, type Stream } from '@epikodelabs/streamix';
 
 describe('reduce', () => {
   let subject: ReturnType<typeof createSubject<number>>;
@@ -122,4 +122,5 @@ describe('reduce', () => {
     expect(results).toEqual(['constant']);  // The accumulator always returns 'constant'
   });
 });
+
 

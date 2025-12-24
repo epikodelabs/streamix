@@ -26,19 +26,19 @@
       "dom"
     ],
     "paths": {
-      "@epikode/streamix/coroutines": [
+      "@epikodelabs/streamix/coroutines": [
         "./projects/libraries/streamix/coroutines/src/lib/index.ts"
       ],
-      "@epikode/streamix/dom": [
+      "@epikodelabs/streamix/dom": [
         "./projects/libraries/streamix/dom/src/lib/index.ts"
       ],
-      "@epikode/streamix/networking": [
+      "@epikodelabs/streamix/networking": [
         "./projects/libraries/streamix/networking/src/lib/index.ts"
       ],
-      "@epikode/streamix/tracing": [
+      "@epikodelabs/streamix/tracing": [
         "./projects/libraries/streamix/tracing/src/lib/index.ts"
       ],
-      "@epikode/streamix": [
+      "@epikodelabs/streamix": [
         "./projects/libraries/streamix/src/lib/index.ts"
       ]
     }
@@ -54,4 +54,5 @@
     "experimentalSpecifierResolution": "node"
   }
 }
+
 

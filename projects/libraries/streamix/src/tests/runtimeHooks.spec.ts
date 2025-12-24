@@ -1,4 +1,4 @@
-import { createStream, map, registerRuntimeHooks, scheduler } from "@epikode/streamix";
+import { createStream, map, registerRuntimeHooks, scheduler } from "@epikodelabs/streamix";
 
 describe("runtimeHooks", () => {
   let previousHooks: any;
@@ -93,4 +93,5 @@ describe("runtimeHooks", () => {
     expect(value).toBe(1102); // (1 + 100) + 1 + 1000
   });
 });
+
 

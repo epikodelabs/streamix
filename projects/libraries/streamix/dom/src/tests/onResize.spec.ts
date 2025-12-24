@@ -1,4 +1,4 @@
-import { onResize } from "@epikode/streamix/dom";
+import { onResize } from "@epikodelabs/streamix/dom";
 import { idescribe } from "./env.spec";
 
 idescribe('onResize', () => {
@@ -125,4 +125,5 @@ idescribe('onResize', () => {
     sub.unsubscribe();
   });
 });
+
 

@@ -1,4 +1,4 @@
-import { fromPromise } from '@epikode/streamix';
+import { fromPromise } from '@epikodelabs/streamix';
 
 describe('fromPromise', () => {
   it('should emit value from resolved promise', (done) => {
@@ -154,4 +154,5 @@ describe('fromPromise', () => {
     expect(emittedValues).toEqual([]);
   });
 });
+
 

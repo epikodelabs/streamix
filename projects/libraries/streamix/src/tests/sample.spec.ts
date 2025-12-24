@@ -1,4 +1,4 @@
-import { createSubject, sample } from '@epikode/streamix';
+import { createSubject, sample } from '@epikodelabs/streamix';
 
 describe("sample", () => {
   let subject: any;
@@ -84,4 +84,5 @@ describe("sample", () => {
     expect(results).toEqual([2]); // The last value before completion should be emitted
   });
 });
+
 

@@ -1,4 +1,4 @@
-import { createSubject, ignoreElements } from "@epikode/streamix";
+import { createSubject, ignoreElements } from "@epikodelabs/streamix";
 
 describe("ignoreElements", () => {
   it("should ignore all emitted values and only emit complete", (done) => {
@@ -99,3 +99,4 @@ describe("ignoreElements", () => {
     sourceStream.error(new Error("Some error"));
   });
 });
+
