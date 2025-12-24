@@ -1,4 +1,4 @@
-import { catchError, createSubject, map, type Subject } from '@epikode/streamix';
+import { catchError, createSubject, map, type Subject } from '@epikodelabs/streamix';
 
 describe('catchError', () => {
   let subject: Subject;
@@ -49,4 +49,5 @@ describe('catchError', () => {
     subject.complete();
   });
 });
+
 

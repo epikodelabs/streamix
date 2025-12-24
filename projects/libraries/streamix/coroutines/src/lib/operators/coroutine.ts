@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, type Operator } from "@epikode/streamix";
+import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * @typedef {object} CoroutineMessage
@@ -442,4 +442,5 @@ export function coroutine<T, R>(
     return (main: MainTask<T, R>, ...functions: Function[]) => implementCoroutine(config, main, functions);
   }
 }
+
 

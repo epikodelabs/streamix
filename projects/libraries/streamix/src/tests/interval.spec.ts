@@ -1,4 +1,4 @@
-import { interval, take } from '@epikode/streamix';
+import { interval, take } from '@epikodelabs/streamix';
 
 describe('interval', () => {
   it('should emit values at specified interval', async () => {
@@ -136,4 +136,5 @@ describe('interval', () => {
     expect(emittedValues.length).toBe(firstLength); // No new emissions after unsubscribe
   });
 });
+
 

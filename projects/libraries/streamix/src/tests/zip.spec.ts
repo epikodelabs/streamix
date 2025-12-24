@@ -1,4 +1,4 @@
-import { createSubject, from, zip } from '@epikode/streamix';
+import { createSubject, from, zip } from '@epikodelabs/streamix';
 
 describe('zip', () => {
   it('should zip values from multiple streams', (done) => {
@@ -89,4 +89,5 @@ describe('zip', () => {
     }, 100);
   });
 });
+
 

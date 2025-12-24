@@ -1,4 +1,4 @@
-import { concatMap, createStream, from, of, type Stream } from '@epikode/streamix';
+import { concatMap, createStream, from, of, type Stream } from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
 
@@ -99,4 +99,5 @@ export function errorInnerStream(): Stream {
     throw new Error('Inner Stream Error');
   });
 }
+
 

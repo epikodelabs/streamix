@@ -1,6 +1,6 @@
-import { concatMap, debounce, finalize, map, mergeMap, range, scan, startWith, Stream, tap } from '@epikode/streamix';
-import { compute, coroutine } from '@epikode/streamix/coroutines';
-import { onResize } from '@epikode/streamix/dom';
+import { concatMap, debounce, finalize, map, mergeMap, range, scan, startWith, Stream, tap } from '@epikodelabs/streamix';
+import { compute, coroutine } from '@epikodelabs/streamix/coroutines';
+import { onResize } from '@epikodelabs/streamix/dom';
 import { Component, OnInit } from '@angular/core';
 
 // Main Mandelbrot computation function
@@ -174,4 +174,5 @@ export class AppComponent implements OnInit {
     );
   }
 }
+
 

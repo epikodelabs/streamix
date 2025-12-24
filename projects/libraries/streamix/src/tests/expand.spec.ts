@@ -1,4 +1,4 @@
-import { expand, from } from '@epikode/streamix';
+import { expand, from } from '@epikodelabs/streamix';
 
 describe('expand', () => {
   it('should handle errors thrown by the project function', async () => {
@@ -90,4 +90,5 @@ describe('expand', () => {
     expect(result).toEqual([1, 2, 3, 4, 5]);
   });
 });
+
 

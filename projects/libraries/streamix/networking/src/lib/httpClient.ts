@@ -1,4 +1,4 @@
-import { createReplaySubject, createStream, type Stream } from '@epikode/streamix';
+import { createReplaySubject, createStream, type Stream } from '@epikodelabs/streamix';
 
 /**
  * Represents a stream of HTTP responses.
@@ -852,4 +852,5 @@ export const readFull: ParserFunction<Uint8Array> = async function* (response) {
   // Once all data is collected, yield the full response body as a single chunk
   yield accumulatedData;
 };
+
 

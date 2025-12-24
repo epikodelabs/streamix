@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikode/streamix";
+import { createAsyncGenerator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `true` when a given element enters
@@ -129,3 +129,4 @@ export function onIntersection(
 
   return subject;
 }
+

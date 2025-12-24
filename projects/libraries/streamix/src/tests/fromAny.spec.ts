@@ -1,4 +1,4 @@
-import { createStream, fromAny } from '@epikode/streamix';
+import { createStream, fromAny } from '@epikodelabs/streamix';
 
 describe('fromAny', () => {
   it('should pass through a stream as-is', async () => {
@@ -377,3 +377,4 @@ describe('fromAny', () => {
     expect(values[0].getValue()).toBe(42);
   });
 });
+

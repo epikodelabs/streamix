@@ -1,4 +1,4 @@
-import { from, throwError } from '@epikode/streamix';
+import { from, throwError } from '@epikodelabs/streamix';
 
 describe('throwError', () => {
   it('should emit an error with the given message when subscribed', (done) => {
@@ -35,4 +35,5 @@ describe('throwError', () => {
     });
   });
 });
+
 

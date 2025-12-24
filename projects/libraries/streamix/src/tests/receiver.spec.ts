@@ -1,4 +1,4 @@
-import { createReceiver } from '@epikode/streamix';
+import { createReceiver } from '@epikodelabs/streamix';
 
 describe('createReceiver', () => {
   let consoleErrorSpy: jasmine.Spy;
@@ -127,4 +127,5 @@ describe('createReceiver', () => {
     expect(completeSpy).toHaveBeenCalled();
   });
 });
+
 

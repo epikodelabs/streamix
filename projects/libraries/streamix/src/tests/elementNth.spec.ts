@@ -1,4 +1,4 @@
-import { createSubject, elementAt, elementNth } from '@epikode/streamix';
+import { createSubject, elementAt, elementNth } from '@epikodelabs/streamix';
 
 describe('elementNth', () => {
   let subject: any;
@@ -89,4 +89,5 @@ describe('elementNth', () => {
     expect(results).toEqual([]); // No value should be emitted as the index is out of bounds
   });
 });
+
 

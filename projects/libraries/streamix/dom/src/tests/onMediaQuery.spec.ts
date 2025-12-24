@@ -1,5 +1,5 @@
-import type { Stream } from '@epikode/streamix';
-import { onMediaQuery } from '@epikode/streamix/dom';
+import type { Stream } from '@epikodelabs/streamix';
+import { onMediaQuery } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 idescribe('onMediaQuery', () => {
@@ -190,4 +190,5 @@ idescribe('onMediaQuery', () => {
     expect(listeners.length).toBe(0);
   });
 });
+
 

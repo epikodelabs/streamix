@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikode/streamix";
+import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the time delta (in milliseconds) between
@@ -105,4 +105,5 @@ export function onAnimationFrame(): Stream<number> {
   subject.name = "onAnimationFrame";
   return subject;
 }
+
 

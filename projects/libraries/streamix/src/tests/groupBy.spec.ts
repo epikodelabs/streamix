@@ -1,4 +1,4 @@
-import { from, groupBy, map, merge, mergeMap, of, tap } from '@epikode/streamix';
+import { from, groupBy, map, merge, mergeMap, of, tap } from '@epikodelabs/streamix';
 
 describe('groupBy', () => {
   it('should partition values using groupBy and sort them by key', (done) => {
@@ -122,4 +122,5 @@ describe('groupBy', () => {
     });
   });
 });
+
 

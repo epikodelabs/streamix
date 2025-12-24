@@ -1,4 +1,4 @@
-import { fromEvent, merge, Stream, Subscription, tap } from '@epikode/streamix';
+import { fromEvent, merge, Stream, Subscription, tap } from '@epikodelabs/streamix';
 import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 
@@ -165,4 +165,5 @@ export class AppSandComponent implements AfterViewInit, OnDestroy {
     }
   }
 }
+
 

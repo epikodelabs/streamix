@@ -2,7 +2,7 @@ import {
   createBehaviorSubjectBuffer,
   createReplayBuffer,
   createSubjectBuffer,
-} from "@epikode/streamix";
+} from "@epikodelabs/streamix";
 
 describe("createSubjectBuffer", () => {
   it("peek returns done:true after completion when reader is caught up", async () => {
@@ -80,4 +80,5 @@ describe("createReplayBuffer", () => {
     expect(rb.buffer).toEqual([1, 2, 3]);
   });
 });
+
 

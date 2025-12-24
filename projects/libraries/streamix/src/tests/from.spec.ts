@@ -1,4 +1,4 @@
-import { from } from '@epikode/streamix';
+import { from } from '@epikodelabs/streamix';
 
 describe('from', () => {
 
@@ -89,3 +89,4 @@ describe('from', () => {
     });
   });
 });
+

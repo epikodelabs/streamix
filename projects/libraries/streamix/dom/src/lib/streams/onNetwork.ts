@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikode/streamix";
+import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the current network state.
@@ -118,4 +118,5 @@ export function onNetwork(): Stream<NetworkState> {
 
   return subject;
 }
+
 

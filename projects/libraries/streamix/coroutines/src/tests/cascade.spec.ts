@@ -1,5 +1,5 @@
-import { createStream } from "@epikode/streamix";
-import { cascade, coroutine } from "@epikode/streamix/coroutines";
+import { createStream } from "@epikodelabs/streamix";
+import { cascade, coroutine } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe("cascade", () => {
@@ -87,4 +87,5 @@ idescribe("cascade", () => {
     await cascaded.finalize();
   });
 });
+
 

@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@epikode/streamix";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@epikodelabs/streamix";
 import type { Coroutine } from "./coroutine";
 
 /**
@@ -143,5 +143,6 @@ export function cascade<T = any, R = any>(
 
   return coroutineLike;
 }
+
 
 

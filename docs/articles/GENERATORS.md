@@ -64,7 +64,7 @@ async function* fetchUserData(userId) {
 I still loved operators, so Streamix was the perfect fit ??? Rx-style operators applied to generator streams:
 
 ```typescript
-import { Stream, debounceTime, distinctUntilChanged } from '@epikode/streamix';
+import { Stream, debounceTime, distinctUntilChanged } from '@epikodelabs/streamix';
 
 async function* searchFeature(searchInput: Stream<string>) {
   const processed = searchInput.pipe(
@@ -201,7 +201,7 @@ Not every async operation needs another observable.
 ## ???? **Try It Yourself**
 
 ```javascript
-import { pipe, map, filter, take } from '@epikode/streamix';
+import { pipe, map, filter, take } from '@epikodelabs/streamix';
 
 async function* processData() {
   const numbers = from([1,2,3,4,5,6,7,8,9,10]).pipe(
@@ -229,7 +229,7 @@ What???s your reactive confession? Ever converted a huge RxJS pipeline into a si
 
 <p align="center">
   <strong>Ready to stream? Get started with Streamix today! ????</strong><br>
-  <a href="https://www.npmjs.com/package/@epikode/streamix">Install from NPM</a> ??? 
+  <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> ??? 
   <a href="https://github.com/actioncrew/streamix">View on GitHub</a> ??? 
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
@@ -237,4 +237,5 @@ What???s your reactive confession? Ever converted a huge RxJS pipeline into a si
 ---
 
 *Remember: Choose your tools wisely, keep it simple, and may your streams be ever readable! ???????*
+
 

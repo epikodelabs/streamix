@@ -1,4 +1,4 @@
-import { filter, from } from '@epikode/streamix';
+import { filter, from } from '@epikodelabs/streamix';
 
 describe('filter', () => {
   it('should allow values that pass the predicate', (done) => {
@@ -56,4 +56,5 @@ describe('filter', () => {
     });
   });
 });
+
 

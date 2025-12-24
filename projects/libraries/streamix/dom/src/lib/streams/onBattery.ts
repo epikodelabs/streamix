@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikode/streamix";
+import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Represents the current battery status.
@@ -110,4 +110,5 @@ export function onBattery(): Stream<BatteryState> {
   subject.name = "onBattery";
   return subject;
 }
+
 

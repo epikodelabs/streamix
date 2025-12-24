@@ -1,4 +1,4 @@
-import { compute, coroutine } from "@epikode/streamix/coroutines";
+import { compute, coroutine } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe("compute", () => {
@@ -89,4 +89,5 @@ idescribe("compute", () => {
     expect(results.length).toBe(1);
   });
 });
+
 

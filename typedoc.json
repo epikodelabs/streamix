@@ -3,7 +3,7 @@
   "out": "docs/api",
   "gitRemote": "origin",
   "gitRevision": "main",
-  "sourceLinkTemplate": "https://github.com/epikodelabs/streamix/blob/{gitRevision}/{path}#L{line}", 
+  "sourceLinkTemplate": "https://github.com/epikodelabslabs/streamix/blob/{gitRevision}/{path}#L{line}", 
   "plugin": ["typedoc-plugin-markdown"],
   "theme": "markdown",
   "hideGenerator": true,
@@ -55,4 +55,5 @@
     "*"
   ]
 }
+
 

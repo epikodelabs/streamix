@@ -5,7 +5,7 @@
 // Works on Windows by converting absolute `C:\...` specifiers to `file://` URLs.
 //
 // Usage example:
-//   node --loader @epikode/ts-test-runner/esm-loader.mjs ./node_modules/@epikode/ts-test-runner/bin/ts-jasmine-cli --spec ./path/to/test.spec.ts
+//   node --loader @epikodelabs/ts-test-runner/esm-loader.mjs ./node_modules/@epikodelabs/ts-test-runner/bin/ts-jasmine-cli --spec ./path/to/test.spec.ts
 //
 import fs from 'fs';
 import { createRequire } from 'module';
@@ -330,4 +330,5 @@ export async function load(url, context, defaultLoad) {
 
   return loadTs(url, context, defaultLoad);
 }
+
 

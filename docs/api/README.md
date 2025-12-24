@@ -1,4 +1,4 @@
-# @epikode/streamix
+# @epikodelabs/streamix
 
 ## Interfaces
 
@@ -135,4 +135,5 @@
 - [createBehaviorSubject](functions/createBehaviorSubject.md)
 - [createReplaySubject](functions/createReplaySubject.md)
 - [createSubject](functions/createSubject.md)
+
 

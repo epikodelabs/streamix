@@ -1,4 +1,4 @@
-import { catchError, from, scan } from '@epikode/streamix';
+import { catchError, from, scan } from '@epikodelabs/streamix';
 
 describe('scan', () => {
   it('should accumulate values correctly', (done) => {
@@ -42,4 +42,5 @@ describe('scan', () => {
     });
   });
 });
+
 

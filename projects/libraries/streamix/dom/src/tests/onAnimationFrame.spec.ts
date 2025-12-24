@@ -1,5 +1,5 @@
-import { map, takeWhile } from '@epikode/streamix';
-import { onAnimationFrame } from '@epikode/streamix/dom';
+import { map, takeWhile } from '@epikodelabs/streamix';
+import { onAnimationFrame } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 idescribe('onAnimationFrame', () => {
@@ -104,4 +104,5 @@ idescribe('onAnimationFrame', () => {
     expect(valuesB.length).toBeGreaterThan(0);
   });
 });
+
 

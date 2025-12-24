@@ -1,4 +1,4 @@
-import { createStream, observeOn } from "@epikode/streamix";
+import { createStream, observeOn } from "@epikodelabs/streamix";
 
 describe('observeOn', () => {
   let originalRequestIdleCallback: typeof requestIdleCallback;
@@ -136,4 +136,5 @@ describe('observeOn', () => {
     expect(values).toEqual([]);
   });
 });
+
 

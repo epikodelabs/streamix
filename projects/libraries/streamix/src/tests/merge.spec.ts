@@ -1,4 +1,4 @@
-import { from, merge } from '@epikode/streamix';
+import { from, merge } from '@epikodelabs/streamix';
 
 describe('merge', () => {
   it('should merge values from multiple sources', (done) => {
@@ -45,5 +45,6 @@ describe('merge', () => {
     })
   });
 });
+
 
 

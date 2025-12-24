@@ -1,4 +1,4 @@
-import { createSubject, from, of, take, takeUntil, throwError, timer } from '@epikode/streamix';
+import { createSubject, from, of, take, takeUntil, throwError, timer } from '@epikodelabs/streamix';
 
 describe('takeUntil', () => {
   it('should take emissions until notifier emits', (done) => {
@@ -200,4 +200,5 @@ describe('takeUntil', () => {
     // which is the primary observable effect of immediate termination.
   });
 });
+
 

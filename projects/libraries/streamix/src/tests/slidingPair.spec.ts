@@ -1,4 +1,4 @@
-import { from, slidingPair } from "@epikode/streamix";
+import { from, slidingPair } from "@epikodelabs/streamix";
 
 
 describe('slidingPair', () => {
@@ -65,4 +65,5 @@ describe('slidingPair', () => {
     });
   });
 });
+
 

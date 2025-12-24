@@ -1,4 +1,4 @@
-import { createSubject, from, map } from '@epikode/streamix';
+import { createSubject, from, map } from '@epikodelabs/streamix';
 
 describe('stream', () => {
   it('allows base streams to be consumed with for-await', async () => {
@@ -40,5 +40,6 @@ describe('stream', () => {
     expect(received).toEqual([1, 2]);
   });
 });
+
 
 

@@ -40,10 +40,10 @@ Getting started with Streamix Coroutines is simple:
 
 ```bash
 # Using npm
-npm install @epikode/streamix
+npm install @epikodelabs/streamix
 
 # Or using yarn
-yarn add @epikode/streamix
+yarn add @epikodelabs/streamix
 ```
 
 ## Your First Coroutine
@@ -51,7 +51,7 @@ yarn add @epikode/streamix
 Let's say you want to process a large list of numbers without freezing your app:
 
 ```typescript
-import { coroutine } from '@epikode/streamix';
+import { coroutine } from '@epikodelabs/streamix';
 
 // Create a background worker for heavy math
 const mathWorker = coroutine(function calculatePrimes(data: { max: number }) {
@@ -185,7 +185,7 @@ const result = await mathWorker.processTask(inputData);
 Ideal when you???re handling a series of inputs in a reactive stream:
 
 ```typescript
-import { from } from '@epikode/streamix';
+import { from } from '@epikodelabs/streamix';
 
 from([data1, data2, data3])
   .pipe(concatMap(data) => compute(mathWorker, data))
@@ -196,7 +196,7 @@ from([data1, data2, data3])
 Perfect for running multiple sequential tasks on the same worker instance without reinitializing it each time:
 
 ```typescript
-import { seize } from '@epikode/streamix';
+import { seize } from '@epikodelabs/streamix';
 
 const [seizedWorker] = await seize(mathWorker).query();
 try {
@@ -217,7 +217,7 @@ These three approaches keep your UI responsive, each excelling in a different sc
 For specialized use cases, Streamix coroutines offer powerful configuration options:
 
 ```typescript
-import { coroutine, CoroutineConfig } from '@epikode/streamix';
+import { coroutine, CoroutineConfig } from '@epikodelabs/streamix';
 
 // Create a custom configuration
 const config: CoroutineConfig = {
@@ -257,7 +257,7 @@ const output = await customWorker.processTask(inputData);
 For scenarios requiring multiple sequential operations on the same worker, use `seize`:
 
 ```typescript
-import { seize } from '@epikode/streamix';
+import { seize } from '@epikodelabs/streamix';
 
 const processSequentialTasks = async () => {
   const seizedWorker = await seize(mathWorker).query();
@@ -279,7 +279,7 @@ const processSequentialTasks = async () => {
 Chain multiple processing steps:
 
 ```typescript
-import { cascade } from '@epikode/streamix';
+import { cascade } from '@epikodelabs/streamix';
 
 // Create specialized workers for each step
 const decoder = coroutine(function decode(rawData) { /* decode logic */ });
@@ -353,4 +353,5 @@ Your users will thank you for keeping things responsive, and you'll wonder how y
 ---
 
 *Ready to make your heavy tasks feel light? Install Streamix and start with your first coroutine today. ???????*
+
 
