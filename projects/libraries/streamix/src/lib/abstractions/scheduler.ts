@@ -9,7 +9,7 @@ import { isPromiseLike } from "./operator";
  * - Errors reject the task promise but do NOT stop the queue
  * - `flush()` is microtask-stable:
  *   it resolves only after the queue stays empty
- *   across a microtask turn (prevents “flush lies”)
+ *   across a microtask turn (prevents ???flush lies???)
  *
  * Performance optimizations:
  * - Parallel arrays instead of per-task objects
@@ -32,6 +32,9 @@ export type Scheduler = {
   flush: () => Promise<void>;
 };
 
+/**
+ * Function createScheduler.
+ */
 export function createScheduler(): Scheduler {
   /**
    * Parallel arrays storing the task queue.

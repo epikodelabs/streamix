@@ -32,17 +32,29 @@ export interface CoroutineLike<T = any, R = T> extends Operator<T, R> {
 }
 
 
+/**
+ * Function cascade.
+ */
 export function cascade<A, B>(...tasks: [MaybePromise<Coroutine<A, B>>]): CoroutineLike<A, B>;
 
+/**
+ * Function cascade.
+ */
 export function cascade<A, B, C>(
   ...tasks: [MaybePromise<Coroutine<A, B>>, MaybePromise<Coroutine<B, C>>]
 ): CoroutineLike<A, C>;
 
+/**
+ * Function cascade.
+ */
 export function cascade<A, B, C, D>(
   ...tasks: [MaybePromise<Coroutine<A, B>>, MaybePromise<Coroutine<B, C>>, MaybePromise<Coroutine<C, D>>]
 ): CoroutineLike<A, D>;
 
 
+/**
+ * Function cascade.
+ */
 export function cascade<T = any, R = any>(
   ...tasks: Array<MaybePromise<Coroutine<any, any>>>
 ): CoroutineLike<T, R>;

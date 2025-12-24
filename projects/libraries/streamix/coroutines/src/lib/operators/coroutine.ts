@@ -211,6 +211,9 @@ export function coroutine(config: CoroutineConfig): <T, R>(main: MainTask<T, R>,
  * @returns {Coroutine<T, R>} A Coroutine operator.
  */
 export function coroutine<T, R>(main: MainTask<T, R>, ...functions: Function[]): Coroutine<T, R>;
+/**
+ * Function coroutine.
+ */
 export function coroutine<T, R>(
   arg1: CoroutineConfig | MainTask<T, R>,
   ...rest: Function[]
