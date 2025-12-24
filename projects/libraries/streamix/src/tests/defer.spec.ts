@@ -1,6 +1,9 @@
 import { createSubject, defer, type Stream } from '@epikode/streamix';
 
 // Mocking Stream class
+/**
+ * Function mockStream.
+ */
 export function mockStream(values: any[], completed = false, error?: Error): Stream<any> {
   const subject = createSubject<any>();
 

@@ -91,6 +91,9 @@ describe('concatMap', () => {
 });
 
 // Error Handling Stream using library's `of` for simplicity
+/**
+ * Function errorInnerStream.
+ */
 export function errorInnerStream(): Stream {
   return createStream('errorInnerStream', async function *(this: Stream) {
     throw new Error('Inner Stream Error');

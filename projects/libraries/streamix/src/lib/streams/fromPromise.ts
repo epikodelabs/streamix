@@ -61,6 +61,9 @@ export function fromPromise<T>(
   factory: CancelablePromiseFactory<T>
 ): Stream<T>;
 
+/**
+ * Function fromPromise.
+ */
 export function fromPromise<T>(
   input: MaybePromise<T> | CancelablePromiseFactory<T>
 ): Stream<T> {
