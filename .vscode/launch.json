@@ -25,10 +25,10 @@
       "runtimeExecutable": "node",
       "runtimeArgs": [
         "--loader",
-        "@actioncrew/ts-test-runner/esm-loader.mjs",
+        "@epikodelabs/ts-test-runner/esm-loader.mjs",
         "--enable-source-maps"
       ],
-      "program": "${workspaceFolder}/node_modules/@actioncrew/ts-test-runner/bin/ts-jasmine-cli",
+      "program": "${workspaceFolder}/node_modules/@epikodelabs/ts-test-runner/bin/ts-jasmine-cli",
       "args": [
         "--spec",
         "${file}"

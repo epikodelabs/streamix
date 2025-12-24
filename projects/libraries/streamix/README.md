@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/LOGO.png?raw=true" alt="Streamix Logo" width="400">
+  <img src="https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/LOGO.png?raw=true" alt="Streamix Logo" width="500">
 </p>
 
 <p align="center">
@@ -8,8 +8,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/epikodelabslabs/streamix/workflows/build/badge.svg">
-    <img src="https://github.com/epikodelabslabs/streamix/workflows/build/badge.svg" alt="Build Status">
+  <a href="https://github.com/epikodelabs/streamix/workflows/build/badge.svg">
+    <img src="https://github.com/epikodelabs/streamix/workflows/build/badge.svg" alt="Build Status">
   </a>
   <a href="https://www.npmjs.com/package/@epikodelabs%2Fstreamix">
     <img src="https://img.shields.io/npm/v/@epikodelabs%2Fstreamix.svg?style=flat-square" alt="NPM Version">
@@ -17,17 +17,17 @@
   <a href="https://www.npmjs.com/package/@epikodelabs%2Fstreamix">
     <img src="https://img.shields.io/npm/dm/@epikodelabs%2Fstreamix.svg?style=flat-square" alt="NPM Downloads">
   </a>
-  <a href="https://github.com/epikodelabslabs/streamix">
-    <img src="https://raw.githubusercontent.com/epikodelabslabs/streamix/main/projects/libraries/streamix/bundle-size.svg" alt="Bundle Size">
+  <a href="https://github.com/epikodelabs/streamix">
+    <img src="https://raw.githubusercontent.com/epikodelabs/streamix/main/projects/libraries/streamix/bundle-size.svg" alt="Bundle Size">
   </a>
-  <a href="https://codecov.io/github/epikodelabslabs/streamix" >
-    <img src="https://codecov.io/github/epikodelabslabs/streamix/graph/badge.svg?token=ITHDU7JVOI" alt="Code Coverage"/>
+  <a href="https://codecov.io/github/epikodelabs/streamix" >
+    <img src="https://codecov.io/github/epikodelabs/streamix/graph/badge.svg?token=ITHDU7JVOI" alt="Code Coverage"/>
   </a>
 </p>
 
 ---
 
-## ???? Why Streamix
+## 🧭 Why Streamix
 
 Streamix is a reactive streams library built on async generators. It focuses on a small bundle size and pull-based execution while keeping an API that feels familiar to RxJS users.
 
@@ -43,7 +43,7 @@ Streamix is a reactive streams library built on async generators. It focuses on 
 
 ---
 
-## ???? Installation
+## 📦 Installation
 
 ```bash
 # npm
@@ -58,7 +58,7 @@ pnpm add @epikodelabs/streamix
 
 ---
 
-## ??? Quick start
+## ⚡ Quick start
 
 ### Basic stream operations
 
@@ -139,7 +139,7 @@ const sub = interval(1000).subscribe(value => {
 
 ---
 
-## ???? Core concepts
+## 🧠 Core concepts
 
 ### Streams
 
@@ -212,7 +212,7 @@ console.log('result:', result);
 
 ---
 
-## ???? HTTP client
+## 🌐 HTTP client
 
 Streamix includes an HTTP client that composes well with streams:
 
@@ -244,7 +244,7 @@ for await (const activeUsers of dataStream) {
 
 ---
 
-## ???? Real-world example
+## 🧪 Real-world example
 
 Live search with API calls and basic error handling:
 
@@ -288,7 +288,7 @@ for await (const result of searchResults) {
 
 ---
 
-## ???? Available operators
+## 🧰 Available operators
 
 ### Transformation
 - `map` - Transform each value
@@ -317,7 +317,7 @@ for await (const result of searchResults) {
 
 ---
 
-## ???? Live demos
+## 🎬 Live demos
 
 - [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
 - [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
@@ -325,7 +325,7 @@ for await (const result of searchResults) {
 
 ---
 
-## ???? Generator-based architecture
+## 🧬 Generator-based architecture
 
 Unlike push-based streams, Streamix uses pull-based async generators:
 
@@ -349,7 +349,7 @@ This enables:
 
 ---
 
-## ???? Streamix vs RxJS
+## 📊 Streamix vs RxJS
 
 | Feature | Streamix | RxJS |
 |---------|----------|------|
@@ -361,16 +361,16 @@ This enables:
 
 ---
 
-## ???? Documentation and resources
+## 📚 Documentation and resources
 
-- [API Documentation](https://epikodelabslabs.github.io/streamix)
+- [API Documentation](https://epikodelabs.github.io/streamix)
 - [Blog: Exploring Streamix](https://medium.com/p/00d5467f0c01)
 - [Streamix 2.0 Updates](https://medium.com/p/a1eb9e7ce1d7)
 - [Reactive Programming Guide](https://medium.com/p/0bfc206ad41c)
 
 ---
 
-## ???? Contributing
+## 🤝 Contributing
 
 We welcome issues and pull requests. If you are new to the codebase:
 
@@ -382,7 +382,7 @@ We welcome issues and pull requests. If you are new to the codebase:
 
 ---
 
-## ???? License
+## 📄 License
 
 MIT License
 
@@ -391,12 +391,10 @@ MIT License
 <p align="center">
   <strong>Get started</strong><br>
   <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> -
-  <a href="https://github.com/epikodelabslabs/streamix">View on GitHub</a> -
+  <a href="https://github.com/epikodelabs/streamix">View on GitHub</a> -
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
 
 <p align="center">
-  ??? If Streamix is useful to you, consider giving the repo a <a href="https://github.com/epikodelabslabs/streamix">star</a> ???
+  ⭐ If Streamix is useful to you, consider giving the repo a <a href="https://github.com/epikodelabs/streamix">star</a> ⭐
 </p>
-
-

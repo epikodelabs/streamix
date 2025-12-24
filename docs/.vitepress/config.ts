@@ -15,7 +15,7 @@ export default defineConfig({
       { text: 'Home', link: '/' },
       { text: 'Changelog', link: '/CHANGELOG' },
       { text: 'API Reference', link: '/api/' },
-      { text: 'GitHub', link: 'https://github.com/actioncrew/streamix' }
+      { text: 'GitHub', link: 'https://github.com/epikodelabs/streamix' }
     ],
 
     // Sidebar configuration
@@ -49,7 +49,7 @@ export default defineConfig({
 
     // Social links
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/actioncrew/streamix' }
+      { icon: 'github', link: 'https://github.com/epikodelabs/streamix' }
     ],
 
     // Footer
