@@ -2,7 +2,7 @@
 
 > **MaybePromise**\<`T`\> = `T` \| `Promise`\<`T`\>
 
-Defined in: [abstractions/operator.ts:13](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L13)
+Defined in: [abstractions/operator.ts:13](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L13)
 
 Represents a value that can either be a synchronous return or a promise that
 resolves to the value.

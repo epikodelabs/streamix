@@ -2,7 +2,7 @@
 
 > **Subscription** = `object`
 
-Defined in: [abstractions/subscription.ts:14](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/subscription.ts#L14)
+Defined in: [abstractions/subscription.ts:14](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/subscription.ts#L14)
 
 Represents a subscription to a stream-like source.
 
@@ -20,7 +20,7 @@ Responsibilities:
 
 > `readonly` **unsubscribed**: `boolean`
 
-Defined in: [abstractions/subscription.ts:24](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/subscription.ts#L24)
+Defined in: [abstractions/subscription.ts:24](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/subscription.ts#L24)
 
 Indicates whether the subscription has been terminated.
 
@@ -36,7 +36,7 @@ for the first time.
 
 > `optional` **onUnsubscribe**: () => [`MaybePromise`](MaybePromise.md)
 
-Defined in: [abstractions/subscription.ts:55](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/subscription.ts#L55)
+Defined in: [abstractions/subscription.ts:55](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/subscription.ts#L55)
 
 Optional cleanup callback executed during unsubscription.
 
@@ -62,7 +62,7 @@ Any errors thrown by this callback are caught internally.
 
 > **unsubscribe**(): `any`
 
-Defined in: [abstractions/subscription.ts:38](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/subscription.ts#L38)
+Defined in: [abstractions/subscription.ts:38](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/subscription.ts#L38)
 
 Terminates the subscription.
 

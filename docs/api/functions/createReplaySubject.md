@@ -2,7 +2,7 @@
 
 > **createReplaySubject**\<`T`\>(`capacity?`): [`ReplaySubject`](../type-aliases/ReplaySubject.md)\<`T`\>
 
-Defined in: [subjects/replaySubject.ts:43](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/replaySubject.ts#L43)
+Defined in: [subjects/replaySubject.ts:31](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/replaySubject.ts#L31)
 
 Creates a new ReplaySubject.
 

@@ -2,7 +2,7 @@
 
 > **audit**\<`T`\>(`duration`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/audit.ts:18](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/audit.ts#L18)
+Defined in: [operators/audit.ts:18](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/audit.ts#L18)
 
 Creates a stream operator that emits the latest value from the source stream
 at most once per specified duration.

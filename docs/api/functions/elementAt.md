@@ -2,7 +2,7 @@
 
 > **elementAt**\<`T`\>(`targetIndex`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/elementAt.ts:18](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/elementAt.ts#L18)
+Defined in: [operators/elementAt.ts:18](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/elementAt.ts#L18)
 
 Creates a stream operator that emits only the single value at the specified zero-based index
 from the source stream.

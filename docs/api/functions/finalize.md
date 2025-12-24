@@ -2,7 +2,7 @@
 
 > **finalize**\<`T`\>(`callback`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [hooks/finalize.ts:16](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/hooks/finalize.ts#L16)
+Defined in: [hooks/finalize.ts:16](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/hooks/finalize.ts#L16)
 
 Creates a stream operator that invokes a finalizer callback upon stream termination.
 

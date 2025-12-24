@@ -2,7 +2,7 @@
 
 > `const` **DONE**: `object`
 
-Defined in: [abstractions/operator.ts:30](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L30)
+Defined in: [abstractions/operator.ts:30](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L30)
 
 A constant representing a completed stream result.
 

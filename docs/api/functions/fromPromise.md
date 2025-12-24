@@ -1,10 +1,12 @@
 # Function: fromPromise()
 
+Function fromPromise.
+
 ## Call Signature
 
 > **fromPromise**\<`T`\>(`promise`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/fromPromise.ts:42](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/fromPromise.ts#L42)
+Defined in: [streams/fromPromise.ts:42](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/fromPromise.ts#L42)
 
 Creates a stream that emits exactly one value and then completes.
 
@@ -50,7 +52,7 @@ A stream that emits the resolved value and then completes.
 
 > **fromPromise**\<`T`\>(`factory`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/fromPromise.ts:60](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/fromPromise.ts#L60)
+Defined in: [streams/fromPromise.ts:60](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/fromPromise.ts#L60)
 
 Creates a stream from a cancelable, lazy asynchronous factory.
 

@@ -2,7 +2,7 @@
 
 > **recurse**\<`T`\>(`condition`, `project`, `options`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/recurse.ts:40](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/recurse.ts#L40)
+Defined in: [operators/recurse.ts:40](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/recurse.ts#L40)
 
 Creates a stream operator that recursively processes values from a source stream.
 

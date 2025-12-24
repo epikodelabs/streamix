@@ -2,7 +2,7 @@
 
 > **min**\<`T`\>(`comparator?`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/min.ts:26](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/min.ts#L26)
+Defined in: [operators/min.ts:26](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/min.ts#L26)
 
 Creates a stream operator that emits the minimum value from the source stream.
 

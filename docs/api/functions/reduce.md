@@ -2,7 +2,7 @@
 
 > **reduce**\<`T`, `A`\>(`accumulator`, `seed`): [`Operator`](../type-aliases/Operator.md)\<`T`, `A`\>
 
-Defined in: [operators/reduce.ts:17](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/reduce.ts#L17)
+Defined in: [operators/reduce.ts:17](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/reduce.ts#L17)
 
 Creates a stream operator that accumulates all values from the source stream
 into a single value using a provided accumulator function.

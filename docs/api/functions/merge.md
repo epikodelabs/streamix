@@ -2,7 +2,7 @@
 
 > **merge**\<`T`, `R`\>(...`sources`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/merge.ts:18](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/merge.ts#L18)
+Defined in: [streams/merge.ts:18](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/merge.ts#L18)
 
 Merges multiple source streams into a single stream, emitting values as they arrive from any source.
 

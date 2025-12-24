@@ -2,7 +2,7 @@
 
 > **forkJoin**\<`T`, `R`\>(...`sources`): [`Stream`](../type-aliases/Stream.md)\<`T`[]\>
 
-Defined in: [streams/forkJoin.ts:10](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/forkJoin.ts#L10)
+Defined in: [streams/forkJoin.ts:10](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/forkJoin.ts#L10)
 
 Waits for all streams to complete and emits an array of their last values.
 

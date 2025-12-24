@@ -2,7 +2,7 @@
 
 > **partition**\<`T`\>(`predicate`): [`Operator`](../type-aliases/Operator.md)\<`T`, [`GroupItem`](../type-aliases/GroupItem.md)\<`T`, `"true"` \| `"false"`\>\>
 
-Defined in: [operators/partition.ts:21](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/partition.ts#L21)
+Defined in: [operators/partition.ts:21](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/partition.ts#L21)
 
 Creates a stream operator that partitions the source stream into two groups based on a predicate.
 

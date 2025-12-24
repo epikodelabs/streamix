@@ -2,7 +2,7 @@
 
 > **loop**\<`T`\>(`initialValue`, `condition`, `iterateFn`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/loop.ts:18](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/loop.ts#L18)
+Defined in: [streams/loop.ts:18](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/loop.ts#L18)
 
 Creates a stream that emits values in a loop based on a condition and an
 iteration function.

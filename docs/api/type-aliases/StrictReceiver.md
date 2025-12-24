@@ -2,7 +2,7 @@
 
 > **StrictReceiver**\<`T`\> = `Required`\<[`Receiver`](Receiver.md)\<`T`\>\> & `object`
 
-Defined in: [abstractions/receiver.ts:42](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L42)
+Defined in: [abstractions/receiver.ts:42](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L42)
 
 A fully defined, state-aware receiver with guaranteed lifecycle handlers.
 

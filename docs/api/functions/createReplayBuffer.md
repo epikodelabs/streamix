@@ -2,7 +2,7 @@
 
 > **createReplayBuffer**\<`T`\>(`capacity`): [`ReplayBuffer`](../type-aliases/ReplayBuffer.md)\<`T`\>
 
-Defined in: [primitives/buffer.ts:510](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L510)
+Defined in: [primitives/buffer.ts:511](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L511)
 
 Creates a Replay Buffer with a fixed capacity. It acts as a history stream:
 1. Buffers the last 'capacity' number of items (circular buffer).

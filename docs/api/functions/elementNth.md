@@ -2,7 +2,7 @@
 
 > **elementNth**\<`T`\>(`indexPattern`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/elementNth.ts:23](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/elementNth.ts#L23)
+Defined in: [operators/elementNth.ts:23](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/elementNth.ts#L23)
 
 Creates a stream operator that emits elements from the source stream at dynamic indices specified
 by the asynchronous index pattern function.

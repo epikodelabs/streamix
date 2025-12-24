@@ -2,7 +2,7 @@
 
 > **createQueue**(): `object`
 
-Defined in: [primitives/queue.ts:12](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/queue.ts#L12)
+Defined in: [primitives/queue.ts:12](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/queue.ts#L12)
 
 Creates an asynchronous queue that processes operations sequentially.
 Operations are guaranteed to run in the order they are enqueued, one after another.

@@ -2,7 +2,7 @@
 
 > **bufferCount**\<`T`\>(`bufferSize`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`[]\>
 
-Defined in: [operators/bufferCount.ts:11](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/bufferCount.ts#L11)
+Defined in: [operators/bufferCount.ts:11](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/bufferCount.ts#L11)
 
 Buffers a fixed number of values from the source stream and emits them as arrays,
 tracking pending and phantom values in the PipeContext.

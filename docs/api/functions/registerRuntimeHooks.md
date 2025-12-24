@@ -2,7 +2,7 @@
 
 > **registerRuntimeHooks**(`hooks`): `void`
 
-Defined in: [abstractions/hooks.ts:118](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L118)
+Defined in: [abstractions/hooks.ts:118](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L118)
 
 Registers runtime hooks globally.
 

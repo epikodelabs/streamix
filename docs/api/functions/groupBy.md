@@ -2,7 +2,7 @@
 
 > **groupBy**\<`T`, `K`\>(`keySelector`): [`Operator`](../type-aliases/Operator.md)\<`T`, [`GroupItem`](../type-aliases/GroupItem.md)\<`T`, `K`\>\>
 
-Defined in: [operators/groupBy.ts:31](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/groupBy.ts#L31)
+Defined in: [operators/groupBy.ts:31](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/groupBy.ts#L31)
 
 Creates a stream operator that groups values from the source stream by a computed key.
 

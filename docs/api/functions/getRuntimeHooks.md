@@ -2,7 +2,7 @@
 
 > **getRuntimeHooks**(): `null` \| [`StreamRuntimeHooks`](../type-aliases/StreamRuntimeHooks.md)
 
-Defined in: [abstractions/hooks.ts:127](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L127)
+Defined in: [abstractions/hooks.ts:127](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L127)
 
 Retrieves the currently registered runtime hooks.
 

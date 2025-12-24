@@ -2,7 +2,7 @@
 
 > **StreamRuntimeHooks** = `object`
 
-Defined in: [abstractions/hooks.ts:49](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L49)
+Defined in: [abstractions/hooks.ts:49](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L49)
 
 Runtime hooks for Streamix internal lifecycle events.
 
@@ -15,7 +15,7 @@ profiling, and developer tooling.
 
 > `optional` **onCreateStream**: (`info`) => `void`
 
-Defined in: [abstractions/hooks.ts:56](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L56)
+Defined in: [abstractions/hooks.ts:56](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L56)
 
 Called when a stream is created.
 
@@ -48,7 +48,7 @@ Optional stream name
 
 > `optional` **onPipeStream**: (`ctx`) => [`PipeStreamHookResult`](PipeStreamHookResult.md) \| `void`
 
-Defined in: [abstractions/hooks.ts:70](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L70)
+Defined in: [abstractions/hooks.ts:70](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L70)
 
 Called when a stream is piped.
 

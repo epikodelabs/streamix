@@ -2,7 +2,7 @@
 
 > **tap**\<`T`\>(`tapFunction`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/tap.ts:18](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/tap.ts#L18)
+Defined in: [operators/tap.ts:18](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/tap.ts#L18)
 
 Creates a stream operator that performs a side-effect for each value from the source
 stream without modifying the value.

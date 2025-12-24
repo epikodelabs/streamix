@@ -2,7 +2,7 @@
 
 > **throttle**\<`T`\>(`duration`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/throttle.ts:16](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/throttle.ts#L16)
+Defined in: [operators/throttle.ts:16](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/throttle.ts#L16)
 
 Creates a throttle operator that emits the first value immediately, then ignores subsequent
 values for the specified duration. If new values arrive during the cooldown, the

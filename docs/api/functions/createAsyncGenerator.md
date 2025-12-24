@@ -2,7 +2,7 @@
 
 > **createAsyncGenerator**\<`T`\>(`register`): `AsyncGenerator`\<`T`\>
 
-Defined in: [abstractions/stream.ts:117](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/stream.ts#L117)
+Defined in: [abstractions/stream.ts:117](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/stream.ts#L117)
 
 Creates a pull-based async generator view over a stream.
 

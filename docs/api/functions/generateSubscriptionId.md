@@ -2,7 +2,7 @@
 
 > **generateSubscriptionId**(): `string`
 
-Defined in: [abstractions/hooks.ts:108](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L108)
+Defined in: [abstractions/hooks.ts:108](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/hooks.ts#L108)
 
 Generates a unique subscription identifier.
 

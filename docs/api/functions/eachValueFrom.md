@@ -2,7 +2,7 @@
 
 > **eachValueFrom**\<`T`\>(`stream`): `AsyncGenerator`\<`T`\>
 
-Defined in: [converters/eachValueFrom.ts:26](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/converters/eachValueFrom.ts#L26)
+Defined in: [converters/eachValueFrom.ts:26](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/converters/eachValueFrom.ts#L26)
 
 Converts a `Stream` into an async generator, yielding each emitted value.
 Distinguishes between undefined values and stream completion.

@@ -2,7 +2,7 @@
 
 > **select**\<`T`\>(`indexIterator`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/select.ts:18](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/select.ts#L18)
+Defined in: [operators/select.ts:18](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/select.ts#L18)
 
 Creates a stream operator that emits only the values at the specified indices from a source stream.
 

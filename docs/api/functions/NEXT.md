@@ -2,7 +2,7 @@
 
 > **NEXT**\<`R`\>(`value`): `object`
 
-Defined in: [abstractions/operator.ts:38](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L38)
+Defined in: [abstractions/operator.ts:38](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L38)
 
 Factory function to create a normal stream result.
 

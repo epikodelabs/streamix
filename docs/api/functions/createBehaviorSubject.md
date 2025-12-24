@@ -2,7 +2,7 @@
 
 > **createBehaviorSubject**\<`T`\>(`initialValue`): [`BehaviorSubject`](../type-aliases/BehaviorSubject.md)\<`T`\>
 
-Defined in: [subjects/behaviorSubject.ts:49](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/behaviorSubject.ts#L49)
+Defined in: [subjects/behaviorSubject.ts:37](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/behaviorSubject.ts#L37)
 
 Creates a BehaviorSubject that holds a current value and emits it immediately to new subscribers.
 It maintains the latest value internally and allows synchronous access via the `snappy` getter.

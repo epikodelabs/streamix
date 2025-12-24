@@ -2,7 +2,7 @@
 
 > **createStream**\<`T`\>(`name`, `generatorFn`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [abstractions/stream.ts:341](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/stream.ts#L341)
+Defined in: [abstractions/stream.ts:341](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/stream.ts#L341)
 
 Creates a multicast stream backed by a shared async generator.
 

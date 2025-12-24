@@ -2,7 +2,7 @@
 
 > **from**\<`T`\>(`source`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/from.ts:15](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/from.ts#L15)
+Defined in: [streams/from.ts:15](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/from.ts#L15)
 
 Creates a stream from an asynchronous or synchronous iterable.
 

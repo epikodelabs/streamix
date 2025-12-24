@@ -2,7 +2,7 @@
 
 > **shareReplay**\<`T`\>(`bufferSize`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/shareReplay.ts:23](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/shareReplay.ts#L23)
+Defined in: [operators/shareReplay.ts:23](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/shareReplay.ts#L23)
 
 Creates a stream operator that shares a single subscription to the source stream
 and replays a specified number of past values to new subscribers.

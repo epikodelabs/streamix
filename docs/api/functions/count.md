@@ -2,7 +2,7 @@
 
 > **count**\<`T`\>(): [`Operator`](../type-aliases/Operator.md)\<`T`, `number`\>
 
-Defined in: [operators/count.ts:13](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/count.ts#L13)
+Defined in: [operators/count.ts:13](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/count.ts#L13)
 
 Creates a stream operator that counts the number of items emitted by the source stream.
 

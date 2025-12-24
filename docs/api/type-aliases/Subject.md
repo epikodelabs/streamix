@@ -2,7 +2,7 @@
 
 > **Subject**\<`T`\> = [`Stream`](Stream.md)\<`T`\> & `object`
 
-Defined in: [subjects/subject.ts:26](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/subject.ts#L26)
+Defined in: [subjects/subject.ts:13](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/subject.ts#L13)
 
 A `Subject` is a special type of `Stream` that can be manually pushed new values.
 It acts as both a source of values and a consumer, multicasting to multiple subscribers.

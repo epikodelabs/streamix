@@ -2,7 +2,7 @@
 
 > **of**\<`T`\>(`value`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/of.ts:15](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/of.ts#L15)
+Defined in: [streams/of.ts:15](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/of.ts#L15)
 
 Creates a stream that emits a single value and then completes.
 

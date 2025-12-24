@@ -2,7 +2,7 @@
 
 > **take**\<`T`\>(`count`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/take.ts:17](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/take.ts#L17)
+Defined in: [operators/take.ts:17](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/take.ts#L17)
 
 Creates a stream operator that emits only the first `count` values from the source stream
 and then completes.

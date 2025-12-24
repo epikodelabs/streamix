@@ -2,7 +2,7 @@
 
 > **createSubjectBuffer**\<`T`\>(): [`CyclicBuffer`](../type-aliases/CyclicBuffer.md)\<`T`\>
 
-Defined in: [primitives/buffer.ts:85](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L85)
+Defined in: [primitives/buffer.ts:86](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L86)
 
 Creates a Subject Buffer. It acts as a queuing stream:
 1. Values are buffered only if active readers are present.

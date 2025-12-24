@@ -2,7 +2,7 @@
 
 > **distinctUntilChanged**\<`T`\>(`comparator?`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/distinctUntilChanged.ts:17](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/distinctUntilChanged.ts#L17)
+Defined in: [operators/distinctUntilChanged.ts:17](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/distinctUntilChanged.ts#L17)
 
 Creates a stream operator that emits values from the source stream only if
 they are different from the previous value.

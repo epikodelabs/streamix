@@ -2,7 +2,7 @@
 
 > **skip**\<`T`\>(`count`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/skip.ts:14](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/skip.ts#L14)
+Defined in: [operators/skip.ts:14](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/skip.ts#L14)
 
 Creates a stream operator that skips the first specified number of values from the source stream.
 

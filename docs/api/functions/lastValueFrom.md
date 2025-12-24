@@ -2,7 +2,7 @@
 
 > **lastValueFrom**\<`T`\>(`stream`): `Promise`\<`T`\>
 
-Defined in: [converters/lastValueFrom.ts:23](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/converters/lastValueFrom.ts#L23)
+Defined in: [converters/lastValueFrom.ts:23](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/converters/lastValueFrom.ts#L23)
 
 Returns a promise that resolves with the last emitted value from a `Stream`.
 

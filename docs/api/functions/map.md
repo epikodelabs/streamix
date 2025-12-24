@@ -2,7 +2,7 @@
 
 > **map**\<`T`, `R`\>(`transform`): [`Operator`](../type-aliases/Operator.md)\<`T`, `R`\>
 
-Defined in: [operators/map.ts:19](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/map.ts#L19)
+Defined in: [operators/map.ts:19](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/map.ts#L19)
 
 Creates a stream operator that applies a transformation function to each value
 emitted by the source stream.

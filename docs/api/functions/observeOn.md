@@ -2,7 +2,7 @@
 
 > **observeOn**\<`T`\>(`context`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/observeOn.ts:42](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/observeOn.ts#L42)
+Defined in: [operators/observeOn.ts:42](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/observeOn.ts#L42)
 
 Creates a stream operator that schedules the emission of each value from the source
 stream on a specified JavaScript task queue.

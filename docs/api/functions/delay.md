@@ -2,7 +2,7 @@
 
 > **delay**\<`T`\>(`ms`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/delay.ts:16](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/delay.ts#L16)
+Defined in: [operators/delay.ts:16](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/delay.ts#L16)
 
 Creates a stream operator that delays the emission of each value from the source stream
 while tracking pending and phantom states.

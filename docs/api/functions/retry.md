@@ -2,7 +2,7 @@
 
 > **retry**\<`T`\>(`factory`, `maxRetries?`, `delay?`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/retry.ts:20](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/retry.ts#L20)
+Defined in: [streams/retry.ts:20](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/retry.ts#L20)
 
 Creates a stream that subscribes to a source factory and retries on error.
 

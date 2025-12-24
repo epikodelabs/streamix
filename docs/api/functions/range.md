@@ -2,7 +2,7 @@
 
 > **range**(`start`, `count`, `step?`): [`Stream`](../type-aliases/Stream.md)\<`number`\>
 
-Defined in: [streams/range.ts:17](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/range.ts#L17)
+Defined in: [streams/range.ts:17](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/range.ts#L17)
 
 Creates a stream that emits a sequence of numbers, starting from `start`,
 incrementing by `step`, and emitting a total of `count` values.

@@ -2,7 +2,7 @@
 
 > **createReceiver**\<`T`\>(`callbackOrReceiver?`): [`StrictReceiver`](../type-aliases/StrictReceiver.md)\<`T`\>
 
-Defined in: [abstractions/receiver.ts:62](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L62)
+Defined in: [abstractions/receiver.ts:62](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L62)
 
 Normalizes a receiver input (a function or an object) into a strict,
 fully-defined receiver.

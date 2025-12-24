@@ -2,7 +2,7 @@
 
 > **defaultIfEmpty**\<`T`\>(`defaultValue`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/defaultIfEmpty.ts:15](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/defaultIfEmpty.ts#L15)
+Defined in: [operators/defaultIfEmpty.ts:15](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/defaultIfEmpty.ts#L15)
 
 Creates a stream operator that emits a default value if the source stream is empty.
 

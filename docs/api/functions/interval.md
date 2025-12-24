@@ -2,7 +2,7 @@
 
 > **interval**(`intervalMs`): [`Stream`](../type-aliases/Stream.md)\<`number`\>
 
-Defined in: [streams/interval.ts:16](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/interval.ts#L16)
+Defined in: [streams/interval.ts:16](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/interval.ts#L16)
 
 Creates a stream that emits incremental numbers starting from 0 at a regular
 interval.

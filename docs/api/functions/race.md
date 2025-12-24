@@ -2,7 +2,7 @@
 
 > **race**\<`T`\>(...`streams`): [`Stream`](../type-aliases/Stream.md)\<`T`\[`number`\]\>
 
-Defined in: [streams/race.ts:20](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/race.ts#L20)
+Defined in: [streams/race.ts:20](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/race.ts#L20)
 
 Returns a stream that races multiple input streams.
 It emits values from the first stream that produces a value,

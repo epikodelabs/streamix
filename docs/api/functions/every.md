@@ -2,7 +2,7 @@
 
 > **every**\<`T`\>(`predicate`): [`Operator`](../type-aliases/Operator.md)\<`T`, `boolean`\>
 
-Defined in: [operators/every.ts:21](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/every.ts#L21)
+Defined in: [operators/every.ts:21](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/every.ts#L21)
 
 Creates a stream operator that tests if all values from the source stream satisfy a predicate.
 

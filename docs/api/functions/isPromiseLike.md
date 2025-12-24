@@ -2,7 +2,7 @@
 
 > **isPromiseLike**\<`T`\>(`value`): `value is Promise<T>`
 
-Defined in: [abstractions/operator.ts:21](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L21)
+Defined in: [abstractions/operator.ts:21](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L21)
 
 Type guard that checks whether a value behaves like a promise.
 

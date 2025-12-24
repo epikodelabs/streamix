@@ -2,7 +2,7 @@
 
 > **Stream**\<`T`\> = `AsyncIterable`\<`T`\> & `object`
 
-Defined in: [abstractions/stream.ts:23](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/stream.ts#L23)
+Defined in: [abstractions/stream.ts:23](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/stream.ts#L23)
 
 A reactive stream representing a sequence of values over time.
 

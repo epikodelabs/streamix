@@ -2,7 +2,7 @@
 
 > **createOperator**\<`T`, `R`\>(`name`, `transformFn`): [`Operator`](../type-aliases/Operator.md)\<`T`, `R`\>
 
-Defined in: [abstractions/operator.ts:78](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L78)
+Defined in: [abstractions/operator.ts:78](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L78)
 
 Creates a reusable stream operator.
 

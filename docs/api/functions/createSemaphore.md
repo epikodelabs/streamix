@@ -2,7 +2,7 @@
 
 > **createSemaphore**(`initialCount`): [`Semaphore`](../interfaces/Semaphore.md)
 
-Defined in: [primitives/semaphore.ts:41](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/semaphore.ts#L41)
+Defined in: [primitives/semaphore.ts:41](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/semaphore.ts#L41)
 
 Creates a semaphore for controlling access to a limited number of resources.
 

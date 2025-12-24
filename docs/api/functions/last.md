@@ -2,7 +2,7 @@
 
 > **last**\<`T`\>(`predicate?`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/last.ts:19](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/last.ts#L19)
+Defined in: [operators/last.ts:19](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/last.ts#L19)
 
 Creates a stream operator that emits only the last value from the source stream
 that matches an optional predicate.

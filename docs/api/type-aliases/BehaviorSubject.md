@@ -2,7 +2,7 @@
 
 > **BehaviorSubject**\<`T`\> = [`Subject`](Subject.md)\<`T`\> & `object`
 
-Defined in: [subjects/behaviorSubject.ts:28](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/behaviorSubject.ts#L28)
+Defined in: [subjects/behaviorSubject.ts:16](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/behaviorSubject.ts#L16)
 
 A BehaviorSubject is a special type of Subject that maintains
 a current value and emits that value immediately to new subscribers.

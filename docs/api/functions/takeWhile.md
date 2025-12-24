@@ -2,7 +2,7 @@
 
 > **takeWhile**\<`T`\>(`predicate`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/takeWhile.ts:21](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/takeWhile.ts#L21)
+Defined in: [operators/takeWhile.ts:21](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/takeWhile.ts#L21)
 
 Creates a stream operator that emits values from the source stream as long as
 a predicate returns true.

@@ -2,7 +2,7 @@
 
 > **max**\<`T`\>(`comparator?`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/max.ts:13](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/max.ts#L13)
+Defined in: [operators/max.ts:13](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/max.ts#L13)
 
 Creates a stream operator that emits the maximum value from the source stream.
 

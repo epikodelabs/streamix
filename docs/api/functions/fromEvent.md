@@ -2,7 +2,7 @@
 
 > **fromEvent**(`target`, `event`): [`Stream`](../type-aliases/Stream.md)\<`Event`\>
 
-Defined in: [streams/fromEvent.ts:16](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/fromEvent.ts#L16)
+Defined in: [streams/fromEvent.ts:16](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/fromEvent.ts#L16)
 
 Creates a stream that emits events of the specified type from the given EventTarget.
 

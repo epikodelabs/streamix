@@ -2,7 +2,7 @@
 
 > **createSubscription**(`onUnsubscribe?`): [`Subscription`](../type-aliases/Subscription.md)
 
-Defined in: [abstractions/subscription.ts:69](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/subscription.ts#L69)
+Defined in: [abstractions/subscription.ts:69](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/subscription.ts#L69)
 
 Creates a new `Subscription` instance.
 

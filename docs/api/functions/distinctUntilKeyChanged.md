@@ -2,7 +2,7 @@
 
 > **distinctUntilKeyChanged**\<`T`, `K`\>(`key`, `comparator?`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/distinctUntilKeyChanged.ts:18](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/distinctUntilKeyChanged.ts#L18)
+Defined in: [operators/distinctUntilKeyChanged.ts:18](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/distinctUntilKeyChanged.ts#L18)
 
 Creates a stream operator that filters out consecutive values from the source
 stream if a specified key's value has not changed.

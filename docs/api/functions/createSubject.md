@@ -2,7 +2,7 @@
 
 > **createSubject**\<`T`\>(`scheduler`): [`Subject`](../type-aliases/Subject.md)\<`T`\>
 
-Defined in: [subjects/subject.ts:68](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/subject.ts#L68)
+Defined in: [subjects/subject.ts:55](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/subject.ts#L55)
 
 Creates a new Subject instance.
 

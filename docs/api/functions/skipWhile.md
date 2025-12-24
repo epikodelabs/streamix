@@ -2,7 +2,7 @@
 
 > **skipWhile**\<`T`\>(`predicate`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/skipWhile.ts:17](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/skipWhile.ts#L17)
+Defined in: [operators/skipWhile.ts:17](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/skipWhile.ts#L17)
 
 Creates a stream operator that skips values from the source stream while a predicate returns true.
 

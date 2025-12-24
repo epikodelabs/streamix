@@ -2,7 +2,7 @@
 
 > **some**\<`T`\>(`predicate`): [`Operator`](../type-aliases/Operator.md)\<`T`, `boolean`\>
 
-Defined in: [operators/some.ts:21](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/some.ts#L21)
+Defined in: [operators/some.ts:21](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/some.ts#L21)
 
 Creates a stream operator that tests if at least one value from the source stream satisfies a predicate.
 

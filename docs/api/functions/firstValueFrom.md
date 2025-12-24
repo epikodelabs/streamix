@@ -2,7 +2,7 @@
 
 > **firstValueFrom**\<`T`\>(`stream`): `Promise`\<`T`\>
 
-Defined in: [converters/firstValueFrom.ts:24](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/converters/firstValueFrom.ts#L24)
+Defined in: [converters/firstValueFrom.ts:24](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/converters/firstValueFrom.ts#L24)
 
 Returns a promise that resolves with the first emitted value from a `Stream`.
 

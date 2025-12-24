@@ -2,7 +2,7 @@
 
 > **ReplaySubject**\<`T`\> = [`Subject`](Subject.md)\<`T`\>
 
-Defined in: [subjects/replaySubject.ts:28](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/replaySubject.ts#L28)
+Defined in: [subjects/replaySubject.ts:16](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/subjects/replaySubject.ts#L16)
 
 A type alias for a ReplaySubject, which is a type of Subject.
 

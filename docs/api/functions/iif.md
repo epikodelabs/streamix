@@ -2,7 +2,7 @@
 
 > **iif**\<`T`\>(`condition`, `trueStream`, `falseStream`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/iif.ts:16](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/iif.ts#L16)
+Defined in: [streams/iif.ts:16](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/iif.ts#L16)
 
 Creates a stream that chooses between two streams based on a condition.
 

@@ -2,7 +2,7 @@
 
 > **GroupItem**\<`T`, `K`\> = `object`
 
-Defined in: [operators/groupBy.ts:8](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/groupBy.ts#L8)
+Defined in: [operators/groupBy.ts:8](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/groupBy.ts#L8)
 
 Represents a grouped item with its original value and the associated key.
 
@@ -26,7 +26,7 @@ The type of the group key.
 
 > **value**: `T`
 
-Defined in: [operators/groupBy.ts:9](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/groupBy.ts#L9)
+Defined in: [operators/groupBy.ts:9](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/groupBy.ts#L9)
 
 ***
 
@@ -34,4 +34,4 @@ Defined in: [operators/groupBy.ts:9](https://github.com/actioncrew/streamix/blob
 
 > **key**: `K`
 
-Defined in: [operators/groupBy.ts:10](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/groupBy.ts#L10)
+Defined in: [operators/groupBy.ts:10](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/groupBy.ts#L10)

@@ -135,5 +135,3 @@
 - [createBehaviorSubject](functions/createBehaviorSubject.md)
 - [createReplaySubject](functions/createReplaySubject.md)
 - [createSubject](functions/createSubject.md)
-
-

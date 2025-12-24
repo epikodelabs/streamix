@@ -2,7 +2,7 @@
 
 > `const` **EMPTY**: [`Stream`](../type-aliases/Stream.md)\<`any`\>
 
-Defined in: [streams/EMPTY.ts:51](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/EMPTY.ts#L51)
+Defined in: [streams/EMPTY.ts:51](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/EMPTY.ts#L51)
 
 A singleton instance of an empty stream.
 

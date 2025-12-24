@@ -2,7 +2,7 @@
 
 > **startWith**\<`T`\>(`initialValue`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [hooks/startWith.ts:14](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/hooks/startWith.ts#L14)
+Defined in: [hooks/startWith.ts:14](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/hooks/startWith.ts#L14)
 
 Creates a stream operator that prepends a specified value to the beginning of the stream.
 

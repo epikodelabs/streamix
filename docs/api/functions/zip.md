@@ -2,7 +2,7 @@
 
 > **zip**\<`T`\>(...`sources`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/zip.ts:16](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/zip.ts#L16)
+Defined in: [streams/zip.ts:16](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/zip.ts#L16)
 
 Combines multiple streams by emitting an array of values (a tuple),
 only when all streams have a value ready (one-by-one, synchronized).

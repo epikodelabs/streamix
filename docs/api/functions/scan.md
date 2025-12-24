@@ -2,7 +2,7 @@
 
 > **scan**\<`T`, `R`\>(`accumulator`, `seed`): [`Operator`](../type-aliases/Operator.md)\<`T`, `R`\>
 
-Defined in: [operators/scan.ts:20](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/scan.ts#L20)
+Defined in: [operators/scan.ts:20](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/scan.ts#L20)
 
 Creates a stream operator that accumulates values from the source stream,
 emitting each intermediate accumulated result.

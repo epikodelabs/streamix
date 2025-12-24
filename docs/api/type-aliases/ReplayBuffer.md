@@ -2,7 +2,7 @@
 
 > **ReplayBuffer**\<`T`\> = [`CyclicBuffer`](CyclicBuffer.md)\<`T`\> & `object`
 
-Defined in: [primitives/buffer.ts:50](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L50)
+Defined in: [primitives/buffer.ts:51](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L51)
 
 Extends CyclicBuffer for "Replay" behavior, providing access to the history.
 

@@ -2,7 +2,7 @@
 
 > **SubjectBuffer**\<`T`\> = [`CyclicBuffer`](CyclicBuffer.md)\<`T`\> & `object`
 
-Defined in: [primitives/buffer.ts:44](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L44)
+Defined in: [primitives/buffer.ts:45](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L45)
 
 Extends CyclicBuffer for "Subject" behavior, providing access to the current value.
 

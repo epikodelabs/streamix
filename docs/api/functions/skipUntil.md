@@ -2,7 +2,7 @@
 
 > **skipUntil**\<`T`, `R`\>(`notifier`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/skipUntil.ts:23](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/skipUntil.ts#L23)
+Defined in: [operators/skipUntil.ts:23](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/skipUntil.ts#L23)
 
 Creates a stream operator that skips all values from the source stream until
 a value is emitted by a `notifier` stream.

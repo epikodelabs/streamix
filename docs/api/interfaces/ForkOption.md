@@ -1,6 +1,6 @@
 # Interface: ForkOption\<T, R\>
 
-Defined in: [operators/fork.ts:14](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/fork.ts#L14)
+Defined in: [operators/fork.ts:14](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/fork.ts#L14)
 
 Represents a conditional branch for the `fork` operator.
 
@@ -28,7 +28,7 @@ The type of values emitted by the handler and output stream.
 
 > **on**: (`value`, `index`) => [`MaybePromise`](../type-aliases/MaybePromise.md)\<`boolean`\>
 
-Defined in: [operators/fork.ts:22](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/fork.ts#L22)
+Defined in: [operators/fork.ts:22](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/fork.ts#L22)
 
 Predicate function to determine if this option should handle a value.
 
@@ -58,7 +58,7 @@ A boolean or a `Promise<boolean>` indicating whether this option matches.
 
 > **handler**: (`value`) => [`Stream`](../type-aliases/Stream.md)\<`R`\> \| [`MaybePromise`](../type-aliases/MaybePromise.md)\<`R`[]\> \| [`MaybePromise`](../type-aliases/MaybePromise.md)\<`R`\>
 
-Defined in: [operators/fork.ts:35](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/fork.ts#L35)
+Defined in: [operators/fork.ts:35](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/fork.ts#L35)
 
 Handler function called for values that match the predicate.
 

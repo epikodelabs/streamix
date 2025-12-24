@@ -2,7 +2,7 @@
 
 > **Operator**\<`T`, `R`\> = `object`
 
-Defined in: [abstractions/operator.ts:49](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L49)
+Defined in: [abstractions/operator.ts:49](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L49)
 
 A stream operator that transforms a value from an input stream to an output stream.
 
@@ -29,7 +29,7 @@ The type of the value being produced by the operator.
 
 > `optional` **name**: `string`
 
-Defined in: [abstractions/operator.ts:53](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L53)
+Defined in: [abstractions/operator.ts:53](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L53)
 
 An optional name for the operator, useful for debugging.
 
@@ -39,7 +39,7 @@ An optional name for the operator, useful for debugging.
 
 > **type**: `"operator"`
 
-Defined in: [abstractions/operator.ts:57](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L57)
+Defined in: [abstractions/operator.ts:57](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L57)
 
 A type discriminator to identify this object as an operator.
 
@@ -49,7 +49,7 @@ A type discriminator to identify this object as an operator.
 
 > **apply**: (`source`) => `AsyncIterator`\<`R`\>
 
-Defined in: [abstractions/operator.ts:63](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L63)
+Defined in: [abstractions/operator.ts:63](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/operator.ts#L63)
 
 The core function that defines the operator's transformation logic. It takes an
 asynchronous iterator of type `T` and returns a new asynchronous iterator of type `R`.

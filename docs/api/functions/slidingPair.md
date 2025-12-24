@@ -2,7 +2,7 @@
 
 > **slidingPair**\<`T`\>(): [`Operator`](../type-aliases/Operator.md)\<`T`, \[`undefined` \| `T`, `T`\]\>
 
-Defined in: [operators/slidingPair.ts:18](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/slidingPair.ts#L18)
+Defined in: [operators/slidingPair.ts:18](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/slidingPair.ts#L18)
 
 Creates a stream operator that emits pairs of values from the source stream,
 where each pair consists of the previous and the current value.

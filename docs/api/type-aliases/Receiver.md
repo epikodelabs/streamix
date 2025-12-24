@@ -2,7 +2,7 @@
 
 > **Receiver**\<`T`\> = `object`
 
-Defined in: [abstractions/receiver.ts:14](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L14)
+Defined in: [abstractions/receiver.ts:14](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L14)
 
 Defines a receiver interface for handling a stream's lifecycle events.
 
@@ -26,7 +26,7 @@ The type of the value handled by the receiver's `next` method.
 
 > `optional` **next**: (`value`) => [`MaybePromise`](MaybePromise.md)
 
-Defined in: [abstractions/receiver.ts:19](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L19)
+Defined in: [abstractions/receiver.ts:19](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L19)
 
 A function called for each new value emitted by the stream.
 
@@ -48,7 +48,7 @@ The value emitted by the stream.
 
 > `optional` **error**: (`err`) => [`MaybePromise`](MaybePromise.md)
 
-Defined in: [abstractions/receiver.ts:24](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L24)
+Defined in: [abstractions/receiver.ts:24](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L24)
 
 A function called if the stream encounters an error.
 
@@ -70,7 +70,7 @@ The error that occurred.
 
 > `optional` **complete**: () => [`MaybePromise`](MaybePromise.md)
 
-Defined in: [abstractions/receiver.ts:28](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L28)
+Defined in: [abstractions/receiver.ts:28](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/receiver.ts#L28)
 
 A function called when the stream has completed successfully and will emit no more values.
 

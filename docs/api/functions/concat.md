@@ -2,7 +2,7 @@
 
 > **concat**\<`T`, `R`\>(...`sources`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/concat.ts:19](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/concat.ts#L19)
+Defined in: [streams/concat.ts:19](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/concat.ts#L19)
 
 Creates a stream that subscribes to multiple streams in sequence.
 

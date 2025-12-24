@@ -2,7 +2,7 @@
 
 > **catchError**\<`T`\>(`handler`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/catchError.ts:22](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/catchError.ts#L22)
+Defined in: [operators/catchError.ts:22](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/catchError.ts#L22)
 
 Creates a stream operator that catches errors from the source stream and handles them.
 

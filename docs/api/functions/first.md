@@ -2,7 +2,7 @@
 
 > **first**\<`T`\>(`predicate?`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/first.ts:22](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/first.ts#L22)
+Defined in: [operators/first.ts:22](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/first.ts#L22)
 
 Creates a stream operator that emits only the first element from the source stream
 that matches an optional predicate.

@@ -2,7 +2,7 @@
 
 > **fork**\<`T`, `R`\>(...`options`): [`Operator`](../type-aliases/Operator.md)\<`T`, `R`\>
 
-Defined in: [operators/fork.ts:59](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/fork.ts#L59)
+Defined in: [operators/fork.ts:59](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/fork.ts#L59)
 
 Creates a stream operator that routes each source value through a specific handler
 based on matching predicates defined in the provided `ForkOption`s.

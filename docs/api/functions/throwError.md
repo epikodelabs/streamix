@@ -2,7 +2,7 @@
 
 > **throwError**\<`T`\>(`message`): [`Operator`](../type-aliases/Operator.md)\<`T`, `never`\>
 
-Defined in: [operators/throwError.ts:17](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/throwError.ts#L17)
+Defined in: [operators/throwError.ts:17](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/throwError.ts#L17)
 
 Creates a stream operator that immediately throws an error with the provided message.
 

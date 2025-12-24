@@ -2,7 +2,7 @@
 
 > **switchMap**\<`T`, `R`\>(`project`): [`Operator`](../type-aliases/Operator.md)\<`T`, `R`\>
 
-Defined in: [operators/switchMap.ts:27](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/switchMap.ts#L27)
+Defined in: [operators/switchMap.ts:27](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/switchMap.ts#L27)
 
 Creates a stream operator that maps each value from the source stream to a new inner stream
 and "switches" to emitting values from the most recent inner stream, canceling the previous one.

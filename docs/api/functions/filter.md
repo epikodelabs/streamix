@@ -2,7 +2,7 @@
 
 > **filter**\<`T`\>(`predicateOrValue`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/filter.ts:19](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/filter.ts#L19)
+Defined in: [operators/filter.ts:19](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/filter.ts#L19)
 
 Creates a stream operator that filters values emitted by the source stream.
 

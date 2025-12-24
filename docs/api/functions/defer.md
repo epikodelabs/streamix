@@ -2,7 +2,7 @@
 
 > **defer**\<`T`\>(`factory`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/defer.ts:17](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/defer.ts#L17)
+Defined in: [streams/defer.ts:17](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/defer.ts#L17)
 
 Creates a stream that defers the creation of an inner stream until it is
 subscribed to.

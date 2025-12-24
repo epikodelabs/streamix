@@ -2,7 +2,7 @@
 
 > **delayUntil**\<`T`, `R`\>(`notifier`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/delayUntil.ts:21](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/delayUntil.ts#L21)
+Defined in: [operators/delayUntil.ts:21](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/delayUntil.ts#L21)
 
 Creates a stream operator that delays the emission of values from the source stream
 until a separate `notifier` stream emits at least one value.

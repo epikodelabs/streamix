@@ -2,7 +2,7 @@
 
 > **withLatestFrom**\<`T`, `R`\>(...`streams`): [`Operator`](../type-aliases/Operator.md)\<`T`, \[`T`, `...R[]`\]\>
 
-Defined in: [operators/withLatestFrom.ts:34](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/withLatestFrom.ts#L34)
+Defined in: [operators/withLatestFrom.ts:25](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/withLatestFrom.ts#L25)
 
 Creates a stream operator that combines the source stream with the latest values
 from other provided streams.

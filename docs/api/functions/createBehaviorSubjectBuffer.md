@@ -2,7 +2,7 @@
 
 > **createBehaviorSubjectBuffer**\<`T`\>(`initialValue?`): [`SubjectBuffer`](../type-aliases/SubjectBuffer.md)\<`T`\>
 
-Defined in: [primitives/buffer.ts:297](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L297)
+Defined in: [primitives/buffer.ts:298](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L298)
 
 Creates a BehaviorSubject Buffer. It extends the Subject Buffer by:
 1. Storing the single latest value (or error).

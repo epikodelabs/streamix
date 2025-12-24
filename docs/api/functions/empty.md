@@ -2,7 +2,7 @@
 
 > **empty**\<`T`\>(): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/EMPTY.ts:23](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/EMPTY.ts#L23)
+Defined in: [streams/EMPTY.ts:23](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/EMPTY.ts#L23)
 
 A singleton instance of an empty stream.
 

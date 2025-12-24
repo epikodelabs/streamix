@@ -2,7 +2,7 @@
 
 > **ignoreElements**\<`T`\>(): [`Operator`](../type-aliases/Operator.md)\<`T`, `never`\>
 
-Defined in: [operators/ignoreElements.ts:14](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/ignoreElements.ts#L14)
+Defined in: [operators/ignoreElements.ts:14](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/ignoreElements.ts#L14)
 
 Creates a stream operator that ignores all values emitted by the source stream.
 

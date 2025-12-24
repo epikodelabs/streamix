@@ -2,7 +2,7 @@
 
 > **endWith**\<`T`\>(`finalValue`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [hooks/endWith.ts:13](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/hooks/endWith.ts#L13)
+Defined in: [hooks/endWith.ts:13](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/hooks/endWith.ts#L13)
 
 Creates a stream operator that emits a final, specified value after the source stream has completed.
 

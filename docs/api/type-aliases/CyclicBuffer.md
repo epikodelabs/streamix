@@ -2,7 +2,7 @@
 
 > **CyclicBuffer**\<`T`\> = `object`
 
-Defined in: [primitives/buffer.ts:24](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L24)
+Defined in: [primitives/buffer.ts:25](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L25)
 
 Core interface for a buffer that supports concurrent reading and writing.
 It models an asynchronous iterable stream.
@@ -19,7 +19,7 @@ It models an asynchronous iterable stream.
 
 > **write**(`value`): `Promise`\<`void`\>
 
-Defined in: [primitives/buffer.ts:26](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L26)
+Defined in: [primitives/buffer.ts:27](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L27)
 
 Writes a value to the buffer, making it available for readers.
 
@@ -39,7 +39,7 @@ Writes a value to the buffer, making it available for readers.
 
 > **error**(`err`): `Promise`\<`void`\>
 
-Defined in: [primitives/buffer.ts:28](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L28)
+Defined in: [primitives/buffer.ts:29](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L29)
 
 Writes an error to the buffer, which will be thrown by readers.
 
@@ -59,7 +59,7 @@ Writes an error to the buffer, which will be thrown by readers.
 
 > **read**(`readerId`): `Promise`\<`IteratorResult`\<`T`, `void`\>\>
 
-Defined in: [primitives/buffer.ts:30](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L30)
+Defined in: [primitives/buffer.ts:31](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L31)
 
 Reads the next available item, waiting if the buffer is empty.
 
@@ -79,7 +79,7 @@ Reads the next available item, waiting if the buffer is empty.
 
 > **peek**(`readerId`): `Promise`\<`IteratorResult`\<`T`, `void`\>\>
 
-Defined in: [primitives/buffer.ts:32](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L32)
+Defined in: [primitives/buffer.ts:33](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L33)
 
 Peeks at the next available item without consuming it.
 
@@ -99,7 +99,7 @@ Peeks at the next available item without consuming it.
 
 > **complete**(): `Promise`\<`void`\>
 
-Defined in: [primitives/buffer.ts:34](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L34)
+Defined in: [primitives/buffer.ts:35](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L35)
 
 Completes the buffer, signaling readers that no more items will arrive.
 
@@ -113,7 +113,7 @@ Completes the buffer, signaling readers that no more items will arrive.
 
 > **attachReader**(): `Promise`\<`number`\>
 
-Defined in: [primitives/buffer.ts:36](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L36)
+Defined in: [primitives/buffer.ts:37](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L37)
 
 Registers a new reader and returns its unique ID.
 
@@ -127,7 +127,7 @@ Registers a new reader and returns its unique ID.
 
 > **detachReader**(`readerId`): `Promise`\<`void`\>
 
-Defined in: [primitives/buffer.ts:38](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L38)
+Defined in: [primitives/buffer.ts:39](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L39)
 
 Removes a reader and may trigger buffer pruning/memory cleanup.
 
@@ -147,7 +147,7 @@ Removes a reader and may trigger buffer pruning/memory cleanup.
 
 > **completed**(`readerId`): `boolean`
 
-Defined in: [primitives/buffer.ts:40](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L40)
+Defined in: [primitives/buffer.ts:41](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/primitives/buffer.ts#L41)
 
 Checks if the buffer has completed or errored for a specific reader.
 

@@ -2,7 +2,7 @@
 
 > **combineLatest**\<`T`\>(...`sources`): [`Stream`](../type-aliases/Stream.md)\<`T`\>
 
-Defined in: [streams/combineLatest.ts:17](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/combineLatest.ts#L17)
+Defined in: [streams/combineLatest.ts:17](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/combineLatest.ts#L17)
 
 Combines multiple streams and emits a tuple containing the latest values
 from each stream whenever any of the source streams emits a new value.

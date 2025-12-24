@@ -2,7 +2,7 @@
 
 > **unique**\<`T`, `K`\>(`keySelector?`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/unique.ts:20](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/unique.ts#L20)
+Defined in: [operators/unique.ts:20](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/unique.ts#L20)
 
 Creates a stream operator that emits only distinct values from the source stream.
 

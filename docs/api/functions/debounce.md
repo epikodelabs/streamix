@@ -2,7 +2,7 @@
 
 > **debounce**\<`T`\>(`duration`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/debounce.ts:16](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/debounce.ts#L16)
+Defined in: [operators/debounce.ts:16](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/debounce.ts#L16)
 
 Creates a stream operator that emits the most recent value from the source stream
 only after a specified duration has passed without another new value.

@@ -2,7 +2,7 @@
 
 > **timer**(`delayMs?`, `intervalMs?`): [`Stream`](../type-aliases/Stream.md)\<`number`\>
 
-Defined in: [streams/timer.ts:15](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/timer.ts#L15)
+Defined in: [streams/timer.ts:15](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/timer.ts#L15)
 
 Creates a timer stream that emits numbers starting from 0.
 

@@ -2,7 +2,7 @@
 
 > **concatMap**\<`T`, `R`\>(`project`): [`Operator`](../type-aliases/Operator.md)\<`T`, `R`\>
 
-Defined in: [operators/concatMap.ts:24](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/concatMap.ts#L24)
+Defined in: [operators/concatMap.ts:24](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/concatMap.ts#L24)
 
 Creates a stream operator that maps each value from the source stream to a new
 inner stream (or value/array/promise) and flattens all inner streams sequentially.

@@ -2,7 +2,7 @@
 
 > **fromAny**\<`R`\>(`value`): [`Stream`](../type-aliases/Stream.md)\<`R`\>
 
-Defined in: [converters/fromAny.ts:21](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/converters/fromAny.ts#L21)
+Defined in: [converters/fromAny.ts:21](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/converters/fromAny.ts#L21)
 
 Converts various value types into a Stream.
 

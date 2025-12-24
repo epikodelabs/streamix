@@ -2,7 +2,7 @@
 
 > **CancelablePromiseFactory**\<`T`\> = (`signal`) => [`MaybePromise`](MaybePromise.md)\<`T`\>
 
-Defined in: [streams/fromPromise.ts:12](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/streams/fromPromise.ts#L12)
+Defined in: [streams/fromPromise.ts:12](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/streams/fromPromise.ts#L12)
 
 Factory for producing a value or promise that supports cooperative cancellation.
 

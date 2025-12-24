@@ -2,7 +2,7 @@
 
 > **Scheduler** = `object`
 
-Defined in: [abstractions/scheduler.ts:19](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/scheduler.ts#L19)
+Defined in: [abstractions/scheduler.ts:19](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/scheduler.ts#L19)
 
 Functional Scheduler
 
@@ -12,7 +12,7 @@ Guarantees:
 - Errors reject the task promise but do NOT stop the queue
 - `flush()` is microtask-stable:
   it resolves only after the queue stays empty
-  across a microtask turn (prevents “flush lies”)
+  across a microtask turn (prevents ???flush lies???)
 
 Performance optimizations:
 - Parallel arrays instead of per-task objects
@@ -25,7 +25,7 @@ Performance optimizations:
 
 > **enqueue**: \<`T`\>(`fn`) => `Promise`\<`T`\>
 
-Defined in: [abstractions/scheduler.ts:26](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/scheduler.ts#L26)
+Defined in: [abstractions/scheduler.ts:26](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/scheduler.ts#L26)
 
 Enqueue a task for serialized execution.
 
@@ -54,7 +54,7 @@ The returned promise resolves or rejects with the task result.
 
 > **flush**: () => `Promise`\<`void`\>
 
-Defined in: [abstractions/scheduler.ts:32](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/scheduler.ts#L32)
+Defined in: [abstractions/scheduler.ts:32](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/abstractions/scheduler.ts#L32)
 
 Resolves when the scheduler becomes idle and
 remains idle across a microtask boundary.

@@ -2,7 +2,7 @@
 
 > **takeUntil**\<`T`, `R`\>(`notifier`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/takeUntil.ts:22](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/takeUntil.ts#L22)
+Defined in: [operators/takeUntil.ts:22](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/takeUntil.ts#L22)
 
 Creates a stream operator that emits all values from the source stream until
 a value is emitted by a `notifier` stream.

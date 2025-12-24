@@ -2,7 +2,7 @@
 
 > **expand**\<`T`\>(`project`, `options`): [`Operator`](../type-aliases/Operator.md)\<`T`, `T`\>
 
-Defined in: [operators/expand.ts:22](https://github.com/actioncrew/streamix/blob/main/projects/libraries/streamix/src/lib/operators/expand.ts#L22)
+Defined in: [operators/expand.ts:22](https://github.com/epikodelabslabs/streamix/blob/main/projects/libraries/streamix/src/lib/operators/expand.ts#L22)
 
 Creates a stream operator that recursively expands each emitted value.
 
