@@ -20,30 +20,24 @@ jobs:
       id-token: write
 
     steps:
-      # 1️⃣ Checkout repo
+      # 1 Checkout repo
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2️⃣ Setup Node.js
+      # 2 Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      # 3️⃣ Install dependencies
+      # 3 Install dependencies
       - name: Install dependencies
-        run: npm i
+        run: npm ci
 
-      # 4️⃣ Copy additional markdown files
-      - name: Copy additional docs
-        run: |
-          mkdir -p docs
-          cp docs/articles/*.md docs/ || true
-
-      # 5️⃣ Generate Typedoc Markdown for API
+      # 4 Generate Typedoc Markdown for API
       - name: Generate API docs
         run: |
           npx typedoc \
@@ -52,49 +46,60 @@ jobs:
             --hideBreadcrumbs \
             --hidePageHeader
 
-      # 6️⃣ Add examples to markdown files using a Node.js script
-      - name: Add examples to docs
-        run: node ./add-examples.js
-
-      # 7️⃣ Rename main API README.md to index.md
+      # 5 Rename main API README.md to index.md
       - name: Rename API README to index
         run: |
           if [ -f docs/api/README.md ]; then
             mv docs/api/README.md docs/api/index.md
           fi
 
-      # 8️⃣ Replace internal README links in API docs
+      # 6 Replace internal README links in API docs
       - name: Fix README links
         run: |
           find docs/api -name '*.md' -exec sed -i \
             -e 's|\(\]\)(\.\./README.md)|\1(./)|g' \
             -e 's|\(\]\)(\.\./\.\./README.md)|\1(../../)|g' {} +
 
-      # 9️⃣ Use main README as homepage and link to API folder
+      # 7 Use main README as homepage and link to API folder
       - name: Create site index.md
         run: |
-          cp README.md docs/index.md
+          cp docs/README.md docs/index.md
           echo "" >> docs/index.md
           echo "## API Reference" >> docs/index.md
           echo "Check the detailed [API Reference here](./api/)." >> docs/index.md
 
-      # 🔟 Build VitePress site
-      - name: Build documentation site
-        run: npx vitepress build docs --ignoreDeadLinks
+      # 8 Fix absolute links in all markdown files to be relative
+      - name: Fix absolute links in markdown files
+        run: |
+          find docs -name '*.md' -exec sed -i \
+            -e 's|](/|](./|g' \
+            -e 's|](./http|](http|g' {} +
 
-      # 1️⃣1️⃣ Setup Pages
+      # 9 Build VitePress site
+      - name: Build documentation site
+        run: npx vitepress build docs --config ./vitepress.config.ts --ignoreDeadLinks
+
+      # 10 Fix absolute paths in built files
+      - name: Fix absolute paths
+        run: node scripts/rewrite-vitepress-base.mjs
+
+      # 11 Create .nojekyll file for GitHub Pages
+      - name: Create .nojekyll file
+        run: touch docs/.vitepress/dist/.nojekyll
+
+      # 12 Setup Pages
       - name: Setup Pages
         uses: actions/configure-pages@v4
         if: github.ref == 'refs/heads/main'
 
-      # 1️⃣2️⃣ Upload Pages artifact
+      # 13 Upload Pages artifact
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@main
         if: github.ref == 'refs/heads/main'
         with:
           path: docs/.vitepress/dist
 
-      # 1️⃣3️⃣ Deploy to GitHub Pages
+      # 14 Deploy to GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
