@@ -43,16 +43,29 @@
       ]
     }
   },
+  "exclude": [
+    "node_modules",
+    "bower_components",
+    "jspm_packages",
+    "dist",
+    "out-tsc",
+    "**/*.spec.ts"
+  ],
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,
     "strictInjectionParameters": true,
     "strictInputAccessModifiers": true,
     "strictTemplates": true
   },
-    "ts-node": {
+  "ts-node": {
     "esm": true,
     "experimentalSpecifierResolution": "node"
-  }
+  },
+  "references": [
+    {
+      "path": "projects/libraries/streamix/tsconfig.spec.json"
+    }
+  ]
 }
 
 
