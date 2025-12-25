@@ -95,10 +95,6 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
       }
     });
 
-    Object.assign(subscription, {
-      value: () => readerLatestValue
-    });
-
     return subscription;
   };
 

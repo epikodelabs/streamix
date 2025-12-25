@@ -115,10 +115,6 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
       }
     });
 
-    Object.assign(subscription, {
-      value: () => latestValue
-    });
-
     return subscription;
   };
 
