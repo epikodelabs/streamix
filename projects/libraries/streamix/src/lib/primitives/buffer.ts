@@ -1,7 +1,5 @@
-// Assuming these imports are available from your project structure
-// Assuming these imports are available from your project structure
 import { isPromiseLike, type MaybePromise } from "../abstractions";
-import { createLock, createSemaphore, type ReleaseFn } from "../primitives";
+import { createLock, createSemaphore } from "../primitives";
 
 /** Unique Symbol used to identify an ErrorMarker object within the buffer. */
 const ERROR_SYMBOL = Symbol('__ERROR_MARKER');
@@ -68,9 +66,8 @@ export function createNotifier() {
     signal: () => waitingResolvers.shift()?.(),
     /** Signals all waiting readers. */
     signalAll: () => { 
-      const resolvers = waitingResolvers;
-      waitingResolvers = [];
-      resolvers.forEach(r => r());
+      waitingResolvers.forEach(r => r());
+      waitingResolvers.length = 0;
     }
   };
 }
@@ -95,23 +92,22 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
   let isCompleted = false;
   let hasError = false;
   let baseIndex = 0;
+  let hasReaders = false;
 
   /** Removes consumed items from the buffer to reclaim memory. */
-  const pruneBuffer = () => {
-    if (buffer.length === 0) return;
-
-    // If no readers, reset state
-    if (readers.size === 0) {
-      baseIndex += buffer.length;
-      buffer.length = 0;
+  const pruneBuffer = (): void => {
+    if (buffer.length === 0 || !hasReaders) {
+      if (buffer.length > 0) {
+        baseIndex += buffer.length;
+        buffer.length = 0;
+      }
       return;
     }
 
     // Find the oldest unread index across all active readers
     let minNext = Infinity;
     for (const reader of readers.values()) {
-      if (!reader.isActive) continue;
-      if (reader.nextIndex < minNext) {
+      if (reader.isActive && reader.nextIndex < minNext) {
         minNext = reader.nextIndex;
       }
     }
@@ -125,15 +121,15 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     }
   };
 
-  const write = async (item: T): Promise<void> => {
+  const write = async (value: T): Promise<void> => {
     const release = await lock();
     try {
       if (isCompleted) throw new Error("Cannot write to completed buffer");
       if (hasError) throw new Error("Cannot write after error");
       
-      if (readers.size === 0) return;
+      if (!hasReaders) return;
 
-      buffer.push(item);
+      buffer.push(value);
       notifier.signalAll();
     } finally {
       release();
@@ -147,7 +143,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
       
       hasError = true;
       
-      if (readers.size > 0) {
+      if (hasReaders) {
         buffer.push(createErrorMarker(err));
       }
       notifier.signalAll();
@@ -165,6 +161,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
         nextIndex: baseIndex + buffer.length,
         isActive: true
       });
+      hasReaders = true;
       return readerId;
     } finally {
       release();
@@ -178,6 +175,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
       if (reader) {
         reader.isActive = false;
         readers.delete(readerId);
+        hasReaders = readers.size > 0;
         pruneBuffer();
       }
     } finally {
@@ -187,17 +185,11 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
 
   const read = async (readerId: number): Promise<IteratorResult<T, void>> => {
     while (true) {
-      let release: ReleaseFn | undefined;
-      let result: IteratorResult<T, void> | undefined;
-      let shouldWait = false;
-      
-      release = await lock();
-      
+      const release = await lock();
       try {
         const reader = readers.get(readerId);
         if (!reader || !reader.isActive) {
-          result = { done: true, value: undefined };
-          return result;
+          return { done: true, value: undefined };
         }
 
         const availableEnd = baseIndex + buffer.length;
@@ -211,19 +203,18 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
             throw item[ERROR_SYMBOL];
           }
           
-          result = { value: item as T, done: false };
-        } else if (isCompleted) {
-          result = { done: true, value: undefined };
-        } else {
-          shouldWait = true;
+          return { value: item as T, done: false };
+        }
+
+        if (isCompleted) {
+          return { done: true, value: undefined };
         }
       } finally {
         release();
       }
-      
-      if (result) return result;
-      // Optimization: release lock before awaiting signal
-      if (shouldWait) await notifier.wait();
+
+      // Wait for notification outside the lock
+      await notifier.wait();
     }
   };
 
@@ -298,7 +289,6 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
 export function createBehaviorSubjectBuffer<T = any>(
   initialValue?: MaybePromise<T>
 ): SubjectBuffer<T> {
-  // Uses the fixed Subject buffer for handling subsequent writes
   const subject = createSubjectBuffer<T>();
   const hasInitial = arguments.length > 0;
   
@@ -312,191 +302,200 @@ export function createBehaviorSubjectBuffer<T = any>(
     initPromise: null as Promise<void> | null
   };
 
-  type ReaderState = {
-    // True if the reader still needs to read the initial snapshot value
-    initialPending: boolean; 
+  const behaviorReaders = new Map<number, {
+    initialPending: boolean;
     initialValue?: BufferItem;
-  };
+  }>();
 
-  const behaviorReaders = new Map<number, ReaderState>();
   const lock = createLock();
 
   // Handle async initialization
-  if (hasInitial && isPromiseLike(initialValue)) {
-    state.initPromise = initialValue.then(
-      (resolved) => {
-        state.currentValue = resolved as T;
-        state.hasCurrentValue = true;
-      },
-      (error) => {
-        state.hasError = true;
-        state.isCompleted = true;
-        state.currentValue = createErrorMarker(error as Error);
-        state.hasCurrentValue = true;
-      }
-    ).finally(() => {
-      state.initPromise = null;
-    });
-  } else if (hasInitial) {
-    state.currentValue = initialValue as T;
-    state.hasCurrentValue = true;
+  if (hasInitial) {
+    if (isPromiseLike(initialValue)) {
+      state.initPromise = (async () => {
+        try {
+          state.currentValue = await initialValue as T;
+          state.hasCurrentValue = true;
+        } catch (error) {
+          state.hasError = true;
+          state.isCompleted = true;
+          state.currentValue = createErrorMarker(error as Error);
+          state.hasCurrentValue = true;
+        } finally {
+          state.initPromise = null;
+        }
+      })();
+    } else {
+      state.currentValue = initialValue as T;
+      state.hasCurrentValue = true;
+    }
   }
 
-  const ensureInit = async () => {
+  const ensureInit = async (): Promise<void> => {
     if (state.initPromise) await state.initPromise;
   };
 
-  return {
-    async write(value: T): Promise<void> {
-      await ensureInit();
-      const release = await lock();
-      try {
-        if (state.isCompleted) throw new Error("Cannot write to completed buffer");
-        if (state.hasError) throw new Error("Cannot write after error");
+  const write = async (value: T): Promise<void> => {
+    await ensureInit();
+    const release = await lock();
+    try {
+      if (state.isCompleted) throw new Error("Cannot write to completed buffer");
+      if (state.hasError) throw new Error("Cannot write after error");
 
-        state.currentValue = value;
-        state.hasCurrentValue = true;
-        
-        // Update pending initial values to latest
-        behaviorReaders.forEach(readerState => {
-          if (readerState.initialPending) {
-            readerState.initialValue = value;
-          }
-        });
-        
-        if (behaviorReaders.size > 0) {
-          await subject.write(value);
-        }
-      } finally {
-        release();
-      }
-    },
-
-    async error(err: Error): Promise<void> {
-      await ensureInit();
-      const release = await lock();
-      try {
-        if (state.isCompleted) throw new Error("Cannot error a completed buffer");
-        
-        state.hasError = true;
-        state.isCompleted = true;
-
-        const errorItem = createErrorMarker(err);
-        state.currentValue = errorItem;
-        state.hasCurrentValue = true;
-        
-        behaviorReaders.forEach(readerState => {
-          if (readerState.initialPending) {
-            readerState.initialValue = errorItem;
-          }
-        });
-        
-        await subject.error(err);
-      } finally {
-        release();
-      }
-    },
-
-    async attachReader(): Promise<number> {
-      await ensureInit();
-      const release = await lock();
-      try {
-        const readerId = await subject.attachReader();
-
-        const snapshot = state.hasCurrentValue ? state.currentValue : undefined;
-        // Reader needs the initial value if we have one AND the stream hasn't already errored/completed
-        const initialPending = state.hasCurrentValue && (!state.isCompleted || state.hasError); 
-
-        behaviorReaders.set(readerId, {
-          initialPending,
-          initialValue: snapshot
-        });
-
-        return readerId;
-      } finally {
-        release();
-      }
-    },
-
-    async detachReader(readerId: number): Promise<void> {
-      await ensureInit();
-      const release = await lock();
-      try {
-        behaviorReaders.delete(readerId);
-        await subject.detachReader(readerId);
-      } finally {
-        release();
-      }
-    },
-
-    async read(readerId: number): Promise<IteratorResult<T, void>> {
-      await ensureInit();
-      const release = await lock();
+      state.currentValue = value;
+      state.hasCurrentValue = true;
       
-      try {
-        const readerState = behaviorReaders.get(readerId);
-        if (readerState?.initialPending) {
-          readerState.initialPending = false;
-
-          if (readerState.initialValue !== undefined) {
-            if (isErrorMarker(readerState.initialValue)) {
-              throw readerState.initialValue[ERROR_SYMBOL];
-            }
-            return { value: readerState.initialValue as T, done: false };
-          }
+      // Update pending initial values to latest
+      for (const readerState of behaviorReaders.values()) {
+        if (readerState.initialPending) {
+          readerState.initialValue = value;
         }
-      } finally {
-        release();
       }
-
-      // If no initial value needed, delegate to the underlying subject queue
-      return await subject.read(readerId);
-    },
-
-    async peek(readerId: number): Promise<IteratorResult<T, void>> {
-      await ensureInit();
-      const release = await lock();
       
-      try {
-        const readerState = behaviorReaders.get(readerId);
-        if (readerState?.initialPending && readerState.initialValue !== undefined) {
+      if (behaviorReaders.size > 0) {
+        await subject.write(value);
+      }
+    } finally {
+      release();
+    }
+  };
+
+  const error = async (err: Error): Promise<void> => {
+    await ensureInit();
+    const release = await lock();
+    try {
+      if (state.isCompleted) throw new Error("Cannot error a completed buffer");
+      
+      state.hasError = true;
+      state.isCompleted = true;
+
+      const errorItem = createErrorMarker(err);
+      state.currentValue = errorItem;
+      state.hasCurrentValue = true;
+      
+      for (const readerState of behaviorReaders.values()) {
+        if (readerState.initialPending) {
+          readerState.initialValue = errorItem;
+        }
+      }
+      
+      await subject.error(err);
+    } finally {
+      release();
+    }
+  };
+
+  const attachReader = async (): Promise<number> => {
+    await ensureInit();
+    const release = await lock();
+    try {
+      const readerId = await subject.attachReader();
+
+      const snapshot = state.hasCurrentValue ? state.currentValue : undefined;
+      // Reader needs the initial value if we have one AND the stream hasn't already errored/completed
+      const initialPending = state.hasCurrentValue && (!state.isCompleted || state.hasError); 
+
+      behaviorReaders.set(readerId, {
+        initialPending,
+        initialValue: snapshot
+      });
+
+      return readerId;
+    } finally {
+      release();
+    }
+  };
+
+  const detachReader = async (readerId: number): Promise<void> => {
+    await ensureInit();
+    const release = await lock();
+    try {
+      behaviorReaders.delete(readerId);
+      await subject.detachReader(readerId);
+    } finally {
+      release();
+    }
+  };
+
+  const read = async (readerId: number): Promise<IteratorResult<T, void>> => {
+    await ensureInit();
+    
+    const release = await lock();
+    try {
+      const readerState = behaviorReaders.get(readerId);
+      if (readerState?.initialPending) {
+        readerState.initialPending = false;
+
+        if (readerState.initialValue !== undefined) {
           if (isErrorMarker(readerState.initialValue)) {
             throw readerState.initialValue[ERROR_SYMBOL];
           }
           return { value: readerState.initialValue as T, done: false };
         }
-      } finally {
-        release();
       }
-
-      return await subject.peek(readerId);
-    },
-
-    async complete(): Promise<void> {
-      await ensureInit();
-      const release = await lock();
-      try {
-        state.isCompleted = true;
-        await subject.complete();
-      } finally {
-        release();
-      }
-    },
-
-    completed(readerId: number): boolean {
-      const readerState = behaviorReaders.get(readerId);
-      // A reader is NOT completed if it's still waiting to emit its initial value
-      const awaitingInitial = readerState?.initialPending && readerState.initialValue !== undefined;
-
-      if (awaitingInitial) return false;
-      return subject.completed(readerId);
-    },
-
-    get value(): T | undefined {
-      if (!state.hasCurrentValue) return undefined;
-      if (isErrorMarker(state.currentValue)) return undefined;
-      return state.currentValue as T;
+    } finally {
+      release();
     }
+    
+    // If no initial value needed, delegate to the underlying subject queue
+    return await subject.read(readerId);
+  };
+
+  const peek = async (readerId: number): Promise<IteratorResult<T, void>> => {
+    await ensureInit();
+    
+    const release = await lock();
+    try {
+      const readerState = behaviorReaders.get(readerId);
+      if (readerState?.initialPending && readerState.initialValue !== undefined) {
+        if (isErrorMarker(readerState.initialValue)) {
+          throw readerState.initialValue[ERROR_SYMBOL];
+        }
+        return { value: readerState.initialValue as T, done: false };
+      }
+    } finally {
+      release();
+    }
+
+    return await subject.peek(readerId);
+  };
+
+  const complete = async (): Promise<void> => {
+    await ensureInit();
+    const release = await lock();
+    try {
+      state.isCompleted = true;
+      await subject.complete();
+    } finally {
+      release();
+    }
+  };
+
+  const completed = (readerId: number): boolean => {
+    const readerState = behaviorReaders.get(readerId);
+    // A reader is NOT completed if it's still waiting to emit its initial value
+    const awaitingInitial = readerState?.initialPending && readerState.initialValue !== undefined;
+
+    if (awaitingInitial) return false;
+    return subject.completed(readerId);
+  };
+
+  const value = (): T | undefined => {
+    if (!state.hasCurrentValue) return undefined;
+    if (isErrorMarker(state.currentValue)) return undefined;
+    return state.currentValue as T;
+  };
+
+  return {
+    write,
+    error,
+    attachReader,
+    detachReader,
+    read,
+    peek,
+    complete,
+    completed,
+    get value() { return value(); }
   };
 }
 
@@ -515,19 +514,18 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
   let resolvedCapacity: number | null = null;
   let buffer: BufferItem[] = [];
   let isInfinite = false;
-  let writeIndex = 0; // The index in the circular buffer for the next write
-  let totalWritten = 0; // Absolute count of all items ever written
+  let writeIndex = 0;
+  let totalWritten = 0;
   
   const readers = new Map<number, { offset: number }>();
-  // Counts how many readers still need to read an item at absolute index 'abs'
-  const slotCounters = new Map<number, number>(); 
+  const slotCounters = new Map<number, number>();
   const notifier = createNotifier();
   const lock = createLock();
   
   let nextReaderId = 0;
   let isCompleted = false;
   let hasError = false;
-  let semaphore: ReturnType<typeof createSemaphore> | undefined; // Used for backpressure
+  let semaphore: ReturnType<typeof createSemaphore> | undefined;
   
   let isInitialized = false;
   let initPromise: Promise<void> | null = null;
@@ -535,29 +533,23 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
   /** Ensures capacity and semaphore are set up, waiting if capacity is a promise. */
   const ensureCapacity = async (): Promise<void> => {
     if (isInitialized) return;
-    if (initPromise) {
-      await initPromise;
-      return;
-    }
+    if (initPromise) return initPromise;
     
-    // Logic for synchronous and asynchronous capacity resolution...
-    const initializer = async (capVal: number) => {
+    const initializer = async (capVal: number): Promise<void> => {
       resolvedCapacity = capVal;
       isInfinite = !isFinite(resolvedCapacity);
       buffer = isInfinite ? [] : new Array(resolvedCapacity);
       
-      if (!isInfinite) {
+      if (!isInfinite && resolvedCapacity > 0) {
         semaphore = createSemaphore(resolvedCapacity);
       }
       isInitialized = true;
     };
 
     if (isPromiseLike(capacity)) {
-      initPromise = (async () => {
-        await initializer(await capacity);
-        initPromise = null;
-      })();
+      initPromise = initializer(await capacity);
       await initPromise;
+      initPromise = null;
     } else {
       await initializer(capacity as number);
     }
@@ -566,7 +558,7 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
   /** Converts an absolute index to the index within the circular buffer array. */
   const getIndex = (abs: number): number => {
     if (isInfinite) return abs;
-    if (resolvedCapacity === null || resolvedCapacity === 0) return 0;
+    if (!resolvedCapacity) return 0;
     return abs % resolvedCapacity;
   };
 
@@ -577,9 +569,7 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
     
     if (cnt <= 1) {
       slotCounters.delete(abs);
-      if (semaphore) {
-        semaphore.release();
-      }
+      semaphore?.release();
     } else {
       slotCounters.set(abs, cnt - 1);
     }
@@ -588,14 +578,11 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
   /** Internal function to perform the actual buffer write under the lock. */
   const writeInternal = (item: BufferItem): void => {
     const abs = totalWritten;
-    const idx = getIndex(abs);
     
     if (isInfinite) {
       buffer.push(item);
     } else {
-      if (idx >= buffer.length) {
-        buffer.length = idx + 1;
-      }
+      const idx = getIndex(abs);
       buffer[idx] = item;
       writeIndex = (writeIndex + 1) % (resolvedCapacity!);
     }
@@ -612,44 +599,53 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
   const write = async (value: T): Promise<void> => {
     await ensureCapacity();
     
-    let needsBackpressureWait = false;
-    let release: ReleaseFn | null = null;
-    
-    release = await lock();
-    
-    try {
-      if (isCompleted) throw new Error("Cannot write to completed buffer");
-      if (hasError) throw new Error("Cannot write after error");
-      
-      // Check for backpressure condition (bounded buffer, full, and active readers)
-      if (!isInfinite && 
-          resolvedCapacity !== null && 
-          totalWritten >= resolvedCapacity && 
-          readers.size > 0) {
-        needsBackpressureWait = true;
-      } else {
-        writeInternal(value);
-      }
-    } finally {
-      release?.();
-    }
-    
-    if (needsBackpressureWait) {
-      // 1. Wait on semaphore (this is where backpressure occurs)
-      const semRelease = await semaphore!.acquire();
-      
-      // 2. Reacquire lock to safely check state and write
-      const reacquire = await lock();
+    if (!isInfinite && readers.size > 0) {
+      // Check if we need to wait for backpressure
+      const release = await lock();
       try {
-        if (isCompleted) {
-           semRelease(); // Immediately release permit since we won't write
-           throw new Error("Cannot write to completed buffer");
+        if (isCompleted) throw new Error("Cannot write to completed buffer");
+        if (hasError) throw new Error("Cannot write after error");
+        
+        const needsBackpressureWait = resolvedCapacity! > 0 && 
+                                     totalWritten >= resolvedCapacity!;
+        
+        if (needsBackpressureWait) {
+          // Release lock before waiting on semaphore
+          release();
+          
+          // Wait for available slot
+          const semRelease = await semaphore!.acquire();
+          
+          // Reacquire lock to write
+          const reacquire = await lock();
+          try {
+            if (isCompleted) {
+              semRelease();
+              throw new Error("Cannot write to completed buffer");
+            }
+            writeInternal(value);
+          } finally {
+            reacquire();
+            // Keep semaphore held - it will be released when the slot is consumed
+          }
+          return;
         }
+        
+        // No backpressure needed, write immediately
         writeInternal(value);
       } finally {
-        reacquire();
-        // 3. Release semaphore permit after writing (handled by releaseSlot on read)
-        semRelease();
+        release();
+      }
+    } else {
+      // Infinite buffer or no readers - no backpressure
+      const release = await lock();
+      try {
+        if (isCompleted) throw new Error("Cannot write to completed buffer");
+        if (hasError) throw new Error("Cannot write after error");
+        
+        writeInternal(value);
+      } finally {
+        release();
       }
     }
   };
@@ -657,7 +653,6 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
   const error = async (err: Error): Promise<void> => {
     await ensureCapacity();
     const release = await lock();
-    
     try {
       if (isCompleted) throw new Error("Cannot write error to completed buffer");
       
@@ -671,7 +666,6 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
   const attachReader = async (): Promise<number> => {
     await ensureCapacity();
     const release = await lock();
-    
     try {
       const id = nextReaderId++;
       const cap = resolvedCapacity ?? Infinity;
@@ -679,6 +673,13 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
       const start = Math.max(0, totalWritten - (isInfinite ? totalWritten : cap));
       
       readers.set(id, { offset: start });
+      
+      // Initialize slot counters for existing items
+      for (let i = start; i < totalWritten; i++) {
+        const cnt = slotCounters.get(i) || 0;
+        slotCounters.set(i, cnt + 1);
+      }
+      
       return id;
     } finally {
       release();
@@ -687,7 +688,6 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
 
   const detachReader = async (id: number): Promise<void> => {
     const release = await lock();
-    
     try {
       const readerState = readers.get(id);
       if (!readerState) return;
@@ -710,18 +710,12 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
     await ensureCapacity();
     
     while (true) {
-      let release: ReleaseFn | undefined;
-      let result: IteratorResult<T, void> | undefined;
-      let shouldWait = false;
+      const release = await lock();
       let slotToRelease: number | undefined;
-
-      release = await lock();
-      
       try {
         const readerState = readers.get(id);
         if (!readerState) {
-          result = { value: undefined, done: true };
-          return result;
+          return { value: undefined, done: true };
         }
         
         const offset = readerState.offset;
@@ -729,37 +723,33 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
         if (offset < totalWritten) {
           const item = buffer[getIndex(offset)];
           readerState.offset++;
-          slotToRelease = offset; // Mark slot consumed
+          slotToRelease = offset;
 
           if (isErrorMarker(item)) {
+            release();
+            releaseSlot(slotToRelease);
             throw item[ERROR_SYMBOL];
           }
           
-          result = { value: item as T, done: false };
-        } else if (isCompleted) {
-          result = { value: undefined, done: true };
-        } else {
-          shouldWait = true;
+          release();
+          releaseSlot(slotToRelease);
+          return { value: item as T, done: false };
+        }
+
+        if (isCompleted) {
+          return { value: undefined, done: true };
         }
       } finally {
         release();
       }
-      
-      // Release slot count/semaphore outside of the main buffer lock
-      if (slotToRelease !== undefined) {
-        releaseSlot(slotToRelease); 
-      }
-      
-      if (result) return result;
-      // Optimization: release lock before awaiting signal
-      if (shouldWait) await notifier.wait();
+
+      await notifier.wait();
     }
   };
 
   const peek = async (id: number): Promise<IteratorResult<T, void>> => {
     await ensureCapacity();
     const release = await lock();
-    
     try {
       const readerState = readers.get(id);
       if (!readerState) {
@@ -785,7 +775,6 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
   const complete = async (): Promise<void> => {
     await ensureCapacity();
     const release = await lock();
-    
     try {
       isCompleted = true;
       notifier.signalAll();
@@ -809,7 +798,6 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
   const getBuffer = (): T[] => {
     const result: T[] = [];
     const cap = resolvedCapacity ?? Infinity;
-    // Calculate the absolute index of the start of the replay window
     const start = Math.max(0, totalWritten - (isInfinite ? totalWritten : cap));
     
     for (let i = start; i < totalWritten; i++) {
