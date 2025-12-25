@@ -99,10 +99,6 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       }
     });
 
-    Object.assign(subscription, {
-      value: () => latestValue
-    });
-
     return subscription;
   };
 
