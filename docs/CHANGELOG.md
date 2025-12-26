@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.28
+
+Buffer and subject internals were reworked: synchronization removed in favor of scheduler-queued methods, `ReplaySubject` now uses the scheduler, and `shareReplay` aligns with strict backpressure and async delivery. Lock and semaphore are deprecated. Added edge-case tests for subjects and buffers, with various type/config/docs corrections and cleanup.
+
 ## 2.0.26
 
 Global scheduler for improved task coordination across streams and operators. Fixed several edge cases in stream operators (`takeUntil`, `skipUntil`) to ensure proper subscription handling and completion propagation. Improved `Semaphore` implementation and tests for deterministic FIFO unblocking of waiting acquires.
