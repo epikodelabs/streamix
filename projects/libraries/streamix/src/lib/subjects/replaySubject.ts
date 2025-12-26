@@ -63,12 +63,17 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     let readerId: number | null = null;
     let readerLatestValue: T | undefined;
     let drainOnUnsubscribe = false;
+    // Prevent multiple unsubscribe calls from decrementing subscriberCount twice.
+    let counted = true;
 
     subscriberCount++;
     const subscription = createSubscription(() => {
       if (!unsubscribing) {
         unsubscribing = true;
-        subscriberCount--;
+        if (counted) {
+          subscriberCount--;
+          counted = false;
+        }
         if (subscriberCount === 0) {
           drainOnUnsubscribe = true;
           complete();
