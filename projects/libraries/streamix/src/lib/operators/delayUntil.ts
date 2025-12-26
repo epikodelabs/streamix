@@ -1,4 +1,4 @@
-import { createOperator, type MaybePromise, type Operator, type Stream, type Subscription, isPromiseLike } from "../abstractions";
+import { createOperator, isPromiseLike, type Operator, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../subjects";
 
@@ -18,7 +18,7 @@ import { createSubject } from "../subjects";
  * @param notifier The stream that acts as a gatekeeper.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export function delayUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | Array<R> | R>) {
+export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
   return createOperator<T, T>("delayUntil", function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
     let canEmit = false;

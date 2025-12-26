@@ -1,4 +1,4 @@
-import { createOperator, type MaybePromise, type Operator, type Stream } from '../abstractions';
+import { createOperator, type Operator, type Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -20,7 +20,7 @@ import { createSubject } from '../subjects';
  * should stop skipping values.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export function skipUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | R>) {
+export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
   return createOperator<T, T>('skipUntil', function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
     let canEmit = false;
