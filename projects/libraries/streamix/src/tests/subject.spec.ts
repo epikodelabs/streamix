@@ -329,6 +329,51 @@ describe('createSubject', () => {
     subject.next(); // Only subscriber2 gets this
     subject.complete();
   });
+
+  it('late subscribers should complete immediately after completion', async () => {
+    const subject = createSubject<number>();
+    subject.next(1);
+    subject.complete();
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const values: number[] = [];
+    let completed = false;
+    subject.subscribe({
+      next: value => values.push(value),
+      complete: () => {
+        completed = true;
+      }
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(values).toEqual([]);
+    expect(completed).toBeTrue();
+  });
+
+  it('late subscribers should receive terminal errors', async () => {
+    const subject = createSubject<number>();
+    const err = new Error('late-error');
+    subject.error(err);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const values: number[] = [];
+    let caught: Error | null = null;
+
+    subject.subscribe({
+      next: value => values.push(value),
+      error: e => {
+        caught = e as Error;
+      }
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(values).toEqual([]);
+    expect((caught as any)?.message).toBe('late-error');
+  });
 });
 
 describe('createSubjectBuffer', () => {
