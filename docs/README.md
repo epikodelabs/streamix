@@ -27,7 +27,7 @@ Small bundle, pull-based execution, and a familiar operator API.
 
 ---
 
-## Give a Star on GitHub
+## ⭐ Give a Star on GitHub
 
 If streamix helps you, please give it a star: https://github.com/epikodelabs/streamix
 
