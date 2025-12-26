@@ -107,6 +107,29 @@ describe('createBehaviorSubject', () => {
     expect(values).toEqual([456]);
   });
 
+  it('late subscribers should complete immediately after completion without emitting', async () => {
+    const subject = createBehaviorSubject<number>(10);
+    subject.next(20);
+    subject.complete();
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const values: number[] = [];
+    let completed = false;
+
+    subject.subscribe({
+      next: v => values.push(v),
+      complete: () => {
+        completed = true;
+      }
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(values).toEqual([]);
+    expect(completed).toBeTrue();
+  });
+
   it('should support unsubscribe and stop receiving further values', async () => {
     const subject = createBehaviorSubject<number>(0);
 

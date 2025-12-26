@@ -132,6 +132,53 @@ describe('createReplaySubject', () => {
     expect(result1).toEqual([5, 6]);
     expect(result2).toEqual([5, 6]);
   });
+
+  it('late subscribers should replay buffered values then complete', async () => {
+    const subject = createReplaySubject<number>(2);
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const values: number[] = [];
+    let completed = false;
+
+    subject.subscribe({
+      next: v => values.push(v),
+      complete: () => {
+        completed = true;
+      }
+    });
+
+    await waitFor(() => completed === true);
+    expect(values).toEqual([2, 3]);
+  });
+
+  it('late subscribers should replay buffered values then error', async () => {
+    const subject = createReplaySubject<number>(2);
+    subject.next(1);
+    subject.next(2);
+    const err = new Error('replay-fail');
+    subject.error(err);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const values: number[] = [];
+    let caught: Error | null = null;
+
+    subject.subscribe({
+      next: v => values.push(v),
+      error: e => {
+        caught = e as Error;
+      }
+    });
+
+    await waitFor(() => caught !== null);
+    expect(values).toEqual([1, 2]);
+    expect((caught as any)?.message).toBe('replay-fail');
+  });
 });
 
 describe('createSemaphore', () => {

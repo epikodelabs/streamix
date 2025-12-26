@@ -106,6 +106,7 @@ export function createReceiver<T = any>(
         } catch (e) {
           console.error('Unhandled error in error handler:', e);
         }
+        await wrappedReceiver.complete();
       }
     },
     complete: async () => {

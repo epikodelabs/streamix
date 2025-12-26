@@ -75,12 +75,13 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
   type BufferItem = T | ErrorMarker;
   
   const buffer: BufferItem[] = [];
-  const readers = new Map<number, { nextIndex: number; isActive: boolean }>();
+  const readers = new Map<number, { nextIndex: number; isActive: boolean; hasSeenTerminalError: boolean }>();
   const waiter = createWaiter();
   
   let nextReaderId = 0;
   let isCompleted = false;
   let hasError = false;
+  let terminalError: Error | null = null;
   let baseIndex = 0;
 
   const pruneBuffer = (): void => {
@@ -123,6 +124,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     if (isCompleted) return Promise.reject(new Error("Cannot write error to completed buffer"));
       
     hasError = true;
+    terminalError = err;
     
     if (readers.size > 0) {
       buffer.push(createErrorMarker(err));
@@ -135,7 +137,8 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
     const readerId = nextReaderId++;
     readers.set(readerId, {
       nextIndex: baseIndex + buffer.length,
-      isActive: true
+      isActive: true,
+      hasSeenTerminalError: false
     });
     return Promise.resolve(readerId);
   };
@@ -166,10 +169,16 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
         pruneBuffer();
 
         if (isErrorMarker(item)) {
+          reader.hasSeenTerminalError = true;
           throw item[ERROR_SYMBOL];
         }
         
         return { value: item as T, done: false };
+      }
+
+      if (hasError && terminalError && !reader.hasSeenTerminalError) {
+        reader.hasSeenTerminalError = true;
+        throw terminalError;
       }
 
       if (isCompleted || hasError) {
@@ -202,6 +211,10 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
       }
       
       return Promise.resolve({ value: item as T, done: false });
+    }
+
+    if (hasError && terminalError && !reader.hasSeenTerminalError) {
+      return Promise.reject(terminalError);
     }
 
     if ((isCompleted || hasError) && reader.nextIndex >= availableEnd) {
@@ -429,12 +442,13 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
   let writeIndex = 0;
   let totalWritten = 0;
   
-  const readers = new Map<number, { offset: number }>();
+  const readers = new Map<number, { offset: number; hasSeenTerminalError: boolean }>();
   const waiter = createWaiter();
   
   let nextReaderId = 0;
   let isCompleted = false;
   let hasError = false;
+  let terminalError: Error | null = null;
   
   let isInitialized = false;
   let initPromise: Promise<void> | null = null;
@@ -515,17 +529,7 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
     if (isCompleted) throw new Error("Cannot write error to completed buffer");
     
     hasError = true;
-    const errorItem = createErrorMarker(err);
-    
-    if (isInfinite) {
-      buffer.push(errorItem);
-      totalWritten++;
-    } else if (resolvedCapacity > 0) {
-      const idx = getIndex(totalWritten);
-      buffer[idx] = errorItem;
-      writeIndex = (writeIndex + 1) % resolvedCapacity;
-      totalWritten++;
-    }
+    terminalError = err;
     
     waiter.notify();
   };
@@ -534,7 +538,7 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
     await ensureCapacity();
     const id = nextReaderId++;
     const start = getOldestIndex();
-    readers.set(id, { offset: start });
+    readers.set(id, { offset: start, hasSeenTerminalError: false });
     return id;
   };
 
@@ -560,12 +564,18 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
         readerState.offset++;
 
         if (isErrorMarker(item)) {
+          readerState.hasSeenTerminalError = true;
           throw item[ERROR_SYMBOL];
         }
         
         return { value: item as T, done: false };
       }
       
+      if (hasError && terminalError && !readerState.hasSeenTerminalError) {
+        readerState.hasSeenTerminalError = true;
+        throw terminalError;
+      }
+
       if (isCompleted || hasError) {
         return { value: undefined, done: true };
       }
@@ -594,6 +604,11 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
       return { value: item as T, done: false };
     }
 
+    if (hasError && terminalError && !readerState.hasSeenTerminalError) {
+      readerState.hasSeenTerminalError = true;
+      throw terminalError;
+    }
+
     return (isCompleted || hasError) ? 
       { done: true, value: undefined } : 
       { done: false, value: undefined };
@@ -609,7 +624,9 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
     const readerState = readers.get(id);
     if (!readerState) return true;
     
-    return (isCompleted || hasError) && readerState.offset >= totalWritten;
+    if (readerState.offset < totalWritten) return false;
+    if (hasError) return readerState.hasSeenTerminalError;
+    return isCompleted;
   };
 
   const getBuffer = (): T[] => {

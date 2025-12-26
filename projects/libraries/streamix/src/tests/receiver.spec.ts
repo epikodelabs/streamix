@@ -30,7 +30,6 @@ describe('createReceiver', () => {
 
     await receiver.next(1);
     await receiver.error(new Error('test'));
-    await receiver.complete();
 
     expect(nextSpy).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledWith(jasmine.any(Error));
@@ -43,7 +42,6 @@ describe('createReceiver', () => {
 
     await receiver.next('value');
     await receiver.error(new Error('err'));
-    await receiver.complete();
 
     expect(receiver.completed).toBeTrue();
     expect(consoleErrorSpy).not.toHaveBeenCalled();
