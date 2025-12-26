@@ -42,12 +42,15 @@ export type Stream<T = any> = AsyncIterable<T> & {
    */
   pipe: OperatorChain<T>;
 
-  /**
-   * Subscribes to the stream.
-   *
-   * A callback or Receiver will be invoked for each next/error/complete event.
-   * Returns a `Subscription` that may be used to unsubscribe.
-   */
+   /**
+    * Subscribes to the stream.
+    *
+    * A callback or Receiver will be invoked for each next/error/complete event.
+    * Returns a `Subscription` that may be used to unsubscribe.
+    *
+    * Note: `complete` can be invoked on unsubscribe (and after error) to give
+    * receivers a single cleanup hook.
+    */
   subscribe: (
     callback?: ((value: T) => MaybePromise) | Receiver<T>
   ) => Subscription;

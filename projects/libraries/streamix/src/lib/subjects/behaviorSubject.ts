@@ -87,7 +87,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
         while (true) {
           const result = await buffer.read(readerId);
           if (result.done) break;
-          await receiver.next?.(result.value);
+          await receiver.next?.(result.value!);
         }
       } catch (err: any) {
         await receiver.error?.(err);

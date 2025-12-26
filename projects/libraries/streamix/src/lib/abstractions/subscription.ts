@@ -15,8 +15,8 @@ export type Subscription = {
   /**
    * Indicates whether the subscription has been terminated.
    *
-   * - `false` → subscription is active
-   * - `true`  → subscription has been unsubscribed and is inactive
+   * - `false` - subscription is active
+   * - `true`  - subscription has been unsubscribed and is inactive
    *
    * This flag becomes `true` immediately when `unsubscribe()` is invoked
    * for the first time.
@@ -30,6 +30,7 @@ export type Subscription = {
    * - Idempotent: calling multiple times has no additional effect
    * - Marks the subscription as unsubscribed synchronously
    * - Executes cleanup logic (if provided) exactly once
+   * - Stream receivers may still get `complete()` as a cleanup signal
    *
    * Errors thrown by cleanup logic are caught and logged.
    *
@@ -74,7 +75,7 @@ export function createSubscription(
 
   return {
     /**
-     * Indicates whether the subscription has been unsubscribed.
+   * - `true`  - subscription has been unsubscribed and is inactive
      */
     get unsubscribed() {
       return _unsubscribed;
