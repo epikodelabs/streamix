@@ -18,7 +18,7 @@ export type MaybePromise<T = any> = (T | Promise<T>);
  * We avoid relying on `instanceof Promise` so that promise-like values from
  * different realms or custom thenables are still treated correctly.
  */
-export const isPromiseLike = <T = any>(value: MaybePromise<T>): value is Promise<T> =>
+export const isPromiseLike = (value: any): boolean =>
   !!value && typeof (value as any).then === 'function';
 
 /**
