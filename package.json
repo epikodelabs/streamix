@@ -1,6 +1,7 @@
 {
   "name": "streamix",
   "version": "2.0.28",
+  "description": "Reactive data streams built on async generators.",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
