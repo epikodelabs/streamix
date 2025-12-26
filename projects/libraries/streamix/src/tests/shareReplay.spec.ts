@@ -1,7 +1,17 @@
 import { createStream, shareReplay } from '@epikodelabs/streamix';
 
+const waitFor = async (predicate: () => boolean, timeoutMs = 2000) => {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('Timed out waiting for condition');
+    }
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+};
+
 describe('shareReplay', () => {
-  it('should replay last emitted value to new subscribers', done => {
+  it('should replay last emitted value to new subscribers', async () => {
     let executionCount = 0;
 
     const source = createStream<number>('source', async function* () {
@@ -16,24 +26,25 @@ describe('shareReplay', () => {
 
     shared$.subscribe({
       next: val => values1.push(val),
-      complete: () => {
-        // Second subscription after complete
-        shared$.subscribe({
-          next: val => values2.push(val),
-          complete: () => {
-            expect(values1).toEqual([42]);
-            expect(values2).toEqual([42]);
-            expect(executionCount).toBe(1);
-            done();
-          },
-          error: done.fail
-        });
-      },
-      error: done.fail
+      complete: () => {}
     });
+
+    await waitFor(() => values1.length === 1);
+
+    // Second subscription after completion
+    shared$.subscribe({
+      next: val => values2.push(val),
+      complete: () => {}
+    });
+
+    await waitFor(() => values2.length === 1);
+
+    expect(values1).toEqual([42]);
+    expect(values2).toEqual([42]);
+    expect(executionCount).toBe(1);
   });
 
-  it('should propagate error to all subscribers', done => {
+  it('should propagate error to all subscribers', async () => {
     const source = createStream<number>('erroring', async function* () {
       yield 1;
       throw new Error('Test error');
@@ -49,7 +60,7 @@ describe('shareReplay', () => {
         expect(err).toEqual(new Error('Test error'));
         errorCount++;
       },
-      complete: () => { if (errorCount === 2 && completed === false) { done(); completed = true; }},
+      complete: () => { completed = true; },
     });
 
     shared$.subscribe({
@@ -58,11 +69,13 @@ describe('shareReplay', () => {
         expect(err).toEqual(new Error('Test error'));
         errorCount++;
       },
-      complete: () => { if (errorCount === 2 && completed === false) { done(); completed = true; }},
+      complete: () => { completed = true; },
     });
+
+    await waitFor(() => errorCount === 2 && completed);
   });
 
-  it('should support async bufferSize and replay the last N values', done => {
+  it('should support async bufferSize and replay the last N values', async () => {
     let executionCount = 0;
 
     const source = createStream<number>('source', async function* () {
@@ -79,20 +92,21 @@ describe('shareReplay', () => {
 
     shared$.subscribe({
       next: v => values1.push(v),
-      complete: () => {
-        shared$.subscribe({
-          next: v => values2.push(v),
-          complete: () => {
-            expect(values1).toEqual([1, 2, 3]);
-            expect(values2).toEqual([2, 3]);
-            expect(executionCount).toBe(1);
-            done();
-          },
-          error: done.fail
-        });
-      },
-      error: done.fail
+      complete: () => {}
     });
+
+    await waitFor(() => values1.length === 3);
+
+    shared$.subscribe({
+      next: v => values2.push(v),
+      complete: () => {}
+    });
+
+    await waitFor(() => values2.length === 2);
+
+    expect(values1).toEqual([1, 2, 3]);
+    expect(values2).toEqual([2, 3]);
+    expect(executionCount).toBe(1);
   });
 });
 

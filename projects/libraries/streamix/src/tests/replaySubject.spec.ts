@@ -1,5 +1,15 @@
 import { createReplayBuffer, createReplaySubject, createSemaphore } from '@epikodelabs/streamix';
 
+const waitFor = async (predicate: () => boolean, timeoutMs = 2000) => {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('Timed out waiting for condition');
+    }
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+};
+
 describe('createReplaySubject', () => {
   it('should emit values to subscribers in real-time as well as replay buffered values', async () => {
     const subject = createReplaySubject<number>(2);
@@ -12,14 +22,16 @@ describe('createReplaySubject', () => {
       receivedA.push(v)
     );
 
+    await waitFor(() => receivedA.length === 2);
     subject.next(3); // Both buffer and live delivery
+    await waitFor(() => receivedA.length === 3);
 
     const receivedB: number[] = [];
     const subB = subject.subscribe(v => receivedB.push(v));
 
     subject.next(4); // Both subA and subB get this
 
-    await new Promise(resolve => setTimeout(resolve, 10)); // Let async delivery finish
+    await waitFor(() => receivedA.length === 4 && receivedB.length === 3);
 
     subA.unsubscribe();
     subB.unsubscribe();
@@ -49,15 +61,20 @@ describe('createReplaySubject', () => {
 
     subject.next(1);
     subject.next(2);
-    subject.next(3); // buffer = [2, 3]
-
     const result: number[] = [];
-    for await (const value of subject) {
-      result.push(value);
-      if (result.length === 2) break;
-    }
 
-    expect(result).toEqual([2, 3]);
+    const reader = (async () => {
+      for await (const value of subject) {
+        result.push(value);
+        if (result.length === 3) break;
+      }
+    })();
+
+    await waitFor(() => result.length === 2);
+    subject.next(3);
+    await reader;
+
+    expect(result).toEqual([1, 2, 3]);
   });
 
   it('should complete all subscribers when last unsubscribes', (done) => {
@@ -98,7 +115,6 @@ describe('createReplaySubject', () => {
   it('should replay only the buffered items to multiple subscribers', async () => {
     const subject = createReplaySubject<number>(1);
     subject.next(5);
-    subject.next(6); // buffer = [6]
 
     const result1: number[] = [];
     const result2: number[] = [];
@@ -106,13 +122,15 @@ describe('createReplaySubject', () => {
     const sub1 = subject.subscribe(v => result1.push(v));
     const sub2 = subject.subscribe(v => result2.push(v));
 
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await waitFor(() => result1.length === 1 && result2.length === 1);
+    subject.next(6);
+    await waitFor(() => result1.length === 2 && result2.length === 2);
 
     sub1.unsubscribe();
     sub2.unsubscribe();
 
-    expect(result1).toEqual([6]);
-    expect(result2).toEqual([6]);
+    expect(result1).toEqual([5, 6]);
+    expect(result2).toEqual([5, 6]);
   });
 });
 

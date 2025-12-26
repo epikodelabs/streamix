@@ -561,8 +561,8 @@ export function createBehaviorSubjectBuffer<T = any>(
  * 2. New readers start from the oldest available item within the capacity window (replaying).
  * 3. Supports backpressure via a Semaphore when the buffer is full.
  *
- * Backpressure only applies when at least one reader is attached; writes proceed
- * without blocking if there are no readers.
+ * Backpressure applies for finite buffers regardless of readers; writes block
+ * once the buffer reaches capacity until slots are released.
  */
 export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): ReplayBuffer<T> {
   type BufferItem = T | ErrorMarker;
@@ -701,21 +701,21 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
       return;
     }
 
-    // Finite capacity with backpressure
-    if (readers.size > 0 && semaphore) {
+    // Finite capacity with backpressure (always enforced)
+    if (semaphore) {
       await semaphore.acquire();
     }
 
     const release = await lock();
     try {
       if (isCompleted) {
-        if (semaphore && readers.size > 0) {
+        if (semaphore) {
           semaphore.release();
         }
         throw new Error("Cannot write to completed buffer");
       }
       if (hasError) {
-        if (semaphore && readers.size > 0) {
+        if (semaphore) {
           semaphore.release();
         }
         throw new Error("Cannot write after error");
@@ -740,10 +740,7 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
       
       if (readers.size > 0) {
         slotCounters.set(abs, readers.size);
-        // Keep semaphore acquired since readers exist
-      } else if (semaphore) {
-        // No readers, release immediately
-        semaphore.release();
+        // Keep semaphore acquired; released when slots are fully consumed.
       }
       
       notifier.signalAll();
@@ -801,37 +798,10 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
         return id;
       }
 
-      // Initialize slot counters for existing items
-      const acquiredReleases: Array<() => void> = [];
-      const incrementedSlots: number[] = [];
+      // Initialize slot counters for existing items.
       for (let i = start; i < totalWritten; i++) {
-        // For finite buffer, ensure semaphore is acquired for each slot
-        if (!isInfinite && resolvedCapacity > 0 && semaphore) {
-          const acquired = semaphore.tryAcquire();
-          if (!acquired) {
-            // Roll back any permits acquired for this reader
-            for (const releaseFn of acquiredReleases) {
-              releaseFn();
-            }
-            for (const idx of incrementedSlots) {
-              const cnt = slotCounters.get(idx);
-              if (cnt !== undefined) {
-                if (cnt <= 1) {
-                  slotCounters.delete(idx);
-                } else {
-                  slotCounters.set(idx, cnt - 1);
-                }
-              }
-            }
-            readers.delete(id);
-            throw new Error("Failed to acquire replay buffer permits");
-          }
-          acquiredReleases.push(acquired);
-        }
-
         const cnt = slotCounters.get(i) || 0;
         slotCounters.set(i, cnt + 1);
-        incrementedSlots.push(i);
       }
       
       return id;
