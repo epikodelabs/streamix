@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, type Stream, type Subscription } from "../abstractions";
+import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { createReplayBuffer, type ReplayBuffer } from "../primitives";
 import type { Subject } from "./subject";
@@ -36,26 +36,37 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
   let writeChain = Promise.resolve();
   let subscriberCount = 0;
 
+  const enqueueWrite = (task: () => Promise<void>) => {
+    writeChain = writeChain.then(task).catch(() => {});
+    return writeChain;
+  };
+
   const next = (value: T) => {
-    if (isCompleted || hasError) return;
-    latestValue = value;
-    writeChain = writeChain.then(() => buffer.write(value)).catch(() => {});
+    scheduler.enqueue(() => {
+      if (isCompleted || hasError) return;
+      latestValue = value;
+      void enqueueWrite(() => buffer.write(value));
+    });
   };
 
   const complete = () => {
-    if (isCompleted) return;
-    isCompleted = true;
-    writeChain = writeChain.then(() => buffer.complete()).catch(() => {});
+    scheduler.enqueue(() => {
+      if (isCompleted) return;
+      isCompleted = true;
+      void enqueueWrite(() => buffer.complete());
+    });
   };
 
   const error = (err: any) => {
-    if (isCompleted || hasError) return;
-    hasError = true;
-    isCompleted = true;
-    writeChain = writeChain.then(async () => {
-      await buffer.error(err);
-      await buffer.complete();
-    }).catch(() => {});
+    scheduler.enqueue(() => {
+      if (isCompleted || hasError) return;
+      hasError = true;
+      isCompleted = true;
+      void enqueueWrite(async () => {
+        await buffer.error(err);
+        await buffer.complete();
+      });
+    });
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
@@ -78,16 +89,15 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
           drainOnUnsubscribe = true;
           complete();
         } else if (readerId !== null) {
-          void buffer.detachReader(readerId);
+          scheduler.enqueue(async () => {
+            if (readerId !== null) await buffer.detachReader(readerId);
+          });
         }
       }
     });
 
-    (async () => {
-      const attachPromise = writeChain.then(() => buffer.attachReader());
-      writeChain = attachPromise.then(() => undefined).catch(() => {});
-
-      readerId = await attachPromise;
+    scheduler.enqueue(() => buffer.attachReader()).then(async (id: number) => {
+      readerId = id;
       if (unsubscribing && !drainOnUnsubscribe) {
         await buffer.detachReader(readerId);
         return;
@@ -107,7 +117,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
         }
         await receiver.complete?.();
       }
-    })();
+    });
 
     return subscription;
   };
