@@ -46,6 +46,19 @@ describe("createSubjectBuffer", () => {
 
     expect(buf.completed(r)).toBeTrue();
   });
+
+  it("read waits for data and resolves after write", async () => {
+    const buf = createSubjectBuffer<number>();
+    const r = await buf.attachReader();
+
+    const pending = buf.read(r);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    await buf.write(123);
+
+    const res = await pending;
+    expect(res).toEqual({ value: 123, done: false });
+  });
 });
 
 describe("createBehaviorSubjectBuffer", () => {
@@ -63,6 +76,21 @@ describe("createBehaviorSubjectBuffer", () => {
 
     expect(buf.completed(r)).toBeFalse();
   });
+
+  it("read waits for the next value after initial is consumed", async () => {
+    const buf = createBehaviorSubjectBuffer<number>(0);
+    const r = await buf.attachReader();
+
+    await buf.read(r); // consume initial
+
+    const pending = buf.read(r);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    await buf.write(1);
+
+    const res = await pending;
+    expect(res.value).toBe(1);
+  });
 });
 
 describe("createReplayBuffer", () => {
@@ -78,6 +106,19 @@ describe("createReplayBuffer", () => {
     await rb.write(3);
 
     expect(rb.buffer).toEqual([1, 2, 3]);
+  });
+
+  it("read waits for data and resolves after write", async () => {
+    const rb = createReplayBuffer<number>(2);
+    const r = await rb.attachReader();
+
+    const pending = rb.read(r);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    await rb.write(7);
+
+    const res = await pending;
+    expect(res.value).toBe(7);
   });
 });
 
