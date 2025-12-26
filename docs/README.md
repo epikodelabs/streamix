@@ -1,10 +1,10 @@
-<p align="center">
-  <img src="https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/LOGO.png?raw=true" alt="Streamix Logo" width="500">
-</p>
+# streamix
+
+Reactive streams built on async generators.
+Small bundle, pull-based execution, and a familiar operator API.
 
 <p align="center">
-  <strong>Reactive streams built on async generators</strong><br>
-  Small bundle, pull-based execution, and a familiar operator API
+  <img src="https://github.com/epikodelabs/streamix/blob/main/LOGO.png?raw=true" alt="Streamix Logo" width="500">
 </p>
 
 <p align="center">
@@ -24,6 +24,12 @@
     <img src="https://codecov.io/github/epikodelabs/streamix/graph/badge.svg?token=ITHDU7JVOI" alt="Code Coverage"/>
   </a>
 </p>
+
+---
+
+## Give a Star on GitHub
+
+If streamix helps you, please give it a star: https://github.com/epikodelabs/streamix
 
 ---
 
@@ -395,6 +401,3 @@ MIT License
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
 
-<p align="center">
-  ⭐ If Streamix is useful to you, consider giving the repo a <a href="https://github.com/epikodelabs/streamix">star</a> ⭐
-</p>
