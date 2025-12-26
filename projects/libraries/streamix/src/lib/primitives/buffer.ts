@@ -59,13 +59,26 @@ export type ReplayBuffer<T = any> = CyclicBuffer<T> & {
  */
 export function createNotifier() {
   let waitingResolvers: (() => void)[] = [];
+  let epoch = 0;
   return {
+    /** Returns the current notification epoch. */
+    getEpoch: () => epoch,
     /** Returns a Promise that resolves when signal() or signalAll() is called. */
-    wait: () => new Promise<void>(resolve => waitingResolvers.push(resolve)),
+    wait: (seen?: number) => new Promise<void>(resolve => {
+      if (seen !== undefined && epoch !== seen) {
+        resolve();
+        return;
+      }
+      waitingResolvers.push(resolve);
+    }),
     /** Signals a single waiting reader. */
-    signal: () => waitingResolvers.shift()?.(),
+    signal: () => {
+      epoch++;
+      waitingResolvers.shift()?.();
+    },
     /** Signals all waiting readers. */
     signalAll: () => { 
+      epoch++;
       waitingResolvers.forEach(r => r());
       waitingResolvers.length = 0;
     }
@@ -177,6 +190,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
         readers.delete(readerId);
         hasReaders = readers.size > 0;
         pruneBuffer();
+        notifier.signalAll();
       }
     } finally {
       release();
@@ -186,6 +200,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
   const read = async (readerId: number): Promise<IteratorResult<T, void>> => {
     while (true) {
       const release = await lock();
+      const seen = notifier.getEpoch();
       try {
         const reader = readers.get(readerId);
         if (!reader || !reader.isActive) {
@@ -214,7 +229,7 @@ export function createSubjectBuffer<T = any>(): CyclicBuffer<T> {
       }
 
       // Wait for notification outside the lock
-      await notifier.wait();
+      await notifier.wait(seen);
     }
   };
 
@@ -598,55 +613,55 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
 
   const write = async (value: T): Promise<void> => {
     await ensureCapacity();
-    
-    if (!isInfinite && readers.size > 0) {
-      // Check if we need to wait for backpressure
+
+    if (isInfinite || !resolvedCapacity || resolvedCapacity <= 0) {
       const release = await lock();
       try {
         if (isCompleted) throw new Error("Cannot write to completed buffer");
         if (hasError) throw new Error("Cannot write after error");
-        
-        const needsBackpressureWait = resolvedCapacity! > 0 && 
-                                     totalWritten >= resolvedCapacity!;
-        
-        if (needsBackpressureWait) {
-          // Release lock before waiting on semaphore
-          release();
-          
-          // Wait for available slot
-          const semRelease = await semaphore!.acquire();
-          
-          // Reacquire lock to write
-          const reacquire = await lock();
-          try {
-            if (isCompleted) {
-              semRelease();
-              throw new Error("Cannot write to completed buffer");
-            }
-            writeInternal(value);
-          } finally {
-            reacquire();
-            // Keep semaphore held - it will be released when the slot is consumed
-          }
-          return;
-        }
-        
-        // No backpressure needed, write immediately
+
         writeInternal(value);
       } finally {
         release();
       }
-    } else {
-      // Infinite buffer or no readers - no backpressure
-      const release = await lock();
-      try {
-        if (isCompleted) throw new Error("Cannot write to completed buffer");
-        if (hasError) throw new Error("Cannot write after error");
-        
+      return;
+    }
+
+    const release = await lock();
+    let shouldAcquire = false;
+    try {
+      if (isCompleted) throw new Error("Cannot write to completed buffer");
+      if (hasError) throw new Error("Cannot write after error");
+      shouldAcquire = readers.size > 0;
+
+      if (!shouldAcquire) {
         writeInternal(value);
-      } finally {
-        release();
+        return;
       }
+    } finally {
+      release();
+    }
+
+    const semRelease = await semaphore!.acquire();
+    const reacquire = await lock();
+    try {
+      if (isCompleted) {
+        semRelease();
+        throw new Error("Cannot write to completed buffer");
+      }
+      if (hasError) {
+        semRelease();
+        throw new Error("Cannot write after error");
+      }
+
+      if (readers.size === 0) {
+        semRelease();
+      }
+
+      writeInternal(value);
+    } finally {
+      reacquire();
+      // Keep semaphore held for active readers; released when slots are consumed.
     }
   };
 
@@ -671,8 +686,18 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
       const cap = resolvedCapacity ?? Infinity;
       // Reader starts at the oldest item in the replay window
       const start = Math.max(0, totalWritten - (isInfinite ? totalWritten : cap));
+      const hadReaders = readers.size > 0;
       
       readers.set(id, { offset: start });
+
+      if (!isInfinite && !hadReaders && semaphore) {
+        for (let i = start; i < totalWritten; i++) {
+          const acquired = semaphore.tryAcquire();
+          if (!acquired) {
+            throw new Error("Failed to acquire replay buffer permit");
+          }
+        }
+      }
       
       // Initialize slot counters for existing items
       for (let i = start; i < totalWritten; i++) {
@@ -711,7 +736,11 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
     
     while (true) {
       const release = await lock();
+      const seen = notifier.getEpoch();
       let slotToRelease: number | undefined;
+      let result: IteratorResult<T, void> | undefined;
+      let pendingError: Error | undefined;
+      let didRead = false;
       try {
         const readerState = readers.get(id);
         if (!readerState) {
@@ -724,26 +753,29 @@ export function createReplayBuffer<T = any>(capacity: MaybePromise<number>): Rep
           const item = buffer[getIndex(offset)];
           readerState.offset++;
           slotToRelease = offset;
+          didRead = true;
 
           if (isErrorMarker(item)) {
-            release();
-            releaseSlot(slotToRelease);
-            throw item[ERROR_SYMBOL];
+            pendingError = item[ERROR_SYMBOL];
+          } else {
+            result = { value: item as T, done: false };
           }
-          
-          release();
-          releaseSlot(slotToRelease);
-          return { value: item as T, done: false };
         }
 
-        if (isCompleted) {
-          return { value: undefined, done: true };
+        if (!didRead && isCompleted && readerState.offset >= totalWritten) {
+          result = { value: undefined, done: true };
         }
       } finally {
         release();
       }
 
-      await notifier.wait();
+      if (slotToRelease !== undefined) {
+        releaseSlot(slotToRelease);
+      }
+      if (pendingError) throw pendingError;
+      if (result) return result;
+
+      await notifier.wait(seen);
     }
   };
 
