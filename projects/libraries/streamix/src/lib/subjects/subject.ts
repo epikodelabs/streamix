@@ -103,7 +103,7 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
         while (true) {
           const result = await buffer.read(readerId);
           if (result.done) break;
-          await receiver.next?.(result.value);
+          await receiver.next?.(result.value!);
         }
       } catch (err: any) {
         await receiver.error?.(err);

@@ -374,6 +374,27 @@ describe('createSubject', () => {
     expect(values).toEqual([]);
     expect((caught as any)?.message).toBe('late-error');
   });
+
+  it('calls complete on unsubscribe for cleanup', (done) => {
+    const subject = createSubject<number>();
+    let completeCalls = 0;
+    let subscription: Subscription;
+
+    subscription = subject.subscribe({
+      next: () => {
+        subscription.unsubscribe();
+      },
+      complete: () => {
+        completeCalls++;
+        setTimeout(() => {
+          expect(completeCalls).toBe(1);
+          done();
+        }, 0);
+      }
+    });
+
+    subject.next(1);
+  });
 });
 
 describe('createSubjectBuffer', () => {

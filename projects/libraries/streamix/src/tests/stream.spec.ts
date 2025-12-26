@@ -1,4 +1,4 @@
-import { createSubject, from, map } from '@epikodelabs/streamix';
+import { createStream, createSubject, from, map } from '@epikodelabs/streamix';
 
 describe('stream', () => {
   it('allows base streams to be consumed with for-await', async () => {
@@ -38,6 +38,45 @@ describe('stream', () => {
 
     await iterate;
     expect(received).toEqual([1, 2]);
+  });
+
+  it('calls complete on unsubscribe for streams', (done) => {
+    const stream = from([1, 2, 3]);
+    let completeCalls = 0;
+    let subscription: any;
+
+    subscription = stream.subscribe({
+      next: () => {
+        subscription.unsubscribe();
+      },
+      complete: () => {
+        completeCalls++;
+        setTimeout(() => {
+          expect(completeCalls).toBe(1);
+          done();
+        }, 0);
+      }
+    });
+  });
+
+  it('calls complete after error for cleanup', (done) => {
+    const stream = createStream('error-stream', async function* () {
+      throw new Error('boom');
+    });
+
+    const events: string[] = [];
+
+    stream.subscribe({
+      error: (err) => {
+        events.push('error');
+        expect(err.message).toBe('boom');
+      },
+      complete: () => {
+        events.push('complete');
+        expect(events).toEqual(['error', 'complete']);
+        done();
+      }
+    });
   });
 });
 
