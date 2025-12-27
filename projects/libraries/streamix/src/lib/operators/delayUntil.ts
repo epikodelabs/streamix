@@ -22,6 +22,8 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
   return createOperator<T, T>("delayUntil", function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
     let canEmit = false;
+    let notifierEmitted = false;
+    let gateClosedWithoutEmit = false;
     const buffer: T[] = [];
     let notifierSubscription: Subscription | undefined;
 
@@ -31,8 +33,9 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
         notifierSubscription = fromAny(resolvedNotifier as Stream<R> | R | Array<R>).subscribe({
           next: () => {
             // The gate is open. Flush the buffer and start live emission.
-            if (!canEmit) { // Only run the flush on the *first* emission
+            if (!canEmit && !gateClosedWithoutEmit) { // Only run the flush on the *first* emission
               canEmit = true;
+              notifierEmitted = true;
               for (const v of buffer) output.next(v);
               buffer.length = 0;
             }
@@ -47,9 +50,9 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
           complete: () => {
             notifierSubscription?.unsubscribe();
             // If the notifier completes before emitting (i.e., !canEmit), 
-            // the buffered values are discarded, but the source can now emit.
-            if (!canEmit) {
-              canEmit = true;
+            // the buffered values are discarded and no new values are emitted.
+            if (!canEmit && !notifierEmitted) {
+              gateClosedWithoutEmit = true;
               buffer.length = 0;
             }
           },
@@ -70,7 +73,7 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
 
           if (canEmit) {
             output.next(value);
-          } else {
+          } else if (!gateClosedWithoutEmit) {
             buffer.push(value);
           }
         }

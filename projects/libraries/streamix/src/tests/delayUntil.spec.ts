@@ -67,6 +67,34 @@ describe("delayUntil", () => {
     });
   });
 
+  it("should drop values after notifier completes without emitting", async () => {
+    const sourceStream = createSubject<number>();
+    const conditionStream = createSubject<any>();
+
+    const emittedValues: number[] = [];
+    const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
+
+    await new Promise<void>((resolve, reject) => {
+      delayedStream.subscribe({
+        next: (value) => emittedValues.push(value),
+        complete: () => {
+          try {
+            expect(emittedValues).toEqual([]);
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        },
+        error: (err) => reject(new Error(`Stream failed: ${err}`)),
+      });
+
+      conditionStream.complete(); // closes gate without emitting
+      sourceStream.next(1);
+      sourceStream.next(2);
+      sourceStream.complete();
+    });
+  });
+
   it("should emit the source stream values after condition stream emits", async () => {
     const sourceStream = createSubject<number>();
     const conditionStream = createSubject<any>();
