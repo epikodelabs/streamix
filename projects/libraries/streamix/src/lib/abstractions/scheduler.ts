@@ -124,6 +124,11 @@ export function createScheduler(): Scheduler {
   let pumping = false;
 
   /**
+   * Tracks delayed generator continuations scheduled via delayStep.
+   */
+  let pendingDelayedContinuations = 0;
+
+  /**
    * Schedules a microtask.
    *
    * Wrapped for clarity and to avoid capturing extra state.
@@ -140,7 +145,7 @@ export function createScheduler(): Scheduler {
    */
   const resolveFlushIfIdleMicrotaskStable = (): void => {
     scheduleMicrotask(() => {
-      if (!pumping && tasks.length === 0 && flushResolvers.length) {
+      if (!pumping && tasks.length === 0 && pendingDelayedContinuations === 0 && flushResolvers.length) {
         const current = flushResolvers;
         flushResolvers = [];
         for (let i = 0; i < current.length; i++) current[i]();
@@ -163,9 +168,12 @@ export function createScheduler(): Scheduler {
     reject: (e: any) => void,
     ms: number
   ): void => {
+    pendingDelayedContinuations++;
     setTimeout(() => {
+      pendingDelayedContinuations--;
       requeueContinuation(task, resolve, reject);
       ensurePump();
+      resolveFlushIfIdleMicrotaskStable();
     }, ms);
   };
 
