@@ -26,7 +26,7 @@ export function takeUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
 
     const notifierSubscription = fromAny(notifier).subscribe({
       next: () => { stop = true; notifierSubscription.unsubscribe(); output.complete(); },
-      error: (err) => { stop = true; notifierSubscription.unsubscribe(); output.error(err); output.complete(); },
+      error: (err) => { stop = true; notifierSubscription.unsubscribe(); output.error(err); },
       complete: () => { notifierSubscription.unsubscribe(); },
     });
 
