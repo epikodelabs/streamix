@@ -36,11 +36,46 @@ export type Scheduler = {
 
   /**
    * Returns a promise that resolves after the specified delay (in milliseconds).
-   * Does NOT block the queue - the scheduler continues processing other tasks.
+   * Scheduling the delay does NOT block the queue; awaiting it inside a task does.
    * If a callback is provided, it will be enqueued and executed after the delay.
+   *
+   * Avoid `await delay(ms)` inside a scheduler task; it pauses the queue.
+   * Prefer `yield delayStep(ms)` in generator tasks to interleave work.
    */
   delay: (ms: number, callback?: () => void | Promise<void>) => Promise<void>;
 };
+
+/**
+ * Marker for generator-friendly delays.
+ */
+export type DelayStep = {
+  readonly __schedulerDelayStep: true;
+  readonly ms: number;
+};
+
+/**
+ * Creates a delay marker for generator tasks.
+ *
+ * Usage:
+ * function* task() {
+ *   yield delayStep(10);
+ *   // resume after ~10ms
+ * }
+ *
+ * This keeps the queue moving while the generator waits.
+ */
+export function delayStep(ms: number): DelayStep {
+  return { __schedulerDelayStep: true, ms };
+}
+
+function isDelayStep(value: any): value is DelayStep {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    value.__schedulerDelayStep === true &&
+    typeof value.ms === "number"
+  );
+}
 
 /**
  * Type guard for Generator
@@ -122,6 +157,18 @@ export function createScheduler(): Scheduler {
     rejects.push(reject as any);
   };
 
+  const requeueContinuationAfter = (
+    task: () => any,
+    resolve: (v: any) => void,
+    reject: (e: any) => void,
+    ms: number
+  ): void => {
+    setTimeout(() => {
+      requeueContinuation(task, resolve, reject);
+      ensurePump();
+    }, ms);
+  };
+
   /**
    * Main execution loop.
    *
@@ -154,7 +201,11 @@ export function createScheduler(): Scheduler {
               value = step.value;
               resolve(value);
             } else {
-              requeueContinuation(() => result, resolve, reject);
+              if (isDelayStep(step.value)) {
+                requeueContinuationAfter(() => result, resolve, reject, step.value.ms);
+              } else {
+                requeueContinuation(() => result, resolve, reject);
+              }
             }
           } else if (isGenerator(result)) {
             const step = result.next();
@@ -162,7 +213,11 @@ export function createScheduler(): Scheduler {
               value = step.value;
               resolve(value);
             } else {
-              requeueContinuation(() => result, resolve, reject);
+              if (isDelayStep(step.value)) {
+                requeueContinuationAfter(() => result, resolve, reject, step.value.ms);
+              } else {
+                requeueContinuation(() => result, resolve, reject);
+              }
             }
           } else if (isPromiseLike(result)) {
             value = await result;
