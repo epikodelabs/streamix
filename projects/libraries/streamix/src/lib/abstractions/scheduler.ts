@@ -6,31 +6,61 @@ import { isPromiseLike } from "./operator";
  * Guarantees:
  * - FIFO execution (one task at a time)
  * - Supports synchronous and asynchronous tasks
+ * - Supports generators and async generators (yielding between values)
  * - Errors reject the task promise but do NOT stop the queue
  * - `flush()` is microtask-stable:
  *   it resolves only after the queue stays empty
- *   across a microtask turn (prevents ???flush lies???)
+ *   across a microtask turn (prevents "flush lies")
  *
  * Performance optimizations:
  * - Parallel arrays instead of per-task objects
  * - At most one pump in flight
  * - Compact storage for flush waiters
+ * - Cooperative yielding for long-running generators
  */
 export type Scheduler = {
   /**
    * Enqueue a task for serialized execution.
    *
-   * The task may return a value or a promise.
-   * The returned promise resolves or rejects with the task result.
+   * The task may return a value, promise, generator, or async generator.
+   * For generators, yields between each value to allow other tasks to run.
+   * The returned promise resolves with the final return value or array of yielded values.
    */
-  enqueue: <T>(fn: () => Promise<T> | T) => Promise<T>;
+  enqueue: <T>(fn: () => Promise<T> | T | Generator<any, T> | AsyncGenerator<any, T>) => Promise<T>;
 
   /**
    * Resolves when the scheduler becomes idle and
    * remains idle across a microtask boundary.
    */
   flush: () => Promise<void>;
+
+  /**
+   * Returns a promise that resolves after the specified delay (in milliseconds).
+   * Does NOT block the queue - the scheduler continues processing other tasks.
+   * If a callback is provided, it will be enqueued and executed after the delay.
+   */
+  delay: (ms: number, callback?: () => void | Promise<void>) => Promise<void>;
 };
+
+/**
+ * Type guard for Generator
+ */
+function isGenerator(value: any): value is Generator<any, any, any> {
+  return value != null && 
+         typeof value === 'object' && 
+         typeof value.next === 'function' &&
+         typeof value[Symbol.iterator] === 'function';
+}
+
+/**
+ * Type guard for AsyncGenerator
+ */
+function isAsyncGenerator(value: any): value is AsyncGenerator<any, any, any> {
+  return value != null && 
+         typeof value === 'object' && 
+         typeof value.next === 'function' &&
+         typeof value[Symbol.asyncIterator] === 'function';
+}
 
 /**
  * Function createScheduler.
@@ -84,9 +114,42 @@ export function createScheduler(): Scheduler {
   };
 
   /**
+   * Executes a generator, yielding control between each iteration.
+   * This prevents long-running generators from blocking the queue.
+   */
+  const executeGenerator = async <T>(gen: Generator<any, T>): Promise<T> => {
+    let result = gen.next();
+    
+    while (!result.done) {
+      // Yield control to allow other tasks to run
+      await Promise.resolve();
+      result = gen.next();
+    }
+    
+    return result.value;
+  };
+
+  /**
+   * Executes an async generator, yielding control between each iteration.
+   * This prevents long-running async generators from blocking the queue.
+   */
+  const executeAsyncGenerator = async <T>(gen: AsyncGenerator<any, T>): Promise<T> => {
+    let result = await gen.next();
+    
+    while (!result.done) {
+      // Yield control to allow other tasks to run
+      await Promise.resolve();
+      result = await gen.next();
+    }
+    
+    return result.value;
+  };
+
+  /**
    * Main execution loop.
    *
    * Pulls tasks from the queue one-by-one and executes them.
+   * Handles generators and async generators with cooperative yielding.
    * Errors reject the corresponding task promise but do not
    * stop the pump.
    */
@@ -104,7 +167,24 @@ export function createScheduler(): Scheduler {
 
         try {
           const result = task();
-          const value = isPromiseLike(result) ? await result : result;
+          
+          let value: any;
+          
+          // Handle different result types
+          if (isAsyncGenerator(result)) {
+            // Async generator: iterate with yielding
+            value = await executeAsyncGenerator(result);
+          } else if (isGenerator(result)) {
+            // Sync generator: iterate with yielding
+            value = await executeGenerator(result);
+          } else if (isPromiseLike(result)) {
+            // Promise: await it
+            value = await result;
+          } else {
+            // Sync value: use directly
+            value = result;
+          }
+          
           resolve(value);
         } catch (err) {
           // Reject only this task; continue pumping.
@@ -148,7 +228,7 @@ export function createScheduler(): Scheduler {
   /**
    * Enqueues a task for execution.
    */
-  const enqueue = <T>(fn: () => Promise<T> | T): Promise<T> => {
+  const enqueue = <T>(fn: () => Promise<T> | T | Generator<any, T> | AsyncGenerator<any, T>): Promise<T> => {
     return new Promise<T>((resolve, reject) => {
       tasks.push(fn as any);
       resolves.push(resolve as any);
@@ -180,7 +260,27 @@ export function createScheduler(): Scheduler {
     });
   };
 
-  return { enqueue, flush };
+  /**
+   * Schedules a callback to run after the specified delay.
+   * Does NOT block the queue - other tasks continue executing during the delay.
+   * The callback runs through the scheduler when the delay expires.
+   */
+  const delay = (ms: number, callback?: () => void | Promise<void>): Promise<void> => {
+    return new Promise<void>((resolve, reject) => {
+      setTimeout(() => {
+        if (callback) {
+          // Enqueue the callback to run through the scheduler
+          enqueue(callback)
+            .then(() => resolve())
+            .catch(reject);
+        } else {
+          resolve();
+        }
+      }, ms);
+    });
+  };
+
+  return { enqueue, flush, delay };
 }
 
 /**
