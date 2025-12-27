@@ -128,25 +128,23 @@ describe('scheduler', () => {
     expect(order).toEqual(['now']);
   });
 
-  it('allows generator tasks to yield while preserving FIFO order', async () => {
+  it('interleaves generator steps with subsequent queued tasks', async () => {
     const scheduler = createScheduler();
     const order: string[] = [];
 
     function* task() {
       order.push('g1');
-      Promise.resolve().then(() => {
-        scheduler.enqueue(() => order.push('late'));
-      });
       yield 1;
       order.push('g2');
       yield 2;
       return 'done';
     }
 
-    await scheduler.enqueue(() => task());
+    scheduler.enqueue(() => task());
+    scheduler.enqueue(() => order.push('next'));
     await scheduler.flush();
 
-    expect(order).toEqual(['g1', 'g2', 'late']);
+    expect(order).toEqual(['g1', 'next', 'g2']);
   });
 
   it('preserves order when tasks enqueue more work', async () => {

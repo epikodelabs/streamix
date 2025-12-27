@@ -6,7 +6,7 @@ import { isPromiseLike } from "./operator";
  * Guarantees:
  * - FIFO execution (one task at a time)
  * - Supports synchronous and asynchronous tasks
- * - Supports generators and async generators (yielding between values)
+ * - Supports generators and async generators (interleaving between values)
  * - Errors reject the task promise but do NOT stop the queue
  * - `flush()` is microtask-stable:
  *   it resolves only after the queue stays empty
@@ -23,8 +23,8 @@ export type Scheduler = {
    * Enqueue a task for serialized execution.
    *
    * The task may return a value, promise, generator, or async generator.
-   * For generators, yields between each value to allow other tasks to run.
-   * The returned promise resolves with the final return value or array of yielded values.
+   * For generators, each yield is interleaved with other queued tasks.
+   * The returned promise resolves with the final return value.
    */
   enqueue: <T>(fn: () => Promise<T> | T | Generator<any, T> | AsyncGenerator<any, T>) => Promise<T>;
 
@@ -114,35 +114,12 @@ export function createScheduler(): Scheduler {
   };
 
   /**
-   * Executes a generator, yielding control between each iteration.
-   * This prevents long-running generators from blocking the queue.
+   * Re-enqueues a continuation to interleave generator steps with other tasks.
    */
-  const executeGenerator = async <T>(gen: Generator<any, T>): Promise<T> => {
-    let result = gen.next();
-    
-    while (!result.done) {
-      // Yield control to allow other tasks to run
-      await Promise.resolve();
-      result = gen.next();
-    }
-    
-    return result.value;
-  };
-
-  /**
-   * Executes an async generator, yielding control between each iteration.
-   * This prevents long-running async generators from blocking the queue.
-   */
-  const executeAsyncGenerator = async <T>(gen: AsyncGenerator<any, T>): Promise<T> => {
-    let result = await gen.next();
-    
-    while (!result.done) {
-      // Yield control to allow other tasks to run
-      await Promise.resolve();
-      result = await gen.next();
-    }
-    
-    return result.value;
+  const requeueContinuation = (task: () => any, resolve: (v: any) => void, reject: (e: any) => void): void => {
+    tasks.push(task as any);
+    resolves.push(resolve as any);
+    rejects.push(reject as any);
   };
 
   /**
@@ -172,20 +149,28 @@ export function createScheduler(): Scheduler {
           
           // Handle different result types
           if (isAsyncGenerator(result)) {
-            // Async generator: iterate with yielding
-            value = await executeAsyncGenerator(result);
+            const step = await result.next();
+            if (step.done) {
+              value = step.value;
+              resolve(value);
+            } else {
+              requeueContinuation(() => result, resolve, reject);
+            }
           } else if (isGenerator(result)) {
-            // Sync generator: iterate with yielding
-            value = await executeGenerator(result);
+            const step = result.next();
+            if (step.done) {
+              value = step.value;
+              resolve(value);
+            } else {
+              requeueContinuation(() => result, resolve, reject);
+            }
           } else if (isPromiseLike(result)) {
-            // Promise: await it
             value = await result;
+            resolve(value);
           } else {
-            // Sync value: use directly
             value = result;
+            resolve(value);
           }
-          
-          resolve(value);
         } catch (err) {
           // Reject only this task; continue pumping.
           reject(err);
