@@ -1,4 +1,4 @@
-import { createScheduler } from '@epikodelabs/streamix';
+import { createScheduler, delayStep } from '@epikodelabs/streamix';
 
 describe('scheduler', () => {
   it('executes tasks in FIFO order for sync and async work', async () => {
@@ -145,6 +145,23 @@ describe('scheduler', () => {
     await scheduler.flush();
 
     expect(order).toEqual(['g1', 'next', 'g2']);
+  });
+
+  it('supports generator delay steps without blocking the queue', async () => {
+    const scheduler = createScheduler();
+    const order: string[] = [];
+
+    function* task() {
+      order.push('start');
+      yield delayStep(10);
+      order.push('after');
+    }
+
+    scheduler.enqueue(() => task());
+    scheduler.enqueue(() => order.push('next'));
+    await scheduler.flush();
+
+    expect(order).toEqual(['start', 'next', 'after']);
   });
 
   it('preserves order when tasks enqueue more work', async () => {
