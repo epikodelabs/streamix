@@ -77,22 +77,24 @@ describe('createReplaySubject', () => {
     expect(result).toEqual([1, 2, 3]);
   });
 
-  it('should complete all subscribers when last unsubscribes', (done) => {
-    const subject = createReplaySubject<number>();
-    const received: number[] = [];
+  it('should keep accepting values after last subscriber unsubscribes', async () => {
+    const subject = createReplaySubject<number>(1);
+    const receivedA: number[] = [];
 
-    const sub = subject.subscribe({
-      next: v => received.push(v),
-      complete: () => {
-        expect(received).toEqual([1, 2]);
-        done();
-      },
-    });
-
+    const subA = subject.subscribe(v => receivedA.push(v));
     subject.next(1);
+    await waitFor(() => receivedA.length === 1);
+    subA.unsubscribe();
+
     subject.next(2);
-    
-    sub.unsubscribe();
+
+    const receivedB: number[] = [];
+    const subB = subject.subscribe(v => receivedB.push(v));
+    await waitFor(() => receivedB.length === 1);
+    subB.unsubscribe();
+
+    expect(receivedA).toEqual([1]);
+    expect(receivedB).toEqual([2]);
   });
 
   it('should not emit values after completion', async () => {

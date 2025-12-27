@@ -15,32 +15,64 @@ import { createSubject } from '../subjects';
  */
 export function fromEvent(target: MaybePromise<EventTarget>, event: MaybePromise<string>): Stream<Event> {
   const subject = createSubject<Event>(); // Create a subject to emit event values.
+  let subscriberCount = 0;
+  let listening = false;
+  let resolvedTarget: EventTarget | null = null;
+  let resolvedEvent: string | null = null;
 
   const originalSubscribe = subject.subscribe; // Capture original subscribe method.
+
+  const listener = (ev: Event) => {
+    if (!subject.completed()) {
+      subject.next(ev); // Emit the event directly into the subject's stream
+    }
+  };
+
+  const start = async () => {
+    if (listening) return;
+    listening = true;
+
+    if (!isPromiseLike(target) && !isPromiseLike(event)) {
+      resolvedTarget = target;
+      resolvedEvent = event;
+      resolvedTarget.addEventListener(resolvedEvent, listener);
+      return;
+    }
+
+    const targetValue = isPromiseLike(target) ? await target : target;
+    const eventValue = isPromiseLike(event) ? await event : event;
+
+    if (!listening) return;
+
+    resolvedTarget = targetValue;
+    resolvedEvent = eventValue;
+    resolvedTarget.addEventListener(resolvedEvent, listener);
+  };
+
+  const stop = () => {
+    if (!listening) return;
+    listening = false;
+
+    if (resolvedTarget && resolvedEvent) {
+      resolvedTarget.removeEventListener(resolvedEvent, listener);
+    }
+
+    resolvedTarget = null;
+    resolvedEvent = null;
+  };
+
   subject.subscribe = (callback?: ((value: Event) => void) | Receiver<Event>) => {
     const subscription = originalSubscribe.call(subject, callback);
-
-    let resolvedTarget: EventTarget;
-    let resolvedEvent: string;
-
-    const listener = (ev: Event) => {
-      if (!subject.completed()) {
-        subject.next(ev); // Emit the event directly into the subject's stream
-      }
-    };
-
-    (async () => {
-      resolvedTarget = isPromiseLike(target) ? await target : target;
-      resolvedEvent = isPromiseLike(event) ? await event : event;
-      resolvedTarget.addEventListener(resolvedEvent, listener);
-    })();
+    if (++subscriberCount === 1) {
+      void start();
+    }
 
     const originalOnUnsubscribe = subscription.onUnsubscribe;
     subscription.onUnsubscribe = () => {
-      originalOnUnsubscribe?.call(subscription);
-      if (resolvedTarget && resolvedEvent) {
-        resolvedTarget.removeEventListener(resolvedEvent, listener); // Cleanup listener on unsubscribe
+      if (--subscriberCount === 0) {
+        stop();
       }
+      originalOnUnsubscribe?.call(subscription);
     };
 
     return subscription;

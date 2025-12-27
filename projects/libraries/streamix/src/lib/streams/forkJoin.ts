@@ -1,4 +1,5 @@
 import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
+import { eachValueFrom, fromAny } from "../converters";
 
 /**
  * Waits for all streams to complete and emits an array of their last values.
@@ -16,38 +17,44 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
       resolvedInputs.push(isPromiseLike(src) ? await src : src);
     }
 
-    let streamsArray: Array<Stream<T>> = [];
-    if (resolvedInputs.length === 1) {
-      const [first] = resolvedInputs;
-      if (first && typeof first === "object" && Symbol.iterator in first) {
-        streamsArray = Array.from(first as Iterable<Stream<T>>);
-      } else {
-        streamsArray = [first as Stream<T>];
-      }
-    } else {
-      streamsArray = resolvedInputs as Array<Stream<T>>;
+    const normalizedSources = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
+      ? resolvedInputs[0]
+      : resolvedInputs) as Array<Stream<T> | Array<T> | T>;
+
+    const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
+    for (const source of normalizedSources) {
+      resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
-    const results = new Array(streamsArray.length);
 
-    const promises = streamsArray.map(async (stream, index) => {
-      const resolved = isPromiseLike(stream) ? await stream : stream;
-      let last: T | undefined;
-      let hasValue = false;
+    const results = new Array(resolvedSources.length);
+    const hasValue = new Array(resolvedSources.length).fill(false);
+    const resolvedIterators = resolvedSources.map((source) =>
+      eachValueFrom(fromAny(source))
+    );
 
-      for await (const value of resolved) {
-        last = value;
-        hasValue = true;
-      }
+    try {
+      const promises = resolvedIterators.map(async (iterator, index) => {
+        while (true) {
+          const result = await iterator.next();
+          if (result.done) break;
+          hasValue[index] = true;
+          results[index] = result.value;
+        }
 
-      if (!hasValue) {
-        throw new Error("forkJoin: one of the streams completed without emitting any value");
-      }
+        if (!hasValue[index]) {
+          throw new Error("forkJoin: one of the streams completed without emitting any value");
+        }
+      });
 
-      results[index] = last;
-    });
-
-    await Promise.all(promises);
-    yield results as T[];
+      await Promise.all(promises);
+      yield results as T[];
+    } finally {
+      await Promise.all(
+        resolvedIterators.map((iterator) =>
+          iterator.return ? iterator.return(undefined).catch(() => {}) : Promise.resolve()
+        )
+      );
+    }
   }
 
   return createStream<T[]>("forkJoin", generator);

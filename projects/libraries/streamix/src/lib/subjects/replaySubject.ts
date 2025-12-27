@@ -34,7 +34,6 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
   let hasError = false;
   let latestValue: T | undefined = undefined;
   let writeChain = Promise.resolve();
-  let subscriberCount = 0;
 
   const enqueueWrite = (task: () => Promise<void>) => {
     writeChain = writeChain.then(task).catch(() => {});
@@ -73,22 +72,11 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     let unsubscribing = false;
     let readerId: number | null = null;
     let readerLatestValue: T | undefined;
-    let drainOnUnsubscribe = false;
-    // Prevent multiple unsubscribe calls from decrementing subscriberCount twice.
-    let counted = true;
 
-    subscriberCount++;
     const subscription = createSubscription(() => {
       if (!unsubscribing) {
         unsubscribing = true;
-        if (counted) {
-          subscriberCount--;
-          counted = false;
-        }
-        if (subscriberCount === 0) {
-          drainOnUnsubscribe = true;
-          complete();
-        } else if (readerId !== null) {
+        if (readerId !== null) {
           scheduler.enqueue(async () => {
             if (readerId !== null) await buffer.detachReader(readerId);
           });
@@ -98,10 +86,6 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
 
     scheduler.enqueue(() => buffer.attachReader()).then(async (id: number) => {
       readerId = id;
-      if (unsubscribing && !drainOnUnsubscribe) {
-        await buffer.detachReader(readerId);
-        return;
-      }
       try {
         while (true) {
           const result = await buffer.read(readerId);
@@ -113,9 +97,15 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
         await receiver.error?.(err);
       } finally {
         if (readerId !== null) {
-          await buffer.detachReader(readerId);
+          scheduler.enqueue(async () => {
+            await buffer.detachReader(readerId);
+            await receiver.complete?.();
+          });
+        } else {
+          scheduler.enqueue(async () => {
+            await receiver.complete?.();
+          });
         }
-        await receiver.complete?.();
       }
     });
 
