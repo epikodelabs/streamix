@@ -45,7 +45,6 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
           error: (err) => {
             notifierSubscription?.unsubscribe();
             output.error(err);
-            output.complete();
           },
           complete: () => {
             notifierSubscription?.unsubscribe();
@@ -59,7 +58,6 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
         });
       } catch (err) {
         output.error(err instanceof Error ? err : new Error(String(err)));
-        output.complete();
       }
     };
 
