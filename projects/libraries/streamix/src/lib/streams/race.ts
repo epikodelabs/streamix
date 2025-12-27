@@ -1,4 +1,4 @@
-import { createStream, type MaybePromise, type Stream } from "../abstractions";
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
@@ -21,36 +21,59 @@ export function race<T extends readonly unknown[] = any[]>(
   ...streams: Array<MaybePromise<Stream<T[number]> | Array<T[number]> | T[number]>>
 ): Stream<T[number]> {
   return createStream<T[number]>('race', async function* () {
-    const resolvedStreams = streams;
-    if (!resolvedStreams || resolvedStreams.length === 0) return;
+    const resolvedInputs: any[] = [];
+    for (const src of streams) {
+      resolvedInputs.push(isPromiseLike(src) ? await src : src);
+    }
 
-    const controllers = new Array(resolvedStreams.length).fill(null).map(() => new AbortController());
+    const normalizedStreams = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
+      ? resolvedInputs[0]
+      : resolvedInputs) as Array<Stream<T[number]> | Array<T[number]> | T[number]>;
+
+    if (!normalizedStreams || normalizedStreams.length === 0) return;
+
+    const resolvedStreams: Array<Stream<T[number]> | Array<T[number]> | T[number]> = [];
+    for (const s of normalizedStreams) {
+      resolvedStreams.push(isPromiseLike(s) ? await s : s);
+    }
+
     const iterators = resolvedStreams.map((s) => eachValueFrom(fromAny(s)));
+    let winnerIndex: number | null = null;
 
     try {
+      const first = await Promise.race(
+        iterators.map((it, index) =>
+          it.next().then(result => ({ ...result, index }))
+        )
+      );
+
+      winnerIndex = first.index;
+
+      // Cancel all losing streams as soon as the winner is known.
+      await Promise.all(
+        iterators.map((it, index) =>
+          index !== winnerIndex && it.return
+            ? it.return(undefined).catch(() => {})
+            : Promise.resolve()
+        )
+      );
+
+      if (first.done) return;
+
+      yield first.value;
+
+      const winner = iterators[winnerIndex];
       while (true) {
-        // Create promises for all iterators
-        const promises = iterators.map((it, i) =>
-          it.next().then(result => ({ ...result, index: i }))
-        );
-
-        // Race all iterators
-        const { value, done, index } = await Promise.race(promises);
-
-        if (done) {
-          // Cancel all other streams
-          controllers.forEach((c, i) => i !== index && c.abort());
-          return;
-        }
-
-        yield value;
-
-        // Cancel losing streams
-        controllers.forEach((c, i) => i !== index && c.abort());
+        const result = await winner.next();
+        if (result.done) break;
+        yield result.value;
       }
     } finally {
-      // Cleanup all controllers
-      controllers.forEach(c => c.abort());
+      await Promise.all(
+        iterators.map((it) =>
+          it.return ? it.return(undefined).catch(() => {}) : Promise.resolve()
+        )
+      );
     }
   });
 }

@@ -18,6 +18,20 @@ describe('createSubject', () => {
     subject.next('value2');
   });
 
+  it('should not emit when unsubscribed before attachment completes', async () => {
+    const subject = createSubject<number>();
+    const values: number[] = [];
+
+    const sub = subject.subscribe(value => values.push(value));
+    sub.unsubscribe();
+
+    subject.next(1);
+    subject.complete();
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(values).toEqual([]);
+  });
+
   it('should allow independent subscriptions with different lifetimes', (done) => {
     const subject = createSubject<any>();
 

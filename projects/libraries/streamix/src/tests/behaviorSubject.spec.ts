@@ -20,6 +20,20 @@ describe('createBehaviorSubject', () => {
     behaviorSubject.complete();
   });
 
+  it('should not emit values after an immediate unsubscribe', async () => {
+    const subject = createBehaviorSubject<number>(1);
+    const values: number[] = [];
+
+    const sub = subject.subscribe(value => values.push(value));
+    sub.unsubscribe();
+
+    subject.next(2);
+    subject.complete();
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(values).toEqual([1]);
+  });
+
   it('should always expose the latest value via the snappy getter', () => {
     const initial = 42;
     const behaviorSubject = createBehaviorSubject(initial);

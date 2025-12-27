@@ -45,40 +45,42 @@ export function merge<T = any, R extends readonly unknown[] = any[]>(
         error => ({ error, index, status: 'rejected' as const })
       );
 
-    while (activeCount > 0) {
-      const race = Promise.race(
-        nextPromises
-          .map((p, i) => (p ? reflect(p, i) : null))
-          .filter(Boolean) as Promise<
-            | { index: number; value: T; done: boolean; status: 'fulfilled' }
-            | { index: number; error: any; status: 'rejected' }
-          >[]
-      );
+    try {
+      while (activeCount > 0) {
+        const race = Promise.race(
+          nextPromises
+            .map((p, i) => (p ? reflect(p, i) : null))
+            .filter(Boolean) as Promise<
+              | { index: number; value: T; done: boolean; status: 'fulfilled' }
+              | { index: number; error: any; status: 'rejected' }
+            >[]
+        );
 
-      const winner = await race;
+        const winner = await race;
 
-      if (winner.status === 'rejected') {
-        throw winner.error;
+        if (winner.status === 'rejected') {
+          throw winner.error;
+        }
+
+        const { value, done, index } = winner;
+
+        if (done) {
+          nextPromises[index] = null;
+          activeCount--;
+        } else {
+          yield value;
+          nextPromises[index] = iterators[index].next();
+        }
       }
-
-      const { value, done, index } = winner;
-
-      if (done) {
-        nextPromises[index] = null;
-        activeCount--;
-      } else {
-        yield value;
-        nextPromises[index] = iterators[index].next();
-      }
-    }
-
-    // Cleanup all iterators on abort or completion
-    for (const iterator of iterators) {
-      if (iterator.return) {
-        try {
-          await iterator.return(undefined);
-        } catch {
-          // ignore
+    } finally {
+      // Cleanup all iterators on abort or completion
+      for (const iterator of iterators) {
+        if (iterator.return) {
+          try {
+            await iterator.return(undefined);
+          } catch {
+            // ignore
+          }
         }
       }
     }
