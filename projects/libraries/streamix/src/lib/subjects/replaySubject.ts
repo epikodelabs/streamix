@@ -88,7 +88,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
       readerId = id;
       try {
         while (true) {
-          const result = await buffer.read(readerId);
+          const result = await buffer.read(readerId!);
           if (result.done) break;
           readerLatestValue = result.value;
           await receiver.next?.(readerLatestValue!);
@@ -98,7 +98,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
       } finally {
         if (readerId !== null) {
           scheduler.enqueue(async () => {
-            await buffer.detachReader(readerId);
+            await buffer.detachReader(readerId!);
             await receiver.complete?.();
           });
         } else {
