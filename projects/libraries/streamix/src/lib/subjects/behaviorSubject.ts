@@ -85,7 +85,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       readerId = id;
       try {
         while (true) {
-          const result = await buffer.read(readerId);
+          const result = await buffer.read(readerId!);
           if (result.done) break;
           await receiver.next?.(result.value!);
         }
@@ -94,7 +94,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       } finally {
         if (!unsubscribing && readerId !== null) {
           scheduler.enqueue(async () => {
-            await buffer.detachReader(readerId);
+            await buffer.detachReader(readerId!);
             await receiver.complete?.();
           });
         } else {
