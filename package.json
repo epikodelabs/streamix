@@ -14,7 +14,7 @@
     "docs:prepare": "node scripts/docs-prepare.mjs",
     "docs:fix-api-links": "node scripts/fix-typedoc-links.mjs",
     "docs:dev": "npm run docs:prepare && npm run docs:generate && npm run docs:fix-api-links && vitepress dev dist",
-    "docs:build": "npm run docs:prepare && npm run docs:generate && npm run docs:fix-api-links && vitepress build dist && npm run docs:rewrite",
+    "docs:build": "npm run docs:prepare && npm run docs:generate && npm run docs:fix-api-links && vitepress build dist --base /streamix/ && npm run docs:rewrite",
     "docs:rewrite": "node scripts/rewrite-vitepress-base.mjs"
   },
   "dependencies": {
