@@ -33,6 +33,30 @@ describe('scheduler', () => {
     expect(order).toEqual([1, 2, 3]);
   });
 
+  it('resolves task return values', async () => {
+    const scheduler = createScheduler();
+
+    const value = await scheduler.enqueue(() => 42);
+
+    expect(value).toBe(42);
+  });
+
+  it('continues processing after an async task rejects', async () => {
+    const scheduler = createScheduler();
+    const order: string[] = [];
+
+    await Promise.allSettled([
+      scheduler.enqueue(async () => {
+        await Promise.resolve();
+        throw new Error('boom');
+      }),
+      scheduler.enqueue(() => order.push('next')),
+    ]);
+
+    await scheduler.flush();
+    expect(order).toEqual(['next']);
+  });
+
   it('continues processing after a task rejects', async () => {
     const scheduler = createScheduler();
     const order: string[] = [];
