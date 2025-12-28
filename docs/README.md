@@ -8,8 +8,8 @@ Small bundle, pull-based execution, and a familiar operator API.
 </p>
 
 <p align="center">
-  <a href="https://github.com/epikodelabs/streamix/workflows/build/badge.svg">
-    <img src="https://github.com/epikodelabs/streamix/workflows/build/badge.svg" alt="Build Status">
+  <a href="https://github.com/epikodelabs/streamix/actions/workflows/build.yml">
+    <img src="https://github.com/epikodelabs/streamix/actions/workflows/build.yml/badge.svg?branch=main" alt="Build Status">
   </a>
   <a href="https://www.npmjs.com/package/@epikodelabs%2Fstreamix">
     <img src="https://img.shields.io/npm/v/@epikodelabs%2Fstreamix.svg?style=flat-square" alt="NPM Version">
@@ -27,13 +27,13 @@ Small bundle, pull-based execution, and a familiar operator API.
 
 ---
 
-## ⭐ Give a Star on GitHub
+## Give a Star on GitHub
 
 If streamix helps you, please give it a star: https://github.com/epikodelabs/streamix
 
 ---
 
-## 🧭 Why streamix
+## Why Streamix
 
 streamix is a reactive streams library built on async generators. It focuses on a small bundle size and pull-based execution while keeping an API that feels familiar to RxJS users.
 
@@ -49,7 +49,7 @@ streamix is a reactive streams library built on async generators. It focuses on 
 
 ---
 
-## 📦 Installation
+## Installation
 
 ```bash
 # npm
@@ -64,7 +64,7 @@ pnpm add @epikodelabs/streamix
 
 ---
 
-## ⚡ Quick start
+## Quick start
 
 ### Basic stream operations
 
@@ -145,7 +145,7 @@ const sub = interval(1000).subscribe(value => {
 
 ---
 
-## 🧠 Core concepts
+## Core concepts
 
 ### Streams
 
@@ -218,7 +218,7 @@ console.log('result:', result);
 
 ---
 
-## 🌐 HTTP client
+## HTTP client
 
 streamix includes an HTTP client that composes well with streams:
 
@@ -250,7 +250,7 @@ for await (const activeUsers of dataStream) {
 
 ---
 
-## 🧪 Real-world example
+## Real-world example
 
 Live search with API calls and basic error handling:
 
@@ -294,7 +294,7 @@ for await (const result of searchResults) {
 
 ---
 
-## 🧰 Available operators
+## Available operators
 
 ### Transformation
 - `map` - Transform each value
@@ -323,7 +323,7 @@ for await (const result of searchResults) {
 
 ---
 
-## 🎬 Live demos
+## Live demos
 
 - [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
 - [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
@@ -331,7 +331,7 @@ for await (const result of searchResults) {
 
 ---
 
-## 🧬 Generator-based architecture
+## Generator-based architecture
 
 Unlike push-based streams, streamix uses pull-based async generators:
 
@@ -355,10 +355,10 @@ This enables:
 
 ---
 
-## 📊 streamix vs RxJS
+## Streamix vs RxJS
 
-| Feature | streamix | RxJS |
-|---------|----------|------|
+| Feature | Streamix | RxJS |
+| --- | --- | --- |
 | Bundle size | Small, generator-based core | Larger, broad operator set |
 | Learning curve | Moderate, smaller API surface | Steeper, larger surface area |
 | Execution model | Pull-based | Push-based |
@@ -367,7 +367,7 @@ This enables:
 
 ---
 
-## 📚 Documentation and resources
+## Documentation and resources
 
 - [API Documentation](https://epikodelabs.github.io/streamix)
 - [Blog: Exploring streamix](https://medium.com/p/00d5467f0c01)
@@ -376,7 +376,7 @@ This enables:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome issues and pull requests. If you are new to the codebase:
 
@@ -388,7 +388,7 @@ We welcome issues and pull requests. If you are new to the codebase:
 
 ---
 
-## 📄 License
+## License
 
 MIT License
 
