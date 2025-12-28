@@ -44,6 +44,10 @@ function processDirectory(dir) {
     for (const [pattern, replacement] of replacements) {
       updated = updated.replace(pattern, replacement);
     }
+    updated = updated.replace(
+      /\]\((?!https?:|mailto:|data:)([^)]+?)\.md(#[^)]+)?\)/g,
+      (_match, pathPart, hash = '') => `](${pathPart}${hash})`
+    );
     if (updated !== content) {
       fs.writeFileSync(fullPath, updated, 'utf8');
     }

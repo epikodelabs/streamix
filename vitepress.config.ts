@@ -49,7 +49,7 @@ export default defineConfig({
   title: 'streamix',
   description: 'Reactive library documentation',
 
-  cleanUrls: false,
+  cleanUrls: true,
 
   themeConfig: {
     nav: [

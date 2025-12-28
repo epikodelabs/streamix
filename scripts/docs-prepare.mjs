@@ -92,19 +92,19 @@ for (const fileName of distMarkdown) {
   for (const target of targets) {
     const escaped = escapeRegExp(target);
     content = content.replace(
-      new RegExp(`\\]\\(\\./${escaped}\\.md\\)`, 'g'),
-      `](./${target})`
+      new RegExp(`\\]\\(\\./${escaped}\\.md(#[^)]+)?\\)`, 'g'),
+      (_match, hash = '') => `](./${target}${hash})`
     );
     content = content.replace(
-      new RegExp(`\\]\\(/${escaped}\\.md\\)`, 'g'),
-      `](/${target})`
+      new RegExp(`\\]\\(/${escaped}\\.md(#[^)]+)?\\)`, 'g'),
+      (_match, hash = '') => `](/${target}${hash})`
     );
   }
 
-  content = content.replace(/]\(\.\/README\.md\)/g, '](./)');
-  content = content.replace(/]\(\.\/README\)/g, '](./)');
-  content = content.replace(/]\(\/README\.md\)/g, '](/)');
-  content = content.replace(/]\(\/README\)/g, '](/)');
+  content = content.replace(/]\(\.\/README\.md(#[^)]+)?\)/g, '](./$1)');
+  content = content.replace(/]\(\.\/README(#[^)]+)?\)/g, '](./$1)');
+  content = content.replace(/]\(\/README\.md(#[^)]+)?\)/g, '](/$1)');
+  content = content.replace(/]\(\/README(#[^)]+)?\)/g, '](/$1)');
 
   if (content !== original) {
     writeText(filePath, content);
