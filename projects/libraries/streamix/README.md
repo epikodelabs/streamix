@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/LOGO.png?raw=true" alt="Streamix Logo" width="500">
 </p>
 
@@ -27,7 +27,7 @@
 
 ---
 
-## 🧭 Why Streamix
+## рџ§­ Why Streamix
 
 Streamix is a reactive streams library built on async generators. It focuses on a small bundle size and pull-based execution while keeping an API that feels familiar to RxJS users.
 
@@ -43,7 +43,7 @@ Streamix is a reactive streams library built on async generators. It focuses on 
 
 ---
 
-## 📦 Installation
+## рџ“¦ Installation
 
 ```bash
 # npm
@@ -58,7 +58,7 @@ pnpm add @epikodelabs/streamix
 
 ---
 
-## ⚡ Quick start
+## вљЎ Quick start
 
 ### Basic stream operations
 
@@ -139,7 +139,7 @@ const sub = interval(1000).subscribe(value => {
 
 ---
 
-## 🧠 Core concepts
+## рџ§  Core concepts
 
 ### Streams
 
@@ -212,7 +212,7 @@ console.log('result:', result);
 
 ---
 
-## 🌐 HTTP client
+## рџЊђ HTTP client
 
 Streamix includes an HTTP client that composes well with streams:
 
@@ -244,7 +244,7 @@ for await (const activeUsers of dataStream) {
 
 ---
 
-## 🧪 Real-world example
+## рџ§Є Real-world example
 
 Live search with API calls and basic error handling:
 
@@ -288,7 +288,7 @@ for await (const result of searchResults) {
 
 ---
 
-## 🧰 Available operators
+## рџ§° Available operators
 
 ### Transformation
 - `map` - Transform each value
@@ -317,7 +317,7 @@ for await (const result of searchResults) {
 
 ---
 
-## 🎬 Live demos
+## рџЋ¬ Live demos
 
 - [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
 - [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
@@ -325,7 +325,7 @@ for await (const result of searchResults) {
 
 ---
 
-## 🧬 Generator-based architecture
+## рџ§¬ Generator-based architecture
 
 Unlike push-based streams, Streamix uses pull-based async generators:
 
@@ -349,7 +349,7 @@ This enables:
 
 ---
 
-## 📊 Streamix vs RxJS
+## рџ“Љ Streamix vs RxJS
 
 | Feature | Streamix | RxJS |
 |---------|----------|------|
@@ -361,7 +361,7 @@ This enables:
 
 ---
 
-## 📚 Documentation and resources
+## рџ“љ Documentation and resources
 
 - [API Documentation](https://epikodelabs.github.io/streamix)
 - [Blog: Exploring Streamix](https://medium.com/p/00d5467f0c01)
@@ -370,7 +370,7 @@ This enables:
 
 ---
 
-## 🤝 Contributing
+## рџ¤ќ Contributing
 
 We welcome issues and pull requests. If you are new to the codebase:
 
@@ -382,7 +382,7 @@ We welcome issues and pull requests. If you are new to the codebase:
 
 ---
 
-## 📄 License
+## рџ“„ License
 
 MIT License
 
@@ -396,5 +396,6 @@ MIT License
 </p>
 
 <p align="center">
-  ⭐ If Streamix is useful to you, consider giving the repo a <a href="https://github.com/epikodelabs/streamix">star</a> ⭐
+  в­ђ If Streamix is useful to you, consider giving the repo a <a href="https://github.com/epikodelabs/streamix">star</a> в­ђ
 </p>
+

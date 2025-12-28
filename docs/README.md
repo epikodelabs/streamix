@@ -1,4 +1,4 @@
-# streamix
+﻿# streamix
 
 Reactive streams built on async generators.
 Small bundle, pull-based execution, and a familiar operator API.
@@ -27,13 +27,13 @@ Small bundle, pull-based execution, and a familiar operator API.
 
 ---
 
-## ⭐ Give a Star on GitHub
+## в­ђ Give a Star on GitHub
 
 If streamix helps you, please give it a star: https://github.com/epikodelabs/streamix
 
 ---
 
-## 🧭 Why streamix
+## рџ§­ Why streamix
 
 streamix is a reactive streams library built on async generators. It focuses on a small bundle size and pull-based execution while keeping an API that feels familiar to RxJS users.
 
@@ -49,7 +49,7 @@ streamix is a reactive streams library built on async generators. It focuses on 
 
 ---
 
-## 📦 Installation
+## рџ“¦ Installation
 
 ```bash
 # npm
@@ -64,7 +64,7 @@ pnpm add @epikodelabs/streamix
 
 ---
 
-## ⚡ Quick start
+## вљЎ Quick start
 
 ### Basic stream operations
 
@@ -145,7 +145,7 @@ const sub = interval(1000).subscribe(value => {
 
 ---
 
-## 🧠 Core concepts
+## рџ§  Core concepts
 
 ### Streams
 
@@ -218,7 +218,7 @@ console.log('result:', result);
 
 ---
 
-## 🌐 HTTP client
+## рџЊђ HTTP client
 
 streamix includes an HTTP client that composes well with streams:
 
@@ -250,7 +250,7 @@ for await (const activeUsers of dataStream) {
 
 ---
 
-## 🧪 Real-world example
+## рџ§Є Real-world example
 
 Live search with API calls and basic error handling:
 
@@ -294,7 +294,7 @@ for await (const result of searchResults) {
 
 ---
 
-## 🧰 Available operators
+## рџ§° Available operators
 
 ### Transformation
 - `map` - Transform each value
@@ -323,7 +323,7 @@ for await (const result of searchResults) {
 
 ---
 
-## 🎬 Live demos
+## рџЋ¬ Live demos
 
 - [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
 - [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
@@ -331,7 +331,7 @@ for await (const result of searchResults) {
 
 ---
 
-## 🧬 Generator-based architecture
+## рџ§¬ Generator-based architecture
 
 Unlike push-based streams, streamix uses pull-based async generators:
 
@@ -355,7 +355,7 @@ This enables:
 
 ---
 
-## 📊 streamix vs RxJS
+## рџ“Љ streamix vs RxJS
 
 | Feature | streamix | RxJS |
 |---------|----------|------|
@@ -367,7 +367,7 @@ This enables:
 
 ---
 
-## 📚 Documentation and resources
+## рџ“љ Documentation and resources
 
 - [API Documentation](https://epikodelabs.github.io/streamix)
 - [Blog: Exploring streamix](https://medium.com/p/00d5467f0c01)
@@ -376,7 +376,7 @@ This enables:
 
 ---
 
-## 🤝 Contributing
+## рџ¤ќ Contributing
 
 We welcome issues and pull requests. If you are new to the codebase:
 
@@ -388,7 +388,7 @@ We welcome issues and pull requests. If you are new to the codebase:
 
 ---
 
-## 📄 License
+## рџ“„ License
 
 MIT License
 
@@ -400,4 +400,6 @@ MIT License
   <a href="https://github.com/epikodelabs/streamix">View on GitHub</a> -
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
+
+
 
