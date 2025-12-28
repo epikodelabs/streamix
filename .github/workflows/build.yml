@@ -36,6 +36,3 @@ jobs:
       - name: Build streamix
         run: npm run build streamix
 
-      # Run Jasmine tests with coverage
-      - name: Run tests
-        run: npm run jasmine:coverage

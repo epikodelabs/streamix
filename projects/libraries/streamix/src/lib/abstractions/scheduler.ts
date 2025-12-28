@@ -9,7 +9,7 @@ import { isPromiseLike } from "./operator";
  * - Errors reject the task promise but do NOT stop the queue
  * - `flush()` is microtask-stable:
  *   it resolves only after the queue stays empty
- *   across a microtask turn (prevents ???flush lies???)
+ *   across a microtask turn (prevents "flush lies")
  *
  * Performance optimizations:
  * - Parallel arrays instead of per-task objects
@@ -30,6 +30,35 @@ export type Scheduler = {
    * remains idle across a microtask boundary.
    */
   flush: () => Promise<void>;
+
+  /**
+   * Awaits a promise without blocking the queue.
+   * 
+   * Designed for use within generators. When yielded,
+   * it allows the queue to continue processing other tasks
+   * while waiting for the promise to resolve.
+   * 
+   * @example
+   * function* myGenerator() {
+   *   yield* scheduler.await(fetch('/api'));
+   *   // Queue was not blocked during fetch
+   * }
+   */
+  await: <T>(promise: Promise<T>) => Promise<T>;
+
+  /**
+   * Waits for the specified duration without blocking the queue.
+   *
+   * Useful for throttling or spacing work in generators or async flows
+   * while allowing other queued tasks to continue running.
+   *
+   * @example
+   * function* task() {
+   *   yield scheduler.delay(100);
+   *   // Queue kept processing during the delay
+   * }
+   */
+  delay: (ms: number) => Promise<void>;
 };
 
 /**
@@ -180,7 +209,56 @@ export function createScheduler(): Scheduler {
     });
   };
 
-  return { enqueue, flush };
+  /**
+   * Awaits a promise without blocking the queue.
+   * 
+   * This method releases the current task slot, allowing
+   * other tasks to execute while waiting for the promise.
+   * Once the promise resolves, it re-enqueues to continue
+   * execution in FIFO order.
+   * 
+   * For use with yield in generators:
+   * 
+   * @example
+   * function* task() {
+   *   const data = yield scheduler.await(fetchData());
+   *   // Queue was not blocked during fetch
+   * }
+   * 
+   * // Or with async/await syntax
+   * const data = await scheduler.await(fetchData());
+   */
+  const awaitNonBlocking = <T>(promise: Promise<T>): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      // Wait for the promise outside the queue
+      promise.then(
+        (value) => {
+          // Re-enqueue to continue in FIFO order
+          enqueue(() => value).then(resolve, reject);
+        },
+        (error) => {
+          // Re-enqueue the error
+          enqueue(() => {
+            throw error;
+          }).catch(reject);
+        }
+      );
+    });
+  };
+
+  /**
+   * Delays execution without blocking the queue.
+   * 
+   * Uses awaitNonBlocking internally to release the queue
+   * during the timeout period.
+   */
+  const delay = (ms: number): Promise<void> => {
+    return awaitNonBlocking(
+      new Promise<void>((resolve) => setTimeout(resolve, ms))
+    );
+  };
+
+  return { enqueue, flush, await: awaitNonBlocking, delay };
 }
 
 /**

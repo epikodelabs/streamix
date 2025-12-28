@@ -36,7 +36,7 @@ Streamix is a reactive streams library built on async generators. It focuses on 
 - Pull-based execution so values are computed when requested
 - Async iterator first, designed for `for await...of`
 - Async callbacks are supported in `subscribe` handlers
-- `query()` retrieves the first emitted value as a promise, then unsubscribes
+- `query()` retrieves actual emitted value as a promise
 - Operators for mapping, filtering, combination, and control flow
 - Subjects for manual emission and multicasting
 - Optional HTTP client and DOM observation utilities
