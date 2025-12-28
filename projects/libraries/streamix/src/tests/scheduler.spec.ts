@@ -197,4 +197,78 @@ describe('scheduler', () => {
       jasmine.clock().uninstall();
     }
   });
+
+  it('resolves flush immediately when already idle', async () => {
+    const scheduler = createScheduler();
+    let resolved = false;
+
+    await scheduler.flush().then(() => {
+      resolved = true;
+    });
+
+    expect(resolved).toBeTrue();
+  });
+
+  it('rejects the task promise when the task throws', async () => {
+    const scheduler = createScheduler();
+    const error = new Error('boom');
+    let captured: unknown;
+
+    await scheduler.enqueue(() => {
+      throw error;
+    }).catch((err) => {
+      captured = err;
+    });
+
+    await scheduler.flush();
+    expect(captured).toBe(error);
+  });
+
+  it('yields the queue while awaiting and resumes in FIFO order', async () => {
+    const scheduler = createScheduler();
+    const order: string[] = [];
+    const deferred = createDeferred<string>();
+
+    const running = scheduler.enqueue(async () => {
+      order.push('start');
+      const value = await scheduler.await(deferred.promise);
+      order.push(`resume:${value}`);
+    });
+
+    scheduler.enqueue(() => order.push('after'));
+
+    await scheduler.flush();
+    expect(order).toEqual(['start', 'after']);
+
+    deferred.resolve('ok');
+    await running;
+    await scheduler.flush();
+    expect(order).toEqual(['start', 'after', 'resume:ok']);
+  });
+
+  it('allows the queue to run while delayed work is pending', async () => {
+    jasmine.clock().install();
+    try {
+      const scheduler = createScheduler();
+      const order: string[] = [];
+
+      const delayed = scheduler.enqueue(async () => {
+        order.push('start');
+        await scheduler.delay(25);
+        order.push('after-delay');
+      });
+
+      scheduler.enqueue(() => order.push('next'));
+
+      await scheduler.flush();
+      expect(order).toEqual(['start', 'next']);
+
+      jasmine.clock().tick(25);
+      await delayed;
+      await scheduler.flush();
+      expect(order).toEqual(['start', 'next', 'after-delay']);
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
 });
