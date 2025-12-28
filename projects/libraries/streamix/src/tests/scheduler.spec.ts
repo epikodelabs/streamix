@@ -209,6 +209,24 @@ describe('scheduler', () => {
     expect(resolved).toBeTrue();
   });
 
+  it('resolves multiple flush calls after queued work completes', async () => {
+    const scheduler = createScheduler();
+    const order: string[] = [];
+
+    scheduler.enqueue(() => order.push('task-1'));
+    scheduler.enqueue(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      order.push('task-2');
+    });
+
+    const firstFlush = scheduler.flush().then(() => order.push('flush-1'));
+    const secondFlush = scheduler.flush().then(() => order.push('flush-2'));
+
+    await Promise.all([firstFlush, secondFlush]);
+
+    expect(order).toEqual(['task-1', 'task-2', 'flush-1', 'flush-2']);
+  });
+
   it('rejects the task promise when the task throws', async () => {
     const scheduler = createScheduler();
     const error = new Error('boom');
