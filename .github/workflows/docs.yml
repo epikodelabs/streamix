@@ -20,87 +20,41 @@ jobs:
       id-token: write
 
     steps:
-      # 1 Checkout repo
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2 Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      # 3 Install dependencies
       - name: Install dependencies
         run: npm ci
 
-      # 4 Generate Typedoc Markdown for API
-      - name: Generate API docs
-        run: |
-          npx typedoc \
-            --plugin typedoc-plugin-markdown \
-            --out docs/api \
-            --hideBreadcrumbs \
-            --hidePageHeader
-
-      # 5 Rename main API README.md to index.md
-      - name: Rename API README to index
-        run: |
-          if [ -f docs/api/README.md ]; then
-            mv docs/api/README.md docs/api/index.md
-          fi
-
-      # 6 Replace internal README links in API docs
-      - name: Fix README links
-        run: |
-          find docs/api -name '*.md' -exec sed -i \
-            -e 's|\(\]\)(\.\./README.md)|\1(./)|g' \
-            -e 's|\(\]\)(\.\./\.\./README.md)|\1(../../)|g' {} +
-
-      # 7 Use main README as homepage and link to API folder
-      - name: Create site index.md
-        run: |
-          cp docs/README.md docs/index.md
-          echo "" >> docs/index.md
-          echo "## API Reference" >> docs/index.md
-          echo "Check the detailed [API Reference here](./api/)." >> docs/index.md
-
-      # 8 Fix absolute links in all markdown files to be relative
-      - name: Fix absolute links in markdown files
-        run: |
-          find docs -name '*.md' -exec sed -i \
-            -e 's|](/|](./|g' \
-            -e 's|](./http|](http|g' {} +
-
-      # 9 Build VitePress site
       - name: Build documentation site
-        run: npx vitepress build docs --config ./vitepress.config.ts --ignoreDeadLinks
+        run: npm run docs:build
 
-      # 10 Fix absolute paths in built files
-      - name: Fix absolute paths
-        run: node scripts/rewrite-vitepress-base.mjs
+      - name: Copy index.html to 404.html for SPA fallback
+        run: cp dist/.vitepress/dist/index.html dist/.vitepress/dist/404.html
 
-      # 11 Create .nojekyll file for GitHub Pages
       - name: Create .nojekyll file
-        run: touch docs/.vitepress/dist/.nojekyll
+        run: touch dist/.vitepress/dist/.nojekyll
 
-      # 12 Setup Pages
       - name: Setup Pages
         uses: actions/configure-pages@v4
         if: github.ref == 'refs/heads/main'
 
-      # 13 Upload Pages artifact
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@main
         if: github.ref == 'refs/heads/main'
         with:
-          path: docs/.vitepress/dist
+          path: dist/.vitepress/dist
 
-      # 14 Deploy to GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
         if: github.ref == 'refs/heads/main'
+        
