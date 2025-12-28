@@ -1,4 +1,21 @@
-import { createScheduler, delayStep } from '@epikodelabs/streamix';
+import { createScheduler } from '@epikodelabs/streamix';
+
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+};
+
+const createDeferred = <T>(): Deferred<T> => {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+};
 
 describe('scheduler', () => {
   it('executes tasks in FIFO order for sync and async work', async () => {
@@ -46,60 +63,6 @@ describe('scheduler', () => {
     expect(order).toEqual(['first', 'second']);
   });
 
-  it('supports generators as tasks', async () => {
-    const scheduler = createScheduler();
-    const order: string[] = [];
-
-    function* task() {
-      order.push('a');
-      yield 1;
-      order.push('b');
-      yield 2;
-      return 'done';
-    }
-
-    const result = await scheduler.enqueue(() => task());
-    await scheduler.flush();
-
-    expect(result).toBe('done');
-    expect(order).toEqual(['a', 'b']);
-  });
-
-  it('supports async generators as tasks', async () => {
-    const scheduler = createScheduler();
-    const order: string[] = [];
-
-    async function* task() {
-      order.push('a');
-      yield 1;
-      await new Promise<void>((resolve) => setTimeout(resolve, 5));
-      order.push('b');
-      yield 2;
-      return 'done';
-    }
-
-    const result = await scheduler.enqueue(() => task());
-    await scheduler.flush();
-
-    expect(result).toBe('done');
-    expect(order).toEqual(['a', 'b']);
-  });
-
-  it('schedules delayed callbacks without blocking the queue', async () => {
-    const scheduler = createScheduler();
-    const order: string[] = [];
-
-    const delayed = scheduler.delay(20, () => {
-      order.push('delayed');
-    });
-
-    await scheduler.enqueue(() => order.push('now'));
-    await delayed;
-    await scheduler.flush();
-
-    expect(order).toEqual(['now', 'delayed']);
-  });
-
   it('resolves multiple flush callers together', async () => {
     const scheduler = createScheduler();
     const order: string[] = [];
@@ -128,42 +91,6 @@ describe('scheduler', () => {
     expect(order).toEqual(['now']);
   });
 
-  it('interleaves generator steps with subsequent queued tasks', async () => {
-    const scheduler = createScheduler();
-    const order: string[] = [];
-
-    function* task() {
-      order.push('g1');
-      yield 1;
-      order.push('g2');
-      yield 2;
-      return 'done';
-    }
-
-    scheduler.enqueue(() => task());
-    scheduler.enqueue(() => order.push('next'));
-    await scheduler.flush();
-
-    expect(order).toEqual(['g1', 'next', 'g2']);
-  });
-
-  it('supports generator delay steps without blocking the queue', async () => {
-    const scheduler = createScheduler();
-    const order: string[] = [];
-
-    function* task() {
-      order.push('start');
-      yield delayStep(10);
-      order.push('after');
-    }
-
-    scheduler.enqueue(() => task());
-    scheduler.enqueue(() => order.push('next'));
-    await scheduler.flush();
-
-    expect(order).toEqual(['start', 'next', 'after']);
-  });
-
   it('preserves order when tasks enqueue more work', async () => {
     const scheduler = createScheduler();
     const order: string[] = [];
@@ -177,5 +104,73 @@ describe('scheduler', () => {
 
     await scheduler.flush();
     expect(order).toEqual(['a', 'c', 'b']);
+  });
+
+  it('resolves after queued work without blocking the queue', async () => {
+    const scheduler = createScheduler();
+    const order: string[] = [];
+    const deferred = createDeferred<string>();
+    let resolved = false;
+
+    const awaited = scheduler.await(deferred.promise).then((value) => {
+      order.push(`awaited:${value}`);
+      resolved = true;
+    });
+
+    scheduler.enqueue(() => order.push('task1'));
+    scheduler.enqueue(() => order.push('task2'));
+
+    await scheduler.flush();
+    expect(order).toEqual(['task1', 'task2']);
+    expect(resolved).toBeFalse();
+
+    deferred.resolve('ok');
+    await awaited;
+    expect(order).toEqual(['task1', 'task2', 'awaited:ok']);
+  });
+
+  it('rejects with the original error without blocking the queue', async () => {
+    const scheduler = createScheduler();
+    const order: string[] = [];
+    const deferred = createDeferred<string>();
+    const error = new Error('boom');
+    let captured: unknown;
+
+    const awaited = scheduler.await(deferred.promise).catch((err) => {
+      captured = err;
+    });
+
+    scheduler.enqueue(() => order.push('task1'));
+    await scheduler.flush();
+    expect(order).toEqual(['task1']);
+
+    deferred.reject(error);
+    await awaited;
+    expect(captured).toBe(error);
+  });
+
+  it('resolves after the timeout without blocking the queue', async () => {
+    jasmine.clock().install();
+    try {
+      const scheduler = createScheduler();
+      const order: string[] = [];
+      let resolved = false;
+
+      const delayed = scheduler.delay(50).then(() => {
+        order.push('delay');
+        resolved = true;
+      });
+
+      scheduler.enqueue(() => order.push('task1'));
+      await scheduler.flush();
+      expect(order).toEqual(['task1']);
+      expect(resolved).toBeFalse();
+
+      jasmine.clock().tick(50);
+      await delayed;
+      expect(order).toEqual(['task1', 'delay']);
+    } finally {
+      jasmine.clock().uninstall();
+    }
   });
 });

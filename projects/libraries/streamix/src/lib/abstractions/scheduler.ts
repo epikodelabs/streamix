@@ -6,7 +6,6 @@ import { isPromiseLike } from "./operator";
  * Guarantees:
  * - FIFO execution (one task at a time)
  * - Supports synchronous and asynchronous tasks
- * - Supports generators and async generators (interleaving between values)
  * - Errors reject the task promise but do NOT stop the queue
  * - `flush()` is microtask-stable:
  *   it resolves only after the queue stays empty
@@ -16,17 +15,15 @@ import { isPromiseLike } from "./operator";
  * - Parallel arrays instead of per-task objects
  * - At most one pump in flight
  * - Compact storage for flush waiters
- * - Cooperative yielding for long-running generators
  */
 export type Scheduler = {
   /**
    * Enqueue a task for serialized execution.
    *
-   * The task may return a value, promise, generator, or async generator.
-   * For generators, each yield is interleaved with other queued tasks.
-   * The returned promise resolves with the final return value.
+   * The task may return a value or a promise.
+   * The returned promise resolves or rejects with the task result.
    */
-  enqueue: <T>(fn: () => Promise<T> | T | Generator<any, T> | AsyncGenerator<any, T>) => Promise<T>;
+  enqueue: <T>(fn: () => Promise<T> | T) => Promise<T>;
 
   /**
    * Resolves when the scheduler becomes idle and
@@ -35,67 +32,34 @@ export type Scheduler = {
   flush: () => Promise<void>;
 
   /**
-   * Returns a promise that resolves after the specified delay (in milliseconds).
-   * Scheduling the delay does NOT block the queue; awaiting it inside a task does.
-   * If a callback is provided, it will be enqueued and executed after the delay.
-   *
-   * Avoid `await delay(ms)` inside a scheduler task; it pauses the queue.
-   * Prefer `yield delayStep(ms)` in generator tasks to interleave work.
+   * Awaits a promise without blocking the queue.
+   * 
+   * Designed for use within generators. When yielded,
+   * it allows the queue to continue processing other tasks
+   * while waiting for the promise to resolve.
+   * 
+   * @example
+   * function* myGenerator() {
+   *   yield* scheduler.await(fetch('/api'));
+   *   // Queue was not blocked during fetch
+   * }
    */
-  delay: (ms: number, callback?: () => void | Promise<void>) => Promise<void>;
+  await: <T>(promise: Promise<T>) => Promise<T>;
+
+  /**
+   * Waits for the specified duration without blocking the queue.
+   *
+   * Useful for throttling or spacing work in generators or async flows
+   * while allowing other queued tasks to continue running.
+   *
+   * @example
+   * function* task() {
+   *   yield scheduler.delay(100);
+   *   // Queue kept processing during the delay
+   * }
+   */
+  delay: (ms: number) => Promise<void>;
 };
-
-/**
- * Marker for generator-friendly delays.
- */
-export type DelayStep = {
-  readonly __schedulerDelayStep: true;
-  readonly ms: number;
-};
-
-/**
- * Creates a delay marker for generator tasks.
- *
- * Usage:
- * function* task() {
- *   yield delayStep(10);
- *   // resume after ~10ms
- * }
- *
- * This keeps the queue moving while the generator waits.
- */
-export function delayStep(ms: number): DelayStep {
-  return { __schedulerDelayStep: true, ms };
-}
-
-function isDelayStep(value: any): value is DelayStep {
-  return (
-    value != null &&
-    typeof value === "object" &&
-    value.__schedulerDelayStep === true &&
-    typeof value.ms === "number"
-  );
-}
-
-/**
- * Type guard for Generator
- */
-function isGenerator(value: any): value is Generator<any, any, any> {
-  return value != null && 
-         typeof value === 'object' && 
-         typeof value.next === 'function' &&
-         typeof value[Symbol.iterator] === 'function';
-}
-
-/**
- * Type guard for AsyncGenerator
- */
-function isAsyncGenerator(value: any): value is AsyncGenerator<any, any, any> {
-  return value != null && 
-         typeof value === 'object' && 
-         typeof value.next === 'function' &&
-         typeof value[Symbol.asyncIterator] === 'function';
-}
 
 /**
  * Function createScheduler.
@@ -124,11 +88,6 @@ export function createScheduler(): Scheduler {
   let pumping = false;
 
   /**
-   * Tracks delayed generator continuations scheduled via delayStep.
-   */
-  let pendingDelayedContinuations = 0;
-
-  /**
    * Schedules a microtask.
    *
    * Wrapped for clarity and to avoid capturing extra state.
@@ -145,7 +104,7 @@ export function createScheduler(): Scheduler {
    */
   const resolveFlushIfIdleMicrotaskStable = (): void => {
     scheduleMicrotask(() => {
-      if (!pumping && tasks.length === 0 && pendingDelayedContinuations === 0 && flushResolvers.length) {
+      if (!pumping && tasks.length === 0 && flushResolvers.length) {
         const current = flushResolvers;
         flushResolvers = [];
         for (let i = 0; i < current.length; i++) current[i]();
@@ -154,34 +113,9 @@ export function createScheduler(): Scheduler {
   };
 
   /**
-   * Re-enqueues a continuation to interleave generator steps with other tasks.
-   */
-  const requeueContinuation = (task: () => any, resolve: (v: any) => void, reject: (e: any) => void): void => {
-    tasks.push(task as any);
-    resolves.push(resolve as any);
-    rejects.push(reject as any);
-  };
-
-  const requeueContinuationAfter = (
-    task: () => any,
-    resolve: (v: any) => void,
-    reject: (e: any) => void,
-    ms: number
-  ): void => {
-    pendingDelayedContinuations++;
-    setTimeout(() => {
-      pendingDelayedContinuations--;
-      requeueContinuation(task, resolve, reject);
-      ensurePump();
-      resolveFlushIfIdleMicrotaskStable();
-    }, ms);
-  };
-
-  /**
    * Main execution loop.
    *
    * Pulls tasks from the queue one-by-one and executes them.
-   * Handles generators and async generators with cooperative yielding.
    * Errors reject the corresponding task promise but do not
    * stop the pump.
    */
@@ -199,41 +133,8 @@ export function createScheduler(): Scheduler {
 
         try {
           const result = task();
-          
-          let value: any;
-          
-          // Handle different result types
-          if (isAsyncGenerator(result)) {
-            const step = await result.next();
-            if (step.done) {
-              value = step.value;
-              resolve(value);
-            } else {
-              if (isDelayStep(step.value)) {
-                requeueContinuationAfter(() => result, resolve, reject, step.value.ms);
-              } else {
-                requeueContinuation(() => result, resolve, reject);
-              }
-            }
-          } else if (isGenerator(result)) {
-            const step = result.next();
-            if (step.done) {
-              value = step.value;
-              resolve(value);
-            } else {
-              if (isDelayStep(step.value)) {
-                requeueContinuationAfter(() => result, resolve, reject, step.value.ms);
-              } else {
-                requeueContinuation(() => result, resolve, reject);
-              }
-            }
-          } else if (isPromiseLike(result)) {
-            value = await result;
-            resolve(value);
-          } else {
-            value = result;
-            resolve(value);
-          }
+          const value = isPromiseLike(result) ? await result : result;
+          resolve(value);
         } catch (err) {
           // Reject only this task; continue pumping.
           reject(err);
@@ -276,7 +177,7 @@ export function createScheduler(): Scheduler {
   /**
    * Enqueues a task for execution.
    */
-  const enqueue = <T>(fn: () => Promise<T> | T | Generator<any, T> | AsyncGenerator<any, T>): Promise<T> => {
+  const enqueue = <T>(fn: () => Promise<T> | T): Promise<T> => {
     return new Promise<T>((resolve, reject) => {
       tasks.push(fn as any);
       resolves.push(resolve as any);
@@ -309,26 +210,55 @@ export function createScheduler(): Scheduler {
   };
 
   /**
-   * Schedules a callback to run after the specified delay.
-   * Does NOT block the queue - other tasks continue executing during the delay.
-   * The callback runs through the scheduler when the delay expires.
+   * Awaits a promise without blocking the queue.
+   * 
+   * This method releases the current task slot, allowing
+   * other tasks to execute while waiting for the promise.
+   * Once the promise resolves, it re-enqueues to continue
+   * execution in FIFO order.
+   * 
+   * For use with yield in generators:
+   * 
+   * @example
+   * function* task() {
+   *   const data = yield scheduler.await(fetchData());
+   *   // Queue was not blocked during fetch
+   * }
+   * 
+   * // Or with async/await syntax
+   * const data = await scheduler.await(fetchData());
    */
-  const delay = (ms: number, callback?: () => void | Promise<void>): Promise<void> => {
-    return new Promise<void>((resolve, reject) => {
-      setTimeout(() => {
-        if (callback) {
-          // Enqueue the callback to run through the scheduler
-          enqueue(callback)
-            .then(() => resolve())
-            .catch(reject);
-        } else {
-          resolve();
+  const awaitNonBlocking = <T>(promise: Promise<T>): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      // Wait for the promise outside the queue
+      promise.then(
+        (value) => {
+          // Re-enqueue to continue in FIFO order
+          enqueue(() => value).then(resolve, reject);
+        },
+        (error) => {
+          // Re-enqueue the error
+          enqueue(() => {
+            throw error;
+          }).catch(reject);
         }
-      }, ms);
+      );
     });
   };
 
-  return { enqueue, flush, delay };
+  /**
+   * Delays execution without blocking the queue.
+   * 
+   * Uses awaitNonBlocking internally to release the queue
+   * during the timeout period.
+   */
+  const delay = (ms: number): Promise<void> => {
+    return awaitNonBlocking(
+      new Promise<void>((resolve) => setTimeout(resolve, ms))
+    );
+  };
+
+  return { enqueue, flush, await: awaitNonBlocking, delay };
 }
 
 /**
