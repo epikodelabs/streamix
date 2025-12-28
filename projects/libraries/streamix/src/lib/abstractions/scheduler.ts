@@ -15,6 +15,7 @@ import { isPromiseLike } from "./operator";
  * - Parallel arrays instead of per-task objects
  * - At most one pump in flight
  * - Compact storage for flush waiters
+ * - Explicit yielding mechanism for non-blocking awaits
  */
 export type Scheduler = {
   /**
@@ -79,7 +80,7 @@ export function createScheduler(): Scheduler {
   const resolveFlushIfIdle = (): void => {
     scheduleMicrotask(() => {
       // Check if we are truly idle: no pump running, no pump scheduled, no tasks
-      if (!pumping && !pumpScheduled && tasks.length === 0) {
+      if (!pumping && !pumpScheduled && tasks.length === 0 && flushResolvers.length > 0) {
         const current = flushResolvers;
         flushResolvers = [];
         for (let i = 0; i < current.length; i++) current[i]();
@@ -138,6 +139,7 @@ export function createScheduler(): Scheduler {
             return;
           }
 
+          // Task yielded - wait for it to complete but continue processing queue
           result.then(resolve, reject);
           next();
         });
@@ -191,22 +193,38 @@ export function createScheduler(): Scheduler {
     });
   };
 
+  /**
+   * Awaits a promise without blocking the queue.
+   * 
+   * If called outside an enqueued task (no currentYield), returns the promise directly.
+   * 
+   * If called inside an enqueued task:
+   * 1. Signals the pump to yield via currentYield()
+   * 2. When the promise resolves, re-enqueues a task that returns the value
+   * 3. Returns a promise that resolves when that re-enqueued task completes
+   */
   const awaitNonBlocking = <T>(promise: Promise<T>): Promise<T> => {
+    // If not in a task context, just return the promise
     if (!currentYield) {
       return promise;
     }
 
+    const yieldFn = currentYield;
+
     return new Promise<T>((resolve, reject) => {
       promise.then(
         (value) => {
-          enqueue(() => resolve(value));
+          // Re-enqueue a task that returns the resolved value
+          enqueue(() => value).then(resolve, reject);
         },
         (error) => {
-          enqueue(() => reject(error));
+          // Re-enqueue a task that returns the rejected error
+          enqueue(() => Promise.reject(error)).then(resolve, reject);
         }
       );
 
-      currentYield?.();
+      // Signal the pump that we're yielding
+      yieldFn();
     });
   };
 
