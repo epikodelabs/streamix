@@ -76,7 +76,14 @@ export default defineConfig({
       '/': [
         {
           text: 'Documentation',
-          items: getDocsSidebarItems()
+          items: [
+            { text: 'Getting Started', link: '/' },
+            { text: 'Changelog', link: '/CHANGELOG' },
+            { text: 'Coroutines', link: '/COROUTINES' },
+            { text: 'Generators', link: '/GENERATORS' },
+            { text: 'Scheduler', link: '/SCHEDULER' },
+            { text: 'Subjects', link: '/SUBJECTS' }
+          ]
         },
         {
           text: 'API Reference',
