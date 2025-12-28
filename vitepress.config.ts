@@ -45,6 +45,7 @@ function getDocsSidebarItems() {
 export default defineConfig({
   base: '/streamix/',
   srcDir: './', // Use root of dist as source
+  lang: 'en-US',
   title: 'streamix',
   description: 'Reactive library documentation',
 
@@ -102,6 +103,8 @@ export default defineConfig({
     lastUpdated: {
       text: 'Updated at',
       formatOptions: {
+        timeZone: 'UTC',
+        timeZoneName: 'short',
         dateStyle: 'full',
         timeStyle: 'medium'
       }
@@ -121,6 +124,6 @@ export default defineConfig({
     ['meta', { name: 'theme-color', content: '#3c82f6' }],
     ['meta', { name: 'og:type', content: 'website' }],
     ['meta', { name: 'og:locale', content: 'en' }],
-    ['meta', { name: 'og:site_name', content: 'Streamix' }]
+    ['meta', { name: 'og:site_name', content: 'streamix' }]
   ]
 })
