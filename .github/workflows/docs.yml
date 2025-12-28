@@ -37,6 +37,9 @@ jobs:
       - name: Build documentation site
         run: npm run docs:build
 
+      - name: Copy index.html to 404.html for SPA fallback
+        run: cp dist/.vitepress/dist/index.html dist/.vitepress/dist/404.html
+
       - name: Create .nojekyll file
         run: touch dist/.vitepress/dist/.nojekyll
 
@@ -54,3 +57,4 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
         if: github.ref == 'refs/heads/main'
+        
