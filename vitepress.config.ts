@@ -44,6 +44,7 @@ function getDocsSidebarItems() {
 
 export default defineConfig({
   base: '/streamix/',
+  srcDir: './dist',
   lang: 'en-US',
   title: 'streamix',
   description: 'Reactive library documentation',
