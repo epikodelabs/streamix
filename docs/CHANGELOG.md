@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 ## 2.0.28
 
@@ -10,7 +10,7 @@ Global scheduler for improved task coordination across streams and operators. Fi
 
 ## 2.0.23
 
-BREAKING: Fixed AsyncIterator protocol compliance across all stream operators: All operators now follow the standard pattern: while (true) в†’ check completion в†’ process в†’ return
+BREAKING: Fixed AsyncIterator protocol compliance across all stream operators: All operators now follow the standard pattern: while (true) → check completion → process → return
 
 ## 2.0.22
 
@@ -78,7 +78,7 @@ Fully refactored all built-in operators, replacing complex subscription manageme
 
 ## 1.0.20
 
-Operators in a pipeline were applied left to right вЂ” the first operator wrapped the source, followed by the next, and so on. Now operators are applied in reverse order, from right to left вЂ” the last operator wraps the source first. Streamix now includes many new built-in operators, enabling richer stream manipulation out of the box. `createMapper` method receives both input and output streams.
+Operators in a pipeline were applied left to right — the first operator wrapped the source, followed by the next, and so on. Now operators are applied in reverse order, from right to left — the last operator wraps the source first. Streamix now includes many new built-in operators, enabling richer stream manipulation out of the box. `createMapper` method receives both input and output streams.
 
 ## 1.0.18
 
@@ -86,7 +86,7 @@ The `Subscription` type has been enhanced with two new methods: `listen` and `va
 
 ## 1.0.16
 
-Streamix now features pull-based subjects, allowing subscribers to independently pull values at their own pace rather than receiving pushed emissions. This ensures that late subscribers can access past values without missing emissions, improving backpressure handling and memory efficiency. Subscriptions are now fully independent, preventing one subscriberвЂ™s lifecycle from affecting others. Additionally, pull-based subjects support async iteration (`for await...of`), making them more flexible for asynchronous workflows while enhancing error propagation and buffer management.
+Streamix now features pull-based subjects, allowing subscribers to independently pull values at their own pace rather than receiving pushed emissions. This ensures that late subscribers can access past values without missing emissions, improving backpressure handling and memory efficiency. Subscriptions are now fully independent, preventing one subscriber’s lifecycle from affecting others. Additionally, pull-based subjects support async iteration (`for await...of`), making them more flexible for asynchronous workflows while enhancing error propagation and buffer management.
 
 ## 1.0.14
 

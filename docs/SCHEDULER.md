@@ -1,21 +1,21 @@
-﻿# рџљЂ Scheduler
+# 🚀 Scheduler
 
 Hey there! This is a super handy task scheduler that keeps things in order with FIFO (First-In-First-Out) execution. It handles regular tasks, async ones, generators, and even async generators. Let's make your code life easier!
 
-## рџ“ќ Quick Overview
+## 📝 Quick Overview
 
 This scheduler runs tasks one by one, in the order you add them. It plays nice with long-running tasks by letting them "yield" control, so others can jump in without everything grinding to a halt. No blocking the queue!
 
-## вњЁ Cool Features
+## ✨ Cool Features
 
-- рџ“‹ **FIFO Style**: Tasks run in the exact order you enqueue themвЂ”one at a time. 
-- рџ”„ **Task Variety**: Works with sync functions, async functions, generators, and async generators. Mix and match! 
-- рџљ§ **Error-Proof**: If one task crashes, it just rejects its own promiseвЂ” the queue keeps chugging along. 
-- вЏ±пёЏ **Smart Flushing**: `flush()` waits until the queue is truly empty, even checking after microtasks to avoid sneaky races. 
-- рџ¤ќ **Friendly Yielding**: Generators can pause and let others run in between steps. Teamwork! 
-- вљЎ **Speedy Design**: Built with efficiency in mindвЂ”uses arrays to save memory and keeps things lightweight. 
+- 📋 **FIFO Style**: Tasks run in the exact order you enqueue them—one at a time. 
+- 🔄 **Task Variety**: Works with sync functions, async functions, generators, and async generators. Mix and match! 
+- 🚧 **Error-Proof**: If one task crashes, it just rejects its own promise— the queue keeps chugging along. 
+- ⏱️ **Smart Flushing**: `flush()` waits until the queue is truly empty, even checking after microtasks to avoid sneaky races. 
+- 🤝 **Friendly Yielding**: Generators can pause and let others run in between steps. Teamwork! 
+- ⚡ **Speedy Design**: Built with efficiency in mind—uses arrays to save memory and keeps things lightweight. 
 
-## рџ› пёЏ How to Use It
+## 🛠️ How to Use It
 
 ### `createScheduler()`
 
@@ -68,7 +68,7 @@ await scheduler.enqueue(async function* () {
 
 ### `flush()`
 
-Chill until the scheduler is totally idleвЂ”no more tasks, even after a microtask check. Perfect for avoiding timing gotchas!
+Chill until the scheduler is totally idle—no more tasks, even after a microtask check. Perfect for avoiding timing gotchas!
 
 **What You Get:** `Promise<void>`
 
@@ -79,14 +79,14 @@ scheduler.enqueue(() => console.log('Task 1'));
 scheduler.enqueue(() => console.log('Task 2'));
 
 await scheduler.flush(); // All done? Yep!
-console.log('All tasks complete рџЋ‰');
+console.log('All tasks complete 🎉');
 ```
 
 ### `delay(ms, callback?)`
 
-Get a promise that waits a bit. You can add a callback to run after the delayвЂ”through the scheduler, of course!
+Get a promise that waits a bit. You can add a callback to run after the delay—through the scheduler, of course!
 
-**Heads Up:** This doesn't block the queue. Other tasks keep going during the wait. But if you `await` it inside a task, that task (and queue) will pauseвЂ”try to avoid that!
+**Heads Up:** This doesn't block the queue. Other tasks keep going during the wait. But if you `await` it inside a task, that task (and queue) will pause—try to avoid that!
 
 **What to Pass:**
 - `ms`: How long to wait (in milliseconds).
@@ -98,19 +98,19 @@ Get a promise that waits a bit. You can add a callback to run after the delayв�
 
 ```typescript
 // Delayed callback, no blocking!
-scheduler.delay(1000, () => console.log('After 1 second вЏі'));
+scheduler.delay(1000, () => console.log('After 1 second ⏳'));
 
 // Others run right away
-scheduler.enqueue(() => console.log('This runs right away рџљЂ'));
+scheduler.enqueue(() => console.log('This runs right away 🚀'));
 
-// Inside a task? It blocksвЂ”use sparingly!
+// Inside a task? It blocks—use sparingly!
 scheduler.enqueue(async () => {
-  await scheduler.delay(1000); // Queue waits too рџґ
+  await scheduler.delay(1000); // Queue waits too 
   console.log('After delay');
 });
 ```
 
-## рџ§° Extra Tools
+## 🧰 Extra Tools
 
 ### `delayStep(ms)`
 
@@ -130,14 +130,14 @@ scheduler.enqueue(function* () {
   console.log('Step 2 (after 100ms)');
   yield; // Quick pause
   console.log('Step 3');
-  return 'done рџЋЉ';
+  return 'done 🎊';
 });
 
 // Sneaky task during the delay
-scheduler.enqueue(() => console.log('This runs during the delay рџЋ'));
+scheduler.enqueue(() => console.log('This runs during the delay '));
 ```
 
-## рџЊџ Ways to Use It
+## 🌟 Ways to Use It
 
 ### One After Another
 
@@ -161,7 +161,7 @@ scheduler.enqueue(function* () {
       yield;
     }
   }
-  return 'processed 1000 items рџЏ†';
+  return 'processed 1000 items 🏆';
 });
 ```
 
@@ -175,7 +175,7 @@ scheduler.enqueue(() => task3());
 
 // Hang tight
 await scheduler.flush();
-console.log('All tasks finished рџ™Њ');
+console.log('All tasks finished 🙌');
 ```
 
 ### Delay Without Drama
@@ -183,16 +183,16 @@ console.log('All tasks finished рџ™Њ');
 ```typescript
 // Callback after delay, no hold-ups
 scheduler.delay(1000, () => {
-  console.log('Executed after 1 second вњЁ');
+  console.log('Executed after 1 second ✨');
 });
 
 // Instant action
-scheduler.enqueue(() => console.log('Runs immediately вљЎ'));
+scheduler.enqueue(() => console.log('Runs immediately ⚡'));
 ```
 
-## рџљЁ Handling Oops Moments
+## 🚨 Handling Oops Moments
 
-If a task throws an error, its promise rejectsвЂ”but the queue marches on! Catch it like a pro.
+If a task throws an error, its promise rejects—but the queue marches on! Catch it like a pro.
 
 ```typescript
 scheduler.enqueue(() => {
@@ -203,11 +203,11 @@ scheduler.enqueue(() => {
 
 // Keeps going strong
 scheduler.enqueue(() => {
-  console.log('Still running рџ’Є');
+  console.log('Still running 💪');
 });
 ```
 
-## рџЊЌ Global Scheduler
+## 🌍 Global Scheduler
 
 We've got a ready-to-go global one for you:
 
@@ -219,18 +219,18 @@ await scheduler.enqueue(() => myTask());
 
 Convenient, right?
 
-## рџ“€ Performance Tips
+## 📈 Performance Tips
 
 - Smart arrays cut down on memory use.
 - Only one "pump" runs at once.
 - Yields keep the event loop happy.
 - Microtasks ensure things happen in order.
 
-## рџ’Ў Pro Tips
+## 💡 Pro Tips
 
-1. рџ§© **Generators for Big Jobs**: Chunk your work with `yield` to stay responsive. 
-2. рџљ« **Skip `await delay()` in Tasks**: Go for `delayStep()` in generators to avoid blocks. 
-3. рџ›ЎпёЏ **Catch Those Errors**: Use try-catch or `.catch()` on promises. 
-4. вЏі **Flush for Sync**: Great for waiting on multiple things.
-5. рџЊџ **Global is Golden**: Stick with the exported `scheduler` unless you need something separate. 
+1. 🧩 **Generators for Big Jobs**: Chunk your work with `yield` to stay responsive. 
+2. 🚫 **Skip `await delay()` in Tasks**: Go for `delayStep()` in generators to avoid blocks. 
+3. 🛡️ **Catch Those Errors**: Use try-catch or `.catch()` on promises. 
+4. ⏳ **Flush for Sync**: Great for waiting on multiple things.
+5. 🌟 **Global is Golden**: Stick with the exported `scheduler` unless you need something separate. 
 
