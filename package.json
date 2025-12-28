@@ -12,8 +12,8 @@
     "minify": "node terser.mjs && npx dts-bundler",
     "clean": "eslint --config eslint.config.js --fix",
     "docs:generate": "typedoc --plugin typedoc-plugin-markdown --out docs/api",
-    "docs:dev": "npm run docs:generate && vitepress dev docs --config vitepress.config.ts",
-    "docs:build": "npm run docs:generate && vitepress build docs --config vitepress.config.ts && npm run docs:rewrite",
+    "docs:dev": "npm run docs:generate && cd docs && vitepress dev --config ../vitepress.config.ts",
+    "docs:build": "npm run docs:generate && cd docs && vitepress build --config ../vitepress.config.ts && cd .. && npm run docs:rewrite",
     "docs:rewrite": "node scripts/rewrite-vitepress-base.mjs"
   },
   "dependencies": {
