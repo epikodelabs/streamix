@@ -18,7 +18,7 @@ export type MaybePromise<T = any> = (T | Promise<T>);
  * We avoid relying on `instanceof Promise` so that promise-like values from
  * different realms or custom thenables are still treated correctly.
  */
-export const isPromiseLike = <T = any>(value: MaybePromise<T>): value is Promise<T> =>
+export const isPromiseLike = (value: unknown): value is Promise<unknown> =>
   !!value && typeof (value as any).then === 'function';
 
 /**
@@ -27,7 +27,7 @@ export const isPromiseLike = <T = any>(value: MaybePromise<T>): value is Promise
  * Always `{ done: true, value: undefined }`.
  * Used to signal the end of a stream.
  */
-export const DONE: { readonly done: true; readonly value: undefined; } = { done: true, value: undefined } as const;
+export const DONE: { readonly done: true; readonly value: undefined; } = Object.freeze({ done: true, value: undefined });
 /**
  * Factory function to create a normal stream result.
  *

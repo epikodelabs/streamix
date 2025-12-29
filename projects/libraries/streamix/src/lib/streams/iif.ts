@@ -9,14 +9,14 @@ import { eachValueFrom, fromAny } from '../converters';
  *
  * @template T The type of the values in the streams.
  * @param {() => MaybePromise<boolean>} condition A function that returns a boolean to determine which stream to use. It is called when the iif stream is subscribed to.
- * @param {Stream<T> | MaybePromise<T> | Array<T>} trueStream The stream to subscribe to if the condition is `true`.
- * @param {Stream<T> | MaybePromise<T> | Array<T>} falseStream The stream to subscribe to if the condition is `false`.
+ * @param {Stream<T> | MaybePromise<T>} trueStream The stream or value to use if the condition is `true`.
+ * @param {Stream<T> | MaybePromise<T>} falseStream The stream or value to use if the condition is `false`.
  * @returns {Stream<T>} A new stream that emits values from either `trueStream` or `falseStream` based on the condition.
  */
 export function iif<T = any>(
   condition: () => MaybePromise<boolean>,
-  trueStream: MaybePromise<Stream<T> | Array<T> | T>,
-  falseStream: MaybePromise<Stream<T> | Array<T> | T>
+  trueStream: Stream<T> | MaybePromise<T>,
+  falseStream: Stream<T> | MaybePromise<T>
 ): Stream<T> {
   async function* generator(): AsyncGenerator<T, void, unknown> {
     // Evaluate condition lazily when the stream starts

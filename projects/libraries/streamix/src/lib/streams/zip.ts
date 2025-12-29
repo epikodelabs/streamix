@@ -10,30 +10,23 @@ import { eachValueFrom, fromAny } from '../converters';
  * Errors from any stream propagate immediately.
  *
  * @template T - A tuple type representing the combined values from the streams.
- * @param sources Streams to combine.
+ * @param sources Streams or values (including promises) to combine.
  * @returns {Stream<T>} A new stream that emits a synchronized tuple of values.
  */
 export function zip<T extends readonly unknown[] = any[]>(
-  ...sources: Array<MaybePromise<Stream<T[number]> | Array<T[number]> | T[number]>>
+  ...sources: Array<Stream<T[number]> | MaybePromise<T[number]>>
 ): Stream<T> {
 
   return createStream<T>('zip', async function* (): AsyncGenerator<T, void, unknown> {
-    const resolvedInputs: any[] = [];
-    for (const src of sources) {
-      resolvedInputs.push(isPromiseLike(src) ? await src : src);
+    if (sources.length === 0) return;
+
+    const resolvedSources: Array<Stream<T[number]> | Array<T[number]> | T[number]> = [];
+    for (const source of sources) {
+      resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
 
-    const normalizedStreams = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
-      ? resolvedInputs[0]
-      : resolvedInputs) as Array<Stream<T[number]> | Array<T[number]> | T[number]>;
-
-    if (normalizedStreams.length === 0) return;
-
-    const iterators = await Promise.all(
-      normalizedStreams.map(async (s) => {
-        const streamSource = isPromiseLike(s) ? await s : s;
-        return eachValueFrom(fromAny(streamSource));
-      })
+    const iterators = resolvedSources.map((source) =>
+      eachValueFrom(fromAny(source))
     );
 
     try {

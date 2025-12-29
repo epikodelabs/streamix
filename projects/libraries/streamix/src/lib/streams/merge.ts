@@ -12,27 +12,18 @@ import { eachValueFrom, fromAny } from "../converters";
  * errors, the merged stream immediately errors.
  *
  * @template T The type of the values in the streams.
- * @param sources Streams/values (or promise of array) to merge.
+ * @param sources Streams or values (including promises) to merge.
  * @returns {Stream<T>} A new stream that emits values from all input streams.
  */
 export function merge<T = any, R extends readonly unknown[] = any[]>(
-  ...sources: { [K in keyof R]: MaybePromise<Stream<R[K]> | Array<R[K]> | R[K]> }
+  ...sources: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
 ): Stream<T> {
   return createStream<T>('merge', async function* () {
-    const resolvedInputs: any[] = [];
-    for (const src of sources) {
-      resolvedInputs.push(isPromiseLike(src) ? await src : src);
-    }
-    
-    const resolvedSourcesRoot = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
-      ? resolvedInputs[0]
-      : resolvedInputs) as Array<Stream<T> | Array<T> | T>;
+    if (sources.length === 0) return;
 
-    if (resolvedSourcesRoot.length === 0) return;
-
-    const resolvedSources = [];
-    for (const source of resolvedSourcesRoot) {
-        resolvedSources.push(isPromiseLike(source) ? await source : source);
+    const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
+    for (const source of sources) {
+      resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
 
     const iterators = resolvedSources.map(s => eachValueFrom(fromAny(s)));
@@ -45,40 +36,42 @@ export function merge<T = any, R extends readonly unknown[] = any[]>(
         error => ({ error, index, status: 'rejected' as const })
       );
 
-    while (activeCount > 0) {
-      const race = Promise.race(
-        nextPromises
-          .map((p, i) => (p ? reflect(p, i) : null))
-          .filter(Boolean) as Promise<
-            | { index: number; value: T; done: boolean; status: 'fulfilled' }
-            | { index: number; error: any; status: 'rejected' }
-          >[]
-      );
+    try {
+      while (activeCount > 0) {
+        const race = Promise.race(
+          nextPromises
+            .map((p, i) => (p ? reflect(p, i) : null))
+            .filter(Boolean) as Promise<
+              | { index: number; value: T; done: boolean; status: 'fulfilled' }
+              | { index: number; error: any; status: 'rejected' }
+            >[]
+        );
 
-      const winner = await race;
+        const winner = await race;
 
-      if (winner.status === 'rejected') {
-        throw winner.error;
+        if (winner.status === 'rejected') {
+          throw winner.error;
+        }
+
+        const { value, done, index } = winner;
+
+        if (done) {
+          nextPromises[index] = null;
+          activeCount--;
+        } else {
+          yield value;
+          nextPromises[index] = iterators[index].next();
+        }
       }
-
-      const { value, done, index } = winner;
-
-      if (done) {
-        nextPromises[index] = null;
-        activeCount--;
-      } else {
-        yield value;
-        nextPromises[index] = iterators[index].next();
-      }
-    }
-
-    // Cleanup all iterators on abort or completion
-    for (const iterator of iterators) {
-      if (iterator.return) {
-        try {
-          await iterator.return(undefined);
-        } catch {
-          // ignore
+    } finally {
+      // Cleanup all iterators on abort or completion
+      for (const iterator of iterators) {
+        if (iterator.return) {
+          try {
+            await iterator.return(undefined);
+          } catch {
+            // ignore
+          }
         }
       }
     }

@@ -1,4 +1,4 @@
-import { createOperator, type MaybePromise, type Operator, type Stream, type Subscription, isPromiseLike } from "../abstractions";
+import { createOperator, isPromiseLike, type Operator, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../subjects";
 
@@ -15,24 +15,27 @@ import { createSubject } from "../subjects";
  * values are DISCARDED, and the operator simply waits for the source to complete.
  *
  * @template T The type of the values in the source and output streams.
- * @param notifier The stream that acts as a gatekeeper.
+ * @param notifier The stream or promise that acts as a gatekeeper.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export function delayUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | Array<R> | R>) {
+export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
   return createOperator<T, T>("delayUntil", function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
     let canEmit = false;
+    let notifierEmitted = false;
+    let gateClosedWithoutEmit = false;
     const buffer: T[] = [];
     let notifierSubscription: Subscription | undefined;
 
     const setupNotifier = async () => {
       try {
         const resolvedNotifier = isPromiseLike(notifier) ? await notifier : notifier;
-        notifierSubscription = fromAny(resolvedNotifier as Stream<R> | R | Array<R>).subscribe({
+        notifierSubscription = fromAny(resolvedNotifier).subscribe({
           next: () => {
             // The gate is open. Flush the buffer and start live emission.
-            if (!canEmit) { // Only run the flush on the *first* emission
+            if (!canEmit && !gateClosedWithoutEmit) { // Only run the flush on the *first* emission
               canEmit = true;
+              notifierEmitted = true;
               for (const v of buffer) output.next(v);
               buffer.length = 0;
             }
@@ -42,21 +45,19 @@ export function delayUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | Ar
           error: (err) => {
             notifierSubscription?.unsubscribe();
             output.error(err);
-            output.complete();
           },
           complete: () => {
             notifierSubscription?.unsubscribe();
             // If the notifier completes before emitting (i.e., !canEmit), 
-            // the buffered values are discarded, but the source can now emit.
-            if (!canEmit) {
-              canEmit = true;
+            // the buffered values are discarded and no new values are emitted.
+            if (!canEmit && !notifierEmitted) {
+              gateClosedWithoutEmit = true;
               buffer.length = 0;
             }
           },
         });
       } catch (err) {
         output.error(err instanceof Error ? err : new Error(String(err)));
-        output.complete();
       }
     };
 
@@ -70,7 +71,7 @@ export function delayUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | Ar
 
           if (canEmit) {
             output.next(value);
-          } else {
+          } else if (!gateClosedWithoutEmit) {
             buffer.push(value);
           }
         }

@@ -24,6 +24,8 @@ export type Receiver<T = any> = {
   error?: (err: Error) => MaybePromise;
   /**
    * A function called when the stream has completed successfully and will emit no more values.
+   * Streamix also invokes this on unsubscribe (and after error) so subscribers can
+   * centralize cleanup in one place.
    */
   complete?: () => MaybePromise;
 };
@@ -106,6 +108,7 @@ export function createReceiver<T = any>(
         } catch (e) {
           console.error('Unhandled error in error handler:', e);
         }
+        await wrappedReceiver.complete();
       }
     },
     complete: async () => {

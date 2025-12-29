@@ -5,6 +5,7 @@ import type { ReleaseFn } from "./lock";
  * access to a limited number of resources.
  *
  * @interface
+ * Prefer scheduler-backed or stream-based coordination utilities for most use cases.
  */
 export type Semaphore = {
   /**
@@ -37,6 +38,7 @@ export type Semaphore = {
  *
  * @param {number} initialCount The initial number of permits available. Must be a non-negative integer.
  * @returns {Semaphore} A semaphore object with `acquire`, `tryAcquire`, and `release` methods.
+ * Prefer scheduler-backed or stream-based coordination utilities for most use cases.
  */
 export const createSemaphore = (initialCount: number): Semaphore => {
   let count = initialCount;

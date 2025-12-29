@@ -1,4 +1,4 @@
-import { createOperator, type MaybePromise, type Operator, type Stream } from '../abstractions';
+import { createOperator, type Operator, type Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -16,11 +16,11 @@ import { createSubject } from '../subjects';
  * an application to finish loading.
  *
  * @template T The type of the values in the source and output streams.
- * @param notifier The stream that, upon its first emission, signals that the operator
- * should stop skipping values.
+ * @param notifier The stream (or promise) that, upon its first emission, signals that
+ * the operator should stop skipping values.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export function skipUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | R>) {
+export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
   return createOperator<T, T>('skipUntil', function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
     let canEmit = false;
@@ -34,7 +34,6 @@ export function skipUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | R>)
       error: (err) => {
         notifierSubscription.unsubscribe();
         output.error(err);
-        output.complete();
       },
       complete: () => {
         notifierSubscription.unsubscribe();

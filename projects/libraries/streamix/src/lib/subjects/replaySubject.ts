@@ -22,7 +22,7 @@ export type ReplaySubject<T = any> = Subject<T>;
  * the latest values it has emitted and "replays" them to any new subscribers.
  * This allows late subscribers to receive past values they may have missed.
  *
- * This subject provides asynchronous delivery and scheduling via a global scheduler.
+ * This subject provides asynchronous delivery while preserving emission order.
  *
  * @template T The type of the values the subject will emit.
  * @param {number} [capacity=Infinity] The maximum number of past values to buffer and replay to new subscribers.
@@ -33,30 +33,38 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
   let isCompleted = false;
   let hasError = false;
   let latestValue: T | undefined = undefined;
+  let writeChain = Promise.resolve();
+
+  const enqueueWrite = (task: () => Promise<void>) => {
+    writeChain = writeChain.then(task).catch(() => {});
+    return writeChain;
+  };
 
   const next = (value: T) => {
-    latestValue = value;
-    scheduler.enqueue(async () => {
+    scheduler.enqueue(() => {
       if (isCompleted || hasError) return;
-      await buffer.write(value);
+      latestValue = value;
+      void enqueueWrite(() => buffer.write(value));
     });
   };
 
   const complete = () => {
-    scheduler.enqueue(async () => {
+    scheduler.enqueue(() => {
       if (isCompleted) return;
       isCompleted = true;
-      await buffer.complete();
+      void enqueueWrite(() => buffer.complete());
     });
   };
 
   const error = (err: any) => {
-    scheduler.enqueue(async () => {
+    scheduler.enqueue(() => {
       if (isCompleted || hasError) return;
       hasError = true;
       isCompleted = true;
-      await buffer.error(err);
-      await buffer.complete();
+      void enqueueWrite(async () => {
+        await buffer.error(err);
+        await buffer.complete();
+      });
     });
   };
 
@@ -68,11 +76,11 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     const subscription = createSubscription(() => {
       if (!unsubscribing) {
         unsubscribing = true;
-        scheduler.enqueue(async () => {
-          if (readerId !== null) {
-            await buffer.detachReader(readerId);
-          }
-        });
+        if (readerId !== null) {
+          scheduler.enqueue(async () => {
+            if (readerId !== null) await buffer.detachReader(readerId);
+          });
+        }
       }
     });
 
@@ -80,7 +88,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
       readerId = id;
       try {
         while (true) {
-          const result = await buffer.read(readerId);
+          const result = await buffer.read(readerId!);
           if (result.done) break;
           readerLatestValue = result.value;
           await receiver.next?.(readerLatestValue!);
@@ -88,15 +96,17 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
       } catch (err: any) {
         await receiver.error?.(err);
       } finally {
-        if (!unsubscribing && readerId !== null) {
-          await buffer.detachReader(readerId);
+        if (readerId !== null) {
+          scheduler.enqueue(async () => {
+            await buffer.detachReader(readerId!);
+            await receiver.complete?.();
+          });
+        } else {
+          scheduler.enqueue(async () => {
+            await receiver.complete?.();
+          });
         }
-        await receiver.complete?.();
       }
-    });
-
-    Object.assign(subscription, {
-      value: () => readerLatestValue
     });
 
     return subscription;

@@ -59,26 +59,26 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
   let hasError = false;
 
   const next = (value: T) => {
+    if (isCompleted || hasError) return;
     latestValue = value;
     scheduler.enqueue(async () => {
-      if (isCompleted || hasError) return;
       await buffer.write(value);
     });
   };
 
   const complete = () => {
+    if (isCompleted || hasError) return;
+    isCompleted = true;
     scheduler.enqueue(async () => {
-      if (isCompleted) return;
-      isCompleted = true;
       await buffer.complete();
     });
   };
 
   const error = (err: any) => {
+    if (isCompleted || hasError) return;
+    hasError = true;
+    isCompleted = true;
     scheduler.enqueue(async () => {
-      if (isCompleted || hasError) return;
-      hasError = true;
-      isCompleted = true;
       await buffer.error(err);
       await buffer.complete();
     });
@@ -103,20 +103,22 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
         while (true) {
           const result = await buffer.read(readerId);
           if (result.done) break;
-          await receiver.next?.(result.value);
+          await receiver.next?.(result.value!);
         }
       } catch (err: any) {
         await receiver.error?.(err);
       } finally {
         if (!unsubscribing && readerId !== null) {
-          await buffer.detachReader(readerId);
+          scheduler.enqueue(async () => {
+            await buffer.detachReader(readerId!);
+            await receiver.complete?.();
+          });
+        } else {
+          scheduler.enqueue(async () => {
+            await receiver.complete?.();
+          });
         }
-        await receiver.complete?.();
       }
-    });
-
-    Object.assign(subscription, {
-      value: () => latestValue
     });
 
     return subscription;

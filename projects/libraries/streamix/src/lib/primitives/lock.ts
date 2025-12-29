@@ -9,6 +9,7 @@ export type ReleaseFn = () => void;
  * An interface for a function that creates a simple asynchronous lock.
  *
  * @interface
+ * Prefer scheduler-backed or stream-based coordination utilities for most use cases.
  */
 export type SimpleLock = () => Promise<ReleaseFn>;
 
@@ -21,6 +22,7 @@ export type SimpleLock = () => Promise<ReleaseFn>;
  * invoke this function to release the lock, allowing the next queued caller to proceed.
  *
  * @returns {SimpleLock} A function that, when called, returns a promise to acquire the lock.
+ * Prefer scheduler-backed or stream-based coordination utilities for most use cases.
  */
 export const createLock = (): SimpleLock => {
   let locked = false;

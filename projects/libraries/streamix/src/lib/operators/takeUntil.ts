@@ -1,4 +1,4 @@
-import { createOperator, type MaybePromise, type Operator, type Stream } from '../abstractions';
+import { createOperator, type Operator, type Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -15,18 +15,18 @@ import { createSubject } from '../subjects';
  * is met, such as waiting for a user to close a dialog or for an animation to complete.
  *
  * @template T The type of the values in the source and output streams.
- * @param notifier The stream that, upon its first emission, signals that the operator
- * should complete.
+ * @param notifier The stream (or promise) that, upon its first emission, signals that
+ * the operator should complete.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export function takeUntil<T = any, R = T>(notifier: MaybePromise<Stream<R> | R>) {
+export function takeUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
   return createOperator<T, T>('takeUntil', function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
     let stop = false;
 
     const notifierSubscription = fromAny(notifier).subscribe({
       next: () => { stop = true; notifierSubscription.unsubscribe(); output.complete(); },
-      error: (err) => { stop = true; notifierSubscription.unsubscribe(); output.error(err); output.complete(); },
+      error: (err) => { stop = true; notifierSubscription.unsubscribe(); output.error(err); },
       complete: () => { notifierSubscription.unsubscribe(); },
     });
 
