@@ -5,24 +5,15 @@ import { eachValueFrom, fromAny } from "../converters";
  * Waits for all streams to complete and emits an array of their last values.
  *
  * @template T The type of the last values emitted by each stream.
- * @param sources Streams to join; arrays/iterables are also accepted for backward compatibility.
+ * @param sources Streams or values (including promises) to join.
  * @returns Stream<T[]>
  */
 export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
-  ...sources: { [K in keyof R]: MaybePromise<Stream<R[K]> | Array<R[K]> | R[K]> }
+  ...sources: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
 ): Stream<T[]> {
   async function* generator() {
-    const resolvedInputs: any[] = [];
-    for (const src of sources) {
-      resolvedInputs.push(isPromiseLike(src) ? await src : src);
-    }
-
-    const normalizedSources = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
-      ? resolvedInputs[0]
-      : resolvedInputs) as Array<Stream<T> | Array<T> | T>;
-
     const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
-    for (const source of normalizedSources) {
+    for (const source of sources) {
       resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
 

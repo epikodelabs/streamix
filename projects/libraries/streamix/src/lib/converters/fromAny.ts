@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, isStreamLike, type Stream } from "../abstractions";
+import { createStream, isPromiseLike, isStreamLike, MaybePromise, type Stream } from "../abstractions";
 
 /**
  * Converts various value types into a Stream.
@@ -19,7 +19,7 @@ import { createStream, isPromiseLike, isStreamLike, type Stream } from "../abstr
  * @returns A {@link Stream<R>} that emits the normalized values.
  */
 export function fromAny<R = any>(
-  value: Stream<R> | Promise<R | Array<R>> | R | Array<R>
+  value: Stream<R> | MaybePromise<R> | Array<R> 
 ): Stream<R> {
   // Step 1: If it's already a stream, return as-is
   if (isStreamLike(value)) {

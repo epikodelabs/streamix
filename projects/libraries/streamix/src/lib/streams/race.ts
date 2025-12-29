@@ -14,27 +14,18 @@ import { eachValueFrom, fromAny } from "../converters";
  * If the winning stream emits an error, the output stream will emit that error.
  *
  * @template {readonly unknown[]} T - A tuple type representing the combined values from the streams.
- * @param {MaybePromise<{ [K in keyof T]: Stream<T[K]> | Array<T[K]> | T[K] }>} streams - Streams (or a promise of them) to race against each other.
+ * @param streams Streams or values (including promises) to race against each other.
  * @returns {Stream<T[number]>} A new stream that emits values from the first stream to produce a value.
  */
 export function race<T extends readonly unknown[] = any[]>(
-  ...streams: Array<MaybePromise<Stream<T[number]> | Array<T[number]> | T[number]>>
+  ...streams: Array<Stream<T[number]> | MaybePromise<T[number]>>
 ): Stream<T[number]> {
   return createStream<T[number]>('race', async function* () {
-    const resolvedInputs: any[] = [];
-    for (const src of streams) {
-      resolvedInputs.push(isPromiseLike(src) ? await src : src);
-    }
-
-    const normalizedStreams = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
-      ? resolvedInputs[0]
-      : resolvedInputs) as Array<Stream<T[number]> | Array<T[number]> | T[number]>;
-
-    if (!normalizedStreams || normalizedStreams.length === 0) return;
+    if (streams.length === 0) return;
 
     const resolvedStreams: Array<Stream<T[number]> | Array<T[number]> | T[number]> = [];
-    for (const s of normalizedStreams) {
-      resolvedStreams.push(isPromiseLike(s) ? await s : s);
+    for (const stream of streams) {
+      resolvedStreams.push(isPromiseLike(stream) ? await stream : stream);
     }
 
     const iterators = resolvedStreams.map((s) => eachValueFrom(fromAny(s)));

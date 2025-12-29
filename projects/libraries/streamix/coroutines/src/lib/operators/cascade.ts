@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
 import type { Coroutine } from "./coroutine";
 
 /**
@@ -35,20 +35,20 @@ export interface CoroutineLike<T = any, R = T> extends Operator<T, R> {
 /**
  * Function cascade.
  */
-export function cascade<A, B>(...tasks: [MaybePromise<Coroutine<A, B>>]): CoroutineLike<A, B>;
+export function cascade<A, B>(...tasks: [Coroutine<A, B>]): CoroutineLike<A, B>;
 
 /**
  * Function cascade.
  */
 export function cascade<A, B, C>(
-  ...tasks: [MaybePromise<Coroutine<A, B>>, MaybePromise<Coroutine<B, C>>]
+  ...tasks: [Coroutine<A, B>, Coroutine<B, C>]
 ): CoroutineLike<A, C>;
 
 /**
  * Function cascade.
  */
 export function cascade<A, B, C, D>(
-  ...tasks: [MaybePromise<Coroutine<A, B>>, MaybePromise<Coroutine<B, C>>, MaybePromise<Coroutine<C, D>>]
+  ...tasks: [Coroutine<A, B>, Coroutine<B, C>, Coroutine<C, D>]
 ): CoroutineLike<A, D>;
 
 
@@ -56,7 +56,7 @@ export function cascade<A, B, C, D>(
  * Function cascade.
  */
 export function cascade<T = any, R = any>(
-  ...tasks: Array<MaybePromise<Coroutine<any, any>>>
+  ...tasks: Array<Coroutine<any, any>>
 ): CoroutineLike<T, R>;
 
 /**
@@ -74,19 +74,9 @@ export function cascade<T = any, R = any>(
  * @returns {CoroutineLike<T, R>} A `CoroutineLike` operator representing the entire cascaded pipeline.
  */
 export function cascade<T = any, R = any>(
-  ...tasks: Array<MaybePromise<Coroutine<any, any>>>
+  ...tasks: Array<Coroutine<any, any>>
 ): CoroutineLike<T, R> {
-  let cachedTasks: Coroutine<any, any>[] | null = null;
-  const getTasks = async () => {
-    if (cachedTasks === null) {
-      const resolvedTasks = await Promise.all(tasks.map(async (task) => {
-        const resolved = isPromiseLike(task) ? await task : task;
-        return Array.isArray(resolved) ? resolved : [resolved];
-      }));
-      cachedTasks = resolvedTasks.flat();
-    }
-    return cachedTasks;
-  };
+  const getTasks = () => tasks;
 
   const operator = createOperator<T, R>("cascade", function (this: Operator, source) {
     let completed = false;
@@ -105,7 +95,7 @@ export function cascade<T = any, R = any>(
           }
 
           let taskResult: any = result.value;
-          const resolvedTasks = await getTasks();
+          const resolvedTasks = getTasks();
           for (const task of resolvedTasks) {
             taskResult = await task.processTask(taskResult);
           }
@@ -127,14 +117,14 @@ export function cascade<T = any, R = any>(
   const coroutineLike: CoroutineLike<T, R> = Object.assign(operator, {
     async processTask(data: T) {
       let result: any = data;
-      const tasksList = await getTasks();
+      const tasksList = getTasks();
       for (const task of tasksList) {
         result = await task.processTask(result);
       }
       return result as R;
     },
     async finalize() {
-      const tasksList = await getTasks();
+      const tasksList = getTasks();
       for (const task of tasksList) {
         await task.finalize();
       }

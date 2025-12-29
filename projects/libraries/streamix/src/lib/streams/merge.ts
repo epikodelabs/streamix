@@ -12,27 +12,18 @@ import { eachValueFrom, fromAny } from "../converters";
  * errors, the merged stream immediately errors.
  *
  * @template T The type of the values in the streams.
- * @param sources Streams/values (or promise of array) to merge.
+ * @param sources Streams or values (including promises) to merge.
  * @returns {Stream<T>} A new stream that emits values from all input streams.
  */
 export function merge<T = any, R extends readonly unknown[] = any[]>(
-  ...sources: { [K in keyof R]: MaybePromise<Stream<R[K]> | Array<R[K]> | R[K]> }
+  ...sources: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
 ): Stream<T> {
   return createStream<T>('merge', async function* () {
-    const resolvedInputs: any[] = [];
-    for (const src of sources) {
-      resolvedInputs.push(isPromiseLike(src) ? await src : src);
-    }
-    
-    const resolvedSourcesRoot = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
-      ? resolvedInputs[0]
-      : resolvedInputs) as Array<Stream<T> | Array<T> | T>;
+    if (sources.length === 0) return;
 
-    if (resolvedSourcesRoot.length === 0) return;
-
-    const resolvedSources = [];
-    for (const source of resolvedSourcesRoot) {
-        resolvedSources.push(isPromiseLike(source) ? await source : source);
+    const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
+    for (const source of sources) {
+      resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
 
     const iterators = resolvedSources.map(s => eachValueFrom(fromAny(s)));

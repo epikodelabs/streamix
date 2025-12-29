@@ -13,17 +13,16 @@ import { createSubject } from "../subjects";
  *
  * The operator is "gated" and will not emit any values until all provided streams
  * have emitted at least one value.
- * Inputs may be streams, plain values, arrays, or promises of those shapes; a single
- * array argument is treated the same as passing values variadically.
+ * Inputs may be streams or values (including promises).
  *
  * @template T The type of the values in the source stream.
  * @template R The tuple type of the values from the other streams (e.g., [R1, R2, R3]).
- * @param streams Streams (or values/arrays/promises) to combine with the source stream.
+ * @param streams Streams or values (including promises) to combine with the source stream.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  * The output stream emits tuples of `[T, ...R]`.
  */
 export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
-  ...streams: { [K in keyof R]: MaybePromise<Stream<R[K]> | Array<R[K]> | R[K]> }
+  ...streams: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
 ) {
   return createOperator<T, [T, ...R]>("withLatestFrom", function (this: Operator, source) {
     const output = createSubject<[T, ...R]>();
@@ -44,16 +43,11 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
           streams.map(async (stream) => (isPromiseLike(stream) ? await stream : stream))
         );
 
-        // Logic to support both withLatestFrom(s1, s2) and withLatestFrom([s1, s2])
-        const streamEntries = (resolvedInputs.length === 1 && Array.isArray(resolvedInputs[0])
-          ? resolvedInputs[0]
-          : resolvedInputs) as Array<Stream<R[number]> | Promise<R[number]> | Array<R[number]>>;
-        
-        latestValues = new Array(streamEntries.length).fill(undefined);
-        hasValue = new Array(streamEntries.length).fill(false);
+        latestValues = new Array(resolvedInputs.length).fill(undefined);
+        hasValue = new Array(resolvedInputs.length).fill(false);
 
-        for (let i = 0; i < streamEntries.length; i++) {
-          const subscription = fromAny(streamEntries[i]).subscribe({
+        for (let i = 0; i < resolvedInputs.length; i++) {
+          const subscription = fromAny(resolvedInputs[i]).subscribe({
             next: (value) => {
               latestValues[i] = value;
               hasValue[i] = true;

@@ -15,7 +15,7 @@ import { createSubject } from "../subjects";
  * values are DISCARDED, and the operator simply waits for the source to complete.
  *
  * @template T The type of the values in the source and output streams.
- * @param notifier The stream that acts as a gatekeeper.
+ * @param notifier The stream or promise that acts as a gatekeeper.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
@@ -30,7 +30,7 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
     const setupNotifier = async () => {
       try {
         const resolvedNotifier = isPromiseLike(notifier) ? await notifier : notifier;
-        notifierSubscription = fromAny(resolvedNotifier as Stream<R> | R | Array<R>).subscribe({
+        notifierSubscription = fromAny(resolvedNotifier).subscribe({
           next: () => {
             // The gate is open. Flush the buffer and start live emission.
             if (!canEmit && !gateClosedWithoutEmit) { // Only run the flush on the *first* emission

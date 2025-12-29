@@ -15,8 +15,8 @@ import { createSubject } from '../subjects';
  * is met, such as waiting for a user to close a dialog or for an animation to complete.
  *
  * @template T The type of the values in the source and output streams.
- * @param notifier The stream that, upon its first emission, signals that the operator
- * should complete.
+ * @param notifier The stream (or promise) that, upon its first emission, signals that
+ * the operator should complete.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export function takeUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {

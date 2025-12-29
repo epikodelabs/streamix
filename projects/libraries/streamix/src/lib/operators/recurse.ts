@@ -32,8 +32,8 @@ export type RecurseOptions = {
  *
  * @template T The type of the values in the source and output streams.
  * @param condition A function that returns a boolean indicating whether to recurse on a value.
- * @param project A function that takes a value and returns a stream of new values to be
- * recursively processed.
+ * @param project A function that takes a value and returns a stream, value/array, or
+ * a promise of those shapes to be recursively processed.
  * @param options An optional configuration object for traversal behavior.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
