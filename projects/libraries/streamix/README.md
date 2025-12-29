@@ -1,10 +1,10 @@
-<p align="center">
-  <img src="https://github.com/epikodelabs/streamix/blob/main/projects/libraries/streamix/LOGO.png?raw=true" alt="Streamix Logo" width="500">
-</p>
+# streamix
+
+Reactive streams built on async generators.
+Small bundle, pull-based execution, and a familiar operator API.
 
 <p align="center">
-  <strong>Reactive streams built on async generators</strong><br>
-  Small bundle, pull-based execution, and a familiar operator API
+  <img src="https://github.com/epikodelabs/streamix/blob/main/LOGO.png?raw=true" alt="streamix Logo" width="500">
 </p>
 
 <p align="center">
@@ -27,9 +27,15 @@
 
 ---
 
+## Give a Star on GitHub
+
+If streamix helps you, please give it a star: https://github.com/epikodelabs/streamix
+
+---
+
 ## Why Streamix
 
-Streamix is a reactive streams library built on async generators. It focuses on a small bundle size and pull-based execution while keeping an API that feels familiar to RxJS users.
+streamix is a reactive streams library built on async generators. It focuses on a small bundle size and pull-based execution while keeping an API that feels familiar to RxJS users.
 
 ### Highlights
 
@@ -214,7 +220,7 @@ console.log('result:', result);
 
 ## HTTP client
 
-Streamix includes an HTTP client that composes well with streams:
+streamix includes an HTTP client that composes well with streams:
 
 ```typescript
 import { map, retry } from '@epikodelabs/streamix';
@@ -327,7 +333,7 @@ for await (const result of searchResults) {
 
 ## Generator-based architecture
 
-Unlike push-based streams, Streamix uses pull-based async generators:
+Unlike push-based streams, streamix uses pull-based async generators:
 
 ```typescript
 import { createStream, take } from '@epikodelabs/streamix';
@@ -364,8 +370,8 @@ This enables:
 ## Documentation and resources
 
 - [API Documentation](https://epikodelabs.github.io/streamix)
-- [Blog: Exploring Streamix](https://medium.com/p/00d5467f0c01)
-- [Streamix 2.0 Updates](https://medium.com/p/a1eb9e7ce1d7)
+- [Blog: Exploring streamix](https://medium.com/p/00d5467f0c01)
+- [streamix 2.0 Updates](https://medium.com/p/a1eb9e7ce1d7)
 - [Reactive Programming Guide](https://medium.com/p/0bfc206ad41c)
 
 ---
@@ -395,7 +401,5 @@ MIT License
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
 
-<p align="center">
-   If Streamix is useful to you, consider giving the repo a <a href="https://github.com/epikodelabs/streamix">star</a> 
-</p>
+
 
