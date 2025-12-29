@@ -23,6 +23,12 @@ import { createSubject } from "../subjects";
  */
 export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
   ...streams: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
+): Operator<T, [T, ...R]>;
+export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
+  streams: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
+): Operator<T, [T, ...R]>;
+export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
+  ...streams: any[]
 ) {
   return createOperator<T, [T, ...R]>("withLatestFrom", function (this: Operator, source) {
     const output = createSubject<[T, ...R]>();
@@ -32,6 +38,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
     let latestValues: any[] = [];
     let hasValue: boolean[] = [];
     const subscriptions: Subscription[] = [];
+    const normalizedInputs = streams.length === 1 && Array.isArray(streams[0]) ? streams[0] : streams;
 
     // The entire operator logic is wrapped in an async function to ensure auxiliary
     // stream subscriptions (and potential sync emissions) are handled before
@@ -40,7 +47,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
       try {
         // --- 1. Setup Auxiliary Streams ---
         const resolvedInputs = await Promise.all(
-          streams.map(async (stream) => (isPromiseLike(stream) ? await stream : stream))
+          normalizedInputs.map(async (stream) => (isPromiseLike(stream) ? await stream : stream))
         );
 
         latestValues = new Array(resolvedInputs.length).fill(undefined);
