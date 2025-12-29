@@ -16,8 +16,8 @@ import { createSubject } from '../subjects';
  * an application to finish loading.
  *
  * @template T The type of the values in the source and output streams.
- * @param notifier The stream that, upon its first emission, signals that the operator
- * should stop skipping values.
+ * @param notifier The stream (or promise) that, upon its first emission, signals that
+ * the operator should stop skipping values.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {

@@ -1,5 +1,5 @@
 import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
-import { fromAny } from "../converters";
+import { eachValueFrom, fromAny } from "../converters";
 
 /**
  * Creates a stream that subscribes to a source factory and retries on error.
@@ -12,13 +12,13 @@ import { fromAny } from "../converters";
  * If all retry attempts fail, the final error is propagated.
  *
  * @template T The type of values emitted by the stream.
- * @param {() => (Stream<T> | MaybePromise<T>)} factory A function that returns a new stream instance for each subscription attempt.
+ * @param {() => (Stream<T> | MaybePromise<T>)} factory A function that returns a new stream or value for each attempt.
  * @param {MaybePromise<number>} [maxRetries=3] The maximum number of times to retry the stream. A value of 0 means no retries.
  * @param {MaybePromise<number>} [delay=1000] The time in milliseconds to wait before each retry attempt.
  * @returns {Stream<T>} A new stream that applies the retry logic.
  */
 export function retry<T = any>(
-  factory: () => MaybePromise<(Stream<T> | T)>,
+  factory: () => Stream<T> | MaybePromise<T>,
   maxRetries: MaybePromise<number> = 3,
   delay: MaybePromise<number> = 1000
 ): Stream<T> {
@@ -29,40 +29,18 @@ export function retry<T = any>(
     let retryCount = 0;
 
     while (retryCount <= resolvedMaxRetries) {
+      let iterator: AsyncGenerator<T> | null = null;
+
       try {
         const produced = factory();
-        const sourceStream = fromAny(isPromiseLike(produced) ? await produced : produced);
-        const values: T[] = [];
-        let streamError: any = null;
-        let completed = false;
+        const source = isPromiseLike(produced) ? await produced : produced;
+        iterator = eachValueFrom(fromAny(source));
 
-        await new Promise<void>((resolve, reject) => {
-          const subscription = sourceStream.subscribe({
-            next: (value: T) => {
-              values.push(value);
-            },
-            error: (err: any) => {
-              streamError = err;
-              reject(err);
-            },
-            complete: () => {
-              completed = true;
-              resolve();
-              subscription.unsubscribe();
-            },
-          });
-        });
-
-        if (streamError) {
-          throw streamError;
+        for await (const value of iterator) {
+          yield value;
         }
 
-        if (completed) {
-          for (const value of values) {
-            yield value;
-          }
-          break;
-        }
+        break;
       } catch (error) {
         retryCount++;
         if (retryCount > resolvedMaxRetries) {
@@ -71,6 +49,14 @@ export function retry<T = any>(
 
         if (resolvedDelay !== undefined) {
           await new Promise<void>((resolve) => setTimeout(resolve, resolvedDelay));
+        }
+      } finally {
+        if (iterator?.return) {
+          try {
+            await iterator.return(undefined);
+          } catch {
+            // Ignore cleanup errors
+          }
         }
       }
     }

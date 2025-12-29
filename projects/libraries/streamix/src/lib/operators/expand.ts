@@ -14,8 +14,8 @@ import { recurse, type RecurseOptions } from './recurse';
  * to a new collection of items that also need to be processed.
  *
  * @template T The type of the values in the source and output streams.
- * @param project A function that takes a value and returns a stream of new values
- * to be expanded.
+ * @param project A function that takes a value and returns a stream, value/array,
+ * or a promise of those shapes to be expanded.
  * @param options An optional configuration object for the underlying `recurse` operator.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */

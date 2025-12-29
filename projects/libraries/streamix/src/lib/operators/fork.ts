@@ -32,7 +32,7 @@ export interface ForkOption<T = any, R = any> {
    * @param value The source value that matched the predicate.
    * @returns A stream, value, promise, or array to be flattened and emitted.
    */
-  handler: (value: T) => (Stream<R> | MaybePromise<Array<R>> | MaybePromise<R>);
+  handler: (value: T) => (Stream<R> | MaybePromise<R> | Array<R>);
 }
 
 /**
@@ -56,11 +56,9 @@ export interface ForkOption<T = any, R = any> {
  *
  * @throws {Error} If a source value does not match any predicate.
  */
-export const fork = <T = any, R = any>(...options: Array<MaybePromise<ForkOption<T, R>>>) =>
+export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
   createOperator<T, R>('fork', function (this: Operator, source) {
-    const resolvedOptions = options.flatMap(option =>
-      Array.isArray(option) ? option : [option]
-    );
+    const resolvedOptions = options;
 
     let outerIndex = 0;
     let innerIterator: AsyncIterator<R> | null = null;
@@ -78,9 +76,10 @@ export const fork = <T = any, R = any>(...options: Array<MaybePromise<ForkOption
 
             let matched: typeof resolvedOptions[number] | undefined;
             outerValue = result.value;
+            const currentIndex = outerIndex++;
 
             for (const option of resolvedOptions) {
-              const predicateResult = option.on(outerValue!, outerIndex++);
+              const predicateResult = option.on(outerValue!, currentIndex);
               if (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) {
                 matched = option;
                 break;

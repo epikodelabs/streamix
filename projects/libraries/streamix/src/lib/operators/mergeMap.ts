@@ -25,7 +25,7 @@ import { createSubject, type Subject } from '../subjects';
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
 export function mergeMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | MaybePromise<Array<R>> | MaybePromise<R>,
+  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>,
 ) {
   return createOperator<T, R>('mergeMap', function (this: Operator, source) {
     const output: Subject<R> = createSubject<R>();
