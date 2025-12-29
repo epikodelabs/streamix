@@ -10,10 +10,17 @@ import { eachValueFrom, fromAny } from "../converters";
  */
 export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
   ...sources: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
+): Stream<T[]>;
+export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
+  sources: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
+): Stream<T[]>;
+export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
+  ...sources: R
 ): Stream<T[]> {
   async function* generator() {
+    const normalizedSources = sources.length === 1 && Array.isArray(sources[0]) ? sources[0] : sources;
     const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
-    for (const source of sources) {
+    for (const source of normalizedSources) {
       resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
 

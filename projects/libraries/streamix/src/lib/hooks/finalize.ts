@@ -13,7 +13,7 @@ import { createOperator, DONE, type MaybePromise, type Operator } from "../abstr
  * It can be synchronous or return a Promise.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const finalize = <T = any>(callback: () => MaybePromise) => {
+export const finalize = <T = any>(callback: () => MaybePromise<T>) => {
   // Shared state across all subscriptions - moved outside createOperator
   let finalized = false;
   let completed = false;

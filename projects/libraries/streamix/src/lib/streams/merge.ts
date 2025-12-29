@@ -15,18 +15,22 @@ import { eachValueFrom, fromAny } from "../converters";
  * @param sources Streams or values (including promises) to merge.
  * @returns {Stream<T>} A new stream that emits values from all input streams.
  */
-export function merge<T = any, R extends readonly unknown[] = any[]>(
-  ...sources: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
-): Stream<T> {
+type MergeSource<T> = Stream<T> | MaybePromise<T>;
+
+export function merge<T = any>(...sources: MergeSource<T>[]): Stream<T> {
   return createStream<T>('merge', async function* () {
     if (sources.length === 0) return;
 
+    const isPromiseSource = (value: MergeSource<T>): value is Promise<any> =>
+      isPromiseLike(value);
     const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
     for (const source of sources) {
-      resolvedSources.push(isPromiseLike(source) ? await source : source);
+      resolvedSources.push(isPromiseSource(source) ? await source : source);
     }
 
-    const iterators = resolvedSources.map(s => eachValueFrom(fromAny(s)));
+    const iterators = resolvedSources.map((source) =>
+      eachValueFrom(fromAny<T>(source))
+    );
     const nextPromises: Array<Promise<IteratorResult<T>> | null> = iterators.map(it => it.next());
     let activeCount = iterators.length;
 
