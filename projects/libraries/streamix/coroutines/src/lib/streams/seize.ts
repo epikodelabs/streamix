@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "@epikodelabs/streamix";
+import { createStream, type MaybePromise, type Stream } from "@epikodelabs/streamix";
 import type { Coroutine, CoroutineMessage } from "../operators";
 
 /**
@@ -43,7 +43,7 @@ export interface SeizedWorker<T = any, R = T> {
  *
  * @template T The type of data sent to the worker.
  * @template R The type of data returned from the worker.
- * @param {Coroutine<T, R>} task The coroutine instance managing the worker pool.
+ * @param {MaybePromise<Coroutine<T, R>>} task The coroutine instance managing the worker pool.
  * @param {(message: CoroutineMessage) => MaybePromise<void>} onMessage A callback function to handle messages received from the seized worker.
  * @param {(error: Error) => MaybePromise<void>} onError A callback function to handle errors originating from the seized worker.
  * @returns {Stream<SeizedWorker<T, R>>} A stream that yields a single `SeizedWorker` object.
@@ -52,10 +52,9 @@ export function seize<T = any, R = T>(
   task: Coroutine<T, R>,
   onMessage: (message: CoroutineMessage) => MaybePromise<void>,
   onError: (error: Error) => MaybePromise<void>
-): Stream<SeizedWorker> {
+): Stream<SeizedWorker<T, R>> {
   return createStream("seize", async function* () {
-    const resolvedTask = isPromiseLike(task) ? await task : task;
-    const { worker, workerId } = await resolvedTask.getIdleWorker();
+    const { worker, workerId } = await task.getIdleWorker();
     let disposed = false;
     const ac = new AbortController();
     const signal = ac.signal;
@@ -77,7 +76,7 @@ export function seize<T = any, R = T>(
         disposed = true;
         worker.removeEventListener("message", messageHandler);
         worker.removeEventListener("error", errorHandler);
-        resolvedTask.returnWorker(workerId);
+        task.returnWorker(workerId);
         ac.abort();
       }
     };
@@ -88,7 +87,7 @@ export function seize<T = any, R = T>(
 
     const seizedWorker: SeizedWorker<T, R> = {
       workerId,
-      sendTask: (data: T) => resolvedTask.assignTask(workerId, data),
+      sendTask: (data: T) => task.assignTask(workerId, data),
       release: cleanup,
     };
 
