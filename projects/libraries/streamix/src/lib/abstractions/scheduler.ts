@@ -15,7 +15,6 @@ import { isPromiseLike } from "./operator";
  * - Parallel arrays instead of per-task objects
  * - At most one pump in flight
  * - Compact storage for flush waiters
- * - Explicit yielding mechanism for non-blocking awaits
  */
 export type Scheduler = {
   /**
@@ -35,29 +34,29 @@ export type Scheduler = {
   /**
    * Awaits a promise without blocking the queue.
    * 
-   * Designed for use within async tasks. When awaited,
+   * Designed for use within generators. When yielded,
    * it allows the queue to continue processing other tasks
    * while waiting for the promise to resolve.
    * 
    * @example
-   * scheduler.enqueue(async () => {
-   *   const data = await scheduler.await(fetch('/api'));
+   * function* myGenerator() {
+   *   yield* scheduler.await(fetch('/api'));
    *   // Queue was not blocked during fetch
-   * });
+   * }
    */
   await: <T>(promise: Promise<T>) => Promise<T>;
 
   /**
    * Waits for the specified duration without blocking the queue.
    *
-   * Useful for throttling or spacing work in async flows
+   * Useful for throttling or spacing work in generators or async flows
    * while allowing other queued tasks to continue running.
    *
    * @example
-   * scheduler.enqueue(async () => {
-   *   await scheduler.delay(100);
+   * function* task() {
+   *   yield scheduler.delay(100);
    *   // Queue kept processing during the delay
-   * });
+   * }
    */
   delay: (ms: number) => Promise<void>;
 };
@@ -66,21 +65,46 @@ export type Scheduler = {
  * Function createScheduler.
  */
 export function createScheduler(): Scheduler {
+  /**
+   * Parallel arrays storing the task queue.
+   *
+   * This avoids allocating `{ fn, resolve, reject }` objects
+   * per task and significantly reduces GC pressure.
+   */
   const tasks: Array<() => any> = [];
   const resolves: Array<(v: any) => void> = [];
   const rejects: Array<(e: any) => void> = [];
+
+  /**
+   * Resolvers for pending `flush()` calls.
+   * Multiple concurrent flush callers are supported.
+   */
   let flushResolvers: Array<() => void> = [];
 
+  /**
+   * Indicates whether a pump is currently running
+   * or scheduled to run.
+   */
   let pumping = false;
-  let pumpScheduled = false;
-  let currentYield: null | (() => void) = null;
 
+  /**
+   * Schedules a microtask.
+   *
+   * Wrapped for clarity and to avoid capturing extra state.
+   */
   const scheduleMicrotask = (cb: () => void) => queueMicrotask(cb);
 
-  const resolveFlushIfIdle = (): void => {
+  /**
+   * Resolves all pending flush promises if the scheduler
+   * is idle AND remains idle across a microtask turn.
+   *
+   * This avoids a subtle bug where a task finishes,
+   * the queue appears empty, but new tasks are enqueued
+   * in a promise continuation.
+   */
+  const resolveFlushIfIdleMicrotaskStable = (): void => {
     scheduleMicrotask(() => {
-      // Check if we are truly idle: no pump running, no pump scheduled, no tasks
-      if (!pumping && !pumpScheduled && tasks.length === 0 && flushResolvers.length > 0) {
+      if (!pumping && tasks.length === 0 && flushResolvers.length) {
         const current = flushResolvers;
         flushResolvers = [];
         for (let i = 0; i < current.length; i++) current[i]();
@@ -88,155 +112,153 @@ export function createScheduler(): Scheduler {
     });
   };
 
-  const pump = (): void => {
-    pumpScheduled = false;
-    if (pumping || tasks.length === 0) return;
-
+  /**
+   * Main execution loop.
+   *
+   * Pulls tasks from the queue one-by-one and executes them.
+   * Errors reject the corresponding task promise but do not
+   * stop the pump.
+   */
+  const pump = async (): Promise<void> => {
+    // Guard against multiple concurrent pumps.
+    if (pumping) return;
     pumping = true;
 
-    const task = tasks.shift()!;
-    const resolve = resolves.shift()!;
-    const reject = rejects.shift()!;
-
-    let yielded = false;
-    let yieldResolve!: () => void;
-    const yieldPromise = new Promise<void>((res) => {
-      yieldResolve = () => {
-        if (!yielded) {
-          yielded = true;
-          res();
-        }
-      };
-    });
-    const previousYield = currentYield;
-    currentYield = yieldResolve;
-
-    // Execute the task
     try {
-      const result = task();
+      while (tasks.length > 0) {
+        // Dequeue from parallel arrays.
+        const task = tasks.shift()!;
+        const resolve = resolves.shift()!;
+        const reject = rejects.shift()!;
 
-      if (isPromiseLike(result)) {
-        const settled = Promise.resolve(result).then(
-          (value) => ({ status: "resolved" as const, value }),
-          (error) => ({ status: "rejected" as const, error })
-        );
+        try {
+          const result = task();
+          const value = isPromiseLike(result) ? await result : result;
+          resolve(value);
+        } catch (err) {
+          // Reject only this task; continue pumping.
+          reject(err);
+        }
 
-        Promise.race([
-          settled,
-          yieldPromise.then(() => ({ status: "yielded" as const })),
-        ]).then((winner) => {
-          currentYield = previousYield;
-
-          if (winner.status === "resolved") {
-            resolve(winner.value);
-            next();
-            return;
-          }
-
-          if (winner.status === "rejected") {
-            reject(winner.error);
-            next();
-            return;
-          }
-
-          // Task yielded - wait for it to complete but continue processing queue
-          result.then(resolve, reject);
-          next();
-        });
-      } else {
-        currentYield = previousYield;
-        resolve(result);
-        // Even for sync tasks, yield to allow flushes/new enqueues
-        scheduleMicrotask(next);
+        /**
+         * Yield between tasks.
+         *
+         * This allows:
+         * - promise continuations to enqueue new tasks
+         * - fair interleaving of async work
+         * - avoidance of deep synchronous recursion
+         *
+         * FIFO order is still preserved.
+         */
+        await Promise.resolve();
       }
-    } catch (err) {
-      currentYield = previousYield;
-      reject(err);
-      next();
+    } finally {
+      pumping = false;
+      resolveFlushIfIdleMicrotaskStable();
     }
   };
 
-  const next = () => {
-    pumping = false;
-    if (tasks.length > 0) {
-      ensurePump();
-    } else {
-      resolveFlushIfIdle();
-    }
-  };
-
+  /**
+   * Ensures the pump is scheduled.
+   *
+   * Scheduling occurs on a microtask boundary to:
+   * - avoid re-entrancy
+   * - keep execution predictable
+   */
   const ensurePump = (): void => {
-    if (!pumping && !pumpScheduled) {
-      pumpScheduled = true;
-      scheduleMicrotask(pump);
+    if (!pumping) {
+      scheduleMicrotask(() => {
+        // pump() rechecks `pumping` internally
+        void pump();
+      });
     }
   };
 
+  /**
+   * Enqueues a task for execution.
+   */
   const enqueue = <T>(fn: () => Promise<T> | T): Promise<T> => {
-    const promise = new Promise<T>((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       tasks.push(fn as any);
       resolves.push(resolve as any);
       rejects.push(reject as any);
+      ensurePump();
     });
-    ensurePump();
-    return promise;
   };
 
+  /**
+   * Resolves once the scheduler becomes fully idle.
+   *
+   * If already idle, resolves immediately.
+   * Otherwise, waits until the queue is empty
+   * and remains empty across a microtask turn.
+   */
   const flush = (): Promise<void> => {
-    if (!pumping && !pumpScheduled && tasks.length === 0) {
-      return Promise.resolve();
-    }
+    // Fast path: already idle.
+    if (!pumping && tasks.length === 0) return Promise.resolve();
+
     return new Promise<void>((resolve) => {
       flushResolvers.push(resolve);
+
+      // Ensure progress even in edge cases.
       ensurePump();
-      resolveFlushIfIdle();
+
+      // Handle cases where pumping flips to false
+      // before this flush registers.
+      resolveFlushIfIdleMicrotaskStable();
     });
   };
 
   /**
    * Awaits a promise without blocking the queue.
    * 
-   * If called outside an enqueued task (no currentYield), returns the promise directly.
+   * This method releases the current task slot, allowing
+   * other tasks to execute while waiting for the promise.
+   * Once the promise resolves, it re-enqueues to continue
+   * execution in FIFO order.
    * 
-   * If called inside an enqueued task:
-   * 1. Signals the pump to yield via currentYield()
-   * 2. When the promise resolves, re-enqueues a task that returns the value
-   * 3. Returns a promise that resolves when that re-enqueued task completes
+   * For use with yield in generators:
+   * 
+   * @example
+   * function* task() {
+   *   const data = yield scheduler.await(fetchData());
+   *   // Queue was not blocked during fetch
+   * }
+   * 
+   * // Or with async/await syntax
+   * const data = await scheduler.await(fetchData());
    */
   const awaitNonBlocking = <T>(promise: Promise<T>): Promise<T> => {
-    // If not in a task context, just return the promise
-    if (!currentYield) {
-      return promise;
-    }
-
-    const yieldFn = currentYield;
-
     return new Promise<T>((resolve, reject) => {
+      // Wait for the promise outside the queue
       promise.then(
         (value) => {
-          // Re-enqueue a task that returns the resolved value
+          // Re-enqueue to continue in FIFO order
           enqueue(() => value).then(resolve, reject);
         },
         (error) => {
-          // Re-enqueue a task that returns the rejected error
-          enqueue(() => Promise.reject(error)).then(resolve, reject);
+          // Re-enqueue the error
+          enqueue(() => {
+            throw error;
+          }).catch(reject);
         }
       );
-
-      // Signal the pump that we're yielding
-      yieldFn();
     });
   };
 
-  const delay = (ms: number): Promise<void> =>
-    awaitNonBlocking(new Promise<void>((res) => setTimeout(res, ms)));
-
-  return {
-    enqueue,
-    flush,
-    await: awaitNonBlocking,
-    delay
+  /**
+   * Delays execution without blocking the queue.
+   * 
+   * Uses awaitNonBlocking internally to release the queue
+   * during the timeout period.
+   */
+  const delay = (ms: number): Promise<void> => {
+    return awaitNonBlocking(
+      new Promise<void>((resolve) => setTimeout(resolve, ms))
+    );
   };
+
+  return { enqueue, flush, await: awaitNonBlocking, delay };
 }
 
 /**

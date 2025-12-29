@@ -1,7 +1,6 @@
 {
   "name": "streamix",
   "version": "2.0.28",
-  "description": "Reactive data streams built on async generators.",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
@@ -11,9 +10,11 @@
     "jasmine:coverage": "npx ts-test-runner --headless --coverage",
     "minify": "node terser.mjs && npx dts-bundler",
     "clean": "eslint --config eslint.config.js --fix",
-    "docs:generate": "typedoc --plugin typedoc-plugin-markdown --out docs/api",
-    "docs:dev": "npm run docs:generate && cd docs && vitepress dev --config ../vitepress.config.ts",
-    "docs:build": "npm run docs:generate && cd docs && vitepress build --config ../vitepress.config.ts && cd .. && npm run docs:rewrite",
+    "docs:generate": "node scripts/copy-vitepress-config.mjs && typedoc --plugin typedoc-plugin-markdown --out dist/api",
+    "docs:prepare": "node scripts/docs-prepare.mjs",
+    "docs:fix-api-links": "node scripts/fix-typedoc-links.mjs",
+    "docs:dev": "npm run docs:prepare && npm run docs:generate && npm run docs:fix-api-links && vitepress dev dist",
+    "docs:build": "npm run docs:prepare && npm run docs:generate && npm run docs:fix-api-links && vitepress build dist --base /streamix/ && npm run docs:rewrite",
     "docs:rewrite": "node scripts/rewrite-vitepress-base.mjs"
   },
   "dependencies": {
@@ -29,8 +30,6 @@
     "zone.js": "0.14.3"
   },
   "devDependencies": {
-    "@actioncrew/dts-bundler": "file:dependencies/actioncrew-dts-bundler-1.0.11.tgz",
-    "@actioncrew/ts-test-runner": "file:dependencies/actioncrew-ts-test-runner-1.0.16.tgz",
     "@angular-devkit/build-angular": "18.0.1",
     "@angular/cli": "18.0.1",
     "@angular/compiler-cli": "18.0.0",
@@ -58,3 +57,5 @@
     "./tracing": "./projects/libraries/streamix/tracing/src/lib/index.ts"
   }
 }
+
+
