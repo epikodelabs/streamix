@@ -2,7 +2,7 @@
 
 ## 2.0.28
 
-Buffer and subject internals were reworked: synchronization removed in favor of scheduler-queued methods, `ReplaySubject` now uses the scheduler, and `shareReplay` aligns with strict backpressure and async delivery. Lock and semaphore are deprecated. Added edge-case tests for subjects and buffers, with various type/config/docs corrections and cleanup.
+Buffer and subject internals were reworked: synchronization removed in favor of scheduler-queued methods, `ReplaySubject` now uses the scheduler, and `shareReplay` aligns with strict backpressure and async delivery. Lock and semaphore remain for convenience. Added edge-case tests for subjects and buffers, with various type/config/docs corrections and cleanup. Streams/operators now match updated signatures with refreshed JSDocs.
 
 ## 2.0.26
 
@@ -193,5 +193,3 @@ In version v0.0.7 of Streamix, several improvements and bug fixes were implement
 ## v0.0.6
 
 Streamix v0.0.6 introduces several improvements and bug fixes, including enhanced operator support with new methods like `iif`, extended functionality for `fromEvent` streams, and optimized performance. New features such as the `race` method and improved handling of cancellations have been added. The library now supports proxying emission operations through stream sinks and includes additional utility functions. Bug fixes address issues in parallel execution, error handling, and test coverage, ensuring better reliability and compatibility.
-
-

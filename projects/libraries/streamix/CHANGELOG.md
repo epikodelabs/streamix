@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 2.0.28
+
+Buffer and subject internals were reworked: synchronization removed in favor of scheduler-queued methods, `ReplaySubject` now uses the scheduler, and `shareReplay` aligns with strict backpressure and async delivery. Lock and semaphore remain for convenience. Added edge-case tests for subjects and buffers, with various type/config/docs corrections and cleanup. Streams/operators now match updated signatures with refreshed JSDocs.
+
 ## 2.0.21
 
 Small fixes, added `forAny` converter, eachValueFrom correctly propagates void values. Updated documentation
