@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits a final, specified value after the source stream has completed.
@@ -10,11 +10,12 @@ import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
  * @param finalValue The value to be emitted as the last item in the stream.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const endWith = <T = any>(finalValue: T) =>
+export const endWith = <T = any>(finalValue: MaybePromise<T>) =>
   createOperator<T, T>("endWith", function (this: Operator, source) {
     let sourceDone = false;
     let finalEmitted = false;
     let completed = false;
+    const finalValuePromise: Promise<T> = Promise.resolve(finalValue as MaybePromise<T>);
 
     return {
       next: async () => {
@@ -36,7 +37,7 @@ export const endWith = <T = any>(finalValue: T) =>
 
           if (!finalEmitted) {
             finalEmitted = true;
-            return NEXT(finalValue);
+            return NEXT(await finalValuePromise);
           }
 
           completed = true;

@@ -15,7 +15,7 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
   sources: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
 ): Stream<T[]>;
 export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
-  ...sources: any[]
+  ...sources: R
 ): Stream<T[]> {
   async function* generator() {
     const normalizedSources = sources.length === 1 && Array.isArray(sources[0]) ? sources[0] : sources;

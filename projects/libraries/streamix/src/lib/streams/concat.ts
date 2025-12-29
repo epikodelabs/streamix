@@ -16,17 +16,19 @@ import { eachValueFrom, fromAny } from "../converters";
  * @param sources Streams or values (including promises) to concatenate.
  * @returns {Stream<T>} A new stream that emits values from all input streams in sequence.
  */
-export function concat<T = any, R extends readonly unknown[] = any[]>(
-  ...sources: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
-): Stream<T> {
+type ConcatSource<T> = Stream<T> | MaybePromise<T>;
+
+export function concat<T = any>(...sources: ConcatSource<T>[]): Stream<T> {
   async function* generator() {
+    const isPromiseSource = (value: ConcatSource<T>): value is Promise<any> =>
+      isPromiseLike(value);
     const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
     for (const source of sources) {
-      resolvedSources.push(isPromiseLike(source) ? await source : source);
+      resolvedSources.push(isPromiseSource(source) ? await source : source);
     }
 
     for (const source of resolvedSources) {
-      const iterator = eachValueFrom(fromAny(source));
+      const iterator = eachValueFrom(fromAny<T>(source));
 
       try {
         for await (const value of iterator) {
