@@ -30,6 +30,7 @@ export function retry<T = any>(
 
     while (retryCount <= resolvedMaxRetries) {
       let iterator: AsyncGenerator<T> | null = null;
+      let buffered: T[] = [];
 
       try {
         const produced = factory();
@@ -37,9 +38,12 @@ export function retry<T = any>(
         iterator = eachValueFrom(fromAny(source));
 
         for await (const value of iterator) {
-          yield value;
+          buffered.push(value);
         }
 
+        for (const value of buffered) {
+          yield value;
+        }
         break;
       } catch (error) {
         retryCount++;

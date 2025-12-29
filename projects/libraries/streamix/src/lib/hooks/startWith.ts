@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, MaybePromise, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that prepends a specified value to the beginning of the stream.
@@ -11,10 +11,11 @@ import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
  * @param initialValue The value to be emitted as the first item in the stream.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const startWith = <T = any>(initialValue: T) =>
+export const startWith = <T = any>(initialValue: MaybePromise<T>) =>
   createOperator<T, T>("startWith", function (this: Operator, source) {
     let emittedInitial = false;
     let completed = false;
+    const initialValuePromise: Promise<T> = Promise.resolve(initialValue as MaybePromise<T>);
 
     return {
       next: async () => {
@@ -25,7 +26,7 @@ export const startWith = <T = any>(initialValue: T) =>
 
           if (!emittedInitial) {
             emittedInitial = true;
-            return NEXT(initialValue);
+            return NEXT(await initialValuePromise);
           }
 
           const result = await source.next();
