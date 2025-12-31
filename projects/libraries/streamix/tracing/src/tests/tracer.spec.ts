@@ -9,6 +9,7 @@ import {
 } from "@epikodelabs/streamix";
 
 import {
+  createTerminalTracer,
   createValueTracer,
   disableTracing,
   enableTracing,
@@ -97,11 +98,69 @@ function createTestTracer() {
   });
 }
 
+function createTerminalTestTracer() {
+  const emitted: ValueTrace[] = [];
+  const delivered: ValueTrace[] = [];
+  const filtered: ValueTrace[] = [];
+  const collapsed: ValueTrace[] = [];
+  const dropped: ValueTrace[] = [];
+  const emittedIds = new Set<string>();
+  const deliveredIds = new Set<string>();
+  const filteredIds = new Set<string>();
+  const collapsedIds = new Set<string>();
+  const droppedIds = new Set<string>();
+
+  const tracer = createTerminalTracer({
+    onTraceUpdate: (t) => {
+      if (t.state === "emitted" && !emittedIds.has(t.valueId)) {
+        emittedIds.add(t.valueId);
+        emitted.push(t);
+      }
+    },
+  });
+
+  const addUnique = (list: ValueTrace[], seen: Set<string>, trace: ValueTrace) => {
+    if (seen.has(trace.valueId)) return;
+    seen.add(trace.valueId);
+    list.push(trace);
+  };
+
+  tracer.subscribe({
+    delivered: (t) => addUnique(delivered, deliveredIds, t),
+    filtered: (t) => addUnique(filtered, filteredIds, t),
+    collapsed: (t) => addUnique(collapsed, collapsedIds, t),
+    dropped: (t) => addUnique(dropped, droppedIds, t),
+  });
+
+  const baseClear = tracer.clear;
+
+  return Object.assign(tracer, {
+    emitted,
+    delivered,
+    filtered,
+    collapsed,
+    dropped,
+    clear() {
+      emitted.length = 0;
+      delivered.length = 0;
+      filtered.length = 0;
+      collapsed.length = 0;
+      dropped.length = 0;
+      emittedIds.clear();
+      deliveredIds.clear();
+      filteredIds.clear();
+      collapsedIds.clear();
+      droppedIds.clear();
+      baseClear();
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // FLATTENED TESTS
 // ---------------------------------------------------------------------------
 
-describe("Tracing", () => {
+describe("valueTracer", () => {
   let tracer: TestTracer;
 
   beforeEach(() => {
@@ -358,6 +417,46 @@ describe("Tracing", () => {
     expect(result).toBe(2);
     expect(tracer.emitted.length).toBe(0);
     expect(tracer.delivered.length).toBe(0);
+  });
+});
+
+describe("terminalTracer", () => {
+  let tracer: ReturnType<typeof createTerminalTestTracer>;
+
+  beforeEach(() => {
+    tracer = createTerminalTestTracer();
+    enableTracing(tracer);
+  });
+
+  afterEach(() => {
+    disableTracing();
+    tracer.clear();
+  });
+
+  it("captures only terminal state without operator steps", async () => {
+    const received: number[] = [];
+
+    const stream = createStream("numbers", async function* () {
+      yield 1;
+      yield 2;
+      yield 3;
+    });
+
+    await waitForCompletion(({ complete }) => {
+      stream
+        .pipe(map((x) => x * 2), filter((x) => x > 2))
+        .subscribe({
+          next: (v) => received.push(v),
+          complete,
+        });
+    });
+
+    expect(received).toEqual([4, 6]);
+    expect(tracer.emitted.length).toBe(3);
+    expect(tracer.delivered.length).toBe(2);
+    expect(tracer.filtered.length).toBe(1);
+    expect(tracer.delivered[0].operatorSteps.length).toBe(0);
+    expect(tracer.filtered[0].operatorSteps.length).toBe(0);
   });
 });
 
