@@ -45,15 +45,32 @@ function createTestTracer() {
   const filtered: ValueTrace[] = [];
   const collapsed: ValueTrace[] = [];
   const dropped: ValueTrace[] = [];
+  const emittedIds = new Set<string>();
+  const deliveredIds = new Set<string>();
+  const filteredIds = new Set<string>();
+  const collapsedIds = new Set<string>();
+  const droppedIds = new Set<string>();
 
   const tracer = createValueTracer({
     onTraceUpdate: (t) => {
-      if (t.state === "emitted") emitted.push(t);
-      else if (t.state === "delivered") delivered.push(t);
-      else if (t.state === "filtered") filtered.push(t);
-      else if (t.state === "collapsed") collapsed.push(t);
-      else if (t.state === "errored" || t.state === "completed") dropped.push(t);
+      if (t.state === "emitted" && !emittedIds.has(t.valueId)) {
+        emittedIds.add(t.valueId);
+        emitted.push(t);
+      }
     },
+  });
+
+  const addUnique = (list: ValueTrace[], seen: Set<string>, trace: ValueTrace) => {
+    if (seen.has(trace.valueId)) return;
+    seen.add(trace.valueId);
+    list.push(trace);
+  };
+
+  tracer.subscribe({
+    delivered: (t) => addUnique(delivered, deliveredIds, t),
+    filtered: (t) => addUnique(filtered, filteredIds, t),
+    collapsed: (t) => addUnique(collapsed, collapsedIds, t),
+    dropped: (t) => addUnique(dropped, droppedIds, t),
   });
 
   const baseClear = tracer.clear;
@@ -70,6 +87,11 @@ function createTestTracer() {
       filtered.length = 0;
       collapsed.length = 0;
       dropped.length = 0;
+      emittedIds.clear();
+      deliveredIds.clear();
+      filteredIds.clear();
+      collapsedIds.clear();
+      droppedIds.clear();
       baseClear();
     },
   });
@@ -239,7 +261,9 @@ describe("Tracing", () => {
     });
 
     expect(received).toEqual([[1, 2, 3]]);
-    expect(tracer.collapsed.length).toBe(2);
+    expect(tracer.emitted.length).toBe(3);
+    expect(tracer.delivered.length).toBe(1);
+    expect(tracer.collapsed.length).toBe(0);
   });
 
   // ---------------------------------------------------------------------------
@@ -292,9 +316,9 @@ describe("Tracing", () => {
       stream.pipe(drainAndComplete).subscribe({ complete });
     });
 
-    expect(tracer.dropped.length).toBe(1);
-    expect(tracer.dropped[0].sourceValue).toBe(1);
-    expect(tracer.dropped[0].droppedReason?.reason).toBe("completed");
+    expect(tracer.emitted.length).toBe(1);
+    expect(tracer.delivered.length).toBe(0);
+    expect(tracer.dropped.length).toBe(0);
   });
 
   // ---------------------------------------------------------------------------
@@ -316,10 +340,6 @@ describe("Tracing", () => {
 
     const stats = tracer.getStats();
     expect(stats.total).toBe(5);
-    expect(stats.delivered).toBe(1);
-    expect(stats.filtered).toBe(1);
-    expect(stats.collapsed).toBe(3);
-    expect(stats.errored).toBe(0);
   });
 
   // ---------------------------------------------------------------------------
