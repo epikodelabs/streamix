@@ -349,6 +349,141 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
   };
 }
 
+/**
+ * Creates a lightweight tracer that only captures terminal value states.
+ */
+export function createTerminalTracer(options: ValueTracerOptions = {}): ValueTracer {
+  const traces = new Map<string, ValueTrace>();
+  const subscribers: TracerEventHandlers[] = [];
+  const subscriptionSubscribers = new Map<string, Set<TracerSubscriptionEventHandlers>>();
+  const lastOperator = new Map<string, { index: number; name: string }>();
+
+  const { maxTraces = 10000, onTraceUpdate } = options;
+
+  const notifySubscribers = (event: keyof TracerEventHandlers, trace: ValueTrace) => {
+    subscribers.forEach(s => s[event]?.(trace));
+    subscriptionSubscribers.get(trace.subscriptionId)?.forEach(s => s[event]?.(trace));
+  };
+
+  const getOperatorName = (valueId: string, operatorIndex: number) =>
+    lastOperator.get(valueId)?.name ?? `op${operatorIndex}`;
+
+  return {
+    subscribe: (handlers) => {
+      subscribers.push(handlers);
+      return () => { const idx = subscribers.indexOf(handlers); if (idx > -1) subscribers.splice(idx, 1); };
+    },
+
+    observeSubscription: (subscriptionId, handlers) => {
+      if (!subscriptionSubscribers.has(subscriptionId)) subscriptionSubscribers.set(subscriptionId, new Set());
+      subscriptionSubscribers.get(subscriptionId)!.add(handlers);
+      return () => { subscriptionSubscribers.get(subscriptionId)?.delete(handlers); };
+    },
+
+    completeSubscription: (subscriptionId) => {
+      subscriptionSubscribers.get(subscriptionId)?.forEach(s => s.complete?.());
+      subscriptionSubscribers.delete(subscriptionId);
+    },
+
+    startTrace: (valueId, streamId, streamName, subscriptionId, value) => {
+      const trace: ValueTrace = {
+        valueId, streamId, streamName, subscriptionId,
+        emittedAt: Date.now(), state: "emitted", sourceValue: value,
+        operatorSteps: [], operatorDurations: new Map(),
+      };
+      traces.set(valueId, trace);
+      if (traces.size > maxTraces) traces.delete(traces.keys().next().value!);
+      onTraceUpdate?.(trace);
+      return trace;
+    },
+
+    createExpandedTrace: (baseValueId, operatorIndex, operatorName, expandedValue) => {
+      const base = traces.get(baseValueId);
+      const valueId = generateValueId();
+      const now = Date.now();
+
+      const trace: ValueTrace = {
+        valueId,
+        streamId: base?.streamId ?? "unknown",
+        streamName: base?.streamName,
+        subscriptionId: base?.subscriptionId ?? "unknown",
+        emittedAt: base?.emittedAt ?? now,
+        state: "expanded",
+        sourceValue: base?.sourceValue ?? expandedValue,
+        finalValue: expandedValue,
+        operatorSteps: [],
+        operatorDurations: new Map(),
+      };
+
+      traces.set(valueId, trace);
+      lastOperator.set(valueId, { index: operatorIndex, name: operatorName });
+      onTraceUpdate?.(trace);
+      return valueId;
+    },
+
+    enterOperator: (valueId, operatorIndex, operatorName) => {
+      lastOperator.set(valueId, { index: operatorIndex, name: operatorName });
+    },
+
+    exitOperator: (valueId, operatorIndex, outputValue, filtered = false) => {
+      const trace = traces.get(valueId);
+      if (!trace) return null;
+
+      trace.finalValue = outputValue;
+
+      if (filtered) {
+        const operatorName = getOperatorName(valueId, operatorIndex);
+        trace.state = "filtered";
+        trace.droppedReason = { operatorIndex, operatorName, reason: "filtered" };
+        notifySubscribers("filtered", trace);
+        onTraceUpdate?.(trace);
+      }
+      return valueId;
+    },
+
+    collapseValue: (valueId, operatorIndex, operatorName, targetValueId, outputValue) => {
+      const trace = traces.get(valueId);
+      if (!trace) return;
+
+      trace.state = "collapsed";
+      trace.finalValue = outputValue;
+      trace.collapsedInto = { operatorIndex, operatorName, targetValueId };
+      trace.droppedReason = { operatorIndex, operatorName, reason: "collapsed" };
+      notifySubscribers("collapsed", trace);
+      onTraceUpdate?.(trace);
+    },
+
+    errorInOperator: (valueId, operatorIndex, error) => {
+      const trace = traces.get(valueId);
+      if (!trace) return;
+
+      const operatorName = getOperatorName(valueId, operatorIndex);
+      trace.state = "errored";
+      trace.droppedReason = { operatorIndex, operatorName, reason: "errored", error };
+      notifySubscribers("dropped", trace);
+      onTraceUpdate?.(trace);
+    },
+
+    markDelivered: (valueId) => {
+      const trace = traces.get(valueId);
+      if (!trace) return;
+      trace.state = "delivered";
+      trace.deliveredAt = Date.now();
+      trace.totalDuration = trace.deliveredAt - trace.emittedAt;
+      notifySubscribers("delivered", trace);
+      onTraceUpdate?.(trace);
+    },
+
+    getAllTraces: () => Array.from(traces.values()),
+    getStats: () => ({ total: traces.size }),
+    clear: () => {
+      traces.clear();
+      subscriptionSubscribers.clear();
+      lastOperator.clear();
+    }
+  };
+}
+
 /* ============================================================================
  * RUNTIME INTERNALS & GLOBALS
  * ========================================================================== */
