@@ -14,7 +14,8 @@
     "./projects/libraries/streamix/tracing/src/tests"
   ],
   "exclude": [
-    "**/node_modules/**"
+    "**/node_modules/**",
+    "**/env.spec.ts"
   ],
   "preserveOutputs": false,
   "outDir": "dist/.vite-jasmine-build",

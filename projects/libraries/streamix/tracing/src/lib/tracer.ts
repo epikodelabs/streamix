@@ -1,6 +1,7 @@
 /**
  * STREAMIX TRACING SYSTEM
  * A comprehensive tracing system for Streamix reactive streams.
+ * Instrumentation sits on runtime hooks so it can observe every stream value.
  * Features:
  * - Tracks value lifecycle from emission to delivery
  * - Supports filter / collapse / expand / error semantics
@@ -481,7 +482,7 @@ export function createTerminalTracer(options: ValueTracerOptions = {}): ValueTra
   };
 }
 
-/* ============================================================================
+/* ============================================================================                                                                                                                                           
  * RUNTIME INTERNALS & GLOBALS
  * ========================================================================== */
 
@@ -494,10 +495,13 @@ export interface TracedWrapper<T> {
   meta: { valueId: string; streamId: string; subscriptionId: string; };
 }
 
-const wrap = <T>(value: T, meta: TracedWrapper<T>["meta"]): TracedWrapper<T> => 
+const wrap = <T>(value: T, meta: TracedWrapper<T>["meta"]): TracedWrapper<T> =>
   ({ [tracedValueBrand]: true, value, meta });
 
 const unwrap = <T>(v: any): T => (v && v[tracedValueBrand]) ? v.value : v;
+
+export const wrapTracedValue = wrap;
+export const unwrapTracedValue = unwrap;
 
 /**
  * Checks if a value is a traced wrapper.
@@ -529,6 +533,10 @@ export function disableTracing(): void {
  * RUNTIME HOOK REGISTRATION
  * ========================================================================== */
 
+/**
+ * Registers hooks with the Streamix runtime so traced values and operator events
+ * can be tracked without modifying existing operators.
+ */
 registerRuntimeHooks({
   onPipeStream({ streamId, streamName, subscriptionId, parentValueId, source, operators }) {
     const tracer = getGlobalTracer();
@@ -561,87 +569,83 @@ registerRuntimeHooks({
         throw: source.throw?.bind(source),
       },
 
-      operators: operators.map((op, i) => {
-        const opName = op.name ?? `op${i}`;
-        return createOperator(`traced_${opName}`, (src) => {
-          const inputQueue: TracedWrapper<any>[] = [];
-          let lastSeenMeta: TracedWrapper<any>["meta"] | null = null;
+    operators: operators.map((op, i) => {
+      const opName = op.name ?? `op${i}`;
+      return createOperator(`traced_${opName}`, (src) => {
+        // Queue retains pending values until the traced operator decides whether they were filtered/consumed.
+        const inputQueue: TracedWrapper<any>[] = [];
+        let lastSeenMeta: TracedWrapper<any>["meta"] | null = null;
 
-          const rawSource: AsyncIterator<any> = {
-            async next() {
-              const r = await src.next();
-              if (r.done) return r;
-              const wrapped = r.value as TracedWrapper<any>;
-              inputQueue.push(wrapped);
-              lastSeenMeta = wrapped.meta;
-              tracer.enterOperator(wrapped.meta.valueId, i, opName, wrapped.value);
-              return { done: false, value: wrapped.value };
-            },
-            return: src.return?.bind(src),
-            throw: src.throw?.bind(src),
-          };
+    // We create the iterator logic
+    const rawSource: AsyncIterator<any> = {
+      async next() {
+        const r = await src.next();
+        if (r.done) return r;
+        const wrapped = r.value as TracedWrapper<any>;
+        inputQueue.push(wrapped);
+        lastSeenMeta = wrapped.meta;
+        tracer.enterOperator(wrapped.meta.valueId, i, opName, wrapped.value);
+        return { done: false, value: wrapped.value };
+      },
+      return: src.return?.bind(src),
+      throw: src.throw?.bind(src),
+    };
 
-          const inner = op.apply(rawSource);
+    const inner = op.apply(rawSource);
 
-          return {
-            async next() {
-              try {
-                const out = await inner.next();
-                if (out.done) {
-                  // Mark remaining queued items as filtered when stream completes
-                  while (inputQueue.length > 0) {
-                    const filteredEntry = inputQueue.shift()!;
-                    tracer.exitOperator(filteredEntry.meta.valueId, i, filteredEntry.value, true);
-                  }
-                  return out;
-                }
+    // FIX: Return an object that is BOTH an Iterator and an Iterable
+    return {
+      async next() {
+        try {
+          const out = await inner.next();
+          if (out.done) {
+            while (inputQueue.length > 0) {
+              const filteredEntry = inputQueue.shift()!;
+              tracer.exitOperator(filteredEntry.meta.valueId, i, filteredEntry.value, true);
+            }
+            return out;
+          }
 
-                // For filter operators: mark skipped values as filtered
-                if (inputQueue.length > 1) {
-                  while (inputQueue.length > 1) {
-                    const filteredEntry = inputQueue.shift()!;
-                    tracer.exitOperator(filteredEntry.meta.valueId, i, filteredEntry.value, true);
-                  }
-                }
+          if (inputQueue.length > 1) {
+            while (inputQueue.length > 1) {
+              const filteredEntry = inputQueue.shift()!;
+              tracer.exitOperator(filteredEntry.meta.valueId, i, filteredEntry.value, true);
+            }
+          }
 
-                const entry = inputQueue.shift();
-                
-                // Handle expansion: operator produces more outputs than inputs
-                if (!entry && lastSeenMeta) {
-                  // Don't create expanded traces, reuse the parent valueId
-                  // This keeps inner stream values as part of the parent transformation
-                  return { 
-                    done: false, 
-                    value: wrap(out.value, lastSeenMeta) 
-                  };
-                }
+          const entry = inputQueue.shift();
+          
+          if (!entry && lastSeenMeta) {
+            return { done: false, value: wrap(out.value, lastSeenMeta) };
+          }
 
-                // Standard transformation
-                if (entry) {
-                  tracer.exitOperator(entry.meta.valueId, i, out.value);
-                  return { done: false, value: wrap(out.value, entry.meta) };
-                }
+          if (entry) {
+            tracer.exitOperator(entry.meta.valueId, i, out.value);
+            return { done: false, value: wrap(out.value, entry.meta) };
+          }
 
-                // Fallback for unexpected state
-                return { done: false, value: out.value };
-              } catch (e) {
-                if (inputQueue.length > 0) {
-                  tracer.errorInOperator(inputQueue[0].meta.valueId, i, e as Error);
-                }
-                throw e;
-              }
-            },
-            return: inner.return?.bind(inner),
-            throw: inner.throw?.bind(inner),
-          };
-        });
-      }),
+          return { done: false, value: out.value };
+        } catch (e) {
+          if (inputQueue.length > 0) {
+            tracer.errorInOperator(inputQueue[0].meta.valueId, i, e as Error);
+          }
+          throw e;
+        }
+      },
+      return: inner.return?.bind(inner),
+      throw: inner.throw?.bind(inner),
+      // THIS IS THE KEY ADDITION:
+      [Symbol.asyncIterator]() { return this; } 
+    };
+  });
+}),
 
       final: it => ({
         async next() {
           const r = await it.next();
           if (!r.done) {
             const wrapped = r.value as TracedWrapper<any>;
+            // Final delivery step marks trace as completed before unwrapping value.
             tracer.markDelivered(wrapped.meta.valueId);
             return { done: false, value: unwrap(r.value) };
           } else {

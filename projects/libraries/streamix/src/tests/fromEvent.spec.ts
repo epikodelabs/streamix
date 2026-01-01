@@ -75,6 +75,49 @@ idescribe('fromEvent', () => {
     }, 10);
   });
 
+  it('supports promise-based targets and event names', (done) => {
+    const element = document.createElement('button');
+    const targetPromise = Promise.resolve(element);
+    const eventPromise = new Promise<string>((resolve) => setTimeout(() => resolve('click'), 0));
+
+    const stream = fromEvent(targetPromise, eventPromise);
+    const subscription = stream.subscribe((ev) => {
+      expect(ev).toBeInstanceOf(Event);
+      subscription.unsubscribe();
+      done();
+    });
+
+    setTimeout(() => {
+      element.click();
+    }, 20);
+  });
+
+  it('does not attach listener when unsubscribed before pending target resolves', (done) => {
+    const element = document.createElement('button');
+
+    let listenerAdded = false;
+    const originalAdd = element.addEventListener;
+    element.addEventListener = function (...args: any[]) {
+      listenerAdded = true;
+      return originalAdd.apply(this, args as any);
+    };
+
+    const targetPromise = new Promise<EventTarget>((resolve) => {
+      setTimeout(() => resolve(element), 20);
+    });
+
+    const stream = fromEvent(targetPromise, Promise.resolve('click'));
+    const subscription = stream.subscribe(() => listenerAdded = true);
+
+    subscription.unsubscribe();
+
+    setTimeout(() => {
+      expect(listenerAdded).toBe(false);
+      element.addEventListener = originalAdd;
+      done();
+    }, 40);
+  });
+
 });
 
 
