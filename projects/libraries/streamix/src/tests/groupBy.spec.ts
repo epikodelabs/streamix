@@ -121,6 +121,22 @@ describe('groupBy', () => {
       },
     });
   });
+
+  it('should support async key selectors', async () => {
+    const results: Array<{ key: string; value: number }> = [];
+
+    const asyncKeySelector = async (value: number) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return value % 2 === 0 ? 'even' : 'odd';
+    };
+
+    for await (const groupItem of from([1, 2, 3, 4]).pipe(groupBy(asyncKeySelector))) {
+      results.push(groupItem);
+    }
+
+    expect(results.map((item) => item.key)).toEqual(['odd', 'even', 'odd', 'even']);
+    expect(results.map((item) => item.value)).toEqual([1, 2, 3, 4]);
+  });
 });
 
 

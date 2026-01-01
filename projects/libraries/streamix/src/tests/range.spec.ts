@@ -118,5 +118,46 @@ describe("range", () => {
       });
     });
   });
+
+  it("resolves promised parameters before emitting", async () => {
+    const start = Promise.resolve(2);
+    const count = Promise.resolve(3);
+    const step = Promise.resolve(5);
+    const emitted: number[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      range(start, count, step).subscribe({
+        next: (value) => emitted.push(value),
+        complete: () => {
+          try {
+            expect(emitted).toEqual([2, 7, 12]);
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        },
+        error: reject,
+      });
+    });
+  });
+
+  it("supports negative step values", async () => {
+    const emitted: number[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      range(5, 3, -1).subscribe({
+        next: (value) => emitted.push(value),
+        complete: () => {
+          try {
+            expect(emitted).toEqual([5, 4, 3]);
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        },
+        error: reject,
+      });
+    });
+  });
 });
 

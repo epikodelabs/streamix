@@ -31,7 +31,7 @@ describe('filter', () => {
         fail(`Unexpected value emitted: ${value}`);
       },
       complete: () => {
-        expect(emittedCount).toBe(0); // ??? Add expectation
+        expect(emittedCount).toBe(0);
         done();
       },
       error: done.fail,
@@ -55,6 +55,56 @@ describe('filter', () => {
       error: done.fail,
     });
   });
+
+  it('should support async predicates', (done) => {
+    const testStream = from([1, 2, 3]);
+    const predicate = async (value: number) => {
+      await new Promise(resolve => setTimeout(resolve, 1));
+      return value % 2 === 1;
+    };
+
+    const filteredStream = testStream.pipe(filter(predicate));
+    const values: number[] = [];
+
+    filteredStream.subscribe({
+      next: (value) => values.push(value),
+      complete: () => {
+        expect(values).toEqual([1, 3]);
+        done();
+      },
+      error: done.fail,
+    });
+  });
+
+  it('should allow filtering by array of values', (done) => {
+    const testStream = from([1, 2, 3, 4, 5]);
+
+    const filteredStream = testStream.pipe(filter([2, 4]));
+    const values: number[] = [];
+
+    filteredStream.subscribe({
+      next: (value) => values.push(value),
+      complete: () => {
+        expect(values).toEqual([2, 4]);
+        done();
+      },
+      error: done.fail,
+    });
+  });
+
+  it('should allow filtering by single value', (done) => {
+    const testStream = from([1, 2, 3]);
+
+    const filteredStream = testStream.pipe(filter(2));
+    const values: number[] = [];
+
+    filteredStream.subscribe({
+      next: (value) => values.push(value),
+      complete: () => {
+        expect(values).toEqual([2]);
+        done();
+      },
+      error: done.fail,
+    });
+  });
 });
-
-

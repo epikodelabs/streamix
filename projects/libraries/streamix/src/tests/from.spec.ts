@@ -88,5 +88,26 @@ describe('from', () => {
       });
     });
   });
+
+  it('should await promised iterables before emitting', async () => {
+    const promiseSource = Promise.resolve([4, 5, 6]);
+    const stream = from(promiseSource);
+    const collected: number[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      stream.subscribe({
+        next: (value) => collected.push(value),
+        complete: () => {
+          try {
+            expect(collected).toEqual([4, 5, 6]);
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        },
+        error: reject,
+      });
+    });
+  });
 });
 
