@@ -1,5 +1,11 @@
 import { createReplaySubject, createStream, type Stream } from '@epikodelabs/streamix';
 
+const LOG_PREFIX = '[httpClient]';
+
+const logWarning = (message: string, ...details: any[]) => {
+  console.warn(`${LOG_PREFIX} ${message}`, ...details);
+};
+
 /**
  * Represents a stream of HTTP responses.
  *
@@ -242,7 +248,7 @@ export const useRetry = (
     }
 
     // This line should never be reached, but TypeScript requires a return statement
-    throw new Error('Retry middleware failed unexpectedly');
+    throw new Error(`${LOG_PREFIX} Retry middleware failed unexpectedly after ${maxRetries} attempts`);
   };
 };
 
@@ -269,13 +275,13 @@ export const useRedirect = (maxRedirects: number = 5): Middleware => {
       // 2. Increment and check limit
       redirects++;
       if (redirects > maxRedirects) {
-        throw new Error(`Too many redirects (max: ${maxRedirects})`);
+        throw new Error(`${LOG_PREFIX} Too many redirects while requesting ${context.url} (max: ${maxRedirects})`);
       }
 
       // 3. Robust location check
       const location = result.redirectTo;
       if (!location || typeof location !== 'string') {
-        throw new Error('Redirect response missing Location header');
+        throw new Error(`${LOG_PREFIX} Redirect response missing Location header for ${result.url}`);
       }
 
       // 4. Resolve the URL relative to the previous request
@@ -321,8 +327,12 @@ export const useRedirect = (maxRedirects: number = 5): Middleware => {
             
             context.headers = headersObj;
           } catch (error) {
+            logWarning('Failed to process headers for 303 redirect', {
+              url: context.url,
+              status: context.status,
+              redirectCount: redirects,
+            }, error);
             // If header processing fails, set to empty object
-            console.warn('Failed to process headers for 303 redirect:', error);
             context.headers = {};
           }
         } else {
@@ -413,7 +423,7 @@ export const useTimeout = (ms: number): Middleware => {
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        throw new Error('Request timed out');
+        throw new Error(`${LOG_PREFIX} Request timed out for ${context.method ?? 'UNKNOWN'} ${context.url}`);
       }
       throw error;
     }
@@ -542,7 +552,7 @@ export const createHttpClient = (): HttpClient => {
         const location = response.headers.get('Location');
         if (!location) {
           // If no location, it's not a valid redirect context, it's an error
-          throw new Error(`Redirect response (${response.status}) missing Location header`);
+          throw new Error(`${LOG_PREFIX} Redirect response (${response.status}) missing Location header for ${url}`);
         }
         context.redirectTo = location;
         return context;
@@ -550,7 +560,7 @@ export const createHttpClient = (): HttpClient => {
 
       // **Handle errors before processing response**
       if (!response.ok) {
-        throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
+        throw new Error(`${LOG_PREFIX} HTTP Error: ${response.status} ${response.statusText} for ${method} ${url}`);
       }
 
       const data = createReplaySubject();
@@ -740,7 +750,7 @@ export const readChunks = <T = Uint8Array>(
   chunkParser: (chunk: any) => T = (chunk) => chunk
 ): ParserFunction<ChunkData<T>> => async function* (response) {
   if (!response.body) {
-    throw new Error("Response body is not readable");
+    throw new Error(`${LOG_PREFIX} Response body for ${response.url || 'unknown'} is not readable`);
   }
 
   const contentLength = response.headers.get("Content-Length");
@@ -773,16 +783,16 @@ export const readChunks = <T = Uint8Array>(
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
-          for (const line of lines) {
-            if (line.trim()) {
-              try {
-                parsedChunk = chunkParser(line);
-                yield { chunk: parsedChunk, progress, done: false };
-              } catch (error) {
-                console.warn("Invalid NDJSON line:", line, error);
+            for (const line of lines) {
+              if (line.trim()) {
+                try {
+                  parsedChunk = chunkParser(line);
+                  yield { chunk: parsedChunk, progress, done: false };
+                } catch (error) {
+                  logWarning('Invalid NDJSON line', line, error);
+                }
               }
             }
-          }
           continue; // Skip standard yield for NDJSON
         }
 
@@ -834,7 +844,7 @@ export const readJsonChunk = (chunk: string): any => {
   try {
     return JSON.parse(chunk);
   } catch {
-    console.warn("Invalid JSON chunk:", chunk);
+    logWarning('Invalid JSON chunk', chunk);
     return null;
   }
 };
@@ -846,7 +856,7 @@ export const readNdjsonChunk = (line: string): any => {
   try {
     return JSON.parse(line);
   } catch {
-    console.warn("Invalid NDJSON line:", line);
+    logWarning('Invalid NDJSON line', line);
     return null;
   }
 };
@@ -884,7 +894,7 @@ function getEncoding(contentType: string): string {
  */
 export const readFull: ParserFunction<Uint8Array> = async function* (response) {
   if (!response.body) {
-    throw new Error("Response body is not readable");
+    throw new Error(`${LOG_PREFIX} Response body for ${response.url || 'unknown'} is not readable`);
   }
 
   const reader = response.body.getReader();
