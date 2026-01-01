@@ -195,6 +195,56 @@ idescribe("seize", () => {
     seized.release();
     await co.finalize();
   });
+
+  it("should ignore messages for other workerId and process matching ones", async () => {
+    const co = coroutine((x: number) => x);
+    (globalThis as any).currentMainTask = (x: number) => x;
+
+    const messages: CoroutineMessage[] = [];
+    const stream = seize(co, msg => { messages.push(msg); }, () => { });
+
+    const iterator = eachValueFrom(stream);
+    const seized: SeizedWorker<number, number> = (await iterator.next()).value;
+
+    // Access the mock worker instance via the file-scoped mock map created in the test setup
+    // Find the actual mock worker instance that has message listeners attached
+    const workerList = Object.values(mockWorkersById as any) as Array<{ listeners?: Record<string, Function[]> }>;
+    const worker = workerList.find((w) => w.listeners!["message"]!.length > 0);
+    if (!worker) {
+      fail("Expected a mock worker with message listeners");
+      return;
+    }
+
+    // Trigger a message with a different workerId (should be ignored)
+    const evWrong = { data: { workerId: seized.workerId + 999, type: 'response', payload: 123 } } as any;
+    worker.listeners?.['message']?.forEach((fn: Function) => fn(evWrong));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(messages.length).toBe(0);
+
+    // Now trigger a message for the correct workerId
+    const evGood = { data: { workerId: seized.workerId, type: 'response', payload: 5 } } as any;
+    worker.listeners?.['message']?.forEach((fn: Function) => fn(evGood));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(messages.some(m => (m as any).payload === 5)).toBeTrue();
+
+    seized.release();
+    await co.finalize();
+  });
+
+  it("should allow multiple calls to release() without throwing", async () => {
+    const co = coroutine((x: number) => x + 1);
+    (globalThis as any).currentMainTask = (x: number) => x + 1;
+
+    const stream = seize(co, () => { }, () => { });
+    const iterator = eachValueFrom(stream);
+    const seized: SeizedWorker<number, number> = (await iterator.next()).value;
+
+    seized.release();
+    // second release should not throw
+    expect(() => seized.release()).not.toThrow();
+
+    await co.finalize();
+  });
 });
 
 

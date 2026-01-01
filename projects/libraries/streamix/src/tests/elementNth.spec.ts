@@ -88,6 +88,37 @@ describe('elementNth', () => {
 
     expect(results).toEqual([]); // No value should be emitted as the index is out of bounds
   });
+
+  it("throws when the requested index is negative", async () => {
+    const elementAtStream = source.pipe(elementAt(-1));
+    const iterator = elementAtStream[Symbol.asyncIterator]();
+    const nextPromise = iterator.next();
+    subject.next(1);
+
+    await expectAsync(nextPromise).toBeRejectedWithError(
+      /Invalid index: -1\. Index must be non-negative\./
+    );
+
+    subject.complete();
+  });
+
+  it("resolves promised indices before emitting", async () => {
+    const results: any[] = [];
+    const elementAtStream = source.pipe(elementAt(Promise.resolve(1)));
+
+    (async () => {
+      for await (const value of elementAtStream) {
+        results.push(value);
+      }
+    })();
+
+    subject.next(1);
+    subject.next(2);
+    subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(results).toEqual([2]);
+  });
 });
 
 
