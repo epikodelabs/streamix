@@ -1,4 +1,4 @@
-import { from, merge } from '@epikodelabs/streamix';
+import { createStream, from, merge } from '@epikodelabs/streamix';
 
 describe('merge', () => {
   it('should merge values from multiple sources', (done) => {
@@ -44,7 +44,55 @@ describe('merge', () => {
       }
     })
   });
+
+  it('should merge promise-based sources and resolve arrays', (done) => {
+    const sources = [
+      from(['stream-value']),
+      Promise.resolve(['promise-value']),
+    ];
+
+    const merged = merge(...sources);
+    const emitted: string[] = [];
+
+    merged.subscribe({
+      next: (value) => emitted.push(value),
+      complete: () => {
+        expect(emitted.sort()).toEqual(['promise-value', 'stream-value']);
+        done();
+      },
+      error: () => done.fail('should not error'),
+    });
+  });
+
+  it('should propagate errors from rejected sources', (done) => {
+    const badStream = createStream('error', async function* () {
+      throw new Error('boom');
+    });
+
+    const merged = merge(badStream, from([1]));
+
+    merged.subscribe({
+      next: () => done.fail('unexpected next'),
+      error: (error: Error) => {
+        expect(error.message).toBe('boom');
+        done();
+      },
+    });
+  });
+
+  it('should complete immediately when no sources are provided', (done) => {
+    const merged = merge();
+    let emitted = false;
+
+    merged.subscribe({
+      next: () => {
+        emitted = true;
+      },
+      complete: () => {
+        expect(emitted).toBe(false);
+        done();
+      },
+      error: () => done.fail('should not error'),
+    });
+  });
 });
-
-
-

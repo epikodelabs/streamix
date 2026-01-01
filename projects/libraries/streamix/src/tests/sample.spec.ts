@@ -83,6 +83,41 @@ describe("sample", () => {
 
     expect(results).toEqual([2]); // The last value before completion should be emitted
   });
+
+  it("should work with promise-based periods", async () => {
+    const periodPromise = Promise.resolve(10);
+    const sampled = subject.pipe(sample(periodPromise));
+    const results: number[] = [];
+
+    (async () => {
+      for await (const value of sampled) {
+        results.push(value);
+      }
+    })();
+
+    subject.next(5);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    subject.next(6);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[results.length - 1]).toBe(6);
+  });
+
+  it("should forward period promise rejections as errors", async () => {
+    const sampled = subject.pipe(sample(Promise.reject(new Error("boom"))));
+
+    try {
+      for await (const _ of sampled) {
+        void _;
+      }
+      fail("expected an error to be thrown");
+    } catch (err: any) {
+      expect(err.message).toBe("boom");
+    }
+  });
 });
 
 

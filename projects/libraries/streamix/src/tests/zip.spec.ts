@@ -88,6 +88,37 @@ describe('zip', () => {
       stream3$.complete();
     }, 100);
   });
+
+  it('should zip promise-based sources', (done) => {
+    const zipped = zip(Promise.resolve([1, 2]), Promise.resolve(['a', 'b']));
+    const result: any[] = [];
+
+    zipped.subscribe({
+      next: (value: any) => result.push(value),
+      complete: () => {
+        expect(result).toEqual([
+          [1, 'a'],
+          [2, 'b'],
+        ]);
+        done();
+      },
+      error: (err: any) => done.fail(err),
+    });
+  });
+
+  it('should complete immediately when no sources are provided', (done) => {
+    const zipped = zip();
+    const timer = setTimeout(() => done.fail('did not complete'), 50);
+
+    zipped.subscribe({
+      next: () => done.fail('should not emit'),
+      complete: () => {
+        clearTimeout(timer);
+        done();
+      },
+      error: (err: any) => done.fail(err),
+    });
+  });
 });
 
 

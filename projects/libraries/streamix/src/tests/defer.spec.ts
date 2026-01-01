@@ -1,4 +1,4 @@
-import { createSubject, defer, type Stream } from '@epikodelabs/streamix';
+import { createSubject, defer, from, type Stream } from '@epikodelabs/streamix';
 
 // Mocking Stream class
 /**
@@ -76,6 +76,17 @@ describe('defer', () => {
         fail('Should not emit');
       }
     });
+  });
+
+  it('supports promised factory results', async () => {
+    const stream = defer(() => Promise.resolve(from(['defered', 'values'])));
+    const results: string[] = [];
+
+    for await (const value of stream) {
+      results.push(value);
+    }
+
+    expect(results).toEqual(['defered', 'values']);
   });
 });
 

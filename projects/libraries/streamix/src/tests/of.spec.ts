@@ -43,6 +43,21 @@ describe('of', () => {
 
     expect(emittedValues).toEqual([]);
   });
+
+  it('should resolve promised values before emitting', (done) => {
+    const valuePromise = Promise.resolve('async_value');
+    const emittedValues: string[] = [];
+
+    const ofStream = of(valuePromise);
+    ofStream.subscribe({
+      next: (value) => emittedValues.push(value),
+      complete: () => {
+        expect(emittedValues).toEqual(['async_value']);
+        done();
+      },
+      error: (err) => done.fail(err),
+    });
+  });
 });
 
 

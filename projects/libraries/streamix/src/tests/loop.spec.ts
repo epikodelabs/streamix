@@ -60,6 +60,23 @@ describe('loop', () => {
     expect(r1).toEqual([0, 1, 2]);
     expect(r2).toEqual([10, 11, 12]);
   });
+
+  it('should support promise-based condition and iterate functions', async () => {
+    const stream = loop(
+      Promise.resolve(0),
+      async (value) => {
+        await new Promise(resolve => setTimeout(resolve, 1));
+        return value < 2;
+      },
+      async (value) => {
+        await new Promise(resolve => setTimeout(resolve, 1));
+        return value + 1;
+      }
+    );
+
+    const result = await collect(stream);
+    expect(result).toEqual([0, 1]);
+  });
 });
 
 
