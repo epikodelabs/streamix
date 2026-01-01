@@ -5,7 +5,7 @@ import {
   filter,
   map,
   mergeMap,
-  scheduler,
+  scheduler
 } from "@epikodelabs/streamix";
 
 import {
@@ -13,6 +13,9 @@ import {
   createValueTracer,
   disableTracing,
   enableTracing,
+  generateValueId,
+  getGlobalTracer,
+  ValueTracer,
   type ValueTrace,
 } from "@epikodelabs/streamix/tracing";
 
@@ -460,3 +463,223 @@ describe("terminalTracer", () => {
   });
 });
 
+describe("tracerEdge", () => {
+  it("trims oldest traces when exceeding maxTraces", () => {
+    const tracer = createValueTracer({ maxTraces: 1 });
+
+    tracer.startTrace("first", "stream", "stream-name", "sub", 1);
+    tracer.startTrace("second", "stream", "stream-name", "sub", 2);
+
+    const allTraces = tracer.getAllTraces();
+    expect(allTraces.length).toBe(1);
+    expect(allTraces[0].valueId).toBe("second");
+    expect(tracer.getStats().total).toBe(1);
+  });
+
+  it("exitOperator returns null when no operator step exists", () => {
+    const tracer = createValueTracer();
+    tracer.startTrace("value-id", "stream", "name", "sub", 123);
+
+    const result = tracer.exitOperator("value-id", 0, "output");
+    expect(result).toBeNull();
+  });
+
+  it("createExpandedTrace works even if base trace is missing", () => {
+    const tracer = createValueTracer();
+
+    const expandedId = tracer.createExpandedTrace("missing-base", 1, "op-name", { foo: "bar" });
+    const expandedTrace = tracer.getAllTraces().find((trace) => trace.valueId === expandedId);
+
+    expect(expandedTrace).toBeDefined();
+    expect(expandedTrace?.state).toBe("expanded");
+    expect(expandedTrace?.streamId).toBe("unknown");
+    expect(expandedTrace?.operatorSteps.length).toBe(1);
+    expect(expandedTrace?.operatorSteps[0].operatorName).toBe("op-name");
+  });
+
+  it("collapseValue and errorInOperator tolerate missing traces", () => {
+    const tracer = createValueTracer();
+    expect(() => tracer.collapseValue("non-existent", 0, "op", "target")).not.toThrow();
+    expect(() => tracer.errorInOperator("non-existent", 0, new Error("boom"))).not.toThrow();
+  });
+
+  it("exitOperator returns null when trace is absent", () => {
+    const tracer = createTerminalTracer();
+    expect(tracer.exitOperator("missing", 0, "value")).toBeNull();
+  });
+});
+
+describe("tracerMismatch", () => {
+  let tracer: ValueTracer;
+
+  beforeEach(() => {
+    tracer = createValueTracer();
+    enableTracing(tracer);
+  });
+
+  afterEach(() => {
+    disableTracing();
+  });
+
+  it("records delivered traces for stream values", async () => {
+    const values: number[] = [];
+
+    const stream = createStream("wrapper-test", async function* () {
+      yield 1;
+      yield 2;
+      yield 3;
+    });
+    const tracedStream = stream.pipe();
+
+    const completion = new Promise<void>((resolve) => {
+      tracedStream.subscribe({
+        next: (value) => values.push(value),
+        complete: resolve,
+      });
+    });
+
+    await scheduler.flush();
+    await completion;
+
+    expect(values).toEqual([1, 2, 3]);
+    const traces = tracer.getAllTraces();
+    expect(traces.length).toBe(values.length);
+    traces.forEach((trace) => {
+      expect(trace.state).toBe("delivered");
+      expect(trace.deliveredAt).toBeDefined();
+    });
+  });
+
+  it("handles operator transformations correctly", async () => {
+    const transformedValues: number[] = [];
+
+    const transformOperator = createOperator("transform", (source) => ({
+      async next() {
+        const result = await source.next();
+        if (result.done) return result;
+        return { done: false, value: (result.value as number) * 2 };
+      },
+      return: source.return?.bind(source),
+      throw: source.throw?.bind(source),
+    }));
+
+    const stream = createStream("transform-test", async function* () {
+      yield 1;
+      yield 2;
+    });
+
+    const completion = new Promise<void>((resolve) => {
+      stream.pipe(transformOperator).subscribe({
+        next: (value) => transformedValues.push(value),
+        complete: resolve,
+      });
+    });
+
+    await scheduler.flush();
+    await completion;
+
+    expect(transformedValues).toEqual([2, 4]);
+
+    const traces = tracer.getAllTraces();
+    expect(traces.length).toBe(transformedValues.length);
+    traces.forEach((trace) => {
+      expect(trace.operatorSteps.length).toBeGreaterThan(0);
+      expect(trace.operatorSteps[0].operatorName).toContain("transform");
+    });
+  });
+
+  it("handles errors in streams without raising", async () => {
+    const values: number[] = [];
+    const errorTraces: ValueTrace[] = [];
+
+    const unsubscribe = tracer.subscribe({
+      dropped: (trace) => errorTraces.push(trace),
+    });
+
+    const stream = createStream("error-test", async function* () {
+      yield 1;
+      throw new Error("Test error");
+    });
+    const tracedStream = stream.pipe();
+
+    let caughtError: Error | undefined;
+
+    const completion = new Promise<void>((resolve) => {
+      tracedStream.subscribe({
+        next: (value) => values.push(value),
+        error: (err) => {
+          caughtError = err;
+          resolve();
+        },
+        complete: () => resolve(),
+      });
+    });
+
+    await scheduler.flush();
+    await completion;
+    unsubscribe();
+
+    expect(values).toEqual([1]);
+    expect(caughtError?.message).toBe("Test error");
+
+    const traces = tracer.getAllTraces();
+    expect(traces.length).toBe(values.length);
+    traces.forEach((trace) => {
+      expect(trace.sourceValue).toBe(1);
+    });
+  });
+
+  it("profiles multi-subscription scenarios", async () => {
+    const values1: number[] = [];
+    const values2: number[] = [];
+
+    const stream = createStream("multi-test", async function* () {
+      yield 1;
+      yield 2;
+    });
+    const tracedStream = stream.pipe();
+
+    const completion1 = new Promise<void>((resolve) => {
+      tracedStream.subscribe({
+        next: (value) => values1.push(value),
+        complete: resolve,
+      });
+    });
+
+    const completion2 = new Promise<void>((resolve) => {
+      tracedStream.subscribe({
+        next: (value) => values2.push(value),
+        complete: resolve,
+      });
+    });
+
+    await scheduler.flush();
+    await Promise.all([completion1, completion2]);
+
+    expect(values1).toEqual([1, 2]);
+    expect(values2).toEqual([1, 2]);
+
+    const traces = tracer.getAllTraces();
+    expect(traces.length).toBe(values1.length + values2.length);
+  });
+});
+describe("tracerUtils", () => {
+  afterEach(() => {
+    disableTracing();
+  });
+
+  it("generates sequential value identifiers", () => {
+    const firstId = parseInt(generateValueId().split("_")[1], 10);
+    const secondId = parseInt(generateValueId().split("_")[1], 10);
+    expect(secondId).toBe(firstId + 1);
+  });
+
+  it("exposes and clears the global tracer", () => {
+    const tracer = createValueTracer();
+    enableTracing(tracer);
+    expect(getGlobalTracer()).toBe(tracer);
+
+    disableTracing();
+    expect(getGlobalTracer()).toBeNull();
+  });
+});
