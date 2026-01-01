@@ -15,7 +15,11 @@ import {
   enableTracing,
   generateValueId,
   getGlobalTracer,
+  getValueId,
+  isTracedValue,
+  unwrapTracedValue,
   ValueTracer,
+  wrapTracedValue,
   type ValueTrace,
 } from "@epikodelabs/streamix/tracing";
 
@@ -420,6 +424,61 @@ describe("valueTracer", () => {
     expect(result).toBe(2);
     expect(tracer.emitted.length).toBe(0);
     expect(tracer.delivered.length).toBe(0);
+  });
+
+  it("filters queued source values when an operator consumes multiple inputs", async () => {
+    const pairSum = createOperator<number, number>("pairSum", (source) => ({
+      async next() {
+        const first = await source.next();
+        if (first.done) return first;
+        const second = await source.next();
+        if (second.done) {
+          return first;
+        }
+        return { done: false, value: (first.value as number) + (second.value as number) };
+      },
+      return: source.return?.bind(source),
+      throw: source.throw?.bind(source),
+    }));
+
+    const stream = createStream("pair-sum", async function* () {
+      yield 1;
+      yield 2;
+      yield 3;
+      yield 4;
+    });
+
+    const emitted: number[] = [];
+
+    await waitForCompletion(({ complete, error }) => {
+      stream.pipe(pairSum).subscribe({
+        next: (value) => emitted.push(value),
+        complete,
+        error,
+      });
+    });
+
+    expect(emitted).toEqual([3, 7]);
+    expect(tracer.filtered.length).toBeGreaterThan(0);
+    expect(tracer.filtered.some((trace) => trace.sourceValue === 1)).toBeTrue();
+  });
+
+  it("wraps values into traced wrappers and exposes metadata helpers", () => {
+    const meta = { valueId: "trace-1", streamId: "stream", subscriptionId: "sub" };
+    const wrapped = wrapTracedValue(42, meta);
+    expect(isTracedValue(wrapped)).toBeTrue();
+    expect(unwrapTracedValue(wrapped)).toBe(42);
+    expect(getValueId(wrapped)).toBe("trace-1");
+  });
+
+  it("notifies subscription observers when completion is triggered", () => {
+    const completions: string[] = [];
+    tracer.observeSubscription("sub-id", {
+      complete: () => completions.push("done"),
+    });
+
+    tracer.completeSubscription("sub-id");
+    expect(completions).toEqual(["done"]);
   });
 });
 
