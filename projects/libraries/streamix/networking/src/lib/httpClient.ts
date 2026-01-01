@@ -233,11 +233,6 @@ export const useRetry = (
 
         // Calculate exponential backoff delay
         const delay = backoffBase * Math.pow(2, retryCount);
-        console.warn(`[http retry] attempt=${retryCount + 1}/${maxRetries} delay=${delay}ms`, {
-          message: error?.message ?? String(error),
-          url: context.url,
-          method: context.method,
-        });
 
         // Wait for the delay before retrying
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -266,34 +261,74 @@ export const useRedirect = (maxRedirects: number = 5): Middleware => {
     while (true) {
       const result = await next(context);
 
-      // No redirect ??? finished
+      // 1. Check if the result indicates a redirect is needed
       if (result.redirectTo === undefined) {
         return result;
       }
 
+      // 2. Increment and check limit
       redirects++;
       if (redirects > maxRedirects) {
-        throw new Error('Too many redirects');
+        throw new Error(`Too many redirects (max: ${maxRedirects})`);
       }
 
+      // 3. Robust location check
       const location = result.redirectTo;
-      if (!location) {
+      if (!location || typeof location !== 'string') {
         throw new Error('Redirect response missing Location header');
       }
 
-      // Resolve new URL
+      // 4. Resolve the URL relative to the previous request
       const nextUrl = new URL(location, result.url).toString();
 
+      // 5. Build the next context
       context = {
         ...result,
         url: nextUrl,
-        redirectTo: undefined,
+        redirectTo: undefined, 
       };
 
-      // RFC 7231: 303 ??? GET + drop body
+      // 6. Handle RFC 7231 (303 See Other)
       if (result.status === 303) {
         context.method = 'GET';
         context.body = undefined;
+        
+        // Handle headers properly - only if headers exist
+        if (context.headers) {
+          try {
+            // Convert headers to a format we can work with
+            let headersObj: Record<string, string>;
+            
+            if (context.headers instanceof Headers) {
+              headersObj = {};
+              context.headers.forEach((value, key) => {
+                headersObj[key] = value;
+              });
+            } else if (Array.isArray(context.headers)) {
+              headersObj = Object.fromEntries(context.headers);
+            } else if (typeof context.headers === 'object') {
+              headersObj = { ...context.headers };
+            } else {
+              // Unknown headers format, keep as is
+              headersObj = context.headers;
+            }
+            
+            // Delete specific headers
+            delete headersObj['content-type'];
+            delete headersObj['content-length'];
+            delete headersObj['Content-Type'];
+            delete headersObj['Content-Length'];
+            
+            context.headers = headersObj;
+          } catch (error) {
+            // If header processing fails, set to empty object
+            console.warn('Failed to process headers for 303 redirect:', error);
+            context.headers = {};
+          }
+        } else {
+          // Ensure headers exists as at least an empty object
+          context.headers = {};
+        }
       }
     }
   };
@@ -504,7 +539,12 @@ export const createHttpClient = (): HttpClient => {
 
       // Handle redirects
       if ([301, 302, 303, 307, 308].includes(response.status)) {
-        context.redirectTo = response.headers.get('Location') || undefined;
+        const location = response.headers.get('Location');
+        if (!location) {
+          // If no location, it's not a valid redirect context, it's an error
+          throw new Error(`Redirect response (${response.status}) missing Location header`);
+        }
+        context.redirectTo = location;
         return context;
       }
 
@@ -566,8 +606,14 @@ export const createHttpClient = (): HttpClient => {
     const promise = chainMiddleware(middlewares)(async (ctx) => ctx)(context);
 
     const stream = createStream('httpData', async function* () {
-      const ctx = await promise;
-      yield* ctx.data!;
+      const ctx = await promise; // If middleware throws, this rejection happens here
+      
+      if (!ctx || !ctx.data) {
+        // This prevents the Symbol.asyncIterator error on undefined
+        return; 
+      }
+      
+      yield* ctx.data;
     }) as HttpStream<T>;
 
     stream.abort = () => abortController.abort();
@@ -770,8 +816,16 @@ export const readBinaryChunk = (chunk: Uint8Array): Uint8Array => chunk;
 /**
  * Decodes a binary chunk into a text string.
  */
-export const readTextChunk = (chunk: Uint8Array, encoding: string = "utf-8"): string =>
-  new TextDecoder(encoding).decode(chunk);
+export function readTextChunk(chunk: any, encoding = 'utf-8'): string {
+  // If chunk is null or undefined (like the final signal in readChunks)
+  if (chunk === null || chunk === undefined) return '';
+  
+  if (chunk instanceof ArrayBuffer || ArrayBuffer.isView(chunk)) {
+    return new TextDecoder(encoding).decode(chunk, { stream: true });
+  }
+  
+  return typeof chunk === 'string' ? chunk : '';
+}
 
 /**
  * Parses a binary chunk as JSON.
