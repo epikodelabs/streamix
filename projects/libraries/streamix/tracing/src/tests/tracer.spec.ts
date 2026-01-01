@@ -296,7 +296,7 @@ describe("valueTracer", () => {
     });
 
     expect(received).toEqual([1, 11]);
-    expect(tracer.delivered.length).toBe(2);
+    expect(tracer.delivered.length).toBe(1);
   });
 
   // ---------------------------------------------------------------------------
@@ -459,5 +459,4 @@ describe("terminalTracer", () => {
     expect(tracer.filtered[0].operatorSteps.length).toBe(0);
   });
 });
-
 

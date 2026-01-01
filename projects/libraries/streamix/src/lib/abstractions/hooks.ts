@@ -1,3 +1,5 @@
+import { type Operator } from "./operator";
+
 /**
  * Context object passed to `onPipeStream` runtime hook.
  *
@@ -14,11 +16,14 @@ export type PipeStreamHookContext = {
   /** Unique identifier of the subscription */
   subscriptionId: string;
 
+  /** Traced outer value id associated with an inner stream */
+  parentValueId?: string;
+
   /** Source async iterator before operators are applied */
   source: AsyncIterator<any>;
 
   /** List of operators applied to the stream */
-  operators: any[];
+  operators: Operator<any, any>[];
 };
 
 /**
@@ -79,6 +84,10 @@ export type StreamRuntimeHooks = {
  * without introducing hard dependencies.
  */
 const HOOKS_KEY = "__STREAMIX_RUNTIME_HOOKS__";
+const ITERATOR_META = new WeakMap<
+  AsyncIterator<any>,
+  { valueId: string; operatorIndex: number; operatorName: string }
+>();
 
 /**
  * Monotonically increasing counters for ID generation.
@@ -126,4 +135,70 @@ export function registerRuntimeHooks(hooks: StreamRuntimeHooks): void {
  */
 export function getRuntimeHooks(): StreamRuntimeHooks | null {
   return ((globalThis as any)[HOOKS_KEY] ?? null) as StreamRuntimeHooks | null;
+}
+
+/**
+ * Associates the latest traced metadata with an iterator.
+ *
+ * Used to connect operator execution with outer values
+ * without mutating iterator results.
+ */
+export function setIteratorMeta(
+  iterator: AsyncIterator<any>,
+  meta: { valueId: string },
+  operatorIndex: number,
+  operatorName: string
+): void {
+  ITERATOR_META.set(iterator, {
+    valueId: meta.valueId,
+    operatorIndex,
+    operatorName,
+  });
+}
+
+/**
+ * Retrieves the latest traced metadata for an iterator.
+ */
+export function getIteratorMeta(
+  iterator: AsyncIterator<any>
+):
+  | { valueId: string; operatorIndex: number; operatorName: string }
+  | undefined {
+  return ITERATOR_META.get(iterator);
+}
+
+/**
+ * Applies any registered `onPipeStream` patch to an iterator pipeline.
+ *
+ * This helper is useful for wrapping inner streams that are consumed
+ * via async iterators and do not automatically trigger `onPipeStream`.
+ */
+export function applyPipeStreamHooks(
+  ctx: PipeStreamHookContext
+): AsyncIterator<any> {
+  const hooks = getRuntimeHooks();
+  let iterator: AsyncIterator<any> = ctx.source;
+  let ops = ctx.operators;
+  let finalWrap: ((it: AsyncIterator<any>) => AsyncIterator<any>) | undefined;
+
+  if (hooks?.onPipeStream) {
+    const patch = hooks.onPipeStream(ctx);
+    if (patch?.source) iterator = patch.source;
+    if (patch?.operators) ops = patch.operators;
+    if (patch?.final) finalWrap = patch.final;
+  }
+
+  for (const op of ops) {
+    iterator = op.apply(iterator);
+  }
+
+  if (finalWrap) {
+    iterator = finalWrap(iterator);
+  }
+
+  if (typeof (iterator as any)[Symbol.asyncIterator] !== "function") {
+    (iterator as any)[Symbol.asyncIterator] = () => iterator;
+  }
+
+  return iterator;
 }
