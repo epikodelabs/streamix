@@ -9,6 +9,8 @@ import {
   setIteratorMeta,
 } from "@epikodelabs/streamix";
 
+const HOOKS_KEY = "__STREAMIX_RUNTIME_HOOKS__";
+
 describe("hooks utilities", () => {
   let previousHooks: ReturnType<typeof getRuntimeHooks>;
 
@@ -118,5 +120,72 @@ describe("hooks utilities", () => {
       (1 + 1) * 2 - 1,
       (2 + 1) * 2 - 1,
     ]);
+  });
+
+  it("returns null when no runtime hooks are registered", () => {
+    delete (globalThis as any)[HOOKS_KEY];
+    expect(getRuntimeHooks()).toBeNull();
+  });
+
+  it("leaves a simple iterator untouched when no hook is registered", async () => {
+    delete (globalThis as any)[HOOKS_KEY];
+
+    const source = (async function* () {
+      yield 1;
+      yield 2;
+    })();
+
+    const ctx = {
+      streamId: "str-no-hook",
+      subscriptionId: "sub-no-hook",
+      source,
+      operators: [],
+    };
+
+    const iterator = applyPipeStreamHooks(ctx);
+    const collected: number[] = [];
+
+    for (;;) {
+      const result = await iterator.next();
+      if (result.done) break;
+      collected.push(result.value);
+    }
+
+    expect(collected).toEqual([1, 2]);
+  });
+
+  it("keeps the pipeline intact when the hook returns no patch", async () => {
+    let hookCalls = 0;
+
+    registerRuntimeHooks({
+      onPipeStream: () => {
+        hookCalls += 1;
+        return {};
+      },
+    });
+
+    const source = (async function* () {
+      yield 3;
+      yield 4;
+    })();
+
+    const ctx = {
+      streamId: "str-empty-patch",
+      subscriptionId: "sub-empty-patch",
+      source,
+      operators: [],
+    };
+
+    const iterator = applyPipeStreamHooks(ctx);
+    const collected: number[] = [];
+
+    for (;;) {
+      const result = await iterator.next();
+      if (result.done) break;
+      collected.push(result.value);
+    }
+
+    expect(hookCalls).toBe(1);
+    expect(collected).toEqual([3, 4]);
   });
 });
