@@ -1,11 +1,11 @@
 /**
  * STREAMIX TRACING SYSTEM
- * * A comprehensive tracing system for Streamix reactive streams.
- * * Features:
- * - Tracks value lifecycle from emission to delivery.
- * - Supports filter / collapse / expand / error semantics.
- * - Preserves type safety by wrapping primitives.
- * - Provides public subscription API for observers.
+ * A comprehensive tracing system for Streamix reactive streams.
+ * Features:
+ * - Tracks value lifecycle from emission to delivery
+ * - Supports filter / collapse / expand / error semantics
+ * - Preserves type safety by wrapping primitives
+ * - Provides public subscription API for observers
  */
 
 import { createOperator, registerRuntimeHooks } from "@epikodelabs/streamix";
@@ -14,8 +14,7 @@ import { createOperator, registerRuntimeHooks } from "@epikodelabs/streamix";
  * TYPES
  * ========================================================================== */
 
-/** * Lifecycle state for a traced value. 
- */
+/** Lifecycle state for a traced value */
 export type ValueState =
   | "emitted"
   | "transformed"
@@ -25,8 +24,7 @@ export type ValueState =
   | "errored"
   | "delivered";
 
-/** * Outcome for an operator step. 
- */
+/** Outcome for an operator step */
 export type OperatorOutcome =
   | "transformed"
   | "filtered"
@@ -34,8 +32,7 @@ export type OperatorOutcome =
   | "collapsed"
   | "errored";
 
-/** * Operator execution metadata within a trace. 
- */
+/** Operator execution metadata within a trace */
 export interface OperatorStep {
   operatorIndex: number;
   operatorName: string;
@@ -47,8 +44,7 @@ export interface OperatorStep {
   error?: Error;
 }
 
-/** * Full trace record for a single value. 
- */
+/** Full trace record for a single value */
 export interface ValueTrace {
   valueId: string;
   streamId: string;
@@ -96,8 +92,7 @@ function getIds(): { value: number } {
   return g[IDS_KEY];
 }
 
-/** * Generates a unique trace value identifier. 
- */
+/** Generates a unique trace value identifier */
 export function generateValueId(): string {
   return `val_${++getIds().value}`;
 }
@@ -123,8 +118,7 @@ export interface ValueTracerOptions {
   onTraceUpdate?: (trace: ValueTrace, step?: OperatorStep) => void;
 }
 
-/** * Functional tracer API with state stored in a closure. 
- */
+/** Functional tracer API with state stored in a closure */
 export interface ValueTracer {
   subscribe: (handlers: TracerEventHandlers) => () => void;
   observeSubscription: (
@@ -309,6 +303,7 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
       trace.collapsedInto = { operatorIndex, operatorName, targetValueId };
       trace.droppedReason = { operatorIndex, operatorName, reason: "collapsed" };
       notifySubscribers("collapsed", trace);
+      onTraceUpdate?.(trace);
     },
 
     errorInOperator: (valueId, operatorIndex, error) => {
@@ -329,6 +324,7 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
         error 
       };
       notifySubscribers("dropped", trace);
+      onTraceUpdate?.(trace);
     },
 
     markDelivered: (valueId) => {
@@ -338,6 +334,7 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
       trace.deliveredAt = Date.now();
       trace.totalDuration = trace.deliveredAt - trace.emittedAt;
       notifySubscribers("delivered", trace);
+      onTraceUpdate?.(trace);
     },
 
     getAllTraces: () => Array.from(traces.values()),
@@ -502,18 +499,28 @@ const wrap = <T>(value: T, meta: TracedWrapper<T>["meta"]): TracedWrapper<T> =>
 
 const unwrap = <T>(v: any): T => (v && v[tracedValueBrand]) ? v.value : v;
 
-/** * Returns the current global tracer, if one is registered. 
+/**
+ * Checks if a value is a traced wrapper.
  */
+export const isTracedValue = (v: any): v is TracedWrapper<any> => 
+  v && v[tracedValueBrand] === true;
+
+/**
+ * Extracts the valueId from a traced value, or returns undefined.
+ * This is useful for operators that need to link inner streams to parent values.
+ */
+export const getValueId = (v: any): string | undefined => 
+  isTracedValue(v) ? v.meta?.valueId : undefined;
+
+/** Returns the current global tracer, if one is registered */
 export const getGlobalTracer = (): ValueTracer | null => (globalThis as any)[TRACER_KEY] ?? null;
 
-/** * Enables tracing by registering a global tracer instance. 
- */
+/** Enables tracing by registering a global tracer instance */
 export function enableTracing(tracer: ValueTracer): void {
   (globalThis as any)[TRACER_KEY] = tracer;
 }
 
-/** * Disables tracing by clearing the global tracer instance. 
- */
+/** Disables tracing by clearing the global tracer instance */
 export function disableTracing(): void {
   (globalThis as any)[TRACER_KEY] = null;
 }
@@ -523,7 +530,7 @@ export function disableTracing(): void {
  * ========================================================================== */
 
 registerRuntimeHooks({
-  onPipeStream({ streamId, streamName, subscriptionId, source, operators }) {
+  onPipeStream({ streamId, streamName, subscriptionId, parentValueId, source, operators }) {
     const tracer = getGlobalTracer();
     if (!tracer) return;
 
@@ -532,6 +539,17 @@ registerRuntimeHooks({
         async next() {
           const r = await source.next();
           if (r.done) return r;
+          
+          // If this is an inner stream, don't create new traces
+          // Inner values are part of the parent's transformation
+          if (parentValueId) {
+            return { 
+              done: false, 
+              value: wrap(r.value, { valueId: parentValueId, streamId, subscriptionId }) 
+            };
+          }
+          
+          // Regular top-level stream value
           const id = generateValueId();
           tracer.startTrace(id, streamId, streamName, subscriptionId, r.value);
           return { 
@@ -570,16 +588,16 @@ registerRuntimeHooks({
               try {
                 const out = await inner.next();
                 if (out.done) {
-                  if (opName === "filter" && inputQueue.length > 0) {
-                    while (inputQueue.length > 0) {
-                      const filteredEntry = inputQueue.shift()!;
-                      tracer.exitOperator(filteredEntry.meta.valueId, i, filteredEntry.value, true);
-                    }
+                  // Mark remaining queued items as filtered when stream completes
+                  while (inputQueue.length > 0) {
+                    const filteredEntry = inputQueue.shift()!;
+                    tracer.exitOperator(filteredEntry.meta.valueId, i, filteredEntry.value, true);
                   }
                   return out;
                 }
 
-                if (opName === "filter" && inputQueue.length > 1) {
+                // For filter operators: mark skipped values as filtered
+                if (inputQueue.length > 1) {
                   while (inputQueue.length > 1) {
                     const filteredEntry = inputQueue.shift()!;
                     tracer.exitOperator(filteredEntry.meta.valueId, i, filteredEntry.value, true);
@@ -588,26 +606,23 @@ registerRuntimeHooks({
 
                 const entry = inputQueue.shift();
                 
-                // If the operator produces more outputs than inputs (expanded state)
+                // Handle expansion: operator produces more outputs than inputs
                 if (!entry && lastSeenMeta) {
-                  const expandedId = tracer.createExpandedTrace(
-                    lastSeenMeta.valueId, 
-                    i, 
-                    opName, 
-                    out.value
-                  );
+                  // Don't create expanded traces, reuse the parent valueId
+                  // This keeps inner stream values as part of the parent transformation
                   return { 
                     done: false, 
-                    value: wrap(out.value, { ...lastSeenMeta, valueId: expandedId }) 
+                    value: wrap(out.value, lastSeenMeta) 
                   };
                 }
 
-                // Default transformation
+                // Standard transformation
                 if (entry) {
                   tracer.exitOperator(entry.meta.valueId, i, out.value);
                   return { done: false, value: wrap(out.value, entry.meta) };
                 }
 
+                // Fallback for unexpected state
                 return { done: false, value: out.value };
               } catch (e) {
                 if (inputQueue.length > 0) {
@@ -626,11 +641,13 @@ registerRuntimeHooks({
         async next() {
           const r = await it.next();
           if (!r.done) {
-            tracer.markDelivered((r.value as TracedWrapper<any>).meta.valueId);
+            const wrapped = r.value as TracedWrapper<any>;
+            tracer.markDelivered(wrapped.meta.valueId);
+            return { done: false, value: unwrap(r.value) };
           } else {
             tracer.completeSubscription(subscriptionId);
+            return r;
           }
-          return r.done ? r : { done: false, value: unwrap(r.value) };
         },
         async return(v) {
           tracer.completeSubscription(subscriptionId);
