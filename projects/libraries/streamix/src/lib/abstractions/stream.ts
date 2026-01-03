@@ -343,7 +343,7 @@ async function drainIterator<T>(
  */
 export function createStream<T>(
   name: string,
-  generatorFn: (signal: AbortSignal) => AsyncGenerator<T, void, unknown>
+  generatorFn: (signal?: AbortSignal) => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
   const id = generateStreamId();
 
