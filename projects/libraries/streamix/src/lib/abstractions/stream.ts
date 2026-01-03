@@ -338,12 +338,12 @@ async function drainIterator<T>(
  *
  * @template T
  * @param name Stream name (debugging / tooling)
- * @param generatorFn Factory producing an async generator
+ * @param generateFn Factory producing an async generator
  * @returns Multicast Stream instance
  */
 export function createStream<T>(
   name: string,
-  generatorFn: (signal: AbortSignal) => AsyncGenerator<T, void, unknown>
+  generateFn: (signal?: AbortSignal) => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
   const id = generateStreamId();
 
@@ -365,7 +365,7 @@ export function createStream<T>(
 
     (async () => {
       const signal = abortController.signal;
-      const iterator = generatorFn(signal)[Symbol.asyncIterator]();
+      const iterator = generateFn(signal)[Symbol.asyncIterator]();
 
       try {
         await drainIterator(iterator, getActiveReceivers, signal);
