@@ -28,7 +28,7 @@ function getDocsSidebarItems() {
   const items = files
     .map((fileName) => {
       const base = fileName.replace(/\.md$/i, '')
-      if (base.toLowerCase() === 'readme') {
+      if (base.toLowerCase() === 'introduction') {
         return { text: 'Getting Started', link: '/' }
       }
       return { text: formatDocLabel(base), link: `/${base}` }

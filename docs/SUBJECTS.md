@@ -44,7 +44,7 @@ In conclusion, a pull-based subject is a complex orchestration of asynchronous p
 <p align="center">
   <strong>Ready to stream? Get started with Streamix today! 🚀</strong><br>
   <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> 📦 
-  <a href="https://github.com/actioncrew/streamix">View on GitHub</a> 🐙 
+  <a href="https://github.com/epikodelabs/streamix">View on GitHub</a> 🐙 
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
 
