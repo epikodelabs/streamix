@@ -42,9 +42,9 @@ function escapeRegExp(value) {
 ensureDir(distRoot);
 ensureDir(apiRoot);
 
-const introductionPath = path.join(repoRoot, 'INTRODUCTION.md');
+const introductionPath = path.join(docsRoot, 'INTRODUCTION.md');
 if (!fs.existsSync(introductionPath)) {
-  throw new Error('INTRODUCTION.md not found in repository root.');
+  throw new Error('INTRODUCTION.md not found in docs directory.');
 }
 
 const indexPath = path.join(distRoot, 'index.md');
@@ -67,6 +67,9 @@ for (const entry of fs.readdirSync(repoRoot, { withFileTypes: true })) {
     continue;
   }
   if (entry.name.toLowerCase() === 'introduction.md') {
+    continue;
+  }
+  if (entry.name.toLowerCase().startsWith('readme')) {
     continue;
   }
   copyIfMissing(path.join(repoRoot, entry.name), path.join(distRoot, entry.name));
