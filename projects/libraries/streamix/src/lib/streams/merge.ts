@@ -15,7 +15,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * @param sources Streams or values (including promises) to merge.
  * @returns {Stream<T>} A new stream that emits values from all input streams.
  */
-type MergeSource<T> = Stream<T> | MaybePromise<T>;
+export type MergeSource<T> = Stream<T> | MaybePromise<T>;
 
 export function merge<T = any>(...sources: MergeSource<T>[]): Stream<T> {
   return createStream<T>('merge', async function* () {

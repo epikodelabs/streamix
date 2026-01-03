@@ -39,4 +39,3 @@ Use Streamix when you want reactive-style composition while preserving async gen
 - [API Documentation](https://epikodelabs.github.io/streamix)
 - [View on GitHub](https://github.com/epikodelabs/streamix)
 - [Give Feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
-- [Operators & generator guides](docs/GENERATORS.md)

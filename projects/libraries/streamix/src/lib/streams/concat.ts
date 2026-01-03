@@ -16,7 +16,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * @param sources Streams or values (including promises) to concatenate.
  * @returns {Stream<T>} A new stream that emits values from all input streams in sequence.
  */
-type ConcatSource<T> = Stream<T> | MaybePromise<T>;
+export type ConcatSource<T> = Stream<T> | MaybePromise<T>;
 
 export function concat<T = any>(...sources: ConcatSource<T>[]): Stream<T> {
   async function* generator() {
