@@ -1,4 +1,4 @@
-import { createOperator, isPromiseLike, type MaybePromise, type Operator, type Stream } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator, type Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -29,6 +29,7 @@ export function mergeMap<T = any, R = any>(
 ) {
   return createOperator<T, R>('mergeMap', function (this: Operator, source) {
     const output: Subject<R> = createSubject<R>();
+    const outputIterator = eachValueFrom(output);
 
     let index = 0;
     let activeInner = 0;
@@ -36,10 +37,16 @@ export function mergeMap<T = any, R = any>(
     let errorOccurred = false;
 
     // Process each inner stream concurrently.
-    const processInner = async (innerStream: Stream<R>) => {
+    const processInner = async (
+      innerStream: Stream<R>,
+      parentMeta?: { valueId: string; operatorIndex: number; operatorName: string }
+    ) => {
       try {
         for await (const val of innerStream) {
           if (errorOccurred) break;
+          if (parentMeta) {
+            setIteratorMeta(outputIterator, { valueId: parentMeta.valueId }, parentMeta.operatorIndex, parentMeta.operatorName);
+          }
           output.next(val);
         }
       } catch (err) {
@@ -65,8 +72,9 @@ export function mergeMap<T = any, R = any>(
           const projected = project(result.value, index++);
           const normalized = isPromiseLike(projected) ? await projected : projected;
           const inner = fromAny(normalized);
+          const parentMeta = getIteratorMeta(source);
           activeInner++;
-          processInner(inner);
+          processInner(inner, parentMeta);
         }
 
         outerCompleted = true;
@@ -81,6 +89,6 @@ export function mergeMap<T = any, R = any>(
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, setIteratorMeta, type MaybePromise, type Operator, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -43,11 +43,11 @@ export const recurse = <T = any>(
   options: RecurseOptions = {}
 ) =>
   createOperator<T, T>('recurse', function (this: Operator, source) {
-    type QueueItem = { value: T; depth: number };
+    type QueueItem = { value: T; depth: number; meta?: { valueId: string; operatorIndex: number; operatorName: string } };
     const queue: QueueItem[] = [];
     let sourceDone = false;
 
-    const enqueueChildren = async (value: T, depth: number) => {
+    const enqueueChildren = async (value: T, depth: number, meta?: QueueItem["meta"]) => {
       if (options.maxDepth !== undefined && depth >= options.maxDepth) return;
       const shouldRecurse = condition(value);
       if (isPromiseLike(shouldRecurse) ? !(await shouldRecurse) : !shouldRecurse) return;
@@ -56,7 +56,7 @@ export const recurse = <T = any>(
       const normalized = isPromiseLike(projected) ? await projected : projected;
 
       for await (const child of eachValueFrom(fromAny(normalized))) {
-        const item = { value: child, depth: depth + 1 };
+        const item = { value: child, depth: depth + 1, meta };
         if (options.traversal === 'breadth') {
           queue.push(item);
         } else {
@@ -65,7 +65,7 @@ export const recurse = <T = any>(
       }
     };
 
-    return {
+    const iterator: AsyncIterator<T> = {
       next: async () => {
         while (true) {
           // Refill queue from source if it's empty
@@ -76,14 +76,20 @@ export const recurse = <T = any>(
               break;
             }
 
-            queue.push({ value: result.value, depth: 0 });
+            const meta = getIteratorMeta(source);
+            queue.push({ value: result.value, depth: 0, meta });
           }
 
           // If the queue now has items, process them
           if (queue.length > 0) {
             const item =
               options.traversal === 'breadth' ? queue.shift()! : queue.pop()!;
-            await enqueueChildren(item.value, item.depth);
+            await enqueueChildren(item.value, item.depth, item.meta);
+
+            if (item.meta) {
+              setIteratorMeta(iterator, { valueId: item.meta.valueId }, item.meta.operatorIndex, item.meta.operatorName);
+            }
+
             return NEXT(item.value);
           }
 
@@ -97,4 +103,6 @@ export const recurse = <T = any>(
         }
       },
     };
+
+    return iterator;
   });

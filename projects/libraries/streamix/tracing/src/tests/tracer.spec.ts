@@ -329,7 +329,9 @@ describe("valueTracer", () => {
     expect(received).toEqual([[1, 2, 3]]);
     expect(tracer.emitted.length).toBe(3);
     expect(tracer.delivered.length).toBe(1);
-    expect(tracer.collapsed.length).toBe(0);
+    expect(tracer.collapsed.length).toBe(2);
+    expect(tracer.collapsed.some((trace) => trace.sourceValue === 1)).toBeTrue();
+    expect(tracer.collapsed.some((trace) => trace.sourceValue === 2)).toBeTrue();
   });
 
   // ---------------------------------------------------------------------------
@@ -426,7 +428,7 @@ describe("valueTracer", () => {
     expect(tracer.delivered.length).toBe(0);
   });
 
-  it("filters queued source values when an operator consumes multiple inputs", async () => {
+  it("collapses queued source values when an operator consumes multiple inputs", async () => {
     const pairSum = createOperator<number, number>("pairSum", (source) => ({
       async next() {
         const first = await source.next();
@@ -459,8 +461,8 @@ describe("valueTracer", () => {
     });
 
     expect(emitted).toEqual([3, 7]);
-    expect(tracer.filtered.length).toBeGreaterThan(0);
-    expect(tracer.filtered.some((trace) => trace.sourceValue === 1)).toBeTrue();
+    expect(tracer.collapsed.length).toBeGreaterThan(0);
+    expect(tracer.collapsed.some((trace) => trace.sourceValue === 1)).toBeTrue();
   });
 
   it("wraps values into traced wrappers and exposes metadata helpers", () => {
