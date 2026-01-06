@@ -9,7 +9,7 @@
  * - Provides public subscription API for observers
  */
 
-import { createOperator, registerRuntimeHooks } from "@epikodelabs/streamix";
+import { createOperator, getIteratorMeta, registerRuntimeHooks, setIteratorMeta } from "@epikodelabs/streamix";
 
 /* ============================================================================
  * TYPES
@@ -72,6 +72,12 @@ export interface ValueTrace {
     operatorIndex: number;
     operatorName: string;
     targetValueId: string;
+  };
+
+  expandedFrom?: {
+    operatorIndex: number;
+    operatorName: string;
+    baseValueId: string;
   };
 
   totalDuration?: number;
@@ -227,39 +233,56 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
       return trace;
     },
 
-    createExpandedTrace: (baseValueId, operatorIndex, operatorName, expandedValue) => {
-      const base = traces.get(baseValueId);
-      const valueId = generateValueId();
-      const now = Date.now();
+    createExpandedTrace(
+  baseValueId: string,
+  operatorIndex: number,
+  operatorName: string,
+  expandedValue: any
+) {
+  const base = traces.get(baseValueId);
+  const valueId = generateValueId();
+  const now = Date.now();
 
-      const trace: ValueTrace = {
-        valueId,
-        streamId: base?.streamId ?? "unknown",
-        streamName: base?.streamName,
-        subscriptionId: base?.subscriptionId ?? "unknown",
-        emittedAt: base?.emittedAt ?? now,
-        state: "expanded",
-        sourceValue: base?.sourceValue ?? expandedValue,
-        finalValue: expandedValue,
-        operatorSteps: base ? [...base.operatorSteps.map(s => ({ ...s }))] : [],
-        operatorDurations: new Map(base?.operatorDurations || []),
-      };
+  const trace: ValueTrace = {
+    valueId,
+    streamId: base?.streamId ?? "unknown",
+    streamName: base?.streamName,
+    subscriptionId: base?.subscriptionId ?? "unknown",
 
-      const step: OperatorStep = {
-        operatorIndex,
-        operatorName,
-        enteredAt: now,
-        exitedAt: now,
-        outcome: "expanded",
-        inputValue: base?.finalValue ?? base?.sourceValue,
-        outputValue: expandedValue
-      };
+    emittedAt: base?.emittedAt ?? now,
+    state: "expanded",
 
-      trace.operatorSteps.push(step);
-      traces.set(valueId, trace);
-      onTraceUpdate?.(trace, step);
-      return valueId;
+    sourceValue: base?.sourceValue,
+    finalValue: expandedValue,
+
+    operatorSteps: base
+      ? base.operatorSteps.map(s => ({ ...s }))
+      : [],
+
+    operatorDurations: new Map(base?.operatorDurations || []),
+
+    // ✅ THIS IS THE KEY ADDITION
+    expandedFrom: {
+      operatorIndex,
+      operatorName,
+      baseValueId,
     },
+  };
+
+  trace.operatorSteps.push({
+    operatorIndex,
+    operatorName,
+    enteredAt: now,
+    exitedAt: now,
+    outcome: "expanded",
+    inputValue: base?.finalValue,
+    outputValue: expandedValue,
+  });
+
+  traces.set(valueId, trace);
+  onTraceUpdate?.(trace);
+  return valueId;
+},
 
     enterOperator: (valueId, operatorIndex, operatorName, inputValue) => {
       const trace = traces.get(valueId);
@@ -574,7 +597,9 @@ registerRuntimeHooks({
       return createOperator(`traced_${opName}`, (src) => {
         // Queue retains pending values until the traced operator decides whether they were filtered/consumed.
         const inputQueue: TracedWrapper<any>[] = [];
+        const metaByValueId = new Map<string, TracedWrapper<any>["meta"]>();
         let lastSeenMeta: TracedWrapper<any>["meta"] | null = null;
+        let lastOutputMeta: TracedWrapper<any>["meta"] | null = null;
 
     // We create the iterator logic
     const rawSource: AsyncIterator<any> = {
@@ -583,7 +608,9 @@ registerRuntimeHooks({
         if (r.done) return r;
         const wrapped = r.value as TracedWrapper<any>;
         inputQueue.push(wrapped);
+        metaByValueId.set(wrapped.meta.valueId, wrapped.meta);
         lastSeenMeta = wrapped.meta;
+        setIteratorMeta(rawSource, wrapped.meta, i, opName);
         tracer.enterOperator(wrapped.meta.valueId, i, opName, wrapped.value);
         return { done: false, value: wrapped.value };
       },
@@ -606,20 +633,68 @@ registerRuntimeHooks({
             return out;
           }
 
-          if (inputQueue.length > 1) {
+          const outputMeta = getIteratorMeta(inner);
+          if (outputMeta) {
+            setIteratorMeta(this as any, { valueId: outputMeta.valueId }, outputMeta.operatorIndex, outputMeta.operatorName);
+          }
+
+          if (!outputMeta && inputQueue.length > 1) {
+            const targetEntry = inputQueue[inputQueue.length - 1];
+            const outputMatchesTarget = Object.is(out.value, targetEntry.value);
             while (inputQueue.length > 1) {
-              const filteredEntry = inputQueue.shift()!;
-              tracer.exitOperator(filteredEntry.meta.valueId, i, filteredEntry.value, true);
+              const pendingEntry = inputQueue.shift()!;
+              if (outputMatchesTarget) {
+                tracer.exitOperator(pendingEntry.meta.valueId, i, pendingEntry.value, true);
+              } else {
+                tracer.collapseValue(
+                  pendingEntry.meta.valueId,
+                  i,
+                  opName,
+                  targetEntry.meta.valueId
+                );
+              }
             }
           }
 
-          const entry = inputQueue.shift();
+          let entry: TracedWrapper<any> | undefined;
+          let expandedFromValueId: string | undefined;
+
+          if (outputMeta?.valueId) {
+            const index = inputQueue.findIndex((candidate) => candidate.meta.valueId === outputMeta.valueId);
+            if (index > -1) {
+              entry = inputQueue.splice(index, 1)[0];
+            } else {
+              expandedFromValueId = outputMeta.valueId;
+            }
+          } else {
+            entry = inputQueue.shift();
+          }
+            const expandedMeta = lastOutputMeta ?? lastSeenMeta;
           
-          if (!entry && lastSeenMeta) {
-            return { done: false, value: wrap(out.value, lastSeenMeta) };
+          if (!entry && (expandedFromValueId || expandedMeta)) {
+            const baseMeta =
+              (expandedFromValueId ? metaByValueId.get(expandedFromValueId) : undefined) ??
+              expandedMeta ??
+              undefined;
+
+            if (!baseMeta) {
+              return { done: false, value: out.value };
+            }
+
+            const expandedId = tracer.createExpandedTrace(
+              expandedFromValueId ?? baseMeta.valueId,
+              i,
+              opName,
+              out.value
+            );
+            return {
+              done: false,
+              value: wrap(out.value, { ...baseMeta, valueId: expandedId })
+            };
           }
 
           if (entry) {
+            lastOutputMeta = entry.meta;
             tracer.exitOperator(entry.meta.valueId, i, out.value);
             return { done: false, value: wrap(out.value, entry.meta) };
           }
