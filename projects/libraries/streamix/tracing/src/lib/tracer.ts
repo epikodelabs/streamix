@@ -243,6 +243,13 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
   const valueId = generateValueId();
   const now = Date.now();
 
+  if (base) {
+    const baseStep = base.operatorSteps.find((s) => s.operatorIndex === operatorIndex);
+    if (baseStep) {
+      baseStep.outcome = "expanded";
+    }
+  }
+
   const trace: ValueTrace = {
     valueId,
     streamId: base?.streamId ?? "unknown",
@@ -318,6 +325,12 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
       const step = trace?.operatorSteps.find(s => s.operatorIndex === operatorIndex && !s.exitedAt);
       if (!trace) return;
 
+      const targetTrace = traces.get(targetValueId);
+      const targetStep = targetTrace?.operatorSteps.find((s) => s.operatorIndex === operatorIndex);
+      if (targetStep) {
+        targetStep.outcome = "collapsed";
+      }
+
       if (step) {
         step.exitedAt = Date.now();
         step.outcome = "collapsed";
@@ -354,10 +367,14 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
     markDelivered: (valueId) => {
       const trace = traces.get(valueId);
       if (!trace) return;
-      trace.state = "delivered";
       trace.deliveredAt = Date.now();
       trace.totalDuration = trace.deliveredAt - trace.emittedAt;
-      notifySubscribers("delivered", trace);
+      // Expanded values are additional emissions derived from a single base value.
+      // They should not be treated as a separate delivered "base value" event.
+      if (!trace.expandedFrom) {
+        trace.state = "delivered";
+        notifySubscribers("delivered", trace);
+      }
       onTraceUpdate?.(trace);
     },
 
@@ -389,7 +406,7 @@ export function createTerminalTracer(options: ValueTracerOptions = {}): ValueTra
   const getOperatorName = (valueId: string, operatorIndex: number) =>
     lastOperator.get(valueId)?.name ?? `op${operatorIndex}`;
 
-  return {
+  const tracer: ValueTracer = {
     subscribe: (handlers) => {
       subscribers.push(handlers);
       return () => { const idx = subscribers.indexOf(handlers); if (idx > -1) subscribers.splice(idx, 1); };
@@ -430,6 +447,7 @@ export function createTerminalTracer(options: ValueTracerOptions = {}): ValueTra
         subscriptionId: base?.subscriptionId ?? "unknown",
         emittedAt: base?.emittedAt ?? now,
         state: "expanded",
+        expandedFrom: { operatorIndex, operatorName, baseValueId },
         sourceValue: base?.sourceValue ?? expandedValue,
         finalValue: expandedValue,
         operatorSteps: [],
@@ -442,17 +460,17 @@ export function createTerminalTracer(options: ValueTracerOptions = {}): ValueTra
       return valueId;
     },
 
-    enterOperator: (valueId, operatorIndex, operatorName) => {
+    enterOperator: (valueId, operatorIndex, operatorName, _inputValue) => {
       lastOperator.set(valueId, { index: operatorIndex, name: operatorName });
     },
 
-    exitOperator: (valueId, operatorIndex, outputValue, filtered = false) => {
+    exitOperator: (valueId, operatorIndex, outputValue, filtered = false, outcome = "transformed") => {
       const trace = traces.get(valueId);
       if (!trace) return null;
 
       trace.finalValue = outputValue;
 
-      if (filtered) {
+      if (filtered || outcome === "filtered") {
         const operatorName = getOperatorName(valueId, operatorIndex);
         trace.state = "filtered";
         trace.droppedReason = { operatorIndex, operatorName, reason: "filtered" };
@@ -488,10 +506,12 @@ export function createTerminalTracer(options: ValueTracerOptions = {}): ValueTra
     markDelivered: (valueId) => {
       const trace = traces.get(valueId);
       if (!trace) return;
-      trace.state = "delivered";
       trace.deliveredAt = Date.now();
       trace.totalDuration = trace.deliveredAt - trace.emittedAt;
-      notifySubscribers("delivered", trace);
+      if (!trace.expandedFrom) {
+        trace.state = "delivered";
+        notifySubscribers("delivered", trace);
+      }
       onTraceUpdate?.(trace);
     },
 
@@ -503,6 +523,8 @@ export function createTerminalTracer(options: ValueTracerOptions = {}): ValueTra
       lastOperator.clear();
     }
   };
+
+  return tracer;
 }
 
 /* ============================================================================                                                                                                                                           
