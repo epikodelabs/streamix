@@ -661,7 +661,7 @@ registerRuntimeHooks({
                 // requested exactly that many inputs during the same `inner.next()` call.
                 // This avoids misclassifying "array-valued" streams (e.g. `map(() => [1,2,3])`)
                 // as collapses.
-                if (Array.isArray(out.value)) {
+                if (Array.isArray(out.value) && requestBatch.length > 1) {
                   const batchSize = out.value.length;
                   if (batchSize > 0 && requestBatch.length === batchSize) {
                     const batch = requestBatch;
