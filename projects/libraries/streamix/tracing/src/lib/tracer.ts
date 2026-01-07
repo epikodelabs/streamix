@@ -707,10 +707,23 @@ registerRuntimeHooks({
 
                   if (count === 0) {
                     removeFromQueue(baseValueId);
-                    tracer.exitOperator(baseValueId, i, out.value);
+
+                    tracer.exitOperator(
+                      baseValueId,
+                      i,
+                      out.value,
+                      false,
+                      "expanded" // ← ALWAYS expanded for flattening
+                    );
+
+                    // Anchor attribution to the base input
                     lastOutputMeta = baseMeta;
                     setIteratorMeta(this as any, baseMeta, i, opName);
-                    return { done: false, value: wrapTracedValue(out.value, baseMeta) };
+
+                    return {
+                      done: false,
+                      value: wrapTracedValue(out.value, baseMeta),
+                    };
                   }
 
                   const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, out.value);
