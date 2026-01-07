@@ -594,7 +594,7 @@ registerRuntimeHooks({
            * - "how many outputs occur without requesting new input"
            */
           let activeRequestBatch: TracedWrapper<any>[] | null = null;
-          const expansionCountByKey = new Map<string, number>();
+          const outputCountByBaseKey = new Map<string, number>();
 
           const removeFromQueue = (valueId: string) => {
             const idx = inputQueue.findIndex((w) => w.meta.valueId === valueId);
@@ -655,34 +655,6 @@ registerRuntimeHooks({
                   setIteratorMeta(this as any, { valueId: outputMeta.valueId }, outputMeta.operatorIndex, outputMeta.operatorName);
                 }
 
-                // Expansion: additional outputs without requesting new input.
-                if (requestBatch.length === 0) {
-                  const baseValueId: string | undefined =
-                    outputMeta?.valueId ?? lastOutputMeta?.valueId ?? lastSeenMeta?.valueId ?? undefined;
-
-                  const baseMeta =
-                    (baseValueId ? metaByValueId.get(baseValueId) : undefined) ??
-                    lastOutputMeta ??
-                    lastSeenMeta ??
-                    null;
-
-                  if (baseValueId && baseMeta) {
-                    const key = `${baseValueId}:${i}`;
-                    const count = expansionCountByKey.get(key) ?? 0;
-                    expansionCountByKey.set(key, count + 1);
-
-                    if (count === 0) {
-                      lastOutputMeta = baseMeta;
-                      tracer.exitOperator(baseValueId, i, out.value, false, "expanded");
-                      return { done: false, value: wrapTracedValue(out.value, baseMeta) };
-                    }
-
-                    const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, out.value);
-                    lastOutputMeta = { ...baseMeta, valueId: expandedId };
-                    return { done: false, value: wrapTracedValue(out.value, { ...baseMeta, valueId: expandedId }) };
-                  }
-                }
-
                 // Collapse: one output is an array produced from multiple sequential inputs.
                 if (Array.isArray(out.value)) {
                   const batchSize = out.value.length;
@@ -698,6 +670,75 @@ registerRuntimeHooks({
                     lastOutputMeta = target.meta;
                     setIteratorMeta(this as any, target.meta, i, opName);
                     return { done: false, value: wrapTracedValue(out.value, target.meta) };
+                  }
+                }
+
+                // If the runtime provides a valueId for the output, prefer it as the base attribution.
+                // This is critical for flattening operators that may interleave input requests while
+                // still emitting outputs for a previous base value.
+                if (outputMeta?.valueId && metaByValueId.has(outputMeta.valueId)) {
+                  const baseValueId = outputMeta.valueId as string;
+                  const baseMeta = metaByValueId.get(baseValueId)!;
+
+                  // Filter: multiple requests, pass-through output from one of them.
+                  if (requestBatch.length > 1) {
+                    const baseRequested = requestBatch.find((w) => w.meta.valueId === baseValueId);
+                    const isPassThrough = baseRequested ? Object.is(out.value, baseRequested.value) : false;
+
+                    if (isPassThrough) {
+                      for (const requested of requestBatch) {
+                        if (requested.meta.valueId === baseValueId) continue;
+                        removeFromQueue(requested.meta.valueId);
+                        tracer.exitOperator(requested.meta.valueId, i, requested.value, true);
+                      }
+                    }
+                  }
+
+                  const key = `${baseValueId}:${i}`;
+                  const count = outputCountByBaseKey.get(key) ?? 0;
+                  outputCountByBaseKey.set(key, count + 1);
+
+                  if (count === 0) {
+                    removeFromQueue(baseValueId);
+                    tracer.exitOperator(baseValueId, i, out.value);
+                    lastOutputMeta = baseMeta;
+                    setIteratorMeta(this as any, baseMeta, i, opName);
+                    return { done: false, value: wrapTracedValue(out.value, baseMeta) };
+                  }
+
+                  const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, out.value);
+                  // Anchor `lastOutputMeta` to the base input so subsequent outputs don't re-base on a child id.
+                  lastOutputMeta = baseMeta;
+                  return { done: false, value: wrapTracedValue(out.value, { ...baseMeta, valueId: expandedId }) };
+                }
+
+                // Expansion: additional outputs without requesting new input.
+                if (requestBatch.length === 0) {
+                  const baseValueId: string | undefined =
+                    outputMeta?.valueId ?? lastOutputMeta?.valueId ?? lastSeenMeta?.valueId ?? undefined;
+
+                  const baseMeta =
+                    (baseValueId ? metaByValueId.get(baseValueId) : undefined) ??
+                    lastOutputMeta ??
+                    lastSeenMeta ??
+                    null;
+
+                  if (baseValueId && baseMeta) {
+                    const key = `${baseValueId}:${i}`;
+                    const count = outputCountByBaseKey.get(key) ?? 0;
+                    outputCountByBaseKey.set(key, count + 1);
+
+                    if (count === 0) {
+                      lastOutputMeta = baseMeta;
+                      tracer.exitOperator(baseValueId, i, out.value, false, "expanded");
+                      return { done: false, value: wrapTracedValue(out.value, baseMeta) };
+                    }
+
+                    const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, out.value);
+                    // Keep `lastOutputMeta` anchored to the base input so subsequent emissions
+                    // for the same expansion series do not accidentally re-base on a child id.
+                    lastOutputMeta = baseMeta;
+                    return { done: false, value: wrapTracedValue(out.value, { ...baseMeta, valueId: expandedId }) };
                   }
                 }
 

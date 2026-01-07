@@ -1,0 +1,140 @@
+﻿<div class="diagram-page">
+  <header class="page-header">
+    <div>
+      <p class="eyebrow">Tracing</p>
+      <h1>Subscription Diagrams</h1>
+      <p>
+        Each subscription has its own timeline—follow emitted values across the
+        pipeline and watch how operators mutate them.
+      </p>
+    </div>
+    <div class="header-actions">
+      <span class="stat-chip">Traces: {{ stats().total }}</span>
+      <span class="stat-chip">Throughput: {{ stats().throughput }}/s</span>
+      <button type="button" class="ghost" (click)="refreshTraces()">Regenerate</button>
+    </div>
+  </header>
+
+  <div class="diagram-legend">
+    <span
+      *ngFor="let sub of subscriptionOrder()"
+      class="legend-pill"
+      [style.borderColor]="getSubscriptionAccent(sub)"
+    >
+      <span class="legend-dot" [style.background]="getSubscriptionAccent(sub)"></span>
+      {{ sub }}
+    </span>
+  </div>
+
+  <section class="controls">
+    <div class="search-field">
+      <label for="trace-search">Search</label>
+      <input
+        id="trace-search"
+        type="search"
+        placeholder="ID or stream name"
+        [value]="searchTerm()"
+        (input)="onSearch($event)"
+      />
+    </div>
+    <div class="filter-group">
+      <button
+        type="button"
+        [class.active]="filterState() === 'all'"
+        (click)="setFilterState('all')"
+      >
+        All
+      </button>
+      <button
+        *ngFor="let state of stateOptions"
+        type="button"
+        [class.active]="filterState() === state"
+        (click)="setFilterState(state)"
+      >
+        {{ state }}
+      </button>
+    </div>
+  </section>
+
+  <section class="diagram-section">
+    <div class="diagram-groups">
+      <article
+        class="diagram-group"
+        *ngFor="let group of groupedTraces(); let idx = index"
+      >
+        <header>
+          <p class="group-sub">
+            Subscription <strong>{{ group.subscriptionId }}</strong>
+          </p>
+          <p class="group-meta">
+            {{ group.traces.length }} traces •
+            {{ group.traces.length ? group.traces[0].streamName : 'unknown stream' }}
+          </p>
+        </header>
+        <div class="diagram-shell" #diagramContainer>
+          <canvas
+            #diagramCanvas
+            class="diagram-canvas"
+            [attr.aria-label]="'Subscription ' + group.subscriptionId + ' diagram'"
+            (mousemove)="onCanvasMouseMove($event, group.subscriptionId)"
+            (mouseleave)="clearHoveredCircle()"
+          ></canvas>
+        </div>
+      </article>
+    </div>
+
+    <aside class="trace-sidebar">
+      <div class="sidebar-header">
+        <h3>Trace list</h3>
+        <p>{{ filteredTraces().length }} shown</p>
+      </div>
+      <div class="trace-list">
+        <article
+          *ngFor="let trace of filteredTraces(); trackBy: trackByTrace"
+          class="trace-card"
+          [class.selected]="selectedTrace()?.valueId === trace.valueId"
+          (click)="selectTrace(trace)"
+        >
+          <p class="value-id">{{ trace.valueId }}</p>
+          <p class="stream-name">{{ trace.streamName }}</p>
+          <p class="trace-meta">
+            {{ formatDuration(trace.totalDuration) }} •
+            {{ formatTime(trace.emittedAt) }} • {{ trace.state }}
+          </p>
+        </article>
+      </div>
+
+      <div class="selection-panel" *ngIf="selectedTrace()">
+        <h4>Selected trace</h4>
+        <p><strong>Value:</strong> {{ selectedTrace()?.sourceValue }}</p>
+        <p><strong>State:</strong> {{ selectedTrace()?.state }}</p>
+        <p>
+          <strong>Duration:</strong>
+          {{ formatDuration(selectedTrace()?.totalDuration) }}
+        </p>
+        <p><strong>Subscription:</strong> {{ selectedTrace()?.subscriptionId }}</p>
+        <p>
+          <strong>Operators:</strong>
+          {{ getSelectedOperatorCount() }}
+        </p>
+      </div>
+    </aside>
+  </section>
+
+  <div
+    class="canvas-tooltip"
+    *ngIf="hoveredCircle() && hoverPosition()"
+    [style.left.px]="hoverPosition()?.left"
+    [style.top.px]="hoverPosition()?.top"
+  >
+    <p class="tooltip-id">{{ hoveredCircle()?.trace?.valueId }}</p>
+    <p class="tooltip-operator">
+      {{ hoveredCircle()?.operatorName | titlecase }}
+      <span class="tooltip-label">{{ hoveredCircle()?.label }}</span>
+    </p>
+    <p class="tooltip-value">Output: {{ formatCircleValue(getCircleDisplayValue(hoveredCircle())) }}</p>
+    <p class="tooltip-state" [style.color]="getStateAccent(hoveredCircle()?.state)">
+      {{ hoveredCircle()?.state | uppercase }}
+    </p>
+  </div>
+</div>
