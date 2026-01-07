@@ -717,7 +717,11 @@ registerRuntimeHooks({
 
           if (entry) {
             lastOutputMeta = entry.meta;
-            tracer.exitOperator(entry.meta.valueId, i, out.value);
+            const outcome: OperatorOutcome | undefined =
+              outputMeta?.operatorIndex === i && outputMeta?.operatorName === opName
+                ? "expanded"
+                : "transformed";
+            tracer.exitOperator(entry.meta.valueId, i, out.value, false, outcome);
             return { done: false, value: wrap(out.value, entry.meta) };
           }
 
