@@ -656,16 +656,23 @@ registerRuntimeHooks({
                 }
 
                 // Collapse: one output is an array produced from multiple sequential inputs.
+                //
+                // Tightened rule: only treat an array output as a collapse when the operator
+                // requested exactly that many inputs during the same `inner.next()` call.
+                // This avoids misclassifying "array-valued" streams (e.g. `map(() => [1,2,3])`)
+                // as collapses.
                 if (Array.isArray(out.value)) {
                   const batchSize = out.value.length;
-                  if (batchSize > 0 && inputQueue.length >= batchSize) {
-                    const batch = inputQueue.splice(0, batchSize);
+                  if (batchSize > 0 && requestBatch.length === batchSize) {
+                    const batch = requestBatch;
                     const target = batch[batch.length - 1];
 
                     for (let j = 0; j < batch.length - 1; j += 1) {
+                      removeFromQueue(batch[j].meta.valueId);
                       tracer.collapseValue(batch[j].meta.valueId, i, opName, target.meta.valueId, out.value);
                     }
 
+                    removeFromQueue(target.meta.valueId);
                     tracer.exitOperator(target.meta.valueId, i, out.value, false, "collapsed");
                     lastOutputMeta = target.meta;
                     setIteratorMeta(this as any, target.meta, i, opName);
