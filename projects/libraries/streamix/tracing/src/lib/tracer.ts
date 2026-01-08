@@ -1008,10 +1008,43 @@ registerRuntimeHooks({
 
                 const outputMeta = getIteratorMeta(inner as any) as any;
                 if (outputMeta?.valueId) {
-                  setIteratorMeta(this as any, { valueId: outputMeta.valueId }, outputMeta.operatorIndex, outputMeta.operatorName);
+                  setIteratorMeta(
+                    this as any,
+                    { valueId: outputMeta.valueId, kind: outputMeta.kind, inputValueIds: outputMeta.inputValueIds },
+                    outputMeta.operatorIndex,
+                    outputMeta.operatorName
+                  );
                 }
 
                 // Array collapse: multiple inputs → array output
+                if (
+                  Array.isArray(out.value) &&
+                  outputMeta?.kind === "collapse" &&
+                  Array.isArray(outputMeta.inputValueIds) &&
+                  outputMeta.inputValueIds.length > 1
+                ) {
+                  const targetId =
+                    (typeof outputMeta.valueId === "string" && outputMeta.valueId) ||
+                    outputMeta.inputValueIds[outputMeta.inputValueIds.length - 1];
+
+                  if (typeof targetId === "string" && metaByValueId.has(targetId)) {
+                    const targetMeta = metaByValueId.get(targetId)!;
+
+                    for (const id of outputMeta.inputValueIds) {
+                      if (id === targetId) continue;
+                      if (!metaByValueId.has(id)) continue;
+                      removeFromQueue(id);
+                      tracer.collapseValue(id, i, opName, targetId, out.value);
+                    }
+
+                    removeFromQueue(targetId);
+                    tracer.exitOperator(targetId, i, out.value, false, "collapsed");
+                    lastOutputMeta = targetMeta;
+                    setIteratorMeta(this as any, targetMeta, i, opName);
+
+                    return { done: false, value: wrapTracedValue(out.value, targetMeta) };
+                  }
+                }
                 if (Array.isArray(out.value) && requestBatch.length > 1 && out.value.length === requestBatch.length) {
                   const target = requestBatch[requestBatch.length - 1];
 
@@ -1071,31 +1104,33 @@ registerRuntimeHooks({
                   // actively awaiting `next()`. Those outputs are buffered and later observed with an empty
                   // `requestBatch`. In that case, attribute the output to pending inputs already pulled from `src`.
                   if (inputQueue.length > 0) {
-                    // Array outputs typically represent a collapse (e.g. bufferCount/buffer).
-                    if (Array.isArray(out.value) && out.value.length > 0 && inputQueue.length >= out.value.length) {
-                      const batch = inputQueue.slice(-out.value.length);
-                      const preferredId = outputMeta?.valueId;
-                      const target =
-                        (preferredId ? batch.find((w) => w.meta.valueId === preferredId) : undefined) ??
-                        batch[batch.length - 1];
+                    // Prefer explicit iterator meta for collapse operators (buffer/bufferCount/toArray/etc.).
+                    if (
+                      Array.isArray(out.value) &&
+                      outputMeta?.kind === "collapse" &&
+                      Array.isArray(outputMeta.inputValueIds) &&
+                      outputMeta.inputValueIds.length > 0
+                    ) {
+                      const targetId =
+                        (typeof outputMeta.valueId === "string" && outputMeta.valueId) ||
+                        outputMeta.inputValueIds[outputMeta.inputValueIds.length - 1];
 
-                      // Anything older than the batch is superseded by the buffer window.
-                      for (const pending of inputQueue.slice(0, inputQueue.length - batch.length)) {
-                        removeFromQueue(pending.meta.valueId);
-                        tracer.exitOperator(pending.meta.valueId, i, pending.value, true);
+                      if (typeof targetId === "string" && metaByValueId.has(targetId)) {
+                        const targetMeta = metaByValueId.get(targetId)!;
+
+                        for (const id of outputMeta.inputValueIds) {
+                          if (id === targetId) continue;
+                          if (!metaByValueId.has(id)) continue;
+                          removeFromQueue(id);
+                          tracer.collapseValue(id, i, opName, targetId, out.value);
+                        }
+
+                        removeFromQueue(targetId);
+                        tracer.exitOperator(targetId, i, out.value, false, "collapsed");
+                        lastOutputMeta = targetMeta;
+                        setIteratorMeta(this as any, targetMeta, i, opName);
+                        return { done: false, value: wrapTracedValue(out.value, targetMeta) };
                       }
-
-                      for (const pending of batch) {
-                        if (pending.meta.valueId === target.meta.valueId) continue;
-                        removeFromQueue(pending.meta.valueId);
-                        tracer.collapseValue(pending.meta.valueId, i, opName, target.meta.valueId, out.value);
-                      }
-
-                      removeFromQueue(target.meta.valueId);
-                      tracer.exitOperator(target.meta.valueId, i, out.value, false, "collapsed");
-                      lastOutputMeta = target.meta;
-                      setIteratorMeta(this as any, target.meta, i, opName);
-                      return { done: false, value: wrapTracedValue(out.value, target.meta) };
                     }
 
                     const preferredId = outputMeta?.valueId;

@@ -84,9 +84,16 @@ export type StreamRuntimeHooks = {
  * without introducing hard dependencies.
  */
 const HOOKS_KEY = "__STREAMIX_RUNTIME_HOOKS__";
+export type IteratorMetaKind = "transform" | "collapse" | "expand";
+export type IteratorMetaTag = {
+  valueId: string;
+  kind?: IteratorMetaKind;
+  inputValueIds?: string[];
+};
+
 const ITERATOR_META = new WeakMap<
   AsyncIterator<any>,
-  { valueId: string; operatorIndex: number; operatorName: string }
+  { valueId: string; operatorIndex: number; operatorName: string; kind?: IteratorMetaKind; inputValueIds?: string[] }
 >();
 
 /**
@@ -145,15 +152,26 @@ export function getRuntimeHooks(): StreamRuntimeHooks | null {
  */
 export function setIteratorMeta(
   iterator: AsyncIterator<any>,
-  meta: { valueId: string },
+  meta: IteratorMetaTag,
   operatorIndex: number,
   operatorName: string
 ): void {
-  ITERATOR_META.set(iterator, {
+  const entry: {
+    valueId: string;
+    operatorIndex: number;
+    operatorName: string;
+    kind?: IteratorMetaKind;
+    inputValueIds?: string[];
+  } = {
     valueId: meta.valueId,
     operatorIndex,
     operatorName,
-  });
+  };
+
+  if (meta.kind !== undefined) entry.kind = meta.kind;
+  if (meta.inputValueIds !== undefined) entry.inputValueIds = meta.inputValueIds;
+
+  ITERATOR_META.set(iterator, entry);
 }
 
 /**
@@ -162,7 +180,13 @@ export function setIteratorMeta(
 export function getIteratorMeta(
   iterator: AsyncIterator<any>
 ):
-  | { valueId: string; operatorIndex: number; operatorName: string }
+  | {
+      valueId: string;
+      operatorIndex: number;
+      operatorName: string;
+      kind?: IteratorMetaKind;
+      inputValueIds?: string[];
+    }
   | undefined {
   return ITERATOR_META.get(iterator);
 }

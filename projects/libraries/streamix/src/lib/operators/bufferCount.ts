@@ -1,4 +1,4 @@
-import { DONE, type MaybePromise, NEXT, type Operator, createOperator, isPromiseLike } from "../abstractions";
+import { DONE, type MaybePromise, NEXT, type Operator, createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta } from "../abstractions";
 
 /**
  * Buffers a fixed number of values from the source stream and emits them as arrays,
@@ -26,11 +26,12 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
       return resolvedBufferSize;
     };
 
-    return {
+    const iterator: AsyncIterator<any> = {
       next: async () => {
         if (completed) return DONE;
 
         const buffer: IteratorResult<T>[] = [];
+        const metaByIndex: ({ valueId: string; operatorIndex: number; operatorName: string } | undefined)[] = [];
 
         const sizeOrPromise = resolveBufferSize();
         const size = isPromiseLike(sizeOrPromise) ? await sizeOrPromise : sizeOrPromise;
@@ -42,6 +43,20 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
 
             // Flush any remaining buffered values
             if (buffer.length > 0) {
+              const metas = metaByIndex.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
+              const lastMeta = metas[metas.length - 1];
+              if (lastMeta) {
+                setIteratorMeta(
+                  iterator as any,
+                  {
+                    valueId: lastMeta.valueId,
+                    kind: "collapse",
+                    inputValueIds: metas.map((m) => m.valueId),
+                  },
+                  lastMeta.operatorIndex,
+                  lastMeta.operatorName
+                );
+              }
               return NEXT(buffer.map((r) => r.value!));
             }
 
@@ -49,9 +64,26 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
           }
 
           buffer.push(result);
+          metaByIndex.push(getIteratorMeta(source));
         }
 
+        const metas = metaByIndex.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
+        const lastMeta = metas[metas.length - 1];
+        if (lastMeta) {
+          setIteratorMeta(
+            iterator as any,
+            {
+              valueId: lastMeta.valueId,
+              kind: "collapse",
+              inputValueIds: metas.map((m) => m.valueId),
+            },
+            lastMeta.operatorIndex,
+            lastMeta.operatorName
+          );
+        }
         return NEXT(buffer.map((r) => r.value!));
       },
     };
+
+    return iterator;
   });

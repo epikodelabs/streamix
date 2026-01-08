@@ -27,10 +27,16 @@ export function buffer<T = any>(period: MaybePromise<number>) {
       if (buffer.length === 0) return;
 
       const targetMeta = buffer[buffer.length - 1]?.meta;
+      const inputValueIds = buffer.map((e) => e.meta?.valueId).filter(Boolean) as string[];
+
       if (targetMeta) {
         setIteratorMeta(
           outputIterator,
-          { valueId: targetMeta.valueId },
+          {
+            valueId: targetMeta.valueId,
+            kind: "collapse",
+            inputValueIds: inputValueIds.length > 0 ? inputValueIds : undefined,
+          },
           targetMeta.operatorIndex,
           targetMeta.operatorName
         );
