@@ -38,7 +38,8 @@ export type ValueState =
   | "collapsed"
   | "expanded"
   | "errored"
-  | "delivered";
+  | "delivered"
+  | "dropped";
 
 /** Outcome of a single operator step. */
 export type OperatorOutcome =
@@ -96,7 +97,7 @@ export interface ValueTrace {
   droppedReason?: {
     operatorIndex: number;
     operatorName: string;
-    reason: "filtered" | "collapsed" | "errored";
+    reason: "filtered" | "collapsed" | "errored" | "late";
     error?: Error;
   };
   /** Collapse linkage for values that were merged into a later value. */
@@ -191,6 +192,13 @@ export function generateValueId(): string {
   return `val_${++getIds().value}`;
 }
 
+type SubscriptionState = "active" | "completed" | "errored";
+
+type DropReason = "filtered" | "collapsed" | "errored" | "late";
+
+export const isAfterComplete = (state?: SubscriptionState) =>
+  state === "completed";
+
 /* ============================================================================
  * TRACER IMPLEMENTATION
  * ========================================================================== */
@@ -201,176 +209,297 @@ export function generateValueId(): string {
  * Note: expanded child traces are still stored, but they do not emit `delivered`
  * events (to avoid over-counting a single logical input producing many outputs).
  */
-export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer {
-  const traces = new Map<string, ValueTrace>();
-  const subscribers: TracerEventHandlers[] = [];
-  const subscriptionSubscribers = new Map<string, Set<TracerSubscriptionEventHandlers>>();
-  const { maxTraces = 10000, onTraceUpdate } = options;
+export function createValueTracer(
+  options: ValueTracerOptions = {}
+): ValueTracer {
+  const {
+    maxTraces = 10_000,
+    onTraceUpdate,
+  } = options;
 
-  const notify = (event: keyof TracerEventHandlers, trace: ValueTrace): void => {
+  /** Insertion order = chronological order */
+  const traces = new Map<string, ValueTrace>();
+
+  const subscribers: TracerEventHandlers[] = [];
+  const subscriptionSubscribers = new Map<
+    string,
+    Set<TracerSubscriptionEventHandlers>
+  >();
+  const subscriptionStates = new Map<string, SubscriptionState>();
+
+  const isCompleted = (subId: string) =>
+    subscriptionStates.get(subId) === "completed";
+
+  const notify = (event: keyof TracerEventHandlers, trace: ValueTrace) => {
     subscribers.forEach((s) => s[event]?.(trace));
-    subscriptionSubscribers.get(trace.subscriptionId)?.forEach((s) => s[event]?.(trace));
+    subscriptionSubscribers.get(trace.subscriptionId)?.forEach((s) =>
+      s[event]?.(trace)
+    );
+  };
+
+  const retain = (valueId: string, trace: ValueTrace) => {
+    traces.set(valueId, trace);
+    if (traces.size > maxTraces) {
+      const oldestKey = traces.keys().next().value;
+      if (oldestKey !== undefined) traces.delete(oldestKey);
+    }
+  };
+
+  const drop = (
+    trace: ValueTrace,
+    operatorIndex: number,
+    operatorName: string,
+    reason: DropReason,
+    error?: Error
+  ) => {
+    trace.state = "dropped" as ValueState;
+    trace.droppedReason = {
+      operatorIndex,
+      operatorName,
+      reason: reason as any,
+      error,
+    };
+    notify("dropped", trace);
+    onTraceUpdate?.(trace);
   };
 
   return {
-    subscribe: (h) => {
+    /* ------------------------------------------------------------ */
+    /* subscriptions                                                 */
+    /* ------------------------------------------------------------ */
+
+    subscribe(h) {
       subscribers.push(h);
-      return () => { const i = subscribers.indexOf(h); if (i > -1) subscribers.splice(i, 1); };
-    },
-    observeSubscription: (id, h) => {
-      if (!subscriptionSubscribers.has(id)) subscriptionSubscribers.set(id, new Set());
-      subscriptionSubscribers.get(id)!.add(h);
-      return () => { subscriptionSubscribers.get(id)?.delete(h); };
-    },
-    completeSubscription: (id) => {
-      subscriptionSubscribers.get(id)?.forEach((s) => s.complete?.());
-      subscriptionSubscribers.delete(id);
-    },
-    startTrace: (valueId, streamId, streamName, subscriptionId, value) => {
-      const trace: ValueTrace = {
-        valueId, streamId, streamName, subscriptionId,
-        emittedAt: Date.now(), state: "emitted", sourceValue: value,
-        operatorSteps: [], operatorDurations: new Map(),
+      return () => {
+        const i = subscribers.indexOf(h);
+        if (i >= 0) subscribers.splice(i, 1);
       };
-      traces.set(valueId, trace);
-      if (traces.size > maxTraces) traces.delete(traces.keys().next().value!);
-      onTraceUpdate?.(trace);
-      return trace;
     },
-    createExpandedTrace: (baseValueId, operatorIndex, operatorName, expandedValue) => {
-      const base = traces.get(baseValueId);
-      const valueId = generateValueId();
-      const now = Date.now();
 
-      if (base) {
-        const baseStep = [...base.operatorSteps].reverse().find((step) => step.operatorIndex === operatorIndex);
-        if (baseStep && baseStep.outcome !== "expanded") {
-          baseStep.outcome = "expanded";
-          if (base.state === "transformed") {
-            base.state = "expanded";
-          }
-          onTraceUpdate?.(base, baseStep);
-        }
+    observeSubscription(id, h) {
+      if (!subscriptionSubscribers.has(id)) {
+        subscriptionSubscribers.set(id, new Set());
       }
+      subscriptionSubscribers.get(id)!.add(h);
+      return () => subscriptionSubscribers.get(id)?.delete(h);
+    },
 
-      const operatorSteps = base ? base.operatorSteps.map((s) => ({ ...s })) : [];
-      const clonedStep = [...operatorSteps].reverse().find((step) => step.operatorIndex === operatorIndex);
+    completeSubscription(subId) {
+      if (subscriptionStates.get(subId) === "completed") return;
+      subscriptionStates.set(subId, "completed");
+      subscriptionSubscribers.get(subId)?.forEach((s) => s.complete?.());
+      subscriptionSubscribers.delete(subId);
+    },
 
-      if (clonedStep) {
-        clonedStep.exitedAt = clonedStep.exitedAt ?? now;
-        clonedStep.outcome = "expanded";
-        clonedStep.outputValue = expandedValue;
-      } else {
-        operatorSteps.push({
-          operatorIndex,
-          operatorName,
-          enteredAt: now,
-          exitedAt: now,
-          outcome: "expanded",
-          inputValue: base?.finalValue,
-          outputValue: expandedValue,
-        });
+    /* ------------------------------------------------------------ */
+    /* trace creation                                                */
+    /* ------------------------------------------------------------ */
+
+    startTrace(valueId, streamId, streamName, subId, value) {
+      if (!subscriptionStates.has(subId)) {
+        subscriptionStates.set(subId, "active");
       }
 
       const trace: ValueTrace = {
         valueId,
-        parentTraceId: baseValueId,
-        streamId: base?.streamId ?? "unknown",
-        streamName: base?.streamName,
-        subscriptionId: base?.subscriptionId ?? "unknown",
-        emittedAt: base?.emittedAt ?? now,
-        state: "expanded",
-        sourceValue: base ? base.sourceValue : expandedValue,
-        finalValue: expandedValue,
-        operatorSteps,
+        streamId,
+        streamName,
+        subscriptionId: subId,
+        emittedAt: Date.now(),
+        state: "emitted",
+        sourceValue: value,
+        operatorSteps: [],
         operatorDurations: new Map(),
-        expandedFrom: { operatorIndex, operatorName, baseValueId },
       };
-      traces.set(valueId, trace);
+
+      retain(valueId, trace);
+
+      if (isCompleted(subId)) {
+        drop(trace, -1, "subscription", "late");
+      } else {
+        onTraceUpdate?.(trace);
+      }
+
+      return trace;
+    },
+
+    createExpandedTrace(baseId, opIdx, opName, value) {
+      const base = traces.get(baseId);
+      const valueId = generateValueId();
+
+      if (!base || isCompleted(base.subscriptionId)) {
+        const trace: ValueTrace = {
+          valueId,
+          parentTraceId: baseId,
+          streamId: base?.streamId ?? "unknown",
+          streamName: base?.streamName,
+          subscriptionId: base?.subscriptionId ?? "unknown",
+          emittedAt: Date.now(),
+          state: "dropped" as ValueState,
+          sourceValue: value,
+          operatorSteps: [],
+          operatorDurations: new Map(),
+          droppedReason: {
+            operatorIndex: opIdx,
+            operatorName: opName,
+            reason: "late",
+          },
+        };
+        retain(valueId, trace);
+        notify("dropped", trace);
+        onTraceUpdate?.(trace);
+        return valueId;
+      }
+
+      const trace: ValueTrace = {
+        valueId,
+        parentTraceId: baseId,
+        streamId: base.streamId,
+        streamName: base.streamName,
+        subscriptionId: base.subscriptionId,
+        emittedAt: base.emittedAt,
+        state: "expanded",
+        sourceValue: base.sourceValue,
+        finalValue: value,
+        operatorSteps: base.operatorSteps.map((s) => ({ ...s })),
+        operatorDurations: new Map(),
+        expandedFrom: {
+          operatorIndex: opIdx,
+          operatorName: opName,
+          baseValueId: baseId,
+        },
+      };
+
+      retain(valueId, trace);
       onTraceUpdate?.(trace);
       return valueId;
     },
-    enterOperator: (vId, idx, name, val) => {
+
+    /* ------------------------------------------------------------ */
+    /* operator lifecycle                                            */
+    /* ------------------------------------------------------------ */
+
+    enterOperator(vId, idx, name, val) {
       const t = traces.get(vId);
-      if (!t) return;
-      const step: OperatorStep = { operatorIndex: idx, operatorName: name, enteredAt: Date.now(), inputValue: val };
-      t.operatorSteps.push(step);
-      onTraceUpdate?.(t, step);
+      if (!t || isCompleted(t.subscriptionId)) return;
+
+      t.operatorSteps.push({
+        operatorIndex: idx,
+        operatorName: name,
+        enteredAt: Date.now(),
+        inputValue: val,
+      });
+
+      onTraceUpdate?.(t);
     },
-    exitOperator: (vId, idx, val, filtered = false, outcome = "transformed") => {
+
+    exitOperator(vId, idx, val, filtered = false, outcome = "transformed") {
       const t = traces.get(vId);
       if (!t) return null;
-      const s = t.operatorSteps.find((step) => step.operatorIndex === idx && !step.exitedAt);
-      
-      // If no step found, return null (for test "exitOperator returns null when no operator step exists")
-      if (!s) return null;
-      
-      s.exitedAt = Date.now();
-      s.outcome = filtered ? "filtered" : outcome;
-      s.outputValue = val;
-      
-      t.state = filtered ? "filtered" : (outcome as ValueState);
-      t.finalValue = val;
-      
-      if (t.operatorDurations) {
-        t.operatorDurations.set(s.operatorName, s.exitedAt - s.enteredAt);
+
+      if (isCompleted(t.subscriptionId)) {
+        drop(
+          t,
+          idx,
+          t.operatorSteps.find((s) => s.operatorIndex === idx)?.operatorName ??
+            `op${idx}`,
+          "late"
+        );
+        return null;
       }
-      
+
+      const step = t.operatorSteps.find(
+        (s) => s.operatorIndex === idx && !s.exitedAt
+      );
+      if (!step) return null;
+
+      step.exitedAt = Date.now();
+      step.outcome = filtered ? "filtered" : (outcome as any);
+      step.outputValue = val;
+
+      t.finalValue = val;
+      t.state = filtered ? "filtered" : (outcome as ValueState);
+
       if (filtered) {
-        t.droppedReason = { operatorIndex: idx, operatorName: s.operatorName, reason: "filtered" };
+        t.droppedReason = {
+          operatorIndex: idx,
+          operatorName: step.operatorName,
+          reason: "filtered",
+        };
         notify("filtered", t);
       }
-      onTraceUpdate?.(t, s);
+
+      onTraceUpdate?.(t, step);
       return vId;
     },
-    collapseValue: (vId, idx, name, targetId, val) => {
+
+    collapseValue(vId, idx, name, targetId, _) {
       const t = traces.get(vId);
       if (!t) return;
-      const s = t.operatorSteps.find((step) => step.operatorIndex === idx && !step.exitedAt);
-      if (s) { 
-        s.exitedAt = Date.now(); 
-        s.outcome = "collapsed"; 
-        s.outputValue = val; 
+
+      if (isCompleted(t.subscriptionId)) {
+        drop(t, idx, name, "late");
+        return;
       }
+
       t.state = "collapsed";
-      t.collapsedInto = { operatorIndex: idx, operatorName: name, targetValueId: targetId };
-      t.droppedReason = { operatorIndex: idx, operatorName: name, reason: "collapsed" };
+      t.collapsedInto = {
+        operatorIndex: idx,
+        operatorName: name,
+        targetValueId: targetId,
+      };
+      t.droppedReason = {
+        operatorIndex: idx,
+        operatorName: name,
+        reason: "collapsed",
+      };
+
       notify("collapsed", t);
       onTraceUpdate?.(t);
     },
-    errorInOperator: (vId, idx, err) => {
+
+    errorInOperator(vId, idx, err) {
       const t = traces.get(vId);
       if (!t) return;
-      const s = t.operatorSteps.find((step) => step.operatorIndex === idx && !step.exitedAt);
-      if (s) { 
-        s.exitedAt = Date.now(); 
-        s.outcome = "errored"; 
-        s.error = err; 
-      }
+
       t.state = "errored";
-      t.droppedReason = { 
-        operatorIndex: idx, 
-        operatorName: s?.operatorName ?? "unknown", 
-        reason: "errored", 
-        error: err 
+      t.droppedReason = {
+        operatorIndex: idx,
+        operatorName:
+          t.operatorSteps.find((s) => s.operatorIndex === idx)?.operatorName ??
+          `op${idx}`,
+        reason: "errored",
+        error: err,
       };
+
       notify("dropped", t);
       onTraceUpdate?.(t);
     },
-    markDelivered: (vId) => {
+
+    /* ------------------------------------------------------------ */
+    /* delivery                                                      */
+    /* ------------------------------------------------------------ */
+
+    markDelivered(vId) {
       const t = traces.get(vId);
-      if (!t) return;
+      if (!t || isCompleted(t.subscriptionId)) return;
+
       t.state = "delivered";
       t.deliveredAt = Date.now();
       t.totalDuration = t.deliveredAt - t.emittedAt;
-      if (!t.expandedFrom) {
-        notify("delivered", t);
-      }
+      notify("delivered", t);
       onTraceUpdate?.(t);
     },
+
+    /* ------------------------------------------------------------ */
+
     getAllTraces: () => Array.from(traces.values()),
     getStats: () => ({ total: traces.size }),
-    clear: () => { traces.clear(); subscriptionSubscribers.clear(); }
+    clear() {
+      traces.clear();
+      subscriptionSubscribers.clear();
+      subscriptionStates.clear();
+    },
   };
 }
 
@@ -381,124 +510,150 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
  * still reports `emitted`, `filtered`, `collapsed`, `errored`, and `delivered`
  * events so UIs can show high-level lifecycle information.
  */
-export function createTerminalTracer(options: ValueTracerOptions = {}): ValueTracer {
+export function createTerminalTracer(
+  options: ValueTracerOptions = {}
+): ValueTracer {
+  const {
+    maxTraces = 10_000,
+    onTraceUpdate,
+  } = options;
+
   const traces = new Map<string, ValueTrace>();
   const subscribers: TracerEventHandlers[] = [];
-  const subscriptionSubscribers = new Map<string, Set<TracerSubscriptionEventHandlers>>();
+  const subscriptionSubscribers = new Map<
+    string,
+    Set<TracerSubscriptionEventHandlers>
+  >();
+  const subscriptionStates = new Map<string, SubscriptionState>();
 
-  const { maxTraces = 10000, onTraceUpdate } = options;
+  const isCompleted = (id: string) =>
+    subscriptionStates.get(id) === "completed";
 
-  const notify = (event: keyof TracerEventHandlers, trace: ValueTrace): void => {
+  const notify = (event: keyof TracerEventHandlers, trace: ValueTrace) => {
     subscribers.forEach((s) => s[event]?.(trace));
-    subscriptionSubscribers.get(trace.subscriptionId)?.forEach((s) => s[event]?.(trace));
+    subscriptionSubscribers.get(trace.subscriptionId)?.forEach((s) =>
+      s[event]?.(trace)
+    );
+  };
+
+  const retain = (id: string, trace: ValueTrace) => {
+    traces.set(id, trace);
+    if (traces.size > maxTraces) {
+      const oldestKey = traces.keys().next().value;
+      if (oldestKey !== undefined) traces.delete(oldestKey);
+    }
   };
 
   return {
-    subscribe: (h) => {
+    subscribe(h) {
       subscribers.push(h);
-      return () => { const i = subscribers.indexOf(h); if (i > -1) subscribers.splice(i, 1); };
+      return () => subscribers.splice(subscribers.indexOf(h), 1);
     },
-    observeSubscription: (id, h) => {
-      if (!subscriptionSubscribers.has(id)) subscriptionSubscribers.set(id, new Set());
+
+    observeSubscription(id, h) {
+      if (!subscriptionSubscribers.has(id)) {
+        subscriptionSubscribers.set(id, new Set());
+      }
       subscriptionSubscribers.get(id)!.add(h);
-      return () => { subscriptionSubscribers.get(id)?.delete(h); };
+      return () => subscriptionSubscribers.get(id)?.delete(h);
     },
-    completeSubscription: (id) => {
+
+    completeSubscription(id) {
+      subscriptionStates.set(id, "completed");
       subscriptionSubscribers.get(id)?.forEach((s) => s.complete?.());
       subscriptionSubscribers.delete(id);
     },
-    startTrace: (valueId, streamId, streamName, subscriptionId, value) => {
+
+    startTrace(valueId, streamId, streamName, subId, value) {
+      if (!subscriptionStates.has(subId)) {
+        subscriptionStates.set(subId, "active");
+      }
+
+      const dropped = isCompleted(subId);
+
       const trace: ValueTrace = {
         valueId,
         streamId,
         streamName,
-        subscriptionId,
+        subscriptionId: subId,
         emittedAt: Date.now(),
-        state: "emitted",
+        state: dropped ? ("dropped" as ValueState) : "emitted",
         sourceValue: value,
         operatorSteps: [],
         operatorDurations: new Map(),
       };
-      traces.set(valueId, trace);
-      if (traces.size > maxTraces) traces.delete(traces.keys().next().value!);
+
+      if (dropped) {
+        trace.droppedReason = {
+          operatorIndex: -1,
+          operatorName: "subscription",
+          reason: "late",
+        };
+        notify("dropped", trace);
+      }
+
+      retain(valueId, trace);
       onTraceUpdate?.(trace);
       return trace;
     },
-    createExpandedTrace: (baseValueId, operatorIndex, operatorName, expandedValue) => {
-      const base = traces.get(baseValueId);
+
+    createExpandedTrace(baseId, idx, name, value) {
+      const base = traces.get(baseId);
       const valueId = generateValueId();
-      const now = Date.now();
+      const subId = base?.subscriptionId ?? "unknown";
+      const dropped = isCompleted(subId);
+
       const trace: ValueTrace = {
         valueId,
-        parentTraceId: baseValueId,
+        parentTraceId: baseId,
         streamId: base?.streamId ?? "unknown",
         streamName: base?.streamName,
-        subscriptionId: base?.subscriptionId ?? "unknown",
-        emittedAt: base?.emittedAt ?? now,
-        state: "expanded",
-        sourceValue: base?.sourceValue ?? expandedValue,
-        finalValue: expandedValue,
+        subscriptionId: subId,
+        emittedAt: Date.now(),
+        state: dropped ? ("dropped" as ValueState) : "expanded",
+        sourceValue: value,
         operatorSteps: [],
         operatorDurations: new Map(),
-        expandedFrom: { operatorIndex, operatorName, baseValueId },
       };
-      traces.set(valueId, trace);
+
+      if (dropped) {
+        trace.droppedReason = {
+          operatorIndex: idx,
+          operatorName: name,
+          reason: "late",
+        };
+        notify("dropped", trace);
+      }
+
+      retain(valueId, trace);
       onTraceUpdate?.(trace);
       return valueId;
     },
-    enterOperator: () => {},
-    exitOperator: (vId, idx, val, filtered = false, outcome = "transformed") => {
-      const t = traces.get(vId);
-      if (!t) return null;
 
-      t.finalValue = val;
+    enterOperator() {},
+    exitOperator() { return null; },
+    collapseValue() {},
+    errorInOperator() {},
 
-      if (filtered) {
-        t.state = "filtered";
-        t.droppedReason = { operatorIndex: idx, operatorName: `op${idx}`, reason: "filtered" };
-        notify("filtered", t);
-        onTraceUpdate?.(t);
-        return vId;
-      }
-
-      t.state = outcome as ValueState;
-      onTraceUpdate?.(t);
-      return vId;
-    },
-    collapseValue: (vId, idx, name, targetId, outputValue) => {
+    markDelivered(vId) {
       const t = traces.get(vId);
-      if (!t) return;
-      t.state = "collapsed";
-      t.finalValue = outputValue;
-      t.collapsedInto = { operatorIndex: idx, operatorName: name, targetValueId: targetId };
-      t.droppedReason = { operatorIndex: idx, operatorName: name, reason: "collapsed" };
-      notify("collapsed", t);
-      onTraceUpdate?.(t);
-    },
-    errorInOperator: (vId, idx, err) => {
-      const t = traces.get(vId);
-      if (!t) return;
-      t.state = "errored";
-      t.droppedReason = { operatorIndex: idx, operatorName: `op${idx}`, reason: "errored", error: err };
-      notify("dropped", t);
-      onTraceUpdate?.(t);
-    },
-    markDelivered: (vId) => {
-      const t = traces.get(vId);
-      if (!t) return;
+      if (!t || isCompleted(t.subscriptionId)) return;
       t.state = "delivered";
-      t.deliveredAt = Date.now();
-      t.totalDuration = t.deliveredAt - t.emittedAt;
-      if (!t.expandedFrom) {
-        notify("delivered", t);
-      }
+      notify("delivered", t);
       onTraceUpdate?.(t);
     },
+
     getAllTraces: () => Array.from(traces.values()),
     getStats: () => ({ total: traces.size }),
-    clear: () => { traces.clear(); subscriptionSubscribers.clear(); }
+    clear() {
+      traces.clear();
+      subscriptionSubscribers.clear();
+      subscriptionStates.clear();
+    },
   };
 }
+
+
 
 /* ============================================================================
  * RUNTIME INTERNALS
