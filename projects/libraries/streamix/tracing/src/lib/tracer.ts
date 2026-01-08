@@ -1,17 +1,14 @@
 /**
- * Streamix tracing system (formal state machine, normalized outcomes).
+ * Streamix tracing utilities.
  *
- * Key points:
- * - OperatorOutcome is the ONLY per-step outcome concept (no StepOutcome).
- * - Lifecycle is modeled by TraceStatus + TerminalReason (orthogonal to outcomes).
- * - A pure reducer enforces transitions and prevents invalid states.
- * - Backward-compatible public API: ValueTracer, ValueTrace, ValueState.
- * - Preserves test expectations:
- *   - createExpandedTrace works when base is missing (state === "expanded", operatorSteps[0] exists)
- *   - expanded children do NOT emit delivered events in createValueTracer
- *   - terminal tracer has operatorSteps empty but still emits filtered/collapsed/dropped
+ * This module provides a lightweight tracing layer for Streamix pipelines. It records how values
+ * move through operators and exposes that information as `ValueTrace` snapshots and event callbacks.
+ *
+ * Common use cases:
+ * - Debugging operator chains and value lifecycles
+ * - Collecting diagnostics/metrics in development tools
+ * - Inspecting delivered vs terminal (filtered/collapsed/dropped) outcomes
  */
-
 import {
   createOperator,
   getIteratorMeta,
@@ -20,9 +17,14 @@ import {
 } from "@epikodelabs/streamix";
 
 /* ============================================================================ */
-/* PUBLIC TYPES (backward compatible) */
+/* PUBLIC TYPES */
 /* ============================================================================ */
 
+/**
+ * High-level lifecycle state of a traced value.
+ *
+ * This is the public view (`ValueTrace.state`) derived from internal status + terminal reason.
+ */
 export type ValueState =
   | "emitted"
   | "transformed"
@@ -33,7 +35,11 @@ export type ValueState =
   | "delivered"
   | "dropped";
 
-/** Single per-step outcome concept (as requested). */
+/**
+ * The outcome recorded for a single operator pass over an input value.
+ *
+ * This is used to annotate `OperatorStep`s and to decide whether a trace should become terminal.
+ */
 export type OperatorOutcome =
   | "transformed"
   | "filtered"
@@ -41,6 +47,7 @@ export type OperatorOutcome =
   | "collapsed"
   | "errored";
 
+/** One operator invocation within a value's lifecycle. */
 export interface OperatorStep {
   operatorIndex: number;
   operatorName: string;
@@ -52,8 +59,24 @@ export interface OperatorStep {
   error?: Error;
 }
 
+/**
+ * Why a value's trace ended without being delivered downstream.
+ *
+ * - `filtered`: explicitly removed by some operator
+ * - `collapsed`: merged into another value (see `collapsedInto`)
+ * - `errored`: operator threw while processing the value
+ * - `late`: trace started/continued after the subscription was completed
+ */
 export type TerminalReason = "filtered" | "collapsed" | "errored" | "late";
 
+/**
+ * Public snapshot of a value's trace at a moment in time.
+ *
+ * Notes:
+ * - `state` is a derived view over the internal state machine.
+ * - `operatorSteps` may be empty when using `createTerminalTracer()`.
+ * - `operatorDurations` aggregates time per operator key `${operatorIndex}:${operatorName}`.
+ */
 export interface ValueTrace {
   valueId: string;
   parentTraceId?: string;
@@ -62,84 +85,101 @@ export interface ValueTrace {
   subscriptionId: string;
   emittedAt: number;
   deliveredAt?: number;
-
   state: ValueState;
-
   sourceValue: any;
   finalValue?: any;
-
   operatorSteps: OperatorStep[];
-
   droppedReason?: {
     operatorIndex: number;
     operatorName: string;
     reason: TerminalReason;
     error?: Error;
   };
-
   collapsedInto?: {
     operatorIndex: number;
     operatorName: string;
     targetValueId: string;
   };
-
   expandedFrom?: {
     operatorIndex: number;
     operatorName: string;
     baseValueId: string;
   };
-
   totalDuration?: number;
   operatorDurations: Map<string, number>;
 }
 
 export type TracerEventHandlers = {
+  /** Invoked when a trace is marked as delivered. */
   delivered?: (trace: ValueTrace) => void;
+  /** Invoked when a trace becomes terminal due to filtering. */
   filtered?: (trace: ValueTrace) => void;
+  /** Invoked when a trace becomes terminal due to collapsing. */
   collapsed?: (trace: ValueTrace) => void;
+  /** Invoked when a trace becomes terminal for reasons other than filtering/collapsing. */
   dropped?: (trace: ValueTrace) => void;
 };
 
 export type TracerSubscriptionEventHandlers = TracerEventHandlers & {
+  /** Invoked when a subscription is completed (via `final` iterator completion/return/throw). */
   complete?: () => void;
 };
 
+/** Configuration for tracer creation. */
 export interface ValueTracerOptions {
+  /** Maximum number of traces kept in memory (LRU eviction). */
   maxTraces?: number;
+  /** Reserved for future diagnostics; currently unused. */
   devMode?: boolean;
+  /**
+   * Called on every trace update. When `includeSteps` is enabled, `step` is the last updated operator step.
+   * This callback is also invoked for terminal/delivered transitions (in addition to event handlers).
+   */
   onTraceUpdate?: (trace: ValueTrace, step?: OperatorStep) => void;
 }
 
+/**
+ * Tracer interface used by the runtime hooks to record value lifecycles.
+ *
+ * Most users should:
+ * - Create a tracer (`createValueTracer` or `createTerminalTracer`)
+ * - Install it globally via `enableTracing()`
+ * - Subscribe to updates via `subscribe()` / `observeSubscription()`
+ */
 export interface ValueTracer {
+  /** Subscribes to value-level events across all subscriptions. Returns an unsubscribe function. */
   subscribe: (handlers: TracerEventHandlers) => () => void;
+  /** Subscribes to value-level events for a specific subscription id. Returns an unsubscribe function. */
   observeSubscription: (subId: string, handlers: TracerSubscriptionEventHandlers) => () => void;
+  /** Marks the subscription as completed and notifies any per-subscription observers. */
   completeSubscription: (subId: string) => void;
-
+  /** Begins a new trace record for a value id. */
   startTrace: (vId: string, sId: string, sName: string | undefined, subId: string, val: any) => ValueTrace;
+  /** Creates a new trace id that is treated as expanded from `baseId`. */
   createExpandedTrace: (baseId: string, opIdx: number, opName: string, val: any) => string;
-
+  /** Records entering an operator (only when step recording is enabled). */
   enterOperator: (vId: string, opIdx: number, opName: string, val: any) => void;
-
-  exitOperator: (
-    vId: string,
-    opIdx: number,
-    val: any,
-    filtered?: boolean,
-    outcome?: OperatorOutcome
-  ) => string | null;
-
+  /**
+   * Records an operator exit and (optionally) marks the trace terminal when filtered/errored.
+   * Returns the value id on success, or `null` when no update was applied.
+   */
+  exitOperator: (vId: string, opIdx: number, val: any, filtered?: boolean, outcome?: OperatorOutcome) => string | null;
+  /** Marks a value as collapsed into another value id and terminalizes it as `collapsed`. */
   collapseValue: (vId: string, opIdx: number, opName: string, targetId: string, val?: any) => void;
+  /** Marks a value as errored in an operator and terminalizes it as `errored`. */
   errorInOperator: (vId: string, opIdx: number, error: Error) => void;
-
+  /** Marks a value trace as delivered (unless already terminal). */
   markDelivered: (vId: string) => void;
-
+  /** Returns the current in-memory traces (subject to LRU eviction). */
   getAllTraces: () => ValueTrace[];
+  /** Returns basic tracer stats. */
   getStats: () => { total: number };
+  /** Clears all in-memory traces and subscription observers. */
   clear: () => void;
 }
 
 /* ============================================================================ */
-/* RUNTIME WRAPPER HELPERS (public) */
+/* RUNTIME WRAPPER HELPERS */
 /* ============================================================================ */
 
 const tracedValueBrand = Symbol("__streamix_traced__");
@@ -151,81 +191,77 @@ export interface TracedWrapper<T> {
   meta: { valueId: string; streamId: string; subscriptionId: string };
 }
 
+/** Wraps a value with tracing metadata for internal runtime propagation. */
 export const wrapTracedValue = <T>(value: T, meta: TracedWrapper<T>["meta"]): TracedWrapper<T> =>
   ({ [tracedValueBrand]: true, value, meta });
 
-export const unwrapTracedValue = <T>(v: any): T => (v && v[tracedValueBrand]) ? v.value : v;
+/** Unwraps a traced wrapper back to the raw value (or returns the input if it's not traced). */
+export const unwrapTracedValue = <T>(v: any): T => (v?.[tracedValueBrand]) ? v.value : v;
 
-export const isTracedValue = (v: any): v is TracedWrapper<any> => !!(v && v[tracedValueBrand]);
+/** Type guard for `TracedWrapper`. */
+export const isTracedValue = (v: any): v is TracedWrapper<any> => Boolean(v?.[tracedValueBrand]);
 
+/** Extracts the `valueId` from a traced wrapper (if present). */
 export const getValueId = (v: any): string | undefined => isTracedValue(v) ? v.meta.valueId : undefined;
 
+/** Returns the currently enabled global tracer, if any. */
 export const getGlobalTracer = (): ValueTracer | null => (globalThis as any)[TRACER_KEY] ?? null;
 
+/** Installs the tracer into `globalThis` so the Streamix runtime hooks can record traces. */
 export function enableTracing(t: ValueTracer): void { (globalThis as any)[TRACER_KEY] = t; }
 
+/** Disables tracing by clearing the global tracer reference. */
 export function disableTracing(): void { (globalThis as any)[TRACER_KEY] = null; }
 
 /* ============================================================================ */
-/* IDS */
+/* ID GENERATION */
 /* ============================================================================ */
 
 const IDS_KEY = "__STREAMIX_TRACE_IDS__";
-function getIds(): { value: number } {
+const getIds = (): { value: number } => {
   const g = globalThis as any;
-  if (!g[IDS_KEY]) g[IDS_KEY] = { value: 0 };
-  return g[IDS_KEY];
-}
+  return g[IDS_KEY] ??= { value: 0 };
+};
 
-export function generateValueId(): string {
-  return `val_${++getIds().value}`;
-}
+/** Generates a unique value id for the current JS realm (stored on `globalThis`). */
+export const generateValueId = (): string => `val_${++getIds().value}`;
 
 /* ============================================================================ */
-/* NORMALIZED INTERNAL MODEL + STATE MACHINE */
+/* INTERNAL MODEL & STATE MACHINE */
 /* ============================================================================ */
 
 type TraceStatus = "active" | "delivered" | "terminal";
 type SubscriptionState = "active" | "completed";
 
 interface TraceRecord {
-  valueId: string;
-
-  streamId: string;
-  streamName?: string;
-  subscriptionId: string;
-
-  emittedAt: number;
-  deliveredAt?: number;
-
-  status: TraceStatus;
-  terminalReason?: TerminalReason;
-
-  sourceValue: any;
-  finalValue?: any;
-
-  parentTraceId?: string;
-
-  expandedFrom?: {
+  readonly valueId: string;
+  readonly streamId: string;
+  readonly streamName?: string;
+  readonly subscriptionId: string;
+  readonly emittedAt: number;
+  readonly deliveredAt?: number;
+  readonly status: TraceStatus;
+  readonly terminalReason?: TerminalReason;
+  readonly sourceValue: any;
+  readonly finalValue?: any;
+  readonly parentTraceId?: string;
+  readonly expandedFrom?: {
     operatorIndex: number;
     operatorName: string;
     baseValueId: string;
   };
-
-  collapsedInto?: {
+  readonly collapsedInto?: {
     operatorIndex: number;
     operatorName: string;
     targetValueId: string;
   };
-
-  droppedReason?: {
+  readonly droppedReason?: {
     operatorIndex: number;
     operatorName: string;
     reason: TerminalReason;
     error?: Error;
   };
-
-  operatorSteps: Array<{
+  readonly operatorSteps: ReadonlyArray<{
     operatorIndex: number;
     operatorName: string;
     enteredAt: number;
@@ -235,47 +271,54 @@ interface TraceRecord {
     outputValue?: any;
     error?: Error;
   }>;
-
-  operatorDurations: Map<string, number>;
-  totalDuration?: number;
+  readonly operatorDurations: ReadonlyMap<string, number>;
+  readonly totalDuration?: number;
 }
 
 type TraceEvent =
   | { type: "ENTER_OP"; opIndex: number; opName: string; input: any; now: number }
-  | { type: "EXIT_OP"; opIndex: number; output: any; outcome: OperatorOutcome; now: number; error?: Error }
+  | { type: "EXIT_OP"; opIndex: number; opName: string; output: any; outcome: OperatorOutcome; now: number; error?: Error }
   | { type: "TERMINALIZE"; reason: TerminalReason; opIndex: number; opName: string; now: number; error?: Error }
   | { type: "DELIVER"; now: number };
 
 type EmitEvent = "delivered" | "filtered" | "collapsed" | "dropped" | "trace";
 
-function assertInvariants(t: TraceRecord, policy: { deliverExpandedChildren: boolean }) {
-  if (t.status === "terminal" && !t.terminalReason) {
-    throw new Error("Invariant: terminal trace must have terminalReason");
-  }
-  if (t.status !== "terminal" && t.terminalReason) {
-    throw new Error("Invariant: non-terminal trace must not have terminalReason");
-  }
-  if (t.status === "delivered" && !t.deliveredAt) {
-    throw new Error("Invariant: delivered trace must have deliveredAt");
-  }
-  if (!policy.deliverExpandedChildren && t.parentTraceId && t.status === "delivered") {
-    throw new Error("Invariant: expanded children must not be delivered (policy)");
-  }
+interface TracerPolicy {
+  readonly deliverExpandedChildren: boolean;
 }
 
-function reduceTrace(
-  trace: TraceRecord,
-  event: TraceEvent,
-  policy: { deliverExpandedChildren: boolean }
-): { trace: TraceRecord; emit: EmitEvent[]; lastStep?: TraceRecord["operatorSteps"][number] } {
-  let t = trace;
-  const emit: EmitEvent[] = [];
+interface ReduceResult {
+  readonly trace: TraceRecord;
+  readonly emit: ReadonlyArray<EmitEvent>;
+  readonly lastStep?: TraceRecord["operatorSteps"][number];
+}
 
-  const isTerminal = t.status === "terminal" || t.status === "delivered";
+/* ============================================================================ */
+/* STATE MACHINE IMPLEMENTATION */
+/* ============================================================================ */
+
+const assertInvariants = (t: TraceRecord, policy: TracerPolicy): void => {
+  if (t.status === "terminal" && !t.terminalReason) {
+    throw new Error(`Invariant violation: terminal trace ${t.valueId} missing terminalReason`);
+  }
+  if (t.status !== "terminal" && t.terminalReason) {
+    throw new Error(`Invariant violation: non-terminal trace ${t.valueId} has terminalReason`);
+  }
+  if (t.status === "delivered" && !t.deliveredAt) {
+    throw new Error(`Invariant violation: delivered trace ${t.valueId} missing deliveredAt`);
+  }
+  if (!policy.deliverExpandedChildren && t.parentTraceId && t.status === "delivered") {
+    throw new Error(`Invariant violation: expanded child ${t.valueId} marked as delivered`);
+  }
+};
+
+const reduceTrace = (trace: TraceRecord, event: TraceEvent, policy: TracerPolicy): ReduceResult => {
+  const isTerminal = trace.status === "terminal" || trace.status === "delivered";
+  const emit: EmitEvent[] = [];
 
   switch (event.type) {
     case "ENTER_OP": {
-      if (isTerminal) return { trace: t, emit };
+      if (isTerminal) return { trace, emit };
 
       const step = {
         operatorIndex: event.opIndex,
@@ -284,54 +327,111 @@ function reduceTrace(
         inputValue: event.input,
       };
 
-      t = { ...t, operatorSteps: [...t.operatorSteps, step] };
-      emit.push("trace");
+      const updated: TraceRecord = {
+        ...trace,
+        operatorSteps: [...trace.operatorSteps, step],
+      };
 
-      assertInvariants(t, policy);
-      return { trace: t, emit, lastStep: step };
+      emit.push("trace");
+      assertInvariants(updated, policy);
+      return { trace: updated, emit, lastStep: step };
     }
 
     case "EXIT_OP": {
-      if (isTerminal) return { trace: t, emit };
+      if (isTerminal) return { trace, emit };
 
-      const stepIndex = t.operatorSteps.findIndex(
+      const stepIndex = trace.operatorSteps.findIndex(
         (s) => s.operatorIndex === event.opIndex && s.exitedAt == null
       );
-      if (stepIndex === -1) return { trace: t, emit };
 
-      const prev = t.operatorSteps[stepIndex];
-      const updated = {
-        ...prev,
+      // When operator step recording is disabled, we may not have an open step to match against.
+      // Still record the final value and allow terminalization for filtered/errored outcomes.
+      if (stepIndex === -1) {
+        const baseUpdate: TraceRecord = {
+          ...trace,
+          finalValue: event.output,
+        };
+
+        let updated: TraceRecord = baseUpdate;
+        if (event.outcome === "filtered") {
+          updated = {
+            ...baseUpdate,
+            status: "terminal",
+            terminalReason: "filtered",
+            droppedReason: {
+              operatorIndex: event.opIndex,
+              operatorName: event.opName,
+              reason: "filtered",
+            },
+          };
+          emit.push("filtered");
+        } else if (event.outcome === "errored") {
+          updated = {
+            ...baseUpdate,
+            status: "terminal",
+            terminalReason: "errored",
+            droppedReason: {
+              operatorIndex: event.opIndex,
+              operatorName: event.opName,
+              reason: "errored",
+              error: event.error,
+            },
+          };
+          emit.push("dropped");
+        }
+
+        emit.push("trace");
+        assertInvariants(updated, policy);
+        return { trace: updated, emit };
+      }
+
+      const prevStep = trace.operatorSteps[stepIndex];
+      const updatedStep = {
+        ...prevStep,
         exitedAt: event.now,
         outcome: event.outcome,
         outputValue: event.output,
         error: event.error,
       };
 
-      const operatorSteps = t.operatorSteps.slice();
-      operatorSteps[stepIndex] = updated;
+      const operatorSteps = [...trace.operatorSteps];
+      operatorSteps[stepIndex] = updatedStep;
 
-      t = { ...t, operatorSteps, finalValue: event.output };
+      // Calculate duration
+      const duration = event.now - prevStep.enteredAt;
+      const durKey = `${event.opIndex}:${prevStep.operatorName}`;
+      const operatorDurations = new Map(trace.operatorDurations);
+      operatorDurations.set(durKey, (operatorDurations.get(durKey) ?? 0) + duration);
 
-      // Terminalize this trace on filtered/errored when it applies to THIS trace.
+      const baseUpdate: TraceRecord = {
+        ...trace,
+        operatorSteps,
+        finalValue: event.output,
+        operatorDurations,
+      };
+
+      // Auto-terminalize on filtered/errored
+      let updated: TraceRecord;
       if (event.outcome === "filtered") {
-        t = { ...t, status: "terminal", terminalReason: "filtered" };
+        updated = { ...baseUpdate, status: "terminal", terminalReason: "filtered" };
         emit.push("filtered");
       } else if (event.outcome === "errored") {
-        t = { ...t, status: "terminal", terminalReason: "errored" };
+        updated = { ...baseUpdate, status: "terminal", terminalReason: "errored" };
         emit.push("dropped");
+      } else {
+        updated = baseUpdate;
       }
 
       emit.push("trace");
-      assertInvariants(t, policy);
-      return { trace: t, emit, lastStep: updated };
+      assertInvariants(updated, policy);
+      return { trace: updated, emit, lastStep: updatedStep };
     }
 
     case "TERMINALIZE": {
-      if (isTerminal) return { trace: t, emit };
+      if (isTerminal) return { trace, emit };
 
-      t = {
-        ...t,
+      const updated: TraceRecord = {
+        ...trace,
         status: "terminal",
         terminalReason: event.reason,
         droppedReason: {
@@ -342,157 +442,188 @@ function reduceTrace(
         },
       };
 
-      if (event.reason === "filtered") emit.push("filtered");
-      else if (event.reason === "collapsed") emit.push("collapsed");
-      else emit.push("dropped");
+      switch (event.reason) {
+        case "filtered":
+          emit.push("filtered");
+          break;
+        case "collapsed":
+          emit.push("collapsed");
+          break;
+        default:
+          emit.push("dropped");
+      }
 
       emit.push("trace");
-      assertInvariants(t, policy);
-      return { trace: t, emit };
+      assertInvariants(updated, policy);
+      return { trace: updated, emit };
     }
 
     case "DELIVER": {
-      if (isTerminal) return { trace: t, emit };
+      if (isTerminal) return { trace, emit };
 
-      // policy: do not deliver expanded children (still trace them)
-      if (t.parentTraceId && !policy.deliverExpandedChildren) {
+      // Policy: skip delivery for expanded children
+      if (trace.parentTraceId && !policy.deliverExpandedChildren) {
         emit.push("trace");
-        assertInvariants(t, policy);
-        return { trace: t, emit };
+        assertInvariants(trace, policy);
+        return { trace, emit };
       }
 
-      t = {
-        ...t,
+      const updated: TraceRecord = {
+        ...trace,
         status: "delivered",
         deliveredAt: event.now,
-        totalDuration: event.now - t.emittedAt,
+        totalDuration: event.now - trace.emittedAt,
       };
 
       emit.push("delivered", "trace");
-      assertInvariants(t, policy);
-      return { trace: t, emit };
+      assertInvariants(updated, policy);
+      return { trace: updated, emit };
+    }
+
+    default: {
+      const _exhaustive: never = event;
+      throw new Error(`Unhandled event type: ${(_exhaustive as any).type}`);
     }
   }
-}
+};
 
-function toValueState(t: TraceRecord): ValueState {
+const toValueState = (t: TraceRecord): ValueState => {
   if (t.status === "delivered") return "delivered";
 
   if (t.status === "terminal") {
-    switch (t.terminalReason) {
-      case "filtered":
-        return "filtered";
-      case "collapsed":
-        return "collapsed";
-      case "errored":
-        return "errored";
-      case "late":
-        return "dropped";
+    switch (t.terminalReason!) {
+      case "filtered": return "filtered";
+      case "collapsed": return "collapsed";
+      case "errored": return "errored";
+      case "late": return "dropped";
+      default: return "dropped";
     }
   }
 
-  // active
+  // Active state
   if (t.parentTraceId) return "expanded";
   if (t.operatorSteps.length > 0) return "transformed";
   return "emitted";
-}
+};
 
-function exportTrace(t: TraceRecord): ValueTrace {
-  return {
-    valueId: t.valueId,
-    parentTraceId: t.parentTraceId,
+const exportTrace = (t: TraceRecord): ValueTrace => ({
+  valueId: t.valueId,
+  parentTraceId: t.parentTraceId,
+  streamId: t.streamId,
+  streamName: t.streamName,
+  subscriptionId: t.subscriptionId,
+  emittedAt: t.emittedAt,
+  deliveredAt: t.deliveredAt,
+  state: toValueState(t),
+  sourceValue: t.sourceValue,
+  finalValue: t.finalValue,
+  operatorSteps: t.operatorSteps.map((s) => ({ ...s })),
+  droppedReason: t.droppedReason,
+  collapsedInto: t.collapsedInto,
+  expandedFrom: t.expandedFrom,
+  totalDuration: t.totalDuration,
+  operatorDurations: new Map(t.operatorDurations),
+});
 
-    streamId: t.streamId,
-    streamName: t.streamName,
-    subscriptionId: t.subscriptionId,
-
-    emittedAt: t.emittedAt,
-    deliveredAt: t.deliveredAt,
-
-    state: toValueState(t),
-
-    sourceValue: t.sourceValue,
-    finalValue: t.finalValue,
-
-    operatorSteps: t.operatorSteps.map((s) => ({
-      operatorIndex: s.operatorIndex,
-      operatorName: s.operatorName,
-      enteredAt: s.enteredAt,
-      exitedAt: s.exitedAt,
-      outcome: s.outcome,
-      inputValue: s.inputValue,
-      outputValue: s.outputValue,
-      error: s.error,
-    })),
-
-    droppedReason: t.droppedReason,
-    collapsedInto: t.collapsedInto,
-    expandedFrom: t.expandedFrom,
-
-    totalDuration: t.totalDuration,
-    operatorDurations: t.operatorDurations,
-  };
-}
-
-function defaultOpName(opIdx: number) {
-  return `op${opIdx}`;
-}
+const defaultOpName = (opIdx: number): string => `op${opIdx}`;
 
 /* ============================================================================ */
-/* VALUE TRACER (full steps) */
+/* TRACER FACTORY */
 /* ============================================================================ */
 
-export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer {
+interface TracerConfig {
+  readonly includeSteps: boolean;
+  readonly policy: TracerPolicy;
+}
+
+const createTracerImpl = (
+  config: TracerConfig,
+  options: ValueTracerOptions = {}
+): ValueTracer => {
   const { maxTraces = 10_000, onTraceUpdate } = options;
+  const { includeSteps, policy } = config;
 
   const traces = new Map<string, TraceRecord>();
-
   const subscribers: TracerEventHandlers[] = [];
   const subscriptionSubscribers = new Map<string, Set<TracerSubscriptionEventHandlers>>();
   const subscriptionStates = new Map<string, SubscriptionState>();
 
-  // Policy required by your tests: do not count delivered for expanded children
-  const policy = { deliverExpandedChildren: false };
-
-  const isCompleted = (subId: string) => subscriptionStates.get(subId) === "completed";
-
-  const notify = (event: keyof TracerEventHandlers, trace: ValueTrace) => {
-    for (const s of subscribers) s[event]?.(trace);
-    subscriptionSubscribers.get(trace.subscriptionId)?.forEach((s) => s[event]?.(trace));
-  };
-
-  const retain = (valueId: string, trace: TraceRecord) => {
+  // LRU eviction for memory management
+  const retainTrace = (valueId: string, trace: TraceRecord): void => {
     traces.set(valueId, trace);
     if (traces.size > maxTraces) {
-      const oldestKey = traces.keys().next().value;
-      if (oldestKey !== undefined) traces.delete(oldestKey);
+      const firstKey = traces.keys().next().value;
+      if (firstKey) traces.delete(firstKey);
+    }
+  };
+
+  const isCompleted = (subId: string): boolean =>
+    subscriptionStates.get(subId) === "completed";
+
+  const notify = (event: keyof TracerEventHandlers, trace: ValueTrace): void => {
+    for (const sub of subscribers) {
+      sub[event]?.(trace);
+    }
+    const subHandlers = subscriptionSubscribers.get(trace.subscriptionId);
+    if (subHandlers) {
+      for (const handler of subHandlers) {
+        handler[event]?.(trace);
+      }
+    }
+  };
+
+  const processEvents = (
+    valueId: string,
+    result: ReduceResult
+  ): void => {
+    retainTrace(valueId, result.trace);
+
+    const exported = includeSteps
+      ? exportTrace(result.trace)
+      : { ...exportTrace(result.trace), operatorSteps: [] };
+
+    for (const event of result.emit) {
+      if (event === "trace") {
+        onTraceUpdate?.(exported, result.lastStep);
+      } else {
+        notify(event, exported);
+      }
     }
   };
 
   return {
-    subscribe(h) {
-      subscribers.push(h);
+    subscribe(handlers) {
+      subscribers.push(handlers);
       return () => {
-        const i = subscribers.indexOf(h);
-        if (i >= 0) subscribers.splice(i, 1);
+        const idx = subscribers.indexOf(handlers);
+        if (idx >= 0) subscribers.splice(idx, 1);
       };
     },
 
-    observeSubscription(id, h) {
-      if (!subscriptionSubscribers.has(id)) subscriptionSubscribers.set(id, new Set());
-      subscriptionSubscribers.get(id)!.add(h);
-      return () => subscriptionSubscribers.get(id)?.delete(h);
+    observeSubscription(subId, handlers) {
+      if (!subscriptionSubscribers.has(subId)) {
+        subscriptionSubscribers.set(subId, new Set());
+      }
+      subscriptionSubscribers.get(subId)!.add(handlers);
+      return () => subscriptionSubscribers.get(subId)?.delete(handlers);
     },
 
     completeSubscription(subId) {
       if (subscriptionStates.get(subId) === "completed") return;
       subscriptionStates.set(subId, "completed");
-      subscriptionSubscribers.get(subId)?.forEach((s) => s.complete?.());
-      subscriptionSubscribers.delete(subId);
+      const handlers = subscriptionSubscribers.get(subId);
+      if (handlers) {
+        for (const h of handlers) {
+          h.complete?.();
+        }
+        subscriptionSubscribers.delete(subId);
+      }
     },
 
     startTrace(valueId, streamId, streamName, subId, value) {
-      if (!subscriptionStates.has(subId)) subscriptionStates.set(subId, "active");
+      if (!subscriptionStates.has(subId)) {
+        subscriptionStates.set(subId, "active");
+      }
 
       const now = Date.now();
       const record: TraceRecord = {
@@ -507,479 +638,194 @@ export function createValueTracer(options: ValueTracerOptions = {}): ValueTracer
         operatorDurations: new Map(),
       };
 
-      retain(valueId, record);
+      retainTrace(valueId, record);
 
-      // If subscription already completed, mark as late drop
       if (isCompleted(subId)) {
-        const { trace: next, emit } = reduceTrace(
+        const result = reduceTrace(
           record,
           { type: "TERMINALIZE", reason: "late", opIndex: -1, opName: "subscription", now },
           policy
         );
-        retain(valueId, next);
-        const ex = exportTrace(next);
-        if (emit.includes("dropped")) notify("dropped", ex);
-        onTraceUpdate?.(ex);
-        return ex;
+        processEvents(valueId, result);
+        return includeSteps ? exportTrace(result.trace) : { ...exportTrace(result.trace), operatorSteps: [] };
       }
 
-      const exported = exportTrace(record);
+      const exported = includeSteps ? exportTrace(record) : { ...exportTrace(record), operatorSteps: [] };
       onTraceUpdate?.(exported);
       return exported;
     },
 
-    /**
-     * Must work even if base trace is missing:
-     * - creates an expanded trace with operatorSteps length 1
-     * - streamId/subId = "unknown" when base missing
-     * - state === "expanded" via parentTraceId
-     */
     createExpandedTrace(baseId, opIdx, opName, value) {
       const now = Date.now();
       const base = traces.get(baseId);
       const valueId = generateValueId();
 
-      if (!base) {
-        const synthetic: TraceRecord = {
-          valueId,
-          parentTraceId: baseId,
-          streamId: "unknown",
-          streamName: undefined,
-          subscriptionId: "unknown",
-          emittedAt: now,
-          status: "active",
-          sourceValue: value,
-          finalValue: value,
-          operatorSteps: [
-            {
-              operatorIndex: opIdx,
-              operatorName: opName,
-              enteredAt: now,
-              exitedAt: now,
-              outcome: "expanded",
-              inputValue: undefined,
-              outputValue: value,
-            },
-          ],
-          operatorDurations: new Map(),
-          expandedFrom: { operatorIndex: opIdx, operatorName: opName, baseValueId: baseId },
-        };
+      const record: TraceRecord = base
+        ? {
+            valueId,
+            parentTraceId: baseId,
+            streamId: base.streamId,
+            streamName: base.streamName,
+            subscriptionId: base.subscriptionId,
+            emittedAt: base.emittedAt,
+            status: "active",
+            sourceValue: base.sourceValue,
+            finalValue: value,
+            operatorSteps: includeSteps ? base.operatorSteps.map((s) => ({ ...s })) : [],
+            operatorDurations: new Map(),
+            expandedFrom: { operatorIndex: opIdx, operatorName: opName, baseValueId: baseId },
+          }
+        : {
+            valueId,
+            parentTraceId: baseId,
+            streamId: "unknown",
+            subscriptionId: "unknown",
+            emittedAt: now,
+            status: "active",
+            sourceValue: value,
+            finalValue: value,
+            operatorSteps: includeSteps
+              ? [
+                  {
+                    operatorIndex: opIdx,
+                    operatorName: opName,
+                    enteredAt: now,
+                    exitedAt: now,
+                    outcome: "expanded" as const,
+                    inputValue: undefined,
+                    outputValue: value,
+                  },
+                ]
+              : [],
+            operatorDurations: new Map(),
+            expandedFrom: { operatorIndex: opIdx, operatorName: opName, baseValueId: baseId },
+          };
 
-        retain(valueId, synthetic);
-        onTraceUpdate?.(exportTrace(synthetic));
-        return valueId;
-      }
-
-      // For real child: copy steps (for UI continuity), attach lineage.
-      const child: TraceRecord = {
-        valueId,
-        parentTraceId: baseId,
-        streamId: base.streamId,
-        streamName: base.streamName,
-        subscriptionId: base.subscriptionId,
-        emittedAt: base.emittedAt,
-        status: "active",
-        sourceValue: base.sourceValue,
-        finalValue: value,
-        operatorSteps: base.operatorSteps.map((s) => ({ ...s })),
-        operatorDurations: new Map(),
-        expandedFrom: { operatorIndex: opIdx, operatorName: opName, baseValueId: baseId },
-      };
-
-      retain(valueId, child);
-      onTraceUpdate?.(exportTrace(child));
+      retainTrace(valueId, record);
+      const exported = includeSteps ? exportTrace(record) : { ...exportTrace(record), operatorSteps: [] };
+      onTraceUpdate?.(exported);
       return valueId;
     },
 
     enterOperator(vId, opIdx, opName, val) {
-      const t = traces.get(vId);
-      if (!t) return;
-      if (isCompleted(t.subscriptionId)) return;
-      if (t.status !== "active") return;
+      if (!includeSteps) return;
 
-      const { trace: next, emit, lastStep } = reduceTrace(
-        t,
+      const trace = traces.get(vId);
+      if (!trace || trace.status !== "active" || isCompleted(trace.subscriptionId)) return;
+
+      const result = reduceTrace(
+        trace,
         { type: "ENTER_OP", opIndex: opIdx, opName, input: val, now: Date.now() },
         policy
       );
 
-      retain(vId, next);
-
-      if (emit.includes("trace")) {
-        const ex = exportTrace(next);
-        onTraceUpdate?.(ex, lastStep
-          ? {
-              operatorIndex: lastStep.operatorIndex,
-              operatorName: lastStep.operatorName,
-              enteredAt: lastStep.enteredAt,
-              exitedAt: lastStep.exitedAt,
-              outcome: lastStep.outcome,
-              inputValue: lastStep.inputValue,
-              outputValue: lastStep.outputValue,
-              error: lastStep.error,
-            }
-          : undefined);
-      }
+      processEvents(vId, result);
     },
 
     exitOperator(vId, opIdx, val, filtered = false, outcome = "transformed") {
-      const t = traces.get(vId);
-      if (!t) return null;
+      const trace = traces.get(vId);
+      if (!trace) return null;
 
-      const hasOpenStep = t.operatorSteps.some(
+      const opName =
+        trace.operatorSteps.find((s) => s.operatorIndex === opIdx && s.exitedAt == null)?.operatorName ??
+        defaultOpName(opIdx);
+
+      const hasOpenStep = trace.operatorSteps.some(
         (s) => s.operatorIndex === opIdx && s.exitedAt == null
       );
-      if (!hasOpenStep) {
-        return null;
-      }
 
-      if (isCompleted(t.subscriptionId)) {
-        // late drop
-        const now = Date.now();
-        const { trace: next, emit } = reduceTrace(
-          t,
-          { type: "TERMINALIZE", reason: "late", opIndex: opIdx, opName: defaultOpName(opIdx), now },
+      if (!hasOpenStep && includeSteps) return null;
+
+      if (isCompleted(trace.subscriptionId)) {
+        const result = reduceTrace(
+          trace,
+          { type: "TERMINALIZE", reason: "late", opIndex: opIdx, opName: defaultOpName(opIdx), now: Date.now() },
           policy
         );
-        retain(vId, next);
-        const ex = exportTrace(next);
-        if (emit.includes("dropped")) notify("dropped", ex);
-        onTraceUpdate?.(ex);
+        processEvents(vId, result);
         return null;
       }
 
-      const out: OperatorOutcome = filtered ? "filtered" : outcome;
+      const finalOutcome: OperatorOutcome = filtered ? "filtered" : outcome;
 
-      const { trace: next, emit, lastStep } = reduceTrace(
-        t,
-        { type: "EXIT_OP", opIndex: opIdx, output: val, outcome: out, now: Date.now() },
+      const result = reduceTrace(
+        trace,
+        { type: "EXIT_OP", opIndex: opIdx, opName, output: val, outcome: finalOutcome, now: Date.now() },
         policy
       );
 
-      // For filtered, ensure droppedReason is populated in legacy shape (tests inspect reason)
-      if (next.status === "terminal" && next.terminalReason === "filtered") {
-        next.droppedReason = {
-          operatorIndex: opIdx,
-          operatorName: lastStep?.operatorName ?? defaultOpName(opIdx),
-          reason: "filtered",
+      // Ensure droppedReason for filtered outcomes
+      let finalTrace = result.trace;
+      if (finalTrace.status === "terminal" && finalTrace.terminalReason === "filtered" && !finalTrace.droppedReason) {
+        finalTrace = {
+          ...finalTrace,
+          droppedReason: {
+            operatorIndex: opIdx,
+            operatorName: result.lastStep?.operatorName ?? defaultOpName(opIdx),
+            reason: "filtered",
+          },
         };
       }
 
-      // For collapsed/expanded/transformed we don't terminalize here (except filtered/errored),
-      // because collapse of non-anchors is handled via collapseValue(), expansion via createExpandedTrace().
-
-      retain(vId, next);
-
-      const ex = exportTrace(next);
-
-      if (emit.includes("filtered")) notify("filtered", ex);
-      if (emit.includes("collapsed")) notify("collapsed", ex);
-      if (emit.includes("dropped")) notify("dropped", ex);
-
-      onTraceUpdate?.(ex, lastStep
-        ? {
-            operatorIndex: lastStep.operatorIndex,
-            operatorName: lastStep.operatorName,
-            enteredAt: lastStep.enteredAt,
-            exitedAt: lastStep.exitedAt,
-            outcome: lastStep.outcome,
-            inputValue: lastStep.inputValue,
-            outputValue: lastStep.outputValue,
-            error: lastStep.error,
-          }
-        : undefined);
-
-      return vId;
-    },
-
-    collapseValue(vId, opIdx, opName, targetId, _val) {
-      const t = traces.get(vId);
-      if (!t) return;
-
-      if (isCompleted(t.subscriptionId)) {
-        // late drop
-        const now = Date.now();
-        const { trace: next, emit } = reduceTrace(
-          t,
-          { type: "TERMINALIZE", reason: "late", opIndex: opIdx, opName, now },
-          policy
-        );
-        retain(vId, next);
-        const ex = exportTrace(next);
-        if (emit.includes("dropped")) notify("dropped", ex);
-        onTraceUpdate?.(ex);
-        return;
-      }
-
-      // Terminalize as collapsed
-      t.collapsedInto = {
-        operatorIndex: opIdx,
-        operatorName: opName,
-        targetValueId: targetId,
-      };
-
-      const { trace: next, emit } = reduceTrace(
-        t,
-        { type: "TERMINALIZE", reason: "collapsed", opIndex: opIdx, opName, now: Date.now() },
-        policy
-      );
-
-      retain(vId, next);
-      const ex = exportTrace(next);
-
-      if (emit.includes("collapsed")) notify("collapsed", ex);
-      onTraceUpdate?.(ex);
-    },
-
-    errorInOperator(vId, opIdx, error) {
-      const t = traces.get(vId);
-      if (!t) return;
-
-      // try to stamp operatorName from step if available
-      const opName =
-        t.operatorSteps.find((s) => s.operatorIndex === opIdx)?.operatorName ?? defaultOpName(opIdx);
-
-      const { trace: next, emit } = reduceTrace(
-        t,
-        { type: "TERMINALIZE", reason: "errored", opIndex: opIdx, opName, now: Date.now(), error },
-        policy
-      );
-
-      // keep legacy state "errored" but notifications treat it as dropped
-      retain(vId, next);
-
-      const ex = exportTrace(next);
-      if (emit.includes("dropped")) notify("dropped", ex);
-      onTraceUpdate?.(ex);
-    },
-
-    markDelivered(vId) {
-      const t = traces.get(vId);
-      if (!t) return;
-      if (isCompleted(t.subscriptionId)) return;
-
-      const { trace: next, emit } = reduceTrace(t, { type: "DELIVER", now: Date.now() }, policy);
-      retain(vId, next);
-
-      const ex = exportTrace(next);
-      if (emit.includes("delivered")) notify("delivered", ex);
-      onTraceUpdate?.(ex);
-    },
-
-    getAllTraces() {
-      return Array.from(traces.values()).map(exportTrace);
-    },
-
-    getStats() {
-      return { total: traces.size };
-    },
-
-    clear() {
-      traces.clear();
-      subscriptionSubscribers.clear();
-      subscriptionStates.clear();
-    },
-  };
-}
-
-/* ============================================================================ */
-/* TERMINAL TRACER (no operatorSteps, but terminal state/events must be emitted) */
-/* ============================================================================ */
-
-export function createTerminalTracer(options: ValueTracerOptions = {}): ValueTracer {
-  const { maxTraces = 10_000, onTraceUpdate } = options;
-
-  const traces = new Map<string, TraceRecord>();
-
-  const subscribers: TracerEventHandlers[] = [];
-  const subscriptionSubscribers = new Map<string, Set<TracerSubscriptionEventHandlers>>();
-  const subscriptionStates = new Map<string, SubscriptionState>();
-
-  // Terminal tracer: still do not deliver expanded children (safe default)
-  const policy = { deliverExpandedChildren: false };
-
-  const isCompleted = (subId: string) => subscriptionStates.get(subId) === "completed";
-
-  const notify = (event: keyof TracerEventHandlers, trace: ValueTrace) => {
-    for (const s of subscribers) s[event]?.(trace);
-    subscriptionSubscribers.get(trace.subscriptionId)?.forEach((s) => s[event]?.(trace));
-  };
-
-  const retain = (valueId: string, trace: TraceRecord) => {
-    traces.set(valueId, trace);
-    if (traces.size > maxTraces) {
-      const oldestKey = traces.keys().next().value;
-      if (oldestKey !== undefined) traces.delete(oldestKey);
-    }
-  };
-
-  const exportTerminalTrace = (t: TraceRecord): ValueTrace => {
-    // Ensure empty operatorSteps (this is what your tests assert)
-    const ex = exportTrace(t);
-    ex.operatorSteps = [];
-    return ex;
-  };
-
-  return {
-    subscribe(h) {
-      subscribers.push(h);
-      return () => {
-        const i = subscribers.indexOf(h);
-        if (i >= 0) subscribers.splice(i, 1);
-      };
-    },
-
-    observeSubscription(id, h) {
-      if (!subscriptionSubscribers.has(id)) subscriptionSubscribers.set(id, new Set());
-      subscriptionSubscribers.get(id)!.add(h);
-      return () => subscriptionSubscribers.get(id)?.delete(h);
-    },
-
-    completeSubscription(subId) {
-      subscriptionStates.set(subId, "completed");
-      subscriptionSubscribers.get(subId)?.forEach((s) => s.complete?.());
-      subscriptionSubscribers.delete(subId);
-    },
-
-    startTrace(valueId, streamId, streamName, subId, value) {
-      if (!subscriptionStates.has(subId)) subscriptionStates.set(subId, "active");
-
-      const now = Date.now();
-
-      const record: TraceRecord = {
-        valueId,
-        streamId,
-        streamName,
-        subscriptionId: subId,
-        emittedAt: now,
-        status: "active",
-        sourceValue: value,
-        operatorSteps: [], // always empty
-        operatorDurations: new Map(),
-      };
-
-      retain(valueId, record);
-
-      if (isCompleted(subId)) {
-        const { trace: next, emit } = reduceTrace(
-          record,
-          { type: "TERMINALIZE", reason: "late", opIndex: -1, opName: "subscription", now },
-          policy
-        );
-        retain(valueId, next);
-        const ex = exportTerminalTrace(next);
-        if (emit.includes("dropped")) notify("dropped", ex);
-        onTraceUpdate?.(ex);
-        return ex;
-      }
-
-      const exported = exportTerminalTrace(record);
-      onTraceUpdate?.(exported);
-      return exported;
-    },
-
-    createExpandedTrace(baseId, opIdx, opName, value) {
-      const now = Date.now();
-      const base = traces.get(baseId);
-      const valueId = generateValueId();
-
-      // Always create trace even if base missing
-      const record: TraceRecord = {
-        valueId,
-        parentTraceId: baseId,
-        streamId: base?.streamId ?? "unknown",
-        streamName: base?.streamName,
-        subscriptionId: base?.subscriptionId ?? "unknown",
-        emittedAt: base?.emittedAt ?? now,
-        status: "active",
-        sourceValue: base?.sourceValue ?? value,
-        finalValue: value,
-        operatorSteps: [], // terminal tracer => empty
-        operatorDurations: new Map(),
-        expandedFrom: { operatorIndex: opIdx, operatorName: opName, baseValueId: baseId },
-      };
-
-      retain(valueId, record);
-      onTraceUpdate?.(exportTerminalTrace(record));
-      return valueId;
-    },
-
-    // terminal tracer does not record operator steps
-    enterOperator() {},
-
-    exitOperator(vId, opIdx, _val, filtered = false) {
-      const t = traces.get(vId);
-      if (!t) return null;
-      if (isCompleted(t.subscriptionId)) return null;
-      if (t.status !== "active") return vId;
-
-      if (filtered) {
-        const { trace: next, emit } = reduceTrace(
-          t,
-          { type: "TERMINALIZE", reason: "filtered", opIndex: opIdx, opName: defaultOpName(opIdx), now: Date.now() },
-          policy
-        );
-        retain(vId, next);
-        const ex = exportTerminalTrace(next);
-        if (emit.includes("filtered")) notify("filtered", ex);
-        onTraceUpdate?.(ex);
-        return vId;
-      }
-
-      // transformed/expanded/collapsed are handled elsewhere; terminal tracer cares about terminal states
+      processEvents(vId, { ...result, trace: finalTrace });
       return vId;
     },
 
     collapseValue(vId, opIdx, opName, targetId) {
-      const t = traces.get(vId);
-      if (!t) return;
-      if (isCompleted(t.subscriptionId)) return;
+      const trace = traces.get(vId);
+      if (!trace || isCompleted(trace.subscriptionId)) {
+        if (trace && isCompleted(trace.subscriptionId)) {
+          const result = reduceTrace(
+            trace,
+            { type: "TERMINALIZE", reason: "late", opIndex: opIdx, opName, now: Date.now() },
+            policy
+          );
+          processEvents(vId, result);
+        }
+        return;
+      }
 
-      t.collapsedInto = { operatorIndex: opIdx, operatorName: opName, targetValueId: targetId };
+      const updatedTrace: TraceRecord = {
+        ...trace,
+        collapsedInto: { operatorIndex: opIdx, operatorName: opName, targetValueId: targetId },
+      };
 
-      const { trace: next, emit } = reduceTrace(
-        t,
+      const result = reduceTrace(
+        updatedTrace,
         { type: "TERMINALIZE", reason: "collapsed", opIndex: opIdx, opName, now: Date.now() },
         policy
       );
 
-      retain(vId, next);
-      const ex = exportTerminalTrace(next);
-      if (emit.includes("collapsed")) notify("collapsed", ex);
-      onTraceUpdate?.(ex);
+      processEvents(vId, result);
     },
 
     errorInOperator(vId, opIdx, error) {
-      const t = traces.get(vId);
-      if (!t) return;
+      const trace = traces.get(vId);
+      if (!trace) return;
 
-      const { trace: next, emit } = reduceTrace(
-        t,
-        { type: "TERMINALIZE", reason: "errored", opIndex: opIdx, opName: defaultOpName(opIdx), now: Date.now(), error },
+      const opName = trace.operatorSteps.find((s) => s.operatorIndex === opIdx)?.operatorName ?? defaultOpName(opIdx);
+
+      const result = reduceTrace(
+        trace,
+        { type: "TERMINALIZE", reason: "errored", opIndex: opIdx, opName, now: Date.now(), error },
         policy
       );
 
-      retain(vId, next);
-      const ex = exportTerminalTrace(next);
-      if (emit.includes("dropped")) notify("dropped", ex);
-      onTraceUpdate?.(ex);
+      processEvents(vId, result);
     },
 
     markDelivered(vId) {
-      const t = traces.get(vId);
-      if (!t) return;
-      if (isCompleted(t.subscriptionId)) return;
+      const trace = traces.get(vId);
+      if (!trace || isCompleted(trace.subscriptionId)) return;
 
-      const { trace: next, emit } = reduceTrace(t, { type: "DELIVER", now: Date.now() }, policy);
-      retain(vId, next);
-
-      const ex = exportTerminalTrace(next);
-      if (emit.includes("delivered")) notify("delivered", ex);
-      onTraceUpdate?.(ex);
+      const result = reduceTrace(trace, { type: "DELIVER", now: Date.now() }, policy);
+      processEvents(vId, result);
     },
 
     getAllTraces() {
-      return Array.from(traces.values()).map(exportTerminalTrace);
+      return Array.from(traces.values()).map((t) =>
+        includeSteps ? exportTrace(t) : { ...exportTrace(t), operatorSteps: [] }
+      );
     },
 
     getStats() {
@@ -992,7 +838,41 @@ export function createTerminalTracer(options: ValueTracerOptions = {}): ValueTra
       subscriptionStates.clear();
     },
   };
-}
+};
+
+/* ============================================================================ */
+/* PUBLIC FACTORY FUNCTIONS */
+/* ============================================================================ */
+
+/**
+ * Creates a full-fidelity tracer intended for development/inspection.
+ *
+ * - Records operator steps (`operatorSteps`) and durations (`operatorDurations`).
+ * - Exports step data to `onTraceUpdate` and `getAllTraces`.
+ */
+export const createValueTracer = (options?: ValueTracerOptions): ValueTracer =>
+  createTracerImpl(
+    {
+      includeSteps: true,
+      policy: { deliverExpandedChildren: false },
+    },
+    options
+  );
+
+/**
+ * Creates a tracer intended for production/low-overhead usage.
+ *
+ * Differences vs `createValueTracer()`:
+ * - Does not retain `operatorSteps` (they are exported as an empty array).
+ */
+export const createTerminalTracer = (options?: ValueTracerOptions): ValueTracer =>
+  createTracerImpl(
+    {
+      includeSteps: false,
+      policy: { deliverExpandedChildren: false },
+    },
+    options
+  );
 
 /* ============================================================================ */
 /* RUNTIME HOOKS */
@@ -1005,10 +885,6 @@ registerRuntimeHooks({
 
     return {
       source: {
-        /**
-         * Wrap source emissions into TracedWrapper values and start traces.
-         * If inside inner stream, reuse parentValueId as base.
-         */
         async next() {
           const r = await source.next();
           if (r.done) return r;
@@ -1049,9 +925,9 @@ registerRuntimeHooks({
           let activeRequestBatch: TracedWrapper<any>[] | null = null;
           const outputCountByBaseKey = new Map<string, number>();
 
-          const removeFromQueue = (valueId: string) => {
+          const removeFromQueue = (valueId: string): void => {
             const idx = inputQueue.findIndex((w) => w.meta.valueId === valueId);
-            if (idx > -1) inputQueue.splice(idx, 1);
+            if (idx >= 0) inputQueue.splice(idx, 1);
           };
 
           const rawSource: AsyncIterator<any> = {
@@ -1069,7 +945,6 @@ registerRuntimeHooks({
               activeRequestBatch?.push(wrapped);
 
               setIteratorMeta(rawSource, wrapped.meta, i, opName);
-
               tracer.enterOperator(wrapped.meta.valueId, i, opName, wrapped.value);
 
               return { done: false, value: wrapped.value };
@@ -1094,6 +969,7 @@ registerRuntimeHooks({
                 }
 
                 if (out.done) {
+                  // Mark all pending values as filtered
                   while (inputQueue.length > 0) {
                     const wrapped = inputQueue.shift()!;
                     tracer.exitOperator(wrapped.meta.valueId, i, wrapped.value, true);
@@ -1106,42 +982,39 @@ registerRuntimeHooks({
                   setIteratorMeta(this as any, { valueId: outputMeta.valueId }, outputMeta.operatorIndex, outputMeta.operatorName);
                 }
 
-                // Collapse: array output from multiple sequential inputs (strict batch-size rule)
-                if (Array.isArray(out.value) && requestBatch.length > 1) {
-                  const batchSize = out.value.length;
-                  if (batchSize > 0 && requestBatch.length === batchSize) {
-                    const batch = requestBatch;
-                    const target = batch[batch.length - 1];
+                // Array collapse: multiple inputs → array output
+                if (Array.isArray(out.value) && requestBatch.length > 1 && out.value.length === requestBatch.length) {
+                  const target = requestBatch[requestBatch.length - 1];
 
-                    for (let j = 0; j < batch.length - 1; j += 1) {
-                      removeFromQueue(batch[j].meta.valueId);
-                      tracer.collapseValue(batch[j].meta.valueId, i, opName, target.meta.valueId, out.value);
-                    }
-
-                    removeFromQueue(target.meta.valueId);
-                    tracer.exitOperator(target.meta.valueId, i, out.value, false, "collapsed");
-                    lastOutputMeta = target.meta;
-                    setIteratorMeta(this as any, target.meta, i, opName);
-
-                    return { done: false, value: wrapTracedValue(out.value, target.meta) };
+                  for (let j = 0; j < requestBatch.length - 1; j++) {
+                    removeFromQueue(requestBatch[j].meta.valueId);
+                    tracer.collapseValue(requestBatch[j].meta.valueId, i, opName, target.meta.valueId, out.value);
                   }
+
+                  removeFromQueue(target.meta.valueId);
+                  tracer.exitOperator(target.meta.valueId, i, out.value, false, "collapsed");
+                  lastOutputMeta = target.meta;
+                  setIteratorMeta(this as any, target.meta, i, opName);
+
+                  return { done: false, value: wrapTracedValue(out.value, target.meta) };
                 }
 
-                // Prefer runtime-provided output valueId when available
+                // Runtime-provided output with expansion/filtering
                 if (outputMeta?.valueId && metaByValueId.has(outputMeta.valueId)) {
                   const baseValueId = outputMeta.valueId as string;
                   const baseMeta = metaByValueId.get(baseValueId)!;
 
-                  // Filter: multiple requests, pass-through output from one of them
+                  // Filter detection: pass-through from one of multiple requests
                   if (requestBatch.length > 1) {
                     const baseRequested = requestBatch.find((w) => w.meta.valueId === baseValueId);
-                    const isPassThrough = baseRequested ? Object.is(out.value, baseRequested.value) : false;
+                    const isPassThrough = baseRequested && Object.is(out.value, baseRequested.value);
 
                     if (isPassThrough) {
-                      for (const requested of requestBatch) {
-                        if (requested.meta.valueId === baseValueId) continue;
-                        removeFromQueue(requested.meta.valueId);
-                        tracer.exitOperator(requested.meta.valueId, i, requested.value, true);
+                      for (const req of requestBatch) {
+                        if (req.meta.valueId !== baseValueId) {
+                          removeFromQueue(req.meta.valueId);
+                          tracer.exitOperator(req.meta.valueId, i, req.value, true);
+                        }
                       }
                     }
                   }
@@ -1152,12 +1025,9 @@ registerRuntimeHooks({
 
                   if (count === 0) {
                     removeFromQueue(baseValueId);
-
                     tracer.exitOperator(baseValueId, i, out.value, false, "expanded");
-
                     lastOutputMeta = baseMeta;
                     setIteratorMeta(this as any, baseMeta, i, opName);
-
                     return { done: false, value: wrapTracedValue(out.value, baseMeta) };
                   }
 
@@ -1166,50 +1036,42 @@ registerRuntimeHooks({
                   return { done: false, value: wrapTracedValue(out.value, { ...baseMeta, valueId: expandedId }) };
                 }
 
-                // Expansion: additional outputs without requesting new input
+                // Expansion: outputs without new input
                 if (requestBatch.length === 0) {
-                  const baseValueId: string | undefined =
-                    outputMeta?.valueId ?? lastOutputMeta?.valueId ?? lastSeenMeta?.valueId ?? undefined;
+                  const baseValueId = outputMeta?.valueId ?? lastOutputMeta?.valueId ?? lastSeenMeta?.valueId;
+                  const baseMeta = baseValueId ? metaByValueId.get(baseValueId) : undefined;
+                  const meta = baseMeta ?? lastOutputMeta ?? lastSeenMeta;
 
-                  const baseMeta =
-                    (baseValueId ? metaByValueId.get(baseValueId) : undefined) ??
-                    lastOutputMeta ??
-                    lastSeenMeta ??
-                    null;
-
-                  if (baseValueId && baseMeta) {
+                  if (baseValueId && meta) {
                     const key = `${baseValueId}:${i}`;
                     const count = outputCountByBaseKey.get(key) ?? 0;
                     outputCountByBaseKey.set(key, count + 1);
 
                     if (count === 0) {
-                      lastOutputMeta = baseMeta;
+                      lastOutputMeta = meta;
                       tracer.exitOperator(baseValueId, i, out.value, false, "expanded");
-                      return { done: false, value: wrapTracedValue(out.value, baseMeta) };
+                      return { done: false, value: wrapTracedValue(out.value, meta) };
                     }
 
                     const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, out.value);
-                    lastOutputMeta = baseMeta;
-                    return { done: false, value: wrapTracedValue(out.value, { ...baseMeta, valueId: expandedId }) };
+                    lastOutputMeta = meta;
+                    return { done: false, value: wrapTracedValue(out.value, { ...meta, valueId: expandedId }) };
                   }
                 }
 
-                // Filter vs collapse: multiple inputs requested before one output
+                // Multiple inputs, one output: filter vs collapse
                 if (requestBatch.length > 1) {
-                  const outputValueId: string =
-                    outputMeta?.valueId ?? requestBatch[requestBatch.length - 1].meta.valueId;
-
-                  const outputEntry =
-                    requestBatch.find((w) => w.meta.valueId === outputValueId) ??
-                    requestBatch[requestBatch.length - 1];
-
+                  const outputValueId = outputMeta?.valueId ?? requestBatch[requestBatch.length - 1].meta.valueId;
+                  const outputEntry = requestBatch.find((w) => w.meta.valueId === outputValueId) ?? requestBatch[requestBatch.length - 1];
                   const isPassThrough = Object.is(out.value, outputEntry.value);
 
                   if (isPassThrough) {
-                    for (const requested of requestBatch) {
-                      if (requested.meta.valueId === outputEntry.meta.valueId) continue;
-                      removeFromQueue(requested.meta.valueId);
-                      tracer.exitOperator(requested.meta.valueId, i, requested.value, true);
+                    // Filter others
+                    for (const req of requestBatch) {
+                      if (req.meta.valueId !== outputEntry.meta.valueId) {
+                        removeFromQueue(req.meta.valueId);
+                        tracer.exitOperator(req.meta.valueId, i, req.value, true);
+                      }
                     }
 
                     removeFromQueue(outputEntry.meta.valueId);
@@ -1218,10 +1080,12 @@ registerRuntimeHooks({
                     return { done: false, value: wrapTracedValue(out.value, outputEntry.meta) };
                   }
 
-                  for (const requested of requestBatch) {
-                    if (requested.meta.valueId === outputEntry.meta.valueId) continue;
-                    removeFromQueue(requested.meta.valueId);
-                    tracer.collapseValue(requested.meta.valueId, i, opName, outputEntry.meta.valueId, out.value);
+                  // Collapse others
+                  for (const req of requestBatch) {
+                    if (req.meta.valueId !== outputEntry.meta.valueId) {
+                      removeFromQueue(req.meta.valueId);
+                      tracer.collapseValue(req.meta.valueId, i, opName, outputEntry.meta.valueId, out.value);
+                    }
                   }
 
                   removeFromQueue(outputEntry.meta.valueId);
@@ -1231,7 +1095,7 @@ registerRuntimeHooks({
                   return { done: false, value: wrapTracedValue(out.value, outputEntry.meta) };
                 }
 
-                // Regular 1:1 transformation
+                // 1:1 transformation
                 if (requestBatch.length === 1) {
                   const wrapped = requestBatch[0];
                   removeFromQueue(wrapped.meta.valueId);
@@ -1240,17 +1104,18 @@ registerRuntimeHooks({
                   return { done: false, value: wrapTracedValue(out.value, wrapped.meta) };
                 }
 
+                // Fallback: use last output meta or pass-through
                 if (lastOutputMeta) {
                   return { done: false, value: wrapTracedValue(out.value, lastOutputMeta) };
                 }
 
                 return { done: false, value: out.value };
-              } catch (e) {
-                // Mark error on first pending value
+              } catch (err) {
+                // Report error on first pending input
                 if (inputQueue.length > 0) {
-                  tracer.errorInOperator(inputQueue[0].meta.valueId, i, e as Error);
+                  tracer.errorInOperator(inputQueue[0].meta.valueId, i, err as Error);
                 }
-                throw e;
+                throw err;
               }
             },
             return: inner.return?.bind(inner),
