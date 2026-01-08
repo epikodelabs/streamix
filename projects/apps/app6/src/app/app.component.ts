@@ -358,6 +358,7 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
       ctx.strokeStyle = accent;
       ctx.lineWidth = 2.5;
       ctx.lineCap = 'round';
+      ctx.setLineDash([]); // Solid line
 
       ctx.beginPath();
       ctx.moveTo(from.x, from.y);
@@ -369,6 +370,65 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
         ctx.bezierCurveTo(midX, from.y, midX, to.y, to.x, to.y);
       }
 
+      ctx.stroke();
+    };
+
+    // Helper to draw dotted half-length line for terminal states
+    const drawDottedHalfLine = (from: Point, to: Point, state: ValueState) => {
+      const accent = STATE_COLORS[state]?.accent ?? STATE_COLORS.emitted.accent;
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.setLineDash([4, 4]); // Dotted line
+
+      // Calculate midpoint for half-length line
+      const midX = from.x + (to.x - from.x) * 0.5;
+      const midY = from.y + (to.y - from.y) * 0.5;
+
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(midX, midY);
+      ctx.stroke();
+
+      ctx.setLineDash([]); // Reset to solid line
+    };
+
+    // Helper to draw terminal symbol (X or other indicator)
+    const drawTerminalSymbol = (x: number, y: number, state: ValueState) => {
+      const accent = STATE_COLORS[state]?.accent ?? STATE_COLORS.emitted.accent;
+      
+      // Draw a larger circle for the terminal symbol background
+      ctx.beginPath();
+      ctx.arc(x, y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = accent;
+      ctx.fill();
+      
+      // Draw white symbol inside based on state
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      
+      if (state === 'filtered') {
+        // X shape for filtered
+        ctx.moveTo(x - 4, y - 4);
+        ctx.lineTo(x + 4, y + 4);
+        ctx.moveTo(x + 4, y - 4);
+        ctx.lineTo(x - 4, y + 4);
+      } else if (state === 'errored') {
+        // ! shape for errored
+        ctx.moveTo(x, y - 4);
+        ctx.lineTo(x, y + 1);
+        ctx.moveTo(x, y + 3);
+        ctx.lineTo(x, y + 3);
+      } else if (state === 'dropped') {
+        // ↓ arrow for dropped
+        ctx.moveTo(x, y - 4);
+        ctx.lineTo(x, y + 2);
+        ctx.moveTo(x - 3, y - 1);
+        ctx.lineTo(x, y + 2);
+        ctx.lineTo(x + 3, y - 1);
+      }
+      
       ctx.stroke();
     };
 
@@ -454,32 +514,48 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
           if (
             state !== 'filtered' &&
             state !== 'errored' &&
+            state !== 'dropped' &&
             collapsedTargetsByStroke.has(`${trace.valueId}:${opIndex + 1}`)
           ) {
             state = 'collapsed';
           }
 
           const outX = getStrokeX(opIndex + 1);
-          const outPoint = { x: outX, y };
-          if (lastPoint) drawCurve(lastPoint, outPoint, state);
-
+          
+          // Check if this is a terminal state (filtered, errored, or dropped)
           const isTerminal = state === 'filtered' || state === 'errored' || state === 'dropped';
+          
+          if (lastPoint) {
+            if (isTerminal) {
+              // For terminal states, draw a dotted half-length line
+              drawDottedHalfLine(lastPoint, { x: outX, y }, state);
+              // Draw terminal symbol at the endpoint (midpoint)
+              const midX = lastPoint.x + (outX - lastPoint.x) * 0.5;
+              drawTerminalSymbol(midX, y, state);
+            } else {
+              drawCurve(lastPoint, { x: outX, y }, state);
+            }
+          }
+
           const valueOut = isTerminal ? undefined : step.outputValue;
 
-          groupCircles.push(
-            makeCircle(trace, state, {
-              x: outX,
-              y,
-              label: 'output',
-              value: valueOut,
-              hasValue: valueOut !== undefined,
-              hasStep: true,
-              operatorName: step.operatorName ?? axisLabels[opIndex],
-              isTerminal,
-            })
-          );
+          if (!isTerminal) {
+            // Only add circle for non-terminal states
+            groupCircles.push(
+              makeCircle(trace, state, {
+                x: outX,
+                y,
+                label: 'output',
+                value: valueOut,
+                hasValue: valueOut !== undefined,
+                hasStep: true,
+                operatorName: step.operatorName ?? axisLabels[opIndex],
+                isTerminal: false,
+              })
+            );
+          }
 
-          lastPoint = outPoint;
+          lastPoint = { x: outX, y };
           if (isTerminal) {
             stopped = true;
             break;
@@ -521,32 +597,48 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
           if (
             state !== 'filtered' &&
             state !== 'errored' &&
+            state !== 'dropped' &&
             collapsedTargetsByStroke.has(`${trace.valueId}:${opIndex + 1}`)
           ) {
             state = 'collapsed';
           }
 
           const outX = getStrokeX(opIndex + 1);
-          const outPoint = { x: outX, y };
-          if (lastPoint) drawCurve(lastPoint, outPoint, state);
-
+          
+          // Check if this is a terminal state (filtered, errored, or dropped)
           const isTerminal = state === 'filtered' || state === 'errored' || state === 'dropped';
+          
+          if (lastPoint) {
+            if (isTerminal) {
+              // For terminal states, draw a dotted half-length line
+              drawDottedHalfLine(lastPoint, { x: outX, y }, state);
+              // Draw terminal symbol at the endpoint (midpoint)
+              const midX = lastPoint.x + (outX - lastPoint.x) * 0.5;
+              drawTerminalSymbol(midX, y, state);
+            } else {
+              drawCurve(lastPoint, { x: outX, y }, state);
+            }
+          }
+
           const valueOut = isTerminal ? undefined : step.outputValue;
 
-          groupCircles.push(
-            makeCircle(trace, state, {
-              x: outX,
-              y,
-              label: 'output',
-              value: valueOut,
-              hasValue: valueOut !== undefined,
-              hasStep: true,
-              operatorName: step.operatorName ?? axisLabels[opIndex],
-              isTerminal,
-            })
-          );
+          if (!isTerminal) {
+            // Only add circle for non-terminal states
+            groupCircles.push(
+              makeCircle(trace, state, {
+                x: outX,
+                y,
+                label: 'output',
+                value: valueOut,
+                hasValue: valueOut !== undefined,
+                hasStep: true,
+                operatorName: step.operatorName ?? axisLabels[opIndex],
+                isTerminal: false,
+              })
+            );
+          }
 
-          lastPoint = outPoint;
+          lastPoint = { x: outX, y };
           if (isTerminal) {
             stopped = true;
             break;
@@ -554,11 +646,14 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
         }
       }
 
-      // Deliver node only when deliveredAt exists and we didn’t stop early
+      // Deliver node only when deliveredAt exists and we didn't stop early
       if (!stopped && trace.deliveredAt && lastPoint) {
         const deliverX = getStrokeX(axisLabels.length - 1);
         const deliverPoint = { x: deliverX, y };
         drawCurve(lastPoint, deliverPoint, 'delivered');
+
+        // Draw delivered symbol (checkmark)
+        this.drawDeliveredSymbol(lastPoint, deliverPoint, y, ctx);
 
         groupCircles.push(
           makeCircle(trace, 'delivered', {
@@ -599,7 +694,7 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
     collapseLinks.forEach(({ from, to }) => drawCurve(from, to, 'collapsed'));
     expansionLinks.forEach(({ from, to }) => drawCurve(from, to, 'expanded'));
 
-    // Draw circles (final)
+    // Draw circles (final) - skip circles that were replaced by terminal symbols
     groupCircles.forEach((circle) => {
       const circleColor = STATE_COLORS[circle.state] ?? STATE_COLORS.emitted;
 
@@ -611,9 +706,15 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
         ctx.strokeStyle = '#cbd5e1';
         ctx.lineWidth = 1.5;
       } else if (circle.isTerminal) {
-        ctx.fillStyle = circleColor.accent;
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 3;
+        // For delivered terminal state
+        if (circle.state === 'delivered') {
+          ctx.fillStyle = circleColor.accent;
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 3;
+        } else {
+          // For filtered/errored/dropped, skip regular circle drawing
+          return;
+        }
       } else {
         ctx.fillStyle = circle.hasValue ? '#fff' : '#f8fafc';
         ctx.strokeStyle = circleColor.accent;
@@ -631,6 +732,31 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
     ctx.font = '12px "Inter", sans-serif';
     ctx.fillStyle = '#475467';
     ctx.fillText('Operator flow / timeline', padding.left + chartWidth / 2, padding.top - 12);
+  }
+
+  // Helper method to draw delivered symbol (checkmark) at the midpoint
+  private drawDeliveredSymbol(from: any, to: any, y: number, ctx: CanvasRenderingContext2D) {
+    const accent = STATE_COLORS['delivered']?.accent ?? '#0ea5e9';
+    
+    // Calculate midpoint
+    const midX = from.x + (to.x - from.x) * 0.5;
+    
+    // Draw a larger circle for the delivered symbol background
+    ctx.beginPath();
+    ctx.arc(midX, y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = accent;
+    ctx.fill();
+    
+    // Draw white checkmark inside
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    
+    // Checkmark shape
+    ctx.moveTo(midX - 3, y);
+    ctx.lineTo(midX - 1, y + 3);
+    ctx.lineTo(midX + 4, y - 2);
+    ctx.stroke();
   }
 
   /* -------------------------------------------------------------------------- */
