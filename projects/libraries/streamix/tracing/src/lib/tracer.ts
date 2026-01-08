@@ -883,7 +883,7 @@ export const createValueTracer = (options?: ValueTracerOptions): ValueTracer =>
   createTracerImpl(
     {
       includeSteps: true,
-      policy: { deliverExpandedChildren: false },
+      policy: { deliverExpandedChildren: true },
     },
     options
   );
@@ -898,7 +898,7 @@ export const createTerminalTracer = (options?: ValueTracerOptions): ValueTracer 
   createTracerImpl(
     {
       includeSteps: false,
-      policy: { deliverExpandedChildren: false },
+      policy: { deliverExpandedChildren: true },
     },
     options
   );
@@ -1161,6 +1161,10 @@ registerRuntimeHooks({
             const wrapped = r.value as TracedWrapper<any>;
             tracer.markDelivered(wrapped.meta.valueId);
             return { done: false, value: unwrapTracedValue(r.value) };
+          }
+          if (!r.done) {
+            const meta = getIteratorMeta(it as any);
+            if (meta?.valueId) tracer.markDelivered(meta.valueId);
           }
           if (r.done) {
             tracer.completeSubscription(subscriptionId);
