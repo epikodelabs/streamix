@@ -123,7 +123,6 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
   private hasView = false;
 
   private circleRegistry = new Map<string, CanvasCircle[]>();
-  private tooltipCircleCounter = 0;
 
   // Chronological (arrival) order — NO SORTING.
   private traceList: ValueTrace[] = [];
@@ -257,7 +256,6 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
   private drawDiagram() {
     const groups = this.groupedTraces();
     this.circleRegistry.clear();
-    this.tooltipCircleCounter = 0;
 
     const canvases = this.diagramCanvases?.toArray() ?? [];
     const containers = this.diagramContainers?.toArray() ?? [];
@@ -268,6 +266,28 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
       if (!canvas || !container) return;
       this.drawSubscriptionDiagram(group.subscriptionId, canvas, container, group.traces);
     });
+  }
+
+  private getChronologicalSequence(trace: ValueTrace, operatorIndex: number | null, label: 'emit' | 'output'): number {
+    // Find the index of this trace in the original chronological list
+    const traceIndex = this.traceIndexById.get(trace.valueId) ?? 0;
+    
+    // Base sequence on trace index (1000 per trace to leave room for operator steps)
+    let sequence = (traceIndex + 1) * 1000;
+    
+    // For emit nodes (column 0), they happen first in a trace
+    if (label === 'emit') {
+      return sequence;
+    }
+    
+    // For output nodes, add operator index to sequence
+    // Operator steps happen in order within a trace
+    if (operatorIndex !== null) {
+      // Add 1 because emit is step 0
+      sequence += operatorIndex + 1;
+    }
+    
+    return sequence;
   }
 
   private drawSubscriptionDiagram(
@@ -456,7 +476,9 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
       }
     ): CanvasCircle => {
       const id = `${subscriptionId}:${circleCounter++}`;
-      const sequence = ++this.tooltipCircleCounter;
+      // Use actual chronological order instead of drawing order
+      const sequence = this.getChronologicalSequence(trace, cfg.operatorIndex, cfg.label);
+      
       const circleTrace: ValueTrace = { ...trace, valueId: `val_${sequence}` };
 
       return {
