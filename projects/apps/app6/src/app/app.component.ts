@@ -32,6 +32,10 @@ interface CanvasCircle {
   id: string;
   x: number;
   y: number;
+  row: number;
+  column: number;
+  operatorIndex: number | null;
+  sequence: number;
   radius: number;
   label: 'emit' | 'output';
   value?: any;
@@ -119,6 +123,7 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
   private hasView = false;
 
   private circleRegistry = new Map<string, CanvasCircle[]>();
+  private tooltipCircleCounter = 0;
 
   // Chronological (arrival) order — NO SORTING.
   private traceList: ValueTrace[] = [];
@@ -252,6 +257,7 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
   private drawDiagram() {
     const groups = this.groupedTraces();
     this.circleRegistry.clear();
+    this.tooltipCircleCounter = 0;
 
     const canvases = this.diagramCanvases?.toArray() ?? [];
     const containers = this.diagramContainers?.toArray() ?? [];
@@ -438,6 +444,9 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
       cfg: {
         x: number;
         y: number;
+        row: number;
+        column: number;
+        operatorIndex: number | null;
         label: 'emit' | 'output';
         value?: any;
         hasValue: boolean;
@@ -445,21 +454,31 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
         operatorName: string;
         isTerminal: boolean;
       }
-    ): CanvasCircle => ({
-      id: `${subscriptionId}:${circleCounter++}`,
-      x: cfg.x,
-      y: cfg.y,
-      radius: 6,
-      label: cfg.label,
-      value: cfg.value,
-      operatorName: cfg.operatorName,
-      trace,
-      state,
-      subscriptionId,
-      isTerminal: cfg.isTerminal,
-      hasValue: cfg.hasValue,
-      hasStep: cfg.hasStep,
-    });
+    ): CanvasCircle => {
+      const id = `${subscriptionId}:${circleCounter++}`;
+      const sequence = ++this.tooltipCircleCounter;
+      const circleTrace: ValueTrace = { ...trace, valueId: `val_${sequence}` };
+
+      return {
+        id,
+        x: cfg.x,
+        y: cfg.y,
+        row: cfg.row,
+        column: cfg.column,
+        operatorIndex: cfg.operatorIndex,
+        sequence,
+        radius: 6,
+        label: cfg.label,
+        value: cfg.value,
+        operatorName: cfg.operatorName,
+        trace: circleTrace,
+        state,
+        subscriptionId,
+        isTerminal: cfg.isTerminal,
+        hasValue: cfg.hasValue,
+        hasStep: cfg.hasStep,
+      };
+    };
 
     // Draw per trace (chronological rows)
     traces.forEach((trace, row) => {
@@ -483,6 +502,9 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
         const startCircle = makeCircle(trace, 'expanded', {
           x: startX,
           y,
+          row,
+          column: startOpIndex + 1,
+          operatorIndex: startOpIndex,
           label: 'output',
           value,
           hasValue: value !== undefined,
@@ -545,6 +567,9 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
               makeCircle(trace, state, {
                 x: outX,
                 y,
+                row,
+                column: opIndex + 1,
+                operatorIndex: opIndex,
                 label: 'output',
                 value: valueOut,
                 hasValue: valueOut !== undefined,
@@ -568,6 +593,9 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
           makeCircle(trace, 'emitted', {
             x: emitX,
             y,
+            row,
+            column: 0,
+            operatorIndex: null,
             label: 'emit',
             value: trace.sourceValue,
             hasValue: trace.sourceValue !== undefined,
@@ -628,6 +656,9 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
               makeCircle(trace, state, {
                 x: outX,
                 y,
+                row,
+                column: opIndex + 1,
+                operatorIndex: opIndex,
                 label: 'output',
                 value: valueOut,
                 hasValue: valueOut !== undefined,
@@ -659,6 +690,9 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
           makeCircle(trace, 'delivered', {
             x: deliverX,
             y,
+            row,
+            column: axisLabels.length - 1,
+            operatorIndex: null,
             label: 'output',
             value: trace.finalValue,
             hasValue: trace.finalValue !== undefined,
@@ -725,6 +759,7 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
       ctx.stroke();
     });
 
+    this.validateCircleTemporalOrder(subscriptionId, groupCircles);
     this.circleRegistry.set(subscriptionId, groupCircles);
 
     // Title
@@ -732,6 +767,75 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
     ctx.font = '12px "Inter", sans-serif';
     ctx.fillStyle = '#475467';
     ctx.fillText('Operator flow / timeline', padding.left + chartWidth / 2, padding.top - 12);
+  }
+
+  private validateCircleTemporalOrder(subscriptionId: string, circles: CanvasCircle[]) {
+    if (circles.length === 0) return;
+
+    const rowCount = circles.reduce((m, c) => Math.max(m, c.row), 0) + 1;
+    const colCount = circles.reduce((m, c) => Math.max(m, c.column), 0) + 1;
+    if (rowCount < 2 || colCount < 2) return;
+
+    // Use a suffix-min DP so we can enforce:
+    // For any cell (r,c), its creation sequence must be < the minimum sequence in the strict lower-right region (r+1.., c+1..).
+    type MinCell = { time: number; row: number; col: number };
+    const INF = Number.POSITIVE_INFINITY;
+
+    const timeGrid: number[][] = Array.from({ length: rowCount }, () => Array.from({ length: colCount }, () => INF));
+    const circleGrid: Array<Array<CanvasCircle | null>> = Array.from({ length: rowCount }, () =>
+      Array.from({ length: colCount }, () => null)
+    );
+
+    for (const circle of circles) {
+      const seq = circle.sequence;
+      if (seq < timeGrid[circle.row][circle.column]) {
+        timeGrid[circle.row][circle.column] = seq;
+        circleGrid[circle.row][circle.column] = circle;
+      }
+    }
+
+    const suffixMin: MinCell[][] = Array.from({ length: rowCount + 1 }, () =>
+      Array.from({ length: colCount + 1 }, () => ({ time: INF, row: -1, col: -1 }))
+    );
+
+    for (let r = rowCount - 1; r >= 0; r -= 1) {
+      for (let c = colCount - 1; c >= 0; c -= 1) {
+        const hereTime = timeGrid[r][c];
+        const bestDown = suffixMin[r + 1][c];
+        const bestRight = suffixMin[r][c + 1];
+        const bestDiag = suffixMin[r + 1][c + 1];
+
+        let best: MinCell = bestDown;
+        if (bestRight.time < best.time) best = bestRight;
+        if (bestDiag.time < best.time) best = bestDiag;
+        if (hereTime < best.time) best = { time: hereTime, row: r, col: c };
+
+        suffixMin[r][c] = best;
+      }
+    }
+
+    for (let r = 0; r < rowCount - 1; r += 1) {
+      for (let c = 0; c < colCount - 1; c += 1) {
+        const tA = timeGrid[r][c];
+        if (!Number.isFinite(tA)) continue;
+
+        const minLR = suffixMin[r + 1][c + 1]; // strict lower-right
+        if (!Number.isFinite(minLR.time)) continue;
+
+        if (tA >= minLR.time) {
+          const a = circleGrid[r][c];
+          const b = circleGrid[minLR.row][minLR.col];
+          throw new Error(
+            [
+              `[TracingVisualizer] Temporal order violated for subscription ${subscriptionId}.`,
+              `Circle at (row=${r}, col=${c}) has seq=${tA}, but a circle in the lower-right exists with seq=${minLR.time} at (row=${minLR.row}, col=${minLR.col}).`,
+              `A: ${a ? `${a.id} valueId=${a.trace.valueId}` : '(missing circle)'}`,
+              `B: ${b ? `${b.id} valueId=${b.trace.valueId}` : '(missing circle)'}`,
+            ].join(' ')
+          );
+        }
+      }
+    }
   }
 
   // Helper method to draw delivered symbol (checkmark) at the midpoint
