@@ -475,6 +475,10 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
         isTerminal: boolean;
       }
     ): CanvasCircle => {
+      const effectiveState: ValueState =
+        cfg.label === 'output' && Boolean(trace.deliveredAt)
+          ? 'delivered'
+          : state;
       const id = `${subscriptionId}:${circleCounter++}`;
       // Use actual chronological order instead of drawing order
       const sequence = this.getChronologicalSequence(trace, cfg.operatorIndex, cfg.label);
@@ -494,7 +498,7 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
         value: cfg.value,
         operatorName: cfg.operatorName,
         trace: circleTrace,
-        state,
+        state: effectiveState,
         subscriptionId,
         isTerminal: cfg.isTerminal,
         hasValue: cfg.hasValue,
