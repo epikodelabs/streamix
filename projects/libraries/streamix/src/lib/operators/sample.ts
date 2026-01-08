@@ -1,4 +1,4 @@
-import { createOperator, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -16,8 +16,12 @@ import { createSubject, type Subject } from '../subjects';
 export const sample = <T = any>(period: MaybePromise<number>) =>
   createOperator<T, T>('sample', function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
 
     let lastResult: IteratorResult<T> | undefined;
+    let lastMeta:
+      | { valueId: string; operatorIndex: number; operatorName: string }
+      | undefined;
     let skipped = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
     let resolvedPeriod: number | undefined = undefined;
@@ -30,6 +34,14 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
         if (!lastResult) return;
 
         if (!skipped) {
+          if (lastMeta) {
+            setIteratorMeta(
+              outputIterator,
+              { valueId: lastMeta.valueId },
+              lastMeta.operatorIndex,
+              lastMeta.operatorName
+            );
+          }
           output.next(lastResult.value!);
         }
 
@@ -52,12 +64,21 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
           const result: IteratorResult<T> = await source.next();
           if (result.done) break;
 
+          lastMeta = getIteratorMeta(source);
           lastResult = result;
           skipped = false;
         }
 
         // Emit final value
         if (lastResult) {
+          if (lastMeta) {
+            setIteratorMeta(
+              outputIterator,
+              { valueId: lastMeta.valueId },
+              lastMeta.operatorIndex,
+              lastMeta.operatorName
+            );
+          }
           output.next(lastResult.value!);
         }
       } catch (err) {
@@ -68,5 +89,5 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });

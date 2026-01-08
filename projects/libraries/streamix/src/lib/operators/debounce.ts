@@ -16,6 +16,7 @@ import { createSubject, type Subject } from "../subjects";
 export function debounce<T = any>(duration: MaybePromise<number>) {
   return createOperator<T, T>("debounce", function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let latestResult: IteratorResult<T> | undefined;
@@ -29,6 +30,14 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
     const flush = () => {
       if (!latestResult) return;
 
+      if (latestMeta) {
+        setIteratorMeta(
+          outputIterator,
+          { valueId: latestMeta.valueId },
+          latestMeta.operatorIndex,
+          latestMeta.operatorName
+        );
+      }
       // Emit final value
       output.next(latestResult.value!);
 
@@ -63,16 +72,6 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
           const meta = getIteratorMeta(source);
 
           // ⚠️ Supersede previous pending value
-          if (latestMeta) {
-            // Mark previous as phantom (debounced)
-            setIteratorMeta(
-              source,
-              { valueId: latestMeta.valueId },
-              latestMeta.operatorIndex,
-              'debounce'
-            );
-          }
-
           latestResult = result;
           latestMeta = meta;
 
@@ -96,6 +95,6 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

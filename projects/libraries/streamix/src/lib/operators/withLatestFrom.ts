@@ -1,4 +1,4 @@
-import { createOperator, createReceiver, isPromiseLike, type MaybePromise, type Operator, type Receiver, type Stream, type Subscription } from "../abstractions";
+import { createOperator, createReceiver, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator, type Receiver, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
@@ -32,6 +32,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
 ) {
   return createOperator<T, [T, ...R]>("withLatestFrom", function (this: Operator, source) {
     const output = createSubject<[T, ...R]>();
+    const outputIterator = eachValueFrom(output);
     const abortController = new AbortController();
     const { signal } = abortController;
     
@@ -92,9 +93,18 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
           const result = winner.result;
 
           if (result.done) break;
+          const meta = getIteratorMeta(source);
 
           // Gate check: Only emit if ALL auxiliary streams have emitted a value
           if (hasValue.length > 0 && hasValue.every(Boolean)) {
+            if (meta) {
+              setIteratorMeta(
+                outputIterator,
+                { valueId: meta.valueId },
+                meta.operatorIndex,
+                meta.operatorName
+              );
+            }
             output.next([result.value, ...latestValues] as [T, ...R]);
           }
         }
@@ -141,6 +151,6 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
     };
 
     // Return the async iterator for stream piping compatibility
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

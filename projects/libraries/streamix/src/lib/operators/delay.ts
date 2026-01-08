@@ -16,6 +16,7 @@ import { createSubject, type Subject } from '../subjects';
 export function delay<T = any>(ms: MaybePromise<number>) {
   return createOperator<T, T>('delay', function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
     let resolvedMs: number | undefined;
 
     (async () => {
@@ -36,10 +37,10 @@ export function delay<T = any>(ms: MaybePromise<number>) {
           // Restore tracing metadata before emission
           if (meta) {
             setIteratorMeta(
-              source,
+              outputIterator,
               { valueId: meta.valueId },
               meta.operatorIndex,
-              'delay'
+              meta.operatorName
             );
           }
 
@@ -52,6 +53,6 @@ export function delay<T = any>(ms: MaybePromise<number>) {
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }
