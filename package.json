@@ -37,7 +37,6 @@
     "@types/jasmine": "5.1.8",
     "@types/markdown-it": "13.0.9",
     "@types/node": "24.2.0",
-    "jasmine": "5.9.0",
     "ng-packagr": "18.0.0",
     "prettier": "3.7.4",
     "rollup": "4.52.4",
