@@ -1,4 +1,4 @@
-import { createOperator, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -16,7 +16,7 @@ import { createSubject, type Subject } from '../subjects';
 export function delay<T = any>(ms: MaybePromise<number>) {
   return createOperator<T, T>('delay', function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
-    let resolvedMs: number | undefined = undefined;
+    let resolvedMs: number | undefined;
 
     (async () => {
       try {
@@ -26,13 +26,24 @@ export function delay<T = any>(ms: MaybePromise<number>) {
           const result: IteratorResult<T> = await source.next();
           if (result.done) break;
 
-          // Delay emission
+          // Capture tracing metadata immediately
+          const meta = getIteratorMeta(source);
+
           if (resolvedMs !== undefined) {
             await new Promise((resolve) => setTimeout(resolve, resolvedMs));
           }
 
-          // Emit downstream
-          output.next(result.value);
+          // Restore tracing metadata before emission
+          if (meta) {
+            setIteratorMeta(
+              source,
+              { valueId: meta.valueId },
+              meta.operatorIndex,
+              'delay'
+            );
+          }
+
+          output.next(result.value!);
         }
       } catch (err) {
         output.error(err);
