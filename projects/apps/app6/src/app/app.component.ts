@@ -1,6 +1,23 @@
 import { CommonModule } from '@angular/common';
-import { AfterViewInit, Component, computed, effect, ElementRef, OnDestroy, QueryList, signal, ViewChildren } from '@angular/core';
-import { createValueTracer, disableTracing, enableTracing, type OperatorStep, type ValueState, type ValueTrace } from '@epikodelabs/streamix/tracing';
+import {
+  AfterViewInit,
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  OnDestroy,
+  QueryList,
+  signal,
+  ViewChildren,
+} from '@angular/core';
+import {
+  createValueTracer,
+  disableTracing,
+  enableTracing,
+  type OperatorStep,
+  type ValueState,
+  type ValueTrace,
+} from '@epikodelabs/streamix/tracing';
 import { runDemoStream } from './demo-stream';
 
 interface ValueTraceWithExpansion extends ValueTrace {
@@ -17,7 +34,7 @@ interface CanvasCircle {
   y: number;
   radius: number;
   label: 'emit' | 'output';
-  value?: number;
+  value?: any;
   operatorName: string;
   trace: ValueTrace;
   state: ValueState;
@@ -35,6 +52,7 @@ const STATE_COLORS: Record<ValueState, { accent: string }> = {
   expanded: { accent: '#8b5cf6' },
   errored: { accent: '#dc2626' },
   delivered: { accent: '#0ea5e9' },
+  dropped: { accent: '#00ce07ff' },
 };
 
 const STATE_ORDER: ValueState[] = [
@@ -43,6 +61,7 @@ const STATE_ORDER: ValueState[] = [
   'filtered',
   'collapsed',
   'errored',
+  'dropped',
   'emitted',
   'transformed',
 ];
@@ -54,6 +73,43 @@ const SUBSCRIPTION_PALETTE = ['#0ea5e9', '#a855f7', '#fb923c', '#34d399', '#f43f
   standalone: true,
   imports: [CommonModule],
   templateUrl: './app.component.html',
+  styles: [
+    `
+      /* make the container scroll horizontally if diagram is wide */
+      .diagram-shell {
+        position: relative;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        background: #fbfcfe;
+        overflow-x: auto;
+        overflow-y: hidden;
+        max-width: 100%;
+      }
+
+      .diagram-canvas {
+        display: block;
+        cursor: crosshair;
+      }
+
+      .diagram-shell {
+        scroll-behavior: smooth;
+      }
+
+      .diagram-shell::-webkit-scrollbar {
+        height: 6px;
+      }
+      .diagram-shell::-webkit-scrollbar-track {
+        background: #f3f4f6;
+      }
+      .diagram-shell::-webkit-scrollbar-thumb {
+        background: #d1d5db;
+        border-radius: 3px;
+      }
+      .diagram-shell::-webkit-scrollbar-thumb:hover {
+        background: #9ca3af;
+      }
+    `,
+  ],
 })
 export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
   @ViewChildren('diagramCanvas') private diagramCanvases?: QueryList<ElementRef<HTMLCanvasElement>>;
@@ -61,8 +117,13 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
 
   private animationFrame?: number;
   private hasView = false;
+
   private circleRegistry = new Map<string, CanvasCircle[]>();
-  private traceMap = new Map<string, ValueTrace>();
+
+  // Chronological (arrival) order — NO SORTING.
+  private traceList: ValueTrace[] = [];
+  private traceIndexById = new Map<string, number>();
+
   private tracer = createValueTracer({
     onTraceUpdate: (trace) => this.handleTraceUpdate(trace),
   });
@@ -72,29 +133,32 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
   readonly filterState = signal<'all' | ValueState>('all');
   readonly selectedTrace = signal<ValueTrace | null>(null);
 
+  // NOTE: this keeps chronological order because `filter()` preserves array order.
   readonly filteredTraces = computed(() => {
     const query = this.searchTerm().trim().toLowerCase();
     const filter = this.filterState();
-    return this.traces()
-      .filter((trace) => {
-        const name = trace.streamName?.toLowerCase() ?? '';
-        const matchesSearch = !query || trace.valueId.includes(query) || name.includes(query);
-        const matchesFilter = filter === 'all' || trace.state === filter;
-        return matchesSearch && matchesFilter;
-      })
-      .sort((a, b) => (a.deliveredAt ?? a.emittedAt) - (b.deliveredAt ?? b.emittedAt));
+    const list = this.traces();
+
+    return list.filter((trace) => {
+      const name = trace.streamName?.toLowerCase() ?? '';
+      const matchesSearch = !query || trace.valueId.includes(query) || name.includes(query);
+      const matchesFilter = filter === 'all' || trace.state === filter;
+      return matchesSearch && matchesFilter;
+    });
   });
 
   readonly subscriptionOrder = computed(() => {
     const set = new Set<string>();
-    this.filteredTraces().forEach((trace) => set.add(trace.subscriptionId));
+    // Set preserves insertion order -> first time we see a subscription in chronological list
+    this.filteredTraces().forEach((t) => set.add(t.subscriptionId));
     return Array.from(set);
   });
 
   readonly groupedTraces = computed(() =>
     this.subscriptionOrder().map((subscriptionId) => ({
       subscriptionId,
-      traces: this.filteredTraces().filter((trace) => trace.subscriptionId === subscriptionId),
+      // still chronological within subscription because filteredTraces is chronological
+      traces: this.filteredTraces().filter((t) => t.subscriptionId === subscriptionId),
     }))
   );
 
@@ -108,199 +172,146 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
       expanded: 0,
       errored: 0,
       delivered: 0,
+      dropped: 0,
     };
-    current.forEach((trace) => counters[trace.state]++);
+    current.forEach((t) => counters[t.state]++);
     return { total: current.length, throughput: Number((current.length / 12).toFixed(1)), counters };
   });
 
   readonly stateOptions = STATE_ORDER;
+
   readonly hoveredCircle = signal<CanvasCircle | null>(null);
   readonly hoverPosition = signal<{ left: number; top: number } | null>(null);
 
   constructor() {
     effect(() => {
+      // redraw when filters change or traces update
       this.filteredTraces();
       this.subscriptionOrder();
-      if (this.hasView) {
-        this.scheduleDraw();
-      }
+      if (this.hasView) this.scheduleDraw();
     });
   }
 
   ngAfterViewInit() {
     this.hasView = true;
-    this.drawDiagram();
+
     enableTracing(this.tracer);
     runDemoStream();
+
+    this.drawDiagram();
     window.addEventListener('resize', this.resizeHandler);
     this.diagramCanvases?.changes.subscribe(() => this.scheduleDraw());
   }
 
   ngOnDestroy() {
     window.removeEventListener('resize', this.resizeHandler);
-    if (this.animationFrame) {
-      cancelAnimationFrame(this.animationFrame);
-    }
+    if (this.animationFrame) cancelAnimationFrame(this.animationFrame);
     disableTracing();
   }
 
   private resizeHandler = () => this.drawDiagram();
 
   private scheduleDraw() {
-    if (this.animationFrame) {
-      cancelAnimationFrame(this.animationFrame);
-    }
+    if (this.animationFrame) cancelAnimationFrame(this.animationFrame);
     this.animationFrame = requestAnimationFrame(() => this.drawDiagram());
   }
 
   getSubscriptionAccent(subId: string) {
-    const index = this.subscriptionOrder().indexOf(subId);
-    return SUBSCRIPTION_PALETTE[index % SUBSCRIPTION_PALETTE.length];
+    const idx = this.subscriptionOrder().indexOf(subId);
+    return SUBSCRIPTION_PALETTE[idx % SUBSCRIPTION_PALETTE.length];
   }
+
+  /* -------------------------------------------------------------------------- */
+  /* Axis labels                                                                 */
+  /* -------------------------------------------------------------------------- */
 
   private getAxisLabelsForTraces(traces: ValueTrace[]) {
     const labelByIndex = new Map<number, string>();
     let maxIndex = -1;
 
     traces.forEach((trace) => {
-      trace.operatorSteps.forEach((step) => {
-        if (step.operatorIndex > maxIndex) {
-          maxIndex = step.operatorIndex;
-        }
+      trace.operatorSteps?.forEach((step) => {
+        if (step.operatorIndex > maxIndex) maxIndex = step.operatorIndex;
         if (!labelByIndex.has(step.operatorIndex) && step.operatorName) {
           labelByIndex.set(step.operatorIndex, step.operatorName);
         }
       });
     });
 
-    if (maxIndex < 0) {
-      return ['deliver'];
-    }
+    if (maxIndex < 0) return ['deliver'];
 
-    const labels = Array.from({ length: maxIndex + 1 }, (_, index) =>
-      labelByIndex.get(index) ?? `op${index}`
-    );
+    const labels = Array.from({ length: maxIndex + 1 }, (_, i) => labelByIndex.get(i) ?? `op${i}`);
     labels.push('deliver');
     return labels;
   }
 
+  /* -------------------------------------------------------------------------- */
+  /* Main draw                                                                   */
+  /* -------------------------------------------------------------------------- */
+
   private drawDiagram() {
     const groups = this.groupedTraces();
     this.circleRegistry.clear();
+
     const canvases = this.diagramCanvases?.toArray() ?? [];
     const containers = this.diagramContainers?.toArray() ?? [];
 
-    groups.forEach((group, index) => {
-      const canvas = canvases[index]?.nativeElement;
-      const container = containers[index]?.nativeElement;
-      if (canvas && container) {
-        this.drawSubscriptionDeterministic(group.subscriptionId, canvas, container, group.traces);
-      }
+    groups.forEach((group, idx) => {
+      const canvas = canvases[idx]?.nativeElement;
+      const container = containers[idx]?.nativeElement;
+      if (!canvas || !container) return;
+      this.drawSubscriptionDiagram(group.subscriptionId, canvas, container, group.traces);
     });
   }
 
-  private drawSubscriptionDeterministic(
+  private drawSubscriptionDiagram(
     subscriptionId: string,
     canvas: HTMLCanvasElement,
     container: HTMLDivElement,
     traces: ValueTrace[]
   ) {
-    const padding = { top: 32, right: 32, bottom: 40, left: 110 };
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = Math.max(600, container.clientWidth);
+    const padding = { top: 32, right: 32, bottom: 40, left: 110 };
     const rowHeight = 36;
+
     const axisLabels = this.getAxisLabelsForTraces(traces);
-    const operatorCount = Math.max(0, axisLabels.length - 1);
+    const operatorCount = Math.max(0, axisLabels.length - 1); // excludes deliver
+    const strokeCount = Math.max(2, axisLabels.length);
 
-    const tracesById = new Map<string, ValueTrace>();
-    const indexByValueId = new Map<string, number>();
-    traces.forEach((trace, index) => {
-      tracesById.set(trace.valueId, trace);
-      indexByValueId.set(trace.valueId, index);
-    });
+    // Wide canvas to enable horizontal scrolling for long operator chains
+    const columnSpacing = 120;
+    const calculatedWidth = padding.left + (strokeCount - 1) * columnSpacing + padding.right;
+    const minWidth = Math.max(600, container.clientWidth);
+    const width = Math.max(minWidth, calculatedWidth);
 
-    // Some operators (e.g. bufferCount) collapse multiple input traces into a single "target" trace.
-    // The target trace's operator step might still show as transformed, so we infer the visual
-    // "collapsed" outcome for the target when any other trace points to it via `collapsedInto`.
-    //
-    // We store by stroke index (operatorIndex + 1), since that's where the output circle is drawn.
-    const collapsedTargetsByStroke = new Set<string>();
-    traces.forEach((trace) => {
-      const collapsedInto = trace.collapsedInto;
-      if (!collapsedInto) return;
-      collapsedTargetsByStroke.add(`${collapsedInto.targetValueId}:${collapsedInto.operatorIndex + 1}`);
-    });
-
-    const childrenByBaseId = new Map<string, number[]>();
-    traces.forEach((trace, index) => {
-      const expandedFrom = (trace as ValueTraceWithExpansion).expandedFrom;
-      if (!expandedFrom) return;
-      const list = childrenByBaseId.get(expandedFrom.baseValueId) ?? [];
-      list.push(index);
-      childrenByBaseId.set(expandedFrom.baseValueId, list);
-    });
-
-    const valueIdSeq = (valueId: string) => {
-      const match = /(\d+)$/.exec(valueId);
-      return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
-    };
-
-    childrenByBaseId.forEach((indices, baseId) => {
-      const sorted = [...indices].sort((a, b) => valueIdSeq(traces[a].valueId) - valueIdSeq(traces[b].valueId));
-      childrenByBaseId.set(baseId, sorted);
-    });
-
-    const orderedIndices: number[] = [];
-    const rowByTraceIndex = new Map<number, number>();
-    let rowCursor = 0;
-
-    traces.forEach((trace, index) => {
-      const expandedFrom = (trace as ValueTraceWithExpansion).expandedFrom;
-      if (expandedFrom) return;
-      if (!rowByTraceIndex.has(index)) {
-        rowByTraceIndex.set(index, rowCursor++);
-        orderedIndices.push(index);
-      }
-
-      const children = childrenByBaseId.get(trace.valueId) ?? [];
-      children.forEach((childIndex) => {
-        rowByTraceIndex.set(childIndex, rowCursor++);
-        orderedIndices.push(childIndex);
-      });
-    });
-
-    traces.forEach((_, index) => {
-      if (rowByTraceIndex.has(index)) return;
-      rowByTraceIndex.set(index, rowCursor++);
-      orderedIndices.push(index);
-    });
-
-    const totalRows = orderedIndices.length;
+    // Strict chronological vertical order: row == index in `traces`.
+    const totalRows = traces.length;
     const height = Math.max(220, totalRows * rowHeight + padding.top + padding.bottom);
-    const dpr = window.devicePixelRatio || 1;
 
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(height * dpr);
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
+
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
     const chartWidth = width - padding.left - padding.right;
-    const strokeCount = Math.max(2, axisLabels.length);
-    const columnWidth = chartWidth / (strokeCount - 1);
-    const columnLabels = axisLabels.slice(0, -1);
-    const getColumnCenter = (index: number) => padding.left + index * columnWidth + columnWidth / 2;
-    const getStrokeX = (index: number) => padding.left + index * columnWidth;
+    const columnWidth = (strokeCount - 1) > 0 ? chartWidth / (strokeCount - 1) : chartWidth;
+    const getStrokeX = (i: number) => padding.left + i * columnWidth;
+    const getColumnCenter = (i: number) => padding.left + i * columnWidth + columnWidth / 2;
 
+    // Background
     const grad = ctx.createLinearGradient(0, 0, 0, height);
     grad.addColorStop(0, '#fbfcfe');
     grad.addColorStop(1, '#e2e8f0');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, width, height);
 
+    // Vertical strokes
     ctx.strokeStyle = '#d1d5db';
     ctx.lineWidth = 1;
     for (let i = 0; i < axisLabels.length; i += 1) {
@@ -311,18 +322,34 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
       ctx.stroke();
     }
 
+    // Labels
     ctx.font = '11px "Inter", sans-serif';
     ctx.fillStyle = '#475467';
-    columnLabels.forEach((label, index) => {
-      const x = getColumnCenter(index);
-      ctx.textAlign = 'center';
-      ctx.fillText(label.toUpperCase(), x, height - padding.bottom + 16);
+    ctx.textAlign = 'center';
+    axisLabels.slice(0, -1).forEach((label, i) => {
+      ctx.fillText(label.toUpperCase(), getColumnCenter(i), height - padding.bottom + 16);
     });
 
     type Point = { x: number; y: number };
+
     const groupCircles: CanvasCircle[] = [];
     let circleCounter = 0;
-    const pointByTraceStroke = new Map<string, Map<number, Point>>();
+
+    const tracesById = new Map<string, ValueTrace>();
+    const indexByValueId = new Map<string, number>();
+    traces.forEach((t, i) => {
+      tracesById.set(t.valueId, t);
+      indexByValueId.set(t.valueId, i);
+    });
+
+    // Determine "collapsed target" markers (so the target can be drawn as collapsed)
+    const collapsedTargetsByStroke = new Set<string>();
+    traces.forEach((trace) => {
+      const c = trace.collapsedInto;
+      if (!c) return;
+      collapsedTargetsByStroke.add(`${c.targetValueId}:${c.operatorIndex + 1}`);
+    });
+
     const expansionLinks: Array<{ from: Point; to: Point }> = [];
     const collapseLinks: Array<{ from: Point; to: Point }> = [];
 
@@ -331,21 +358,24 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
       ctx.strokeStyle = accent;
       ctx.lineWidth = 2.5;
       ctx.lineCap = 'round';
+
       ctx.beginPath();
       ctx.moveTo(from.x, from.y);
+
       if (Math.abs(from.y - to.y) < 2) {
         ctx.lineTo(to.x, to.y);
       } else {
         const midX = (from.x + to.x) / 2;
         ctx.bezierCurveTo(midX, from.y, midX, to.y, to.x, to.y);
       }
+
       ctx.stroke();
     };
 
     const makeCircle = (
       trace: ValueTrace,
       state: ValueState,
-      config: {
+      cfg: {
         x: number;
         y: number;
         label: 'emit' | 'output';
@@ -357,35 +387,34 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
       }
     ): CanvasCircle => ({
       id: `${subscriptionId}:${circleCounter++}`,
-      x: config.x,
-      y: config.y,
+      x: cfg.x,
+      y: cfg.y,
       radius: 6,
-      label: config.label,
-      value: config.value,
-      operatorName: config.operatorName,
+      label: cfg.label,
+      value: cfg.value,
+      operatorName: cfg.operatorName,
       trace,
       state,
       subscriptionId,
-      isTerminal: config.isTerminal,
-      hasValue: config.hasValue,
-      hasStep: config.hasStep,
+      isTerminal: cfg.isTerminal,
+      hasValue: cfg.hasValue,
+      hasStep: cfg.hasStep,
     });
 
-    orderedIndices.forEach((traceIndex) => {
-      const trace = traces[traceIndex];
-      const row = rowByTraceIndex.get(traceIndex) ?? 0;
+    // Draw per trace (chronological rows)
+    traces.forEach((trace, row) => {
       const y = padding.top + row * rowHeight + rowHeight / 2;
-      const stepsByIndex = new Map<number, OperatorStep>(trace.operatorSteps.map((step) => [step.operatorIndex, step]));
+
+      const stepsByIndex = new Map<number, OperatorStep>();
+      (trace.operatorSteps ?? []).forEach((s) => stepsByIndex.set(s.operatorIndex, s));
 
       const expandedFrom = (trace as ValueTraceWithExpansion).expandedFrom;
-
-      const pointsByStroke = new Map<number, Point>();
-      pointByTraceStroke.set(trace.valueId, pointsByStroke);
 
       let lastPoint: Point | undefined;
       let stopped = false;
 
       if (expandedFrom) {
+        // Expanded traces start at the operator output column (operatorIndex + 1)
         const startOpIndex = expandedFrom.operatorIndex;
         const startX = getStrokeX(startOpIndex + 1);
         const startStep = stepsByIndex.get(startOpIndex);
@@ -402,18 +431,18 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
           isTerminal: false,
         });
         groupCircles.push(startCircle);
-        pointsByStroke.set(startOpIndex + 1, { x: startX, y });
         lastPoint = { x: startX, y };
 
+        // Continue drawing steps after the expansion point
         for (let opIndex = startOpIndex + 1; opIndex < operatorCount; opIndex += 1) {
           const step = stepsByIndex.get(opIndex);
           if (!step) break;
 
+          // If this trace collapses into another at this operator
           if (trace.collapsedInto?.operatorIndex === opIndex) {
             const targetIndex = indexByValueId.get(trace.collapsedInto.targetValueId);
-            if (targetIndex !== undefined) {
-              const targetRow = rowByTraceIndex.get(targetIndex) ?? 0;
-              const targetY = padding.top + targetRow * rowHeight + rowHeight / 2;
+            if (targetIndex !== undefined && lastPoint) {
+              const targetY = padding.top + targetIndex * rowHeight + rowHeight / 2;
               const targetX = getStrokeX(opIndex + 1);
               collapseLinks.push({ from: lastPoint, to: { x: targetX, y: targetY } });
             }
@@ -429,45 +458,48 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
           ) {
             state = 'collapsed';
           }
+
           const outX = getStrokeX(opIndex + 1);
           const outPoint = { x: outX, y };
-          drawCurve(lastPoint, outPoint, state);
+          if (lastPoint) drawCurve(lastPoint, outPoint, state);
 
-          const isTerminal = state === 'filtered' || state === 'errored';
+          const isTerminal = state === 'filtered' || state === 'errored' || state === 'dropped';
           const valueOut = isTerminal ? undefined : step.outputValue;
-          const circleOut = makeCircle(trace, state, {
-            x: outX,
-            y,
-            label: 'output',
-            value: valueOut,
-            hasValue: valueOut !== undefined,
-            hasStep: true,
-            operatorName: step.operatorName ?? axisLabels[opIndex],
-            isTerminal,
-          });
-          groupCircles.push(circleOut);
-          pointsByStroke.set(opIndex + 1, outPoint);
-          lastPoint = outPoint;
 
+          groupCircles.push(
+            makeCircle(trace, state, {
+              x: outX,
+              y,
+              label: 'output',
+              value: valueOut,
+              hasValue: valueOut !== undefined,
+              hasStep: true,
+              operatorName: step.operatorName ?? axisLabels[opIndex],
+              isTerminal,
+            })
+          );
+
+          lastPoint = outPoint;
           if (isTerminal) {
             stopped = true;
             break;
           }
         }
       } else {
+        // Normal trace starts at emission column (0)
         const emitX = getStrokeX(0);
-        const emittedCircle = makeCircle(trace, 'emitted', {
-          x: emitX,
-          y,
-          label: 'emit',
-          value: trace.sourceValue,
-          hasValue: trace.sourceValue !== undefined,
-          hasStep: true,
-          operatorName: 'emit',
-          isTerminal: false,
-        });
-        groupCircles.push(emittedCircle);
-        pointsByStroke.set(0, { x: emitX, y });
+        groupCircles.push(
+          makeCircle(trace, 'emitted', {
+            x: emitX,
+            y,
+            label: 'emit',
+            value: trace.sourceValue,
+            hasValue: trace.sourceValue !== undefined,
+            hasStep: true,
+            operatorName: 'emit',
+            isTerminal: false,
+          })
+        );
         lastPoint = { x: emitX, y };
 
         for (let opIndex = 0; opIndex < operatorCount; opIndex += 1) {
@@ -476,9 +508,8 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
 
           if (trace.collapsedInto?.operatorIndex === opIndex) {
             const targetIndex = indexByValueId.get(trace.collapsedInto.targetValueId);
-            if (targetIndex !== undefined) {
-              const targetRow = rowByTraceIndex.get(targetIndex) ?? 0;
-              const targetY = padding.top + targetRow * rowHeight + rowHeight / 2;
+            if (targetIndex !== undefined && lastPoint) {
+              const targetY = padding.top + targetIndex * rowHeight + rowHeight / 2;
               const targetX = getStrokeX(opIndex + 1);
               collapseLinks.push({ from: lastPoint, to: { x: targetX, y: targetY } });
             }
@@ -494,26 +525,28 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
           ) {
             state = 'collapsed';
           }
+
           const outX = getStrokeX(opIndex + 1);
           const outPoint = { x: outX, y };
-          drawCurve(lastPoint, outPoint, state);
+          if (lastPoint) drawCurve(lastPoint, outPoint, state);
 
-          const isTerminal = state === 'filtered' || state === 'errored';
+          const isTerminal = state === 'filtered' || state === 'errored' || state === 'dropped';
           const valueOut = isTerminal ? undefined : step.outputValue;
-          const circleOut = makeCircle(trace, state, {
-            x: outX,
-            y,
-            label: 'output',
-            value: valueOut,
-            hasValue: valueOut !== undefined,
-            hasStep: true,
-            operatorName: step.operatorName ?? axisLabels[opIndex],
-            isTerminal,
-          });
-          groupCircles.push(circleOut);
-          pointsByStroke.set(opIndex + 1, outPoint);
-          lastPoint = outPoint;
 
+          groupCircles.push(
+            makeCircle(trace, state, {
+              x: outX,
+              y,
+              label: 'output',
+              value: valueOut,
+              hasValue: valueOut !== undefined,
+              hasStep: true,
+              operatorName: step.operatorName ?? axisLabels[opIndex],
+              isTerminal,
+            })
+          );
+
+          lastPoint = outPoint;
           if (isTerminal) {
             stopped = true;
             break;
@@ -521,57 +554,55 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
         }
       }
 
+      // Deliver node only when deliveredAt exists and we didn’t stop early
       if (!stopped && trace.deliveredAt && lastPoint) {
         const deliverX = getStrokeX(axisLabels.length - 1);
         const deliverPoint = { x: deliverX, y };
         drawCurve(lastPoint, deliverPoint, 'delivered');
-        const deliverCircle = makeCircle(trace, 'delivered', {
-          x: deliverX,
-          y,
-          label: 'output',
-          value: trace.finalValue,
-          hasValue: trace.finalValue !== undefined,
-          hasStep: true,
-          operatorName: 'deliver',
-          isTerminal: true,
-        });
-        groupCircles.push(deliverCircle);
-        pointsByStroke.set(axisLabels.length - 1, deliverPoint);
+
+        groupCircles.push(
+          makeCircle(trace, 'delivered', {
+            x: deliverX,
+            y,
+            label: 'output',
+            value: trace.finalValue,
+            hasValue: trace.finalValue !== undefined,
+            hasStep: true,
+            operatorName: 'deliver',
+            isTerminal: true,
+          })
+        );
       }
     });
 
-    traces.forEach((childTrace) => {
-      const expandedFrom = (childTrace as ValueTraceWithExpansion).expandedFrom;
-      if (!expandedFrom) return;
+    // Expansion links (connect base operator stroke -> child start stroke)
+    traces.forEach((child) => {
+      const ex = (child as ValueTraceWithExpansion).expandedFrom;
+      if (!ex) return;
 
-      const baseTrace = tracesById.get(expandedFrom.baseValueId);
-      const baseIndex = baseTrace ? indexByValueId.get(baseTrace.valueId) : undefined;
-      const childIndex = indexByValueId.get(childTrace.valueId);
+      const baseIndex = indexByValueId.get(ex.baseValueId);
+      const childIndex = indexByValueId.get(child.valueId);
       if (baseIndex === undefined || childIndex === undefined) return;
 
-      const baseRow = rowByTraceIndex.get(baseIndex) ?? 0;
-      const childRow = rowByTraceIndex.get(childIndex) ?? 0;
-      const baseY = padding.top + baseRow * rowHeight + rowHeight / 2;
-      const childY = padding.top + childRow * rowHeight + rowHeight / 2;
+      const baseY = padding.top + baseIndex * rowHeight + rowHeight / 2;
+      const childY = padding.top + childIndex * rowHeight + rowHeight / 2;
 
-      const originOpIndex = expandedFrom.operatorIndex;
-      const basePoint = {
-        x: getStrokeX(originOpIndex),
-        y: baseY,
-      };
-      const childPoint = {
-        x: getStrokeX(originOpIndex + 1),
-        y: childY,
-      };
+      const originOpIndex = ex.operatorIndex;
 
-      expansionLinks.push({ from: basePoint, to: childPoint });
+      expansionLinks.push({
+        from: { x: getStrokeX(originOpIndex), y: baseY },
+        to: { x: getStrokeX(originOpIndex + 1), y: childY },
+      });
     });
 
+    // Draw links last, so they sit behind circles but on top of background
     collapseLinks.forEach(({ from, to }) => drawCurve(from, to, 'collapsed'));
     expansionLinks.forEach(({ from, to }) => drawCurve(from, to, 'expanded'));
 
+    // Draw circles (final)
     groupCircles.forEach((circle) => {
       const circleColor = STATE_COLORS[circle.state] ?? STATE_COLORS.emitted;
+
       ctx.beginPath();
       ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
 
@@ -595,17 +626,23 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
 
     this.circleRegistry.set(subscriptionId, groupCircles);
 
+    // Title
     ctx.textAlign = 'center';
     ctx.font = '12px "Inter", sans-serif';
     ctx.fillStyle = '#475467';
     ctx.fillText('Operator flow / timeline', padding.left + chartWidth / 2, padding.top - 12);
   }
 
+  /* -------------------------------------------------------------------------- */
+  /* Mouse / tooltip                                                             */
+  /* -------------------------------------------------------------------------- */
+
   onCanvasMouseMove(event: MouseEvent, subscriptionId: string) {
     const canvas = event.currentTarget as HTMLCanvasElement;
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
+
     const circles = this.circleRegistry.get(subscriptionId) ?? [];
     const hit = circles.find((circle) => {
       const dx = circle.x - x;
@@ -626,11 +663,19 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
     this.hoverPosition.set(null);
   }
 
+  /* -------------------------------------------------------------------------- */
+  /* Controls                                                                     */
+  /* -------------------------------------------------------------------------- */
+
   refreshTraces() {
-    this.traceMap.clear();
+    // hard reset ordering buffers
+    this.traceList = [];
+    this.traceIndexById.clear();
+
     this.traces.set([]);
     this.selectedTrace.set(null);
     this.clearHoveredCircle();
+
     runDemoStream();
   }
 
@@ -649,22 +694,20 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
   }
 
   selectTrace(trace: ValueTrace) {
-    this.selectedTrace.set(
-      this.selectedTrace()?.valueId === trace.valueId ? null : trace
-    );
+    this.selectedTrace.set(this.selectedTrace()?.valueId === trace.valueId ? null : trace);
   }
 
   trackByTrace(_: number, trace: ValueTrace) {
     return trace.valueId;
   }
 
+  /* -------------------------------------------------------------------------- */
+  /* Helpers referenced by template                                               */
+  /* -------------------------------------------------------------------------- */
+
   formatDuration(ms: number | undefined) {
-    if (!ms) {
-      return '?';
-    }
-    if (ms < 1000) {
-      return `${ms.toFixed(1)}ms`;
-    }
+    if (!ms) return '?';
+    if (ms < 1000) return `${ms.toFixed(1)}ms`;
     return `${(ms / 1000).toFixed(2)}s`;
   }
 
@@ -679,13 +722,20 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
   formatCircleValue(value?: any) {
     if (value === undefined || value === null) return 'N/A';
     if (typeof value === 'number') return value.toFixed(2);
-    if (typeof value === 'object') return JSON.stringify(value);
+    if (typeof value === 'object') {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    }
     return String(value);
   }
 
   getCircleDisplayValue(circle?: CanvasCircle | null) {
     if (!circle) return undefined;
     if (circle.value !== undefined) return circle.value;
+
     const steps = circle.trace?.operatorSteps ?? [];
     for (let i = steps.length - 1; i >= 0; i -= 1) {
       const step = steps[i];
@@ -701,15 +751,27 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
   }
 
   getStateAccent(state?: ValueState) {
-    if (!state) {
-      return '#475467';
-    }
+    if (!state) return '#475467';
     return STATE_COLORS[state]?.accent ?? '#475467';
   }
 
+  /* -------------------------------------------------------------------------- */
+  /* Chronological trace ingestion (NO SORTING)                                   */
+  /* -------------------------------------------------------------------------- */
+
   private handleTraceUpdate(trace: ValueTrace) {
-    this.traceMap.set(trace.valueId, trace);
-    const list = Array.from(this.traceMap.values()).sort((a, b) => a.emittedAt - b.emittedAt);
-    this.traces.set(list);
+    const existingIndex = this.traceIndexById.get(trace.valueId);
+
+    if (existingIndex === undefined) {
+      // first time we see this trace -> append (chronological)
+      this.traceIndexById.set(trace.valueId, this.traceList.length);
+      this.traceList.push(trace);
+    } else {
+      // update in place without changing order
+      this.traceList[existingIndex] = trace;
+    }
+
+    // push snapshot
+    this.traces.set(this.traceList.slice());
   }
 }
