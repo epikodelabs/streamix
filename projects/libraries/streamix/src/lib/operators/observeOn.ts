@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -42,6 +42,7 @@ import { createSubject } from '../subjects';
 export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotask" | "idle">) => {
   return createOperator<T, T>('observeOn', function (this: Operator, source) {
     const output = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
     const scheduledPromises: Promise<void>[] = [];
 
     (async () => {
@@ -56,10 +57,19 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
         while (true) {
           const result = await source.next();
           if (result.done) break;
+          const meta = getIteratorMeta(source);
 
           const p = new Promise<void>((resolve) => {
             schedule(() => {
               try {
+                if (meta) {
+                  setIteratorMeta(
+                    outputIterator,
+                    { valueId: meta.valueId },
+                    meta.operatorIndex,
+                    meta.operatorName
+                  );
+                }
                 output.next(result.value);
               } finally {
                 resolve();
@@ -78,7 +88,6 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
       }
     })();
 
-    const iterator = eachValueFrom(output);
     let completed = false;
 
     return {
@@ -86,7 +95,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
         while (true) {
           if (completed) return DONE;
 
-          const result = await iterator.next();
+          const result = await outputIterator.next();
           if (result.done) {
             completed = true;
             return DONE;

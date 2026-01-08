@@ -1,4 +1,4 @@
-import { createOperator, type Operator, type Stream } from '../abstractions';
+import { createOperator, getIteratorMeta, setIteratorMeta, type Operator, type Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -23,6 +23,7 @@ import { createSubject } from '../subjects';
 export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
   return createOperator<T, T>('skipUntil', function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
     let canEmit = false;
 
     // Subscribe to notifier
@@ -46,7 +47,18 @@ export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
         while (true) {
           const { done, value } = await source.next();
           if (done) break;
-          if (canEmit) output.next(value);
+          if (canEmit) {
+            const meta = getIteratorMeta(source);
+            if (meta) {
+              setIteratorMeta(
+                outputIterator,
+                { valueId: meta.valueId },
+                meta.operatorIndex,
+                meta.operatorName
+              );
+            }
+            output.next(value);
+          }
         }
       } catch (err) {
         if (!output.completed()) output.error(err);
@@ -56,6 +68,6 @@ export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

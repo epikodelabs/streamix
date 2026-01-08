@@ -1,4 +1,4 @@
-import { createOperator, type Operator, type Stream } from '../abstractions';
+import { createOperator, getIteratorMeta, setIteratorMeta, type Operator, type Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -22,6 +22,7 @@ import { createSubject } from '../subjects';
 export function takeUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
   return createOperator<T, T>('takeUntil', function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
     let stop = false;
 
     const notifierSubscription = fromAny(notifier).subscribe({
@@ -35,6 +36,15 @@ export function takeUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
         while (!stop) {
           const { done, value } = await source.next();
           if (done || stop) break;
+          const meta = getIteratorMeta(source);
+          if (meta) {
+            setIteratorMeta(
+              outputIterator,
+              { valueId: meta.valueId },
+              meta.operatorIndex,
+              meta.operatorName
+            );
+          }
           output.next(value);
         }
       } catch (err) {
@@ -45,6 +55,6 @@ export function takeUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

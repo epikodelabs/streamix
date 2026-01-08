@@ -1,4 +1,4 @@
-import { createOperator, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -16,15 +16,28 @@ import { createSubject, type Subject } from '../subjects';
 export const throttle = <T = any>(duration: MaybePromise<number>) =>
   createOperator<T, T>('throttle', function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
     let lastEmit = 0;
     let pendingResult: IteratorResult<T> | undefined;
+    let pendingMeta:
+      | { valueId: string; operatorIndex: number; operatorName: string }
+      | undefined;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let resolvedDuration: number | undefined = undefined;
 
     const flushPending = () => {
       if (pendingResult !== undefined) {
+        if (pendingMeta) {
+          setIteratorMeta(
+            outputIterator,
+            { valueId: pendingMeta.valueId },
+            pendingMeta.operatorIndex,
+            pendingMeta.operatorName
+          );
+        }
         output.next(pendingResult.value!);
         pendingResult = undefined;
+        pendingMeta = undefined;
       }
       timer = null;
       lastEmit = Date.now();
@@ -41,15 +54,26 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
           const now = Date.now();
           if (resolvedDuration === undefined) {
             pendingResult = result;
+            pendingMeta = getIteratorMeta(source);
             continue;
           }
 
           if (now - lastEmit >= resolvedDuration) {
             // Emit immediately
+            const meta = getIteratorMeta(source);
+            if (meta) {
+              setIteratorMeta(
+                outputIterator,
+                { valueId: meta.valueId },
+                meta.operatorIndex,
+                meta.operatorName
+              );
+            }
             output.next(result.value);
             lastEmit = now;
           } else {
             pendingResult = result;
+            pendingMeta = getIteratorMeta(source);
 
             // Schedule trailing emit
             if (!timer) {
@@ -72,5 +96,5 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });

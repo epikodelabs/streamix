@@ -1,4 +1,4 @@
-import { createOperator, isPromiseLike, type Operator, type Stream, type Subscription } from "../abstractions";
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type Operator, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../subjects";
 
@@ -21,10 +21,11 @@ import { createSubject } from "../subjects";
 export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
   return createOperator<T, T>("delayUntil", function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
     let canEmit = false;
     let notifierEmitted = false;
     let gateClosedWithoutEmit = false;
-    const buffer: T[] = [];
+    const buffer: { value: T; meta?: { valueId: string; operatorIndex: number; operatorName: string } }[] = [];
     let notifierSubscription: Subscription | undefined;
 
     const setupNotifier = async () => {
@@ -36,7 +37,17 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
             if (!canEmit && !gateClosedWithoutEmit) { // Only run the flush on the *first* emission
               canEmit = true;
               notifierEmitted = true;
-              for (const v of buffer) output.next(v);
+              for (const entry of buffer) {
+                if (entry.meta) {
+                  setIteratorMeta(
+                    outputIterator,
+                    { valueId: entry.meta.valueId },
+                    entry.meta.operatorIndex,
+                    entry.meta.operatorName
+                  );
+                }
+                output.next(entry.value);
+              }
               buffer.length = 0;
             }
             // Unsubscribe from the notifier immediately after the first next()
@@ -68,11 +79,20 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
         while (true) {
           const { done, value } = await source.next();
           if (done) break;
+          const meta = getIteratorMeta(source);
 
           if (canEmit) {
+            if (meta) {
+              setIteratorMeta(
+                outputIterator,
+                { valueId: meta.valueId },
+                meta.operatorIndex,
+                meta.operatorName
+              );
+            }
             output.next(value);
           } else if (!gateClosedWithoutEmit) {
-            buffer.push(value);
+            buffer.push({ value, meta });
           }
         }
       } catch (err) {
@@ -83,6 +103,6 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

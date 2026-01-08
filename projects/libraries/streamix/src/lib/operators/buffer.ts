@@ -14,6 +14,7 @@ import { createSubject } from "../subjects";
 export function buffer<T = any>(period: MaybePromise<number>) {
   return createOperator<T, T[]>("buffer", function (this: Operator, source) {
     const output = createSubject<T[]>();
+    const outputIterator = eachValueFrom(output);
 
     let buffer: {
       result: IteratorResult<T>;
@@ -25,16 +26,14 @@ export function buffer<T = any>(period: MaybePromise<number>) {
     const flush = () => {
       if (buffer.length === 0) return;
 
-      // Mark all buffered values as collapsed
-      for (const entry of buffer) {
-        if (entry.meta) {
-          setIteratorMeta(
-            source,
-            { valueId: entry.meta.valueId },
-            entry.meta.operatorIndex,
-            "buffer"
-          );
-        }
+      const targetMeta = buffer[buffer.length - 1]?.meta;
+      if (targetMeta) {
+        setIteratorMeta(
+          outputIterator,
+          { valueId: targetMeta.valueId },
+          targetMeta.operatorIndex,
+          targetMeta.operatorName
+        );
       }
 
       // Emit expanded value
@@ -86,6 +85,6 @@ export function buffer<T = any>(period: MaybePromise<number>) {
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

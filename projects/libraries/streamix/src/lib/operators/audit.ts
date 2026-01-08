@@ -18,6 +18,7 @@ import { createSubject } from '../subjects';
 export const audit = <T = any>(duration: MaybePromise<number>) =>
   createOperator<T, T>('audit', function (this: Operator, source) {
     const output = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
 
     let bufferedResult: IteratorResult<T> | undefined;
     let bufferedMeta:
@@ -31,6 +32,14 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
     const flush = () => {
       if (!bufferedResult) return;
 
+      if (bufferedMeta) {
+        setIteratorMeta(
+          outputIterator,
+          { valueId: bufferedMeta.valueId },
+          bufferedMeta.operatorIndex,
+          bufferedMeta.operatorName
+        );
+      }
       output.next(bufferedResult.value!);
 
       bufferedResult = undefined;
@@ -65,15 +74,6 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
           const meta = getIteratorMeta(source);
 
           // ⚠️ Replace buffered value → mark previous as filtered
-          if (bufferedMeta) {
-            setIteratorMeta(
-              source,
-              { valueId: bufferedMeta.valueId },
-              bufferedMeta.operatorIndex,
-              'audit'
-            );
-          }
-
           bufferedResult = result;
           bufferedMeta = meta;
 
@@ -91,5 +91,5 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
