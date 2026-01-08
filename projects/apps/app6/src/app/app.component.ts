@@ -36,6 +36,7 @@ interface CanvasCircle {
   column: number;
   operatorIndex: number | null;
   sequence: number;
+  displayValueId: string;
   radius: number;
   label: 'emit' | 'output';
   value?: any;
@@ -458,9 +459,9 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
       ctx.stroke();
     };
 
-    const makeCircle = (
-      trace: ValueTrace,
-      state: ValueState,
+	    const makeCircle = (
+	      trace: ValueTrace,
+	      state: ValueState,
       cfg: {
         x: number;
         y: number;
@@ -474,34 +475,34 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
         operatorName: string;
         isTerminal: boolean;
       }
-    ): CanvasCircle => {
-      const effectiveState: ValueState =
-        cfg.label === 'output' && Boolean(trace.deliveredAt)
-          ? 'delivered'
-          : state;
-      const id = `${subscriptionId}:${circleCounter++}`;
-      // Use actual chronological order instead of drawing order
-      const sequence = this.getChronologicalSequence(trace, cfg.operatorIndex, cfg.label);
-      
-      const circleTrace: ValueTrace = { ...trace, valueId: `val_${sequence}` };
+	    ): CanvasCircle => {
+	      const effectiveState: ValueState =
+	        cfg.label === 'output' && Boolean(trace.deliveredAt)
+	          ? 'delivered'
+	          : state;
+	      const id = `${subscriptionId}:${circleCounter++}`;
+	      // Use actual chronological order instead of drawing order
+	      const sequence = this.getChronologicalSequence(trace, cfg.operatorIndex, cfg.label);
+	      const displayValueId = `val_${sequence}`;
 
-      return {
-        id,
-        x: cfg.x,
-        y: cfg.y,
-        row: cfg.row,
-        column: cfg.column,
-        operatorIndex: cfg.operatorIndex,
-        sequence,
-        radius: 6,
-        label: cfg.label,
-        value: cfg.value,
-        operatorName: cfg.operatorName,
-        trace: circleTrace,
-        state: effectiveState,
-        subscriptionId,
-        isTerminal: cfg.isTerminal,
-        hasValue: cfg.hasValue,
+	      return {
+	        id,
+	        x: cfg.x,
+	        y: cfg.y,
+	        row: cfg.row,
+	        column: cfg.column,
+	        operatorIndex: cfg.operatorIndex,
+	        sequence,
+	        displayValueId,
+	        radius: 6,
+	        label: cfg.label,
+	        value: cfg.value,
+	        operatorName: cfg.operatorName,
+	        trace,
+	        state: effectiveState,
+	        subscriptionId,
+	        isTerminal: cfg.isTerminal,
+	        hasValue: cfg.hasValue,
         hasStep: cfg.hasStep,
       };
     };
