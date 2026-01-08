@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, getIteratorMeta, NEXT, setIteratorMeta, type Operator } from "../abstractions";
 
 /**
  * Collects all emitted values from the source stream into an array
@@ -10,11 +10,13 @@ import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
 export const toArray = <T = any>() =>
   createOperator<T, T[]>("toArray", function (this: Operator, source) {
     const collected: IteratorResult<T>[] = [];
+    const collectedMeta:
+      | ({ valueId: string; operatorIndex: number; operatorName: string } | undefined)[] = [];
     let completed = false;
     let emitted = false;
 
     return {
-      next: async () => {
+      next: async function () {
         while (true) {
           // All done and final array emitted → complete
           if (completed && emitted) {
@@ -27,6 +29,16 @@ export const toArray = <T = any>() =>
             completed = true;
             if (!emitted) {
               emitted = true;
+              const metas = collectedMeta.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
+              const lastMeta = metas[metas.length - 1];
+              if (lastMeta) {
+                setIteratorMeta(
+                  this as any,
+                  { valueId: lastMeta.valueId, kind: "collapse", inputValueIds: metas.map((m) => m.valueId) },
+                  lastMeta.operatorIndex,
+                  lastMeta.operatorName
+                );
+              }
               // Emit the final array of values
               return NEXT(collected.map((r) => r.value!));
             }
@@ -34,6 +46,7 @@ export const toArray = <T = any>() =>
           }
 
           collected.push(result);
+          collectedMeta.push(getIteratorMeta(source));
         }
       },
     };
