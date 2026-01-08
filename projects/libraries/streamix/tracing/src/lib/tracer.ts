@@ -430,8 +430,37 @@ const reduceTrace = (trace: TraceRecord, event: TraceEvent, policy: TracerPolicy
     case "TERMINALIZE": {
       if (isTerminal) return { trace, emit };
 
+      const openStepIndex = trace.operatorSteps.findIndex(
+        (s) => s.operatorIndex === event.opIndex && s.exitedAt == null
+      );
+
+      let operatorSteps: Array<TraceRecord["operatorSteps"][number]> = [...trace.operatorSteps];
+      let lastStep: TraceRecord["operatorSteps"][number] | undefined;
+      if (openStepIndex !== -1) {
+        const prevStep = trace.operatorSteps[openStepIndex];
+        const outcome =
+          event.reason === "filtered"
+            ? ("filtered" as const)
+            : event.reason === "errored"
+              ? ("errored" as const)
+              : event.reason === "collapsed"
+                ? ("collapsed" as const)
+                : undefined;
+
+        const updatedStep = {
+          ...prevStep,
+          exitedAt: event.now,
+          outcome,
+          error: event.error,
+        };
+
+        operatorSteps[openStepIndex] = updatedStep;
+        lastStep = updatedStep;
+      }
+
       const updated: TraceRecord = {
         ...trace,
+        operatorSteps,
         status: "terminal",
         terminalReason: event.reason,
         droppedReason: {
@@ -455,7 +484,7 @@ const reduceTrace = (trace: TraceRecord, event: TraceEvent, policy: TracerPolicy
 
       emit.push("trace");
       assertInvariants(updated, policy);
-      return { trace: updated, emit };
+      return { trace: updated, emit, lastStep };
     }
 
     case "DELIVER": {

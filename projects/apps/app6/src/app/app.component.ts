@@ -441,11 +441,11 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
         ctx.moveTo(x + 4, y - 4);
         ctx.lineTo(x - 4, y + 4);
       } else if (state === 'errored') {
-        // ! shape for errored
-        ctx.moveTo(x, y - 4);
-        ctx.lineTo(x, y + 1);
-        ctx.moveTo(x, y + 3);
-        ctx.lineTo(x, y + 3);
+        // X shape for errored (same as filtered, but red background)
+        ctx.moveTo(x - 4, y - 4);
+        ctx.lineTo(x + 4, y + 4);
+        ctx.moveTo(x + 4, y - 4);
+        ctx.lineTo(x - 4, y + 4);
       } else if (state === 'dropped') {
         // ↓ arrow for dropped
         ctx.moveTo(x, y - 4);
