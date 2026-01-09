@@ -57,7 +57,12 @@ export function switchMap<T = any, R = any>(
         next: (value) => {
           if (streamId === currentInnerStreamId) {
             if (parentMeta) {
-              setIteratorMeta(outputIterator, { valueId: parentMeta.valueId }, parentMeta.operatorIndex, parentMeta.operatorName);
+              setIteratorMeta(
+                outputIterator,
+                { valueId: parentMeta.valueId, kind: "expand" },
+                parentMeta.operatorIndex,
+                parentMeta.operatorName
+              );
             }
             output.next(value);
           }

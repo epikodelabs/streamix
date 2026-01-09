@@ -56,7 +56,12 @@ export const concatMap = <T = any, R = T>(
           }
 
           if (currentMeta) {
-            setIteratorMeta(iterator, { valueId: currentMeta.valueId }, currentMeta.operatorIndex, currentMeta.operatorName);
+            setIteratorMeta(
+              iterator,
+              { valueId: currentMeta.valueId, kind: "expand" },
+              currentMeta.operatorIndex,
+              currentMeta.operatorName
+            );
           }
 
           // Mark that inner stream produced a value

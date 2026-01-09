@@ -45,7 +45,12 @@ export function mergeMap<T = any, R = any>(
         for await (const val of innerStream) {
           if (errorOccurred) break;
           if (parentMeta) {
-            setIteratorMeta(outputIterator, { valueId: parentMeta.valueId }, parentMeta.operatorIndex, parentMeta.operatorName);
+            setIteratorMeta(
+              outputIterator,
+              { valueId: parentMeta.valueId, kind: "expand" },
+              parentMeta.operatorIndex,
+              parentMeta.operatorName
+            );
           }
           output.next(val);
         }

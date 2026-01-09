@@ -103,7 +103,12 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
           }
 
           if (currentMeta) {
-            setIteratorMeta(iterator, { valueId: currentMeta.valueId }, currentMeta.operatorIndex, currentMeta.operatorName);
+            setIteratorMeta(
+              iterator,
+              { valueId: currentMeta.valueId, kind: "expand" },
+              currentMeta.operatorIndex,
+              currentMeta.operatorName
+            );
           }
 
           return NEXT(innerResult.value);
