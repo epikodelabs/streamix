@@ -97,6 +97,18 @@ const ITERATOR_META = new WeakMap<
 >();
 
 /**
+ * Per-value metadata storage.
+ * Maps value objects to their associated trace metadata.
+ * For primitives, we use a symbol property to attach metadata.
+ */
+const VALUE_META = new WeakMap<
+  object,
+  { valueId: string; operatorIndex: number; operatorName: string; kind?: IteratorMetaKind; inputValueIds?: string[] }
+>();
+
+export const VALUE_META_SYMBOL = Symbol('__streamix_value_meta__');
+
+/**
  * Monotonically increasing counters for ID generation.
  *
  * These counters are intentionally process-local
@@ -189,6 +201,82 @@ export function getIteratorMeta(
     }
   | undefined {
   return ITERATOR_META.get(iterator);
+}
+
+/**
+ * Associates metadata with a specific value.
+ * Works for both objects (via WeakMap) and primitives (via symbol property).
+ */
+export function setValueMeta(
+  value: any,
+  meta: IteratorMetaTag,
+  operatorIndex: number,
+  operatorName: string
+): any {
+  const entry: {
+    valueId: string;
+    operatorIndex: number;
+    operatorName: string;
+    kind?: IteratorMetaKind;
+    inputValueIds?: string[];
+  } = {
+    valueId: meta.valueId,
+    operatorIndex,
+    operatorName,
+  };
+
+  if (meta.kind !== undefined) entry.kind = meta.kind;
+  if (meta.inputValueIds !== undefined) entry.inputValueIds = meta.inputValueIds;
+
+  // For objects, use WeakMap
+  if (value !== null && typeof value === 'object') {
+    VALUE_META.set(value, entry);
+    return value;
+  } else if (value !== null && value !== undefined) {
+    // For primitives, wrap in an object with marker symbol
+    const wrapper = { [VALUE_META_SYMBOL]: value };
+    VALUE_META.set(wrapper, entry);
+    return wrapper;
+  }
+  return value;
+}
+
+/**
+ * Retrieves metadata associated with a specific value.
+ */
+export function getValueMeta(
+  value: any
+):
+  | {
+      valueId: string;
+      operatorIndex: number;
+      operatorName: string;
+      kind?: IteratorMetaKind;
+      inputValueIds?: string[];
+    }
+  | undefined {
+  // For objects (including wrapped primitives), check WeakMap
+  if (value !== null && typeof value === 'object') {
+    return VALUE_META.get(value);
+  }
+  return undefined;
+}
+
+/**
+ * Checks if a value is a wrapped primitive.
+ */
+export function isWrappedPrimitive(value: any): boolean {
+  return value !== null && typeof value === 'object' && VALUE_META_SYMBOL in value;
+}
+
+/**
+ * Unwraps a primitive value from its metadata wrapper.
+ */
+export function unwrapPrimitive(value: any): any {
+  if (isWrappedPrimitive(value)) {
+    return value[VALUE_META_SYMBOL];
+  }
+  return value;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from "../abstractions";
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { createSubject, type Subject } from "../subjects";
 
@@ -30,16 +30,17 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
     const flush = () => {
       if (!latestResult) return;
 
+      let value = latestResult.value!;
+      
+      // Attach metadata to the value itself (may wrap primitives)
       if (latestMeta) {
-        setIteratorMeta(
-          outputIterator,
-          { valueId: latestMeta.valueId },
-          latestMeta.operatorIndex,
-          latestMeta.operatorName
-        );
+        value = setValueMeta(value, { valueId: latestMeta.valueId }, latestMeta.operatorIndex, latestMeta.operatorName);
+        // Also set on iterator for backward compatibility
+        setIteratorMeta(outputIterator, { valueId: latestMeta.valueId }, latestMeta.operatorIndex, latestMeta.operatorName);
       }
-      // Emit final value
-      output.next(latestResult.value!);
+      
+      // Emit value (potentially wrapped)
+      output.next(value);
 
       latestResult = undefined;
       latestMeta = undefined;

@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -17,6 +17,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
   createOperator<T, T>('throttle', function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
     const outputIterator = eachValueFrom(output);
+    
     let lastEmit = 0;
     let pendingResult: IteratorResult<T> | undefined;
     let pendingMeta:
@@ -27,15 +28,16 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
 
     const flushPending = () => {
       if (pendingResult !== undefined) {
+        let value = pendingResult.value!;
+        
+        // Attach metadata to the value itself (may wrap primitives)
         if (pendingMeta) {
-          setIteratorMeta(
-            outputIterator,
-            { valueId: pendingMeta.valueId },
-            pendingMeta.operatorIndex,
-            pendingMeta.operatorName
-          );
+          value = setValueMeta(value, { valueId: pendingMeta.valueId }, pendingMeta.operatorIndex, pendingMeta.operatorName);
+          // Also set on iterator for backward compatibility
+          setIteratorMeta(outputIterator, { valueId: pendingMeta.valueId }, pendingMeta.operatorIndex, pendingMeta.operatorName);
         }
-        output.next(pendingResult.value!);
+        
+        output.next(value);
         pendingResult = undefined;
         pendingMeta = undefined;
       }
@@ -60,16 +62,17 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
 
           if (now - lastEmit >= resolvedDuration) {
             // Emit immediately
+            let value = result.value;
             const meta = getIteratorMeta(source);
+            
+            // Attach metadata to the value itself (may wrap primitives)
             if (meta) {
-              setIteratorMeta(
-                outputIterator,
-                { valueId: meta.valueId },
-                meta.operatorIndex,
-                meta.operatorName
-              );
+              value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+              // Also set on iterator for backward compatibility
+              setIteratorMeta(outputIterator, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
             }
-            output.next(result.value);
+            
+            output.next(value);
             lastEmit = now;
           } else {
             pendingResult = result;
