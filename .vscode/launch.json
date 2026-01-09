@@ -16,6 +16,9 @@
         "--spec",
         "${file}"
       ],
+      "env": {
+        "TS_NODE_PROJECT": "${workspaceFolder}/tsconfig.json"
+      },
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "skipFiles": [
