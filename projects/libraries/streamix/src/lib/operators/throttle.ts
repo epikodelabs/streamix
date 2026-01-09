@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -20,26 +20,16 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
     
     let lastEmit = 0;
     let pendingResult: IteratorResult<T> | undefined;
-    let pendingMeta:
-      | { valueId: string; operatorIndex: number; operatorName: string }
-      | undefined;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let resolvedDuration: number | undefined = undefined;
 
     const flushPending = () => {
       if (pendingResult !== undefined) {
-        let value = pendingResult.value!;
+        const value = pendingResult.value!;
         
-        // Attach metadata to the value itself (may wrap primitives)
-        if (pendingMeta) {
-          value = setValueMeta(value, { valueId: pendingMeta.valueId }, pendingMeta.operatorIndex, pendingMeta.operatorName);
-          // Also set on iterator for backward compatibility
-          setIteratorMeta(outputIterator, { valueId: pendingMeta.valueId }, pendingMeta.operatorIndex, pendingMeta.operatorName);
-        }
-        
+        // Emit value directly - tracer tracks it via inputQueue
         output.next(value);
         pendingResult = undefined;
-        pendingMeta = undefined;
       }
       timer = null;
       lastEmit = Date.now();
@@ -56,27 +46,21 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
           const now = Date.now();
           if (resolvedDuration === undefined) {
             pendingResult = result;
-            pendingMeta = getIteratorMeta(source);
+            getIteratorMeta(source);
             continue;
           }
 
           if (now - lastEmit >= resolvedDuration) {
             // Emit immediately
-            let value = result.value;
-            const meta = getIteratorMeta(source);
+            const value = result.value;
+            getIteratorMeta(source);
             
-            // Attach metadata to the value itself (may wrap primitives)
-            if (meta) {
-              value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-              // Also set on iterator for backward compatibility
-              setIteratorMeta(outputIterator, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-            }
-            
+            // Emit value directly - tracer tracks it via inputQueue
             output.next(value);
             lastEmit = now;
           } else {
             pendingResult = result;
-            pendingMeta = getIteratorMeta(source);
+            getIteratorMeta(source);
 
             // Schedule trailing emit
             if (!timer) {

@@ -1,4 +1,4 @@
-import { createOperator, createReceiver, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator, type Receiver, type Stream, type Subscription } from "../abstractions";
+import { createOperator, createReceiver, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Receiver, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
@@ -97,6 +97,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
 
           // Gate check: Only emit if ALL auxiliary streams have emitted a value
           if (hasValue.length > 0 && hasValue.every(Boolean)) {
+            let combined = [result.value, ...latestValues] as [T, ...R];
             if (meta) {
               setIteratorMeta(
                 outputIterator,
@@ -104,8 +105,9 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
                 meta.operatorIndex,
                 meta.operatorName
               );
+              combined = setValueMeta(combined, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
             }
-            output.next([result.value, ...latestValues] as [T, ...R]);
+            output.next(combined);
           }
         }
       } catch (err) {

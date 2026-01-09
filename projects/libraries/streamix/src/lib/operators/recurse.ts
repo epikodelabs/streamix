@@ -1,4 +1,4 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, setIteratorMeta, type MaybePromise, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -86,7 +86,17 @@ export const recurse = <T = any>(
               options.traversal === 'breadth' ? queue.shift()! : queue.pop()!;
             await enqueueChildren(item.value, item.depth, item.meta);
 
+            let value = item.value;
             if (item.meta) {
+              value = setValueMeta(
+                value,
+                {
+                  valueId: item.meta.valueId,
+                  ...(item.depth > 0 ? { kind: "expand" as const } : {}),
+                },
+                item.meta.operatorIndex,
+                item.meta.operatorName
+              );
               setIteratorMeta(
                 iterator,
                 {
@@ -98,7 +108,7 @@ export const recurse = <T = any>(
               );
             }
 
-            return NEXT(item.value);
+            return NEXT(value);
           }
 
           // If queue is empty and source is done, we're done

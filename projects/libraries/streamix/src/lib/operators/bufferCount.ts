@@ -1,4 +1,4 @@
-import { DONE, type MaybePromise, NEXT, type Operator, createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta } from "../abstractions";
+import { DONE, type MaybePromise, NEXT, type Operator, createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta } from "../abstractions";
 
 /**
  * Buffers a fixed number of values from the source stream and emits them as arrays,
@@ -45,6 +45,7 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
             if (buffer.length > 0) {
               const metas = metaByIndex.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
               const lastMeta = metas[metas.length - 1];
+              let values = buffer.map((r) => r.value!);
               if (lastMeta) {
                 setIteratorMeta(
                   iterator as any,
@@ -56,8 +57,14 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
                   lastMeta.operatorIndex,
                   lastMeta.operatorName
                 );
+                values = setValueMeta(
+                  values,
+                  { valueId: lastMeta.valueId, kind: "collapse", inputValueIds: metas.map((m) => m.valueId) },
+                  lastMeta.operatorIndex,
+                  lastMeta.operatorName
+                );
               }
-              return NEXT(buffer.map((r) => r.value!));
+              return NEXT(values);
             }
 
             return DONE;
@@ -69,6 +76,7 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
 
         const metas = metaByIndex.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
         const lastMeta = metas[metas.length - 1];
+        let values = buffer.map((r) => r.value!);
         if (lastMeta) {
           setIteratorMeta(
             iterator as any,
@@ -80,8 +88,14 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
             lastMeta.operatorIndex,
             lastMeta.operatorName
           );
+          values = setValueMeta(
+            values,
+            { valueId: lastMeta.valueId, kind: "collapse", inputValueIds: metas.map((m) => m.valueId) },
+            lastMeta.operatorIndex,
+            lastMeta.operatorName
+          );
         }
-        return NEXT(buffer.map((r) => r.value!));
+        return NEXT(values);
       },
     };
 

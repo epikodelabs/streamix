@@ -1,4 +1,4 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -62,6 +62,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
           const p = new Promise<void>((resolve) => {
             schedule(() => {
               try {
+                let value = result.value;
                 if (meta) {
                   setIteratorMeta(
                     outputIterator,
@@ -69,8 +70,9 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
                     meta.operatorIndex,
                     meta.operatorName
                   );
+                  value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
                 }
-                output.next(result.value);
+                output.next(value);
               } finally {
                 resolve();
               }

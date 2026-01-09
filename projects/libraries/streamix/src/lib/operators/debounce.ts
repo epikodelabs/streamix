@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from "../abstractions";
+import { createOperator, getIteratorMeta, isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { createSubject, type Subject } from "../subjects";
 
@@ -20,9 +20,6 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let latestResult: IteratorResult<T> | undefined;
-    let latestMeta:
-      | { valueId: string; operatorIndex: number; operatorName: string }
-      | undefined;
 
     let resolvedDuration: number | undefined;
     let completed = false;
@@ -30,20 +27,12 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
     const flush = () => {
       if (!latestResult) return;
 
-      let value = latestResult.value!;
+      const value = latestResult.value!;
       
-      // Attach metadata to the value itself (may wrap primitives)
-      if (latestMeta) {
-        value = setValueMeta(value, { valueId: latestMeta.valueId }, latestMeta.operatorIndex, latestMeta.operatorName);
-        // Also set on iterator for backward compatibility
-        setIteratorMeta(outputIterator, { valueId: latestMeta.valueId }, latestMeta.operatorIndex, latestMeta.operatorName);
-      }
-      
-      // Emit value (potentially wrapped)
+      // Emit value directly - tracer tracks it via inputQueue
       output.next(value);
 
       latestResult = undefined;
-      latestMeta = undefined;
       timeoutId = undefined;
 
       if (completed) {
@@ -70,11 +59,10 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
           }
 
           // 🔍 Extract tracing metadata of incoming value
-          const meta = getIteratorMeta(source);
+          getIteratorMeta(source);
 
           // ⚠️ Supersede previous pending value
           latestResult = result;
-          latestMeta = meta;
 
           if (timeoutId) clearTimeout(timeoutId);
           if (resolvedDuration !== undefined) {

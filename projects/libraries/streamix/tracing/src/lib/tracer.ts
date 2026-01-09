@@ -11,7 +11,6 @@
  */
 import {
   createOperator,
-  getIteratorMeta,
   getValueMeta,
   registerRuntimeHooks,
   setIteratorMeta,
@@ -1067,78 +1066,64 @@ registerRuntimeHooks({
                   return out;
                 }
 
-                // Check for per-value metadata (from operators like debounce/throttle)
+                // Per-value metadata (attached by operators like debounce/throttle/audit/bufferCount/etc.)
+                // Note: when metadata is attached to a primitive, it may come in via a wrapped value.
+                // Always read metadata before unwrapping.
                 const perValueMeta = getValueMeta(out.value);
-                
-                const outputMeta = getIteratorMeta(inner as any) as any;
-                
-                // Use per-value metadata if available, otherwise use iterator metadata
-                const metaToPropagate = perValueMeta ?? outputMeta;
-                
-                if (metaToPropagate?.valueId) {
-                  setIteratorMeta(
-                    this as any,
-                    { valueId: metaToPropagate.valueId, kind: metaToPropagate.kind, inputValueIds: metaToPropagate.inputValueIds },
-                    metaToPropagate.operatorIndex,
-                    metaToPropagate.operatorName
-                  );
-                }
+                const emittedValue = unwrapPrimitive(out.value);
 
                 // Array collapse: multiple inputs → array output
                 if (
-                  Array.isArray(out.value) &&
-                  outputMeta?.kind === "collapse" &&
-                  Array.isArray(outputMeta.inputValueIds) &&
-                  outputMeta.inputValueIds.length > 1
+                  Array.isArray(emittedValue) &&
+                  perValueMeta?.kind === "collapse" &&
+                  Array.isArray(perValueMeta.inputValueIds) &&
+                  perValueMeta.inputValueIds.length > 1
                 ) {
                   const targetId =
-                    (typeof outputMeta.valueId === "string" && outputMeta.valueId) ||
-                    outputMeta.inputValueIds[outputMeta.inputValueIds.length - 1];
+                    (typeof perValueMeta.valueId === "string" && perValueMeta.valueId) ||
+                    perValueMeta.inputValueIds[perValueMeta.inputValueIds.length - 1];
 
                   if (typeof targetId === "string" && metaByValueId.has(targetId)) {
                     const targetMeta = metaByValueId.get(targetId)!;
 
-                    for (const id of outputMeta.inputValueIds) {
+                    for (const id of perValueMeta.inputValueIds) {
                       if (id === targetId) continue;
                       if (!metaByValueId.has(id)) continue;
                       removeFromQueue(id);
-                      tracer.collapseValue(id, i, opName, targetId, out.value);
+                      tracer.collapseValue(id, i, opName, targetId, emittedValue);
                     }
 
                     removeFromQueue(targetId);
-                    const unwrappedValue = unwrapPrimitive(out.value);
-                    tracer.exitOperator(targetId, i, unwrappedValue, false, "collapsed");
+                    tracer.exitOperator(targetId, i, emittedValue, false, "collapsed");
                     lastOutputMeta = targetMeta;
-                    setIteratorMeta(this as any, targetMeta, i, opName);
 
-                    return { done: false, value: wrapTracedValue(unwrappedValue, targetMeta) };
+                    return { done: false, value: wrapTracedValue(emittedValue, targetMeta) };
                   }
                 }
-                if (Array.isArray(out.value) && requestBatch.length > 1 && out.value.length === requestBatch.length) {
+                if (Array.isArray(emittedValue) && requestBatch.length > 1 && emittedValue.length === requestBatch.length) {
                   const target = requestBatch[requestBatch.length - 1];
 
                   for (let j = 0; j < requestBatch.length - 1; j++) {
                     removeFromQueue(requestBatch[j].meta.valueId);
-                    tracer.collapseValue(requestBatch[j].meta.valueId, i, opName, target.meta.valueId, out.value);
+                    tracer.exitOperator(requestBatch[j].meta.valueId, i, requestBatch[j].value, true);
                   }
 
                   removeFromQueue(target.meta.valueId);
-                  tracer.exitOperator(target.meta.valueId, i, out.value, false, "collapsed");
+                  tracer.exitOperator(target.meta.valueId, i, emittedValue, false, "transformed");
                   lastOutputMeta = target.meta;
-                  setIteratorMeta(this as any, target.meta, i, opName);
 
-                  return { done: false, value: wrapTracedValue(out.value, target.meta) };
+                  return { done: false, value: wrapTracedValue(emittedValue, target.meta) };
                 }
 
                 // Runtime-provided output with expansion/filtering
-                if (outputMeta?.valueId && metaByValueId.has(outputMeta.valueId)) {
-                  const baseValueId = outputMeta.valueId as string;
+                if (perValueMeta?.kind === "expand" && perValueMeta.valueId && metaByValueId.has(perValueMeta.valueId)) {
+                  const baseValueId = perValueMeta.valueId as string;
                   const baseMeta = metaByValueId.get(baseValueId)!;
 
                   // Filter detection: pass-through from one of multiple requests
                   if (requestBatch.length > 1) {
                     const baseRequested = requestBatch.find((w) => w.meta.valueId === baseValueId);
-                    const isPassThrough = baseRequested && Object.is(out.value, baseRequested.value);
+                    const isPassThrough = baseRequested && Object.is(emittedValue, baseRequested.value);
 
                     if (isPassThrough) {
                       for (const req of requestBatch) {
@@ -1156,16 +1141,14 @@ registerRuntimeHooks({
 
                   if (count === 0) {
                     removeFromQueue(baseValueId);
-                    tracer.exitOperator(baseValueId, i, out.value, false, "expanded");
+                    tracer.exitOperator(baseValueId, i, emittedValue, false, "expanded");
                     lastOutputMeta = baseMeta;
-                    setIteratorMeta(this as any, baseMeta, i, opName);
-                    return { done: false, value: wrapTracedValue(out.value, baseMeta) };
+                    return { done: false, value: wrapTracedValue(emittedValue, baseMeta) };
                   }
 
-                  const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, out.value);
+                  const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, emittedValue);
                   lastOutputMeta = baseMeta;
-                  setIteratorMeta(this as any, { ...baseMeta, valueId: expandedId }, i, opName);
-                  return { done: false, value: wrapTracedValue(out.value, { ...baseMeta, valueId: expandedId }) };
+                  return { done: false, value: wrapTracedValue(emittedValue, { ...baseMeta, valueId: expandedId }) };
                 }
 
                 // Expansion: outputs without new input
@@ -1174,63 +1157,55 @@ registerRuntimeHooks({
                   // actively awaiting `next()`. Those outputs are buffered and later observed with an empty
                   // `requestBatch`. In that case, attribute the output to pending inputs already pulled from `src`.
                   if (inputQueue.length > 0) {
-                    // Prefer explicit iterator meta for collapse operators (buffer/bufferCount/toArray/etc.).
+                    // Prefer explicit per-value meta for collapse operators (buffer/bufferCount/toArray/etc.).
                     if (
-                      Array.isArray(out.value) &&
-                      outputMeta?.kind === "collapse" &&
-                      Array.isArray(outputMeta.inputValueIds) &&
-                      outputMeta.inputValueIds.length > 0
+                      Array.isArray(emittedValue) &&
+                      perValueMeta?.kind === "collapse" &&
+                      Array.isArray(perValueMeta.inputValueIds) &&
+                      perValueMeta.inputValueIds.length > 0
                     ) {
                       const targetId =
-                        (typeof outputMeta.valueId === "string" && outputMeta.valueId) ||
-                        outputMeta.inputValueIds[outputMeta.inputValueIds.length - 1];
+                        (typeof perValueMeta.valueId === "string" && perValueMeta.valueId) ||
+                        perValueMeta.inputValueIds[perValueMeta.inputValueIds.length - 1];
 
                       if (typeof targetId === "string" && metaByValueId.has(targetId)) {
                         const targetMeta = metaByValueId.get(targetId)!;
 
-                        for (const id of outputMeta.inputValueIds) {
+                        for (const id of perValueMeta.inputValueIds) {
                           if (id === targetId) continue;
                           if (!metaByValueId.has(id)) continue;
                           removeFromQueue(id);
-                          tracer.collapseValue(id, i, opName, targetId, out.value);
+                          tracer.collapseValue(id, i, opName, targetId, emittedValue);
                         }
 
                         removeFromQueue(targetId);
-                        tracer.exitOperator(targetId, i, out.value, false, "collapsed");
+                        tracer.exitOperator(targetId, i, emittedValue, false, "collapsed");
                         lastOutputMeta = targetMeta;
-                        setIteratorMeta(this as any, targetMeta, i, opName);
-                        return { done: false, value: wrapTracedValue(out.value, targetMeta) };
+                        return { done: false, value: wrapTracedValue(emittedValue, targetMeta) };
                       }
                     }
 
-                    const preferredId = outputMeta?.valueId;
+                    const preferredId = perValueMeta?.valueId;
                     const chosen =
                       (preferredId ? inputQueue.find((w) => w.meta.valueId === preferredId) : undefined) ??
                       // For pass-through operators, match by value if possible.
-                      [...inputQueue].reverse().find((w) => Object.is(w.value, out.value)) ??
+                      [...inputQueue].reverse().find((w) => Object.is(w.value, emittedValue)) ??
                       inputQueue[inputQueue.length - 1];
 
-                    // For rate-limiting operators, non-emitted values are collapsed, not filtered
-                    const isRateLimiter = opName === 'debounce' || opName === 'throttle' || opName === 'audit' || opName === 'sample';
-                    
+                    // Mark non-emitted values as filtered
                     for (const pending of [...inputQueue]) {
                       if (pending.meta.valueId === chosen.meta.valueId) continue;
                       removeFromQueue(pending.meta.valueId);
-                      if (isRateLimiter) {
-                        tracer.collapseValue(pending.meta.valueId, i, opName, chosen.meta.valueId, out.value);
-                      } else {
-                        tracer.exitOperator(pending.meta.valueId, i, pending.value, true);
-                      }
+                      tracer.exitOperator(pending.meta.valueId, i, pending.value, true);
                     }
 
                     removeFromQueue(chosen.meta.valueId);
-                    tracer.exitOperator(chosen.meta.valueId, i, out.value, false, isRateLimiter ? "collapsed" : "transformed");
+                    tracer.exitOperator(chosen.meta.valueId, i, emittedValue, false, "transformed");
                     lastOutputMeta = chosen.meta;
-                    setIteratorMeta(this as any, chosen.meta, i, opName);
-                    return { done: false, value: wrapTracedValue(out.value, chosen.meta) };
+                    return { done: false, value: wrapTracedValue(emittedValue, chosen.meta) };
                   }
 
-                  const baseValueId = outputMeta?.valueId ?? lastOutputMeta?.valueId ?? lastSeenMeta?.valueId;
+                  const baseValueId = perValueMeta?.valueId ?? lastOutputMeta?.valueId ?? lastSeenMeta?.valueId;
                   const baseMeta = baseValueId ? metaByValueId.get(baseValueId) : undefined;
                   const meta = baseMeta ?? lastOutputMeta ?? lastSeenMeta;
 
@@ -1241,23 +1216,21 @@ registerRuntimeHooks({
 
                     if (count === 0) {
                       lastOutputMeta = meta;
-                      tracer.exitOperator(baseValueId, i, out.value, false, "expanded");
-                      setIteratorMeta(this as any, meta, i, opName);
-                      return { done: false, value: wrapTracedValue(out.value, meta) };
+                      tracer.exitOperator(baseValueId, i, emittedValue, false, "expanded");
+                      return { done: false, value: wrapTracedValue(emittedValue, meta) };
                     }
 
-                    const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, out.value);
+                    const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, emittedValue);
                     lastOutputMeta = meta;
-                    setIteratorMeta(this as any, meta, i, opName);
-                    return { done: false, value: wrapTracedValue(out.value, { ...meta, valueId: expandedId }) };
+                    return { done: false, value: wrapTracedValue(emittedValue, { ...meta, valueId: expandedId }) };
                   }
                 }
 
                 // Multiple inputs, one output: filter vs collapse
                 if (requestBatch.length > 1) {
-                  const outputValueId = outputMeta?.valueId ?? requestBatch[requestBatch.length - 1].meta.valueId;
+                  const outputValueId = perValueMeta?.valueId ?? requestBatch[requestBatch.length - 1].meta.valueId;
                   const outputEntry = requestBatch.find((w) => w.meta.valueId === outputValueId) ?? requestBatch[requestBatch.length - 1];
-                  const isPassThrough = Object.is(out.value, outputEntry.value);
+                  const isPassThrough = Object.is(emittedValue, outputEntry.value);
 
                   if (isPassThrough) {
                     // Filter others
@@ -1269,53 +1242,48 @@ registerRuntimeHooks({
                     }
 
                     removeFromQueue(outputEntry.meta.valueId);
-                    tracer.exitOperator(outputEntry.meta.valueId, i, out.value, false, "transformed");
+                    tracer.exitOperator(outputEntry.meta.valueId, i, emittedValue, false, "transformed");
                     lastOutputMeta = outputEntry.meta;
-                    setIteratorMeta(this as any, outputEntry.meta, i, opName);
-                    return { done: false, value: wrapTracedValue(out.value, outputEntry.meta) };
+                    return { done: false, value: wrapTracedValue(emittedValue, outputEntry.meta) };
                   }
 
-                  // Collapse others
+                  // Filter others
                   for (const req of requestBatch) {
                     if (req.meta.valueId !== outputEntry.meta.valueId) {
                       removeFromQueue(req.meta.valueId);
-                      tracer.collapseValue(req.meta.valueId, i, opName, outputEntry.meta.valueId, out.value);
+                      tracer.exitOperator(req.meta.valueId, i, req.value, true);
                     }
                   }
 
                   removeFromQueue(outputEntry.meta.valueId);
-                  tracer.exitOperator(outputEntry.meta.valueId, i, out.value, false, "collapsed");
+                  tracer.exitOperator(outputEntry.meta.valueId, i, emittedValue, false, "transformed");
                   lastOutputMeta = outputEntry.meta;
-                  setIteratorMeta(this as any, outputEntry.meta, i, opName);
-                  return { done: false, value: wrapTracedValue(out.value, outputEntry.meta) };
+                  return { done: false, value: wrapTracedValue(emittedValue, outputEntry.meta) };
                 }
 
                 // 1:1 transformation
                 if (requestBatch.length === 1) {
                   const wrapped = requestBatch[0];
                   removeFromQueue(wrapped.meta.valueId);
-                  tracer.exitOperator(wrapped.meta.valueId, i, out.value, false, "transformed");
+                  tracer.exitOperator(wrapped.meta.valueId, i, emittedValue, false, "transformed");
                   lastOutputMeta = wrapped.meta;
-                  setIteratorMeta(this as any, wrapped.meta, i, opName);
-                  return { done: false, value: wrapTracedValue(out.value, wrapped.meta) };
+                  return { done: false, value: wrapTracedValue(emittedValue, wrapped.meta) };
                 }
 
                 // Fallback: use last output meta or pass-through
                 if (lastOutputMeta) {
-                  setIteratorMeta(this as any, lastOutputMeta, i, opName);
-                  return { done: false, value: wrapTracedValue(out.value, lastOutputMeta) };
+                  return { done: false, value: wrapTracedValue(emittedValue, lastOutputMeta) };
                 }
 
                 // Last resort: use lastSeenMeta if available
                 if (lastSeenMeta) {
                   lastOutputMeta = lastSeenMeta;
-                  setIteratorMeta(this as any, lastSeenMeta, i, opName);
-                  return { done: false, value: wrapTracedValue(out.value, lastSeenMeta) };
+                  return { done: false, value: wrapTracedValue(emittedValue, lastSeenMeta) };
                 }
 
                 // Truly last resort: unwrapped value (should rarely happen)
                 // This means we lost track of the value's metadata somehow
-                return { done: false, value: out.value };
+                return { done: false, value: emittedValue };
               } catch (err) {
                 // Report error on first pending input
                 if (inputQueue.length > 0) {
@@ -1335,44 +1303,17 @@ registerRuntimeHooks({
         async next() {
           const r = await it.next();
           if (!r.done) {
-            let valueId: string | undefined;
-            let valueToCheck = r.value;
-            let finalValue = r.value;
-            
-            // 1. Try wrapped value (tracer's own wrapping)
             if (isTracedValue(r.value)) {
               const wrapped = r.value as TracedWrapper<any>;
-              valueId = wrapped.meta.valueId;
-              finalValue = unwrapTracedValue(r.value);
-              valueToCheck = finalValue;
+              tracer.markDelivered(wrapped.meta.valueId);
+              return { done: false, value: unwrapPrimitive(wrapped.value) };
             }
-            
-            // Unwrap primitives early so we can check metadata on the wrapper
-            const unwrappedValue = unwrapPrimitive(valueToCheck);
-            
-            // 2. Try per-value metadata (attached by operators like debounce/throttle)
-            // Check the wrapped version for metadata
-            if (!valueId) {
-              const valueMeta = getValueMeta(valueToCheck);
-              if (valueMeta?.valueId) {
-                valueId = valueMeta.valueId;
-              }
-            }
-            
-            // 3. Fall back to iterator metadata
-            if (!valueId) {
-              const meta = getIteratorMeta(it as any);
-              if (meta?.valueId) {
-                valueId = meta.valueId;
-              }
-            }
-            
-            // Mark as delivered if we found a valueId
-            if (valueId) {
-              tracer.markDelivered(valueId);
-            }
-            
-            return { done: false, value: unwrappedValue };
+
+            // Best-effort fallback for values not wrapped by the tracing runtime.
+            const valueMeta = getValueMeta(r.value);
+            if (valueMeta?.valueId) tracer.markDelivered(valueMeta.valueId);
+
+            return { done: false, value: unwrapPrimitive(r.value) };
           }
           if (r.done) {
             tracer.completeSubscription(subscriptionId);

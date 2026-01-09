@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -44,7 +44,11 @@ export function delay<T = any>(ms: MaybePromise<number>) {
             );
           }
 
-          output.next(result.value!);
+          let value = result.value!;
+          if (meta) {
+            value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+          }
+          output.next(value);
         }
       } catch (err) {
         output.error(err);
