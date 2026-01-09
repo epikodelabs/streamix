@@ -95,6 +95,8 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
 
   private animationFrame?: number;
   private hasView = false;
+  private traceUpdateTimer?: ReturnType<typeof setTimeout>;
+  private pendingTraceUpdates = false;
 
   private circleRegistry = new Map<string, CanvasCircle[]>();
 
@@ -228,6 +230,7 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
   ngOnDestroy() {
     window.removeEventListener('resize', this.resizeHandler);
     if (this.animationFrame) cancelAnimationFrame(this.animationFrame);
+    if (this.traceUpdateTimer) clearTimeout(this.traceUpdateTimer);
     disableTracing();
   }
 
@@ -278,12 +281,15 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
     const canvases = this.diagramCanvases?.toArray() ?? [];
     const containers = this.diagramContainers?.toArray() ?? [];
 
-    groups.forEach((group, idx) => {
+    // Render all subscriptions in parallel, each in its own worker thread
+    const renderPromises = groups.map((group, idx) => {
       const canvas = canvases[idx]?.nativeElement;
       const container = containers[idx]?.nativeElement;
-      if (!canvas || !container) return;
-      void this.drawSubscriptionDiagram(group.subscriptionId, canvas, container, group.traces);
+      if (!canvas || !container) return Promise.resolve();
+      return this.drawSubscriptionDiagram(group.subscriptionId, canvas, container, group.traces);
     });
+
+    void Promise.all(renderPromises);
   }
 
   private async drawSubscriptionDiagram(
@@ -312,10 +318,18 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
     const height = Math.max(220, totalRows * rowHeight + padding.top + padding.bottom);
 
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(width * dpr);
-    canvas.height = Math.floor(height * dpr);
+    const newWidth = Math.floor(width * dpr);
+    const newHeight = Math.floor(height * dpr);
+    
+    // Set CSS dimensions first to reserve space and prevent layout shifts
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
+    
+    // Only resize buffer if dimensions changed to avoid flickering
+    if (canvas.width !== newWidth || canvas.height !== newHeight) {
+      canvas.width = newWidth;
+      canvas.height = newHeight;
+    }
 
     // Build the chronological index map
     const chronologicalIndexMap: Record<string, number> = {};
@@ -340,23 +354,28 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
 
       const result: DrawingOutput = await drawingWorker.processTask(input);
 
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-      ctx.drawImage(result.imageBitmap, 0, 0, width, height);
+      // Use requestAnimationFrame for smooth rendering and better performance
+      requestAnimationFrame(() => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(result.imageBitmap, 0, 0);
 
-      this.circleRegistry.set(subscriptionId, result.circles);
+        this.circleRegistry.set(subscriptionId, result.circles);
 
-      if (typeof (result.imageBitmap as any).close === 'function') {
-        (result.imageBitmap as any).close();
-      }
+        // Close the ImageBitmap to free GPU memory immediately after drawing
+        if (typeof (result.imageBitmap as any).close === 'function') {
+          (result.imageBitmap as any).close();
+        }
+      });
     } catch (error) {
       console.error('Drawing worker error:', error);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.scale(dpr, dpr);
       ctx.fillStyle = '#ef4444';
       ctx.font = '14px "Inter", sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('Error rendering diagram', width / 2, height / 2);
+      ctx.restore();
     }
   }
 
@@ -512,7 +531,20 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
       this.traceList[existingIndex] = trace;
     }
 
-    // push snapshot
-    this.traces.set(this.traceList.slice());
+    // Batch trace updates: wait for a brief period to collect multiple updates
+    // before triggering a redraw. This significantly improves performance when
+    // many traces arrive rapidly (e.g., during high-frequency stream operations)
+    this.pendingTraceUpdates = true;
+    
+    if (this.traceUpdateTimer) {
+      clearTimeout(this.traceUpdateTimer);
+    }
+    
+    this.traceUpdateTimer = setTimeout(() => {
+      if (this.pendingTraceUpdates) {
+        this.traces.set(this.traceList.slice());
+        this.pendingTraceUpdates = false;
+      }
+    }, 16); // ~60fps batching - one frame delay
   }
 }

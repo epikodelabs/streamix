@@ -66,7 +66,7 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
 
   if (rowCount === 0 || columnCount === 0) {
     const emptyCanvas = new OffscreenCanvas(1, 1);
-    const emptyBitmap = emptyCanvas.transferToImageBitmap ? emptyCanvas.transferToImageBitmap() : await createImageBitmap(emptyCanvas);
+    const emptyBitmap = emptyCanvas.transferToImageBitmap();
     return {
       imageBitmap: emptyBitmap,
       circles: [],
@@ -81,7 +81,10 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
   const totalHeight = Math.max(canvasHeight, chartHeight + padding.top + padding.bottom);
 
   const offscreen = new OffscreenCanvas(Math.max(1, Math.floor(canvasWidth * dpr)), Math.max(1, Math.floor(totalHeight * dpr)));
-  const ctx = offscreen.getContext('2d');
+  const ctx = offscreen.getContext('2d', { 
+    alpha: true,
+    // Optimize for write-only operations since we only draw, never read pixels
+  });
   if (!ctx) {
     throw new Error('OffscreenCanvas 2D context not available');
   }
@@ -507,32 +510,63 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
   collapseLinks.forEach(({ from, to }) => drawCurve(from, to, 'collapsed'));
   expansionLinks.forEach(({ from, to }) => drawCurve(from, to, 'expanded'));
 
+  // Batch circle drawing by state for better performance
+  // Group circles by their rendering style to minimize context state changes
+  const circlesByStyle = new Map<string, DrawingCircle[]>();
+  
   circles.forEach((circle) => {
-    const circleColor = STATE_COLORS[circle.state] ?? STATE_COLORS.emitted;
-
-    ctx.beginPath();
-    ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
-
+    let styleKey: string;
     if (!circle.hasStep) {
+      styleKey = 'no-step';
+    } else if (circle.isTerminal) {
+      if (circle.state === 'delivered') {
+        styleKey = 'terminal-delivered';
+      } else {
+        return; // Skip non-delivered terminal circles
+      }
+    } else {
+      styleKey = circle.hasValue ? `step-${circle.state}-value` : `step-${circle.state}-no-value`;
+    }
+    
+    if (!circlesByStyle.has(styleKey)) {
+      circlesByStyle.set(styleKey, []);
+    }
+    circlesByStyle.get(styleKey)!.push(circle);
+  });
+
+  // Draw circles in batches to reduce context state changes
+  circlesByStyle.forEach((batchCircles, styleKey) => {
+    if (batchCircles.length === 0) return;
+
+    const firstCircle = batchCircles[0];
+    const circleColor = STATE_COLORS[firstCircle.state] ?? STATE_COLORS.emitted;
+
+    // Set styles once for the entire batch
+    if (styleKey === 'no-step') {
       ctx.fillStyle = '#fff';
       ctx.strokeStyle = '#cbd5e1';
       ctx.lineWidth = 1.5;
-    } else if (circle.isTerminal) {
-      if (circle.state === 'delivered') {
-        ctx.fillStyle = circleColor.accent;
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 3;
-      } else {
-        return;
-      }
+    } else if (styleKey === 'terminal-delivered') {
+      ctx.fillStyle = circleColor.accent;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 3;
+    } else if (styleKey.includes('-value')) {
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = circleColor.accent;
+      ctx.lineWidth = 2;
     } else {
-      ctx.fillStyle = circle.hasValue ? '#fff' : '#f8fafc';
+      ctx.fillStyle = '#f8fafc';
       ctx.strokeStyle = circleColor.accent;
       ctx.lineWidth = 2;
     }
 
-    ctx.fill();
-    ctx.stroke();
+    // Draw all circles in this batch with a single fill and stroke operation
+    batchCircles.forEach((circle) => {
+      ctx.beginPath();
+      ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
   });
 
   ctx.textAlign = 'center';
@@ -540,13 +574,8 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
   ctx.fillStyle = '#475467';
   ctx.fillText('Operator flow / timeline', padding.left + chartWidth / 2, padding.top - 12);
 
-  let imageBitmap: ImageBitmap;
-  if (typeof (offscreen as any).transferToImageBitmap === 'function') {
-    imageBitmap = (offscreen as any).transferToImageBitmap();
-  } else {
-    const blob = await offscreen.convertToBlob();
-    imageBitmap = await createImageBitmap(blob);
-  }
+  // Use transferToImageBitmap for zero-copy transfer (much faster than convertToBlob)
+  const imageBitmap = offscreen.transferToImageBitmap();
 
   return {
     imageBitmap,
