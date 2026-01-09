@@ -1019,11 +1019,32 @@ registerRuntimeHooks({
             if (idx >= 0) inputQueue.splice(idx, 1);
           };
 
+          const exitAndRemove = (valueId: string, value: any, filtered: boolean, outcome: OperatorOutcome = "transformed"): void => {
+            removeFromQueue(valueId);
+            tracer.exitOperator(valueId, i, value, filtered, outcome);
+          };
+
+          const handleCollapse = (inputIds: string[], targetId: string, emittedValue: any): { done: false; value: TracedWrapper<any> } | null => {
+            if (!metaByValueId.has(targetId)) return null;
+            
+            const targetMeta = metaByValueId.get(targetId)!;
+            
+            for (const id of inputIds) {
+              if (id === targetId) continue;
+              if (!metaByValueId.has(id)) continue;
+              removeFromQueue(id);
+              tracer.collapseValue(id, i, opName, targetId, emittedValue);
+            }
+            
+            exitAndRemove(targetId, emittedValue, false, "collapsed");
+            lastOutputMeta = targetMeta;
+            return { done: false, value: wrapTracedValue(emittedValue, targetMeta) };
+          };
+
           const filterBatch = (batch: TracedWrapper<any>[], selectedId: string): void => {
             for (const item of batch) {
               if (item.meta.valueId !== selectedId) {
-                removeFromQueue(item.meta.valueId);
-                tracer.exitOperator(item.meta.valueId, i, item.value, true);
+                exitAndRemove(item.meta.valueId, item.value, true);
               }
             }
           };
@@ -1034,8 +1055,7 @@ registerRuntimeHooks({
             outputCountByBaseKey.set(key, count + 1);
 
             if (count === 0) {
-              removeFromQueue(baseValueId);
-              tracer.exitOperator(baseValueId, i, emittedValue, false, "expanded");
+              exitAndRemove(baseValueId, emittedValue, false, "expanded");
               lastOutputMeta = baseMeta;
               return { done: false, value: wrapTracedValue(emittedValue, baseMeta) };
             }
@@ -1085,10 +1105,8 @@ registerRuntimeHooks({
 
                 if (out.done) {
                   // Mark all pending values as filtered
-                  while (inputQueue.length > 0) {
-                    const wrapped = inputQueue.shift()!;
-                    tracer.exitOperator(wrapped.meta.valueId, i, wrapped.value, true);
-                  }
+                  inputQueue.forEach(w => tracer.exitOperator(w.meta.valueId, i, w.value, true));
+                  inputQueue.length = 0;
                   return out;
                 }
 
@@ -1109,21 +1127,9 @@ registerRuntimeHooks({
                     (typeof perValueMeta.valueId === "string" && perValueMeta.valueId) ||
                     perValueMeta.inputValueIds[perValueMeta.inputValueIds.length - 1];
 
-                  if (typeof targetId === "string" && metaByValueId.has(targetId)) {
-                    const targetMeta = metaByValueId.get(targetId)!;
-
-                    for (const id of perValueMeta.inputValueIds) {
-                      if (id === targetId) continue;
-                      if (!metaByValueId.has(id)) continue;
-                      removeFromQueue(id);
-                      tracer.collapseValue(id, i, opName, targetId, emittedValue);
-                    }
-
-                    removeFromQueue(targetId);
-                    tracer.exitOperator(targetId, i, emittedValue, false, "collapsed");
-                    lastOutputMeta = targetMeta;
-
-                    return { done: false, value: wrapTracedValue(emittedValue, targetMeta) };
+                  if (typeof targetId === "string") {
+                    const result = handleCollapse(perValueMeta.inputValueIds, targetId, emittedValue);
+                    if (result) return result;
                   }
                 }
 
@@ -1160,20 +1166,9 @@ registerRuntimeHooks({
                         (typeof perValueMeta.valueId === "string" && perValueMeta.valueId) ||
                         perValueMeta.inputValueIds[perValueMeta.inputValueIds.length - 1];
 
-                      if (typeof targetId === "string" && metaByValueId.has(targetId)) {
-                        const targetMeta = metaByValueId.get(targetId)!;
-
-                        for (const id of perValueMeta.inputValueIds) {
-                          if (id === targetId) continue;
-                          if (!metaByValueId.has(id)) continue;
-                          removeFromQueue(id);
-                          tracer.collapseValue(id, i, opName, targetId, emittedValue);
-                        }
-
-                        removeFromQueue(targetId);
-                        tracer.exitOperator(targetId, i, emittedValue, false, "collapsed");
-                        lastOutputMeta = targetMeta;
-                        return { done: false, value: wrapTracedValue(emittedValue, targetMeta) };
+                      if (typeof targetId === "string") {
+                        const result = handleCollapse(perValueMeta.inputValueIds, targetId, emittedValue);
+                        if (result) return result;
                       }
                     }
 
@@ -1187,23 +1182,20 @@ registerRuntimeHooks({
                     // Mark non-emitted values as filtered
                     for (const pending of [...inputQueue]) {
                       if (pending.meta.valueId === chosen.meta.valueId) continue;
-                      removeFromQueue(pending.meta.valueId);
-                      tracer.exitOperator(pending.meta.valueId, i, pending.value, true);
+                      exitAndRemove(pending.meta.valueId, pending.value, true);
                     }
 
-                    removeFromQueue(chosen.meta.valueId);
-                    tracer.exitOperator(chosen.meta.valueId, i, emittedValue, false, "transformed");
+                    exitAndRemove(chosen.meta.valueId, emittedValue, false, "transformed");
                     lastOutputMeta = chosen.meta;
                     return { done: false, value: wrapTracedValue(emittedValue, chosen.meta) };
                   }
 
                   const baseValueId = perValueMeta?.valueId ?? lastOutputMeta?.valueId ?? lastSeenMeta?.valueId;
-                  if (baseValueId) {
-                    const baseMeta = metaByValueId.get(baseValueId) ?? lastOutputMeta ?? lastSeenMeta;
-                    if (baseMeta) {
-                      lastOutputMeta = baseMeta;
-                      return handleExpansion(baseValueId, baseMeta, emittedValue);
-                    }
+                  const baseMeta = baseValueId ? (metaByValueId.get(baseValueId) ?? lastOutputMeta ?? lastSeenMeta) : null;
+                  
+                  if (baseMeta) {
+                    lastOutputMeta = baseMeta;
+                    return handleExpansion(baseValueId!, baseMeta, emittedValue);
                   }
                 }
 
@@ -1213,8 +1205,7 @@ registerRuntimeHooks({
                   const outputEntry = requestBatch.find((w) => w.meta.valueId === outputValueId) ?? requestBatch[requestBatch.length - 1];
 
                   filterBatch(requestBatch, outputEntry.meta.valueId);
-                  removeFromQueue(outputEntry.meta.valueId);
-                  tracer.exitOperator(outputEntry.meta.valueId, i, emittedValue, false, "transformed");
+                  exitAndRemove(outputEntry.meta.valueId, emittedValue, false, "transformed");
                   lastOutputMeta = outputEntry.meta;
                   return { done: false, value: wrapTracedValue(emittedValue, outputEntry.meta) };
                 }
@@ -1222,8 +1213,7 @@ registerRuntimeHooks({
                 // 1:1 transformation
                 if (requestBatch.length === 1) {
                   const wrapped = requestBatch[0];
-                  removeFromQueue(wrapped.meta.valueId);
-                  tracer.exitOperator(wrapped.meta.valueId, i, emittedValue, false, "transformed");
+                  exitAndRemove(wrapped.meta.valueId, emittedValue, false, "transformed");
                   lastOutputMeta = wrapped.meta;
                   return { done: false, value: wrapTracedValue(emittedValue, wrapped.meta) };
                 }
