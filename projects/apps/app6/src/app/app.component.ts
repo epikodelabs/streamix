@@ -17,8 +17,8 @@ import {
   type ValueState,
   type ValueTrace,
 } from '@epikodelabs/streamix/tracing';
-import { drawingWorker, type DrawingInput, type DrawingOutput, type DrawingCircle } from './drawing.worker.js';
 import { runDemoStream } from './demo-stream';
+import { drawingWorker, type DrawingCircle, type DrawingInput, type DrawingOutput } from './drawing.worker.js';
 
 type CanvasCircle = DrawingCircle;
 
