@@ -545,6 +545,6 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
         this.traces.set(this.traceList.slice());
         this.pendingTraceUpdates = false;
       }
-    }, 16); // ~60fps batching - one frame delay
+    }, 300); // Throttle to max ~3 redraws per second
   }
 }
