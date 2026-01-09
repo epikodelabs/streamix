@@ -87,7 +87,15 @@ export const recurse = <T = any>(
             await enqueueChildren(item.value, item.depth, item.meta);
 
             if (item.meta) {
-              setIteratorMeta(iterator, { valueId: item.meta.valueId }, item.meta.operatorIndex, item.meta.operatorName);
+              setIteratorMeta(
+                iterator,
+                {
+                  valueId: item.meta.valueId,
+                  ...(item.depth > 0 ? { kind: "expand" as const } : {}),
+                },
+                item.meta.operatorIndex,
+                item.meta.operatorName
+              );
             }
 
             return NEXT(item.value);
