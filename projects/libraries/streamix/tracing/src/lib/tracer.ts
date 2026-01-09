@@ -1019,6 +1019,32 @@ registerRuntimeHooks({
             if (idx >= 0) inputQueue.splice(idx, 1);
           };
 
+          const filterBatch = (batch: TracedWrapper<any>[], selectedId: string): void => {
+            for (const item of batch) {
+              if (item.meta.valueId !== selectedId) {
+                removeFromQueue(item.meta.valueId);
+                tracer.exitOperator(item.meta.valueId, i, item.value, true);
+              }
+            }
+          };
+
+          const handleExpansion = (baseValueId: string, baseMeta: TracedWrapper<any>["meta"], emittedValue: any): { done: false; value: TracedWrapper<any> } => {
+            const key = `${baseValueId}:${i}`;
+            const count = outputCountByBaseKey.get(key) ?? 0;
+            outputCountByBaseKey.set(key, count + 1);
+
+            if (count === 0) {
+              removeFromQueue(baseValueId);
+              tracer.exitOperator(baseValueId, i, emittedValue, false, "expanded");
+              lastOutputMeta = baseMeta;
+              return { done: false, value: wrapTracedValue(emittedValue, baseMeta) };
+            }
+
+            const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, emittedValue);
+            lastOutputMeta = baseMeta;
+            return { done: false, value: wrapTracedValue(emittedValue, { ...baseMeta, valueId: expandedId }) };
+          };
+
           const rawSource: AsyncIterator<any> = {
             async next() {
               const r = await src.next();
@@ -1100,20 +1126,6 @@ registerRuntimeHooks({
                     return { done: false, value: wrapTracedValue(emittedValue, targetMeta) };
                   }
                 }
-                if (Array.isArray(emittedValue) && requestBatch.length > 1 && emittedValue.length === requestBatch.length) {
-                  const target = requestBatch[requestBatch.length - 1];
-
-                  for (let j = 0; j < requestBatch.length - 1; j++) {
-                    removeFromQueue(requestBatch[j].meta.valueId);
-                    tracer.exitOperator(requestBatch[j].meta.valueId, i, requestBatch[j].value, true);
-                  }
-
-                  removeFromQueue(target.meta.valueId);
-                  tracer.exitOperator(target.meta.valueId, i, emittedValue, false, "transformed");
-                  lastOutputMeta = target.meta;
-
-                  return { done: false, value: wrapTracedValue(emittedValue, target.meta) };
-                }
 
                 // Runtime-provided output with expansion/filtering
                 if (perValueMeta?.kind === "expand" && perValueMeta.valueId && metaByValueId.has(perValueMeta.valueId)) {
@@ -1123,32 +1135,12 @@ registerRuntimeHooks({
                   // Filter detection: pass-through from one of multiple requests
                   if (requestBatch.length > 1) {
                     const baseRequested = requestBatch.find((w) => w.meta.valueId === baseValueId);
-                    const isPassThrough = baseRequested && Object.is(emittedValue, baseRequested.value);
-
-                    if (isPassThrough) {
-                      for (const req of requestBatch) {
-                        if (req.meta.valueId !== baseValueId) {
-                          removeFromQueue(req.meta.valueId);
-                          tracer.exitOperator(req.meta.valueId, i, req.value, true);
-                        }
-                      }
+                    if (baseRequested && Object.is(emittedValue, baseRequested.value)) {
+                      filterBatch(requestBatch, baseValueId);
                     }
                   }
 
-                  const key = `${baseValueId}:${i}`;
-                  const count = outputCountByBaseKey.get(key) ?? 0;
-                  outputCountByBaseKey.set(key, count + 1);
-
-                  if (count === 0) {
-                    removeFromQueue(baseValueId);
-                    tracer.exitOperator(baseValueId, i, emittedValue, false, "expanded");
-                    lastOutputMeta = baseMeta;
-                    return { done: false, value: wrapTracedValue(emittedValue, baseMeta) };
-                  }
-
-                  const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, emittedValue);
-                  lastOutputMeta = baseMeta;
-                  return { done: false, value: wrapTracedValue(emittedValue, { ...baseMeta, valueId: expandedId }) };
+                  return handleExpansion(baseValueId, baseMeta, emittedValue);
                 }
 
                 // Expansion: outputs without new input
@@ -1206,55 +1198,21 @@ registerRuntimeHooks({
                   }
 
                   const baseValueId = perValueMeta?.valueId ?? lastOutputMeta?.valueId ?? lastSeenMeta?.valueId;
-                  const baseMeta = baseValueId ? metaByValueId.get(baseValueId) : undefined;
-                  const meta = baseMeta ?? lastOutputMeta ?? lastSeenMeta;
-
-                  if (baseValueId && meta) {
-                    const key = `${baseValueId}:${i}`;
-                    const count = outputCountByBaseKey.get(key) ?? 0;
-                    outputCountByBaseKey.set(key, count + 1);
-
-                    if (count === 0) {
-                      lastOutputMeta = meta;
-                      tracer.exitOperator(baseValueId, i, emittedValue, false, "expanded");
-                      return { done: false, value: wrapTracedValue(emittedValue, meta) };
+                  if (baseValueId) {
+                    const baseMeta = metaByValueId.get(baseValueId) ?? lastOutputMeta ?? lastSeenMeta;
+                    if (baseMeta) {
+                      lastOutputMeta = baseMeta;
+                      return handleExpansion(baseValueId, baseMeta, emittedValue);
                     }
-
-                    const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, emittedValue);
-                    lastOutputMeta = meta;
-                    return { done: false, value: wrapTracedValue(emittedValue, { ...meta, valueId: expandedId }) };
                   }
                 }
 
-                // Multiple inputs, one output: filter vs collapse
+                // Multiple inputs, one output: filter non-selected values
                 if (requestBatch.length > 1) {
                   const outputValueId = perValueMeta?.valueId ?? requestBatch[requestBatch.length - 1].meta.valueId;
                   const outputEntry = requestBatch.find((w) => w.meta.valueId === outputValueId) ?? requestBatch[requestBatch.length - 1];
-                  const isPassThrough = Object.is(emittedValue, outputEntry.value);
 
-                  if (isPassThrough) {
-                    // Filter others
-                    for (const req of requestBatch) {
-                      if (req.meta.valueId !== outputEntry.meta.valueId) {
-                        removeFromQueue(req.meta.valueId);
-                        tracer.exitOperator(req.meta.valueId, i, req.value, true);
-                      }
-                    }
-
-                    removeFromQueue(outputEntry.meta.valueId);
-                    tracer.exitOperator(outputEntry.meta.valueId, i, emittedValue, false, "transformed");
-                    lastOutputMeta = outputEntry.meta;
-                    return { done: false, value: wrapTracedValue(emittedValue, outputEntry.meta) };
-                  }
-
-                  // Filter others
-                  for (const req of requestBatch) {
-                    if (req.meta.valueId !== outputEntry.meta.valueId) {
-                      removeFromQueue(req.meta.valueId);
-                      tracer.exitOperator(req.meta.valueId, i, req.value, true);
-                    }
-                  }
-
+                  filterBatch(requestBatch, outputEntry.meta.valueId);
                   removeFromQueue(outputEntry.meta.valueId);
                   tracer.exitOperator(outputEntry.meta.valueId, i, emittedValue, false, "transformed");
                   lastOutputMeta = outputEntry.meta;
@@ -1270,19 +1228,14 @@ registerRuntimeHooks({
                   return { done: false, value: wrapTracedValue(emittedValue, wrapped.meta) };
                 }
 
-                // Fallback: use last output meta or pass-through
-                if (lastOutputMeta) {
-                  return { done: false, value: wrapTracedValue(emittedValue, lastOutputMeta) };
+                // Fallback: reuse last known metadata
+                const fallbackMeta = lastOutputMeta ?? lastSeenMeta;
+                if (fallbackMeta) {
+                  lastOutputMeta = fallbackMeta;
+                  return { done: false, value: wrapTracedValue(emittedValue, fallbackMeta) };
                 }
 
-                // Last resort: use lastSeenMeta if available
-                if (lastSeenMeta) {
-                  lastOutputMeta = lastSeenMeta;
-                  return { done: false, value: wrapTracedValue(emittedValue, lastSeenMeta) };
-                }
-
-                // Truly last resort: unwrapped value (should rarely happen)
-                // This means we lost track of the value's metadata somehow
+                // Last resort: unwrapped value (metadata tracking lost)
                 return { done: false, value: emittedValue };
               } catch (err) {
                 // Report error on first pending input
