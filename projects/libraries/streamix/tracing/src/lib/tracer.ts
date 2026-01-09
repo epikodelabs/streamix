@@ -590,6 +590,8 @@ const toValueState = (t: TraceRecord): ValueState => {
   return "emitted";
 };
 
+const unwrapForExport = (value: any): any => unwrapPrimitive(unwrapTracedValue(value));
+
 const exportTrace = (t: TraceRecord): ValueTrace => ({
   valueId: t.valueId,
   parentTraceId: t.parentTraceId,
@@ -599,9 +601,13 @@ const exportTrace = (t: TraceRecord): ValueTrace => ({
   emittedAt: t.emittedAt,
   deliveredAt: t.deliveredAt,
   state: toValueState(t),
-  sourceValue: t.sourceValue,
-  finalValue: t.finalValue,
-  operatorSteps: t.operatorSteps.map((s) => ({ ...s })),
+  sourceValue: unwrapForExport(t.sourceValue),
+  finalValue: t.finalValue !== undefined ? unwrapForExport(t.finalValue) : undefined,
+  operatorSteps: t.operatorSteps.map((s) => ({
+    ...s,
+    inputValue: unwrapForExport(s.inputValue),
+    outputValue: s.outputValue !== undefined ? unwrapForExport(s.outputValue) : undefined,
+  })),
   droppedReason: t.droppedReason,
   collapsedInto: t.collapsedInto,
   expandedFrom: t.expandedFrom,
