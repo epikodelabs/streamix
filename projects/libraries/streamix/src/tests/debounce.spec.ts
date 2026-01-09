@@ -1,9 +1,25 @@
-import { createStream, debounce, from, interval, take } from "@epikodelabs/streamix";
+import {
+  concatMap,
+  createStream,
+  debounce,
+  distinctUntilChanged,
+  filter,
+  from,
+  interval,
+  map,
+  scan,
+  scheduler,
+  take,
+  throttle
+} from "@epikodelabs/streamix";
+import { createValueTracer, disableTracing, enableTracing } from "@epikodelabs/streamix/tracing";
 
 describe('debounce', () => {
   it('should debounce values from an array stream', (done) => {
     const values = [1, 2, 3, 4, 5];
-    const debouncedStream = from(values).pipe(debounce(100));
+    // `from(array)` completes synchronously; debounce should flush the latest value on completion
+    // even if the configured duration hasn't elapsed yet.
+    const debouncedStream = from(values).pipe(debounce(10_000));
     const emittedValues: number[] = [];
 
     debouncedStream.subscribe({
@@ -13,6 +29,7 @@ describe('debounce', () => {
         expect(emittedValues).toEqual([5]);
         done();
       },
+      error: done.fail,
     });
   });
 
@@ -102,6 +119,124 @@ describe('debounce', () => {
       complete: () => done(),
     });
   });
+
+  it("should trace debounce in the demo-sophisticated pipeline (no dangling transformed inputs)", async () => {
+    const previousTimeout = jasmine.DEFAULT_TIMEOUT_INTERVAL;
+    jasmine.DEFAULT_TIMEOUT_INTERVAL = 20_000;
+
+    const tracer = createValueTracer();
+    enableTracing(tracer);
+    jasmine.clock().install();
+
+    try {
+      const sophisticatedSource = createStream('demo-sophisticated', async function* () {
+        for (let i = 1; i <= 30; i += 1) {
+          yield i;
+          await new Promise((resolve) => setTimeout(resolve, 12 + (i % 6) * 7));
+        }
+      });
+
+      const received: number[] = [];
+      let completed = false;
+      let error: unknown;
+
+      sophisticatedSource
+        .pipe(
+          map((x) => x * 2),
+          filter((x) => x % 4 !== 0),
+          concatMap((x, idx) =>
+            createStream(`inner-soph-${idx}`, async function* () {
+              yield x;
+              await new Promise((resolve) => setTimeout(resolve, 8));
+              yield x + idx;
+              await new Promise((resolve) => setTimeout(resolve, 6));
+              yield x * 10;
+            })
+          ),
+          scan((acc, x) => acc + x, 0),
+          distinctUntilChanged(),
+          map((sum) => sum % 1000),
+          throttle(30),
+          debounce(15)
+        )
+        .subscribe({
+          next: (value) => received.push(value),
+          complete: () => {
+            completed = true;
+          },
+          error: (err) => {
+            error = err;
+            completed = true;
+          },
+        });
+
+      for (let elapsedMs = 0; elapsedMs < 20_000 && !completed; elapsedMs += 5) {
+        jasmine.clock().tick(5);
+        await scheduler.flush();
+      }
+
+      // Flush any timers queued in the same tick as completion (debounce/throttle trailing).
+      jasmine.clock().tick(2_000);
+      await scheduler.flush();
+
+      if (error) throw error;
+      expect(completed).toBeTrue();
+
+      // This pipeline is time-based and should be deterministic under a fake clock.
+      // Lock down the exact output if you adjust the timing/constants above.
+      const expected = [
+        2, 24, 30, 97, 119, 219, 250, 390, 430, 610, 659, 879, 937, 197, 264, 564,
+        640, 980, 65, 445, 539, 959, 62, 522, 634, 134, 255, 795, 925, 505,
+      ];
+      expect(received).toEqual(expected);
+
+      const traces = tracer.getAllTraces();
+
+      const deliveredWithDebounce = traces.filter(
+        (t) =>
+          t.state === "delivered" &&
+          (t.operatorSteps ?? []).some((s) => s.operatorName === "debounce")
+      );
+      expect(deliveredWithDebounce.length).toBeGreaterThan(0);
+
+      // Source emits 30 base values; concatMap expands those into child traces.
+      const baseTraces = traces.filter((t) => t.parentTraceId == null);
+      expect(baseTraces.length).toBe(30);
+
+      // After completion, nothing should be left in a non-terminal state.
+      const nonTerminalTraces = traces.filter(
+        (t) => t.state === "emitted" || t.state === "transformed"
+      );
+      expect(nonTerminalTraces.length).toBe(0);
+
+      // No dangling operator steps (entered but never exited).
+      const danglingSteps = traces.filter((t) =>
+        (t.operatorSteps ?? []).some((s) => s.exitedAt === undefined)
+      );
+      expect(danglingSteps.length).toBe(0);
+
+      const filteredByRateLimit = traces.filter(
+        (t) =>
+          t.state === "filtered" &&
+          (t.operatorSteps ?? []).some(
+            (s) =>
+              (s.operatorName === "throttle" || s.operatorName === "debounce") &&
+              s.outcome === "filtered"
+          )
+      );
+      expect(filteredByRateLimit.length).toBeGreaterThan(0);
+
+      const danglingDebounce = traces.filter(
+        (t) =>
+          t.state === "transformed" &&
+          (t.operatorSteps ?? []).some((s) => s.operatorName === "debounce")
+      );
+      expect(danglingDebounce.length).toBe(0);
+    } finally {
+      jasmine.clock().uninstall();
+      disableTracing();
+      tracer.clear();
+      jasmine.DEFAULT_TIMEOUT_INTERVAL = previousTimeout;
+    }
+  });
 });
-
-

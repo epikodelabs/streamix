@@ -1,12 +1,11 @@
 import {
+  concatMap,
   createStream,
   debounce,
   distinctUntilChanged,
   filter,
   map,
-  mergeMap,
   scan,
-  tap,
   throttle
 } from '@epikodelabs/streamix';
 
@@ -18,7 +17,7 @@ export const createDemoStream = () =>
     }
   });
 
-export const runDemoStream = () => {
+export const runDemoStream = (hooks?: { onOut?: (value: number) => void; onDone?: () => void }) => {
   // const stream = createDemoStream();
   // stream
   //   .pipe(
@@ -93,32 +92,36 @@ export const runDemoStream = () => {
   const sophisticatedSource = createStream('demo-sophisticated', async function* () {
     for (let i = 1; i <= 30; i += 1) {
       yield i;
-      await new Promise((resolve) => setTimeout(resolve, 12 + (i % 6) * 7));
     }
   });
 
   sophisticatedSource
-    .pipe(
-      tap((x) => console.log('demo sophisticated in', x)),
-      map((x) => x * 2),
-      filter((x) => x % 4 !== 0),
-      mergeMap((x, idx) =>
-        createStream(`inner-soph-${idx}`, async function* () {
-          yield x;
-          await new Promise((resolve) => setTimeout(resolve, 8));
-          yield x + idx;
-          await new Promise((resolve) => setTimeout(resolve, 6));
-          yield x * 10;
-        })
-      ),
-      scan((acc, x) => acc + x, 0),
-      distinctUntilChanged(),
-      map((sum) => sum % 1000),
-      throttle(30),
-      debounce(15)
-    )
-    .subscribe({
-      next: (value) => console.log('demo sophisticated out', value),
-      complete: () => console.log('demo sophisticated done'),
-    });
+  .pipe(
+    map((x) => x * 2),
+    filter((x) => x % 4 !== 0),
+    concatMap((x, idx) =>
+      createStream(`inner-soph-${idx}`, async function* () {
+        yield x;
+        await new Promise((resolve) => setTimeout(resolve, 8));
+        yield x + idx;
+        await new Promise((resolve) => setTimeout(resolve, 6));
+        yield x * 10;
+      })
+    ),
+    scan((acc, x) => acc + x, 0),
+    distinctUntilChanged(),
+    map((sum) => sum % 1000),
+    throttle(30),
+    debounce(15)
+  )
+  .subscribe({
+    next: (value) => {
+      console.log('demo sophisticated out', value);
+      hooks?.onOut?.(value);
+    },
+    complete: () => {
+      console.log('demo sophisticated done');
+      hooks?.onDone?.();
+    },
+  });
 };

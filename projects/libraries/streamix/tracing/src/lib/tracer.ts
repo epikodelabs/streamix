@@ -316,6 +316,59 @@ const reduceTrace = (trace: TraceRecord, event: TraceEvent, policy: TracerPolicy
   const isTerminal = trace.status === "terminal" || trace.status === "delivered";
   const emit: EmitEvent[] = [];
 
+  const closeOpenSteps = (
+    input: TraceRecord,
+    now: number,
+    options?: { terminalReason?: TerminalReason; terminalOpIndex?: number; error?: Error }
+  ): TraceRecord => {
+    if (input.operatorSteps.length === 0) return input;
+
+    let changed = false;
+    const operatorSteps: Array<TraceRecord["operatorSteps"][number]> = [...input.operatorSteps];
+    const operatorDurations = new Map(input.operatorDurations);
+
+    for (let idx = 0; idx < operatorSteps.length; idx += 1) {
+      const step = operatorSteps[idx];
+      if (step.exitedAt != null) continue;
+
+      changed = true;
+
+      const isTerminalStep =
+        options?.terminalOpIndex != null && step.operatorIndex === options.terminalOpIndex;
+
+      const outcome: OperatorOutcome | undefined = isTerminalStep
+        ? options?.terminalReason === "filtered"
+          ? "filtered"
+          : options?.terminalReason === "collapsed"
+            ? "collapsed"
+            : options?.terminalReason === "errored"
+              ? "errored"
+              : step.outcome ?? "transformed"
+        : step.outcome ?? "transformed";
+
+      const updatedStep = {
+        ...step,
+        exitedAt: now,
+        outcome,
+        error: isTerminalStep ? options?.error ?? step.error : step.error,
+      };
+
+      operatorSteps[idx] = updatedStep;
+
+      const duration = now - step.enteredAt;
+      const durKey = `${step.operatorIndex}:${step.operatorName}`;
+      operatorDurations.set(durKey, (operatorDurations.get(durKey) ?? 0) + duration);
+    }
+
+    if (!changed) return input;
+
+    return {
+      ...input,
+      operatorSteps,
+      operatorDurations,
+    };
+  };
+
   switch (event.type) {
     case "ENTER_OP": {
       if (isTerminal) return { trace, emit };
@@ -414,9 +467,20 @@ const reduceTrace = (trace: TraceRecord, event: TraceEvent, policy: TracerPolicy
       let updated: TraceRecord;
       if (event.outcome === "filtered") {
         updated = { ...baseUpdate, status: "terminal", terminalReason: "filtered" };
+        // Ensure we don't leave unrelated open steps dangling when a value becomes terminal.
+        updated = closeOpenSteps(updated, event.now, {
+          terminalReason: "filtered",
+          terminalOpIndex: event.opIndex,
+        });
         emit.push("filtered");
       } else if (event.outcome === "errored") {
         updated = { ...baseUpdate, status: "terminal", terminalReason: "errored" };
+        // Ensure we don't leave unrelated open steps dangling when a value becomes terminal.
+        updated = closeOpenSteps(updated, event.now, {
+          terminalReason: "errored",
+          terminalOpIndex: event.opIndex,
+          error: event.error,
+        });
         emit.push("dropped");
       } else {
         updated = baseUpdate;
@@ -430,37 +494,14 @@ const reduceTrace = (trace: TraceRecord, event: TraceEvent, policy: TracerPolicy
     case "TERMINALIZE": {
       if (isTerminal) return { trace, emit };
 
-      const openStepIndex = trace.operatorSteps.findIndex(
-        (s) => s.operatorIndex === event.opIndex && s.exitedAt == null
-      );
-
-      let operatorSteps: Array<TraceRecord["operatorSteps"][number]> = [...trace.operatorSteps];
-      let lastStep: TraceRecord["operatorSteps"][number] | undefined;
-      if (openStepIndex !== -1) {
-        const prevStep = trace.operatorSteps[openStepIndex];
-        const outcome =
-          event.reason === "filtered"
-            ? ("filtered" as const)
-            : event.reason === "errored"
-              ? ("errored" as const)
-              : event.reason === "collapsed"
-                ? ("collapsed" as const)
-                : undefined;
-
-        const updatedStep = {
-          ...prevStep,
-          exitedAt: event.now,
-          outcome,
-          error: event.error,
-        };
-
-        operatorSteps[openStepIndex] = updatedStep;
-        lastStep = updatedStep;
-      }
+      const closed = closeOpenSteps(trace, event.now, {
+        terminalReason: event.reason,
+        terminalOpIndex: event.opIndex,
+        error: event.error,
+      });
 
       const updated: TraceRecord = {
-        ...trace,
-        operatorSteps,
+        ...closed,
         status: "terminal",
         terminalReason: event.reason,
         droppedReason: {
@@ -484,6 +525,11 @@ const reduceTrace = (trace: TraceRecord, event: TraceEvent, policy: TracerPolicy
 
       emit.push("trace");
       assertInvariants(updated, policy);
+
+      const lastStep = updated.operatorSteps.findLast(
+        (s) => s.operatorIndex === event.opIndex && s.exitedAt != null
+      );
+
       return { trace: updated, emit, lastStep };
     }
 
@@ -497,11 +543,13 @@ const reduceTrace = (trace: TraceRecord, event: TraceEvent, policy: TracerPolicy
         return { trace, emit };
       }
 
+      const closed = closeOpenSteps(trace, event.now);
+
       const updated: TraceRecord = {
-        ...trace,
+        ...closed,
         status: "delivered",
         deliveredAt: event.now,
-        totalDuration: event.now - trace.emittedAt,
+        totalDuration: event.now - closed.emittedAt,
       };
 
       emit.push("delivered", "trace");
