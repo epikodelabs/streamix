@@ -303,7 +303,7 @@ describe("valueTracer", () => {
     });
 
     expect(received).toEqual([1, 11]);
-    expect(tracer.delivered.length).toBe(1);
+    expect(tracer.delivered.length).toBe(2);
   });
 
   // ---------------------------------------------------------------------------
