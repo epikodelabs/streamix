@@ -1037,8 +1037,7 @@ registerRuntimeHooks({
             }
             
             exitAndRemove(targetId, emittedValue, false, "collapsed");
-            lastOutputMeta = targetMeta;
-            return { done: false, value: wrapTracedValue(emittedValue, targetMeta) };
+            return wrapOutput(targetMeta, emittedValue);
           };
 
           const filterBatch = (batch: TracedWrapper<any>[], selectedId: string): void => {
@@ -1063,6 +1062,22 @@ registerRuntimeHooks({
             const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, emittedValue);
             lastOutputMeta = baseMeta;
             return { done: false, value: wrapTracedValue(emittedValue, { ...baseMeta, valueId: expandedId }) };
+          };
+
+          const wrapOutput = (meta: TracedWrapper<any>["meta"], value: any): { done: false; value: TracedWrapper<any> } => {
+            lastOutputMeta = meta;
+            return { done: false, value: wrapTracedValue(value, meta) };
+          };
+
+          const isCollapseMetadata = (meta: any, value: any): meta is { kind: "collapse"; inputValueIds: string[]; valueId?: string } =>
+            Array.isArray(value) &&
+            meta?.kind === "collapse" &&
+            Array.isArray(meta.inputValueIds) &&
+            meta.inputValueIds.length > 0;
+
+          const resolveTargetId = (meta: any): string | null => {
+            const targetId = (typeof meta.valueId === "string" && meta.valueId) || meta.inputValueIds[meta.inputValueIds.length - 1];
+            return typeof targetId === "string" ? targetId : null;
           };
 
           const rawSource: AsyncIterator<any> = {
@@ -1117,17 +1132,9 @@ registerRuntimeHooks({
                 const emittedValue = unwrapPrimitive(out.value);
 
                 // Array collapse: multiple inputs → array output
-                if (
-                  Array.isArray(emittedValue) &&
-                  perValueMeta?.kind === "collapse" &&
-                  Array.isArray(perValueMeta.inputValueIds) &&
-                  perValueMeta.inputValueIds.length > 1
-                ) {
-                  const targetId =
-                    (typeof perValueMeta.valueId === "string" && perValueMeta.valueId) ||
-                    perValueMeta.inputValueIds[perValueMeta.inputValueIds.length - 1];
-
-                  if (typeof targetId === "string") {
+                if (isCollapseMetadata(perValueMeta, emittedValue) && perValueMeta.inputValueIds.length > 1) {
+                  const targetId = resolveTargetId(perValueMeta);
+                  if (targetId) {
                     const result = handleCollapse(perValueMeta.inputValueIds, targetId, emittedValue);
                     if (result) return result;
                   }
@@ -1156,17 +1163,9 @@ registerRuntimeHooks({
                   // `requestBatch`. In that case, attribute the output to pending inputs already pulled from `src`.
                   if (inputQueue.length > 0) {
                     // Prefer explicit per-value meta for collapse operators (buffer/bufferCount/toArray/etc.).
-                    if (
-                      Array.isArray(emittedValue) &&
-                      perValueMeta?.kind === "collapse" &&
-                      Array.isArray(perValueMeta.inputValueIds) &&
-                      perValueMeta.inputValueIds.length > 0
-                    ) {
-                      const targetId =
-                        (typeof perValueMeta.valueId === "string" && perValueMeta.valueId) ||
-                        perValueMeta.inputValueIds[perValueMeta.inputValueIds.length - 1];
-
-                      if (typeof targetId === "string") {
+                    if (isCollapseMetadata(perValueMeta, emittedValue)) {
+                      const targetId = resolveTargetId(perValueMeta);
+                      if (targetId) {
                         const result = handleCollapse(perValueMeta.inputValueIds, targetId, emittedValue);
                         if (result) return result;
                       }
@@ -1186,8 +1185,7 @@ registerRuntimeHooks({
                     }
 
                     exitAndRemove(chosen.meta.valueId, emittedValue, false, "transformed");
-                    lastOutputMeta = chosen.meta;
-                    return { done: false, value: wrapTracedValue(emittedValue, chosen.meta) };
+                    return wrapOutput(chosen.meta, emittedValue);
                   }
 
                   const baseValueId = perValueMeta?.valueId ?? lastOutputMeta?.valueId ?? lastSeenMeta?.valueId;
@@ -1206,24 +1204,19 @@ registerRuntimeHooks({
 
                   filterBatch(requestBatch, outputEntry.meta.valueId);
                   exitAndRemove(outputEntry.meta.valueId, emittedValue, false, "transformed");
-                  lastOutputMeta = outputEntry.meta;
-                  return { done: false, value: wrapTracedValue(emittedValue, outputEntry.meta) };
+                  return wrapOutput(outputEntry.meta, emittedValue);
                 }
 
                 // 1:1 transformation
                 if (requestBatch.length === 1) {
                   const wrapped = requestBatch[0];
                   exitAndRemove(wrapped.meta.valueId, emittedValue, false, "transformed");
-                  lastOutputMeta = wrapped.meta;
-                  return { done: false, value: wrapTracedValue(emittedValue, wrapped.meta) };
+                  return wrapOutput(wrapped.meta, emittedValue);
                 }
 
                 // Fallback: reuse last known metadata
                 const fallbackMeta = lastOutputMeta ?? lastSeenMeta;
-                if (fallbackMeta) {
-                  lastOutputMeta = fallbackMeta;
-                  return { done: false, value: wrapTracedValue(emittedValue, fallbackMeta) };
-                }
+                if (fallbackMeta) return wrapOutput(fallbackMeta, emittedValue);
 
                 // Last resort: unwrapped value (metadata tracking lost)
                 return { done: false, value: emittedValue };
