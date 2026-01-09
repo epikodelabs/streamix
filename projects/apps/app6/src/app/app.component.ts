@@ -137,6 +137,34 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
   readonly searchTerm = signal('');
   readonly filterState = signal<'all' | ValueState>('all');
   readonly selectedTrace = signal<ValueTrace | null>(null);
+  readonly demoOutputs = signal<number[]>([]);
+
+  readonly demoTracerOutputs = computed(() => {
+    const subs = this.subscriptionOrder();
+    if (subs.length === 0) return [] as any[];
+    const subscriptionId = subs[0];
+
+    return this.traces()
+      .filter(
+        (t) =>
+          t.subscriptionId === subscriptionId &&
+          t.state === 'delivered' &&
+          (t.operatorSteps ?? []).some((s) => s.operatorName === 'debounce')
+      )
+      .slice()
+      .sort((a, b) => (a.deliveredAt ?? 0) - (b.deliveredAt ?? 0))
+      .map((t) => t.finalValue);
+  });
+
+  readonly demoOutputsMatchTracer = computed(() => {
+    const a = this.demoOutputs();
+    const b = this.demoTracerOutputs();
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!Object.is(a[i], b[i])) return false;
+    }
+    return true;
+  });
 
   // NOTE: this keeps chronological order because `filter()` preserves array order.
   readonly filteredTraces = computed(() => {
@@ -201,7 +229,22 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
     this.hasView = true;
 
     enableTracing(this.tracer);
-    runDemoStream();
+    this.demoOutputs.set([]);
+    runDemoStream({
+      onOut: (value) => this.demoOutputs.update((prev) => [...prev, value]),
+      onDone: () => {
+        // Allow tracer to flush any final updates before comparison.
+        setTimeout(() => {
+          if (!this.demoOutputsMatchTracer()) {
+            // eslint-disable-next-line no-console
+            console.warn('demo-sophisticated mismatch', {
+              streamOutputs: this.demoOutputs(),
+              tracerDelivered: this.demoTracerOutputs(),
+            });
+          }
+        }, 0);
+      },
+    });
 
     this.drawDiagram();
     window.addEventListener('resize', this.resizeHandler);
@@ -933,7 +976,21 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
     this.selectedTrace.set(null);
     this.clearHoveredCircle();
 
-    runDemoStream();
+    this.demoOutputs.set([]);
+    runDemoStream({
+      onOut: (value) => this.demoOutputs.update((prev) => [...prev, value]),
+      onDone: () => {
+        setTimeout(() => {
+          if (!this.demoOutputsMatchTracer()) {
+            // eslint-disable-next-line no-console
+            console.warn('demo-sophisticated mismatch', {
+              streamOutputs: this.demoOutputs(),
+              tracerDelivered: this.demoTracerOutputs(),
+            });
+          }
+        }, 0);
+      },
+    });
   }
 
   setSearchTerm(value: string) {

@@ -11,6 +11,10 @@
     <div class="header-actions">
       <span class="stat-chip">Traces: {{ stats().total }}</span>
       <span class="stat-chip">Throughput: {{ stats().throughput }}/s</span>
+      <span class="stat-chip">
+        Outputs: {{ demoOutputs().length }} / {{ demoTracerOutputs().length }}
+        <span *ngIf="demoOutputs().length && !demoOutputsMatchTracer()"> (mismatch)</span>
+      </span>
       <button type="button" class="ghost" (click)="refreshTraces()">Regenerate</button>
     </div>
   </header>
