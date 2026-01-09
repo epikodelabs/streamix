@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type Operator, type Stream, type Subscription } from "../abstractions";
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type Operator, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../subjects";
 
@@ -38,6 +38,7 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
               canEmit = true;
               notifierEmitted = true;
               for (const entry of buffer) {
+                let value = entry.value;
                 if (entry.meta) {
                   setIteratorMeta(
                     outputIterator,
@@ -45,8 +46,9 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
                     entry.meta.operatorIndex,
                     entry.meta.operatorName
                   );
+                  value = setValueMeta(value, { valueId: entry.meta.valueId }, entry.meta.operatorIndex, entry.meta.operatorName);
                 }
-                output.next(entry.value);
+                output.next(value);
               }
               buffer.length = 0;
             }
@@ -82,6 +84,7 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
           const meta = getIteratorMeta(source);
 
           if (canEmit) {
+            let outputValue = value;
             if (meta) {
               setIteratorMeta(
                 outputIterator,
@@ -89,8 +92,9 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
                 meta.operatorIndex,
                 meta.operatorName
               );
+              outputValue = setValueMeta(outputValue, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
             }
-            output.next(value);
+            output.next(outputValue);
           } else if (!gateClosedWithoutEmit) {
             buffer.push({ value, meta });
           }

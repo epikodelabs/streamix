@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../subjects";
 
@@ -56,6 +56,7 @@ export function switchMap<T = any, R = any>(
       currentSubscription = innerStream.subscribe({
         next: (value) => {
           if (streamId === currentInnerStreamId) {
+            let outputValue = value;
             if (parentMeta) {
               setIteratorMeta(
                 outputIterator,
@@ -63,8 +64,14 @@ export function switchMap<T = any, R = any>(
                 parentMeta.operatorIndex,
                 parentMeta.operatorName
               );
+              outputValue = setValueMeta(
+                outputValue,
+                { valueId: parentMeta.valueId, kind: "expand" },
+                parentMeta.operatorIndex,
+                parentMeta.operatorName
+              );
             }
-            output.next(value);
+            output.next(outputValue);
           }
         },
         error: (err) => {

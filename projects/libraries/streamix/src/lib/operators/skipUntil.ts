@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, setIteratorMeta, type Operator, type Stream } from '../abstractions';
+import { createOperator, getIteratorMeta, setIteratorMeta, setValueMeta, type Operator, type Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -49,6 +49,7 @@ export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
           if (done) break;
           if (canEmit) {
             const meta = getIteratorMeta(source);
+            let outputValue = value;
             if (meta) {
               setIteratorMeta(
                 outputIterator,
@@ -56,8 +57,9 @@ export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
                 meta.operatorIndex,
                 meta.operatorName
               );
+              outputValue = setValueMeta(outputValue, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
             }
-            output.next(value);
+            output.next(outputValue);
           }
         }
       } catch (err) {

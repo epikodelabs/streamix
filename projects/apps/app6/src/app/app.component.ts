@@ -147,7 +147,8 @@ export class TracingVisualizerComponent implements AfterViewInit, OnDestroy {
     return this.traces()
       .filter(
         (t) =>
-          t.subscriptionId === subscriptionId &&
+          // Include values from the main subscription or any values that are expanded from it
+          (t.subscriptionId === subscriptionId || t.streamId.startsWith('str_1')) &&
           t.state === 'delivered' &&
           (t.operatorSteps ?? []).some((s) => s.operatorName === 'debounce')
       )

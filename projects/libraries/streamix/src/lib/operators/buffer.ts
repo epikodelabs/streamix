@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, setIteratorMeta, type MaybePromise, type Operator } from "../abstractions";
+import { createOperator, getIteratorMeta, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { timer } from "../streams";
 import { createSubject } from "../subjects";
@@ -43,7 +43,16 @@ export function buffer<T = any>(period: MaybePromise<number>) {
       }
 
       // Emit expanded value
-      output.next(buffer.map((e) => e.result.value!));
+      let values = buffer.map((e) => e.result.value!);
+      if (targetMeta) {
+        values = setValueMeta(
+          values,
+          { valueId: targetMeta.valueId, kind: "collapse", inputValueIds: inputValueIds.length > 0 ? inputValueIds : undefined },
+          targetMeta.operatorIndex,
+          targetMeta.operatorName
+        );
+      }
+      output.next(values);
       buffer = [];
     };
 

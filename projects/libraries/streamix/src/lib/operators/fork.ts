@@ -1,4 +1,4 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, setIteratorMeta, type MaybePromise, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -103,12 +103,20 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
           }
 
           if (currentMeta) {
+            // Attach per-value metadata so tracers can attribute outputs even when emitted asynchronously.
+            const tagged = setValueMeta(
+              innerResult.value,
+              { valueId: currentMeta.valueId, kind: "expand" },
+              currentMeta.operatorIndex,
+              currentMeta.operatorName
+            );
             setIteratorMeta(
               iterator,
               { valueId: currentMeta.valueId, kind: "expand" },
               currentMeta.operatorIndex,
               currentMeta.operatorName
             );
+            return NEXT(tagged);
           }
 
           return NEXT(innerResult.value);
