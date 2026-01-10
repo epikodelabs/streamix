@@ -28,7 +28,6 @@ export function onIntersection(
 
   let subscriberCount = 0;
   let active = false;
-  let initialEmitPending = false;
 
   let el: Element | null = null;
   let io: IntersectionObserver | null = null;
@@ -88,17 +87,11 @@ export function onIntersection(
 
       io.observe(el);
       
-      // Defer initial emission to allow subscription variable assignment
-      if (!initialEmitPending) {
-        initialEmitPending = true;
-        queueMicrotask(() => {
-          initialEmitPending = false;
-          if (active && io) {
-            // Trigger initial observation synchronously
-            const rect = el!.getBoundingClientRect();
-            subject.next(rect.top < window.innerHeight && rect.bottom > 0);
-          }
-        });
+      // Emit initial value immediately
+      if (active && io) {
+        // Trigger initial observation synchronously
+        const rect = el!.getBoundingClientRect();
+        subject.next(rect.top < window.innerHeight && rect.bottom > 0);
       }
 
       // ???? REQUIRED: detect DOM removal

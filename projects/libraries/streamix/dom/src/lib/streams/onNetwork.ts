@@ -36,7 +36,6 @@ export function onNetwork(): Stream<NetworkState> {
 
   let subscriberCount = 0;
   let stopped = true;
-  let initialEmitPending = false;
 
   let connection: any = null;
 
@@ -69,13 +68,7 @@ export function onNetwork(): Stream<NetworkState> {
     window.addEventListener("offline", emit);
     connection?.addEventListener?.("change", emit);
 
-    if (!initialEmitPending) {
-      initialEmitPending = true;
-      queueMicrotask(() => {
-        initialEmitPending = false;
-        if (!stopped) emit();
-      });
-    }
+    emit();
   };
 
   const stop = () => {

@@ -25,7 +25,6 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
 
   let subscriberCount = 0;
   let stopped = true;
-  let initialEmitPending = false;
 
   const getState = (): DocumentVisibilityState => {
     if (typeof document === "undefined" || !("visibilityState" in document)) {
@@ -47,13 +46,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
 
     document.addEventListener("visibilitychange", emit);
     
-    if (!initialEmitPending) {
-      initialEmitPending = true;
-      queueMicrotask(() => {
-        initialEmitPending = false;
-        if (!stopped) emit();
-      });
-    }
+    emit();
   };
 
   const stop = () => {
