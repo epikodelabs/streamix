@@ -26,7 +26,7 @@ export function onAnimationFrame(): Stream<number> {
   let lastTime = 0;
 
   const startLoop = () => {
-    if (subscriberCount === 0 || !stopped) return;
+    if (!stopped) return;
     stopped = false;
 
     // SSR / non-browser guard
@@ -78,10 +78,7 @@ export function onAnimationFrame(): Stream<number> {
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
-      queueMicrotask(() => {
-        if (subscriberCount === 0) return;
-        startLoop();
-      });
+      startLoop();
     }
   };
 

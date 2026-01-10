@@ -36,6 +36,7 @@ export function onNetwork(): Stream<NetworkState> {
 
   let subscriberCount = 0;
   let stopped = true;
+  let initialEmitPending = false;
 
   let connection: any = null;
 
@@ -54,7 +55,7 @@ export function onNetwork(): Stream<NetworkState> {
   };
 
   const start = () => {
-    if (subscriberCount === 0 || !stopped) return;
+    if (!stopped) return;
     stopped = false;
 
     // SSR / unsupported guard
@@ -68,7 +69,13 @@ export function onNetwork(): Stream<NetworkState> {
     window.addEventListener("offline", emit);
     connection?.addEventListener?.("change", emit);
 
-    emit(); // initial snapshot
+    if (!initialEmitPending) {
+      initialEmitPending = true;
+      queueMicrotask(() => {
+        initialEmitPending = false;
+        if (!stopped) emit();
+      });
+    }
   };
 
   const stop = () => {
@@ -92,10 +99,7 @@ export function onNetwork(): Stream<NetworkState> {
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
-      queueMicrotask(() => {
-        if (subscriberCount === 0) return;
-        start();
-      });
+      start();
     }
   };
 

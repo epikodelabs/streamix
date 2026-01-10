@@ -20,6 +20,7 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
 
   let subscriberCount = 0;
   let stopped = true;
+  let initialEmitPending = false;
 
   const getOrientation = (): "portrait" | "landscape" => {
     if (
@@ -39,21 +40,27 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
   };
 
   const start = () => {
-    if (subscriberCount === 0 || !stopped) return;
-    stopped = false;
+    if (!stopped) return;
+      stopped = false;
+      
+      if (
+        typeof window === "undefined" ||
+        !window.screen ||
+        !window.screen.orientation
+      ) {
+        return;
+      }
 
-    // SSR / unsupported guard
-    if (
-      typeof window === "undefined" ||
-      !window.screen ||
-      !window.screen.orientation
-    ) {
-      return;
-    }
-
-    window.screen.orientation.addEventListener("change", emit);
-    emit(); // initial value
-  };
+      window.screen.orientation.addEventListener("change", emit);
+      
+      if (!initialEmitPending) {
+        initialEmitPending = true;
+        queueMicrotask(() => {
+          initialEmitPending = false;
+          if (!stopped) emit();
+        });
+      }
+    };
 
   const stop = () => {
     if (stopped) return;
@@ -78,10 +85,7 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
-      queueMicrotask(() => {
-        if (subscriberCount === 0) return;
-        start();
-      });
+      start();
     }
   };
 

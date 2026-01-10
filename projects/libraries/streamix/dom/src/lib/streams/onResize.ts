@@ -26,6 +26,7 @@ export function onResize(
 
   let subscriberCount = 0;
   let active = false;
+  let initialEmitPending = false;
 
   let resolvedElement: HTMLElement | null = null;
   let observer: ResizeObserver | null = null;
@@ -49,8 +50,8 @@ export function onResize(
   /* Lifecycle                                          */
   /* -------------------------------------------------- */
 
-  const start = async () => {
-    if (subscriberCount === 0 || active) return;
+  const start = () => {
+    if (active) return;
     active = true;
 
     // SSR / unsupported
@@ -59,21 +60,38 @@ export function onResize(
       return;
     }
 
-    const el = isPromiseLike(element) ? await element : element;
+    if (isPromiseLike(element)) {
+      // Async: wait for element resolution
+      void (async () => {
+        const el = await element;
+        if (!active || !el) return;
 
-    // Guard against unsubscribe during await
-    if (!active || !el) return;
-
-    resolvedElement = el;
-
-    observer = new ResizeObserver(entries => {
-      emit(entries[0]);
-    });
-
-    observer.observe(resolvedElement);
-
-    // Initial synchronous emission
-    emit();
+        resolvedElement = el;
+        observer = new ResizeObserver(entries => emit(entries[0]));
+        observer.observe(resolvedElement);
+        
+        if (!initialEmitPending) {
+          initialEmitPending = true;
+          queueMicrotask(() => {
+            initialEmitPending = false;
+            if (active) emit();
+          });
+        }
+      })();
+    } else {
+      // Sync: setup immediately, defer emission
+      resolvedElement = element;
+      observer = new ResizeObserver(entries => emit(entries[0]));
+      observer.observe(resolvedElement);
+      
+      if (!initialEmitPending) {
+        initialEmitPending = true;
+        queueMicrotask(() => {
+          initialEmitPending = false;
+          if (active) emit();
+        });
+      }
+    }
   };
 
   const stop = () => {
@@ -93,10 +111,7 @@ export function onResize(
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
-      queueMicrotask(() => {
-        if (subscriberCount === 0) return;
-        void start();
-      });
+      start();
     }
   };
 

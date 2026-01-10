@@ -32,6 +32,7 @@ export function onViewportChange(): Stream<ViewportState> {
 
   let subscriberCount = 0;
   let stopped = true;
+  let initialEmitPending = false;
 
   let target: VisualViewport | Window | null = null;
 
@@ -71,7 +72,7 @@ export function onViewportChange(): Stream<ViewportState> {
   };
 
   const start = () => {
-    if (subscriberCount === 0 || !stopped) return;
+    if (!stopped) return;
     stopped = false;
 
     // SSR guard
@@ -82,7 +83,13 @@ export function onViewportChange(): Stream<ViewportState> {
     target.addEventListener("resize", emit);
     target.addEventListener("scroll", emit);
 
-    emit(); // initial snapshot
+    if (!initialEmitPending) {
+      initialEmitPending = true;
+      queueMicrotask(() => {
+        initialEmitPending = false;
+        if (!stopped) emit();
+      });
+    }
   };
 
   const stop = () => {
@@ -105,10 +112,7 @@ export function onViewportChange(): Stream<ViewportState> {
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
-      queueMicrotask(() => {
-        if (subscriberCount === 0) return;
-        start();
-      });
+      start();
     }
   };
 

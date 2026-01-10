@@ -25,6 +25,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
 
   let subscriberCount = 0;
   let stopped = true;
+  let initialEmitPending = false;
 
   const getState = (): DocumentVisibilityState => {
     if (typeof document === "undefined" || !("visibilityState" in document)) {
@@ -38,14 +39,21 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
   };
 
   const start = () => {
-    if (subscriberCount === 0 || !stopped) return;
+    if (!stopped) return;
     stopped = false;
 
     // SSR / unsupported guard
     if (typeof document === "undefined") return;
 
     document.addEventListener("visibilitychange", emit);
-    emit(); // initial value
+    
+    if (!initialEmitPending) {
+      initialEmitPending = true;
+      queueMicrotask(() => {
+        initialEmitPending = false;
+        if (!stopped) emit();
+      });
+    }
   };
 
   const stop = () => {
@@ -65,10 +73,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
-      queueMicrotask(() => {
-        if (subscriberCount === 0) return;
-        start();
-      });
+      start();
     }
   };
 

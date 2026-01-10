@@ -21,6 +21,7 @@ export function onFullscreen(): Stream<boolean> {
 
   let subscriberCount = 0;
   let stopped = true;
+  let initialEmitPending = false;
 
   /**
    * Checks whether the document is currently in fullscreen mode.
@@ -41,7 +42,7 @@ export function onFullscreen(): Stream<boolean> {
   };
 
   const start = () => {
-    if (subscriberCount === 0 || !stopped) return;
+    if (!stopped) return;
     stopped = false;
 
     // SSR guard
@@ -52,7 +53,14 @@ export function onFullscreen(): Stream<boolean> {
     document.addEventListener("mozfullscreenchange", emit as any);
     document.addEventListener("MSFullscreenChange", emit as any);
 
-    emit(); // initial state
+    // Defer initial emission to allow subscription variable assignment
+    if (!initialEmitPending) {
+      initialEmitPending = true;
+      queueMicrotask(() => {
+        initialEmitPending = false;
+        if (!stopped) emit();
+      });
+    }
   };
 
   const stop = () => {
@@ -75,18 +83,17 @@ export function onFullscreen(): Stream<boolean> {
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
-      queueMicrotask(() => {
-        if (subscriberCount === 0) return;
-        start();
-      });
+      start();
     }
   };
 
   subject.subscribe = (
     cb?: ((v: boolean) => void) | Receiver<boolean>
   ) => {
+    // Create subscription first
     const sub = originalSubscribe.call(subject, cb);
 
+    // Now if start() emits synchronously, the subscription variable is assigned
     scheduleStart();
 
     const o = sub.onUnsubscribe;
