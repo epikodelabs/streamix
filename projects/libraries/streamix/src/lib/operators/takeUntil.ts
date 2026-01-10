@@ -25,11 +25,38 @@ export function takeUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
     const outputIterator = eachValueFrom(output);
     let stop = false;
 
-    const notifierSubscription = fromAny(notifier).subscribe({
-      next: () => { stop = true; notifierSubscription.unsubscribe(); output.complete(); },
-      error: (err) => { stop = true; notifierSubscription.unsubscribe(); output.error(err); },
-      complete: () => { notifierSubscription.unsubscribe(); },
+    let notifierSubscription: any;
+    let pendingUnsubscribe = false;
+
+    const requestUnsubscribe = (): void => {
+      if (notifierSubscription) {
+        const sub = notifierSubscription;
+        notifierSubscription = undefined;
+        sub.unsubscribe();
+        return;
+      }
+      pendingUnsubscribe = true;
+    };
+
+    notifierSubscription = fromAny(notifier).subscribe({
+      next: () => {
+        stop = true;
+        requestUnsubscribe();
+        output.complete();
+      },
+      error: (err) => {
+        stop = true;
+        requestUnsubscribe();
+        output.error(err);
+      },
+      complete: () => {
+        requestUnsubscribe();
+      },
     });
+
+    if (pendingUnsubscribe) {
+      requestUnsubscribe();
+    }
 
     (async () => {
       try {
@@ -53,7 +80,7 @@ export function takeUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
         if (!output.completed()) output.error(err);
       } finally {
         output.complete();
-        notifierSubscription.unsubscribe();
+        requestUnsubscribe();
       }
     })();
 

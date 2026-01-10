@@ -25,21 +25,38 @@ export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
     const output = createSubject<T>();
     const outputIterator = eachValueFrom(output);
     let canEmit = false;
+    let notifierSubscription: any;
+    let pendingUnsubscribe = false;
+
+    const requestUnsubscribe = (): void => {
+      if (notifierSubscription) {
+        const sub = notifierSubscription;
+        notifierSubscription = undefined;
+        sub.unsubscribe();
+        return;
+      }
+
+      pendingUnsubscribe = true;
+    };
 
     // Subscribe to notifier
-    const notifierSubscription = fromAny(notifier).subscribe({
+    notifierSubscription = fromAny(notifier).subscribe({
       next: () => {
         canEmit = true;
-        notifierSubscription.unsubscribe();
+        requestUnsubscribe();
       },
       error: (err) => {
-        notifierSubscription.unsubscribe();
-        output.error(err);
+        requestUnsubscribe();
+        if (!output.completed()) output.error(err);
       },
       complete: () => {
-        notifierSubscription.unsubscribe();
+        requestUnsubscribe();
       },
     });
+
+    if (pendingUnsubscribe) {
+      requestUnsubscribe();
+    }
 
     // Process source
     (async () => {
@@ -65,8 +82,8 @@ export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
       } catch (err) {
         if (!output.completed()) output.error(err);
       } finally {
-        output.complete();
-        notifierSubscription.unsubscribe();
+        if (!output.completed()) output.complete();
+        requestUnsubscribe();
       }
     })();
 
