@@ -33,23 +33,38 @@ export function onMutation(
   let resolvedOptions: MutationObserverInit | undefined;
   let observer: MutationObserver | null = null;
 
-  const start = async () => {
-    if (subscriberCount === 0 || !stopped) return;
+  const start = () => {
+    if (!stopped) return;
     stopped = false;
 
     // SSR / unsupported guard
     if (typeof MutationObserver === "undefined") return;
 
-    resolvedElement = isPromiseLike(element) ? await element : element;
-    resolvedOptions = isPromiseLike(options) ? await options : options;
+    if (isPromiseLike(element) || isPromiseLike(options)) {
+      // Async path for promise element/options
+      void (async () => {
+        resolvedElement = isPromiseLike(element) ? await element : element;
+        resolvedOptions = isPromiseLike(options) ? await options : options;
 
-    if (stopped || !resolvedElement) return;
+        if (stopped || !resolvedElement) return;
 
-    observer = new MutationObserver(mutations => {
-      subject.next([...mutations]);
-    });
+        observer = new MutationObserver(mutations => {
+          subject.next([...mutations]);
+        });
 
-    observer.observe(resolvedElement, resolvedOptions);
+        observer.observe(resolvedElement, resolvedOptions);
+      })();
+    } else {
+      // Synchronous path for immediate element/options
+      resolvedElement = element;
+      resolvedOptions = options;
+
+      observer = new MutationObserver(mutations => {
+        subject.next([...mutations]);
+      });
+
+      observer.observe(resolvedElement, resolvedOptions);
+    }
   };
 
   const stop = () => {
@@ -69,10 +84,7 @@ export function onMutation(
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
-      queueMicrotask(() => {
-        if (subscriberCount === 0) return;
-        void start();
-      });
+      start();
     }
   };
 

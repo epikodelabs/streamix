@@ -27,6 +27,7 @@ export function onMediaQuery(
 
   let subscriberCount = 0;
   let active = false;
+  let initialEmitPending = false;
 
   let mql: MediaQueryList | null = null;
   let listener: ((e: MediaQueryListEvent) => void) | null = null;
@@ -44,31 +45,51 @@ export function onMediaQuery(
   /* Lifecycle                                          */
   /* -------------------------------------------------- */
 
-  const start = async () => {
-    if (subscriberCount === 0 || active) return;
+  const start = () => {
+    if (active) return;
     active = true;
 
-    // Promise query ??? emit false immediately
     if (isPromiseLike(query)) {
-      subject.next(false);
-    }
+      // Async path for promise query
+      subject.next(false); // Emit false immediately
+      void (async () => {
+        const q = await query;
+        if (!active) return;
 
-    const q = isPromiseLike(query) ? await query : query;
-    if (!active) return;
+        mql = window.matchMedia(q);
+        subject.next(mql.matches);
 
-    mql = window.matchMedia(q);
+        listener = (e: MediaQueryListEvent) => {
+          subject.next(e.matches);
+        };
 
-    // Emit resolved state
-    subject.next(mql.matches);
+        if (typeof mql.addEventListener === 'function') {
+          mql.addEventListener('change', listener);
+        } else if (typeof (mql as any).addListener === 'function') {
+          (mql as any).addListener(listener);
+        }
+      })();
+    } else {
+      // Synchronous path for immediate query
+      mql = window.matchMedia(query);
 
-    listener = (e: MediaQueryListEvent) => {
-      subject.next(e.matches);
-    };
+      listener = (e: MediaQueryListEvent) => {
+        subject.next(e.matches);
+      };
 
-    if (typeof mql.addEventListener === 'function') {
-      mql.addEventListener('change', listener);
-    } else if (typeof (mql as any).addListener === 'function') {
-      (mql as any).addListener(listener);
+      if (typeof mql.addEventListener === 'function') {
+        mql.addEventListener('change', listener);
+      } else if (typeof (mql as any).addListener === 'function') {
+        (mql as any).addListener(listener);
+      }
+      
+      if (!initialEmitPending) {
+        initialEmitPending = true;
+        queueMicrotask(() => {
+          initialEmitPending = false;
+          if (active && mql) subject.next(mql.matches);
+        });
+      }
     }
   };
 
@@ -96,10 +117,7 @@ export function onMediaQuery(
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
-      queueMicrotask(() => {
-        if (subscriberCount === 0) return;
-        void start();
-      });
+      start();
     }
   };
 
