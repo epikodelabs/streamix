@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
+import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, isPromiseLike, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import type { Subject } from "./subject";
 
@@ -7,7 +7,7 @@ export type BehaviorSubject<T = any> = Subject<T> & {
 };
 
 export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
-  const subscribers = new Set<Receiver<T>>();
+  let subscribers: Receiver<T>[] = [];
   let latestValue: T = initialValue;
   let isCompleted = false;
   let hasError = false;
@@ -17,19 +17,21 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     if (isCompleted || hasError) return;
     latestValue = value;
     
-    const currentSubscribers = new Set(subscribers);
+    const currentSubscribers = subscribers;
 
     scheduler.enqueue(async () => {
-      const promises: Promise<void>[] = [];
-      for (const subscriber of currentSubscribers) {
+      let promises: Promise<void>[] | undefined;
+      for (let i = 0; i < currentSubscribers.length; i++) {
+        const subscriber = currentSubscribers[i];
         if (subscriber.next) {
           const result = subscriber.next(value);
-          if (result instanceof Promise) {
-            promises.push(result);
+          if (isPromiseLike(result)) {
+            if (!promises) promises = [];
+            promises.push(result as Promise<void>);
           }
         }
       }
-      await Promise.all(promises);
+      await Promise.all(promises || []);
     });
   };
 
@@ -37,20 +39,23 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     if (isCompleted || hasError) return;
     isCompleted = true;
     
-    const currentSubscribers = new Set(subscribers);
-    subscribers.clear();
+    // Capture and clear
+    const currentSubscribers = subscribers;
+    subscribers = []; 
 
     scheduler.enqueue(async () => {
-      const promises: Promise<void>[] = [];
-      for (const subscriber of currentSubscribers) {
+      let promises: Promise<void>[] | undefined;
+      for (let i = 0; i < currentSubscribers.length; i++) {
+        const subscriber = currentSubscribers[i];
         if (subscriber.complete) {
           const result = subscriber.complete();
-          if (result instanceof Promise) {
-            promises.push(result);
+          if (isPromiseLike(result)) {
+            if (!promises) promises = [];
+            promises.push(result as Promise<void>);
           }
         }
       }
-      await Promise.all(promises);
+      await Promise.all(promises || []);
     });
   };
 
@@ -60,38 +65,38 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     isCompleted = true;
     errorObj = err;
     
-    const currentSubscribers = new Set(subscribers);
-    subscribers.clear();
+    const currentSubscribers = subscribers;
+    subscribers = [];
 
     scheduler.enqueue(async () => {
-      const promises: Promise<void>[] = [];
-      for (const subscriber of currentSubscribers) {
+      let promises: Promise<void>[] | undefined;
+      for (let i = 0; i < currentSubscribers.length; i++) {
+        const subscriber = currentSubscribers[i];
         if (subscriber.error) {
           const result = subscriber.error(err);
-          if (result instanceof Promise) {
-            promises.push(result);
+          if (isPromiseLike(result)) {
+            if (!promises) promises = [];
+            promises.push(result as Promise<void>);
           }
         }
       }
-      await Promise.all(promises);
+      await Promise.all(promises || []);
     });
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
     if (hasError) {
-        scheduler.enqueue(async () => await receiver.error?.(errorObj));
+        scheduler.enqueue(() => receiver.error?.(errorObj));
         return createSubscription();
     }
     
     if (isCompleted) {
          // Should NOT emit value if completed, just complete.
-         scheduler.enqueue(async () => {
-             await receiver.complete?.();
-         });
+         scheduler.enqueue(() => receiver.complete?.());
          return createSubscription();
     }
 
-    subscribers.add(receiver);
+    subscribers = [...subscribers, receiver];
     
     // Synchronous Initial Emission
     if (receiver.next) {
@@ -100,10 +105,14 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     }
 
     const subscription = createSubscription(() => {
-      subscribers.delete(receiver);
-      scheduler.enqueue(async () => {
-        await receiver.complete?.();
-      });
+        const idx = subscribers.indexOf(receiver);
+        if (idx !== -1) {
+            const nextSubscribers = subscribers.slice();
+            nextSubscribers.splice(idx, 1);
+            subscribers = nextSubscribers;
+        }
+
+      scheduler.enqueue(() => receiver.complete?.());
     });
 
     return subscription;

@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
+import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, isPromiseLike, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import type { Subject } from "./subject";
 
@@ -6,7 +6,7 @@ export type ReplaySubject<T = any> = Subject<T>;
 
 export function createReplaySubject<T = any>(capacity: number = Infinity): ReplaySubject<T> {
   const values: T[] = [];
-  const subscribers = new Set<Receiver<T>>();
+  let subscribers: Receiver<T>[] = [];
   let isCompleted = false;
   let hasError = false;
   let latestValue: T | undefined = undefined;
@@ -20,19 +20,21 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
       values.shift();
     }
 
-    const currentSubscribers = new Set(subscribers);
+    const currentSubscribers = subscribers;
 
     scheduler.enqueue(async () => {
-      const promises: Promise<void>[] = [];
-      for (const subscriber of currentSubscribers) {
+      let promises: Promise<void>[] | undefined;
+      for (let i = 0; i < currentSubscribers.length; i++) {
+        const subscriber = currentSubscribers[i];
         if (subscriber.next) {
           const result = subscriber.next(value);
-          if (result instanceof Promise) {
-            promises.push(result);
+          if (isPromiseLike(result)) {
+            if (!promises) promises = [];
+            promises.push(result as Promise<void>);
           }
         }
       }
-      await Promise.all(promises);
+      await Promise.all(promises || []);
     });
   };
 
@@ -40,20 +42,22 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
      if (isCompleted || hasError) return;
      isCompleted = true;
      
-     const currentSubscribers = new Set(subscribers);
-     subscribers.clear();
+     const currentSubscribers = subscribers;
+     subscribers = [];
 
      scheduler.enqueue(async () => {
-         const promises: Promise<void>[] = [];
-         for (const subscriber of currentSubscribers) {
+         let promises: Promise<void>[] | undefined;
+         for (let i = 0; i < currentSubscribers.length; i++) {
+             const subscriber = currentSubscribers[i];
              if (subscriber.complete) {
                  const result = subscriber.complete();
-                 if (result instanceof Promise) {
-                     promises.push(result);
+                 if (isPromiseLike(result)) {
+                     if (!promises) promises = [];
+                     promises.push(result as Promise<void>);
                  }
              }
          }
-         await Promise.all(promises);
+         await Promise.all(promises || []);
      });
   };
 
@@ -63,20 +67,22 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
      isCompleted = true;
      errorObj = err;
      
-     const currentSubscribers = new Set(subscribers);
-     subscribers.clear();
+     const currentSubscribers = subscribers;
+     subscribers = [];
      
      scheduler.enqueue(async () => {
-         const promises: Promise<void>[] = [];
-         for (const subscriber of currentSubscribers) {
+         let promises: Promise<void>[] | undefined;
+         for (let i = 0; i < currentSubscribers.length; i++) {
+             const subscriber = currentSubscribers[i];
              if (subscriber.error) {
                  const result = subscriber.error(err);
-                 if (result instanceof Promise) {
-                     promises.push(result);
+                 if (isPromiseLike(result)) {
+                     if (!promises) promises = [];
+                     promises.push(result as Promise<void>);
                  }
              }
          }
-         await Promise.all(promises);
+         await Promise.all(promises || []);
      });
   };
 
@@ -98,7 +104,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     }
     
     let isUnsubscribed = false;
-    subscribers.add(receiver);
+    subscribers = [...subscribers, receiver];
     const currentValues = [...values];
     
     scheduler.enqueue(async () => {
@@ -114,7 +120,12 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     
     return createSubscription(() => {
         isUnsubscribed = true;
-        subscribers.delete(receiver);
+        const idx = subscribers.indexOf(receiver);
+        if (idx !== -1) {
+            const nextSubscribers = subscribers.slice();
+            nextSubscribers.splice(idx, 1);
+            subscribers = nextSubscribers;
+        }
         scheduler.enqueue(() => receiver.complete?.());
     });
   };

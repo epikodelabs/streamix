@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, scheduler as globalScheduler, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, type Scheduler, type Stream, type Subscription } from "../abstractions";
+import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, scheduler as globalScheduler, isPromiseLike, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, type Scheduler, type Stream, type Subscription } from "../abstractions";
 import { firstValueFrom } from "../converters";
 
 export type Subject<T = any> = Stream<T> & {
@@ -10,7 +10,7 @@ export type Subject<T = any> = Stream<T> & {
 };
 
 export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): Subject<T> {
-  const subscribers = new Set<Receiver<T>>();
+  let subscribers: Receiver<T>[] = [];
   let latestValue: T | undefined = undefined;
   let isCompleted = false;
   let hasError = false;
@@ -20,20 +20,22 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     if (isCompleted || hasError) return;
     latestValue = value;
     
-    // Snapshot subscribers synchronously
-    const currentSubscribers = new Set(subscribers);
+    const currentSubscribers = subscribers;
 
     scheduler.enqueue(async () => {
-      const promises: Promise<void>[] = [];
-      for (const subscriber of currentSubscribers) {
+      let promises: Promise<void>[] | undefined;
+      for (let i = 0; i < currentSubscribers.length; i++) {
+        const subscriber = currentSubscribers[i];
         if (subscriber.next) {
           const result = subscriber.next(value);
-          if (result instanceof Promise) {
-            promises.push(result);
+          if (isPromiseLike(result)) {
+            if (!promises) promises = [];
+            promises.push(result as Promise<void>);
           }
         }
       }
-      await Promise.all(promises);
+      
+      await Promise.all(promises || []);
     });
   };
 
@@ -41,21 +43,23 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     if (isCompleted || hasError) return;
     isCompleted = true;
     
-    // Snapshot subscribers synchronously
-    const currentSubscribers = new Set(subscribers);
-    subscribers.clear();
+    // Capture and clear
+    const currentSubscribers = subscribers;
+    subscribers = []; 
 
     scheduler.enqueue(async () => {
-      const promises: Promise<void>[] = [];
-      for (const subscriber of currentSubscribers) {
+      let promises: Promise<void>[] | undefined;
+      for (let i = 0; i < currentSubscribers.length; i++) {
+        const subscriber = currentSubscribers[i];
         if (subscriber.complete) {
           const result = subscriber.complete();
-          if (result instanceof Promise) {
-            promises.push(result);
+          if (isPromiseLike(result)) {
+            if (!promises) promises = [];
+            promises.push(result as Promise<void>);
           }
         }
       }
-      await Promise.all(promises);
+      await Promise.all(promises || []);
     });
   };
 
@@ -65,44 +69,46 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     isCompleted = true;
     errorObj = err;
     
-    // Snapshot subscribers synchronously
-    const currentSubscribers = new Set(subscribers);
-    subscribers.clear();
+    const currentSubscribers = subscribers;
+    subscribers = [];
 
     scheduler.enqueue(async () => {
-      const promises: Promise<void>[] = [];
-      for (const subscriber of currentSubscribers) {
+      let promises: Promise<void>[] | undefined;
+      for (let i = 0; i < currentSubscribers.length; i++) {
+        const subscriber = currentSubscribers[i];
         if (subscriber.error) {
           const result = subscriber.error(err);
-          if (result instanceof Promise) {
-            promises.push(result);
+          if (isPromiseLike(result)) {
+            if (!promises) promises = [];
+            promises.push(result as Promise<void>);
           }
         }
       }
-      await Promise.all(promises);
+      await Promise.all(promises || []);
     });
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
-    // Synchronous state check
     if (hasError) {
-        scheduler.enqueue(async () => await receiver.error?.(errorObj));
+        scheduler.enqueue(() => receiver.error?.(errorObj));
         return createSubscription(); 
     }
     if (isCompleted) {
-        scheduler.enqueue(async () => await receiver.complete?.());
+        scheduler.enqueue(() => receiver.complete?.());
         return createSubscription();
     }
   
-    subscribers.add(receiver);
+    subscribers = [...subscribers, receiver];
 
     const subscription = createSubscription(() => {
-      subscribers.delete(receiver);
-      // We also schedule a complete call on the receiver to signify unsubscription finished?
-      // StrictReceiver normally handles cleanup.
-      scheduler.enqueue(async () => {
-        await receiver.complete?.();
-      });
+        const idx = subscribers.indexOf(receiver);
+        if (idx !== -1) {
+            const nextSubscribers = subscribers.slice();
+            nextSubscribers.splice(idx, 1);
+            subscribers = nextSubscribers;
+        }
+
+       scheduler.enqueue(() => receiver.complete?.());
     });
 
     return subscription;
