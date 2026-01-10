@@ -50,7 +50,7 @@ export function onResize(
   /* -------------------------------------------------- */
 
   const start = async () => {
-    if (active) return;
+    if (subscriberCount === 0 || active) return;
     active = true;
 
     // SSR / unsupported
@@ -90,6 +90,15 @@ export function onResize(
   /* -------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      queueMicrotask(() => {
+        if (subscriberCount === 0) return;
+        void start();
+      });
+    }
+  };
 
   subject.subscribe = (
     cb?: ((value: { width: number; height: number }) => void) |
@@ -97,9 +106,7 @@ export function onResize(
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      void start();
-    }
+    scheduleStart();
 
     const prev = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

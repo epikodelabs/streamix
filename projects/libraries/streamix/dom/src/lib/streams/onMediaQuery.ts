@@ -45,7 +45,7 @@ export function onMediaQuery(
   /* -------------------------------------------------- */
 
   const start = async () => {
-    if (active) return;
+    if (subscriberCount === 0 || active) return;
     active = true;
 
     // Promise query ??? emit false immediately
@@ -93,14 +93,22 @@ export function onMediaQuery(
   /* -------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      queueMicrotask(() => {
+        if (subscriberCount === 0) return;
+        void start();
+      });
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: boolean) => void) | Receiver<boolean>
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      void start();
-    }
+    scheduleStart();
 
     const prev = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

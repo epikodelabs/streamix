@@ -44,7 +44,7 @@ export function onBattery(): Stream<BatteryState> {
   };
 
   const start = async () => {
-    if (!stopped) return;
+    if (subscriberCount === 0 || !stopped) return;
     stopped = false;
 
     // SSR / unsupported API guard
@@ -53,6 +53,7 @@ export function onBattery(): Stream<BatteryState> {
     }
 
     battery = await (navigator as any).getBattery();
+    if (stopped || subscriberCount === 0) return;
     emit();
 
     battery.addEventListener("chargingchange", emit);
@@ -80,14 +81,22 @@ export function onBattery(): Stream<BatteryState> {
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      queueMicrotask(() => {
+        if (subscriberCount === 0) return;
+        void start();
+      });
+    }
+  };
+
   subject.subscribe = (
     cb?: ((v: BatteryState) => void) | Receiver<BatteryState>
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      void start();
-    }
+    scheduleStart();
 
     const o = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

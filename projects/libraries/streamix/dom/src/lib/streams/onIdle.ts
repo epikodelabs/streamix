@@ -29,7 +29,7 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
   let idleId: number | null = null;
 
   const startLoop = () => {
-    if (!stopped) return;
+    if (subscriberCount === 0 || !stopped) return;
     stopped = false;
 
     // SSR / non-browser guard
@@ -77,14 +77,22 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      queueMicrotask(() => {
+        if (subscriberCount === 0) return;
+        startLoop();
+      });
+    }
+  };
+
   subject.subscribe = (
     callback?: ((value: IdleDeadline) => void) | Receiver<IdleDeadline>
   ) => {
     const subscription = originalSubscribe.call(subject, callback);
 
-    if (++subscriberCount === 1) {
-      startLoop();
-    }
+    scheduleStart();
 
     const originalOnUnsubscribe = subscription.onUnsubscribe;
     subscription.onUnsubscribe = () => {

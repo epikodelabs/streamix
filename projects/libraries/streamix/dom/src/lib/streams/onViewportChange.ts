@@ -71,7 +71,7 @@ export function onViewportChange(): Stream<ViewportState> {
   };
 
   const start = () => {
-    if (!stopped) return;
+    if (subscriberCount === 0 || !stopped) return;
     stopped = false;
 
     // SSR guard
@@ -102,14 +102,22 @@ export function onViewportChange(): Stream<ViewportState> {
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      queueMicrotask(() => {
+        if (subscriberCount === 0) return;
+        start();
+      });
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: ViewportState) => void) | Receiver<ViewportState>
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      start();
-    }
+    scheduleStart();
 
     const o = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

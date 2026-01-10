@@ -54,7 +54,7 @@ export function onNetwork(): Stream<NetworkState> {
   };
 
   const start = () => {
-    if (!stopped) return;
+    if (subscriberCount === 0 || !stopped) return;
     stopped = false;
 
     // SSR / unsupported guard
@@ -89,14 +89,22 @@ export function onNetwork(): Stream<NetworkState> {
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      queueMicrotask(() => {
+        if (subscriberCount === 0) return;
+        start();
+      });
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: NetworkState) => void) | Receiver<NetworkState>
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      start();
-    }
+    scheduleStart();
 
     const o = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

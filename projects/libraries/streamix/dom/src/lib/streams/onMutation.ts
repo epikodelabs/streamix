@@ -34,7 +34,7 @@ export function onMutation(
   let observer: MutationObserver | null = null;
 
   const start = async () => {
-    if (!stopped) return;
+    if (subscriberCount === 0 || !stopped) return;
     stopped = false;
 
     // SSR / unsupported guard
@@ -66,14 +66,22 @@ export function onMutation(
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      queueMicrotask(() => {
+        if (subscriberCount === 0) return;
+        void start();
+      });
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: MutationRecord[]) => void) | Receiver<MutationRecord[]>
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      void start();
-    }
+    scheduleStart();
 
     const o = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

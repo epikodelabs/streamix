@@ -38,7 +38,7 @@ export function onIntersection(
   /* -------------------------------------------------- */
 
   const start = async () => {
-    if (active) return;
+    if (subscriberCount === 0 || active) return;
     active = true;
 
     if (
@@ -95,6 +95,16 @@ export function onIntersection(
   /* -------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      queueMicrotask(() => {
+        if (subscriberCount === 0) return;
+        void start();
+      });
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: boolean) => void) | Receiver<boolean>
   ) => {
@@ -102,9 +112,7 @@ export function onIntersection(
 
     subscriptions.add(sub);
 
-    if (++subscriberCount === 1) {
-      void start();
-    }
+    scheduleStart();
 
     const prev = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {
