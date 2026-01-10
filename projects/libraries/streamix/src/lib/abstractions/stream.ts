@@ -136,7 +136,21 @@ export function createAsyncGenerator<T = any>(
     /** Value buffer when producer outpaces consumer */
     const queue: T[] = [];
 
-    const subscription = register({
+    let subscription: Subscription | undefined;
+    let pendingUnsubscribe = false;
+
+    const requestUnsubscribe = (): void => {
+      if (subscription) {
+        const sub = subscription;
+        subscription = undefined;
+        sub.unsubscribe();
+        return;
+      }
+
+      pendingUnsubscribe = true;
+    };
+
+    subscription = register({
       next(value: T) {
         if (resolveNext) {
           const r = resolveNext;
@@ -156,7 +170,7 @@ export function createAsyncGenerator<T = any>(
           rejectNext = null;
           r(err);
         }
-        subscription.unsubscribe();
+        requestUnsubscribe();
       },
 
       complete() {
@@ -167,9 +181,13 @@ export function createAsyncGenerator<T = any>(
           rejectNext = null;
           r({ done: true, value: undefined });
         }
-        subscription.unsubscribe();
+        requestUnsubscribe();
       },
     });
+
+    if (pendingUnsubscribe) {
+      requestUnsubscribe();
+    }
 
     try {
       while (true) {
@@ -193,7 +211,7 @@ export function createAsyncGenerator<T = any>(
         }
       }
     } finally {
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     }
   }
 
