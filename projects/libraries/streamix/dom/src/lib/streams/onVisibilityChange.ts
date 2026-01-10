@@ -38,7 +38,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
   };
 
   const start = () => {
-    if (!stopped) return;
+    if (subscriberCount === 0 || !stopped) return;
     stopped = false;
 
     // SSR / unsupported guard
@@ -62,14 +62,22 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      queueMicrotask(() => {
+        if (subscriberCount === 0) return;
+        start();
+      });
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: DocumentVisibilityState) => void) | Receiver<DocumentVisibilityState>
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      start();
-    }
+    scheduleStart();
 
     const o = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {
