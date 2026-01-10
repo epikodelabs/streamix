@@ -1197,13 +1197,30 @@ registerRuntimeHooks({
                   }
                 }
 
-                // Multiple inputs, one output: filter non-selected values
+                // Multiple inputs, one output
                 if (requestBatch.length > 1) {
                   const outputValueId = perValueMeta?.valueId ?? requestBatch[requestBatch.length - 1].meta.valueId;
                   const outputEntry = requestBatch.find((w) => w.meta.valueId === outputValueId) ?? requestBatch[requestBatch.length - 1];
 
-                  filterBatch(requestBatch, outputEntry.meta.valueId);
-                  exitAndRemove(outputEntry.meta.valueId, emittedValue, false, "transformed");
+                  // Detect if this is a collapse (multiple inputs combined/transformed)
+                  // or a filter (one input selected unchanged)
+                  const isPassThrough = requestBatch.some((w) => Object.is(w.value, emittedValue));
+                  
+                  if (isPassThrough) {
+                    // Filter case: one input passed through, others filtered out
+                    filterBatch(requestBatch, outputEntry.meta.valueId);
+                    exitAndRemove(outputEntry.meta.valueId, emittedValue, false, "transformed");
+                  } else {
+                    // Collapse case: multiple inputs merged into new value
+                    for (const item of requestBatch) {
+                      if (item.meta.valueId !== outputEntry.meta.valueId) {
+                        removeFromQueue(item.meta.valueId);
+                        tracer.collapseValue(item.meta.valueId, i, opName, outputEntry.meta.valueId, emittedValue);
+                      }
+                    }
+                    exitAndRemove(outputEntry.meta.valueId, emittedValue, false, "collapsed");
+                  }
+                  
                   return wrapOutput(outputEntry.meta, emittedValue);
                 }
 
