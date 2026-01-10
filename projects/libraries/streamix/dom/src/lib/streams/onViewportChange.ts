@@ -32,7 +32,6 @@ export function onViewportChange(): Stream<ViewportState> {
 
   let subscriberCount = 0;
   let stopped = true;
-  let initialEmitPending = false;
 
   let target: VisualViewport | Window | null = null;
 
@@ -83,13 +82,7 @@ export function onViewportChange(): Stream<ViewportState> {
     target.addEventListener("resize", emit);
     target.addEventListener("scroll", emit);
 
-    if (!initialEmitPending) {
-      initialEmitPending = true;
-      queueMicrotask(() => {
-        initialEmitPending = false;
-        if (!stopped) emit();
-      });
-    }
+    emit();
   };
 
   const stop = () => {

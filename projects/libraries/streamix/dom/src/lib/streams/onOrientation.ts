@@ -20,7 +20,6 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
 
   let subscriberCount = 0;
   let stopped = true;
-  let initialEmitPending = false;
 
   const getOrientation = (): "portrait" | "landscape" => {
     if (
@@ -53,13 +52,7 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
 
       window.screen.orientation.addEventListener("change", emit);
       
-      if (!initialEmitPending) {
-        initialEmitPending = true;
-        queueMicrotask(() => {
-          initialEmitPending = false;
-          if (!stopped) emit();
-        });
-      }
+      emit();
     };
 
   const stop = () => {

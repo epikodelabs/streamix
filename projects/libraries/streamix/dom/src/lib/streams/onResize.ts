@@ -26,7 +26,6 @@ export function onResize(
 
   let subscriberCount = 0;
   let active = false;
-  let initialEmitPending = false;
 
   let resolvedElement: HTMLElement | null = null;
   let observer: ResizeObserver | null = null;
@@ -70,13 +69,7 @@ export function onResize(
         observer = new ResizeObserver(entries => emit(entries[0]));
         observer.observe(resolvedElement);
         
-        if (!initialEmitPending) {
-          initialEmitPending = true;
-          queueMicrotask(() => {
-            initialEmitPending = false;
-            if (active) emit();
-          });
-        }
+        if (active) emit();
       })();
     } else {
       // Sync: setup immediately, defer emission
@@ -84,13 +77,7 @@ export function onResize(
       observer = new ResizeObserver(entries => emit(entries[0]));
       observer.observe(resolvedElement);
       
-      if (!initialEmitPending) {
-        initialEmitPending = true;
-        queueMicrotask(() => {
-          initialEmitPending = false;
-          if (active) emit();
-        });
-      }
+      if (active) emit();
     }
   };
 

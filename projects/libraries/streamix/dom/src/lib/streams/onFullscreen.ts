@@ -21,7 +21,6 @@ export function onFullscreen(): Stream<boolean> {
 
   let subscriberCount = 0;
   let stopped = true;
-  let initialEmitPending = false;
 
   /**
    * Checks whether the document is currently in fullscreen mode.
@@ -53,14 +52,8 @@ export function onFullscreen(): Stream<boolean> {
     document.addEventListener("mozfullscreenchange", emit as any);
     document.addEventListener("MSFullscreenChange", emit as any);
 
-    // Defer initial emission to allow subscription variable assignment
-    if (!initialEmitPending) {
-      initialEmitPending = true;
-      queueMicrotask(() => {
-        initialEmitPending = false;
-        if (!stopped) emit();
-      });
-    }
+    // Emit initial value immediately
+    emit();
   };
 
   const stop = () => {

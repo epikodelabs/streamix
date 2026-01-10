@@ -27,7 +27,6 @@ export function onMediaQuery(
 
   let subscriberCount = 0;
   let active = false;
-  let initialEmitPending = false;
 
   let mql: MediaQueryList | null = null;
   let listener: ((e: MediaQueryListEvent) => void) | null = null;
@@ -83,13 +82,7 @@ export function onMediaQuery(
         (mql as any).addListener(listener);
       }
       
-      if (!initialEmitPending) {
-        initialEmitPending = true;
-        queueMicrotask(() => {
-          initialEmitPending = false;
-          if (active && mql) subject.next(mql.matches);
-        });
-      }
+      if (active && mql) subject.next(mql.matches);
     }
   };
 
