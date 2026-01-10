@@ -1,58 +1,56 @@
 import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { createBehaviorSubjectBuffer } from "../primitives";
 import type { Subject } from "./subject";
 
-/**
- * A BehaviorSubject is a special type of Subject that maintains
- * a current value and emits that value immediately to new subscribers.
- * It allows synchronous retrieval of the latest emitted value via `.snappy`.
- *
- * It is "stateful" in that it remembers the last value it emitted.
- *
- * @template T The type of the values held and emitted by the subject.
- * @extends {Subject<T>}
- */
 export type BehaviorSubject<T = any> = Subject<T> & {
-  /**
-   * Provides synchronous access to the most recently pushed value.
-   * This value is the last value passed to the `next()` method, or the initial value if none have been emitted.
-   *
-   * @type {T}
-   */
   get snappy(): T;
 };
 
-/**
- * Creates a BehaviorSubject that holds a current value and emits it immediately to new subscribers.
- * It maintains the latest value internally and allows synchronous access via the `snappy` getter.
- *
- * The subject queues emitted values and delivers them to subscribers asynchronously,
- * supporting safe concurrent access and orderly processing.
- *
- * @template T The type of the values the subject will hold.
- * @param {T} initialValue The value that the subject will hold upon creation.
- * @returns {BehaviorSubject<T>} A new BehaviorSubject instance.
- */
 export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
-  const buffer = createBehaviorSubjectBuffer<T>(initialValue);
-  let latestValue = initialValue;
+  const subscribers = new Set<Receiver<T>>();
+  let latestValue: T = initialValue;
   let isCompleted = false;
   let hasError = false;
+  let errorObj: any = null;
 
   const next = (value: T) => {
     if (isCompleted || hasError) return;
     latestValue = value;
+    
+    const currentSubscribers = new Set(subscribers);
+
     scheduler.enqueue(async () => {
-      await buffer.write(value);
+      const promises: Promise<void>[] = [];
+      for (const subscriber of currentSubscribers) {
+        if (subscriber.next) {
+          const result = subscriber.next(value);
+          if (result instanceof Promise) {
+            promises.push(result);
+          }
+        }
+      }
+      await Promise.all(promises);
     });
   };
 
   const complete = () => {
     if (isCompleted || hasError) return;
     isCompleted = true;
+    
+    const currentSubscribers = new Set(subscribers);
+    subscribers.clear();
+
     scheduler.enqueue(async () => {
-      await buffer.complete();
+      const promises: Promise<void>[] = [];
+      for (const subscriber of currentSubscribers) {
+        if (subscriber.complete) {
+          const result = subscriber.complete();
+          if (result instanceof Promise) {
+            promises.push(result);
+          }
+        }
+      }
+      await Promise.all(promises);
     });
   };
 
@@ -60,49 +58,52 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     if (isCompleted || hasError) return;
     hasError = true;
     isCompleted = true;
+    errorObj = err;
+    
+    const currentSubscribers = new Set(subscribers);
+    subscribers.clear();
+
     scheduler.enqueue(async () => {
-      await buffer.error(err);
-      await buffer.complete();
+      const promises: Promise<void>[] = [];
+      for (const subscriber of currentSubscribers) {
+        if (subscriber.error) {
+          const result = subscriber.error(err);
+          if (result instanceof Promise) {
+            promises.push(result);
+          }
+        }
+      }
+      await Promise.all(promises);
     });
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
-    let unsubscribing = false;
-    let readerId: number | null = null;
+    if (hasError) {
+        scheduler.enqueue(async () => await receiver.error?.(errorObj));
+        return createSubscription();
+    }
+    
+    if (isCompleted) {
+         // Should NOT emit value if completed, just complete.
+         scheduler.enqueue(async () => {
+             await receiver.complete?.();
+         });
+         return createSubscription();
+    }
+
+    subscribers.add(receiver);
+    
+    // Synchronous Initial Emission
+    if (receiver.next) {
+         // We call validation-wrapped receiver, so it handles errors.
+         receiver.next(latestValue);
+    }
 
     const subscription = createSubscription(() => {
-      if (!unsubscribing) {
-        unsubscribing = true;
-        scheduler.enqueue(async () => {
-          if (readerId !== null) {
-            await buffer.detachReader(readerId);
-          }
-        });
-      }
-    });
-
-    scheduler.enqueue(() => buffer.attachReader()).then(async (id: number) => {
-      readerId = id;
-      try {
-        while (true) {
-          const result = await buffer.read(readerId!);
-          if (result.done) break;
-          await receiver.next?.(result.value!);
-        }
-      } catch (err: any) {
-        await receiver.error?.(err);
-      } finally {
-        if (!unsubscribing && readerId !== null) {
-          scheduler.enqueue(async () => {
-            await buffer.detachReader(readerId!);
-            await receiver.complete?.();
-          });
-        } else {
-          scheduler.enqueue(async () => {
-            await receiver.complete?.();
-          });
-        }
-      }
+      subscribers.delete(receiver);
+      scheduler.enqueue(async () => {
+        await receiver.complete?.();
+      });
     });
 
     return subscription;

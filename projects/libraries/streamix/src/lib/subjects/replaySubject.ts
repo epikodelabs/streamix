@@ -1,115 +1,122 @@
 import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { createReplayBuffer, type ReplayBuffer } from "../primitives";
 import type { Subject } from "./subject";
 
-/**
- * A type alias for a ReplaySubject, which is a type of Subject.
- *
- * A ReplaySubject stores a specified number of the latest values it has emitted
- * and "replays" them to any new subscribers. This allows late subscribers to
- * receive past values they may have missed.
- *
- * @template T The type of the values emitted by the subject.
- * @extends {Subject<T>}
- */
 export type ReplaySubject<T = any> = Subject<T>;
 
-/**
- * Creates a new ReplaySubject.
- *
- * A ReplaySubject is a variant of a Subject that stores a specified number of
- * the latest values it has emitted and "replays" them to any new subscribers.
- * This allows late subscribers to receive past values they may have missed.
- *
- * This subject provides asynchronous delivery while preserving emission order.
- *
- * @template T The type of the values the subject will emit.
- * @param {number} [capacity=Infinity] The maximum number of past values to buffer and replay to new subscribers.
- * @returns {ReplaySubject<T>} A new ReplaySubject instance.
- */
 export function createReplaySubject<T = any>(capacity: number = Infinity): ReplaySubject<T> {
-  const buffer = createReplayBuffer<T>(capacity) as ReplayBuffer;
+  const values: T[] = [];
+  const subscribers = new Set<Receiver<T>>();
   let isCompleted = false;
   let hasError = false;
   let latestValue: T | undefined = undefined;
-  let writeChain = Promise.resolve();
-
-  const enqueueWrite = (task: () => Promise<void>) => {
-    writeChain = writeChain.then(task).catch(() => {});
-    return writeChain;
-  };
+  let errorObj: any = null;
 
   const next = (value: T) => {
-    scheduler.enqueue(() => {
-      if (isCompleted || hasError) return;
-      latestValue = value;
-      void enqueueWrite(() => buffer.write(value));
+    if (isCompleted || hasError) return;
+    latestValue = value;
+    values.push(value);
+    if (values.length > capacity) {
+      values.shift();
+    }
+
+    const currentSubscribers = new Set(subscribers);
+
+    scheduler.enqueue(async () => {
+      const promises: Promise<void>[] = [];
+      for (const subscriber of currentSubscribers) {
+        if (subscriber.next) {
+          const result = subscriber.next(value);
+          if (result instanceof Promise) {
+            promises.push(result);
+          }
+        }
+      }
+      await Promise.all(promises);
     });
   };
 
   const complete = () => {
-    scheduler.enqueue(() => {
-      if (isCompleted) return;
-      isCompleted = true;
-      void enqueueWrite(() => buffer.complete());
-    });
+     if (isCompleted || hasError) return;
+     isCompleted = true;
+     
+     const currentSubscribers = new Set(subscribers);
+     subscribers.clear();
+
+     scheduler.enqueue(async () => {
+         const promises: Promise<void>[] = [];
+         for (const subscriber of currentSubscribers) {
+             if (subscriber.complete) {
+                 const result = subscriber.complete();
+                 if (result instanceof Promise) {
+                     promises.push(result);
+                 }
+             }
+         }
+         await Promise.all(promises);
+     });
   };
 
   const error = (err: any) => {
-    scheduler.enqueue(() => {
-      if (isCompleted || hasError) return;
-      hasError = true;
-      isCompleted = true;
-      void enqueueWrite(async () => {
-        await buffer.error(err);
-        await buffer.complete();
-      });
-    });
+     if (isCompleted || hasError) return;
+     hasError = true;
+     isCompleted = true;
+     errorObj = err;
+     
+     const currentSubscribers = new Set(subscribers);
+     subscribers.clear();
+     
+     scheduler.enqueue(async () => {
+         const promises: Promise<void>[] = [];
+         for (const subscriber of currentSubscribers) {
+             if (subscriber.error) {
+                 const result = subscriber.error(err);
+                 if (result instanceof Promise) {
+                     promises.push(result);
+                 }
+             }
+         }
+         await Promise.all(promises);
+     });
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
-    let unsubscribing = false;
-    let readerId: number | null = null;
-    let readerLatestValue: T | undefined;
-
-    const subscription = createSubscription(() => {
-      if (!unsubscribing) {
-        unsubscribing = true;
-        if (readerId !== null) {
-          scheduler.enqueue(async () => {
-            if (readerId !== null) await buffer.detachReader(readerId);
-          });
-        }
-      }
-    });
-
-    scheduler.enqueue(() => buffer.attachReader()).then(async (id: number) => {
-      readerId = id;
-      try {
-        while (true) {
-          const result = await buffer.read(readerId!);
-          if (result.done) break;
-          readerLatestValue = result.value;
-          await receiver.next?.(readerLatestValue!);
-        }
-      } catch (err: any) {
-        await receiver.error?.(err);
-      } finally {
-        if (readerId !== null) {
-          scheduler.enqueue(async () => {
-            await buffer.detachReader(readerId!);
+    if (hasError) {
+        scheduler.enqueue(async () => {
+            for (const v of values) await receiver.next?.(v);
+            await receiver.error?.(errorObj);
+        });
+        return createSubscription();
+    }
+    
+    if (isCompleted) {
+        scheduler.enqueue(async () => {
+            for (const v of values) await receiver.next?.(v);
             await receiver.complete?.();
-          });
-        } else {
-          scheduler.enqueue(async () => {
-            await receiver.complete?.();
-          });
+        });
+        return createSubscription();
+    }
+    
+    let isUnsubscribed = false;
+    subscribers.add(receiver);
+    const currentValues = [...values];
+    
+    scheduler.enqueue(async () => {
+        // Only run replay if not unsubscribed
+        if (!isUnsubscribed) {
+            for (const v of currentValues) {
+                // Technically we could check isUnsubscribed inside loop too?
+                // But generally "batch" replay is fine.
+                await receiver.next?.(v);
+            }
         }
-      }
     });
-
-    return subscription;
+    
+    return createSubscription(() => {
+        isUnsubscribed = true;
+        subscribers.delete(receiver);
+        scheduler.enqueue(() => receiver.complete?.());
+    });
   };
 
   const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
