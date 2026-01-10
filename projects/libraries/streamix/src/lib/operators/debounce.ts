@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { createSubject, type Subject } from "../subjects";
 
@@ -19,7 +19,7 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
     const outputIterator = eachValueFrom(output);
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    let latestResult: IteratorResult<T> | undefined;
+    let latestResult: (IteratorResult<T> & { meta?: ReturnType<typeof getIteratorMeta> }) | undefined;
 
     let resolvedDuration: number | undefined;
     let completed = false;
@@ -29,6 +29,15 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
 
       const value = latestResult.value!;
       
+      if (latestResult.meta) {
+        setIteratorMeta(
+          outputIterator,
+          latestResult.meta,
+          latestResult.meta.operatorIndex,
+          latestResult.meta.operatorName
+        );
+      }
+
       // Emit value directly - tracer tracks it via inputQueue
       output.next(value);
 
@@ -59,10 +68,13 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
           }
 
           // 🔍 Extract tracing metadata of incoming value
-          getIteratorMeta(source);
+          const meta = getIteratorMeta(source);
 
           // ⚠️ Supersede previous pending value
           latestResult = result;
+          if (meta) {
+            (latestResult as any).meta = meta;
+          }
 
           if (timeoutId) clearTimeout(timeoutId);
           if (resolvedDuration !== undefined) {
