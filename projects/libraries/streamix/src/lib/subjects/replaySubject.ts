@@ -116,7 +116,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     async query(): Promise<T> {
       return await firstValueFrom(this);
     },
-    get snappy(): T | undefined {
+    get value(): T | undefined {
       return latestValue;
     },
     next,

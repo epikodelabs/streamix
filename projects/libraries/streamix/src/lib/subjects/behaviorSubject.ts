@@ -3,7 +3,7 @@ import { firstValueFrom } from "../converters";
 import type { Subject } from "./subject";
 
 export type BehaviorSubject<T = any> = Subject<T> & {
-  get snappy(): T;
+  get value(): T;
 };
 
 export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
@@ -98,7 +98,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     type: "subject",
     name: "behaviorSubject",
     id,
-    get snappy() {
+    get value() {
       return latestValue;
     },
     pipe(...operators: Operator<any, any>[]): Stream<any> {
