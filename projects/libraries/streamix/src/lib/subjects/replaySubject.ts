@@ -83,7 +83,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
         return createSubscription();
     }
 
-    subscribers.push(strictReceiver);
+    subscribers = [...subscribers, strictReceiver];
     
     if (values.length > 0) {
         const stamp = nextEmissionStamp();

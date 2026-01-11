@@ -68,6 +68,7 @@ export function createReceiver<T = any>(
   let _completed = false;
   let _processing = false;
   let _pendingComplete = false;
+  const _queue: T[] = [];
 
   const baseReceiver = {
     get completed() { return _completed; }
@@ -81,10 +82,20 @@ export function createReceiver<T = any>(
 
   const wantsRaw = (receiver as any).__wantsRawValues === true;
 
+  const runNext = async (val: T) => {
+    const v = wantsRaw ? val : unwrapPrimitive(val);
+    await receiver.next?.call(receiver, v);
+  };
+
   const wrappedReceiver: StrictReceiver<T> = {
     next: (value: T) => {
       if (_completed) return;
       
+      if (_processing) {
+        _queue.push(value);
+        return;
+      }
+
       const val = wantsRaw ? value : unwrapPrimitive(value);
       
       try {
@@ -94,10 +105,15 @@ export function createReceiver<T = any>(
             return (async () => {
                 try {
                     await result;
+                    while (_queue.length > 0 && !_completed) {
+                      const queuedVal = _queue.shift()!;
+                      await runNext(queuedVal);
+                    }
                 } catch (err) {
                     await wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
                 } finally {
                     _processing = false;
+                    _queue.length = 0;
                     if (_pendingComplete && !_completed) {
                         _pendingComplete = false;
                         await wrappedReceiver.complete();

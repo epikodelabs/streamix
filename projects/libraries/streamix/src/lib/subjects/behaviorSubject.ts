@@ -19,7 +19,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     latestValue = value;
 
     const stamp = nextEmissionStamp();
-    const targets = subscribers.slice();
+    const targets = subscribers;
     withEmissionStamp(stamp, () => {
       for (let i = 0; i < targets.length; i++) {
         targets[i].next(value);
@@ -32,7 +32,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     isCompleted = true;
 
     const stamp = nextEmissionStamp();
-    const targets = subscribers.slice();
+    const targets = subscribers;
     subscribers = [];
     withEmissionStamp(stamp, () => {
       for (let i = 0; i < targets.length; i++) {
@@ -48,7 +48,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     errorObj = err instanceof Error ? err : new Error(String(err));
 
     const stamp = nextEmissionStamp();
-    const targets = subscribers.slice();
+    const targets = subscribers;
     subscribers = [];
     withEmissionStamp(stamp, () => {
       for (let i = 0; i < targets.length; i++) {
@@ -76,7 +76,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       return createSubscription();
     }
 
-    subscribers.push(strictReceiver);
+    subscribers = [...subscribers, strictReceiver];
 
     const stamp = nextEmissionStamp();
     withEmissionStamp(stamp, () => {

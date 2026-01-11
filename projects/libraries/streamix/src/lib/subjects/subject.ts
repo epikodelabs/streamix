@@ -22,7 +22,7 @@ export function createSubject<T = any>(): Subject<T> {
     latestValue = value;
 
     const stamp = nextEmissionStamp();
-    const targets = subscribers.slice();
+    const targets = subscribers;
     withEmissionStamp(stamp, () => {
       for (let i = 0; i < targets.length; i++) {
         targets[i].next(value);
@@ -35,7 +35,7 @@ export function createSubject<T = any>(): Subject<T> {
     isCompleted = true;
 
     const stamp = nextEmissionStamp();
-    const targets = subscribers.slice();
+    const targets = subscribers;
     subscribers = [];
     withEmissionStamp(stamp, () => {
       for (let i = 0; i < targets.length; i++) {
@@ -51,7 +51,7 @@ export function createSubject<T = any>(): Subject<T> {
     errorObj = err instanceof Error ? err : new Error(String(err));
 
     const stamp = nextEmissionStamp();
-    const targets = subscribers.slice();
+    const targets = subscribers;
     subscribers = [];
     withEmissionStamp(stamp, () => {
       for (let i = 0; i < targets.length; i++) {
@@ -72,7 +72,7 @@ export function createSubject<T = any>(): Subject<T> {
       return createSubscription();
     }
 
-    subscribers.push(strictReceiver);
+    subscribers = [...subscribers, strictReceiver];
 
     return createSubscription(() => {
       subscribers = subscribers.filter(s => s !== strictReceiver);
