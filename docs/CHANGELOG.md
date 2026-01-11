@@ -46,7 +46,7 @@ We have added AbortController support to most stream creators to enable proper c
 
 ## 2.0.12
 
-Refactored core operators to use pure AsyncIterator logic without relying on Subject, resulting in cleaner and more predictable behavior. Added the `observeOn` operator for microtask/macrotask scheduling. Renamed the `value` property of Subject to `snappy` to better reflect its intention and humorous design.
+Refactored core operators to use pure AsyncIterator logic without relying on Subject, resulting in cleaner and more predictable behavior. Added the `observeOn` operator for microtask/macrotask scheduling. Renamed the `value` property of Subject to `value` to better reflect its intention and humorous design.
 
 ## 2.0.11
 

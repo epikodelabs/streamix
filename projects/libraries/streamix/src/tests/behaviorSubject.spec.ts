@@ -34,39 +34,39 @@ describe('createBehaviorSubject', () => {
     expect(values).toEqual([1]);
   });
 
-  it('should always expose the latest value via the snappy getter', () => {
+  it('should always expose the latest value via the value getter', () => {
     const initial = 42;
     const behaviorSubject = createBehaviorSubject(initial);
 
-    expect(behaviorSubject.snappy).toBe(42);
+    expect(behaviorSubject.value).toBe(42);
 
     behaviorSubject.next(100);
-    expect(behaviorSubject.snappy).toBe(100);
+    expect(behaviorSubject.value).toBe(100);
 
     behaviorSubject.next(999);
-    expect(behaviorSubject.snappy).toBe(999);
+    expect(behaviorSubject.value).toBe(999);
 
     behaviorSubject.complete();
-    expect(behaviorSubject.snappy).toBe(999);
+    expect(behaviorSubject.value).toBe(999);
   });
 
-  it('should always define snappy on the subject (getter present and readable)', () => {
+  it('should always define value on the subject (getter present and readable)', () => {
     const subject = createBehaviorSubject<number>(1);
 
-    expect('snappy' in subject).toBeTrue();
+    expect('value' in subject).toBeTrue();
 
-    const descriptor = Object.getOwnPropertyDescriptor(subject, 'snappy');
+    const descriptor = Object.getOwnPropertyDescriptor(subject, 'value');
     expect(descriptor).toBeDefined();
     expect(descriptor?.get).toEqual(jasmine.any(Function));
 
-    expect(subject.snappy).toBe(1);
+    expect(subject.value).toBe(1);
 
     subject.next(0);
-    // snappy updates synchronously (even though emissions are scheduled)
-    expect(subject.snappy).toBe(0);
+    // value updates synchronously (even though emissions are scheduled)
+    expect(subject.value).toBe(0);
 
     subject.complete();
-    expect(subject.snappy).toBe(0);
+    expect(subject.value).toBe(0);
   });
 
   it('should allow multiple subscribers to receive the same latest value', async () => {
