@@ -1,4 +1,5 @@
-import type { MaybePromise } from "./operator";
+import { unwrapPrimitive } from "./hooks";
+import { isPromiseLike, type MaybePromise } from "./operator";
 
 /**
  * Defines a receiver interface for handling a stream's lifecycle events.
@@ -78,27 +79,34 @@ export function createReceiver<T = any>(
       ? { ...baseReceiver, ...callbackOrReceiver }
       : baseReceiver) as Receiver<T>;
 
+  const wantsRaw = (receiver as any).__wantsRawValues === true;
+
   const wrappedReceiver: StrictReceiver<T> = {
-    next: async (value: T) => {
-      if (!_completed) {
-        _processing = true;
-        try {
-          await receiver.next?.call(receiver, value);
-        } catch (err) {
-          await wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
-        } finally {
-          _processing = false;
-          // If completion was requested during processing, complete now
-          if (_pendingComplete && !_completed) {
-            _pendingComplete = false; // Clear the flag
-            _completed = true;
-            try {
-              await receiver.complete?.call(receiver);
-            } catch (err) {
-              console.error('Unhandled error in complete handler:', err);
-            }
-          }
+    next: (value: T) => {
+      if (_completed) return;
+      
+      const val = wantsRaw ? value : unwrapPrimitive(value);
+      
+      try {
+        const result = receiver.next?.call(receiver, val);
+        if (isPromiseLike(result)) {
+            _processing = true;
+            return (async () => {
+                try {
+                    await result;
+                } catch (err) {
+                    await wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
+                } finally {
+                    _processing = false;
+                    if (_pendingComplete && !_completed) {
+                        _pendingComplete = false;
+                        await wrappedReceiver.complete();
+                    }
+                }
+            })();
         }
+      } catch (err) {
+        return wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
       }
     },
     error: async function (err: Error) {
