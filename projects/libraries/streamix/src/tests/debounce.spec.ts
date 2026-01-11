@@ -259,17 +259,6 @@ describe('debounce', () => {
               const deliveredTraces = traces.filter((t) => t.state === 'delivered');
               const deliveredValues = deliveredTraces.map((t) => t.finalValue).sort((a, b) => a - b);
               
-              // CRITICAL: Every value that reached the subscriber must be marked as delivered
-              console.log('App6-like Received values:', received);
-              console.log('App6-like Delivered traces count:', deliveredTraces.length);
-              console.log('App6-like Delivered values:', deliveredValues);
-              
-              // Get filtered and collapsed traces for debugging
-              const filteredTraces = traces.filter((t) => t.state === 'filtered');
-              const collapsedTraces = traces.filter((t) => t.state === 'collapsed');
-              console.log('App6-like Filtered count:', filteredTraces.length);
-              console.log('App6-like Collapsed count:', collapsedTraces.length);
-              
               expect(received.length).toBeGreaterThan(0);
               expect(deliveredValues.length).toBe(received.length);
               expect(deliveredValues).toEqual(received.slice().sort((a, b) => a - b));
