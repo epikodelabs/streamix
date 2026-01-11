@@ -3,7 +3,6 @@ import { getCurrentEmissionStamp, getIteratorEmissionStamp, nextEmissionStamp, s
 import { generateStreamId, generateSubscriptionId, getRuntimeHooks } from "./hooks";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
-import { scheduler } from "./scheduler";
 import { createSubscription, type Subscription } from "./subscription";
 
 /**
@@ -314,7 +313,7 @@ function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
       // ⚡️ Synchronous execution when within an emission context
       return cb();
     }
-    return scheduler.enqueue(cb).catch(() => {});
+    return Promise.resolve().then(cb).catch(() => {});
   };
 
   if (receiver.next) {
@@ -386,7 +385,7 @@ async function drainIterator<T>(
   const processResult = (result: IteratorResult<T>) => {
     if (result.done) return true;
 
-    const stamp = getIteratorEmissionStamp(iterator);
+    const stamp = getIteratorEmissionStamp(iterator) ?? nextEmissionStamp();
     const receivers = getReceivers();
 
     const forward = () => {
@@ -397,11 +396,7 @@ async function drainIterator<T>(
       }
     };
 
-    if (stamp !== undefined) {
-      withEmissionStamp(stamp, forward);
-    } else {
-      forward();
-    }
+    withEmissionStamp(stamp, forward);
     return false;
   };
 

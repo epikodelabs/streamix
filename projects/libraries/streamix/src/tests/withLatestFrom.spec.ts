@@ -1,4 +1,8 @@
-import { createStream, createSubject, from, scheduler, withLatestFrom } from '@epikodelabs/streamix';
+import { createStream, createSubject, from, withLatestFrom } from '@epikodelabs/streamix';
+
+const scheduler = {
+  flush: () => new Promise(resolve => setTimeout(resolve, 0))
+};
 
 describe('withLatestFrom', () => {
   it('should handle cancellation of the main stream', (done) => {
