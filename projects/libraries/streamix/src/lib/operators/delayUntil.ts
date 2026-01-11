@@ -198,7 +198,6 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
           }
           
           if (effectivelyCanEmit) {
-            console.log('DEBUG: Emitting value directly', value);
             let outputValue = value;
             if (meta) {
               setIteratorMeta(
@@ -211,7 +210,6 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
             }
             output.next(outputValue);
           } else if (!gateClosedWithoutEmit) {
-            console.log('DEBUG: Buffering value', value);
             buffer.push({ value, meta });
           }
         }
