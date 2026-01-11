@@ -53,7 +53,10 @@ export function switchMap<T = any, R = any>(
         currentSubscription = null;
       }
 
-      currentSubscription = innerStream.subscribe({
+      let pendingFinalize = false;
+      let nextSubscription: Subscription | null = null;
+
+      nextSubscription = innerStream.subscribe({
         next: (value) => {
           if (streamId === currentInnerStreamId) {
             let outputValue = value;
@@ -75,15 +78,34 @@ export function switchMap<T = any, R = any>(
           }
         },
         error: (err) => {
-          if (streamId === currentInnerStreamId) output.error(err);
+          if (streamId !== currentInnerStreamId) return;
+          if (!nextSubscription) {
+            pendingFinalize = true;
+            output.error(err);
+            return;
+          }
+          currentSubscription = null;
+          nextSubscription = null;
+          output.error(err);
         },
         complete: () => {
-          if (streamId === currentInnerStreamId) {
-            currentSubscription = null;
-            checkComplete();
+          if (streamId !== currentInnerStreamId) return;
+          if (!nextSubscription) {
+            pendingFinalize = true;
+            return;
           }
+          currentSubscription = null;
+          nextSubscription = null;
+          checkComplete();
         },
       });
+
+      currentSubscription = nextSubscription;
+      if (pendingFinalize) {
+        currentSubscription = null;
+        nextSubscription = null;
+        checkComplete();
+      }
     };
 
     (async () => {
