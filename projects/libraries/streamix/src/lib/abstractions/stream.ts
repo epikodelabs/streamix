@@ -461,11 +461,11 @@ export function createStream<T>(
 
   getRuntimeHooks()?.onCreateStream?.({ id, name });
 
-  const activeSubscriptions = new Set<SubscriberEntry<T>>();
+  let activeSubscriptions: SubscriberEntry<T>[] = [];
   let isRunning = false;
   let abortController = new AbortController();
 
-  const getActiveReceivers = () => Array.from(activeSubscriptions);
+  const getActiveReceivers = () => activeSubscriptions;
 
   /**
    * Starts the shared generator loop.
@@ -498,21 +498,21 @@ export function createStream<T>(
     let subscription!: Subscription;
 
     subscription = createSubscription(async () => {
-      const entry = getActiveReceivers().find(
+      const entry = activeSubscriptions.find(
         s => s.subscription === subscription
       );
 
       if (entry) {
-        activeSubscriptions.delete(entry);
+        activeSubscriptions = activeSubscriptions.filter(s => s !== entry);
         entry.receiver.complete?.();
       }
 
-      if (activeSubscriptions.size === 0) {
+      if (activeSubscriptions.length === 0) {
         abortController.abort();
       }
     });
 
-    activeSubscriptions.add({ receiver: wrapped, subscription });
+    activeSubscriptions = [...activeSubscriptions, { receiver: wrapped, subscription }];
 
     if (!isRunning) {
       startMulticastLoop();

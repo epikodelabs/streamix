@@ -180,11 +180,6 @@ describe('debounce', () => {
               const deliveredTraces = traces.filter((t) => t.state === 'delivered');
               const deliveredValues = deliveredTraces.map((t) => t.finalValue).sort((a, b) => a - b);
               
-              // CRITICAL: Every value that reached the subscriber must be marked as delivered
-              console.log('Received values:', received);
-              console.log('Delivered traces count:', deliveredTraces.length);
-              console.log('Delivered values:', deliveredValues);
-              
               expect(received.length).toBeGreaterThan(0);
               expect(deliveredValues.length).toBe(received.length);
               expect(deliveredValues).toEqual(received.slice().sort((a, b) => a - b));
