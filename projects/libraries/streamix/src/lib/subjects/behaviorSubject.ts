@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, isPromiseLike, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
+import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, nextEmissionStamp, type Operator, pipeSourceThrough, type Receiver, type Stream, type StrictReceiver, type Subscription, withEmissionStamp } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import type { Subject } from "./subject";
 
@@ -7,7 +7,8 @@ export type BehaviorSubject<T = any> = Subject<T> & {
 };
 
 export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
-  let subscribers: Receiver<T>[] = [];
+  const id = generateStreamId();
+  let subscribers: StrictReceiver<T>[] = [];
   let latestValue: T = initialValue;
   let isCompleted = false;
   let hasError = false;
@@ -16,46 +17,27 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
   const next = (value: T) => {
     if (isCompleted || hasError) return;
     latestValue = value;
-    
-    const currentSubscribers = subscribers;
 
-    scheduler.enqueue(async () => {
-      let promises: Promise<void>[] | undefined;
-      for (let i = 0; i < currentSubscribers.length; i++) {
-        const subscriber = currentSubscribers[i];
-        if (subscriber.next) {
-          const result = subscriber.next(value);
-          if (isPromiseLike(result)) {
-            if (!promises) promises = [];
-            promises.push(result as Promise<void>);
-          }
-        }
+    const stamp = nextEmissionStamp();
+    const targets = subscribers.slice();
+    withEmissionStamp(stamp, () => {
+      for (let i = 0; i < targets.length; i++) {
+        targets[i].next(value);
       }
-      await Promise.all(promises || []);
     });
   };
 
   const complete = () => {
     if (isCompleted || hasError) return;
     isCompleted = true;
-    
-    // Capture and clear
-    const currentSubscribers = subscribers;
-    subscribers = []; 
 
-    scheduler.enqueue(async () => {
-      let promises: Promise<void>[] | undefined;
-      for (let i = 0; i < currentSubscribers.length; i++) {
-        const subscriber = currentSubscribers[i];
-        if (subscriber.complete) {
-          const result = subscriber.complete();
-          if (isPromiseLike(result)) {
-            if (!promises) promises = [];
-            promises.push(result as Promise<void>);
-          }
-        }
+    const stamp = nextEmissionStamp();
+    const targets = subscribers.slice();
+    subscribers = [];
+    withEmissionStamp(stamp, () => {
+      for (let i = 0; i < targets.length; i++) {
+        targets[i].complete();
       }
-      await Promise.all(promises || []);
     });
   };
 
@@ -63,59 +45,48 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     if (isCompleted || hasError) return;
     hasError = true;
     isCompleted = true;
-    errorObj = err;
-    
-    const currentSubscribers = subscribers;
-    subscribers = [];
+    errorObj = err instanceof Error ? err : new Error(String(err));
 
-    scheduler.enqueue(async () => {
-      let promises: Promise<void>[] | undefined;
-      for (let i = 0; i < currentSubscribers.length; i++) {
-        const subscriber = currentSubscribers[i];
-        if (subscriber.error) {
-          const result = subscriber.error(err);
-          if (isPromiseLike(result)) {
-            if (!promises) promises = [];
-            promises.push(result as Promise<void>);
-          }
-        }
+    const stamp = nextEmissionStamp();
+    const targets = subscribers.slice();
+    subscribers = [];
+    withEmissionStamp(stamp, () => {
+      for (let i = 0; i < targets.length; i++) {
+        targets[i].error(errorObj);
       }
-      await Promise.all(promises || []);
     });
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
+    const strictReceiver = receiver as StrictReceiver<T>;
+
     if (hasError) {
-        scheduler.enqueue(() => receiver.error?.(errorObj));
-        return createSubscription();
+      const stamp = nextEmissionStamp();
+      withEmissionStamp(stamp, () => {
+        strictReceiver.error(errorObj);
+      });
+      return createSubscription();
     }
     
     if (isCompleted) {
-         // Should NOT emit value if completed, just complete.
-         scheduler.enqueue(() => receiver.complete?.());
-         return createSubscription();
+      const stamp = nextEmissionStamp();
+      withEmissionStamp(stamp, () => {
+        strictReceiver.complete();
+      });
+      return createSubscription();
     }
 
-    subscribers = [...subscribers, receiver];
-    
-    // Synchronous Initial Emission
-    if (receiver.next) {
-         // We call validation-wrapped receiver, so it handles errors.
-         receiver.next(latestValue);
-    }
+    subscribers.push(strictReceiver);
 
-    const subscription = createSubscription(() => {
-        const idx = subscribers.indexOf(receiver);
-        if (idx !== -1) {
-            const nextSubscribers = subscribers.slice();
-            nextSubscribers.splice(idx, 1);
-            subscribers = nextSubscribers;
-        }
-
-      scheduler.enqueue(() => receiver.complete?.());
+    const stamp = nextEmissionStamp();
+    withEmissionStamp(stamp, () => {
+      strictReceiver.next(latestValue);
     });
 
-    return subscription;
+    return createSubscription(() => {
+      subscribers = subscribers.filter(s => s !== strictReceiver);
+      strictReceiver.complete();
+    });
   };
 
   const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
@@ -126,7 +97,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
   const subject: BehaviorSubject<T> = {
     type: "subject",
     name: "behaviorSubject",
-    id: generateStreamId(),
+    id,
     get snappy() {
       return latestValue;
     },
@@ -141,7 +112,11 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     complete,
     completed: () => isCompleted,
     error,
-    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
+    [Symbol.asyncIterator]: () => {
+      const it = createAsyncGenerator(registerReceiver);
+      (it as any).__streamix_streamId = id;
+      return it;
+    },
   };
 
   return subject;

@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, scheduler as globalScheduler, isPromiseLike, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, type Scheduler, type Stream, type Subscription } from "../abstractions";
+import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, nextEmissionStamp, type Operator, pipeSourceThrough, type Receiver, type Stream, type StrictReceiver, type Subscription, withEmissionStamp } from "../abstractions";
 import { firstValueFrom } from "../converters";
 
 export type Subject<T = any> = Stream<T> & {
@@ -9,8 +9,9 @@ export type Subject<T = any> = Stream<T> & {
   get snappy(): T | undefined;
 };
 
-export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): Subject<T> {
-  let subscribers: Receiver<T>[] = [];
+export function createSubject<T = any>(): Subject<T> {
+  const id = generateStreamId();
+  let subscribers: StrictReceiver<T>[] = [];
   let latestValue: T | undefined = undefined;
   let isCompleted = false;
   let hasError = false;
@@ -19,47 +20,27 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
   const next = (value: T) => {
     if (isCompleted || hasError) return;
     latestValue = value;
-    
-    const currentSubscribers = subscribers;
 
-    scheduler.enqueue(async () => {
-      let promises: Promise<void>[] | undefined;
-      for (let i = 0; i < currentSubscribers.length; i++) {
-        const subscriber = currentSubscribers[i];
-        if (subscriber.next) {
-          const result = subscriber.next(value);
-          if (isPromiseLike(result)) {
-            if (!promises) promises = [];
-            promises.push(result as Promise<void>);
-          }
-        }
+    const stamp = nextEmissionStamp();
+    const targets = subscribers.slice();
+    withEmissionStamp(stamp, () => {
+      for (let i = 0; i < targets.length; i++) {
+        targets[i].next(value);
       }
-      
-      await Promise.all(promises || []);
     });
   };
 
   const complete = () => {
     if (isCompleted || hasError) return;
     isCompleted = true;
-    
-    // Capture and clear
-    const currentSubscribers = subscribers;
-    subscribers = []; 
 
-    scheduler.enqueue(async () => {
-      let promises: Promise<void>[] | undefined;
-      for (let i = 0; i < currentSubscribers.length; i++) {
-        const subscriber = currentSubscribers[i];
-        if (subscriber.complete) {
-          const result = subscriber.complete();
-          if (isPromiseLike(result)) {
-            if (!promises) promises = [];
-            promises.push(result as Promise<void>);
-          }
-        }
+    const stamp = nextEmissionStamp();
+    const targets = subscribers.slice();
+    subscribers = [];
+    withEmissionStamp(stamp, () => {
+      for (let i = 0; i < targets.length; i++) {
+        targets[i].complete();
       }
-      await Promise.all(promises || []);
     });
   };
 
@@ -67,51 +48,36 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     if (isCompleted || hasError) return;
     hasError = true;
     isCompleted = true;
-    errorObj = err;
-    
-    const currentSubscribers = subscribers;
-    subscribers = [];
+    errorObj = err instanceof Error ? err : new Error(String(err));
 
-    scheduler.enqueue(async () => {
-      let promises: Promise<void>[] | undefined;
-      for (let i = 0; i < currentSubscribers.length; i++) {
-        const subscriber = currentSubscribers[i];
-        if (subscriber.error) {
-          const result = subscriber.error(err);
-          if (isPromiseLike(result)) {
-            if (!promises) promises = [];
-            promises.push(result as Promise<void>);
-          }
-        }
+    const stamp = nextEmissionStamp();
+    const targets = subscribers.slice();
+    subscribers = [];
+    withEmissionStamp(stamp, () => {
+      for (let i = 0; i < targets.length; i++) {
+        targets[i].error(errorObj);
       }
-      await Promise.all(promises || []);
     });
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
+    const strictReceiver = receiver as StrictReceiver<T>;
+
     if (hasError) {
-        scheduler.enqueue(() => receiver.error?.(errorObj));
-        return createSubscription(); 
+      strictReceiver.error(errorObj);
+      return createSubscription();
     }
     if (isCompleted) {
-        scheduler.enqueue(() => receiver.complete?.());
-        return createSubscription();
+      strictReceiver.complete();
+      return createSubscription();
     }
-  
-    subscribers = [...subscribers, receiver];
 
-    const subscription = createSubscription(() => {
-        const idx = subscribers.indexOf(receiver);
-        if (idx !== -1) {
-            const nextSubscribers = subscribers.slice();
-            nextSubscribers.splice(idx, 1);
-            subscribers = nextSubscribers;
-        }
+    subscribers.push(strictReceiver);
 
-       scheduler.enqueue(() => receiver.complete?.());
+    return createSubscription(() => {
+      subscribers = subscribers.filter(s => s !== strictReceiver);
+      strictReceiver.complete();
     });
-
-    return subscription;
   };
 
   const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
@@ -122,7 +88,7 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
   const subject: Subject<T> = {
     type: "subject",
     name: "subject",
-    id: generateStreamId(),
+    id,
     get snappy() {
       return latestValue;
     },
@@ -137,7 +103,11 @@ export function createSubject<T = any>(scheduler: Scheduler = globalScheduler): 
     complete,
     completed: () => isCompleted,
     error,
-    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
+    [Symbol.asyncIterator]: () => {
+      const it = createAsyncGenerator(registerReceiver);
+      (it as any).__streamix_streamId = id;
+      return it;
+    },
   };
 
   return subject;

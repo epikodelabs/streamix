@@ -1,12 +1,13 @@
-import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, isPromiseLike, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
+import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, nextEmissionStamp, type Operator, pipeSourceThrough, type Receiver, type Stream, type StrictReceiver, type Subscription, withEmissionStamp } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import type { Subject } from "./subject";
 
 export type ReplaySubject<T = any> = Subject<T>;
 
 export function createReplaySubject<T = any>(capacity: number = Infinity): ReplaySubject<T> {
+  const id = generateStreamId();
   const values: T[] = [];
-  let subscribers: Receiver<T>[] = [];
+  let subscribers: StrictReceiver<T>[] = [];
   let isCompleted = false;
   let hasError = false;
   let latestValue: T | undefined = undefined;
@@ -20,21 +21,12 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
       values.shift();
     }
 
-    const currentSubscribers = subscribers;
-
-    scheduler.enqueue(async () => {
-      let promises: Promise<void>[] | undefined;
-      for (let i = 0; i < currentSubscribers.length; i++) {
-        const subscriber = currentSubscribers[i];
-        if (subscriber.next) {
-          const result = subscriber.next(value);
-          if (isPromiseLike(result)) {
-            if (!promises) promises = [];
-            promises.push(result as Promise<void>);
-          }
-        }
+    const stamp = nextEmissionStamp();
+    const targets = subscribers;
+    withEmissionStamp(stamp, () => {
+      for (let i = 0; i < targets.length; i++) {
+        targets[i].next(value);
       }
-      await Promise.all(promises || []);
     });
   };
 
@@ -42,22 +34,14 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
      if (isCompleted || hasError) return;
      isCompleted = true;
      
-     const currentSubscribers = subscribers;
+     const stamp = nextEmissionStamp();
+     const targets = subscribers;
      subscribers = [];
 
-     scheduler.enqueue(async () => {
-         let promises: Promise<void>[] | undefined;
-         for (let i = 0; i < currentSubscribers.length; i++) {
-             const subscriber = currentSubscribers[i];
-             if (subscriber.complete) {
-                 const result = subscriber.complete();
-                 if (isPromiseLike(result)) {
-                     if (!promises) promises = [];
-                     promises.push(result as Promise<void>);
-                 }
-             }
-         }
-         await Promise.all(promises || []);
+     withEmissionStamp(stamp, () => {
+       for (let i = 0; i < targets.length; i++) {
+         targets[i].complete();
+       }
      });
   };
 
@@ -65,68 +49,54 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
      if (isCompleted || hasError) return;
      hasError = true;
      isCompleted = true;
-     errorObj = err;
+     errorObj = err instanceof Error ? err : new Error(String(err));
      
-     const currentSubscribers = subscribers;
+     const stamp = nextEmissionStamp();
+     const targets = subscribers;
      subscribers = [];
      
-     scheduler.enqueue(async () => {
-         let promises: Promise<void>[] | undefined;
-         for (let i = 0; i < currentSubscribers.length; i++) {
-             const subscriber = currentSubscribers[i];
-             if (subscriber.error) {
-                 const result = subscriber.error(err);
-                 if (isPromiseLike(result)) {
-                     if (!promises) promises = [];
-                     promises.push(result as Promise<void>);
-                 }
-             }
-         }
-         await Promise.all(promises || []);
+     withEmissionStamp(stamp, () => {
+       for (let i = 0; i < targets.length; i++) {
+         targets[i].error(errorObj);
+       }
      });
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
+    const strictReceiver = receiver as StrictReceiver<T>;
+
     if (hasError) {
-        scheduler.enqueue(async () => {
-            for (const v of values) await receiver.next?.(v);
-            await receiver.error?.(errorObj);
+        const stamp = nextEmissionStamp();
+        withEmissionStamp(stamp, () => {
+          for (const v of values) strictReceiver.next(v);
+          strictReceiver.error(errorObj);
         });
         return createSubscription();
     }
     
     if (isCompleted) {
-        scheduler.enqueue(async () => {
-            for (const v of values) await receiver.next?.(v);
-            await receiver.complete?.();
+        const stamp = nextEmissionStamp();
+        withEmissionStamp(stamp, () => {
+          for (const v of values) strictReceiver.next(v);
+          strictReceiver.complete();
         });
         return createSubscription();
     }
+
+    subscribers.push(strictReceiver);
     
-    let isUnsubscribed = false;
-    subscribers = [...subscribers, receiver];
-    const currentValues = [...values];
-    
-    scheduler.enqueue(async () => {
-        // Only run replay if not unsubscribed
-        if (!isUnsubscribed) {
-            for (const v of currentValues) {
-                // Technically we could check isUnsubscribed inside loop too?
-                // But generally "batch" replay is fine.
-                await receiver.next?.(v);
-            }
-        }
-    });
-    
+    if (values.length > 0) {
+        const stamp = nextEmissionStamp();
+        withEmissionStamp(stamp, () => {
+          for (const v of values) {
+              strictReceiver.next(v);
+          }
+        });
+    }
+
     return createSubscription(() => {
-        isUnsubscribed = true;
-        const idx = subscribers.indexOf(receiver);
-        if (idx !== -1) {
-            const nextSubscribers = subscribers.slice();
-            nextSubscribers.splice(idx, 1);
-            subscribers = nextSubscribers;
-        }
-        scheduler.enqueue(() => receiver.complete?.());
+        subscribers = subscribers.filter(s => s !== strictReceiver);
+        strictReceiver.complete();
     });
   };
 
@@ -138,7 +108,7 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
   const replaySubject: ReplaySubject<T> = {
     type: "subject",
     name: "replaySubject",
-    id: generateStreamId(),
+    id,
     pipe(...operators: Operator<any, any>[]): Stream<any> {
       return pipeSourceThrough(this, operators);
     },
@@ -153,7 +123,11 @@ export function createReplaySubject<T = any>(capacity: number = Infinity): Repla
     complete,
     completed: () => isCompleted,
     error,
-    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
+    [Symbol.asyncIterator]: () => {
+      const it = createAsyncGenerator(registerReceiver);
+      (it as any).__streamix_streamId = id;
+      return it;
+    },
   };
 
   return replaySubject;
