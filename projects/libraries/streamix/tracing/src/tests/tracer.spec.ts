@@ -4,9 +4,12 @@ import {
   createStream,
   filter,
   map,
-  mergeMap,
-  scheduler
+  mergeMap
 } from "@epikodelabs/streamix";
+
+const scheduler = {
+  flush: () => new Promise(resolve => setTimeout(resolve, 0))
+};
 
 import {
   createTerminalTracer,

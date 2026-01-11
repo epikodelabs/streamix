@@ -1,6 +1,7 @@
-import { scheduler } from '@epikodelabs/streamix';
 import { onIdle } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
+
+const nativeSetTimeout = setTimeout;
 
 /* -------------------------------------------------- */
 /* Helpers                                            */
@@ -29,7 +30,7 @@ function patchGlobal<K extends keyof typeof globalThis>(
 }
 
 async function flush() {
-  await scheduler.flush();
+  await new Promise(r => nativeSetTimeout(r, 0));
 }
 
 /* -------------------------------------------------- */

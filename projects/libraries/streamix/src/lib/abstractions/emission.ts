@@ -1,10 +1,16 @@
 const ITERATOR_EMISSION_STAMP = new WeakMap<AsyncIterator<any>, number>();
 
-let globalEmissionStamp = 0;
+let lastEmissionStamp = 0;
 let currentEmissionStamp: number | null = null;
 
 export function nextEmissionStamp(): number {
-  return ++globalEmissionStamp;
+  const now = Date.now();
+  if (now > lastEmissionStamp) {
+    lastEmissionStamp = now;
+  } else {
+    lastEmissionStamp++;
+  }
+  return lastEmissionStamp;
 }
 
 export function getCurrentEmissionStamp(): number | null {

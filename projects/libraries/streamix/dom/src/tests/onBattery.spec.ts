@@ -1,4 +1,3 @@
-import { scheduler } from '@epikodelabs/streamix';
 import { onBattery } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
@@ -7,7 +6,7 @@ import { idescribe } from './env.spec';
 /* -------------------------------------------------- */
 
 async function flush() {
-  await scheduler.flush();
+  await new Promise(r => setTimeout(r, 0));
 }
 
 /* -------------------------------------------------- */
