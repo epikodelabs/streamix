@@ -43,17 +43,14 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
     const setupNotifier = async () => {
       try {
         const resolvedNotifier = isPromiseLike(notifier) ? await notifier : notifier;
-        console.log('DEBUG: Subscribing to notification stream'); 
         notifierSubscription = fromAny(resolvedNotifier).subscribe({
           next: () => {
              const stamp = getCurrentEmissionStamp();
-             console.log('DEBUG: Notifier NEXT', { stamp });
              if (stamp !== null) openedAtStamp = stamp;
              signalResolve({ kind: 'next' });
              notifierSubscription?.unsubscribe();
           },
           error: (err) => {
-            console.log('DEBUG: Notifier ERROR', err);
             notifierError = err;
             const stamp = getCurrentEmissionStamp();
              if (stamp !== null) notifierErrorAtStamp = stamp;
@@ -61,7 +58,6 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
             notifierSubscription?.unsubscribe();
           },
           complete: () => {
-             console.log('DEBUG: Notifier COMPLETE');
              signalResolve({ kind: 'complete' });
              notifierSubscription?.unsubscribe();
           },
@@ -79,8 +75,6 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
         let activeNextPromise: Promise<IteratorResult<T>> | null = null;
 
         while (true) {
-          console.log('DEBUG: Loop Start', { canEmit, hasBuffer: buffer.length, raceEnabled: (!canEmit && !gateClosedWithoutEmit) });
-          // console.log('DEBUG: Loop Start', { canEmit, hasBuffer: buffer.length });
           if (notifierError && notifierErrorAtStamp === null) throw notifierError;
           
           let resultValue: IteratorResult<T> | undefined;
@@ -117,13 +111,11 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
                     if (raceResult.type === 'signal') {
                         if (raceResult.kind === 'next') {
                             // Gate opens
-                            console.log('DEBUG: Gate Opening. Flushing buffer count:', buffer.length);
                             if (!canEmit && !gateClosedWithoutEmit) {
                                 canEmit = true;
                                 notifierEmitted = true;
                                 // Flush buffer
                                 for (const entry of buffer) {
-                                    console.log('DEBUG: Flushing value', entry.value);
                                     let value = entry.value;
                                     if (entry.meta) {
                                     setIteratorMeta(
@@ -188,7 +180,6 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
                notifierEmitted = true;
                // Flush buffer
                if (buffer.length > 0) {
-                 // console.log('DEBUG: Late Flush due to stamps', buffer.length);
                  for (const entry of buffer) {
                        let value = entry.value;
                        if (entry.meta) {
