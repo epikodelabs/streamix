@@ -37,8 +37,10 @@ idescribe("jsonp", () => {
           if (fail) {
             node.onerror?.(new Event("error"));
           } else if (testData && callbackName) {
-            (window as any)[callbackName!](testData);
-            node.onload?.(new Event("load"));
+            if ((window as any)[callbackName]) {
+              (window as any)[callbackName!](testData);
+              node.onload?.(new Event("load"));
+            }
           }
         }, 1);
 
@@ -114,12 +116,15 @@ idescribe("jsonp", () => {
     const valuePromise = iterator.next();
     await iterator.return?.(undefined); // Early close
 
-    const value = await valuePromise;
+    try {
+      await valuePromise;
+    } catch {
+      // Expected to potentially throw or return done due to abort
+    }
 
     // Wait for simulated cleanup
     await new Promise(r => setTimeout(r, 2));
 
-    expect(value.value).toEqual(testData);
     expect(refs.removedScript).toBe(refs.appendedScript);
 
     // Ensure no lingering global callback

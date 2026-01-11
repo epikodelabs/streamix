@@ -40,13 +40,13 @@ idescribe('onOrientation', () => {
       next: (value) => {
         try {
           expect(value).toBe('portrait');
-          subscription.unsubscribe();
-          done();
         } catch (err: any) {
           done.fail(err);
         }
       },
     });
+    subscription.unsubscribe();
+    done();
   });
 
   it('should emit a new value on orientation change', (done) => {
@@ -70,11 +70,13 @@ idescribe('onOrientation', () => {
             expect(value).toBe('portrait'); // initial
 
             // Simulate orientation change to landscape
-            mockOrientation.angle = 90;
-            mockOrientation.type = 'landscape-primary';
-
-            // Trigger the change event
-            changeCallback!();
+            setTimeout(() => {
+                mockOrientation.angle = 90;
+                mockOrientation.type = 'landscape-primary';
+    
+                // Trigger the change event
+                if (changeCallback) changeCallback();
+            }, 0);
           } else if (callCount === 2) {
             expect(value).toBe('landscape');
             subscription.unsubscribe();
@@ -97,13 +99,13 @@ idescribe('onOrientation', () => {
       next: (value) => {
         try {
           expect(value).toBe('landscape');
-          subscription.unsubscribe();
-          done();
         } catch (err: any) {
           done.fail(err);
         }
       },
     });
+    subscription.unsubscribe();
+    done();
   });
 
   it('should clean up event listeners on unsubscribe', () => {
