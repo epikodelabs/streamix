@@ -25,7 +25,7 @@ export type ReplaySubject<T = any> = Subject<T>;
 /**
  * Creates a ReplaySubject that replays a specified number of previous values to each new subscriber.
  *
- * ReplaySubject<T> features:
+ * `ReplaySubject<T>` features:
  * - Replays last `capacity` values to each new subscriber
  * - No replay beyond the specified capacity
  * - Global async backpressure across all consumers

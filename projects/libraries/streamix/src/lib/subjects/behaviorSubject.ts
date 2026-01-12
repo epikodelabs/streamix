@@ -25,7 +25,7 @@ export type BehaviorSubject<T = any> = Subject<T> & {
 };
 
 /**
- * BehaviorSubject<T> — push-based multicast stream with:
+ * `BehaviorSubject<T>` — push-based multicast stream with:
  * - current value (always available)
  * - immediate current-value emission to new subscribers
  * - global async backpressure across all receivers

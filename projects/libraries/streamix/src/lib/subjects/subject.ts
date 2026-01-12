@@ -16,7 +16,7 @@ import {
 import { firstValueFrom } from "../converters";
 
 /**
- * Subject<T> — push-based multicast stream with global async backpressure.
+ * `Subject<T>` — push-based multicast stream with global async backpressure.
  *
  * Semantics enforced by your tests:
  * - No replay for late subscribers
@@ -33,7 +33,7 @@ export type Subject<T = any> = Stream<T> & {
 };
 
 /**
- * Subject<T> — push-based multicast stream with global async backpressure.
+ * `Subject<T>` — push-based multicast stream with global async backpressure.
  *
  * Semantics:
  * - No replay for late subscribers
