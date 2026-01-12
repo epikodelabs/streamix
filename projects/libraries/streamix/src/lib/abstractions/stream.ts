@@ -1,8 +1,8 @@
 import { firstValueFrom } from "../converters";
+import { getCurrentEmissionStamp, getIteratorEmissionStamp, nextEmissionStamp, setIteratorEmissionStamp, withEmissionStamp } from "./emission";
 import { generateStreamId, generateSubscriptionId, getRuntimeHooks } from "./hooks";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
-import { scheduler } from "./scheduler";
 import { createSubscription, type Subscription } from "./subscription";
 
 /**
@@ -63,7 +63,7 @@ export type Stream<T = any> = AsyncIterable<T> & {
   query: () => Promise<T>;
 
   /** Allows direct async iteration: `for await (const value of stream) { ... }`. */
-  [Symbol.asyncIterator](): AsyncGenerator<T>;
+  [Symbol.asyncIterator](): AsyncIterator<T>;
 };
 
 /**
@@ -119,85 +119,188 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
  */
 export function createAsyncGenerator<T = any>(
   register: (receiver: Receiver<T>) => Subscription
-): AsyncGenerator<T> {
-  async function* generator(): AsyncGenerator<T> {
-    /** Resolver for the next awaited iterator result */
-    let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
+): AsyncIterator<T> {
+  let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
+  let rejectNext: ((error: any) => void) | null = null;
+  let completed = false;
+  let terminalError: any = null;
+  const queue: Array<{ value: T; stamp: number; resolve?: () => void }> = [];
+  let ackResolver: (() => void) | null = null;
 
-    /** Rejector for the next awaited iterator result */
-    let rejectNext: ((error: any) => void) | null = null;
+  let subscription: Subscription | undefined;
+  let pendingUnsubscribe = false;
 
-    /** Indicates that the stream has completed */
-    let completed = false;
-
-    /** Stores terminal error (if any) */
-    let error: any = null;
-
-    /** Value buffer when producer outpaces consumer */
-    const queue: T[] = [];
-
-    const subscription = register({
-      next(value: T) {
-        if (resolveNext) {
-          const r = resolveNext;
-          resolveNext = null;
-          rejectNext = null;
-          r({ done: false, value });
-        } else {
-          queue.push(value);
-        }
-      },
-
-      error(err: any) {
-        error = err;
-        if (rejectNext) {
-          const r = rejectNext;
-          resolveNext = null;
-          rejectNext = null;
-          r(err);
-        }
-        subscription.unsubscribe();
-      },
-
-      complete() {
-        completed = true;
-        if (resolveNext) {
-          const r = resolveNext;
-          resolveNext = null;
-          rejectNext = null;
-          r({ done: true, value: undefined });
-        }
-        subscription.unsubscribe();
-      },
-    });
-
-    try {
-      while (true) {
-        if (error) throw error;
-
-        if (queue.length > 0) {
-          yield queue.shift()!;
-        } else if (completed) {
-          break;
-        } else {
-          const result = await new Promise<IteratorResult<T>>((resolve, reject) => {
-            resolveNext = resolve;
-            rejectNext = reject;
-          });
-
-          if (result.done) {
-            break;
-          } else {
-            yield result.value as T;
-          }
-        }
-      }
-    } finally {
-      subscription.unsubscribe();
+  const ensureSubscription = () => {
+    if (subscription || completed || terminalError) return;
+    subscription = register(receiverCallbacks);
+    if (pendingUnsubscribe) {
+      const sub = subscription;
+      subscription = undefined;
+      pendingUnsubscribe = false;
+      sub?.unsubscribe();
     }
-  }
+  };
 
-  return generator();
+  const requestUnsubscribe = (): void => {
+    if (subscription) {
+      const sub = subscription;
+      subscription = undefined;
+      sub.unsubscribe();
+      return;
+    }
+
+    pendingUnsubscribe = true;
+  };
+
+  const iterator: AsyncIterator<T> & AsyncIterable<T> & {
+    __tryNext?: () => IteratorResult<T> | null;
+    __hasBufferedValues?: () => boolean;
+  } = {
+    async next(): Promise<IteratorResult<T>> {
+      if (ackResolver) { const r = ackResolver; ackResolver = null; r(); }
+
+      if (terminalError) throw terminalError;
+
+      ensureSubscription();
+      if (terminalError) throw terminalError;
+
+      if (queue.length > 0) {
+        const item = queue.shift()!;
+        if (item.resolve) ackResolver = item.resolve;
+        setIteratorEmissionStamp(iterator as any, item.stamp);
+        return { done: false, value: item.value };
+      }
+
+      if (completed) {
+        return { done: true, value: undefined };
+      }
+
+      return await new Promise<IteratorResult<T>>((resolve, reject) => {
+        resolveNext = resolve;
+        rejectNext = reject;
+      });
+    },
+
+    async return(value?: any): Promise<IteratorResult<T>> {
+      if (ackResolver) { const r = ackResolver; ackResolver = null; r(); }
+      completed = true;
+      if (resolveNext) {
+        const r = resolveNext;
+        resolveNext = null;
+        rejectNext = null;
+        r({ done: true, value });
+      }
+      requestUnsubscribe();
+      return { done: true, value };
+    },
+
+    async throw(err?: any): Promise<IteratorResult<T>> {
+      if (ackResolver) { const r = ackResolver; ackResolver = null; r(); }
+      terminalError = err;
+      if (rejectNext) {
+        const r = rejectNext;
+        resolveNext = null;
+        rejectNext = null;
+        r(err);
+      }
+      requestUnsubscribe();
+      throw err;
+    },
+
+    [Symbol.asyncIterator]() {
+      return this as any;
+    },
+  };
+
+  iterator.__tryNext = (): IteratorResult<T> | null => {
+    if (ackResolver) { const r = ackResolver; ackResolver = null; r(); }
+
+    if (terminalError) throw terminalError;
+
+    ensureSubscription();
+
+    if (terminalError) throw terminalError;
+
+    if (queue.length > 0) {
+      const item = queue.shift()!;
+      if (item.resolve) ackResolver = item.resolve;
+      setIteratorEmissionStamp(iterator as any, item.stamp);
+      return { done: false, value: item.value };
+    }
+
+    if (completed) {
+      return { done: true, value: undefined };
+    }
+
+    return null;
+  };
+
+  iterator.__hasBufferedValues = () => queue.length > 0;
+
+  const receiverCallbacks: Receiver<T> = {
+    next(value: T) {
+      if (completed || terminalError) return;
+
+      const currentStamp = getCurrentEmissionStamp();
+      const baseStamp = currentStamp ?? nextEmissionStamp();
+      const stamp = currentStamp === null ? -baseStamp : baseStamp;
+
+      let resolve!: () => void;
+      const p = new Promise<void>(r => resolve = r);
+
+      if (resolveNext) {
+        setIteratorEmissionStamp(iterator as any, stamp);
+        const r = resolveNext;
+        resolveNext = null;
+        rejectNext = null;
+        ackResolver = resolve;
+        r({ done: false, value });
+      } else {
+        queue.push({ value, stamp, resolve });
+      }
+
+      return p;
+    },
+
+    error(err: any) {
+      if (completed || terminalError) return;
+      terminalError = err;
+      completed = true;
+
+      const currentStamp = getCurrentEmissionStamp();
+      const stamp = currentStamp ?? nextEmissionStamp();
+
+      if (rejectNext) {
+        setIteratorEmissionStamp(iterator, stamp);
+        const r = rejectNext;
+        resolveNext = null;
+        rejectNext = null;
+        r(err);
+      }
+      requestUnsubscribe();
+    },
+
+    complete() {
+      if (completed || terminalError) return;
+      completed = true;
+
+      const currentStamp = getCurrentEmissionStamp();
+      const stamp = currentStamp ?? nextEmissionStamp();
+
+      if (resolveNext) {
+        setIteratorEmissionStamp(iterator, stamp);
+        const r = resolveNext;
+        resolveNext = null;
+        rejectNext = null;
+        r({ done: true, value: undefined });
+      }
+      requestUnsubscribe();
+    },
+  };
+
+  (receiverCallbacks as any).__wantsRawValues = true;
+
+  return iterator;
 }
 
 /**
@@ -219,12 +322,18 @@ function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
    * Schedules a callback safely, ensuring scheduler errors
    * do not propagate into the stream core.
    */
-  const safeSchedule = (cb: () => MaybePromise) =>
-    scheduler.enqueue(cb).catch(() => {});
+  const execute = (cb: () => MaybePromise) => {
+    const stamp = getCurrentEmissionStamp();
+    if (stamp !== null) {
+      // ⚡️ Synchronous execution when within an emission context
+      return cb();
+    }
+    return Promise.resolve().then(cb).catch(() => {});
+  };
 
   if (receiver.next) {
     wrapped.next = (value: T) =>
-      safeSchedule(async () => {
+      execute(async () => {
         try {
           await receiver.next!(value);
         } catch (err) {
@@ -243,7 +352,7 @@ function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
   if (receiver.error) {
     wrapped.error = (err: any) => {
       const error = err instanceof Error ? err : new Error(String(err));
-      return safeSchedule(() => {
+      return execute(() => {
         try {
           return receiver.error!(error);
         } catch {
@@ -255,7 +364,7 @@ function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
 
   if (receiver.complete) {
     wrapped.complete = () =>
-      safeSchedule(() => {
+      execute(() => {
         try {
           return receiver.complete!();
         } catch {
@@ -282,14 +391,40 @@ function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
  * @param signal Abort signal controlling cancellation
  */
 async function drainIterator<T>(
-  iterator: AsyncIterator<T>,
+  iterator: AsyncIterator<T> & { __tryNext?: () => IteratorResult<T> | null },
   getReceivers: () => Array<SubscriberEntry<T>>,
   signal: AbortSignal
 ): Promise<void> {
   const abortPromise = waitForAbort(signal);
 
+  const processResult = (result: IteratorResult<T>) => {
+    if (result.done) return true;
+
+    const stamp = getIteratorEmissionStamp(iterator) ?? nextEmissionStamp();
+    const receivers = getReceivers();
+
+    const forward = () => {
+      for (const { receiver, subscription } of receivers) {
+        if (!subscription.unsubscribed) {
+          receiver.next?.(result.value);
+        }
+      }
+    };
+
+    withEmissionStamp(stamp, forward);
+    return false;
+  };
+
   try {
     while (true) {
+      if (iterator.__tryNext) {
+        while (true) {
+          const nextResult = iterator.__tryNext();
+          if (!nextResult) break;
+          if (processResult(nextResult)) return;
+        }
+      }
+
       const winner = await Promise.race([
         abortPromise.then(() => ({ aborted: true } as const)),
         iterator.next().then(result => ({ result })),
@@ -297,15 +432,7 @@ async function drainIterator<T>(
 
       if ("aborted" in winner || signal.aborted) break;
 
-      const { result } = winner;
-      if (result.done) break;
-
-      const receivers = getReceivers();
-      for (const { receiver, subscription } of receivers) {
-        if (!subscription.unsubscribed) {
-          receiver.next?.(result.value);
-        }
-      }
+      if (processResult(winner.result)) break;
     }
   } catch (err) {
     if (!signal.aborted) {
@@ -338,22 +465,22 @@ async function drainIterator<T>(
  *
  * @template T
  * @param name Stream name (debugging / tooling)
- * @param generateFn Factory producing an async generator
+ * @param generatorFn Factory producing an async generator
  * @returns Multicast Stream instance
  */
 export function createStream<T>(
   name: string,
-  generateFn: (signal: AbortSignal) => AsyncGenerator<T, void, unknown>
+  generatorFn: (signal?: AbortSignal) => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
   const id = generateStreamId();
 
   getRuntimeHooks()?.onCreateStream?.({ id, name });
 
-  const activeSubscriptions = new Set<SubscriberEntry<T>>();
+  let activeSubscriptions: SubscriberEntry<T>[] = [];
   let isRunning = false;
   let abortController = new AbortController();
 
-  const getActiveReceivers = () => Array.from(activeSubscriptions);
+  const getActiveReceivers = () => activeSubscriptions;
 
   /**
    * Starts the shared generator loop.
@@ -365,7 +492,7 @@ export function createStream<T>(
 
     (async () => {
       const signal = abortController.signal;
-      const iterator = generateFn(signal)[Symbol.asyncIterator]();
+      const iterator = generatorFn(signal)[Symbol.asyncIterator]();
 
       try {
         await drainIterator(iterator, getActiveReceivers, signal);
@@ -386,21 +513,21 @@ export function createStream<T>(
     let subscription!: Subscription;
 
     subscription = createSubscription(async () => {
-      const entry = getActiveReceivers().find(
+      const entry = activeSubscriptions.find(
         s => s.subscription === subscription
       );
 
       if (entry) {
-        activeSubscriptions.delete(entry);
+        activeSubscriptions = activeSubscriptions.filter(s => s !== entry);
         entry.receiver.complete?.();
       }
 
-      if (activeSubscriptions.size === 0) {
+      if (activeSubscriptions.length === 0) {
         abortController.abort();
       }
     });
 
-    activeSubscriptions.add({ receiver: wrapped, subscription });
+    activeSubscriptions = [...activeSubscriptions, { receiver: wrapped, subscription }];
 
     if (!isRunning) {
       startMulticastLoop();
@@ -421,7 +548,11 @@ export function createStream<T>(
     pipe,
     subscribe: cb => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(self),
-    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
+    [Symbol.asyncIterator]: () => {
+      const it = createAsyncGenerator(registerReceiver);
+      (it as any).__streamix_streamId = id;
+      return it;
+    },
   };
 
   return self;
@@ -457,7 +588,11 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
       return firstValueFrom(pipedStream);
     },
 
-    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
+    [Symbol.asyncIterator]: () => {
+      const it = createAsyncGenerator(registerReceiver);
+      (it as any).__streamix_streamId = pipedStream.id;
+      return it;
+    },
   };
 
   /**

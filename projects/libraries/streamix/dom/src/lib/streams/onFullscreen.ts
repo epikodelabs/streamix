@@ -52,7 +52,8 @@ export function onFullscreen(): Stream<boolean> {
     document.addEventListener("mozfullscreenchange", emit as any);
     document.addEventListener("MSFullscreenChange", emit as any);
 
-    emit(); // initial state
+    // Emit initial value immediately
+    emit();
   };
 
   const stop = () => {
@@ -72,14 +73,21 @@ export function onFullscreen(): Stream<boolean> {
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
+
   subject.subscribe = (
     cb?: ((v: boolean) => void) | Receiver<boolean>
   ) => {
+    // Create subscription first
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      start();
-    }
+    // Now if start() emits synchronously, the subscription variable is assigned
+    scheduleStart();
 
     const o = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

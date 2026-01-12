@@ -28,11 +28,11 @@ The `subscribe()` function returns a `Subscription` object. This object includes
 
 The use of `readerId` is critical here; it provides a unique identifier for each subscriber, allowing the buffer to correctly detach only the specified reader when `unsubscribe()` is called.
 
-## ⚡ 5. The "Snappy" and "Query" APIs: Bridging Imperative Gaps
+## ⚡ 5. The "value" and "Query" APIs: Bridging Imperative Gaps
 
 To be truly useful, a reactive stream needs to interoperate with existing imperative code. Providing synchronous and one-shot async access to the latest value adds another layer of complexity.
 
-- **snappy**: This getter is a simple, synchronous way to access the most recently pushed value of a subject. It's a pragmatic convenience that bridges the asynchronous, reactive world with the synchronous, imperative needs of an application.
+- **value**: This getter is a simple, synchronous way to access the most recently pushed value of a subject. It's a pragmatic convenience that bridges the asynchronous, reactive world with the synchronous, imperative needs of an application.
 - **query()**: This method uses `firstValueFrom` to get the next value from the stream and resolve a promise with it. This is a great pattern for one-shot reads, but it relies on the underlying stream (`this`) and its subscription logic to work correctly.
 
 ## Conclusion
@@ -44,14 +44,12 @@ In conclusion, a pull-based subject is a complex orchestration of asynchronous p
 <p align="center">
   <strong>Ready to stream? Get started with Streamix today! 🚀</strong><br>
   <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> 📦 
-  <a href="https://github.com/epikodelabs/streamix">View on GitHub</a> 🐙 
+  <a href="https://github.com/actioncrew/streamix">View on GitHub</a> 🐙 
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
 
 ---
 
 *Remember: Choose your tools wisely, keep it simple, and may your reactive pipelines be pragmatic and interoperable with everything else. 💡*
-
-
 
 

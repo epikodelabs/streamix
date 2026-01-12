@@ -1,4 +1,4 @@
-import { createOperator, isPromiseLike, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../subjects";
 
@@ -29,6 +29,7 @@ export function switchMap<T = any, R = any>(
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source) {
     const output = createSubject<R>();
+    const outputIterator = eachValueFrom(output);
 
     let currentSubscription: Subscription | null = null;
     let inputCompleted = false;
@@ -41,29 +42,70 @@ export function switchMap<T = any, R = any>(
       }
     };
 
-    const subscribeToInner = async (innerStream: Stream<R>, streamId: number) => {
+    const subscribeToInner = async (
+      innerStream: Stream<R>,
+      streamId: number,
+      parentMeta?: { valueId: string; operatorIndex: number; operatorName: string }
+    ) => {
       // Cancel previous inner stream
       if (currentSubscription) {
         currentSubscription.unsubscribe();
         currentSubscription = null;
       }
 
-      currentSubscription = innerStream.subscribe({
+      let pendingFinalize = false;
+      let nextSubscription: Subscription | null = null;
+
+      nextSubscription = innerStream.subscribe({
         next: (value) => {
           if (streamId === currentInnerStreamId) {
-            output.next(value);
+            let outputValue = value;
+            if (parentMeta) {
+              setIteratorMeta(
+                outputIterator,
+                { valueId: parentMeta.valueId, kind: "expand" },
+                parentMeta.operatorIndex,
+                parentMeta.operatorName
+              );
+              outputValue = setValueMeta(
+                outputValue,
+                { valueId: parentMeta.valueId, kind: "expand" },
+                parentMeta.operatorIndex,
+                parentMeta.operatorName
+              );
+            }
+            output.next(outputValue);
           }
         },
         error: (err) => {
-          if (streamId === currentInnerStreamId) output.error(err);
+          if (streamId !== currentInnerStreamId) return;
+          if (!nextSubscription) {
+            pendingFinalize = true;
+            output.error(err);
+            return;
+          }
+          currentSubscription = null;
+          nextSubscription = null;
+          output.error(err);
         },
         complete: () => {
-          if (streamId === currentInnerStreamId) {
-            currentSubscription = null;
-            checkComplete();
+          if (streamId !== currentInnerStreamId) return;
+          if (!nextSubscription) {
+            pendingFinalize = true;
+            return;
           }
+          currentSubscription = null;
+          nextSubscription = null;
+          checkComplete();
         },
       });
+
+      currentSubscription = nextSubscription;
+      if (pendingFinalize) {
+        currentSubscription = null;
+        nextSubscription = null;
+        checkComplete();
+      }
     };
 
     (async () => {
@@ -73,10 +115,11 @@ export function switchMap<T = any, R = any>(
           if (result.done) break;
 
           const streamId = ++currentInnerStreamId;
+          const parentMeta = getIteratorMeta(source);
           const projected = project(result.value, index++);
           const normalized = isPromiseLike(projected) ? await projected : projected;
           const innerStream = fromAny(normalized);
-          await subscribeToInner(innerStream, streamId);
+          await subscribeToInner(innerStream, streamId, parentMeta);
         }
 
         inputCompleted = true;
@@ -86,6 +129,6 @@ export function switchMap<T = any, R = any>(
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

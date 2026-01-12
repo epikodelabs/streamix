@@ -1,8 +1,13 @@
 # Changelog
 
+
+### 2.0.29
+
+Rewrote subjects internals to guard async-iterator backpressure and avoid races; deferred iterator processing to avoid notifier/source races. Fixed several unsubscribe and race issues in subject/operator chains that caused flaky tests.
+
 ## 2.0.28
 
-Buffer and subject internals were reworked: synchronization removed in favor of scheduler-queued methods, `ReplaySubject` now uses the scheduler, and `shareReplay` aligns with strict backpressure and async delivery. Lock and semaphore remain for convenience. Added edge-case tests for subjects and buffers, with various type/config/docs corrections and cleanup. Streams/operators now match updated signatures with refreshed JSDocs.
+Buffer and subject internals were reworked: synchronization removed in favor of scheduler-queued methods, `ReplaySubject` now uses the scheduler, and `shareReplay` aligns with strict backpressure and async delivery. Lock and semaphore are deprecated. Added edge-case tests for subjects and buffers, with various type/config/docs corrections and cleanup.
 
 ## 2.0.26
 
@@ -46,7 +51,7 @@ We have added AbortController support to most stream creators to enable proper c
 
 ## 2.0.12
 
-Refactored core operators to use pure AsyncIterator logic without relying on Subject, resulting in cleaner and more predictable behavior. Added the `observeOn` operator for microtask/macrotask scheduling. Renamed the `value` property of Subject to `snappy` to better reflect its intention and humorous design.
+Refactored core operators to use pure AsyncIterator logic without relying on Subject, resulting in cleaner and more predictable behavior. Added the `observeOn` operator for microtask/macrotask scheduling. Renamed the `value` property of Subject to `value` to better reflect its intention and humorous design.
 
 ## 2.0.11
 

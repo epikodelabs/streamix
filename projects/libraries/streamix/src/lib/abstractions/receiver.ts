@@ -1,44 +1,17 @@
-import type { MaybePromise } from "./operator";
+import { isPromiseLike, unwrapPrimitive, type MaybePromise } from "../abstractions";
 
 /**
  * Defines a receiver interface for handling a stream's lifecycle events.
- *
- * A receiver is an object that can be passed to a stream's `subscribe` method
- * to handle the three primary events in a stream's lifecycle: `next` for
- * new values, `error` for stream errors, and `complete` when the stream has finished.
- *
- * All properties are optional, allowing you to subscribe only to the events you care about.
- *
  * @template T The type of the value handled by the receiver's `next` method.
  */
 export type Receiver<T = any> = {
-  /**
-   * A function called for each new value emitted by the stream.
-   * @param value The value emitted by the stream.
-   */
   next?: (value: T) => MaybePromise;
-  /**
-   * A function called if the stream encounters an error.
-   * @param err The error that occurred.
-   */
   error?: (err: Error) => MaybePromise;
-  /**
-   * A function called when the stream has completed successfully and will emit no more values.
-   * Streamix also invokes this on unsubscribe (and after error) so subscribers can
-   * centralize cleanup in one place.
-   */
   complete?: () => MaybePromise;
 };
 
 /**
  * A fully defined, state-aware receiver with guaranteed lifecycle handlers.
- *
- * This type extends the `Receiver` interface by making all handler methods
- * (`next`, `error`, and `complete`) required. It also includes a `completed`
- * property to track the receiver's state, preventing it from processing
- * new events after it has completed. This is an internal type used to ensure
- * robust handling of all stream events.
- *
  * @template T The type of the value handled by the receiver.
  */
 export type StrictReceiver<T = any> = Required<Receiver<T>> & { readonly completed: boolean; };
@@ -47,88 +20,110 @@ export type StrictReceiver<T = any> = Required<Receiver<T>> & { readonly complet
  * Normalizes a receiver input (a function or an object) into a strict,
  * fully-defined receiver.
  *
- * This factory function ensures that a consistent `StrictReceiver` object is
- * always returned, regardless of the input. It wraps the provided handlers
- * with logic that ensures events are not processed after completion and that
- * unhandled errors are logged.
- *
- * If the input is a function, it is treated as the `next` handler. If it's an
- * object, its `next`, `error`, and `complete` properties are used. If no input
- * is provided, a receiver with no-op handlers is created.
+ * This implementation preserves the prototype chain of the input receiver
+ * and ensures `this.completed` is a live property, fixing sporadic state issues.
  *
  * @template T The type of the value handled by the receiver.
  * @param callbackOrReceiver An optional function to serve as the `next` handler,
  * or a `Receiver` object with one or more optional handlers.
- * @returns A new `StrictReceiver` instance with normalized handlers and completion tracking.
+ * @returns A new `StrictReceiver` instance.
  */
 export function createReceiver<T = any>(
   callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
 ): StrictReceiver<T> {
   let _completed = false;
-  let _processing = false;
-  let _pendingComplete = false;
 
-  const baseReceiver = {
-    get completed() { return _completed; }
-  } as { readonly completed: boolean; };
+  // 1. Construct the internal receiver without destroying prototypes or snapshotting getters.
+  let receiver: Receiver<T>;
 
-  const receiver = (typeof callbackOrReceiver === 'function'
-    ? { ...baseReceiver, next: callbackOrReceiver }
-    : callbackOrReceiver
-      ? { ...baseReceiver, ...callbackOrReceiver }
-      : baseReceiver) as Receiver<T>;
+  if (typeof callbackOrReceiver === 'function') {
+    receiver = { next: callbackOrReceiver };
+  } else if (callbackOrReceiver && typeof callbackOrReceiver === 'object') {
+    // Use Object.create to preserve the prototype chain (methods/class props)
+    receiver = Object.create(callbackOrReceiver);
+  } else {
+    receiver = {};
+  }
+
+  // 2. Inject the 'completed' property as a LIVE getter on the internal receiver.
+  // This ensures 'this.completed' inside user handlers always reflects the real state.
+  Object.defineProperty(receiver, 'completed', {
+    get: () => _completed,
+    configurable: true,
+    enumerable: true
+  });
+
+  const wantsRaw = (callbackOrReceiver as any)?.__wantsRawValues === true;
+
+  // Helper: Safely execute complete and return a Promise if async
+  const safeComplete = (): MaybePromise => {
+    try {
+      // Use the ORIGINAL object for the call to ensure 'this' is correct
+      // (Though 'receiver' inherits from it, so it's usually fine, 
+      // accessing the prop directly from the prototype is safer if the user didn't override it)
+      const completeFn = callbackOrReceiver && typeof callbackOrReceiver !== 'function' 
+        ? callbackOrReceiver.complete 
+        : receiver.complete;
+        
+      const result = completeFn?.call(receiver);
+      
+      if (isPromiseLike(result)) {
+        return result.catch((err: any) => console.error('Unhandled error in complete handler:', err));
+      }
+    } catch (err) {
+      console.error('Unhandled error in complete handler:', err);
+    }
+  };
 
   const wrappedReceiver: StrictReceiver<T> = {
-    next: async (value: T) => {
-      if (!_completed) {
-        _processing = true;
-        try {
-          await receiver.next?.call(receiver, value);
-        } catch (err) {
-          await wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
-        } finally {
-          _processing = false;
-          // If completion was requested during processing, complete now
-          if (_pendingComplete && !_completed) {
-            _pendingComplete = false; // Clear the flag
-            _completed = true;
-            try {
-              await receiver.complete?.call(receiver);
-            } catch (err) {
-              console.error('Unhandled error in complete handler:', err);
-            }
-          }
+    next: (value: T) => {
+      if (_completed) return;
+      const val = wantsRaw ? value : unwrapPrimitive(value);
+      try {
+        const nextFn = receiver.next;
+        const result = nextFn?.call(receiver, val);
+        
+        if (isPromiseLike(result)) {
+           // If next is async, we must catch errors to trigger the error lifecycle
+           return result.catch((err: any) => wrappedReceiver.error(err));
         }
+      } catch (err) {
+        // Sync error in next -> trigger error lifecycle
+        return wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
       }
     },
-    error: async function (err: Error) {
+    error: (err: Error) => {
       if (!_completed) {
+        _completed = true;
+        
+        let errorResult: MaybePromise;
         try {
-          await receiver.error?.call(receiver, err);
+          const errorFn = receiver.error;
+          errorResult = errorFn?.call(receiver, err);
         } catch (e) {
           console.error('Unhandled error in error handler:', e);
         }
-        await wrappedReceiver.complete();
+
+        if (isPromiseLike(errorResult)) {
+          // Async Error Handling: Wait for error handler, then clean up
+          return errorResult
+            .catch((e: any) => console.error('Unhandled error in error handler:', e))
+            .then(() => safeComplete());
+        }
+
+        // Sync Error Handling: Clean up immediately
+        return safeComplete();
       }
     },
-    complete: async () => {
+    complete: () => {
       if (!_completed) {
-        if (_processing) {
-          // Defer completion until after current next() finishes
-          _pendingComplete = true;
-        } else {
-          _completed = true;
-          try {
-            await receiver.complete?.call(receiver);
-          } catch (err) {
-            console.error('Unhandled error in complete handler:', err);
-          }
-        }
+        _completed = true;
+        return safeComplete();
       }
     },
     get completed() {
       return _completed;
-    },
+    }
   };
 
   return wrappedReceiver;

@@ -1,4 +1,4 @@
-import { createOperator, type MaybePromise, type Operator } from "../abstractions";
+import { createOperator, getIteratorMeta, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { timer } from "../streams";
 import { createSubject } from "../subjects";
@@ -14,22 +14,63 @@ import { createSubject } from "../subjects";
 export function buffer<T = any>(period: MaybePromise<number>) {
   return createOperator<T, T[]>("buffer", function (this: Operator, source) {
     const output = createSubject<T[]>();
-    let buffer: IteratorResult<T>[] = [];
+    const outputIterator = eachValueFrom(output);
+
+    let buffer: {
+      result: IteratorResult<T>;
+      meta?: { valueId: string; operatorIndex: number; operatorName: string };
+    }[] = [];
+
     let completed = false;
 
     const flush = () => {
-      if (buffer.length > 0) {
-        // Emit an array of the actual values
-        const values = buffer.map((r) => r.value!);
-        output.next(values);
+      if (buffer.length === 0) return;
 
-        // Resolve all pending results for this flush
-        buffer = [];
+      const targetMeta = buffer[buffer.length - 1]?.meta;
+      const inputValueIds = buffer.map((e) => e.meta?.valueId).filter(Boolean) as string[];
+
+      if (targetMeta) {
+        setIteratorMeta(
+          outputIterator,
+          {
+            valueId: targetMeta.valueId,
+            kind: "collapse",
+            inputValueIds: inputValueIds.length > 0 ? inputValueIds : undefined,
+          },
+          targetMeta.operatorIndex,
+          targetMeta.operatorName
+        );
       }
+
+      // Emit expanded value
+      let values = buffer.map((e) => e.result.value!);
+      if (targetMeta) {
+        values = setValueMeta(
+          values,
+          { valueId: targetMeta.valueId, kind: "collapse", inputValueIds: inputValueIds.length > 0 ? inputValueIds : undefined },
+          targetMeta.operatorIndex,
+          targetMeta.operatorName
+        );
+      }
+      output.next(values);
+      buffer = [];
+    };
+
+    let intervalSubscription: any;
+    let pendingIntervalUnsubscribe = false;
+
+    const requestIntervalUnsubscribe = (): void => {
+      if (intervalSubscription) {
+        const sub = intervalSubscription;
+        intervalSubscription = undefined;
+        sub.unsubscribe();
+        return;
+      }
+      pendingIntervalUnsubscribe = true;
     };
 
     const cleanup = () => {
-      intervalSubscription.unsubscribe();
+      requestIntervalUnsubscribe();
     };
 
     const flushAndComplete = () => {
@@ -42,38 +83,40 @@ export function buffer<T = any>(period: MaybePromise<number>) {
     };
 
     const fail = (err: any) => {
-      // resolve all pending before error
-      if (buffer.length > 0) {
-        buffer = [];
-      }
+      buffer = [];
       output.error(err);
       cleanup();
     };
 
-    // Timer triggers periodic flush
-    const intervalSubscription = timer(period, period).subscribe({
+    // Periodic flush
+    intervalSubscription = timer(period, period).subscribe({
       next: () => flush(),
       error: (err) => fail(err),
       complete: () => flushAndComplete(),
     });
 
+    if (pendingIntervalUnsubscribe) {
+      requestIntervalUnsubscribe();
+    }
+
     (async () => {
       try {
         while (true) {
-          const result: IteratorResult<T> = await source.next();
+          const result = await source.next();
           if (result.done) break;
 
-          // Add to buffer
-          buffer.push(result);
+          buffer.push({
+            result,
+            meta: getIteratorMeta(source),
+          });
         }
       } catch (err) {
-        cleanup();
-        output.error(err);
+        fail(err);
       } finally {
         flushAndComplete();
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

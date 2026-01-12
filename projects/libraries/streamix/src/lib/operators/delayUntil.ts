@@ -1,4 +1,4 @@
-import { createOperator, isPromiseLike, type Operator, type Stream, type Subscription } from "../abstractions";
+import { createOperator, getCurrentEmissionStamp, getIteratorEmissionStamp, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type Operator, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from "../subjects";
 
@@ -21,43 +21,50 @@ import { createSubject } from "../subjects";
 export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
   return createOperator<T, T>("delayUntil", function (this: Operator, source: AsyncIterator<T>) {
     const output = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
     let canEmit = false;
     let notifierEmitted = false;
     let gateClosedWithoutEmit = false;
-    const buffer: T[] = [];
+    let buffer: { value: T; meta?: { valueId: string; operatorIndex: number; operatorName: string } }[] = [];
     let notifierSubscription: Subscription | undefined;
+
+    let notifierError: any = null;
+    let notifierErrorAtStamp: number | null = null;
+    let openedAtStamp: number | null = null;
+    
+    let signalResolve: (val: { kind: 'next' | 'complete' }) => void;
+    let signalReject: (err: any) => void;
+    const notifierSignal = new Promise<{ kind: 'next' | 'complete' }>((resolve, reject) => {
+      signalResolve = resolve;
+      signalReject = reject;
+    });
+    notifierSignal.catch(() => {});
 
     const setupNotifier = async () => {
       try {
         const resolvedNotifier = isPromiseLike(notifier) ? await notifier : notifier;
         notifierSubscription = fromAny(resolvedNotifier).subscribe({
           next: () => {
-            // The gate is open. Flush the buffer and start live emission.
-            if (!canEmit && !gateClosedWithoutEmit) { // Only run the flush on the *first* emission
-              canEmit = true;
-              notifierEmitted = true;
-              for (const v of buffer) output.next(v);
-              buffer.length = 0;
-            }
-            // Unsubscribe from the notifier immediately after the first next()
-            notifierSubscription?.unsubscribe();
+             const stamp = getCurrentEmissionStamp();
+             if (stamp !== null) openedAtStamp = stamp;
+             signalResolve({ kind: 'next' });
+             notifierSubscription?.unsubscribe();
           },
           error: (err) => {
+            notifierError = err;
+            const stamp = getCurrentEmissionStamp();
+             if (stamp !== null) notifierErrorAtStamp = stamp;
+            signalReject(err);
             notifierSubscription?.unsubscribe();
-            output.error(err);
           },
           complete: () => {
-            notifierSubscription?.unsubscribe();
-            // If the notifier completes before emitting (i.e., !canEmit), 
-            // the buffered values are discarded and no new values are emitted.
-            if (!canEmit && !notifierEmitted) {
-              gateClosedWithoutEmit = true;
-              buffer.length = 0;
-            }
+             signalResolve({ kind: 'complete' });
+             notifierSubscription?.unsubscribe();
           },
         });
       } catch (err) {
-        output.error(err instanceof Error ? err : new Error(String(err)));
+         notifierError = err instanceof Error ? err : new Error(String(err));
+         signalReject(notifierError);
       }
     };
 
@@ -65,14 +72,145 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
 
     (async () => {
       try {
-        while (true) {
-          const { done, value } = await source.next();
-          if (done) break;
+        let activeNextPromise: Promise<IteratorResult<T>> | null = null;
 
-          if (canEmit) {
-            output.next(value);
+        while (true) {
+          if (notifierError && notifierErrorAtStamp === null) throw notifierError;
+          
+          let resultValue: IteratorResult<T> | undefined;
+
+          // We only race if we haven't decided the gate state yet
+          const raceEnabled = !canEmit && !gateClosedWithoutEmit;
+
+          if (raceEnabled) {
+             if (!activeNextPromise) {
+               activeNextPromise = source.next();
+             }
+             
+             const raceResult = await Promise.race([
+                activeNextPromise.then(res => ({ type: 'source', res } as const)),
+                notifierSignal.then(
+                    (val) => ({ type: 'signal', kind: val.kind } as const),
+                    (err) => ({ type: 'error', err } as const)
+                )
+             ]);
+
+             if (raceResult.type === 'signal' || raceResult.type === 'error') {
+                 // Rescue pending source value
+                 const rescue = await Promise.race([
+                    activeNextPromise.then(res => ({ res })),
+                    new Promise<{res: IteratorResult<T>} | null>(resolve => setTimeout(() => resolve(null), 0))
+                 ]);
+
+                 if (rescue) {
+                    resultValue = rescue.res;
+                    activeNextPromise = null;
+                 } else {
+                    if (raceResult.type === 'error') throw raceResult.err;
+                    
+                    if (raceResult.type === 'signal') {
+                        if (raceResult.kind === 'next') {
+                            // Gate opens
+                            if (!canEmit && !gateClosedWithoutEmit) {
+                                canEmit = true;
+                                notifierEmitted = true;
+                                // Flush buffer
+                                for (const entry of buffer) {
+                                    let value = entry.value;
+                                    if (entry.meta) {
+                                    setIteratorMeta(
+                                        outputIterator,
+                                        { valueId: entry.meta.valueId },
+                                        entry.meta.operatorIndex,
+                                        entry.meta.operatorName
+                                    );
+                                    value = setValueMeta(value, { valueId: entry.meta.valueId }, entry.meta.operatorIndex, entry.meta.operatorName);
+                                    }
+                                    output.next(value);
+                                }
+                                buffer.length = 0;
+                            }
+                        } else {
+                            // Complete without next
+                            if (!canEmit && !notifierEmitted) {
+                                gateClosedWithoutEmit = true;
+                                buffer.length = 0;
+                            }
+                        }
+                    }
+                    continue; // Loop back with new state
+                 }
+             } else {
+                resultValue = raceResult.res;
+                activeNextPromise = null;
+             }
+          } else {
+             // Not racing logic
+             if (activeNextPromise) {
+                resultValue = await activeNextPromise;
+                activeNextPromise = null;
+             } else {
+                resultValue = await source.next();
+             }
+          }
+          
+          const { done, value } = resultValue!;
+          if (done) break;
+          const meta = getIteratorMeta(source);
+          const stamp = getIteratorEmissionStamp(source);
+
+          if (stamp !== undefined) {
+             if (notifierError && notifierErrorAtStamp === null) throw notifierError;
+             const s = Math.abs(stamp);
+             if (notifierErrorAtStamp !== null && s >= Math.abs(notifierErrorAtStamp)) throw notifierError;
+          } else {
+             if (notifierError) throw notifierError;
+          }
+
+          // Check if we should effectively open gate based on stamps
+          // If notifier opened at Stamp X, and Source value is at Stamp Y > X, then we should emit.
+          
+          let effectivelyCanEmit = canEmit;
+          if (stamp !== undefined && stamp > 0 && openedAtStamp !== null) {
+              effectivelyCanEmit = stamp > openedAtStamp;
+          } 
+
+          if (effectivelyCanEmit && !canEmit && !gateClosedWithoutEmit) {
+               canEmit = true;
+               notifierEmitted = true;
+               // Flush buffer
+               if (buffer.length > 0) {
+                 for (const entry of buffer) {
+                       let value = entry.value;
+                       if (entry.meta) {
+                           setIteratorMeta(
+                               outputIterator,
+                               { valueId: entry.meta.valueId },
+                               entry.meta.operatorIndex,
+                               entry.meta.operatorName
+                           );
+                           value = setValueMeta(value, { valueId: entry.meta.valueId }, entry.meta.operatorIndex, entry.meta.operatorName);
+                       }
+                       output.next(value);
+                 }
+                 buffer.length = 0;
+               }
+          }
+          
+          if (effectivelyCanEmit) {
+            let outputValue = value;
+            if (meta) {
+              setIteratorMeta(
+                outputIterator,
+                { valueId: meta.valueId },
+                meta.operatorIndex,
+                meta.operatorName
+              );
+              outputValue = setValueMeta(outputValue, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+            }
+            output.next(outputValue);
           } else if (!gateClosedWithoutEmit) {
-            buffer.push(value);
+            buffer.push({ value, meta });
           }
         }
       } catch (err) {
@@ -83,6 +221,6 @@ export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

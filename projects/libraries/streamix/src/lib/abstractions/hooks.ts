@@ -1,3 +1,5 @@
+import { type Operator } from "./operator";
+
 /**
  * Context object passed to `onPipeStream` runtime hook.
  *
@@ -14,11 +16,14 @@ export type PipeStreamHookContext = {
   /** Unique identifier of the subscription */
   subscriptionId: string;
 
+  /** Traced outer value id associated with an inner stream */
+  parentValueId?: string;
+
   /** Source async iterator before operators are applied */
   source: AsyncIterator<any>;
 
   /** List of operators applied to the stream */
-  operators: any[];
+  operators: Operator<any, any>[];
 };
 
 /**
@@ -79,6 +84,29 @@ export type StreamRuntimeHooks = {
  * without introducing hard dependencies.
  */
 const HOOKS_KEY = "__STREAMIX_RUNTIME_HOOKS__";
+export type IteratorMetaKind = "transform" | "collapse" | "expand";
+export type IteratorMetaTag = {
+  valueId: string;
+  kind?: IteratorMetaKind;
+  inputValueIds?: string[];
+};
+
+const ITERATOR_META = new WeakMap<
+  AsyncIterator<any>,
+  { valueId: string; operatorIndex: number; operatorName: string; kind?: IteratorMetaKind; inputValueIds?: string[] }
+>();
+
+/**
+ * Per-value metadata storage.
+ * Maps value objects to their associated trace metadata.
+ * For primitives, we use a symbol property to attach metadata.
+ */
+const VALUE_META = new WeakMap<
+  object,
+  { valueId: string; operatorIndex: number; operatorName: string; kind?: IteratorMetaKind; inputValueIds?: string[] }
+>();
+
+export const VALUE_META_SYMBOL = Symbol('__streamix_value_meta__');
 
 /**
  * Monotonically increasing counters for ID generation.
@@ -126,4 +154,163 @@ export function registerRuntimeHooks(hooks: StreamRuntimeHooks): void {
  */
 export function getRuntimeHooks(): StreamRuntimeHooks | null {
   return ((globalThis as any)[HOOKS_KEY] ?? null) as StreamRuntimeHooks | null;
+}
+
+/**
+ * Associates the latest traced metadata with an iterator.
+ *
+ * Used to connect operator execution with outer values
+ * without mutating iterator results.
+ */
+export function setIteratorMeta(
+  iterator: AsyncIterator<any>,
+  meta: IteratorMetaTag,
+  operatorIndex: number,
+  operatorName: string
+): void {
+  const entry: {
+    valueId: string;
+    operatorIndex: number;
+    operatorName: string;
+    kind?: IteratorMetaKind;
+    inputValueIds?: string[];
+  } = {
+    valueId: meta.valueId,
+    operatorIndex,
+    operatorName,
+  };
+
+  if (meta.kind !== undefined) entry.kind = meta.kind;
+  if (meta.inputValueIds !== undefined) entry.inputValueIds = meta.inputValueIds;
+
+  ITERATOR_META.set(iterator, entry);
+}
+
+/**
+ * Retrieves the latest traced metadata for an iterator.
+ */
+export function getIteratorMeta(
+  iterator: AsyncIterator<any>
+):
+  | {
+      valueId: string;
+      operatorIndex: number;
+      operatorName: string;
+      kind?: IteratorMetaKind;
+      inputValueIds?: string[];
+    }
+  | undefined {
+  return ITERATOR_META.get(iterator);
+}
+
+/**
+ * Associates metadata with a specific value.
+ * Works for both objects (via WeakMap) and primitives (via symbol property).
+ */
+export function setValueMeta(
+  value: any,
+  meta: IteratorMetaTag,
+  operatorIndex: number,
+  operatorName: string
+): any {
+  const entry: {
+    valueId: string;
+    operatorIndex: number;
+    operatorName: string;
+    kind?: IteratorMetaKind;
+    inputValueIds?: string[];
+  } = {
+    valueId: meta.valueId,
+    operatorIndex,
+    operatorName,
+  };
+
+  if (meta.kind !== undefined) entry.kind = meta.kind;
+  if (meta.inputValueIds !== undefined) entry.inputValueIds = meta.inputValueIds;
+
+  // For objects, use WeakMap
+  if (value !== null && typeof value === 'object') {
+    VALUE_META.set(value, entry);
+    return value;
+  } else if (value !== null && value !== undefined) {
+    // For primitives, wrap in an object with marker symbol
+    const wrapper = { [VALUE_META_SYMBOL]: value };
+    VALUE_META.set(wrapper, entry);
+    return wrapper;
+  }
+  return value;
+}
+
+/**
+ * Retrieves metadata associated with a specific value.
+ */
+export function getValueMeta(
+  value: any
+):
+  | {
+      valueId: string;
+      operatorIndex: number;
+      operatorName: string;
+      kind?: IteratorMetaKind;
+      inputValueIds?: string[];
+    }
+  | undefined {
+  // For objects (including wrapped primitives), check WeakMap
+  if (value !== null && typeof value === 'object') {
+    return VALUE_META.get(value);
+  }
+  return undefined;
+}
+
+/**
+ * Checks if a value is a wrapped primitive.
+ */
+export function isWrappedPrimitive(value: any): boolean {
+  return value !== null && typeof value === 'object' && VALUE_META_SYMBOL in value;
+}
+
+/**
+ * Unwraps a primitive value from its metadata wrapper.
+ */
+export function unwrapPrimitive(value: any): any {
+  if (isWrappedPrimitive(value)) {
+    return value[VALUE_META_SYMBOL];
+  }
+  return value;
+}
+
+/**
+ * Applies any registered `onPipeStream` patch to an iterator pipeline.
+ *
+ * This helper is useful for wrapping inner streams that are consumed
+ * via async iterators and do not automatically trigger `onPipeStream`.
+ */
+export function applyPipeStreamHooks(
+  ctx: PipeStreamHookContext
+): AsyncIterator<any> {
+  const hooks = getRuntimeHooks();
+  let iterator: AsyncIterator<any> = ctx.source;
+  let ops = ctx.operators;
+  let finalWrap: ((it: AsyncIterator<any>) => AsyncIterator<any>) | undefined;
+
+  if (hooks?.onPipeStream) {
+    const patch = hooks.onPipeStream(ctx);
+    if (patch?.source) iterator = patch.source;
+    if (patch?.operators) ops = patch.operators;
+    if (patch?.final) finalWrap = patch.final;
+  }
+
+  for (const op of ops) {
+    iterator = op.apply(iterator);
+  }
+
+  if (finalWrap) {
+    iterator = finalWrap(iterator);
+  }
+
+  if (typeof (iterator as any)[Symbol.asyncIterator] !== "function") {
+    (iterator as any)[Symbol.asyncIterator] = () => iterator;
+  }
+
+  return iterator;
 }

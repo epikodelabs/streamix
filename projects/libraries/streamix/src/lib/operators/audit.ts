@@ -1,4 +1,4 @@
-import { createOperator, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -18,53 +18,61 @@ import { createSubject } from '../subjects';
 export const audit = <T = any>(duration: MaybePromise<number>) =>
   createOperator<T, T>('audit', function (this: Operator, source) {
     const output = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
 
-    let lastResult: IteratorResult<T> | undefined = undefined;
-    let timerId: ReturnType<typeof setTimeout> | undefined = undefined;
-    let resolvedDuration: number | undefined = undefined;
+    let bufferedResult: IteratorResult<T> | undefined;
+
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+    let resolvedDuration: number | undefined;
+    let completed = false;
 
     const flush = () => {
-      if (lastResult !== undefined) {
-        output.next(lastResult.value!);
-        lastResult = undefined;
-      }
+      if (!bufferedResult) return;
+
+      const value = bufferedResult.value!;
+      // Emit value directly - tracer tracks it via inputQueue
+      output.next(value);
+
+      bufferedResult = undefined;
       timerId = undefined;
+
+      if (completed) {
+        output.complete();
+      }
     };
 
     const startTimer = () => {
-      if (resolvedDuration === undefined) {
-        return;
-      }
-      timerId = setTimeout(() => flush(), resolvedDuration);
+      if (resolvedDuration === undefined || timerId !== undefined) return;
+      timerId = setTimeout(flush, resolvedDuration);
     };
 
     (async () => {
       try {
-        resolvedDuration = isPromiseLike(duration) ? await duration : duration;
+        resolvedDuration = isPromiseLike(duration)
+          ? await duration
+          : duration;
 
         while (true) {
           const result = await source.next();
 
-          // Stream completed
           if (result.done) {
-            if (lastResult !== undefined) {
-              flush();
-            }
+            completed = true;
+            if (bufferedResult) flush();
             break;
           }
 
-          // Add new value to pending set and buffer it
-          lastResult = result;
+          getIteratorMeta(source);
 
-          // Start a new timer if not active
-          if (timerId === undefined) {
-            startTimer();
-          }
+          // ⚠️ Replace buffered value → mark previous as filtered
+          bufferedResult = result;
+
+          // Timer starts only once per window
+          startTimer();
         }
       } catch (err) {
         output.error(err);
       } finally {
-        if (timerId !== undefined) {
+        if (timerId) {
           clearTimeout(timerId);
           timerId = undefined;
         }
@@ -72,5 +80,5 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });

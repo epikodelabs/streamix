@@ -43,7 +43,7 @@ export interface SeizedWorker<T = any, R = T> {
  *
  * @template T The type of data sent to the worker.
  * @template R The type of data returned from the worker.
- * @param {MaybePromise<Coroutine<T, R>>} task The coroutine instance managing the worker pool.
+ * @param {Coroutine<T, R>} task The coroutine instance managing the worker pool.
  * @param {(message: CoroutineMessage) => MaybePromise<void>} onMessage A callback function to handle messages received from the seized worker.
  * @param {(error: Error) => MaybePromise<void>} onError A callback function to handle errors originating from the seized worker.
  * @returns {Stream<SeizedWorker<T, R>>} A stream that yields a single `SeizedWorker` object.

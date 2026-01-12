@@ -1,4 +1,4 @@
-import { createOperator, isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { createSubject, type Subject } from "../subjects";
 
@@ -16,47 +16,67 @@ import { createSubject, type Subject } from "../subjects";
 export function debounce<T = any>(duration: MaybePromise<number>) {
   return createOperator<T, T>("debounce", function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
-    let timeoutId: ReturnType<typeof setTimeout> | undefined = undefined;
-    let latestResult: IteratorResult<T> | undefined = undefined;
-    let isCompleted = false;
-    let resolvedDuration: number | undefined = undefined;
+    const outputIterator = eachValueFrom(output);
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let latestResult: (IteratorResult<T> & { meta?: ReturnType<typeof getIteratorMeta> }) | undefined;
+
+    let resolvedDuration: number | undefined;
+    let completed = false;
 
     const flush = () => {
-      if (latestResult !== undefined) {
-        // Emit the latest value
-        output.next(latestResult.value!);
+      if (!latestResult) return;
 
-        latestResult = undefined;
+      const value = latestResult.value!;
+      
+      if (latestResult.meta) {
+        setIteratorMeta(
+          outputIterator,
+          latestResult.meta,
+          latestResult.meta.operatorIndex,
+          latestResult.meta.operatorName
+        );
       }
+
+      // Emit value directly - tracer tracks it via inputQueue
+      output.next(value);
+
+      latestResult = undefined;
       timeoutId = undefined;
 
-      // If the source has completed, complete the output stream
-      if (isCompleted) {
+      if (completed) {
         output.complete();
       }
     };
 
     (async () => {
       try {
-        resolvedDuration = isPromiseLike(duration) ? await duration : duration;
+        resolvedDuration = isPromiseLike(duration)
+          ? await duration
+          : duration;
 
         while (true) {
           const result = await source.next();
 
           if (result.done) {
-            isCompleted = true;
+            completed = true;
 
-            // If a pending value exists, flush it before completing
-            if (timeoutId === undefined && latestResult !== undefined) {
+            if (latestResult && timeoutId === undefined) {
               flush();
             }
             break;
           }
 
-          latestResult = result;
+          // 🔍 Extract tracing metadata of incoming value
+          const meta = getIteratorMeta(source);
 
-          // Reset the timer
-          if (timeoutId !== undefined) clearTimeout(timeoutId);
+          // ⚠️ Supersede previous pending value
+          latestResult = result;
+          if (meta) {
+            (latestResult as any).meta = meta;
+          }
+
+          if (timeoutId) clearTimeout(timeoutId);
           if (resolvedDuration !== undefined) {
             timeoutId = setTimeout(flush, resolvedDuration);
           }
@@ -64,18 +84,18 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
       } catch (err) {
         output.error(err);
       } finally {
-        isCompleted = true;
-        // Clear pending timer
-        if (timeoutId !== undefined) {
+        completed = true;
+
+        if (timeoutId) {
           clearTimeout(timeoutId);
           timeoutId = undefined;
         }
-        // Flush any remaining latest value
-        if (latestResult !== undefined) flush();
+
+        if (latestResult) flush();
         output.complete();
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

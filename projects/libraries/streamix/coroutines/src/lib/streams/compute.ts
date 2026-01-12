@@ -1,4 +1,5 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "@epikodelabs/streamix";
+import { createStream, isPromiseLike, type Stream } from "@epikodelabs/streamix";
+import { MaybePromise } from "rollup";
 import type { Coroutine } from "../operators";
 
 /**
@@ -11,17 +12,15 @@ import type { Coroutine } from "../operators";
  * The stream will emit a single value and then complete.
  *
  * @template T The type of the result from the computation.
- * @param {Coroutine | PromiseLike<Coroutine>} task The coroutine instance managing the worker pool.
- * @param {any | PromiseLike<any>} params The data to send to the worker for computation.
+ * @param {Coroutine} task The coroutine instance managing the worker pool.
+ * @param {MaybePromise<any>} params The data to send to the worker for computation.
  * @returns {Stream<T>} A new stream that emits the result of the computation.
  */
-export function compute<T = any>(task: MaybePromise<Coroutine>, params: MaybePromise<any>): Stream<T> {
+export function compute<T = any>(task: Coroutine, params: MaybePromise<any>): Stream<T> {
   return createStream<T>("compute", async function* () {
-    const resolvedTask = isPromiseLike(task) ? await task : task;
     const resolvedParams = isPromiseLike(params) ? await params : params;
-
     // Use processTask to handle worker acquisition, messaging, and releasing automatically
-    const result = await resolvedTask.processTask(resolvedParams);
+    const result = await task.processTask(resolvedParams);
     yield result;
   });
 }

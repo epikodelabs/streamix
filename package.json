@@ -1,13 +1,13 @@
 {
   "name": "streamix",
-  "version": "2.0.28",
+  "version": "2.0.29",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "jasmine": "npx ts-test-runner --headless",
-    "jasmine:coverage": "npx ts-test-runner --headless --coverage",
+    "jasmine": "testify --headless --browser node",
+    "jasmine:coverage": "testify --headless --browser node --coverage",
     "minify": "node terser.mjs && npx dts-bundler",
     "clean": "eslint --config eslint.config.js --fix",
     "docs:generate": "node scripts/copy-vitepress-config.mjs && typedoc --plugin typedoc-plugin-markdown --out dist/api",
@@ -33,10 +33,10 @@
     "@angular-devkit/build-angular": "18.0.1",
     "@angular/cli": "18.0.1",
     "@angular/compiler-cli": "18.0.0",
+    "@epikodelabs/testify": "file:dependencies/epikodelabs-testify-1.0.16.tgz",
     "@types/jasmine": "5.1.8",
     "@types/markdown-it": "13.0.9",
     "@types/node": "24.2.0",
-    "jasmine": "5.9.0",
     "ng-packagr": "18.0.0",
     "prettier": "3.7.4",
     "rollup": "4.52.4",
@@ -49,13 +49,5 @@
     "vitepress": "1.6.4"
   },
   "type": "module",
-  "sideEffects": false,
-  "exports": {
-    ".": "./projects/libraries/streamix/src/lib/index.ts",
-    "./coroutine": "./projects/libraries/streamix/coroutine/src/lib/index.ts",
-    "./http": "./projects/libraries/streamix/http/src/lib/index.ts",
-    "./tracing": "./projects/libraries/streamix/tracing/src/lib/index.ts"
-  }
+  "sideEffects": false
 }
-
-

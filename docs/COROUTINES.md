@@ -9,7 +9,7 @@ Imagine you're building a photo editor, data analyzer, or game. When users uploa
 - ⛔ UI becomes unresponsive
 - 🖱️ Buttons don't click
 - 🧊 Animations freeze
--  Users think the app crashed
+- 😬 Users think the app crashed
 
 This happens because JavaScript normally runs everything on one thread - like having one person handle all tasks in a restaurant.
 
@@ -353,7 +353,5 @@ Your users will thank you for keeping things responsive, and you'll wonder how y
 ---
 
 *Ready to make your heavy tasks feel light? Install Streamix and start with your first coroutine today. 🚀*
-
-
 
 

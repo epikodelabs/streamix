@@ -45,7 +45,8 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
     if (typeof document === "undefined") return;
 
     document.addEventListener("visibilitychange", emit);
-    emit(); // initial value
+    
+    emit();
   };
 
   const stop = () => {
@@ -62,14 +63,19 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: DocumentVisibilityState) => void) | Receiver<DocumentVisibilityState>
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      start();
-    }
+    scheduleStart();
 
     const o = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {
