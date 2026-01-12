@@ -3,7 +3,7 @@
 
 ### 2.0.29
 
-Rewrote subjects internals to guard async-iterator backpressure and avoid races; deferred iterator processing to avoid notifier/source races. Fixed several unsubscribe and race issues in subject/operator chains that caused flaky tests.
+Rewrote subjects internals to guard async-iterator backpressure and avoid races; all subjects are sync; deferred iterator processing to avoid notifier/source races. Fixed several unsubscribe and race issues in subject/operator chains that caused flaky tests.
 
 ## 2.0.28
 
