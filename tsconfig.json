@@ -21,6 +21,7 @@
     "useDefineForClassFields": false,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "skipLibCheck": true,
     "lib": [
       "ESNext",
       "dom"

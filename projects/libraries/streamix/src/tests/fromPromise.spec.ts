@@ -128,7 +128,7 @@ describe('fromPromise', () => {
     let capturedSignal: AbortSignal | undefined;
     const emittedValues: any[] = [];
 
-    const stream = fromPromise<string>((signal) => {
+    const stream = fromPromise<string>((signal: AbortSignal) => {
       capturedSignal = signal;
 
       return new Promise((resolve, reject) => {

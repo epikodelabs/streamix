@@ -84,7 +84,7 @@ describe('delay', () => {
     const testStream = from([42]);
     const delayPromise = Promise.resolve<number | undefined>(undefined);
 
-    const delayedStream = testStream.pipe(delay(delayPromise));
+    const delayedStream = testStream.pipe(delay(delayPromise as any));
     const startTime = Date.now();
 
     delayedStream.subscribe({

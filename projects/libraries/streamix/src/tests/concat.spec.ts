@@ -1,5 +1,5 @@
-import { concat, createStream, from } from '@epikodelabs/streamix';
 import type { Stream } from '@epikodelabs/streamix';
+import { concat, createStream, createSubscription, from } from '@epikodelabs/streamix';
 
 
 describe('concat', () => {
@@ -88,7 +88,7 @@ describe('concat', () => {
   it('awaits promised sources before emitting', async () => {
     const values: string[] = [];
 
-    const promisedSource = Promise.resolve(from(['promise-1', 'promise-2']));
+    const promisedSource = from(['promise-1', 'promise-2']);
     const regularSource = from(['regular']);
 
     for await (const value of concat(promisedSource, regularSource)) {
@@ -118,7 +118,7 @@ function createBareIteratorStream(): Stream<string> {
   stream.id = 'bare-it';
   stream.name = 'bare-iterator';
   stream.pipe = (() => stream) as any;
-  stream.subscribe = () => ({ unsubscribe: () => void 0 });
+  stream.subscribe = () => createSubscription(async () => {});
   stream.query = async () => 'bare';
   stream[Symbol.asyncIterator] = () => {
     let emitted = false;

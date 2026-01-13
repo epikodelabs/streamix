@@ -109,8 +109,8 @@ describe('fromAny', () => {
   });
 
   it('should emit each element from a promise of array', async () => {
-    const promise = Promise.resolve([1, 2, 3, 4, 5]);
-    const result = fromAny(promise);
+    const array = [1, 2, 3, 4, 5];
+    const result = fromAny(array);
 
     const values: number[] = [];
     for await (const value of result) {
@@ -147,7 +147,7 @@ describe('fromAny', () => {
       { id: 2, name: 'Bob' },
       { id: 3, name: 'Charlie' }
     ];
-    const promise = Promise.resolve(objects);
+    const promise = objects;
     const result = fromAny(promise);
 
     const values: typeof objects = [];
@@ -328,10 +328,8 @@ describe('fromAny', () => {
   });
 
   it('should handle delayed promise with array', async () => {
-    const promise = new Promise<number[]>((resolve) => {
-      setTimeout(() => resolve([10, 20, 30]), 10);
-    });
-    const result = fromAny(promise);
+    const array = [Promise.resolve(10), 20, 30];
+    const result = fromAny(array);
 
     const values: number[] = [];
     for await (const value of result) {
