@@ -41,7 +41,7 @@ describe('iif', () => {
   it('should resolve asynchronous conditions and promise-based streams', (done) => {
     const condition = () => Promise.resolve(false);
     const trueStream = from(['true-case']);
-    const falseStream = Promise.resolve(from(['false-case']));
+    const falseStream = Promise.resolve('false-case');
 
     const result: string[] = [];
     const subscription = iif(condition, trueStream, falseStream).subscribe({

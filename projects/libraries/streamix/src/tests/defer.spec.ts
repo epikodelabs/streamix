@@ -79,7 +79,7 @@ describe('defer', () => {
   });
 
   it('supports promised factory results', async () => {
-    const stream = defer(() => Promise.resolve(from(['defered', 'values'])));
+    const stream = defer(() => from(['defered', 'values']));
     const results: string[] = [];
 
     for await (const value of stream) {

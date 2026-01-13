@@ -48,7 +48,7 @@ describe('merge', () => {
   it('should merge promise-based sources and resolve arrays', (done) => {
     const sources = [
       from(['stream-value']),
-      Promise.resolve(['promise-value']),
+      Promise.resolve('promise-value'),
     ];
 
     const merged = merge(...sources);

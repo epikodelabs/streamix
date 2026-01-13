@@ -112,7 +112,7 @@ idescribe('onMutation', () => {
           expect(mutations.some(m => m.attributeName === 'data-test')).toBeTrue();
           subscription.unsubscribe();
           done();
-        } catch (error) {
+        } catch (error: any) {
           done.fail(error);
         }
       },

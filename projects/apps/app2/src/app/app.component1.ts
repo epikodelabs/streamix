@@ -1,10 +1,10 @@
-import { coroutine, CoroutineMessage, seize, SeizedWorker } from '@epikodelabs/streamix';
 import { Component, OnInit } from '@angular/core';
+import { coroutine, CoroutineMessage, seize, SeizedWorker } from '@epikodelabs/streamix/coroutines';
 
 // --- Worker Function that runs the timer logic ---
 // This is a single, stateful function designed to run in a web worker.
 // Worker function for use in Coroutine
-import { WorkerUtils } from '@epikodelabs/streamix';
+import { WorkerUtils } from '@epikodelabs/streamix/coroutines';
 
 /**
  * A main task function that runs a countdown timer inside a Web Worker.
