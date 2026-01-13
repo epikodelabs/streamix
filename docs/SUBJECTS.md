@@ -10,21 +10,20 @@ Unlike typical streams that create a new execution for each subscriber, a Subjec
 **No Replay**  
 Subscribers only receive values emitted after they subscribe. There's no built-in replay buffer—late subscribers start fresh from the moment they connect.
 
-**Global Backpressure**  
-The Subject respects the pace of *all* its subscribers. If any subscriber returns a Promise (indicating async work), the Subject waits for that work to complete before emitting the next value. This prevents overwhelming slow consumers.
+**Per-receiver Backpressure (not global)**  
+The Subject does not wait for all subscribers to finish async work before emitting the next value. Instead, backpressure is handled at the *receiver* level: if a receiver's `next` handler returns a Promise, that receiver buffers subsequent values for itself until its async work completes. The Subject broadcasts values immediately to all subscribers and does not `await` their Promises collectively.
 
-## ⏳ Serialized Emission Queue
+## ⏳ Emission stamping and delivery semantics
 
-All producer operations (`next`, `complete`, `error`) are queued and processed sequentially. This design eliminates race conditions and ensures predictable order of operations.
+Producer operations (`next`, `complete`, `error`) are stamped and delivered in the emission context, which provides a predictable ordering for consumers. However, the Subject does not maintain a single global async queue that waits for every subscriber; stamping records an emission context used by internal utilities and iterators to preserve ordering and avoid re-entrancy issues.
 
-**How it works:**
-1. Each call to `next()`, `complete()`, or `error()` enqueues a task
-2. The queue drains one task at a time in FIFO order
-3. For each `next` emission, the Subject delivers the value to all active subscribers
-4. If any subscriber returns a Promise, the Subject awaits `Promise.all()` before continuing
-5. Terminal events (`complete`, `error`) are processed through the same queue, ensuring reliable delivery
+How it works:
+- Each emission is assigned an emission stamp to mark its context
+- The Subject broadcasts the value to all active subscribers immediately (synchronously within the emission context)
+- Individual receivers may buffer and resume their own processing if their handler returns a Promise, but the Subject itself does not await all receivers
+- Terminal events (`complete`, `error`) are dispatched to subscribers in the same stamped context
 
-This serialization guarantees that even if multiple producers call `next()` concurrently, emissions arrive at subscribers in a well-defined order without interleaving.
+This provides ordered delivery while keeping backpressure management localized to receivers rather than elevating it to a global Subject-level throttle.
 
 ## 🔌 Subscription Lifecycle
 
@@ -54,10 +53,10 @@ for await (const value of subject) {
 The iterator doesn't register as a subscriber until you call `next()` for the first time. This defers work until you actually start consuming values.
 
 **Backpressure Participation**  
-Once attached, the iterator actively participates in backpressure. The Subject won't emit the next value until the iterator signals readiness by requesting another value. This creates natural flow control—the Subject moves at the pace of iteration.
+The async iterator bridges push and pull styles by buffering values and exposing them via the iterator protocol. The iterator controls its own consumption (it will queue values when the consumer is slow), but the Subject itself does not pause globally waiting for the iterator. In short, the iterator participates in flow control from its own side; the Subject continues to emit to all subscribers.
 
 **Buffering**  
-If the Subject emits while the iterator isn't actively awaiting, values are buffered internally. This prevents data loss while maintaining backpressure semantics.
+If the Subject emits while the iterator isn't actively awaiting, values are buffered by the iterator implementation to avoid data loss. The iterator's buffering and stamping preserve ordering for the consuming loop.
 
 **Clean Termination**  
 - Breaking from the loop or calling `return()` detaches the iterator without completing the Subject
@@ -77,13 +76,13 @@ An async method that resolves with the next emitted value. Essentially a one-sho
 Errors propagate through the same serialized queue as values:
 
 **Receiver Errors**  
-If any receiver throws an error during emission, the Subject catches it, transitions to an errored state, and notifies all active subscribers with the error. The Subject becomes terminal—no further emissions are possible.
+Errors thrown inside a receiver are handled at the receiver level: the receiver's `error` handler is invoked and that receiver is completed. Such receiver-local errors do *not* automatically transition the Subject itself into an errored or terminal state.
 
 **Explicit Errors**  
-Calling `error(err)` explicitly transitions the Subject to an errored state, notifying all subscribers and making the Subject terminal.
+Calling `error(err)` on the Subject explicitly transitions the Subject to an errored (terminal) state and notifies all subscribers.
 
 **Late Subscriber Errors**  
-Subscribers who join after an error immediately receive the error notification through their `error()` method.
+If a subscriber attaches after the Subject has been explicitly errored, it receives the terminal error immediately via its `error()` handler.
 
 ## 🎭 Usage Patterns
 
