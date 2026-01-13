@@ -124,8 +124,7 @@ export function createAsyncGenerator<T = any>(
   let rejectNext: ((error: any) => void) | null = null;
   let completed = false;
   let terminalError: any = null;
-  const queue: Array<{ value: T; stamp: number; resolve?: () => void }> = [];
-  let ackResolver: (() => void) | null = null;
+  const queue: Array<{ value: T; stamp: number }> = [];
 
   let subscription: Subscription | undefined;
   let pendingUnsubscribe = false;
@@ -157,8 +156,6 @@ export function createAsyncGenerator<T = any>(
     __hasBufferedValues?: () => boolean;
   } = {
     async next(): Promise<IteratorResult<T>> {
-      if (ackResolver) { const r = ackResolver; ackResolver = null; r(); }
-
       if (terminalError) throw terminalError;
 
       ensureSubscription();
@@ -166,7 +163,6 @@ export function createAsyncGenerator<T = any>(
 
       if (queue.length > 0) {
         const item = queue.shift()!;
-        if (item.resolve) ackResolver = item.resolve;
         setIteratorEmissionStamp(iterator as any, item.stamp);
         return { done: false, value: item.value };
       }
@@ -182,7 +178,6 @@ export function createAsyncGenerator<T = any>(
     },
 
     async return(value?: any): Promise<IteratorResult<T>> {
-      if (ackResolver) { const r = ackResolver; ackResolver = null; r(); }
       completed = true;
       if (resolveNext) {
         const r = resolveNext;
@@ -195,7 +190,6 @@ export function createAsyncGenerator<T = any>(
     },
 
     async throw(err?: any): Promise<IteratorResult<T>> {
-      if (ackResolver) { const r = ackResolver; ackResolver = null; r(); }
       terminalError = err;
       if (rejectNext) {
         const r = rejectNext;
@@ -213,8 +207,6 @@ export function createAsyncGenerator<T = any>(
   };
 
   iterator.__tryNext = (): IteratorResult<T> | null => {
-    if (ackResolver) { const r = ackResolver; ackResolver = null; r(); }
-
     if (terminalError) throw terminalError;
 
     ensureSubscription();
@@ -223,7 +215,6 @@ export function createAsyncGenerator<T = any>(
 
     if (queue.length > 0) {
       const item = queue.shift()!;
-      if (item.resolve) ackResolver = item.resolve;
       setIteratorEmissionStamp(iterator as any, item.stamp);
       return { done: false, value: item.value };
     }
@@ -245,21 +236,15 @@ export function createAsyncGenerator<T = any>(
       const baseStamp = currentStamp ?? nextEmissionStamp();
       const stamp = currentStamp === null ? -baseStamp : baseStamp;
 
-      let resolve!: () => void;
-      const p = new Promise<void>(r => resolve = r);
-
       if (resolveNext) {
         setIteratorEmissionStamp(iterator as any, stamp);
         const r = resolveNext;
         resolveNext = null;
         rejectNext = null;
-        ackResolver = resolve;
         r({ done: false, value });
       } else {
-        queue.push({ value, stamp, resolve });
+        queue.push({ value, stamp });
       }
-
-      return p;
     },
 
     error(err: any) {
