@@ -1,5 +1,10 @@
 # Changelog
 
+
+### 2.0.29
+
+Rewrote subjects internals to guard async-iterator backpressure and avoid races; all subjects are sync; deferred iterator processing to avoid notifier/source races. Fixed several unsubscribe and race issues in subject/operator chains that caused flaky tests.
+
 ## 2.0.28
 
 Buffer and subject internals were reworked: synchronization removed in favor of scheduler-queued methods, `ReplaySubject` now uses the scheduler, and `shareReplay` aligns with strict backpressure and async delivery. Lock and semaphore are deprecated. Added edge-case tests for subjects and buffers, with various type/config/docs corrections and cleanup.
