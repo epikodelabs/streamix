@@ -1,177 +1,106 @@
 import {
   createOperator,
-  Event,
   getIteratorEmissionStamp,
   nextEmissionStamp,
   setIteratorEmissionStamp,
   type Operator,
-  type Stream
+  type Stream,
 } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
-import { createSubject } from "../subjects";
+import { fromAny } from "../converters";
 
-/**
- * Complete the output when a notifier emits.
- *
- * `takeUntil` forwards source values until the supplied `notifier` emits its
- * first value. When the notifier emits (or errors), the operator will stop
- * forwarding further source values and will complete (or error) the output
- * subscription at the appropriate logical boundary determined by emission
- * stamps.
- *
- * Key behaviors:
- * - Ordering and stamps: both source values and notifier signals carry a
- *   monotonic `stamp`. The operator uses stamp comparisons to decide whether a
- *   particular source value should be emitted (only values with stamps strictly
- *   less than the notifier's stamp are forwarded).
- * - Notifier error: if the notifier errors, that error is propagated to the
- *   output and the subscription is terminated.
- * - Notifier completion without emission: completing the notifier without any
- *   emission does not by itself stop the source; `takeUntil` only reacts to an
- *   actual `notifierEmit` event (or error).
- *
- * Typical use-cases:
- * - Stop processing a stream once an external cancellation or signal occurs.
- * - Implement timeouts or cancellation by piping a timer/abort-notifier.
- *
- * @template T Source/output value type.
- * @template R Notifier value type (ignored for payload).
- * @param notifier A `Stream<R>` or `Promise<R>` whose first emission triggers completion.
- * @returns An `Operator<T, T>` that ends the output when the notifier emits.
- */
-export function takeUntil<T = any, R = any>(
-  notifier: Stream<R> | Promise<R>
+export function takeUntil<T = any>(
+  notifier: Stream<any> | Promise<any>
 ): Operator<T, T> {
-  return createOperator<T, T>("takeUntil", function (
-    this: Operator,
-    source: AsyncIterator<T>
-  ) {
-    const output = createSubject<T>();
-    const outIt = eachValueFrom(output);
+  return createOperator<T, T>("takeUntil", (sourceIt) => {
+    const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
 
-    /* ---------------------------------------------------------------------- */
-    /* Shared queue                                                            */
-    /* ---------------------------------------------------------------------- */
+    let gateStamp: number | null = null;   // ONLY for notifier emit
+    let notifierError: any = null;
 
-    const queue: Event<T>[] = [];
-    let wake: (() => void) | null = null;
+    let pending: { value: T; stamp: number } | null = null;
+    let throwAfterPending = false;
 
-    const enqueue = (e: Event<T>) => {
-      queue.push(e);
-      wake?.();
-      wake = null;
+    const stampOf = (it: any) => {
+      const s = getIteratorEmissionStamp(it);
+      return typeof s === "number" ? s : nextEmissionStamp();
     };
 
-    const dequeue = async (): Promise<Event<T>> => {
-      while (queue.length === 0) {
-        await new Promise<void>((r) => (wake = r));
-      }
-      queue.sort((a, b) => Math.abs(a.stamp) - Math.abs(b.stamp));
-      return queue.shift()!;
-    };
-
-    /* ---------------------------------------------------------------------- */
-    /* Source producer                                                         */
-    /* ---------------------------------------------------------------------- */
-
+    // Observe notifier exactly once
     (async () => {
       try {
-        while (true) {
-          const r = await source.next();
-          const stamp =
-            getIteratorEmissionStamp(source) ?? nextEmissionStamp();
+        const r = await notifierIt.next();
+        const stamp = stampOf(notifierIt);
 
-          if (r.done) {
-            enqueue({ kind: "sourceDone", stamp });
-            break;
-          }
-
-          enqueue({ kind: "source", value: r.value, stamp });
+        if (!r.done) {
+          // notifier EMIT → gate + cancel source
+          gateStamp = stamp;
+          try { sourceIt.return?.(); } catch {}
         }
       } catch (err) {
-        enqueue({
-          kind: "notifierError",
-          error: err,
-          stamp: nextEmissionStamp(),
-        });
+        // notifier ERROR → NO source cancellation
+        notifierError = err;
       }
     })();
 
-    /* ---------------------------------------------------------------------- */
-    /* Notifier producer                                                       */
-    /* ---------------------------------------------------------------------- */
-
-    const notifierSub = fromAny(notifier).subscribe({
-      next() {
-        enqueue({ kind: "notifierEmit", stamp: nextEmissionStamp() });
-      },
-      error(err) {
-        enqueue({
-          kind: "notifierError",
-          error: err,
-          stamp: nextEmissionStamp(),
-        });
-      },
-      complete() {
-        /* ignored */
-      },
-    });
-
-    /* ---------------------------------------------------------------------- */
-    /* Consumer (ONLY authority)                                               */
-    /* ---------------------------------------------------------------------- */
-
-    (async () => {
-      let stopAtStamp: number | null = null;
-      let notifierError: any = null;
-
-      try {
-        while (true) {
-          const e = await dequeue();
-
-          switch (e.kind) {
-            case "source": {
-              if (
-                stopAtStamp !== null &&
-                Math.abs(e.stamp) >= Math.abs(stopAtStamp)
-              ) {
-                throw "__STOP__";
-              }
-
-              setIteratorEmissionStamp(outIt as any, e.stamp);
-              output.next(e.value);
-              break;
-            }
-
-            case "notifierEmit": {
-              stopAtStamp ??= e.stamp;
-              throw "__STOP__";
-            }
-
-            case "notifierError": {
-              notifierError = e.error;
-              stopAtStamp ??= e.stamp;
-              throw "__STOP__";
-            }
-
-            case "sourceDone":
-              throw "__STOP__";
-          }
+    const iterator: AsyncIterator<T> = {
+      async next() {
+        // 1) deliver buffered value
+        if (pending) {
+          const { value, stamp } = pending;
+          pending = null;
+          setIteratorEmissionStamp(iterator as any, stamp);
+          return { done: false, value };
         }
-      } catch (err) {
-        if (err !== "__STOP__") {
-          output.error(err);
-          return;
+
+        // 2) throw notifier error after pending value
+        if (throwAfterPending) {
+          throwAfterPending = false;
+          throw notifierError;
         }
-      } finally {
-        notifierSub.unsubscribe();
-        source.return?.();
 
-        if (notifierError) output.error(notifierError);
-        else output.complete();
-      }
-    })();
+        // 3) pull source
+        const r = await sourceIt.next();
+        const stamp = stampOf(sourceIt);
 
-    return outIt;
+        if (r.done) {
+          if (notifierError) throw notifierError;
+          return { done: true, value: undefined };
+        }
+
+        // 4) gate ONLY on notifier emit
+        if (gateStamp !== null && stamp >= gateStamp) {
+          return { done: true, value: undefined };
+        }
+
+        // 5) notifier errored AFTER pull → yield value, then error
+        if (notifierError) {
+          pending = { value: r.value, stamp };
+          throwAfterPending = true;
+          return this.next();
+        }
+
+        // 6) normal path
+        setIteratorEmissionStamp(iterator as any, stamp);
+        return { done: false, value: r.value };
+      },
+
+      async return() {
+        try { sourceIt.return?.(); } catch {}
+        try { notifierIt.return?.(); } catch {}
+        pending = null;
+        throwAfterPending = false;
+        return { done: true, value: undefined };
+      },
+
+      async throw(err) {
+        try { sourceIt.return?.(); } catch {}
+        try { notifierIt.return?.(); } catch {}
+        pending = null;
+        throwAfterPending = false;
+        throw err;
+      },
+    };
+
+    return iterator;
   });
 }
