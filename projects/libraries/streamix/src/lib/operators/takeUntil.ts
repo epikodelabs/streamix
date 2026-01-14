@@ -1,202 +1,158 @@
-import { createOperator, getCurrentEmissionStamp, getIteratorEmissionStamp, getIteratorMeta, setIteratorMeta, setValueMeta, type Operator, type Stream } from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
-import { createSubject } from '../subjects';
+import {
+  createOperator,
+  getIteratorEmissionStamp,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  type Operator,
+  type Stream
+} from "../abstractions";
+import { eachValueFrom, fromAny } from "../converters";
+import { createSubject } from "../subjects";
 
-/**
- * Creates a stream operator that emits all values from the source stream until
- * a value is emitted by a `notifier` stream.
- *
- * This operator controls the lifespan of a stream based on an external signal.
- * It consumes and re-emits values from the source until the `notifier` stream
- * emits its first value. As soon as that happens, the operator completes the
- * output stream and unsubscribes from both the source and the notifier.
- *
- * This is useful for automatically stopping an operation when a certain condition
- * is met, such as waiting for a user to close a dialog or for an animation to complete.
- *
- * @template T The type of the values in the source and output streams.
- * @param notifier The stream (or promise) that, upon its first emission, signals that
- * the operator should complete.
- * @returns An `Operator` instance that can be used in a stream's `pipe` method.
- */
-export function takeUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
-  return createOperator<T, T>('takeUntil', function (this: Operator, source: AsyncIterator<T>) {
+/* -------------------------------------------------------------------------- */
+/* Event model                                                                 */
+/* -------------------------------------------------------------------------- */
+
+type Event<T> =
+  | { kind: "source"; value: T; stamp: number }
+  | { kind: "sourceDone"; stamp: number }
+  | { kind: "notifierEmit"; stamp: number }
+  | { kind: "notifierError"; error: any; stamp: number }
+  | { kind: "notifierDone"; stamp: number };
+
+export function takeUntil<T = any, R = any>(
+  notifier: Stream<R> | Promise<R>
+): Operator<T, T> {
+  return createOperator<T, T>("takeUntil", function (
+    this: Operator,
+    source: AsyncIterator<T>
+  ) {
     const output = createSubject<T>();
-    const outputIterator = eachValueFrom(output);
+    const outIt = eachValueFrom(output);
 
-    let stopAtStamp: number | null = null;
-    let notifierError: any = null;
-    let notifierErrorAtStamp: number | null = null;
-    let stop = false;
+    /* ---------------------------------------------------------------------- */
+    /* Shared queue                                                            */
+    /* ---------------------------------------------------------------------- */
 
-    let notifierSubscription: any;
-    
-    let signalResolve: () => void;
-    let signalReject: (err: any) => void;
-    
-    // Signal used to unblock the iteration loop if the notifier emits/errors
-    const notifierSignal = new Promise<void>((resolve, reject) => {
-      signalResolve = resolve;
-      signalReject = reject;
-    });
-    notifierSignal.catch(() => {}); // Prevent unhandled rejection warnings
+    const queue: Event<T>[] = [];
+    let wake: (() => void) | null = null;
 
-    const requestUnsubscribe = (): void => {
-      if (notifierSubscription) {
-        const sub = notifierSubscription;
-        notifierSubscription = undefined;
-        sub.unsubscribe();
-      }
+    const enqueue = (e: Event<T>) => {
+      queue.push(e);
+      wake?.();
+      wake = null;
     };
 
-    const processNext = (value: T): void => {
-      const meta = getIteratorMeta(source);
-      let outputValue = value;
-      if (meta) {
-        setIteratorMeta(outputIterator, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-        outputValue = setValueMeta(outputValue, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+    const dequeue = async (): Promise<Event<T>> => {
+      while (queue.length === 0) {
+        await new Promise<void>((r) => (wake = r));
       }
-      output.next(outputValue);
+      queue.sort((a, b) => Math.abs(a.stamp) - Math.abs(b.stamp));
+      return queue.shift()!;
     };
 
-    notifierSubscription = fromAny(notifier).subscribe({
-      next: () => {
-        const stamp = getCurrentEmissionStamp();
-        if (stamp !== null) {
-          stopAtStamp = stamp;
-          signalResolve();
-        } else {
-          stop = true;
-          signalResolve();
-        }
-        requestUnsubscribe();
-      },
-      error: (err) => {
-        const stamp = getCurrentEmissionStamp();
-        notifierError = err;
-        if (stamp !== null) {
-          notifierErrorAtStamp = stamp;
-          signalReject(err);
-        } else {
-          stop = true;
-          // In Cold mode without stamps, we can fault immediately? 
-          // Or stick to signalReject which will throw in the loop.
-          // For safety against deadlocks, signalReject is sufficient to wake the loop.
-          // But strict error propagation normally happens via output.error.
-          // However, the loop catches the error and calls output.error.
-          signalReject(err);
-        }
-        requestUnsubscribe();
-      },
-      complete: () => requestUnsubscribe(),
-    });
+    /* ---------------------------------------------------------------------- */
+    /* Source producer                                                         */
+    /* ---------------------------------------------------------------------- */
 
-    const iterate = async (): Promise<void> => {
+    (async () => {
       try {
         while (true) {
-          if (stop) break;
+          const r = await source.next();
+          const stamp =
+            getIteratorEmissionStamp(source) ?? nextEmissionStamp();
 
-          let syncResult: IteratorResult<T> | null = null;
-          if (typeof (source as any).__tryNext === 'function') {
-             try {
-               syncResult = (source as any).__tryNext();
-             } catch (e) {
-                if (!output.completed()) output.error(e);
-                return;
-             }
+          if (r.done) {
+            enqueue({ kind: "sourceDone", stamp });
+            break;
           }
 
-          if (syncResult) {
-             const { done, value } = syncResult;
-             if (done) break;
+          enqueue({ kind: "source", value: r.value, stamp });
+        }
+      } catch (err) {
+        enqueue({
+          kind: "notifierError",
+          error: err,
+          stamp: nextEmissionStamp(),
+        });
+      }
+    })();
 
-             const stamp = getIteratorEmissionStamp(source);
-             if (stamp !== undefined) {
-                if (stop) break;
-                if (notifierError && notifierErrorAtStamp === null) throw notifierError;
-                const s = Math.abs(stamp);
-                if (stopAtStamp !== null && s >= Math.abs(stopAtStamp)) break;
-                if (notifierErrorAtStamp !== null && s >= Math.abs(notifierErrorAtStamp)) throw notifierError;
-                processNext(value);
-             } else {
-                if (stop) break;
-                if (notifierError) throw notifierError;
-                processNext(value);
-             }
-             continue;
-          }
+    /* ---------------------------------------------------------------------- */
+    /* Notifier producer                                                       */
+    /* ---------------------------------------------------------------------- */
 
-          if (notifierError && notifierErrorAtStamp === null) throw notifierError;
+    const notifierSub = fromAny(notifier).subscribe({
+      next() {
+        enqueue({ kind: "notifierEmit", stamp: nextEmissionStamp() });
+      },
+      error(err) {
+        enqueue({
+          kind: "notifierError",
+          error: err,
+          stamp: nextEmissionStamp(),
+        });
+      },
+      complete() {
+        /* ignored */
+      },
+    });
 
-          const nextPromise = source.next();
-          
-          const raceResult = await Promise.race([
-            nextPromise.then(
-              res => ({ type: 'source', res } as const),
-              err => ({ type: 'sourceError', err } as const)
-            ),
-            notifierSignal.then(
-              () => ({ type: 'signal' } as const),
-              err => ({ type: 'error', err } as const)
-            )
-          ]);
+    /* ---------------------------------------------------------------------- */
+    /* Consumer (ONLY authority)                                               */
+    /* ---------------------------------------------------------------------- */
 
-          let resultValue: IteratorResult<T> | undefined;
+    (async () => {
+      let stopAtStamp: number | null = null;
+      let notifierError: any = null;
 
-          if (raceResult.type === 'sourceError') {
-             throw raceResult.err;
-          }
+      try {
+        while (true) {
+          const e = await dequeue();
 
-          if (raceResult.type === 'signal' || raceResult.type === 'error') {
-             const rescue = await Promise.race([
-                nextPromise.then(
-                  res => ({ res }),
-                  () => null // If nextPromise fails, we don't rescue, implying null
-                ),
-                new Promise<{res: IteratorResult<T>} | null>(resolve => setTimeout(() => resolve(null), 0))
-             ]);
-             
-             if (rescue) {
-               resultValue = rescue.res;
-             } else {
-               if (raceResult.type === 'error') throw raceResult.err;
-               break;
-             }
-          } else {
-            resultValue = raceResult.res;
-          }
+          switch (e.kind) {
+            case "source": {
+              if (
+                stopAtStamp !== null &&
+                Math.abs(e.stamp) >= Math.abs(stopAtStamp)
+              ) {
+                throw "__STOP__";
+              }
 
-          const { done, value } = resultValue;
-          if (done) break;
+              setIteratorEmissionStamp(outIt as any, e.stamp);
+              output.next(e.value);
+              break;
+            }
 
-          const stamp = getIteratorEmissionStamp(source);
+            case "notifierEmit": {
+              stopAtStamp ??= e.stamp;
+              throw "__STOP__";
+            }
 
-          if (stamp !== undefined) {
-            if (stop) break;
-            if (notifierError && notifierErrorAtStamp === null) throw notifierError;
-            const s = Math.abs(stamp);
-            if (stopAtStamp !== null && s >= Math.abs(stopAtStamp)) break;
-            if (notifierErrorAtStamp !== null && s >= Math.abs(notifierErrorAtStamp)) throw notifierError;
-            
-            processNext(value);
-          } else {
-            if (stop) break;
-            if (notifierError) throw notifierError;
-            processNext(value);
+            case "notifierError": {
+              notifierError = e.error;
+              stopAtStamp ??= e.stamp;
+              throw "__STOP__";
+            }
+
+            case "sourceDone":
+              throw "__STOP__";
           }
         }
-
-        if (!output.completed()) output.complete();
       } catch (err) {
-        if (!output.completed()) output.error(err);
+        if (err !== "__STOP__") {
+          output.error(err);
+          return;
+        }
       } finally {
-        requestUnsubscribe();
+        notifierSub.unsubscribe();
         source.return?.();
+
+        if (notifierError) output.error(notifierError);
+        else output.complete();
       }
-    };
+    })();
 
-    iterate();
-
-    return outputIterator;
+    return outIt;
   });
 }
