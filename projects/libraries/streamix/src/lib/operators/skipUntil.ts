@@ -1,6 +1,5 @@
 import {
   createOperator,
-  Event,
   getIteratorEmissionStamp,
   nextEmissionStamp,
   setIteratorEmissionStamp,
@@ -15,8 +14,8 @@ import { createSubject } from "../subjects";
  *
  * `skipUntil` suppresses (drops) source values until the provided `notifier`
  * produces its first emission. After the notifier emits, subsequent source
- * values are forwarded normally. Like other until-style operators, ordering is
- * determined using monotonic `stamp` values attached to emissions.
+ * values are forwarded normally. Uses stamp-based filtering to ensure correct
+ * ordering between notifier and source events.
  *
  * Important details:
  * - Ordering and stamps: when the gate opens (notifier emits) only source
@@ -24,8 +23,7 @@ import { createSubject } from "../subjects";
  *   forwarded. This prevents forwarding values that were logically emitted
  *   before or concurrently with the notifier signal.
  * - Notifier completion without emission: if the notifier completes without
- *   emitting, the operator remains closed and continues to drop source values
- *   (unless the notifier later emits, which will open the gate).
+ *   emitting, the operator remains closed and continues to drop source values.
  * - Error propagation: errors from either the notifier or source are propagated
  *   to the output and will terminate the subscription.
  *
@@ -49,131 +47,67 @@ export function skipUntil<T = any, R = any>(
     const outIt = eachValueFrom(output);
 
     /* ---------------------------------------------------------------------- */
-    /* Shared queue                                                            */
+    /* Shared state                                                            */
     /* ---------------------------------------------------------------------- */
 
-    const queue: Event<T>[] = [];
-    let wake: (() => void) | null = null;
-
-    const enqueue = (e: Event<T>) => {
-      queue.push(e);
-      wake?.();
-      wake = null;
-    };
-
-    const dequeue = async (): Promise<Event<T>> => {
-      while (queue.length === 0) {
-        await new Promise<void>((r) => (wake = r));
-      }
-      queue.sort((a, b) => Math.abs(a.stamp) - Math.abs(b.stamp));
-      return queue.shift()!;
-    };
+    let gateOpened = false;
+    let gateStamp: number | null = null;
+    let notifierError: any = null;
 
     /* ---------------------------------------------------------------------- */
-    /* Notifier producer (MUST BE FIRST)                                       */
+    /* Notifier producer                                                       */
     /* ---------------------------------------------------------------------- */
 
     const notifierSub = fromAny(notifier).subscribe({
       next() {
-        enqueue({ kind: "notifierEmit", stamp: nextEmissionStamp() });
+        if (!gateOpened) {
+          gateOpened = true;
+          gateStamp = nextEmissionStamp();
+        }
       },
       error(err) {
-        enqueue({
-          kind: "notifierError",
-          error: err,
-          stamp: nextEmissionStamp(),
-        });
+        notifierError = err;
       },
       complete() {
-        enqueue({ kind: "notifierDone", stamp: nextEmissionStamp() });
+        // Notifier completed without emitting - gate stays closed
       },
     });
 
     /* ---------------------------------------------------------------------- */
-    /* Source producer (AFTER notifier subscription)                           */
+    /* Source producer                                                         */
     /* ---------------------------------------------------------------------- */
 
     (async () => {
       try {
         while (true) {
           const r = await source.next();
-          const stamp =
-            getIteratorEmissionStamp(source) ?? nextEmissionStamp();
+          const stamp = getIteratorEmissionStamp(source) ?? nextEmissionStamp();
 
           if (r.done) {
-            enqueue({ kind: "sourceDone", stamp });
             break;
           }
 
-          enqueue({ kind: "source", value: r.value, stamp });
-        }
-      } catch (err) {
-        enqueue({
-          kind: "notifierError",
-          error: err,
-          stamp: nextEmissionStamp(),
-        });
-      }
-    })();
+          if (notifierError) {
+            break;
+          }
 
-    /* ---------------------------------------------------------------------- */
-    /* Consumer (ONLY authority)                                               */
-    /* ---------------------------------------------------------------------- */
-
-    (async () => {
-      let gateOpened = false;
-      let gateStamp: number | null = null;
-      let notifierError: any = null;
-
-      try {
-        while (true) {
-          const e = await dequeue();
-
-          switch (e.kind) {
-            case "notifierEmit":
-              if (!gateOpened) {
-                gateOpened = true;
-                gateStamp = e.stamp;
-              }
-              break;
-
-            case "notifierDone":
-              break;
-
-            case "notifierError":
-              notifierError = e.error;
-              throw "__STOP__";
-
-            case "source": {
-              if (!gateOpened) break;
-
-              if (
-                gateStamp !== null &&
-                Math.abs(e.stamp) <= Math.abs(gateStamp)
-              ) {
-                break;
-              }
-
-              setIteratorEmissionStamp(outIt as any, e.stamp);
-              output.next(e.value);
-              break;
-            }
-
-            case "sourceDone":
-              throw "__STOP__";
+          // Only forward if gate is open AND stamp is strictly after gate stamp
+          if (gateOpened && gateStamp !== null && Math.abs(stamp) > Math.abs(gateStamp)) {
+            setIteratorEmissionStamp(outIt as any, stamp);
+            output.next(r.value);
           }
         }
       } catch (err) {
-        if (err !== "__STOP__") {
-          output.error(err);
-          return;
-        }
+        output.error(err);
+        return;
       } finally {
         notifierSub.unsubscribe();
-        source.return?.();
 
-        if (notifierError) output.error(notifierError);
-        else output.complete();
+        if (notifierError) {
+          output.error(notifierError);
+        } else {
+          output.complete();
+        }
       }
     })();
 
