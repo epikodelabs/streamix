@@ -1,5 +1,6 @@
 import {
   createOperator,
+  Event,
   getIteratorEmissionStamp,
   nextEmissionStamp,
   setIteratorEmissionStamp,
@@ -9,17 +10,34 @@ import {
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
-/* -------------------------------------------------------------------------- */
-/* Event model                                                                 */
-/* -------------------------------------------------------------------------- */
-
-type Event<T> =
-  | { kind: "source"; value: T; stamp: number }
-  | { kind: "sourceDone"; stamp: number }
-  | { kind: "notifierEmit"; stamp: number }
-  | { kind: "notifierError"; error: any; stamp: number }
-  | { kind: "notifierDone"; stamp: number };
-
+/**
+ * Skip source values until a notifier emits.
+ *
+ * `skipUntil` suppresses (drops) source values until the provided `notifier`
+ * produces its first emission. After the notifier emits, subsequent source
+ * values are forwarded normally. Like other until-style operators, ordering is
+ * determined using monotonic `stamp` values attached to emissions.
+ *
+ * Important details:
+ * - Ordering and stamps: when the gate opens (notifier emits) only source
+ *   values whose stamp is strictly greater than the gate-opening stamp will be
+ *   forwarded. This prevents forwarding values that were logically emitted
+ *   before or concurrently with the notifier signal.
+ * - Notifier completion without emission: if the notifier completes without
+ *   emitting, the operator remains closed and continues to drop source values
+ *   (unless the notifier later emits, which will open the gate).
+ * - Error propagation: errors from either the notifier or source are propagated
+ *   to the output and will terminate the subscription.
+ *
+ * Common uses:
+ * - Ignore initial values until a readiness signal arrives.
+ * - Wait for user interaction before processing inputs.
+ *
+ * @template T Source/output value type.
+ * @template R Notifier value type (ignored by this operator).
+ * @param notifier A `Stream<R>` or `Promise<R>` that opens the gate when it emits.
+ * @returns An `Operator<T, T>` that drops source values until the notifier emits.
+ */
 export function skipUntil<T = any, R = any>(
   notifier: Stream<R> | Promise<R>
 ): Operator<T, T> {

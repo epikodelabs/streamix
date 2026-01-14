@@ -1,5 +1,6 @@
 import {
   createOperator,
+  Event,
   getIteratorEmissionStamp,
   nextEmissionStamp,
   setIteratorEmissionStamp,
@@ -9,17 +10,35 @@ import {
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
-/* -------------------------------------------------------------------------- */
-/* Event model                                                                 */
-/* -------------------------------------------------------------------------- */
-
-type Event<T> =
-  | { kind: "source"; value: T; stamp: number }
-  | { kind: "sourceDone"; stamp: number }
-  | { kind: "notifierEmit"; stamp: number }
-  | { kind: "notifierError"; error: any; stamp: number }
-  | { kind: "notifierDone"; stamp: number };
-
+/**
+ * Complete the output when a notifier emits.
+ *
+ * `takeUntil` forwards source values until the supplied `notifier` emits its
+ * first value. When the notifier emits (or errors), the operator will stop
+ * forwarding further source values and will complete (or error) the output
+ * subscription at the appropriate logical boundary determined by emission
+ * stamps.
+ *
+ * Key behaviors:
+ * - Ordering and stamps: both source values and notifier signals carry a
+ *   monotonic `stamp`. The operator uses stamp comparisons to decide whether a
+ *   particular source value should be emitted (only values with stamps strictly
+ *   less than the notifier's stamp are forwarded).
+ * - Notifier error: if the notifier errors, that error is propagated to the
+ *   output and the subscription is terminated.
+ * - Notifier completion without emission: completing the notifier without any
+ *   emission does not by itself stop the source; `takeUntil` only reacts to an
+ *   actual `notifierEmit` event (or error).
+ *
+ * Typical use-cases:
+ * - Stop processing a stream once an external cancellation or signal occurs.
+ * - Implement timeouts or cancellation by piping a timer/abort-notifier.
+ *
+ * @template T Source/output value type.
+ * @template R Notifier value type (ignored for payload).
+ * @param notifier A `Stream<R>` or `Promise<R>` whose first emission triggers completion.
+ * @returns An `Operator<T, T>` that ends the output when the notifier emits.
+ */
 export function takeUntil<T = any, R = any>(
   notifier: Stream<R> | Promise<R>
 ): Operator<T, T> {
