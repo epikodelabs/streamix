@@ -4,6 +4,12 @@ import { type Operator } from "./operator";
  * Pipe / Runtime hook types
  * ========================================================================== */
 
+/**
+ * Context object provided to the `onPipeStream` runtime hook.
+ *
+ * Contains identifiers and the current operator chain so tooling can
+ * inspect or modify the stream pipeline before it is executed.
+ */
 export type PipeStreamHookContext = {
   streamId: string;
   streamName?: string;
@@ -13,14 +19,28 @@ export type PipeStreamHookContext = {
   operators: Operator<any, any>[];
 };
 
+/**
+ * Result returned by an `onPipeStream` hook.
+ *
+ * Any provided fields patch the pipeline used for the subscription.
+ */
 export type PipeStreamHookResult = {
   source?: AsyncIterator<any>;
   operators?: any[];
   final?: (iterator: AsyncIterator<any>) => AsyncIterator<any>;
 };
 
+/**
+ * Hooks that can be registered to observe or modify runtime stream behavior.
+ */
 export type StreamRuntimeHooks = {
+  /** Called when a stream is created. Useful for tracing and instrumentation. */
   onCreateStream?: (info: { id: string; name?: string }) => void;
+  /**
+   * Called when a source stream is piped through operators. Returning a
+   * `PipeStreamHookResult` allows modifying the source iterator, operator
+   * list or applying a final wrapper around the iterator.
+   */
   onPipeStream?: (
     ctx: PipeStreamHookContext
   ) => PipeStreamHookResult | void;
@@ -32,10 +52,18 @@ export type StreamRuntimeHooks = {
 
 const HOOKS_KEY = "__STREAMIX_RUNTIME_HOOKS__";
 
+/**
+ * Registers runtime hooks used by instrumentation and devtools.
+ *
+ * Replaces any previously-registered hooks for the current global context.
+ */
 export function registerRuntimeHooks(hooks: StreamRuntimeHooks): void {
   (globalThis as any)[HOOKS_KEY] = hooks;
 }
 
+/**
+ * Returns the currently-registered runtime hooks, if any.
+ */
 export function getRuntimeHooks(): StreamRuntimeHooks | null {
   return ((globalThis as any)[HOOKS_KEY] ?? null) as StreamRuntimeHooks | null;
 }
@@ -44,11 +72,20 @@ export function getRuntimeHooks(): StreamRuntimeHooks | null {
  * Iterator & value metadata (unchanged, but cleaned)
  * ========================================================================== */
 
+/**
+ * Kinds of iterator metadata describing how a value was produced.
+ */
 export type IteratorMetaKind = "transform" | "collapse" | "expand";
 
+/**
+ * Metadata tag attached to iterators to correlate values across operators.
+ */
 export type IteratorMetaTag = {
+  /** Unique identifier for the value produced by the iterator. */
   valueId: string;
+  /** Optional kind describing the transformation performed. */
   kind?: IteratorMetaKind;
+  /** Optional list of parent value ids (for collapse/expand operations). */
   inputValueIds?: string[];
 };
 
@@ -74,8 +111,12 @@ const VALUE_META = new WeakMap<
   }
 >();
 
+/** Symbol key used when wrapping primitive values with metadata. */
 export const VALUE_META_SYMBOL = Symbol("__streamix_value_meta__");
 
+/**
+ * Attach iterator-level metadata used by tracing and until-style operators.
+ */
 export function setIteratorMeta(
   iterator: AsyncIterator<any>,
   meta: IteratorMetaTag,
@@ -91,6 +132,9 @@ export function setIteratorMeta(
   });
 }
 
+/**
+ * Retrieve attached iterator metadata, if present.
+ */
 export function getIteratorMeta(
   iterator: AsyncIterator<any>
 ):
@@ -105,6 +149,10 @@ export function getIteratorMeta(
   return ITERATOR_META.get(iterator);
 }
 
+/**
+ * Attach metadata to a value. Object values receive metadata directly; primitive
+ * values are wrapped in a small object so their metadata can be tracked.
+ */
 export function setValueMeta(
   value: any,
   meta: IteratorMetaTag,
@@ -133,6 +181,9 @@ export function setValueMeta(
   return value;
 }
 
+/**
+ * Return metadata previously attached to a value, or `undefined` if none.
+ */
 export function getValueMeta(value: any) {
   if (value !== null && typeof value === "object") {
     return VALUE_META.get(value);
@@ -140,6 +191,10 @@ export function getValueMeta(value: any) {
   return undefined;
 }
 
+/**
+ * Returns true when a value is a wrapper created to hold metadata for a
+ * primitive value.
+ */
 export function isWrappedPrimitive(value: any): boolean {
   return (
     value !== null &&
@@ -148,6 +203,9 @@ export function isWrappedPrimitive(value: any): boolean {
   );
 }
 
+/**
+ * Unwrap a primitive value previously wrapped by `setValueMeta`.
+ */
 export function unwrapPrimitive(value: any): any {
   return isWrappedPrimitive(value) ? value[VALUE_META_SYMBOL] : value;
 }
@@ -156,6 +214,10 @@ export function unwrapPrimitive(value: any): any {
  * Pipe hook application
  * ========================================================================== */
 
+/**
+ * Apply any configured `onPipeStream` hooks and then materialize the
+ * operator chain into a final `AsyncIterator`.
+ */
 export function applyPipeStreamHooks(
   ctx: PipeStreamHookContext
 ): AsyncIterator<any> {
@@ -194,11 +256,10 @@ export function applyPipeStreamHooks(
  * ========================================================================== */
 
 /**
- * Gate used by until-style operators (skipUntil, takeUntil, etc).
+ * Gate used by "until" style operators (e.g. `takeUntil`, `skipUntil`).
  *
- * IMPORTANT:
- * - Populated at EMISSION TIME (via hooks / emission context)
- * - Never mutated from iterator pull logic
+ * Populated at emission time and used by operators to determine whether a
+ * source value should be forwarded or whether the notifier already fired.
  */
 export type UntilGate = {
   /** First notifier emission stamp */
@@ -212,8 +273,7 @@ export type UntilGate = {
 };
 
 /**
- * Factory – NEVER use a global singleton gate.
- * Each notifier must have its own gate.
+ * Create a fresh `UntilGate`. Each notifier must use its own gate instance.
  */
 export function createUntilGate(): UntilGate {
   return {
@@ -237,23 +297,14 @@ let streamIdCounter = 0;
 let subscriptionIdCounter = 0;
 
 /**
- * Generates a unique stream identifier.
- *
- * Used for:
- * - runtime hooks
- * - tracing
- * - gate ownership (until-operators)
+ * Generate a short, unique stream id for runtime tracing.
  */
 export function generateStreamId(): string {
   return `str_${++streamIdCounter}`;
 }
 
 /**
- * Generates a unique subscription identifier.
- *
- * Used to:
- * - distinguish concurrent subscribers
- * - correlate lifecycle events
+ * Generate a short, unique subscription id used to correlate subscriptions.
  */
 export function generateSubscriptionId(): string {
   return `sub_${++subscriptionIdCounter}`;
