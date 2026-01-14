@@ -1,6 +1,6 @@
 import { createSubject } from '@epikodelabs/streamix';
 
-describe('createSubject (push multicast, auto-requesting)', () => {
+describe('createSubject', () => {
 
   it('does not emit values after unsubscribe (unsubscribe triggers complete)', (done) => {
     const subject = createSubject<any>();

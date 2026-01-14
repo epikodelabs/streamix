@@ -1,5 +1,6 @@
 import {
   createOperator,
+  Event,
   getIteratorEmissionStamp,
   nextEmissionStamp,
   setIteratorEmissionStamp,
@@ -9,33 +10,36 @@ import {
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
-/* -------------------------------------------------------------------------- */
-/* Event model                                                                 */
-/* -------------------------------------------------------------------------- */
-
-type Event<T> =
-  | { kind: "source"; value: T; stamp: number }
-  | { kind: "sourceDone"; stamp: number }
-  | { kind: "notifierEmit"; stamp: number }
-  | { kind: "notifierError"; error: any; stamp: number }
-  | { kind: "notifierDone"; stamp: number };
-
-
 /**
- * Creates a stream operator that delays the emission of values from the source stream
- * until a separate `notifier` stream emits at least one value.
+ * Delay values from the source until a notifier emits.
  *
- * This operator acts as a gate. It buffers all values from the source stream
- * until the `notifier` stream emits its first value. Once the notifier emits,
- * the operator immediately flushes all buffered values and then passes through
- * all subsequent values from the source without delay.
+ * This operator buffers every value produced by the source stream and releases
+ * them only after the provided `notifier` produces its first emission. After the
+ * notifier emits, the operator flushes the buffered values (in timestamp order)
+ * and forwards all subsequent source values immediately.
  *
- * If the `notifier` stream completes without ever emitting a value, the buffered 
- * values are DISCARDED, and the operator simply waits for the source to complete.
+ * Important semantics:
+ * - Ordering and stamps: each source emission and notifier signal is stamped with
+ *   a monotonic emission `stamp`. The operator uses `stamp` comparisons to
+ *   determine ordering and to avoid races between near-simultaneous notifier and
+ *   source events. Buffered values are flushed only if their stamp is strictly
+ *   greater than the gate-opening stamp.
+ * - Notifier completion without emission: if the notifier completes without
+ *   emitting, buffered values are discarded and the operator will not forward
+ *   any buffered values (it simply waits for the source to continue/complete).
+ * - Error propagation: any error from the notifier or source is propagated to
+ *   the output (the operator records the error and terminates the output
+ *   iterator accordingly).
  *
- * @template T The type of the values in the source and output streams.
- * @param notifier The stream or promise that acts as a gatekeeper.
- * @returns An `Operator` instance that can be used in a stream's `pipe` method.
+ * Use-cases:
+ * - Delay producing values until an initialization step completes (e.g. wait
+ *   for a connection or configuration event).
+ * - Gate values until user interaction or external readiness signal occurs.
+ *
+ * @template T Source/output value type.
+ * @template R Notifier value type (ignored by this operator).
+ * @param notifier A `Stream<R>` or `Promise<R>` that gates the source.
+ * @returns An `Operator<T, T>` that can be used in a stream pipeline.
  */
 export function delayUntil<T = any, R = any>(
   notifier: Stream<R> | Promise<R>
