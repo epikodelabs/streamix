@@ -82,22 +82,18 @@ Your app stays responsive while the heavy calculation runs in the background!
 ## ⚠️ Common Mistakes to Avoid
 
 ```typescript
-// ❌ WRONG: Function declaration (use function expression instead)
-function badTask(data) { return data.value * 2; }
-const badWorker1 = coroutine(badTask);
-
 // ❌ WRONG: Arrow function
-const badWorker2 = coroutine((data) => data.value * 2);
+const badWorker1 = coroutine((data) => data.value * 2);
 
 // ❌ WRONG: References external variable
 const multiplier = 10;
-const badWorker3 = coroutine(function task(data) {
+const badWorker2 = coroutine(function task(data) {
   return data.value * multiplier; // References external 'multiplier'
 });
 
 // ❌ WRONG: Uses imported modules
 import { someUtility } from './utils';
-const badWorker4 = coroutine(function task(data) {
+const badWorker3 = coroutine(function task(data) {
   return someUtility(data); // Can't use imports inside worker
 });
 ```
