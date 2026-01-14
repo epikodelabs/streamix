@@ -17,12 +17,12 @@ import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../
  * A stream that emits the produced value and then completes.
  */
 export function fromPromise<T>(
-  input: MaybePromise<T>
+  input: MaybePromise<T> | ((signal: AbortSignal) => MaybePromise<T>)
 ): Stream<T> {
   return createStream<T>('fromPromise', async function* (signal?: AbortSignal) {
     const effectiveSignal = signal ?? new AbortController().signal;
     const valueOrPromise =
-      typeof input === "function" ? input(effectiveSignal) : input;
+      typeof input === "function" ? (input as (s?: AbortSignal) => MaybePromise<T>)(effectiveSignal) : input;
 
     yield isPromiseLike(valueOrPromise) ? await valueOrPromise : valueOrPromise;
   });

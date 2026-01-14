@@ -1,199 +1,182 @@
-import { createOperator, getCurrentEmissionStamp, getIteratorEmissionStamp, getIteratorMeta, setIteratorMeta, setValueMeta, type Operator, type Stream } from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
-import { createSubject } from '../subjects';
+import {
+  createOperator,
+  Event,
+  getIteratorEmissionStamp,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  type Operator,
+  type Stream,
+} from "../abstractions";
+import { eachValueFrom, fromAny } from "../converters";
+import { createSubject } from "../subjects";
 
 /**
- * Creates a stream operator that skips all values from the source stream until
- * a value is emitted by a `notifier` stream.
+ * Skip source values until a notifier emits.
  *
- * This operator controls the flow of data based on an external signal. It initially
- * drops all values from the source stream. It also subscribes to a separate `notifier`
- * stream. When the notifier emits its first value, the operator's internal state
- * changes, allowing all subsequent values from the source stream to pass through.
+ * `skipUntil` suppresses (drops) source values until the provided `notifier`
+ * produces its first emission. After the notifier emits, subsequent source
+ * values are forwarded normally. Like other until-style operators, ordering is
+ * determined using monotonic `stamp` values attached to emissions.
  *
- * This is useful for delaying the start of a data-intensive process until a specific
- * condition is met, for example, waiting for a user to click a button or for
- * an application to finish loading.
+ * Important details:
+ * - Ordering and stamps: when the gate opens (notifier emits) only source
+ *   values whose stamp is strictly greater than the gate-opening stamp will be
+ *   forwarded. This prevents forwarding values that were logically emitted
+ *   before or concurrently with the notifier signal.
+ * - Notifier completion without emission: if the notifier completes without
+ *   emitting, the operator remains closed and continues to drop source values
+ *   (unless the notifier later emits, which will open the gate).
+ * - Error propagation: errors from either the notifier or source are propagated
+ *   to the output and will terminate the subscription.
  *
- * @template T The type of the values in the source and output streams.
- * @param notifier The stream (or promise) that, upon its first emission, signals that
- * the operator should stop skipping values.
- * @returns An `Operator` instance that can be used in a stream's `pipe` method.
+ * Common uses:
+ * - Ignore initial values until a readiness signal arrives.
+ * - Wait for user interaction before processing inputs.
+ *
+ * @template T Source/output value type.
+ * @template R Notifier value type (ignored by this operator).
+ * @param notifier A `Stream<R>` or `Promise<R>` that opens the gate when it emits.
+ * @returns An `Operator<T, T>` that drops source values until the notifier emits.
  */
-export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
-  return createOperator<T, T>('skipUntil', function (this: Operator, source: AsyncIterator<T>) {
+export function skipUntil<T = any, R = any>(
+  notifier: Stream<R> | Promise<R>
+): Operator<T, T> {
+  return createOperator<T, T>("skipUntil", function (
+    this: Operator,
+    source: AsyncIterator<T>
+  ) {
     const output = createSubject<T>();
-    const outputIterator = eachValueFrom(output);
-    let openedAtStamp: number | null = null;
-    let canEmit = false;
-    let notifierSubscription: any;
-    let pendingUnsubscribe = false;
-    let notifierError: any = null;
-    let notifierErrorAtStamp: number | null = null;
+    const outIt = eachValueFrom(output);
 
-    let signalResolve: () => void;
-    let signalReject: (err: any) => void;
-    const notifierSignal = new Promise<void>((resolve, reject) => {
-      signalResolve = resolve;
-      signalReject = reject;
-    });
-    notifierSignal.catch(() => {});
+    /* ---------------------------------------------------------------------- */
+    /* Shared queue                                                            */
+    /* ---------------------------------------------------------------------- */
 
-    const requestUnsubscribe = (): void => {
-      if (notifierSubscription) {
-        const sub = notifierSubscription;
-        notifierSubscription = undefined;
-        sub.unsubscribe();
-        return;
-      }
+    const queue: Event<T>[] = [];
+    let wake: (() => void) | null = null;
 
-      pendingUnsubscribe = true;
+    const enqueue = (e: Event<T>) => {
+      queue.push(e);
+      wake?.();
+      wake = null;
     };
 
-    // Subscribe to notifier
-    notifierSubscription = fromAny(notifier).subscribe({
-      next: () => {
-        const stamp = getCurrentEmissionStamp();
-        canEmit = true;
-        if (stamp !== null) {
-          openedAtStamp = stamp;
-        } else {
-          // cold notifier, gate purely by boolean
-        }
-        signalResolve();
-        requestUnsubscribe();
+    const dequeue = async (): Promise<Event<T>> => {
+      while (queue.length === 0) {
+        await new Promise<void>((r) => (wake = r));
+      }
+      queue.sort((a, b) => Math.abs(a.stamp) - Math.abs(b.stamp));
+      return queue.shift()!;
+    };
+
+    /* ---------------------------------------------------------------------- */
+    /* Notifier producer (MUST BE FIRST)                                       */
+    /* ---------------------------------------------------------------------- */
+
+    const notifierSub = fromAny(notifier).subscribe({
+      next() {
+        enqueue({ kind: "notifierEmit", stamp: nextEmissionStamp() });
       },
-      error: (err) => {
-        notifierError = err;
-        const stamp = getCurrentEmissionStamp();
-        if (stamp !== null) notifierErrorAtStamp = stamp;
-        signalReject(err);
-        requestUnsubscribe();
+      error(err) {
+        enqueue({
+          kind: "notifierError",
+          error: err,
+          stamp: nextEmissionStamp(),
+        });
       },
-      complete: () => {
-        requestUnsubscribe();
+      complete() {
+        enqueue({ kind: "notifierDone", stamp: nextEmissionStamp() });
       },
     });
 
-    if (pendingUnsubscribe) {
-      requestUnsubscribe();
-    }
+    /* ---------------------------------------------------------------------- */
+    /* Source producer (AFTER notifier subscription)                           */
+    /* ---------------------------------------------------------------------- */
 
-    const startSource = async (deferStart: boolean) => {
-      if (deferStart) {
-        await Promise.resolve();
-      }
+    (async () => {
       try {
-        let activeNextPromise: Promise<IteratorResult<T>> | null = null;
-        
         while (true) {
-          if (notifierError && notifierErrorAtStamp === null) throw notifierError;
+          const r = await source.next();
+          const stamp =
+            getIteratorEmissionStamp(source) ?? nextEmissionStamp();
 
-          let resultValue: IteratorResult<T> | undefined;
-
-          if (canEmit) {
-             if (activeNextPromise) {
-               resultValue = await activeNextPromise;
-               activeNextPromise = null;
-             } else {
-               resultValue = await source.next();
-             }
-          } else {
-             if (!activeNextPromise) {
-               activeNextPromise = source.next();
-             }
-             
-             const raceResult = await Promise.race([
-                activeNextPromise.then(res => ({ type: 'source', res } as const)),
-                notifierSignal.then(
-                    () => ({ type: 'signal' } as const),
-                    (err) => ({ type: 'error', err } as const)
-                )
-             ]);
-
-             if (raceResult.type === 'signal' || raceResult.type === 'error') {
-                 // Check if source value is also ready (rescue)
-                 const rescue = await Promise.race([
-                    activeNextPromise.then(res => ({ res })),
-                    new Promise<{res: IteratorResult<T>} | null>(resolve => setTimeout(() => resolve(null), 0))
-                 ]);
-                 
-                 if (rescue) {
-                    resultValue = rescue.res;
-                    activeNextPromise = null;
-                 } else {
-                    // Source value not ready.
-                    if (raceResult.type === 'error') throw raceResult.err;
-                    // If signal (Start), we loop back. canEmit should be true now.
-                    continue;
-                 }
-             } else {
-                resultValue = raceResult.res;
-                activeNextPromise = null;
-             }
+          if (r.done) {
+            enqueue({ kind: "sourceDone", stamp });
+            break;
           }
 
-          const { done, value } = resultValue!;
-          if (done) break;
-          const stamp = getIteratorEmissionStamp(source);
+          enqueue({ kind: "source", value: r.value, stamp });
+        }
+      } catch (err) {
+        enqueue({
+          kind: "notifierError",
+          error: err,
+          stamp: nextEmissionStamp(),
+        });
+      }
+    })();
 
-          // Check error condition first?
-          // If we have a value.
-          // If notifier failed at stamp X.
-          // If value stamp < X: Skip? No, if we haven't started, we skip.
-          // If value stamp >= X: Throw error?
-          
-          // Re-evaluate 'shouldEmit' logic with error handling.
-          
-          if (stamp !== undefined) {
-              if (notifierError && notifierErrorAtStamp === null) throw notifierError;
-              const s = Math.abs(stamp);
-              
-              if (notifierErrorAtStamp !== null && s >= Math.abs(notifierErrorAtStamp)) throw notifierError;
-          } else {
-              if (notifierError) throw notifierError;
-          }
+    /* ---------------------------------------------------------------------- */
+    /* Consumer (ONLY authority)                                               */
+    /* ---------------------------------------------------------------------- */
 
-          const shouldEmit =
-            stamp === undefined
-              ? canEmit
-              : stamp > 0
-                ? (openedAtStamp !== null ? stamp > openedAtStamp : canEmit)
-                : canEmit;
+    (async () => {
+      let gateOpened = false;
+      let gateStamp: number | null = null;
+      let notifierError: any = null;
 
-          if (shouldEmit) {
-            const meta = getIteratorMeta(source);
-            let outputValue = value;
-            if (meta) {
-              setIteratorMeta(
-                outputIterator,
-                { valueId: meta.valueId },
-                meta.operatorIndex,
-                meta.operatorName
-              );
-              outputValue = setValueMeta(outputValue, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+      try {
+        while (true) {
+          const e = await dequeue();
+
+          switch (e.kind) {
+            case "notifierEmit":
+              if (!gateOpened) {
+                gateOpened = true;
+                gateStamp = e.stamp;
+              }
+              break;
+
+            case "notifierDone":
+              break;
+
+            case "notifierError":
+              notifierError = e.error;
+              throw "__STOP__";
+
+            case "source": {
+              if (!gateOpened) break;
+
+              if (
+                gateStamp !== null &&
+                Math.abs(e.stamp) <= Math.abs(gateStamp)
+              ) {
+                break;
+              }
+
+              setIteratorEmissionStamp(outIt as any, e.stamp);
+              output.next(e.value);
+              break;
             }
-            output.next(outputValue);
+
+            case "sourceDone":
+              throw "__STOP__";
           }
         }
       } catch (err) {
-        if (!output.completed()) output.error(err);
+        if (err !== "__STOP__") {
+          output.error(err);
+          return;
+        }
       } finally {
-        if (!output.completed()) output.complete();
-        requestUnsubscribe();
+        notifierSub.unsubscribe();
+        source.return?.();
+
+        if (notifierError) output.error(notifierError);
+        else output.complete();
       }
-    };
+    })();
 
-    // Process source.
-    // For cold notifiers (`from([...])`, promises) we yield one microtask so the notifier
-    // can establish `canEmit` before a cold source begins emitting.
-    const isNotifierSubject = !!notifier && typeof notifier === 'object' && (notifier as any).type === 'subject';
-    if (isNotifierSubject) {
-      void startSource(false);
-    } else {
-      queueMicrotask(() => void startSource(true));
-    }
-
-    return outputIterator;
+    return outIt;
   });
 }
