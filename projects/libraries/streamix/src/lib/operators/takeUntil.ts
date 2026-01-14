@@ -8,6 +8,35 @@ import {
 } from "../abstractions";
 import { fromAny } from "../converters";
 
+/**
+ * Complete the output when a notifier emits.
+ *
+ * `takeUntil` subscribes to the provided `notifier` (a `Stream` or `Promise`) and
+ * completes the output iterator as soon as the notifier produces its first
+ * emission. Ordering between notifier and source values is managed using
+ * emission stamps so that values from the source that are stamped at or after
+ * the notifier emission will not be forwarded.
+ *
+ * Semantics and edge cases:
+ * - Notifier emits: the operator records the notifier's emission stamp and
+ *   cancels the source. Any source value whose stamp is greater than or equal
+ *   to the notifier stamp is considered after the notifier and will not be
+ *   emitted.
+ * - Notifier errors: if the notifier throws before the next source value is
+ *   emitted, the error is propagated immediately. If the notifier errors after
+ *   a source value has been pulled, the operator will yield that pulled value
+ *   first and then throw the notifier error on the subsequent pull.
+ * - Notifier completes without emitting: the operator keeps forwarding source
+ *   values normally (i.e. it stays open).
+ *
+ * Use-cases:
+ * - Stop processing a stream when an external cancellation/timeout signal fires.
+ *
+ * @template T Source/output value type.
+ * @param notifier A `Stream<any>` or `Promise<any>` whose first emission
+ *        triggers completion of the output.
+ * @returns An `Operator<T, T>` that completes when the notifier emits.
+ */
 export function takeUntil<T = any>(
   notifier: Stream<any> | Promise<any>
 ): Operator<T, T> {
