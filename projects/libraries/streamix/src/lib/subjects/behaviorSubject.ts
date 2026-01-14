@@ -1,123 +1,179 @@
-import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, nextEmissionStamp, type Operator, pipeSourceThrough, type Receiver, type Stream, type StrictReceiver, type Subscription, withEmissionStamp } from "../abstractions";
+import {
+  createReceiver,
+  createSubscription,
+  generateStreamId,
+  getCurrentEmissionStamp,
+  isPromiseLike,
+  nextEmissionStamp,
+  pipeSourceThrough,
+  withEmissionStamp,
+  type Operator,
+  type Receiver,
+  type StrictReceiver,
+  type Subscription
+} from "../abstractions";
 import { firstValueFrom } from "../converters";
+import {
+  createAsyncIterator,
+  createTryCommit,
+  type QueueItem,
+} from "./helpers";
 import type { Subject } from "./subject";
+
+/* ========================================================================== */
+/* BehaviorSubject                                                            */
+/* ========================================================================== */
 
 export type BehaviorSubject<T = any> = Subject<T> & {
   get value(): T;
 };
 
-export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
+export function createBehaviorSubject<T>(initialValue: T): BehaviorSubject<T> {
   const id = generateStreamId();
-  let subscribers: StrictReceiver<T>[] = [];
+
+  const receivers = new Set<StrictReceiver<T>>();
+  const ready = new Set<StrictReceiver<T>>();
+  const queue: QueueItem<T>[] = [];
+
   let latestValue: T = initialValue;
   let isCompleted = false;
-  let hasError = false;
-  let errorObj: any = null;
+  const terminalRef = { current: null as QueueItem<T> | null };
+
+  /* ------------------------------------------------------------------------ */
+  /* Commit barrier (IDENTICAL to Subject)                                     */
+  /* ------------------------------------------------------------------------ */
+
+  const setLatestValue = (v: T) => {
+    latestValue = v;
+  };
+
+  const tryCommit = createTryCommit<T>({
+    receivers,
+    ready,
+    queue,
+    setLatestValue,
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /* Producer API                                                             */
+  /* ------------------------------------------------------------------------ */
 
   const next = (value: T) => {
-    if (isCompleted || hasError) return;
-    latestValue = value;
+    if (isCompleted) return;
 
-    const stamp = nextEmissionStamp();
-    const targets = subscribers;
-    withEmissionStamp(stamp, () => {
-      for (let i = 0; i < targets.length; i++) {
-        targets[i].next(value);
-      }
-    });
+    const current = getCurrentEmissionStamp();
+    const base = current ?? nextEmissionStamp();
+    const stamp = current === null ? -base : base;
+
+    queue.push({ kind: "next", value, stamp });
+    tryCommit();
   };
 
   const complete = () => {
-    if (isCompleted || hasError) return;
+    if (isCompleted) return;
     isCompleted = true;
-
-    const stamp = nextEmissionStamp();
-    const targets = subscribers;
-    subscribers = [];
-    withEmissionStamp(stamp, () => {
-      for (let i = 0; i < targets.length; i++) {
-        targets[i].complete();
-      }
-    });
+    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    const item: QueueItem<T> = { kind: "complete", stamp };
+    terminalRef.current = item;
+    queue.push(item);
+    tryCommit();
   };
 
   const error = (err: any) => {
-    if (isCompleted || hasError) return;
-    hasError = true;
+    if (isCompleted) return;
     isCompleted = true;
-    errorObj = err instanceof Error ? err : new Error(String(err));
 
-    const stamp = nextEmissionStamp();
-    const targets = subscribers;
-    subscribers = [];
+    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    const item: QueueItem<T> = {
+      kind: "error",
+      error: err instanceof Error ? err : new Error(String(err)),
+      stamp,
+    };
+    terminalRef.current = item;
+    queue.push(item);
+    tryCommit();
+  };
+
+  /* ------------------------------------------------------------------------ */
+  /* Subscription                                                             */
+  /* ------------------------------------------------------------------------ */
+
+  const register = (receiver: Receiver<T>): Subscription => {
+    const r = receiver as StrictReceiver<T>;
+    const item = terminalRef.current;
+    if (item) {
+      if (item.kind === "complete") {
+        withEmissionStamp(item.stamp, () => r.complete());
+      } else if (item.kind === "error") {
+        const err = item.error;
+        withEmissionStamp(item.stamp, () => r.error(err));
+      }
+      return createSubscription();
+    }
+
+    receivers.add(r);
+    ready.add(r);
+
+    /* BehaviorSubject semantic: emit latest value directly to THIS receiver only */
+    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     withEmissionStamp(stamp, () => {
-      for (let i = 0; i < targets.length; i++) {
-        targets[i].error(errorObj);
+      const res = r.next(latestValue);
+      if (isPromiseLike(res)) {
+        ready.delete(r);
+        res.finally(() => {
+          if (!r.completed && receivers.has(r)) {
+            ready.add(r);
+            tryCommit();
+          }
+        });
       }
     });
-  };
 
-  const registerReceiver = (receiver: Receiver<T>): Subscription => {
-    const strictReceiver = receiver as StrictReceiver<T>;
-
-    if (hasError) {
-      const stamp = nextEmissionStamp();
-      withEmissionStamp(stamp, () => {
-        strictReceiver.error(errorObj);
-      });
-      return createSubscription();
-    }
-    
-    if (isCompleted) {
-      const stamp = nextEmissionStamp();
-      withEmissionStamp(stamp, () => {
-        strictReceiver.complete();
-      });
-      return createSubscription();
-    }
-
-    subscribers = [...subscribers, strictReceiver];
-
-    const stamp = nextEmissionStamp();
-    withEmissionStamp(stamp, () => {
-      strictReceiver.next(latestValue);
-    });
+    tryCommit();
 
     return createSubscription(() => {
-      subscribers = subscribers.filter(s => s !== strictReceiver);
-      strictReceiver.complete();
+      receivers.delete(r);
+      ready.delete(r);
+
+      const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+      withEmissionStamp(stamp, () => r.complete());
+
+      tryCommit();
     });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
-    const receiver = createReceiver(callbackOrReceiver);
-    return registerReceiver(receiver);
-  };
 
-  const subject: BehaviorSubject<T> = {
+  const subscribe = (cb?: ((v: T) => any) | Receiver<T>) =>
+    register(createReceiver(cb));
+
+  /* ------------------------------------------------------------------------ */
+  /* Async iterator                                                           */
+  /* ------------------------------------------------------------------------ */
+
+  const asyncIterator = createAsyncIterator<T>({ register });
+
+  /* ------------------------------------------------------------------------ */
+  /* Public API                                                               */
+  /* ------------------------------------------------------------------------ */
+
+  return {
     type: "subject",
     name: "behaviorSubject",
     id,
     get value() {
       return latestValue;
     },
-    pipe(...operators: Operator<any, any>[]): Stream<any> {
-      return pipeSourceThrough(this, operators);
+    pipe(...ops: Operator<any, any>[]) {
+      return pipeSourceThrough(this, ops);
     },
     subscribe,
-    async query(): Promise<T> {
-      return await firstValueFrom(this);
+    async query() {
+      return firstValueFrom(this);
     },
     next,
     complete,
-    completed: () => isCompleted,
     error,
-    [Symbol.asyncIterator]: () => {
-      const it = createAsyncGenerator(registerReceiver);
-      (it as any).__streamix_streamId = id;
-      return it;
-    },
+    completed: () => isCompleted,
+    [Symbol.asyncIterator]: asyncIterator,
   };
-
-  return subject;
 }
