@@ -4,10 +4,21 @@ import {
   nextEmissionStamp,
   setIteratorEmissionStamp,
   type Operator,
-  type Stream
+  type Stream,
 } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
+
+/* -------------------------------------------------------------------------- */
+/* Event model                                                                 */
+/* -------------------------------------------------------------------------- */
+
+type Event<T> =
+  | { kind: "source"; value: T; stamp: number }
+  | { kind: "sourceDone"; stamp: number }
+  | { kind: "notifierEmit"; stamp: number }
+  | { kind: "notifierError"; error: any; stamp: number }
+  | { kind: "notifierDone"; stamp: number };
 
 export function skipUntil<T = any, R = any>(
   notifier: Stream<R> | Promise<R>
@@ -17,73 +28,137 @@ export function skipUntil<T = any, R = any>(
     source: AsyncIterator<T>
   ) {
     const output = createSubject<T>();
-    const outputIterator = eachValueFrom(output);
+    const outIt = eachValueFrom(output);
 
-    let openedAtStamp: number | null = null;
-    let notifierError: any = null;
-    let notifierCompletedWithoutEmit = false;
+    /* ---------------------------------------------------------------------- */
+    /* Shared queue                                                            */
+    /* ---------------------------------------------------------------------- */
 
-    // --- notifier subscription (push-based, authoritative) ---
-    let notifierSub: any;
-    
-    notifierSub = fromAny(notifier).subscribe({
+    const queue: Event<T>[] = [];
+    let wake: (() => void) | null = null;
+
+    const enqueue = (e: Event<T>) => {
+      queue.push(e);
+      wake?.();
+      wake = null;
+    };
+
+    const dequeue = async (): Promise<Event<T>> => {
+      while (queue.length === 0) {
+        await new Promise<void>((r) => (wake = r));
+      }
+      queue.sort((a, b) => Math.abs(a.stamp) - Math.abs(b.stamp));
+      return queue.shift()!;
+    };
+
+    /* ---------------------------------------------------------------------- */
+    /* Notifier producer (MUST BE FIRST)                                       */
+    /* ---------------------------------------------------------------------- */
+
+    const notifierSub = fromAny(notifier).subscribe({
       next() {
-        if (openedAtStamp === null) {
-          // FIX: Use getCurrentEmissionStamp or nextEmissionStamp
-          // The subscription itself might not have an emission stamp
-          openedAtStamp = nextEmissionStamp();
-        }
+        enqueue({ kind: "notifierEmit", stamp: nextEmissionStamp() });
       },
       error(err) {
-        notifierError = err;
+        enqueue({
+          kind: "notifierError",
+          error: err,
+          stamp: nextEmissionStamp(),
+        });
       },
       complete() {
-        if (openedAtStamp === null) {
-          notifierCompletedWithoutEmit = true;
-        }
-      }
+        enqueue({ kind: "notifierDone", stamp: nextEmissionStamp() });
+      },
     });
+
+    /* ---------------------------------------------------------------------- */
+    /* Source producer (AFTER notifier subscription)                           */
+    /* ---------------------------------------------------------------------- */
 
     (async () => {
       try {
         while (true) {
-          if (notifierError) throw notifierError;
-
           const r = await source.next();
+          const stamp =
+            getIteratorEmissionStamp(source) ?? nextEmissionStamp();
 
-          if (r.done) break;
-
-          // Skip forever if notifier completed without emission
-          if (notifierCompletedWithoutEmit) {
-            continue;
+          if (r.done) {
+            enqueue({ kind: "sourceDone", stamp });
+            break;
           }
 
-          // Gate not opened yet
-          if (openedAtStamp === null) {
-            continue;
-          }
-
-          const sourceStamp = getIteratorEmissionStamp(source);
-          if (sourceStamp !== undefined) {
-            if (Math.abs(sourceStamp) <= Math.abs(openedAtStamp)) {
-              continue; // pre-notifier value
-            }
-          }
-
-          const emitStamp = sourceStamp ?? nextEmissionStamp();
-          setIteratorEmissionStamp(outputIterator as any, emitStamp);
-          output.next(r.value);
+          enqueue({ kind: "source", value: r.value, stamp });
         }
-
-        output.complete();
       } catch (err) {
-        output.error(err);
-      } finally {
-        notifierSub.unsubscribe();
-        source.return?.();
+        enqueue({
+          kind: "notifierError",
+          error: err,
+          stamp: nextEmissionStamp(),
+        });
       }
     })();
 
-    return outputIterator;
+    /* ---------------------------------------------------------------------- */
+    /* Consumer (ONLY authority)                                               */
+    /* ---------------------------------------------------------------------- */
+
+    (async () => {
+      let gateOpened = false;
+      let gateStamp: number | null = null;
+      let notifierError: any = null;
+
+      try {
+        while (true) {
+          const e = await dequeue();
+
+          switch (e.kind) {
+            case "notifierEmit":
+              if (!gateOpened) {
+                gateOpened = true;
+                gateStamp = e.stamp;
+              }
+              break;
+
+            case "notifierDone":
+              break;
+
+            case "notifierError":
+              notifierError = e.error;
+              throw "__STOP__";
+
+            case "source": {
+              if (!gateOpened) break;
+
+              if (
+                gateStamp !== null &&
+                Math.abs(e.stamp) <= Math.abs(gateStamp)
+              ) {
+                break;
+              }
+
+              setIteratorEmissionStamp(outIt as any, e.stamp);
+              output.next(e.value);
+              break;
+            }
+
+            case "sourceDone":
+              throw "__STOP__";
+          }
+        }
+      } catch (err) {
+        if (err !== "__STOP__") {
+          output.error(err);
+          return;
+        }
+      } finally {
+        notifierSub.unsubscribe();
+        source.return?.();
+
+        if (notifierError) output.error(notifierError);
+        else output.complete();
+      }
+    })();
+
+    return outIt;
   });
 }
