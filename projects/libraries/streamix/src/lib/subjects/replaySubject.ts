@@ -15,16 +15,15 @@ import {
   type Subscription,
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
+import {
+  createTryCommit,
+  QueueItem
+} from "./helpers";
 import type { Subject } from "./subject";
 
 /* ========================================================================== */
 /* ReplaySubject                                                              */
 /* ========================================================================== */
-
-type QueueItem<T> =
-  | { kind: "next"; value: T; stamp: number }
-  | { kind: "complete"; stamp: number }
-  | { kind: "error"; error: Error; stamp: number };
 
 type ReplayItem<T> = { value: T; stamp: number };
 
@@ -43,8 +42,7 @@ export function createReplaySubject<T = any>(
 
   let latestValue: T | undefined = undefined;
   let isCompleted = false;
-  let terminal: QueueItem<T> | null = null;
-  let isCommitting = false;
+  const terminalRef = { current: null as QueueItem<T> | null };
 
   /* ------------------------------------------------------------------------ */
   /* Helpers                                                                  */
@@ -102,56 +100,18 @@ export function createReplaySubject<T = any>(
   /* Commit barrier (same as Subject for LIVE values)                          */
   /* ------------------------------------------------------------------------ */
 
-  const tryCommit = () => {
-    if (isCommitting) return;
-    isCommitting = true;
-
-    try {
-      while (queue.length > 0 && ready.size === receivers.size) {
-        const item = queue.shift()!;
-        const targets = Array.from(ready);
-        ready.clear();
-
-        const stamp = item.stamp;
-        let pendingAsync = 0;
-
-        withEmissionStamp(stamp, () => {
-          if (item.kind === "next") {
-            latestValue = item.value;
-            pushReplay(item.value, stamp);
-
-            for (const r of targets) {
-              const res = r.next(item.value);
-              if (isPromiseLike(res)) {
-                pendingAsync++;
-                res.finally(() => {
-                  if (!r.completed && receivers.has(r)) {
-                    ready.add(r);
-                    tryCommit();
-                  }
-                });
-              } else {
-                if (!r.completed && receivers.has(r)) ready.add(r);
-              }
-            }
-          } else {
-            for (const r of targets) {
-              if (item.kind === "complete") r.complete();
-              else if (item.kind === "error") r.error(item.error);
-            }
-            receivers.clear();
-            ready.clear();
-            queue.length = 0;
-            return;
-          }
-        });
-
-        if (pendingAsync > 0) break;
-      }
-    } finally {
-      isCommitting = false;
-    }
+  const setLatestValue = (v: T) => {
+    latestValue = v;
+    // Also push into replay buffer
+    pushReplay(v, getCurrentEmissionStamp() ?? nextEmissionStamp());
   };
+
+  const tryCommit = createTryCommit<T>({
+    receivers,
+    ready,
+    queue,
+    setLatestValue,
+  });
 
   /* ------------------------------------------------------------------------ */
   /* Producer API                                                             */
@@ -171,10 +131,9 @@ export function createReplaySubject<T = any>(
   const complete = () => {
     if (isCompleted) return;
     isCompleted = true;
-
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     const item: QueueItem<T> = { kind: "complete", stamp };
-    terminal = item;
+    terminalRef.current = item;
     queue.push(item);
     tryCommit();
   };
@@ -189,7 +148,7 @@ export function createReplaySubject<T = any>(
       error: err instanceof Error ? err : new Error(String(err)),
       stamp,
     };
-    terminal = item;
+    terminalRef.current = item;
     queue.push(item);
     tryCommit();
   };
@@ -200,9 +159,9 @@ export function createReplaySubject<T = any>(
 
   const register = (receiver: Receiver<T>): Subscription => {
     const r = receiver as StrictReceiver<T>;
-
     // Late subscriber: replay buffer then terminal, just for this receiver.
-    if (terminal) {
+    const term = terminalRef.current;
+    if (term) {
       // Replay should not depend on being in receivers set.
       // Still respect async receivers by cursor replay.
       const startLen = replay.length;
@@ -216,15 +175,16 @@ export function createReplaySubject<T = any>(
         });
         if (isPromiseLike(res)) {
           allSync = false;
+          const capturedTerm = term;
           res.finally(() => {
             // continue remaining replay, then deliver terminal
-            replayWithCursor(r, i + 1, () => deliverTerminalToReceiver(r, terminal!));
+            replayWithCursor(r, i + 1, () => deliverTerminalToReceiver(r, capturedTerm!));
           });
           break;
         }
       }
       if (allSync) {
-        deliverTerminalToReceiver(r, terminal);
+        deliverTerminalToReceiver(r, term);
       }
       return createSubscription();
     }
