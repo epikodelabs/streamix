@@ -1,4 +1,4 @@
-# Same Engine. Different Tune.
+# ✨ Same Engine. Different Tune.
 
 **Streamix is not an original idea.** It deliberately borrows from RxJS—operator names, conceptual models, the entire vocabulary of reactive programming. This was conscious, intentional, and the right choice.
 
@@ -6,7 +6,7 @@ This isn't an apology. It's an explanation of why RxJS was the correct foundatio
 
 ---
 
-## You Don't Reinvent the Language
+## ✨ You Don't Reinvent the Language
 
 If you've written this:
 
@@ -25,7 +25,7 @@ This isn't plagiarism. It's the same reason `map` and `reduce` exist across Java
 
 ---
 
-## Where the Fork Happens
+## ✨ Where the Fork Happens
 
 What Streamix **doesn't** copy is the engine:
 
@@ -45,7 +45,7 @@ What Streamix **doesn't** copy is the engine:
 
 ---
 
-## Why Not Just Use RxJS?
+## ✨ Why Not Just Use RxJS?
 
 I did, for years. But I kept hitting the same walls:
 - **Schedulers** were powerful but opaque
@@ -63,7 +63,7 @@ So I kept the interface, rebuilt the machinery.
 
 ---
 
-## Standing on Shoulders
+## ✨ Standing on Shoulders
 
 Streamix exists because RxJS exists. RxJS taught a generation how to think about async flows, cancellation, and composition. It got the API design right.
 
@@ -79,7 +79,7 @@ Both libraries are valid. Both have their place.
 
 ---
 
-## Final Word
+## ✨ Final Word
 
 Streamix borrows heavily from RxJS because RxJS got the vocabulary right. Where it differs is implementation: pull vs push, generators vs observers, simplicity vs power.
 

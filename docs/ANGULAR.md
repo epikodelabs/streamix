@@ -1,4 +1,4 @@
-# Streamix + Angular
+# ✨ Streamix + Angular
 
 Angular applications have traditionally relied on RxJS, even when the underlying problem is relatively simple. While RxJS provides a powerful and expressive foundation, its use at the component level often introduces additional ceremony that is unnecessary for local, sequential asynchronous flows.
 
