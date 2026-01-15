@@ -24,10 +24,23 @@ import type { Subject } from "./subject";
 /* BehaviorSubject                                                            */
 /* ========================================================================== */
 
+/**
+ * Subject variant that synchronously emits the latest pushed value to every
+ * subscriber as soon as they register.
+ *
+ * @template T Value type managed by this subject.
+ */
 export type BehaviorSubject<T = any> = Subject<T> & {
   get value(): T;
 };
 
+/**
+ * Create a `BehaviorSubject` seeded with an initial value so that the first
+ * subscriber immediately receives the current state.
+ *
+ * @template T Value type managed by the subject.
+ * @param initialValue Value that subscribers receive immediately.
+ */
 export function createBehaviorSubject<T>(initialValue: T): BehaviorSubject<T> {
   const id = generateStreamId();
 

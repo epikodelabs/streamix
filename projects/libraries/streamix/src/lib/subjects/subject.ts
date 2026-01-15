@@ -22,6 +22,12 @@ import {
 /* Subject                                                                    */
 /* ========================================================================== */
 
+/**
+ * Hot stream that exposes the full `Stream` contract while also allowing
+ * values, errors, or completion to be pushed imperatively.
+ *
+ * @template T Value type emitted by the subject.
+ */
 export type Subject<T = any> = Stream<T> & {
   next(value?: T): void;
   complete(): void;
@@ -30,6 +36,12 @@ export type Subject<T = any> = Stream<T> & {
   get value(): T | undefined;
 };
 
+/**
+ * Create a bare subject that immediately forwards pushes to every active
+ * subscriber and retains the most recent value for late subscribers.
+ *
+ * @template T Value type carried by the subject.
+ */
 export function createSubject<T = any>(): Subject<T> {
   const id = generateStreamId();
 
