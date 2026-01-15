@@ -87,35 +87,6 @@ export function createOperator<T = any, R = T>(
 }
 
 /**
- * Timeline event used by "until"-style operators to coordinate source and notifier
- * activity within a subscription.
- *
- * Each event carries a monotonic numeric `stamp` (per-subscription) so operators
- * can deterministically order events and resolve races between source emissions
- * and notifier signals.
- *
- * Variants:
- * - `kind: "source"` — a normal emission from the source with `value: T`.
- * - `kind: "sourceDone"` — the source completed (no value).
- * - `kind: "notifierEmit"` — the notifier produced a signal (used to open gates).
- * - `kind: "notifierError"` — the notifier threw; carries `error` to propagate.
- * - `kind: "notifierDone"` — the notifier completed without emitting.
- *
- * Semantics:
- * - Compare `stamp` values to determine ordering (e.g. whether a notifier
- *   emission happened before a given source value).
- * - Operators typically update an `UntilGate` from notifier events:
- *   `notifierEmit` -> set `openStamp`; `notifierDone` (without emit) -> set `closeStamp`;
- *   `notifierError` -> record `error` for propagation.
- */
-export type Event<T> =
-  | { kind: "source"; value: T; stamp: number }
-  | { kind: "sourceDone"; stamp: number }
-  | { kind: "notifierEmit"; stamp: number }
-  | { kind: "notifierError"; error: any; stamp: number }
-  | { kind: "notifierDone"; stamp: number };
-
-/**
  * A type representing a chain of stream operators.
  *
  * This type uses function overloading to provide strong type safety for a sequence
