@@ -1,7 +1,6 @@
 # streamix
 
-Reactive streams built on async generators.
-Small bundle, pull-based execution, and a familiar operator API.
+Reactive streams that don't fight you. Built on async generators for pull-based execution, tiny bundles, and an API that feels familiar.
 
 <p align="center">
   <img src="https://github.com/epikodelabs/streamix/blob/main/LOGO.png?raw=true" alt="streamix Logo" width="500">
@@ -27,46 +26,37 @@ Small bundle, pull-based execution, and a familiar operator API.
 
 ---
 
-## Give a Star on GitHub
+## ✨ The Problem with Reactive Streams
 
-If streamix helps you, please give it a star: https://github.com/epikodelabs/streamix
+You've been there: RxJS is powerful but your bundle is bloated. Promises are simple but chaining async operations turns into callback soup. React's useEffect dependencies spiral out of control. You need reactive patterns without the baggage.
 
----
+**streamix** gives you reactive streams that compute on-demand, compose naturally with async/await, and ship in a fraction of the size. Built on async generators, it's pull-based by design—values only compute when you ask for them, giving you natural backpressure and predictable behavior.
 
-## Why Streamix
+### What You Get
 
-streamix is a reactive streams library built on async generators. It focuses on a small bundle size and pull-based execution while keeping an API that feels familiar to RxJS users.
+🪶 **Lightweight** — Generator-based core means minimal bundle impact  
+🎯 **Pull-based** — Values compute on-demand, no wasted cycles  
+⚡ **Async native** — Built for `for await...of` and async workflows  
+🔄 **RxJS-familiar** — Map, filter, debounce—operators you already know  
+⚛️ **React-ready** — Drop-in replacement for complex useEffect chains  
+🎨 **Flexible** — Subjects for manual control, streams for composition  
+🔍 **Debuggable** — Iterator-first design makes each step inspectable
 
-### Highlights
-
-- Pull-based execution so values are computed when requested
-- Async iterator first, designed for `for await...of`
-- Async callbacks are supported in `subscribe` handlers
-- `query()` retrieves actual emitted value as a promise
-- Operators for mapping, filtering, combination, and control flow
-- Subjects for manual emission and multicasting
-- Optional HTTP client and DOM observation utilities
+Whether you're building real-time dashboards, CLI tools, or background processors, streamix keeps async complexity manageable without the framework tax.
 
 ---
 
-## Installation
+## 📦 Installation
 
 ```bash
-# npm
 npm install @epikodelabs/streamix
-
-# yarn
-yarn add @epikodelabs/streamix
-
-# pnpm
-pnpm add @epikodelabs/streamix
 ```
 
 ---
 
-## Quick start
+## ⚡️ Quick Start
 
-### Basic stream operations
+### Transform Data Streams
 
 ```typescript
 import { range, map, filter, take } from '@epikodelabs/streamix';
@@ -83,7 +73,7 @@ for await (const value of stream) {
 }
 ```
 
-### Handling user events
+### Tame User Input
 
 ```typescript
 import { fromEvent, debounce, map, filter } from '@epikodelabs/streamix';
@@ -101,55 +91,47 @@ for await (const searchTerm of searchStream) {
 }
 ```
 
-### Subscribe with async callbacks
+### Simplify React Components
+
+Stop wrestling with useEffect dependencies and cleanup functions:
 
 ```typescript
-import { interval } from '@epikodelabs/streamix';
+import { useEffect, useState } from 'react';
+import { fromEvent, debounce, map, filter } from '@epikodelabs/streamix';
 
-const sub = interval(1000).subscribe(async value => {
-  await fetch('/metrics', { method: 'POST', body: JSON.stringify({ value }) });
-});
+function SearchComponent() {
+  const [results, setResults] = useState([]);
 
-// Later:
-sub.unsubscribe();
+  useEffect(() => {
+    const searchInput = document.getElementById('search');
+    const stream = fromEvent(searchInput, 'input')
+      .pipe(
+        map(e => e.target.value),
+        debounce(300),
+        filter(text => text.length > 2)
+      );
+
+    (async () => {
+      for await (const term of stream) {
+        const data = await fetchResults(term);
+        setResults(data);
+      }
+    })();
+  }, []); // One dependency array. That's it.
+
+  return <ResultsList results={results} />;
+}
 ```
 
-### Subscribe with a receiver
-
-```typescript
-import { interval, take } from '@epikodelabs/streamix';
-
-const sub = interval(500)
-  .pipe(take(3))
-  .subscribe({
-    next: value => console.log('tick:', value),
-    error: err => console.error('error:', err),
-    complete: () => console.log('complete'),
-  });
-
-sub.unsubscribe();
-```
-
-### Subscribe and cancel on a condition
-
-```typescript
-import { interval } from '@epikodelabs/streamix';
-
-const sub = interval(1000).subscribe(value => {
-  console.log('value:', value);
-  if (value >= 5) {
-    sub.unsubscribe();
-  }
-});
-```
+No dependency arrays to maintain. No manual cleanup. No stale closure bugs. Just streams.
 
 ---
 
-## Core concepts
+## 🧠 Core Concepts
 
-### Streams
+### Streams Are Just Async Generators
 
-Streams are sequences of values over time, implemented as async generators:
+At their core, streams are async generators—functions that yield values over time:
 
 ```typescript
 import { createStream } from '@epikodelabs/streamix';
@@ -164,63 +146,137 @@ async function* numberStream() {
 const stream = createStream('numbers', numberStream);
 ```
 
-### Operators
+This simple foundation means streams are predictable, testable, and easy to reason about.
 
-Transform, filter, and combine streams with familiar operators:
+### Stream Factories: Common Patterns, Zero Boilerplate
+
+Rather than writing generators for every use case, reach for built-in factories:
+
+**Combine Multiple Sources**
+- `combineLatest(...sources)` — React to any change across multiple streams
+- `concat(...sources)` — Chain streams sequentially, one after another
+- `forkJoin(...sources)` — Wait for all streams to complete, emit final values
+- `merge(...sources)` — Mix concurrent streams into a single flow
+- `race(...sources)` — First to emit wins, others get cancelled
+- `zip(...sources)` — Pair values by index across streams
+
+**Create From Anything**
+- `defer(factory)` — Lazy evaluation—build streams only when subscribed
+- `from(source)` — Lift arrays, iterables, async generators, or promises
+- `fromEvent(target, event)` — Turn DOM clicks, key presses, anything into streams
+- `fromPromise(promise)` — Single-value streams from promise-based APIs
+- `of(...values)` — Emit a known set of values immediately
+- `range(start, count)` — Generate sequential numbers without loops
+
+**Control Timing**
+- `interval(ms)` — Metronome for your async operations
+- `timer(delay, period?)` — Delayed start, optional repetition
+
+**Shape Behavior**
+- `EMPTY()` — The stream that does nothing (useful for conditional logic)
+- `iif(condition, trueSource, falseSource)` — Branch based on runtime conditions
+- `loop(factory)` — Keep generating while values keep coming
+- `retry(source, attempts)` — Resilience built in—retry failed operations
+
+### Operators: Compose Without Nesting
+
+Operators transform streams without callback pyramids. Pipe them together for readable async logic:
 
 ```typescript
-import { map, filter, mergeMap, combineLatest } from '@epikodelabs/streamix';
-
-const processedStream = sourceStream
+const stream = from(items)
   .pipe(
     map(x => x * 2),
     filter(x => x > 10),
-    mergeMap(x => fetchDataFor(x))
+    debounce(100),
+    take(5)
   );
 ```
 
-### Subjects
+Mix sync and async transformations seamlessly:
 
-Manually control stream emissions:
+```typescript
+const results = from(pages)
+  .pipe(
+    map(page => page.length),
+    map(async length => {
+      await expensiveOperation(length);
+      return length * 2;
+    }),
+    filter(num => num > 10)
+  );
+```
+
+**40+ Operators Organized By Purpose**
+
+**Shape Your Data**  
+`map`, `scan`, `reduce`, `expand`, `recurse`, `groupBy`, `partition` — Transform, accumulate, and reorganize streams into exactly what you need.
+
+**Pick What Matters**  
+`filter`, `take`, `takeWhile`, `takeUntil`, `skip`, `skipWhile`, `skipUntil`, `first`, `last`, `elementAt`, `elementNth`, `distinctUntilChanged`, `distinctUntilKeyChanged`, `unique` — Cut through noise and extract signal.
+
+**Orchestrate Multiple Streams**  
+`withLatestFrom`, `sample`, `fork`, `slidingPair` — Coordinate timing and combine data across concurrent flows.
+
+**Control the Flow**  
+`buffer`, `bufferCount`, `debounce`, `throttle`, `audit`, `delay`, `delayUntil` — Rate limiting, batching, and timing control without manual state management.
+
+**Flatten Nested Streams**  
+`concatMap`, `mergeMap`, `switchMap` — Handle streams that produce streams—perfect for API calls, dynamic data, and conditional flows.
+
+**Handle Edge Cases**  
+`tap`, `catchError`, `defaultIfEmpty`, `ignoreElements`, `throwError`, `observeOn`, `shareReplay`, `toArray` — Debug, recover from errors, and handle empty or failed streams gracefully.
+
+**Aggregate Results**  
+`count`, `every`, `some`, `min`, `max`, `select` — Reduce streams to single values or boolean checks.
+
+### Subjects: When You Need Manual Control
+
+Sometimes you need to push values into a stream on your own terms:
 
 ```typescript
 import { createSubject } from '@epikodelabs/streamix';
 
-const subject = createSubject<string>();
+const messages = createSubject<string>();
 
-for await (const value of subject) {
-  console.log('Received:', value);
-}
+// Consumer listens
+(async () => {
+  for await (const msg of messages) {
+    console.log('Received:', msg);
+  }
+})();
 
-subject.next('Hello');
-subject.next('World');
-subject.complete();
+// Producer pushes
+messages.next('System online');
+messages.next('Processing...');
+messages.complete();
 ```
 
-### Query the first value
+### Query: Get One Value and Bail
 
-`query()` retrieves the actual emitted value as a promise, then automatically unsubscribes.
+When you just need the first emitted value as a promise:
 
 ```typescript
 import { interval, take, map } from '@epikodelabs/streamix';
 
+// Wait for the first value
 const stream = interval(1000).pipe(take(1));
 const first = await stream.query();
-console.log('first:', first);
+console.log('First value:', first);
 
+// Or transform before querying
 const transformed = interval(500).pipe(
   map(value => value * 10),
   take(1)
 );
 const result = await transformed.query();
-console.log('result:', result);
+console.log('Result:', result); // 0
 ```
 
 ---
 
-## HTTP client
+## 🌐 HTTP Client That Streams
 
-streamix includes an HTTP client that composes well with streams:
+Built-in HTTP client designed for stream composition:
 
 ```typescript
 import { map, retry } from '@epikodelabs/streamix';
@@ -230,7 +286,7 @@ import {
   useBase,
   useLogger,
   useTimeout
-} from '@epikodelabs/streamix/networking';
+} from '@epikodelabs/streamix/http';
 
 const client = createHttpClient().withDefaults(
   useBase("https://api.example.com"),
@@ -238,6 +294,7 @@ const client = createHttpClient().withDefaults(
   useTimeout(5000)
 );
 
+// Automatic retries, stream transformations, all in one flow
 const dataStream = retry(() => client.get("/users", readJson), 3)
   .pipe(
     map(users => users.filter(user => user.active))
@@ -250,9 +307,9 @@ for await (const activeUsers of dataStream) {
 
 ---
 
-## Real-world example
+## 🧪 Real-World Example: Live Search
 
-Live search with API calls and basic error handling:
+Debounce user input, call an API, handle errors, update the UI—all in one stream:
 
 ```typescript
 import {
@@ -271,13 +328,15 @@ const resultsDiv = document.getElementById('results');
 const searchResults = fromEvent(searchInput, 'input')
   .pipe(
     map(e => e.target.value.trim()),
-    debounce(300),
-    filter(query => query.length > 2),
-    switchMap(query => fromPromise(
-      fetch(`/api/search?q=${query}`)
-        .then(r => r.json())
-        .catch(() => ({ error: 'Search failed', query }))
-    )),
+    debounce(300),                    // Wait for typing to pause
+    filter(query => query.length > 2), // Ignore short queries
+    switchMap(query =>                 // Cancel previous requests
+      fromPromise(
+        fetch(`/api/search?q=${query}`)
+          .then(r => r.json())
+          .catch(() => ({ error: 'Search failed', query }))
+      )
+    ),
     startWith({ results: [], query: '' })
   );
 
@@ -292,114 +351,88 @@ for await (const result of searchResults) {
 }
 ```
 
----
-
-## Available operators
-
-### Transformation
-- `map` - Transform each value
-- `scan` - Accumulate values over time
-- `buffer` - Collect values into arrays
-
-### Filtering
-- `filter` - Keep values that match criteria
-- `take` - Take first N values
-- `takeWhile` - Take while condition is true
-- `skip` - Skip first N values
-- `distinct` - Remove duplicates
-
-### Combination
-- `mergeMap` - Merge multiple streams
-- `switchMap` - Switch to latest stream
-- `combineLatest` - Combine latest values
-- `concat` - Connect streams sequentially
-
-### Utility
-- `tap` - Side effects without changing stream
-- `delay` - Add delays between emissions
-- `retry` - Retry failed operations
-- `finalize` - Cleanup when stream completes
-- `debounce` - Limit emission rate
+No state variables. No cleanup logic. Just a single, readable stream.
 
 ---
 
-## Live demos
+## 🎬 See It In Action
 
-- [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
-- [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
-- [Travel Blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w)
+- [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk) — Visual transformations with streams
+- [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz) — Handling large datasets efficiently
+- [Travel Blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w) — Full application example
 
 ---
 
-## Generator-based architecture
+## 🧬 Pull-Based = Predictable
 
-Unlike push-based streams, streamix uses pull-based async generators:
+Unlike push-based streams that fire whenever they want, streamix generators only compute values when you ask for them:
 
 ```typescript
 import { createStream, take } from '@epikodelabs/streamix';
 
 async function* expensiveStream() {
   for (let i = 0; i < 1000000; i++) {
-    yield expensiveComputation(i);
+    yield expensiveComputation(i); // Only runs when consumed
   }
 }
 
 const stream = createStream('calculations', expensiveStream)
-  .pipe(take(10));
+  .pipe(take(10)); // Stops after 10 values—no wasted computation
 ```
 
-This enables:
-- On-demand computation
-- Lower memory usage per stream
-- Natural backpressure from the consumer
+This gives you:
+- **On-demand computation** — No CPU cycles burned until you iterate
+- **Natural backpressure** — Consumer controls the pace
+- **Lower memory** — Values exist only while being processed
+- **Easier debugging** — Step through values predictably
 
 ---
 
-## Streamix vs RxJS
+## ⚖️ Streamix vs RxJS
 
 | Feature | Streamix | RxJS |
-| --- | --- | --- |
-| Bundle size | Small, generator-based core | Larger, broad operator set |
-| Learning curve | Moderate, smaller API surface | Steeper, larger surface area |
-| Execution model | Pull-based | Push-based |
-| Async/await | Native | Limited |
-| Backpressure | Consumer-driven | Requires patterns |
+|---------|----------|------|
+| **Philosophy** | Pull-based, compute on-demand | Push-based, eager execution |
+| **Bundle Size** | ~15KB minified | ~50KB+ minified |
+| **Learning Curve** | Focused API, easier entry | Comprehensive but steeper |
+| **Async/Await** | Native throughout | Requires conversion |
+| **Backpressure** | Built-in by design | Manual implementation |
+| **Best For** | Modern async workflows, bundle-conscious apps | Complex reactive systems, existing RxJS codebases |
+
+Both are excellent tools. Choose streamix for new projects where bundle size matters and async/await is primary. Choose RxJS for established patterns or when you need its extensive operator ecosystem.
 
 ---
 
-## Documentation and resources
+## 📚 Learn More
 
-- [API Documentation](https://epikodelabs.github.io/streamix)
-- [Blog: Exploring streamix](https://medium.com/p/00d5467f0c01)
-- [streamix 2.0 Updates](https://medium.com/p/a1eb9e7ce1d7)
-- [Reactive Programming Guide](https://medium.com/p/0bfc206ad41c)
-
----
-
-## Contributing
-
-We welcome issues and pull requests. If you are new to the codebase:
-
-- Open an issue with a minimal reproduction for bugs
-- Propose features with a short problem statement and example
-- Improve docs with focused changes
-
-[Share your feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
+- [API Documentation](https://epikodelabs.github.io/streamix) — Complete reference
+- [streamix 2.0 Updates](https://medium.com/p/a1eb9e7ce1d7) — generator-driven reactive library
+- [Reactive Programming Guide](https://medium.com/p/0bfc206ad41c) — streamix vs redux-saga
 
 ---
 
-## License
+## 🤝 Contributing
 
-MIT License
+Found a bug? Have an idea? We'd love to hear from you.
+
+- **Bug reports** — Minimal reproduction case in an issue
+- **Features** — Describe the problem and your proposed solution
+- **Docs** — Clarifications and examples always welcome
+- **Code** — Follow existing patterns, include tests
+
+[Share feedback](https://forms.gle/CDLvoXZqMMyp4VKu9) and help shape streamix.
+
+---
+
+## 📜 License
+
+MIT — use it freely.
 
 ---
 
 <p align="center">
-  <strong>Get started</strong><br>
-  <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> -
-  <a href="https://github.com/epikodelabs/streamix">View on GitHub</a> -
+  <strong>Ready to stream?</strong><br>
+  <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> ·
+  <a href="https://github.com/epikodelabs/streamix">Star on GitHub</a> ·
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
-
-
-
