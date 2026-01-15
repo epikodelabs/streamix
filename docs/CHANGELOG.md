@@ -1,6 +1,10 @@
 # Changelog
 
 
+### 2.0.30
+
+Subjects were tightened again around async-iterator backpressure, the `takeUntil`/`skipUntil`/`delayUntil` operators now mirror the iterator-first lifecycle so cancellation and cleanup behave predictably. The scheduler was removed in favor of direct task coordination.
+
 ### 2.0.29
 
 Rewrote subjects internals to guard async-iterator backpressure and avoid races; all subjects are sync; deferred iterator processing to avoid notifier/source races. Fixed several unsubscribe and race issues in subject/operator chains that caused flaky tests.
