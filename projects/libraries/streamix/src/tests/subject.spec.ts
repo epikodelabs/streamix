@@ -1,5 +1,9 @@
 import { createSubject } from '@epikodelabs/streamix';
 
+const flushMicrotasks = async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+};
+
 describe('createSubject', () => {
 
   it('does not emit values after unsubscribe (unsubscribe triggers complete)', (done) => {
@@ -29,7 +33,7 @@ describe('createSubject', () => {
     subject.next(1);
     subject.complete();
 
-    await Promise.resolve();
+    await flushMicrotasks();
     expect(values).toEqual([]);
   });
 
@@ -141,7 +145,7 @@ describe('createSubject', () => {
     for (let i = 0; i < 1000; i++) subject.next(i);
     subject.complete();
 
-    await Promise.resolve();
+    await flushMicrotasks();
     expect(completed).toBeTrue();
     expect(count).toBe(1000);
   });
@@ -212,7 +216,7 @@ describe('createSubject', () => {
     const subject = createSubject<number>();
     subject.complete();
 
-    await Promise.resolve();
+    await flushMicrotasks();
 
     let completed = false;
     subject.subscribe({ complete: () => (completed = true) });
