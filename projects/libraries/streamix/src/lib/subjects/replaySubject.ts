@@ -27,8 +27,21 @@ import type { Subject } from "./subject";
 
 type ReplayItem<T> = { value: T; stamp: number };
 
+/**
+ * Subject that retains a buffer of past emissions so new subscribers receive
+ * the most recent values in order before shifting into live mode.
+ *
+ * @template T Value type replayed to late subscribers.
+ */
 export type ReplaySubject<T = any> = Subject<T>;
 
+/**
+ * Construct a `ReplaySubject` with an optional buffer `capacity` that limits
+ * how many past values are replayed to late subscribers.
+ *
+ * @template T Value type replayed to subscribers.
+ * @param capacity Maximum number of past values stored in the buffer.
+ */
 export function createReplaySubject<T = any>(
   capacity: number = Infinity
 ): ReplaySubject<T> {
