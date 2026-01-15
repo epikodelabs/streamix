@@ -22,7 +22,7 @@ export type Receiver<T = any> = {
    * A function called if the stream encounters an error.
    * @param err The error that occurred.
    */
-  error?: (err: Error) => MaybePromise;
+  error?: (err: any) => MaybePromise;
   /**
    * A function called when the stream has completed successfully and will emit no more values.
    * Streamix also invokes this on unsubscribe (and after error) so subscribers can
@@ -133,7 +133,7 @@ export function createReceiver<T = any>(
 
       void processQueue();
     },
-    error: async function (err: Error) {
+    error: async function (err: any) {
       if (!_completed) {
         try {
           await scheduleCallback(receiver.error, err);
