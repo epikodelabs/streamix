@@ -82,53 +82,61 @@ export function createReceiver<T = any>(
 
   const wantsRaw = (receiver as any).__wantsRawValues === true;
 
-  const runNext = async (val: T) => {
-    const v = wantsRaw ? val : unwrapPrimitive(val);
-    await receiver.next?.call(receiver, v);
+  const scheduleCallback = <R>(
+    handler?: ((...args: any[]) => MaybePromise<R>) | undefined,
+    ...args: any[]
+  ): Promise<R | undefined> => {
+    if (!handler) return Promise.resolve<R | undefined>(undefined);
+
+    return new Promise<R | undefined>((resolve, reject) => {
+      queueMicrotask(() => {
+        try {
+          const result = handler.apply(receiver, args);
+          if (isPromiseLike(result)) {
+            result.then(resolve, reject);
+          } else {
+            resolve(result as R | undefined);
+          }
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
   };
 
   const wrappedReceiver: StrictReceiver<T> = {
     next: (value: T) => {
       if (_completed) return;
-      
-      if (_processing) {
-        _queue.push(value);
-        return;
-      }
 
-      const val = wantsRaw ? value : unwrapPrimitive(value);
-      
-      try {
-        const result = receiver.next?.call(receiver, val);
-        if (isPromiseLike(result)) {
-            _processing = true;
-            return (async () => {
-                try {
-                    await result;
-                    while (_queue.length > 0 && !_completed) {
-                      const queuedVal = _queue.shift()!;
-                      await runNext(queuedVal);
-                    }
-                } catch (err) {
-                    await wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
-                } finally {
-                    _processing = false;
-                    _queue.length = 0;
-                    if (_pendingComplete && !_completed) {
-                        _pendingComplete = false;
-                        await wrappedReceiver.complete();
-                    }
-                }
-            })();
+      _queue.push(value);
+      if (_processing) return;
+
+      const processQueue = async () => {
+        _processing = true;
+        try {
+          while (_queue.length > 0 && !_completed) {
+            const queuedVal = _queue.shift()!;
+            const val = wantsRaw ? queuedVal : unwrapPrimitive(queuedVal);
+            await scheduleCallback(receiver.next, val);
+          }
+        } catch (err) {
+          await wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
+          return;
+        } finally {
+          _processing = false;
+          if (_pendingComplete && !_completed) {
+            _pendingComplete = false;
+            await wrappedReceiver.complete();
+          }
         }
-      } catch (err) {
-        return wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
-      }
+      };
+
+      void processQueue();
     },
     error: async function (err: Error) {
       if (!_completed) {
         try {
-          await receiver.error?.call(receiver, err);
+          await scheduleCallback(receiver.error, err);
         } catch (e) {
           console.error('Unhandled error in error handler:', e);
         }
@@ -138,12 +146,11 @@ export function createReceiver<T = any>(
     complete: async () => {
       if (!_completed) {
         if (_processing) {
-          // Defer completion until after current next() finishes
           _pendingComplete = true;
         } else {
           _completed = true;
           try {
-            await receiver.complete?.call(receiver);
+            await scheduleCallback(receiver.complete);
           } catch (err) {
             console.error('Unhandled error in complete handler:', err);
           }
