@@ -1,70 +1,65 @@
 # 🧵 Subjects
 
-Subjects are hot, push-based streams that expose the full `Stream` surface while letting you imperatively `next`, `complete`, or `error`. A single execution context broadcasts every emission to all active subscribers, but each receiver handles its own backpressure by buffering when its `next` handler returns a promise. Internally, each emission is stamped so ordering stays deterministic even when receivers resolve asynchronously.
+Subjects are hot, push-based streams that expose the same `Stream` surface while letting you imperatively `next`, `complete`, or `error`. A single execution context broadcasts every emission to all active subscribers, and each emission is stamped to keep ordering deterministic even when downstream handlers return promises.
 
 ## 🎯 Core Characteristics
 
-- **Multicast broadcasting** – the subject maintains one execution, so every subscriber receives each emission at the same time the emitter pushes it.
-- **Per-receiver flow control (with a global readiness gate)** – each receiver buffers while its handler resolves, but the commit loop still waits until `ready.size === receivers.size` before advancing, so every emission pauses until all listeners rejoin the ready set.
-- **Imperative producer API** – values, completion, and errors are stamped and queued through the shared commit loop before delivery.
-- **Late terminal replay** – subscribers who join after completion or error immediately see the terminal notification delivered with the stored stamp.
+- **Multicast broadcasting** – the subject maintains one execution context so every active subscriber receives each emission in lockstep.
+- **Global readiness gate** – the commit loop only advances when `ready.size === receivers.size`, so every listener must finish consuming (and rejoin the ready set) before the next value is emitted, even if they buffer asynchronously.
+- **Imperative producer API** – `next`, `complete`, and `error` push stamped queue items through the shared commit loop for consistent delivery.
+- **Late terminal replay** – subscribers who join after completion or error immediately observe the stored terminal stamp and handler result.
 
 ## ⏳ Emission stamping and delivery
 
-Every `next`, `complete`, or `error` call records an emission stamp that downstream utilities (subjects, iterators, operators) use to enforce ordering and avoid re-entrancy. The commit loop pushes each stamped item to ready receivers, and receivers that return promises drop out of the ready set until their async work settles.
-
-The gate that drives each emission is *global*: the loop only advances when `ready.size === receivers.size`, so the next queued item waits until every registered receiver has consumed (and, if needed, asynchronously resolved) the current value. That keeps the subject synchronized with every consumer, even though each receiver manages its own backpressure by re-adding itself to `ready` after finishes.
+Each producer call records an emission stamp. `createTryCommit` pulls the next queued item only when every receiver is ready and delivers it inside that stamp, so re-entrancy is avoided and async handler promises re-add their receiver to the ready set once resolved.
 
 ## 🔌 Subscription lifecycle
 
-- **Subscribe** with `receiver` or `callback` to get a `Subscription` that can be cancelled with `.unsubscribe()`.
-- **Unsubscribe cleanup** removes the receiver and immediately calls its `complete()` handler so cleanup logic sees a deterministic stop.
-- **Late subscribers** after completion or error receive the terminal notification and no further values.
+- **Subscribe** with a `Receiver` or callback to obtain a `Subscription` with `unsubscribe()`.
+- **Per-receiver queuing** – `createReceiver` serializes `next` invocations per receiver, buffering values while a handler is running and deferring completion until the queue drains.
+- **Unsubscribe cleanup** calls the receiver’s `complete()` so cleanup logic sees a deterministic stop.
+- **Late subscribers** after terminal events immediately see the stored completion or error.
 
 ## 🔁 Lazy async iterator with true backpressure
 
 ```ts
 for await (const value of subject) {
-  // iterator-level buffering and stamping preserves ordered delivery
+  // Buffered values are stamped and delivered in order.
 }
 ```
 
-- **Lazy registration** – the iterator only subscribes when `next()` is called, deferring work until consumption begins.
-- **Iterator-level buffering** isolates the iterator’s backpressure without pausing the subject for other subscribers.
-- **Clean termination** – breaking the loop or calling `return()` detaches the iterator without completing the subject, so other subscribers stay live.
+- **Lazy registration** – the iterator subscribes only on the first `next()` call.
+- **Iterator-level buffering** lets the iterator manage its own backpressure without pausing the subject for other subscribers.
+- **Clean termination** – breaking or returning from the iterator detaches it without completing the subject, so other subscribers stay live.
 
 ## 📊 Value access helpers
 
-- **`value` getter** provides synchronous access to the most recent emission (or `undefined` for the base subject before anything is emitted).
-- **`query()`** is implemented with `firstValueFrom` and resolves with the next emitted value, great for one-shot sampling.
+- **`value` getter** exposes the latest emission (or `undefined` for the base subject before anything emits).
+- **`query()`** is a `firstValueFrom`-style helper that resolves with the next emitted value and immediately unsubscribes.
 
 ## ⚠️ Error handling
 
-Errors are stamped and delivered like values:
-
-- **Receiver errors** stay local to the receiver: `receiver.error()` runs without forcing the subject to terminal state.
-- **Explicit `error(err)`** transitions the subject to an errored terminal state and notifies all subscribers.
-- **Late subscribers** immediately observe the stored error when they subscribe after an explicit error.
+- **Receiver errors** are handled locally; `receiver.error()` runs without forcing the subject to terminate unless it was already terminal.
+- **Explicit `error(err)`** transitions the subject into an errored terminal state stamped like any other emission.
+- **Late subscriber errors** deliver the stored error immediately upon registration.
 
 ## ❤️ `createBehaviorSubject(initialValue)`
 
-`BehaviorSubject` is the stateful variant: it caches the latest value in `latestValue` and replays it synchronously to any newly registered receiver before joining the live commit loop. As a result:
+`BehaviorSubject` seeds the subject with an initial value, stores the latest value in `latestValue`, and replays it synchronously to every new subscriber before they join the live commit loop. Behavior subjects share the same commit logic but always have a concrete current state.
 
-- `value` never returns `undefined` after creation because there is always a seeded state.
-- Late subscribers immediately receive the current snapshot before any further values.
-- All other behaviors (async iterator, terminal handling, commit loop) are shared with the base subject.
-
-Use `BehaviorSubject` whenever each consumer needs the latest “current state” immediately.
+- `value` never returns `undefined` because the subject always retains its seeded state.
+- New subscribers immediately receive the current snapshot before future emissions.
+- Useful for state propagation where every consumer needs the current value upfront.
 
 ## 🌀 `createReplaySubject(capacity = Infinity)`
 
-`ReplaySubject` keeps a sliding buffer of past `{ value, stamp }` entries that it replays to newcomers before handing them off to the live flow.
+`ReplaySubject` retains a sliding buffer of the most recent `{ value, stamp }` entries and replays them to late subscribers before handing them off to the live flow.
 
-- **Replayed history** is drained in order and respects asynchronous receiver handlers by continuing the replay via cursor-based steps when promises are returned.
-- **Capacity** bounds how many entries are stored; older items drop off when the buffer exceeds the limit.
-- **Terminal replays** deliver completion or errors immediately after replay finishes, even for subscribers that appear after the terminal event.
+- **Replayed history** is drained in order; async handlers are honored by cursor-based replay so promises can settle before continuing.
+- **Capacity** bounds history length and drops the oldest entries when the buffer exceeds the limit.
+- **Terminal replays** deliver completion or errors immediately after the buffer drains, even for subscribers that join after the terminal event.
 
-Ideal for “catching up” new subscribers with recent history before mixing them into ongoing emissions.
+Use replay subjects when new subscribers need to catch up on recent history before resuming live emissions.
 
 ## 🎭 Usage patterns
 
