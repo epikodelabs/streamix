@@ -116,18 +116,18 @@ function SearchComponent() {
 ```
 
 **Notice what disappeared:**
-- вќЊ No manual debounce logic with `setTimeout`
-- вќЊ No `cancelled` flag dance
-- вќЊ No cleanup function spaghetti
-- вќЊ No race condition bugs
-- вќЊ No dependency array paranoia
+- No manual debounce logic with `setTimeout`
+- No `cancelled` flag dance
+- No cleanup function spaghetti
+- No race condition bugs
+- No dependency array paranoia
 
 **Notice what you got:**
-- вњ… Automatic request cancellation via `switchMap`
-- вњ… Built-in debouncing
-- вњ… Declarative data flow
-- вњ… Zero stale closure bugs
-- вњ… Actually readable code
+- Automatic request cancellation via `switchMap`
+- Built-in debouncing
+- Declarative data flow
+- Zero stale closure bugs
+- Actually readable code
 
 ---
 
@@ -167,7 +167,7 @@ function MetricsDashboard() {
 
 ### ✨ 2. **Form Validation with Server-Side Checks**
 
-Debounce, validate, check availabilityвЂ”all in one flow:
+Debounce, validate, check availability-all in one flow:
 
 ```typescript
 function UsernameInput() {
@@ -313,11 +313,11 @@ Based on real migrations, teams report:
 
 While Streamix makes React development dramatically better, it's not React-specific:
 
-**рџЋ® Games** вЂ” Handle input streams, physics updates, and entity lifecycle  
-**вљ™пёЏ Node.js** вЂ” Process file streams, API requests, database queries  
-**рџ–ҐпёЏ Electron** вЂ” Coordinate IPC, file system watching, background tasks  
-**рџ“± React Native** вЂ” Handle gestures, sensors, and network requests  
-**рџ”§ CLIs** вЂ” Build interactive prompts and progress indicators
+**Games** - Handle input streams, physics updates, and entity lifecycle  
+**Node.js** - Process file streams, API requests, database queries  
+**Electron** - Coordinate IPC, file system watching, background tasks  
+**React Native** - Handle gestures, sensors, and network requests  
+**CLIs** - Build interactive prompts and progress indicators
 
 Streamix is just JavaScript. It runs anywhere.
 
@@ -325,7 +325,7 @@ Streamix is just JavaScript. It runs anywhere.
 
 ## ✨ Heavy Lifting? Meet Coroutines
 
-Speaking of running anywhereвЂ”what about CPU-intensive work? Streamix includes **coroutines** that move heavy processing to Web Workers automatically:
+Speaking of running anywhere-what about CPU-intensive work? Streamix includes **coroutines** that move heavy processing to Web Workers automatically:
 
 ```typescript
 import { coroutine } from '@epikodelabs/streamix';
@@ -372,13 +372,13 @@ function ImageEditor() {
 ## ✨ Why Developers Are Switching
 
 > **"We migrated our search component and deleted 200 lines of useEffect cleanup code. Our bug count dropped to zero."**  
-> вЂ” Frontend lead at a SaaS company
+> - Frontend lead at a SaaS company
 
 > **"Finally, reactive programming that doesn't require a PhD. My junior devs actually understand the code now."**  
-> вЂ” Senior engineer at a startup
+> - Senior engineer at a startup
 
 > **"Bundle size went down 40KB and our Lighthouse scores improved. Streamix just works."**  
-> вЂ” Performance engineer at an e-commerce platform
+> - Performance engineer at an e-commerce platform
 
 ---
 
@@ -425,12 +425,12 @@ You'll notice:
 **React is amazing.** But `useEffect` wasn't designed for complex async flows. You shouldn't need a Computer Science degree to debounce a search input or poll an API without memory leaks.
 
 **Streamix gives you:**
-- вњ… RxJS-style operators without the bundle bloat
-- вњ… Pull-based streams that respect React's rendering model
-- вњ… Automatic cleanup and cancellation
-- вњ… TypeScript support out of the box
-- вњ… Zero dependencies, ~9KB gzipped
-- вњ… Works with any framework (or no framework)
+- RxJS-style operators without the bundle bloat
+- Pull-based streams that respect React's rendering model
+- Automatic cleanup and cancellation
+- TypeScript support out of the box
+- Zero dependencies, ~9KB gzipped
+- Works with any framework (or no framework)
 
 **Stop fighting your tools.** Start streaming.
 
