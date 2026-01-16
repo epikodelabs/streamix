@@ -1,6 +1,6 @@
-# ✨ Streamix and RxJS: A Deliberate Connection
+# ✨ Same Language, Different Execution
 
-**Streamix deliberately builds on RxJS.** The operator names, conceptual models, and vocabulary of reactive programming are borrowed intentionally. This document explains why that foundation matters and where Streamix charts its own path.
+If you've used RxJS, Streamix's API will look familiar. The operator names and patterns are the same by design. This document explains why Streamix reuses RxJS's vocabulary while implementing a fundamentally different execution model.
 
 ## ✨ A Shared Vocabulary
 

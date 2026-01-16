@@ -1,25 +1,25 @@
-# ✨ Streamix + Angular
+# ✨ Async Generators Meet Angular Components
 
-**Streamix** brings async generator-based reactive programming to TypeScript. It provides familiar operators like `map`, `filter`, `debounce`, and `switchMap`, but works with async iterables instead of Observables. This enables pull-based execution with automatic lifecycle management through native async/await syntax.
+**Streamix** brings async-generator–based reactive programming to TypeScript. It offers familiar operators, but operates on async iterables rather than Observables. This enables pull-based execution with lifecycle management handled naturally through `async`/`await`.
 
-Angular applications have traditionally relied on RxJS for reactive programming. While RxJS provides a powerful foundation, its use at the component level can introduce ceremony that feels unnecessary for simple, local asynchronous flows.
+Angular applications have traditionally relied on RxJS for reactive programming. RxJS is powerful and essential to the framework, but at the component level it can introduce ceremony—Subjects, subscriptions, and explicit cleanup—even for simple, localized asynchronous flows.
 
-Streamix complements RxJS in Angular applications. It's designed for scenarios where reactive logic stays within a component and is more naturally expressed as **consumption** rather than **subscription**.
+At present, fully replacing RxJS in Angular is not feasible without modifying core framework components. The emergence of Signals, however, suggests a future where Angular’s reactivity is less tightly coupled to RxJS, potentially opening the door to broader integration of consumption-based reactive models.
 
 ## ✨ RxJS Remains Central
 
-RxJS is a core dependency in Angular. Major parts of Angular's API—`HttpClient`, router events, forms, and framework integrations—are built on RxJS Observables. Most production Angular applications will continue to need RxJS.
+RxJS is a core Angular dependency. Major framework APIs—`HttpClient`, router events, forms—are built on RxJS Observables. Production applications will continue to need RxJS for framework integration.
 
-Angular's reactivity model is evolving alongside this. With **Signals**, the framework now has a native primitive for state propagation and change detection. This creates a natural separation:
+Angular's reactivity is evolving with **Signals**, a native primitive for state propagation and change detection. This creates separation between:
 
-* **Framework-level reactivity** centers on Signals
-* **Application-level asynchronous flow** can use different approaches
+* **Framework-level reactivity** (Signals)
+* **Application-level asynchronous flow** (multiple approaches possible)
 
-This allows developers to simplify component logic while keeping RxJS where the framework requires it.
+Developers can simplify component logic while keeping RxJS where the framework requires it.
 
 ## ✨ A Practical Example
 
-Consider a search component. The typical RxJS implementation uses Subjects, explicit teardown, and careful operator selection:
+A typical search component in RxJS:
 
 ```ts
 this.searchControl.valueChanges
@@ -32,9 +32,9 @@ this.searchControl.valueChanges
   .subscribe(results => this.results$.next(results));
 ```
 
-This works well but requires manual subscription management and lifecycle coordination.
+This requires manual subscription management and lifecycle coordination.
 
-Streamix uses the same reactive operators with async generators:
+With Streamix:
 
 ```ts
 const stream = fromEvent(input, 'input').pipe(
@@ -48,15 +48,15 @@ for await (const results of stream) {
 }
 ```
 
-The key differences:
+Key differences:
 
-* Cancellation happens automatically when the loop exits
-* Cleanup is tied to component lifecycle
+* Automatic cancellation when the loop exits
+* Lifecycle-bound cleanup
 * Direct async/await integration
-* No Subjects or manual teardown needed
+* No Subjects or manual teardown
 
 ## ✨ Complementary Approaches
 
-Streamix fits naturally with Angular's evolution. Signals handle synchronous, framework-level reactivity. Streamix offers a straightforward model for component-level asynchronous flows. RxJS remains essential for framework integration and complex reactive scenarios.
+Streamix aligns with Angular's evolution. Signals handle framework-level reactivity. Streamix provides a straightforward model for component-level async flows. RxJS remains essential for framework integration and complex scenarios.
 
 Each tool serves its purpose. Choose based on the problem at hand.
