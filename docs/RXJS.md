@@ -1,6 +1,6 @@
 # ✨ Same Language, Different Execution
 
-Streamix began as an exploration of RxJS concepts rebuilt on async generators. What started as a learning exercise evolved into a mature async-based solution with its own strengths—familiar operator vocabulary, pull-based execution, and native integration with modern JavaScript's async/await.
+Streamix began as an exploration of reactive patterns without relying on iterators at all. As the design evolved, it became clear that the async iterator model offered a more natural foundation for expressing pull-based execution. The project eventually settled on async generators, resulting in an async-first reactive system with familiar operator vocabulary, deterministic flow, and native integration with JavaScript’s async / await.
 
 ## ✨ A Shared Vocabulary
 
