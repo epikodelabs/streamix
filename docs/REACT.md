@@ -202,7 +202,7 @@ function UsernameInput() {
       <input id="username" />
       {checking && <span>Checking...</span>}
       {available !== null && (
-        <span>{available ? 'вњ“ Available' : 'вњ— Taken'}</span>
+        <span>{available ? '✓ Available' : '✗ Taken'}</span>
       )}
     </div>
   );
@@ -443,4 +443,4 @@ You'll notice:
 - [API Reference](https://epikodelabs.github.io/streamix)
 - [Feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
 
-**MIT Licensed** В· Made with вќ¤пёЏ for developers who value clean code
+**MIT Licensed** · Made with ❤️ for developers who value clean code
