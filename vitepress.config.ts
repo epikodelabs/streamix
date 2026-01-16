@@ -39,8 +39,9 @@ export default defineConfig({
             { text: 'Changelog', link: '/CHANGELOG' },
             { text: 'Coroutines', link: '/COROUTINES' },
             { text: 'Generators', link: '/GENERATORS' },
-
-            { text: 'Subjects', link: '/SUBJECTS' }
+            { text: 'Subjects', link: '/SUBJECTS' },
+            { text: 'Angular', link: '/ANGULAR' },
+            { text: 'React', link: '/REACT' }
           ]
         },
         {
