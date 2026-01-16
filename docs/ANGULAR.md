@@ -1,25 +1,58 @@
-# ✨ Async Generators Meet Angular Components
+# ✨ Pull-Based Reactivity in a Signals-Era Angular
 
-**Streamix** brings async-generator–based reactive programming to TypeScript. It offers familiar operators, but operates on async iterables rather than Observables. This enables pull-based execution with lifecycle management handled naturally through `async`/`await`.
+Angular's reactivity model is evolving. With **Signals**, the framework now has a native mechanism for state propagation and change detection. Meanwhile, RxJS remains deeply integrated into Angular's core APIs—`HttpClient`, router events, and forms are all built on Observables.
 
-Angular applications have traditionally relied on RxJS for reactive programming. RxJS is powerful and essential to the framework, but at the component level it can introduce ceremony—Subjects, subscriptions, and explicit cleanup—even for simple, localized asynchronous flows.
+This creates a natural separation:
 
-At present, fully replacing RxJS in Angular is not feasible without modifying core framework components. The emergence of Signals, however, suggests a future where Angular’s reactivity is less tightly coupled to RxJS, potentially opening the door to broader integration of consumption-based reactive models.
+* **Framework-level reactivity** → Signals, RxJS (where required)
+* **Component-level async flow** → room for alternatives
 
-## ✨ RxJS Remains Central
+Streamix fits into this gap. It offers a pull-based, async-generator approach for localized asynchronous flows inside components—where subscription-centric patterns often feel heavier than necessary.
 
-RxJS is a core Angular dependency. Major framework APIs—`HttpClient`, router events, forms—are built on RxJS Observables. Production applications will continue to need RxJS for framework integration.
+---
 
-Angular's reactivity is evolving with **Signals**, a native primitive for state propagation and change detection. This creates separation between:
+## ✨ What Is Streamix?
 
-* **Framework-level reactivity** (Signals)
-* **Application-level asynchronous flow** (multiple approaches possible)
+Streamix began as an exploration of reactive programming mechanics—reimplementing familiar operators to understand their behavior. It converged on async generators as a foundation for pull-based execution.
 
-Developers can simplify component logic while keeping RxJS where the framework requires it.
+The result is an async-first reactive system that preserves familiar operator semantics while aligning with JavaScript's native `async`/`await`.
 
-## ✨ A Practical Example
+### ✨ A Shared Vocabulary
 
-A typical search component in RxJS:
+A typical reactive pipeline:
+
+```ts
+source.pipe(
+  debounceTime(300),
+  switchMap(fetchData)
+)
+```
+
+These operator names have become industry standard. Streamix deliberately adopts this vocabulary—not to replicate RxJS behavior, but to reuse concepts developers already understand.
+
+### ✨ Different Execution Model
+
+While the operator names are familiar, the execution differs:
+
+**RxJS:**
+* Push-based (sources control timing)
+* Scheduler-driven coordination
+* Subscription-centric lifecycle
+* Optimized for multicasting and framework integration
+* ~50KB+ minified
+
+**Streamix:**
+* Pull-based (consumers control pace)
+* Built on async generators
+* Iterator-first (`for await...of`)
+* Optimized for sequential async flows
+* ~9KB minified
+
+---
+
+## ✨ A Practical Comparison
+
+A typical RxJS-based search component:
 
 ```ts
 this.searchControl.valueChanges
@@ -32,7 +65,7 @@ this.searchControl.valueChanges
   .subscribe(results => this.results$.next(results));
 ```
 
-This requires manual subscription management and lifecycle coordination.
+This requires explicit subscription management, teardown logic, and lifecycle coordination.
 
 With Streamix:
 
@@ -50,13 +83,35 @@ for await (const results of stream) {
 
 Key differences:
 
-* Automatic cancellation when the loop exits
-* Lifecycle-bound cleanup
-* Direct async/await integration
+* Cancellation happens automatically when the loop exits
+* Cleanup is tied to execution scope
+* Reads like ordinary `async`/`await`
 * No Subjects or manual teardown
+
+---
+
+## ✨ When to Choose Which
+
+**RxJS excels when:**
+* Multiple subscribers needed
+* Advanced scheduling required
+* Deep framework integration
+* Shared, long-lived event sources
+
+**Streamix targets:**
+* Local, component-level async logic
+* Sequential, pull-driven flows
+* Explicit execution boundaries
+* Smaller runtime footprint
+
+---
 
 ## ✨ Complementary Approaches
 
-Streamix aligns with Angular's evolution. Signals handle framework-level reactivity. Streamix provides a straightforward model for component-level async flows. RxJS remains essential for framework integration and complex scenarios.
+Streamix doesn't compete with Angular's direction—it complements it. Signals handle framework-level state. RxJS remains essential where the framework requires it. Streamix provides a simpler model for consuming asynchronous streams where subscription patterns add unnecessary ceremony.
 
-Each tool serves its purpose. Choose based on the problem at hand.
+Each tool has its place. Choose based on where reactivity lives in your architecture.
+
+---
+
+**Acknowledgments:** Inspired by reactive programming patterns popularized by RxJS and enabled by JavaScript's async iterator and generator specifications.
