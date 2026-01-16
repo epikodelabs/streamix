@@ -1,75 +1,105 @@
 # ✨ Same Language, Different Execution
 
-Streamix began as an exploration of reactive patterns without relying on iterators at all. As the design evolved, it became clear that the async iterator model offered a more natural foundation for expressing pull-based execution. The project eventually settled on async generators, resulting in an async-first reactive system with familiar operator vocabulary, deterministic flow, and native integration with JavaScript’s async / await.
+Streamix began as a learning exercise—rebuilding RxJS operators to understand how reactive programming works under the hood. What started as imitation gradually evolved into something distinct. By adopting async generators as the core abstraction, it became an async-first reactive system with familiar operators, pull-based execution, and seamless integration with JavaScript's async/await.
 
 ## ✨ A Shared Vocabulary
 
-If you've written code like this:
+A typical reactive pipeline might look like this:
 
-```typescript
+```ts
 source.pipe(
   debounceTime(300),
   switchMap(fetchData)
 )
 ```
 
-You're already familiar with reactive programming concepts that have become industry standard. Streamix uses this same vocabulary because **shared language makes adoption easier.**
+Even without knowing the implementation details, the structure communicates the core ideas of reactive composition. These operator names have become part of the industry’s shared mental model—and Streamix deliberately speaks that same language.
 
-This approach follows established precedent. Just as `map` and `filter` appear across JavaScript, Python, and Ruby, successful patterns naturally become common language. RxJS established the reactive programming lexicon, and Streamix benefits from that foundation.
+This is not accidental. Shared vocabulary lowers the cost of adoption. When patterns prove useful across ecosystems, they naturally become common terms. Just as `map` and `filter` appear in nearly every programming language, reactive operators have converged on a stable, recognizable lexicon.
+
+RxJS helped establish that vocabulary. Streamix builds on it—not to mirror behavior, but to avoid forcing developers to relearn concepts that already work.
+
+---
 
 ## ✨ Different Under the Hood
 
-While Streamix shares RxJS's operator vocabulary, the underlying execution model differs significantly:
+Although the operator names look familiar, the execution model behind them is fundamentally different.
 
-**RxJS:**
-- Push-based execution (source controls emission timing)
-- Scheduler-driven coordination
-- Subscription-centric model
-- ~50KB+ minified
+**RxJS**
 
-**Streamix:**
-- Pull-based execution (consumer controls pace)
-- Built on async generators
-- Iterator-first approach (`for await...of`)
-- ~9KB minified
+* Push-based execution (the source controls when values flow)
+* Scheduler-driven coordination
+* Subscription-centric lifecycle
+* Optimized for fan-out, multicasting, and framework integration
+* ~50KB+ minified
 
-The familiar operators work differently inside, optimized for different use cases.
+**Streamix**
 
-## ✨ When to Choose Streamix
+* Pull-based execution (the consumer controls when values are requested)
+* Built on async iterators and async generators
+* Iterator-first consumption (`for await...of`)
+* Optimized for linear, sequential async flows
+* ~9KB minified
 
-RxJS excels at complex reactive scenarios with multiple subscribers, sophisticated scheduling, and framework integration. It's the right choice for many applications.
+In other words, the *API surface looks similar*, but the mechanics—and the trade-offs—are not.
 
-Streamix offers an alternative when you need:
-- Smaller bundle sizes
-- Pull-based semantics aligned with async/await patterns
-- Simpler mental models for sequential async flows
-- Native integration with modern JavaScript features
+---
 
-Both libraries address real requirements. The choice depends on your specific needs.
+## ✨ Choosing the Right Tool
 
-## ✨ Building on a Strong Foundation
+RxJS excels at complex, highly dynamic reactive systems:
 
-RxJS demonstrated how to design intuitive APIs for reactive programming. It solved fundamental problems around async flow composition, cancellation, and error handling.
+* Multiple subscribers
+* Rich scheduling strategies
+* Deep integration with frameworks like Angular
+* Long-lived, shared event sources
 
-Streamix takes that proven vocabulary and reimplements it with different trade-offs:
-- Reduced bundle size
-- Pull-based semantics
-- Native async/await integration
-- Simplified execution model
+Streamix targets a different space. It’s a strong fit when:
 
-This isn't about replacing RxJS—it's about providing alternatives for different constraints.
+* Bundle size matters
+* Reactive logic is scoped and local
+* Pull-based semantics align better with your mental model
+* You want async flows to read like ordinary `async` / `await` code
+
+Neither approach is universally better. They are optimized for different constraints.
+
+---
+
+## ✨ Building on a Proven Foundation
+
+RxJS demonstrated how powerful and expressive reactive composition can be. It established conventions around cancellation, error propagation, and operator chaining that are now widely understood.
+
+Streamix takes that proven vocabulary and applies it to a different execution strategy:
+
+* Pull-driven flow control
+* Async-iterator-based lifecycles
+* Native alignment with modern JavaScript
+* A deliberately smaller and simpler core
+
+This is not about replacing RxJS. It’s about offering an alternative when its strengths are more than you need—or when its execution model isn’t the best fit.
+
+---
 
 ## ✨ In Summary
 
-Streamix uses RxJS's vocabulary because it's well-designed and widely understood. The implementation differs to serve different priorities: smaller bundles, pull-based execution, and closer alignment with native JavaScript async features.
+Streamix uses a familiar reactive vocabulary because it’s effective and widely understood.
+What changes is *how* that vocabulary is executed.
 
-Both libraries have value. Both solve real problems. Choose based on your application's requirements.
+The result is a library that prioritizes:
+
+* Pull-based semantics
+* Async/await-native control flow
+* Smaller bundles
+* Simpler, more explicit execution
+
+Both RxJS and Streamix solve real problems.
+The right choice depends on the shape of your application—not on ideology.
 
 <p align="center">
-  <strong>Streamix: Familiar reactive patterns, generator-powered implementation.</strong><br><br>
+  <strong>Streamix: familiar reactive language, async-iterator execution.</strong><br><br>
   <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> ·
   <a href="https://github.com/epikodelabs/streamix">Star on GitHub</a> ·
   <a href="https://epikodelabs.github.io/streamix">Read the Docs</a>
 </p>
 
-**Acknowledgments:** Built on concepts pioneered by RxJS and enabled by TC39's async generator specification.
+**Acknowledgments:** Inspired by reactive programming patterns popularized by RxJS and enabled by JavaScript’s async iterator and async generator specifications.
