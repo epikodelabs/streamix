@@ -14,10 +14,10 @@
   "main": "public-api.ts",
   "type": "module",
   "sideEffects": false,
-  "homepage": "https://epikodelabslabs.github.io/streamix/",
+  "homepage": "https://epikodelabs.github.io/streamix/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/epikodelabslabs/streamix.git"
+    "url": "git+https://github.com/epikodelabs/streamix.git"
   },
   "author": "Oleksii Shepel",
   "email": "oleksii.shepel@outlook.com"
