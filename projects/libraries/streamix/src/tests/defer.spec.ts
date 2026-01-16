@@ -88,6 +88,49 @@ describe('defer', () => {
 
     expect(results).toEqual(['defered', 'values']);
   });
+
+  it('supports factories that return promises resolving to streams', async () => {
+    const factory = jasmine
+      .createSpy('factory')
+      .and.callFake(async () => from([10, 20]));
+
+    const stream = defer(() => factory());
+    const results: number[] = [];
+
+    for await (const value of stream) {
+      results.push(value);
+    }
+
+    expect(factory).toHaveBeenCalled();
+    expect(results).toEqual([10, 20]);
+  });
+
+  it('throws when the factory promises reject', async () => {
+    const err = new Error('factory failure');
+    const stream = defer(() => Promise.reject(err));
+
+    await new Promise<void>((resolve, reject) => {
+      stream.subscribe({
+        next: () => reject(new Error('should not emit')),
+        error: (error) => {
+          expect(error).toBe(err);
+          resolve();
+        },
+        complete: () => reject(new Error('complete should not run')),
+      });
+    });
+  });
+
+  it('emits plain values returned by the factory immediately', async () => {
+    const stream = defer(() => 42);
+    const results: number[] = [];
+
+    for await (const value of stream) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([42]);
+  });
 });
 
 

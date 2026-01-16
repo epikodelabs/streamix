@@ -503,6 +503,29 @@ describe('middleware', () => {
     expect(refreshToken).toHaveBeenCalled();
   });
 
+  it('does not refresh token when shouldRetry returns false', async () => {
+    const fetch = mockFetchSequence([
+      async () => new Response(null, { status: 401 }),
+    ]);
+
+    const getToken = jasmine.createSpy().and.resolveTo('token1');
+    const refreshToken = jasmine.createSpy().and.resolveTo('token2');
+
+    const client = createHttpClient().withDefaults(
+      useCustom(fetch),
+      useBase('http://test.local'),
+      useOauth({
+        getToken,
+        refreshToken,
+        shouldRetry: () => false,
+      }),
+    );
+
+    await expectAsync(collect(client.get('/secure', readJson))).toBeRejectedWithError(/HTTP Error/);
+    expect(refreshToken).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('follows various redirects', async () => {
     const statuses = [301, 302, 303, 307, 308];
     for (const status of statuses) {

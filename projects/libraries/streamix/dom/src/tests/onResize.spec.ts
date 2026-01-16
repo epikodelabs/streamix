@@ -119,6 +119,55 @@ idescribe('onResize', () => {
 
     sub.unsubscribe();
   });
+
+  it('supports promise-based element resolution', async () => {
+    const div = document.createElement('div');
+    div.style.width = '40px';
+    div.style.height = '60px';
+    document.body.appendChild(div);
+
+    let resolveElement: (element: HTMLElement) => void;
+    const elementPromise = new Promise<HTMLElement>(resolve => {
+      resolveElement = resolve;
+    });
+
+    const values: any[] = [];
+    const subscription = onResize(elementPromise!).subscribe(v => values.push(v));
+
+    resolveElement!(div);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+
+    expect(values.length).toBeGreaterThan(0);
+    expect(values[0].width).toBeGreaterThan(0);
+
+    subscription.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('no-ops when ResizeObserver is unavailable', () => {
+    const div = document.createElement('div');
+    document.body.appendChild(div);
+
+    const originalObserver = (globalThis as any).ResizeObserver;
+    try {
+      delete (globalThis as any).ResizeObserver;
+
+      const callback = jasmine.createSpy('callback');
+      const subscription = onResize(div).subscribe(callback);
+
+      expect(callback).not.toHaveBeenCalled();
+      subscription.unsubscribe();
+    } finally {
+      if (originalObserver) {
+        (globalThis as any).ResizeObserver = originalObserver;
+      } else {
+        delete (globalThis as any).ResizeObserver;
+      }
+      document.body.removeChild(div);
+    }
+  });
 });
 
 
