@@ -1,6 +1,6 @@
 # ✨ Same Language, Different Execution
 
-If you've used RxJS, Streamix's API will look familiar. The operator names and patterns are the same by design. This document explains why Streamix reuses RxJS's vocabulary while implementing a fundamentally different execution model.
+Streamix began as an exploration of RxJS concepts rebuilt on async generators. What started as a learning exercise evolved into a mature async-based solution with its own strengths—familiar operator vocabulary, pull-based execution, and native integration with modern JavaScript's async/await.
 
 ## ✨ A Shared Vocabulary
 
