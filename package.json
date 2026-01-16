@@ -33,6 +33,8 @@
     "@angular-devkit/build-angular": "18.0.1",
     "@angular/cli": "18.0.1",
     "@angular/compiler-cli": "18.0.0",
+    "@epikodelabs/testify": "file:dependencies/epikodelabs-testify-1.0.16.tgz",
+    "@epikodelabs/typegen": "file:dependencies/epikodelabs-typegen-1.0.11.tgz",
     "@types/jasmine": "5.1.8",
     "@types/markdown-it": "13.0.9",
     "@types/node": "24.2.0",
