@@ -1,8 +1,8 @@
-# ✨ Stop Fighting useEffect. Start Streaming.
+# ✨ Beyond useState and useEffect
 
 ## ✨ How Streamix Turns React's Biggest Pain Point Into Your Superpower
 
-If you've been writing React for more than a week, you know the drill: `useEffect` seems simple until it isn't. Dependencies pile up, cleanup functions multiply, stale closures bite you, and before you know it, you're debugging race conditions at 2 AM wondering why your search feature is showing results from three requests ago.
+Anyone who has spent real time with React has met this moment: an effect that started out harmless slowly turns into a liability. Dependency arrays grow longer, cleanup logic spreads across callbacks, closures stop reflecting reality, and async work begins to overlap in ways you didn’t intend. Eventually you’re stepping through logs late at night, trying to understand why your UI is confidently rendering data from a request that should have been obsolete two renders ago.
 
 **There's a better way.** And it doesn't require rewriting your entire app.
 
