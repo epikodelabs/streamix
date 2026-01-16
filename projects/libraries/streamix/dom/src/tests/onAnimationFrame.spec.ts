@@ -103,6 +103,42 @@ idescribe('onAnimationFrame', () => {
     expect(valuesA.length).toBeGreaterThan(0);
     expect(valuesB.length).toBeGreaterThan(0);
   });
+
+  it('falls back to timeout loop when RAF is unavailable', async () => {
+    const originalRAF = (globalThis as any).requestAnimationFrame;
+    const originalCancelRAF = (globalThis as any).cancelAnimationFrame;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+
+    (globalThis as any).requestAnimationFrame = undefined;
+    (globalThis as any).cancelAnimationFrame = undefined;
+
+    const setTimeoutSpy = spyOn(globalThis as any, 'setTimeout').and.callFake(
+      (cb: FrameRequestCallback, delay?: number, ...rest: any[]) =>
+        originalSetTimeout(cb as TimerHandler, delay ?? 0, ...rest)
+    );
+    const clearTimeoutSpy = spyOn(globalThis as any, 'clearTimeout').and.callFake((id: number) =>
+      originalClearTimeout(id)
+    );
+
+    try {
+      const stream = onAnimationFrame();
+      const subscription = stream.subscribe(() => {});
+
+      await new Promise(resolve => originalSetTimeout(resolve, 50));
+
+      subscription.unsubscribe();
+      await new Promise(resolve => originalSetTimeout(resolve, 0));
+
+      expect(setTimeoutSpy).toHaveBeenCalled();
+      expect(clearTimeoutSpy).toHaveBeenCalled();
+    } finally {
+      (globalThis as any).requestAnimationFrame = originalRAF;
+      (globalThis as any).cancelAnimationFrame = originalCancelRAF;
+      (globalThis as any).setTimeout = originalSetTimeout;
+      (globalThis as any).clearTimeout = originalClearTimeout;
+    }
+  });
 });
 
 
