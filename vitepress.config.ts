@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitepress'
+import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   base: '/streamix/',
@@ -40,9 +40,8 @@ export default defineConfig({
             { text: 'Coroutines', link: '/COROUTINES' },
             { text: 'Generators', link: '/GENERATORS' },
             { text: 'Subjects', link: '/SUBJECTS' },
-            { text: 'RxJS', link: '/RXJS' },
-            { text: 'React', link: '/REACT' },
             { text: 'Angular', link: '/ANGULAR' },
+            { text: 'React', link: '/REACT' }
           ]
         },
         {
