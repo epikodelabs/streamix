@@ -13,6 +13,7 @@ import {
   readNdjsonChunk,
   readStatus,
   readText,
+  readTextChunk,
   useAccept,
   useBase,
   useCustom,
@@ -694,6 +695,55 @@ describe('middleware', () => {
 
     await collect(client.get('/test', readJson));
   });
+
+  describe('middlewares', () => {
+    it('does not override absolute URLs in useBase', async () => {
+      const context: Context = {
+        url: 'https://api.remote/resource',
+        method: 'GET',
+        headers: {},
+        parser: readStatus,
+      } as Context;
+
+      const next = jasmine.createSpy('next').and.resolveTo(context);
+      await useBase('http://test.local')(next)(context);
+      const appliedContext = next.calls.mostRecent().args[0];
+      expect(appliedContext.url).toBe('https://api.remote/resource');
+    });
+
+    it('throws after exhausting retries in useRetry', async () => {
+      const context: Context = {
+        url: 'http://retry.test',
+        method: 'GET',
+        headers: {},
+        parser: readStatus,
+      } as Context;
+
+      const next = jasmine.createSpy('next').and.callFake(async () => {
+        throw new Error('retry failure');
+      });
+      await expectAsync(useRetry(1, 0)(next)(context)).toBeRejectedWithError('retry failure');
+      expect(next).toHaveBeenCalledTimes(2);
+    });
+
+    it('errors when redirect location is not a string', async () => {
+      const context: Context = {
+        url: 'http://redirect.test',
+        method: 'GET',
+        headers: {},
+        parser: readStatus,
+      } as Context;
+
+      const middleware = useRedirect();
+      const next = jasmine.createSpy('next').and.resolveTo({
+        ...context,
+        redirectTo: 123,
+        status: 301,
+      });
+
+      await expectAsync(middleware(next)(context)).toBeRejectedWithError(/missing Location header/);
+    });
+  });
 });
 
 /* ================================================== */
@@ -844,6 +894,19 @@ describe('parsers', () => {
     ]);
   });
 
+  it('decodes binary and string payloads with readTextChunk', () => {
+    const encoder = new TextEncoder();
+    const binaryChunk = encoder.encode('decoded text');
+
+    expect(readTextChunk(binaryChunk)).toBe('decoded text');
+    expect(readTextChunk('literal string')).toBe('literal string');
+  });
+
+  it('treats unknown readTextChunk inputs as empty strings', () => {
+    expect(readTextChunk(null)).toBe('');
+    expect(readTextChunk(123)).toBe('');
+  });
+
   it('reads full response body', async () => {
     const encoder = new TextEncoder();
     const chunks = [encoder.encode('Hello'), encoder.encode(' World')];
@@ -855,6 +918,13 @@ describe('parsers', () => {
     expect(values[0]).toBeInstanceOf(Uint8Array);
     const text = new TextDecoder().decode(values[0]);
     expect(text).toBe('Hello World');
+  });
+
+  it('throws when readFull cannot access the response body', async () => {
+    const response = new Response(null);
+    Object.defineProperty(response, 'body', { value: null });
+
+    await expectAsync(collect(readFull(response))).toBeRejectedWithError(/not readable/);
   });
 
   it('handles parser errors in stream', async () => {
