@@ -11,20 +11,6 @@ import { DONE, type MaybePromise, NEXT, type Operator, createOperator, getIterat
 export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity) =>
   createOperator<T, T[]>("bufferCount", function (this: Operator, source) {
     let completed = false;
-    let resolvedBufferSize: number | undefined;
-    const resolveBufferSize = (): MaybePromise<number> => {
-      if (resolvedBufferSize !== undefined) {
-        return resolvedBufferSize;
-      }
-      if (isPromiseLike(bufferSize)) {
-        return bufferSize.then((val) => {
-          resolvedBufferSize = val;
-          return val;
-        });
-      }
-      resolvedBufferSize = bufferSize;
-      return resolvedBufferSize;
-    };
 
     const iterator: AsyncIterator<any> = {
       next: async () => {
@@ -32,9 +18,8 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
 
         const buffer: IteratorResult<T>[] = [];
         const metaByIndex: ({ valueId: string; operatorIndex: number; operatorName: string } | undefined)[] = [];
-
-        const sizeOrPromise = resolveBufferSize();
-        const size = isPromiseLike(sizeOrPromise) ? await sizeOrPromise : sizeOrPromise;
+        
+        const size = isPromiseLike(bufferSize) ? await bufferSize : bufferSize;
         while (buffer.length < size) {
           const result = await source.next();
 

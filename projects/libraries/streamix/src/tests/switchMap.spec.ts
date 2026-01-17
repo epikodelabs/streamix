@@ -64,6 +64,47 @@ describe('switchMap', () => {
     });
   });
 
+  it('should emit values when project returns arrays', (done) => {
+    const testStream = from([1, 2]);
+    const project = (value: number) => [value, value * 10];
+
+    const switchedStream = testStream.pipe(delay(100), switchMap(project));
+    const results: number[] = [];
+
+    switchedStream.subscribe({
+      next: (value) => results.push(value),
+      complete: () => {
+        expect(results).toEqual([1, 10, 2, 20]);
+        done();
+      }
+    });
+  });
+
+  it('should drop stale promise results and only emit latest', (done) => {
+    const subject = createSubject<number>();
+    const switchedStream = subject.pipe(
+      switchMap((value) =>
+        new Promise<number>((resolve) => {
+          setTimeout(() => resolve(value * 10), value === 1 ? 100 : 10);
+        })
+      )
+    );
+
+    const results: number[] = [];
+
+    switchedStream.subscribe({
+      next: (value) => results.push(value),
+      complete: () => {
+        expect(results).toEqual([20]);
+        done();
+      }
+    });
+
+    subject.next(1);
+    setTimeout(() => subject.next(2), 20);
+    setTimeout(() => subject.complete(), 150);
+  });
+
   it('should switch to an inner observable that delays emissions', (done) => {
     const testStream = from([1, 2]);
     const project = (value: number) => {
