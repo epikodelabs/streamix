@@ -1,6 +1,8 @@
 export * from './audit';
 export * from './buffer';
 export * from './bufferCount';
+export * from './bufferUntil';
+export * from './bufferWhile';
 export * from './catchError';
 export * from './concatMap';
 export * from './debounce';
@@ -41,6 +43,5 @@ export * from './tap';
 export * from './throttle';
 export * from './throwError';
 export * from './toArray';
-export * from './unique';
 export * from './withLatestFrom';
 
