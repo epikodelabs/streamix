@@ -148,7 +148,10 @@ export function createAsyncIterator<T>(opts: {
 
     let sub: Subscription | null = null;
 
-    const iterator: AsyncIterator<T> = {
+    const iterator: AsyncIterator<T> & {
+      __tryNext?: () => IteratorResult<T> | null;
+      __hasBufferedValues?: () => boolean;
+    } = {
       next() {
         if (!sub) sub = register(iteratorReceiver);
 
@@ -261,6 +264,37 @@ export function createAsyncIterator<T>(opts: {
         pendingError = err;
         pendingErrorStamp = stamp;
       },
+    };
+
+    iterator.__hasBufferedValues = () => !!pending || !!pendingError;
+
+    iterator.__tryNext = () => {
+      if (pendingError) {
+        const err = pendingError;
+        const stamp = pendingErrorStamp!;
+        pendingError = null;
+        pendingErrorStamp = null;
+        setIteratorEmissionStamp(iterator as any, stamp);
+        throw err;
+      }
+
+      if (pending) {
+        const r = pending;
+        const stamp = pendingStamp!;
+        pending = null;
+        pendingStamp = null;
+        setIteratorEmissionStamp(iterator as any, stamp);
+
+        if (backpressureResolve) {
+          const resolve = backpressureResolve;
+          backpressureResolve = null;
+          resolve();
+        }
+
+        return r;
+      }
+
+      return null;
     };
 
     return iterator;

@@ -51,7 +51,7 @@ yarn add @epikodelabs/streamix
 Let's say you want to process a large list of numbers without freezing your app:
 
 ```typescript
-import { coroutine } from '@epikodelabs/streamix';
+import { coroutine } from '@epikodelabs/streamix/coroutines';
 
 // Create a background worker for heavy math
 const mathWorker = coroutine(function calculatePrimes(data: { max: number }) {
@@ -188,19 +188,19 @@ from([data1, data2, data3])
   .subscribe(result => handleResult(result));
 ```
 
-### 3. **Persistent Worker** - Use `seize()`
+### 3. **Persistent Worker** - Use `hire()`
 Perfect for running multiple sequential tasks on the same worker instance without reinitializing it each time:
 
 ```typescript
-import { seize } from '@epikodelabs/streamix';
+import { hire } from '@epikodelabs/streamix/coroutines';
 
-const [seizedWorker] = await seize(mathWorker).query();
+const [hiredWorker] = await hire(mathWorker).query();
 try {
-  const result1 = await seizedWorker.sendTask(data1);
-  const result2 = await seizedWorker.sendTask(data2);
-  const result3 = await seizedWorker.sendTask(data3);
+  const result1 = await hiredWorker.sendTask(data1);
+  const result2 = await hiredWorker.sendTask(data2);
+  const result3 = await hiredWorker.sendTask(data3);
 } finally {
-  seizedWorker.release(); // Always release!
+  hiredWorker.release(); // Always release!
 }
 ```
 
@@ -213,7 +213,7 @@ These three approaches keep your UI responsive, each excelling in a different sc
 For specialized use cases, Streamix coroutines offer powerful configuration options:
 
 ```typescript
-import { coroutine, CoroutineConfig } from '@epikodelabs/streamix';
+import { coroutine, CoroutineConfig } from '@epikodelabs/streamix/coroutines';
 
 // Create a custom configuration
 const config: CoroutineConfig = {
@@ -250,22 +250,22 @@ const output = await customWorker.processTask(inputData);
 
 ### Dedicated Workers: Persistent Worker Connections
 
-For scenarios requiring multiple sequential operations on the same worker, use `seize`:
+For scenarios requiring multiple sequential operations on the same worker, use `hire`:
 
 ```typescript
-import { seize } from '@epikodelabs/streamix';
+import { hire } from '@epikodelabs/streamix/coroutines';
 
 const processSequentialTasks = async () => {
-  const seizedWorker = await seize(mathWorker).query();
+  const hiredWorker = await hire(mathWorker).query();
   
   try {
-    await seizedWorker.sendTask({ operation: 'initialize', data: largeDataset });
-    await seizedWorker.sendTask({ operation: 'process', params: { threshold: 0.5 } });
-    const finalResult = await seizedWorker.sendTask({ operation: 'finalize' });
+    await hiredWorker.sendTask({ operation: 'initialize', data: largeDataset });
+    await hiredWorker.sendTask({ operation: 'process', params: { threshold: 0.5 } });
+    const finalResult = await hiredWorker.sendTask({ operation: 'finalize' });
     
     return finalResult;
   } finally {
-    seizedWorker.release();
+    hiredWorker.release();
   }
 };
 ```
@@ -275,7 +275,7 @@ const processSequentialTasks = async () => {
 Chain multiple processing steps:
 
 ```typescript
-import { cascade } from '@epikodelabs/streamix';
+import { cascade } from '@epikodelabs/streamix/coroutines';
 
 // Create specialized workers for each step
 const decoder = coroutine(function decode(rawData) { /* decode logic */ });
