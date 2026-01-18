@@ -1,5 +1,5 @@
-import { idescribe } from './env.spec';
 import { onBattery } from '@epikodelabs/streamix/dom';
+import { idescribe } from './env.spec';
 
 function patchNavigator(patch: Record<string, any>) {
   const originals: Record<string, PropertyDescriptor | undefined> = {};
@@ -78,13 +78,13 @@ idescribe('onBattery', () => {
     expect(updates.length).toBeGreaterThan(0);
 
     battery.level = 0.75;
-    listeners.levelchange.forEach(cb => cb());
+    listeners['levelchange'].forEach(cb => cb());
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(updates.at(-1)?.level).toBe(0.75);
 
     sub.unsubscribe();
-    expect(listeners.levelchange.length).toBe(0);
-    expect(listeners.chargingchange.length).toBe(0);
+    expect(listeners['levelchange'].length).toBe(0);
+    expect(listeners['chargingchange'].length).toBe(0);
   });
 });
