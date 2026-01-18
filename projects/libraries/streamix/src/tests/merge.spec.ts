@@ -95,4 +95,31 @@ describe('merge', () => {
       error: () => done.fail('should not error'),
     });
   });
+
+  it('cleans up underlying iterators when the consumer stops early', async () => {
+    const cleanupCalls: number[] = [];
+
+    const makeStream = (id: number) =>
+      createStream(`cleanup-${id}`, async function* () {
+        try {
+          while (true) {
+            yield id;
+          }
+        } finally {
+          cleanupCalls.push(id);
+        }
+      });
+
+    const merged = merge(makeStream(1), makeStream(2));
+    const iterator = merged[Symbol.asyncIterator]();
+
+    const first = await iterator.next();
+    expect(first.done).toBeFalse();
+
+    await iterator.return!(undefined);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(cleanupCalls).toContain(1);
+    expect(cleanupCalls).toContain(2);
+  });
 });

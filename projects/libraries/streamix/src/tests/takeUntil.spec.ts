@@ -123,7 +123,7 @@ describe('takeUntil', () => {
         expect(err.message).toBe('Source failure');
         done();
       },
-      complete: () => {},
+      complete: () => { },
     });
   });
 
@@ -145,7 +145,7 @@ describe('takeUntil', () => {
         expect(emitted).toEqual([1, 2]);
         done();
       },
-      complete: () => {},
+      complete: () => { },
     });
 
     // Emit some source values
@@ -198,6 +198,31 @@ describe('takeUntil', () => {
     // Refined Unsubscription Test: Check for immediate completion of an immediate-source with an immediate-notifier.
     // The existing test "should handle case where notifier emits immediately" already covers that no values are emitted,
     // which is the primary observable effect of immediate termination.
+  });
+
+  it('should emit the current value before propagating a notifier error', async () => {
+    const source = createSubject<number>();
+    const notifier = createSubject<never>();
+    const taken = source.pipe(takeUntil(notifier));
+
+    const testError = new Error('Notifier error after value');
+
+    const promise = new Promise<void>((resolve) => {
+      taken.subscribe({
+        next: (value) => {
+          expect(value).toBe(1);
+        },
+        error: (err) => {
+          expect(err).toBe(testError);
+          resolve();
+        },
+      });
+    });
+
+    source.next(1);
+    notifier.error(testError);
+
+    await promise;
   });
 });
 

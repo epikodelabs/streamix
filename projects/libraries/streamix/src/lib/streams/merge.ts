@@ -8,20 +8,18 @@ import { eachValueFrom, fromAny } from "../converters";
  * unified stream of events. Unlike `zip`, it does not wait for a value from every
  * stream before emitting; it emits values on a first-come, first-served basis.
  *
- * The merged stream completes only after all source streams have completed. If any source stream
- * errors, the merged stream immediately errors.
+ * The merged stream completes only after all source streams have completed.
+ * If any source stream errors, the merged stream immediately errors.
  *
  * @template T The type of the values in the streams.
  * @param sources Streams or values (including promises) to merge.
  * @returns {Stream<T>} A new stream that emits values from all input streams.
  */
-type MergeSource<T> = Stream<T> | MaybePromise<T>;
-
-export function merge<T = any>(...sources: MergeSource<T>[]): Stream<T> {
+export function merge<T = any>(...sources: (Stream<T> | MaybePromise<T>)[]): Stream<T> {
   return createStream<T>('merge', async function* () {
     if (sources.length === 0) return;
 
-    const isPromiseSource = (value: MergeSource<T>): value is Promise<any> =>
+    const isPromiseSource = (value: (Stream<T> | MaybePromise<T>)): value is Promise<any> =>
       isPromiseLike(value);
     const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
     for (const source of sources) {
@@ -31,7 +29,9 @@ export function merge<T = any>(...sources: MergeSource<T>[]): Stream<T> {
     const iterators = resolvedSources.map((source) =>
       eachValueFrom(fromAny<T>(source))
     );
-    const nextPromises: Array<Promise<IteratorResult<T>> | null> = iterators.map(it => it.next());
+    const nextPromises: Array<Promise<IteratorResult<T>> | null> = iterators.map(
+      it => it.next()
+    );
     let activeCount = iterators.length;
 
     const reflect = (promise: Promise<IteratorResult<T>>, index: number) =>
@@ -39,6 +39,28 @@ export function merge<T = any>(...sources: MergeSource<T>[]): Stream<T> {
         result => ({ ...result, index, status: 'fulfilled' as const }),
         error => ({ error, index, status: 'rejected' as const })
       );
+
+    const cleanup = async () => {
+      const cleanupErrors: Array<{ index: number; error: any }> = [];
+
+      for (let i = 0; i < iterators.length; i++) {
+        const iterator = iterators[i];
+        if (iterator.return) {
+          try {
+            await iterator.return(undefined);
+          } catch (error) {
+            cleanupErrors.push({ index: i, error });
+          }
+        }
+      }
+
+      if (cleanupErrors.length > 0) {
+        console.warn(
+          'Merge cleanup errors:',
+          cleanupErrors.map(e => `[${e.index}]: ${e.error}`)
+        );
+      }
+    };
 
     try {
       while (activeCount > 0) {
@@ -54,6 +76,7 @@ export function merge<T = any>(...sources: MergeSource<T>[]): Stream<T> {
         const winner = await race;
 
         if (winner.status === 'rejected') {
+          await cleanup();
           throw winner.error;
         }
 
@@ -68,16 +91,7 @@ export function merge<T = any>(...sources: MergeSource<T>[]): Stream<T> {
         }
       }
     } finally {
-      // Cleanup all iterators on abort or completion
-      for (const iterator of iterators) {
-        if (iterator.return) {
-          try {
-            await iterator.return(undefined);
-          } catch {
-            // ignore
-          }
-        }
-      }
+      await cleanup();
     }
   });
 }

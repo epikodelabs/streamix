@@ -71,46 +71,72 @@ export function takeUntil<T = any>(
       }
     })();
 
+    const tryDrainBufferedValue = (): IteratorResult<T> | null => {
+      const tryNext = (sourceIt as any).__tryNext;
+      if (typeof tryNext === "function") {
+        try {
+          return tryNext.call(sourceIt);
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    };
+
     const iterator: AsyncIterator<T> = {
       async next() {
-        // 1) deliver buffered value
-        if (pending) {
-          const { value, stamp } = pending;
-          pending = null;
+        while (true) {
+          // 1) deliver buffered value
+          if (pending) {
+            const { value, stamp } = pending;
+            pending = null;
+            setIteratorEmissionStamp(iterator as any, stamp);
+            return { done: false, value };
+          }
+
+          // 2) throw notifier error after pending value
+          if (throwAfterPending) {
+            throwAfterPending = false;
+            throw notifierError;
+          }
+
+          if (notifierError) {
+            const buffered = tryDrainBufferedValue();
+            if (buffered && !buffered.done) {
+              const stamp = stampOf(sourceIt);
+              pending = { value: buffered.value, stamp };
+              throwAfterPending = true;
+              continue;
+            }
+
+            throw notifierError;
+          }
+
+          // 3) pull source
+          const r = await sourceIt.next();
+          const stamp = stampOf(sourceIt);
+
+          if (r.done) {
+            if (notifierError) throw notifierError;
+            return { done: true, value: undefined };
+          }
+
+          // 4) gate ONLY on notifier emit
+          if (gateStamp !== null && stamp >= gateStamp) {
+            return { done: true, value: undefined };
+          }
+
+          // 5) notifier errored AFTER pull → yield value, then error
+          if (notifierError) {
+            pending = { value: r.value, stamp };
+            throwAfterPending = true;
+            continue;
+          }
+        
+          // 6) normal path
           setIteratorEmissionStamp(iterator as any, stamp);
-          return { done: false, value };
+          return { done: false, value: r.value };
         }
-
-        // 2) throw notifier error after pending value
-        if (throwAfterPending) {
-          throwAfterPending = false;
-          throw notifierError;
-        }
-
-        // 3) pull source
-        const r = await sourceIt.next();
-        const stamp = stampOf(sourceIt);
-
-        if (r.done) {
-          if (notifierError) throw notifierError;
-          return { done: true, value: undefined };
-        }
-
-        // 4) gate ONLY on notifier emit
-        if (gateStamp !== null && stamp >= gateStamp) {
-          return { done: true, value: undefined };
-        }
-
-        // 5) notifier errored AFTER pull → yield value, then error
-        if (notifierError) {
-          pending = { value: r.value, stamp };
-          throwAfterPending = true;
-          return this.next();
-        }
-
-        // 6) normal path
-        setIteratorEmissionStamp(iterator as any, stamp);
-        return { done: false, value: r.value };
       },
 
       async return() {
