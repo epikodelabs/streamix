@@ -11,7 +11,7 @@ import {
 
 const HOOKS_KEY = "__STREAMIX_RUNTIME_HOOKS__";
 
-describe("hooks utilities", () => {
+describe("hooksUtilities", () => {
   let previousHooks: ReturnType<typeof getRuntimeHooks>;
 
   beforeEach(() => {

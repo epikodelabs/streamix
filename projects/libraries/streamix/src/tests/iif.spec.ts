@@ -1,4 +1,4 @@
-import { from, iif, switchMap } from '@epikodelabs/streamix';
+import { concatMap, from, iif } from '@epikodelabs/streamix';
 
 
 describe('iif', () => {
@@ -7,7 +7,7 @@ describe('iif', () => {
     const trueStream = from([10, 20, 30]);
     const falseStream = from([1, 2, 3]);
 
-    const pipeline = from([6]).pipe(switchMap((value: any) => iif(() => condition(value), trueStream, falseStream)));
+    const pipeline = from([6]).pipe(concatMap((value: any) => iif(() => condition(value), trueStream, falseStream)));
     const result: any[] = [];
 
     const subscription = pipeline.subscribe({
@@ -25,7 +25,7 @@ describe('iif', () => {
     const trueStream = from([10, 20, 30]);
     const falseStream = from([1, 2, 3]);
 
-    const pipeline = from([2]).pipe(switchMap((value: any) => iif(() => condition(value), trueStream, falseStream)));
+    const pipeline = from([2]).pipe(concatMap((value: any) => iif(() => condition(value), trueStream, falseStream)));
     const result: any[] = [];
 
     const subscription = pipeline.subscribe({

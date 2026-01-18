@@ -168,7 +168,7 @@ const magicShow = from(storyBook)
   );
 ```
 
-**Full operator catalog:** audit, buffer, bufferCount, catchError, concatMap, count, debounce, defaultIfEmpty, delay, delayUntil, distinctUntilChanged, distinctUntilKeyChanged, elementAt, elementNth, every, expand, filter, first, fork, groupBy, ignoreElements, last, map, max, mergeMap, min, observeOn, partition, recurse, reduce, sample, scan, select, shareReplay, skip, skipUntil, skipWhile, slidingPair, some, switchMap, take, takeUntil, takeWhile, tap, throttle, throwError, toArray, unique, withLatestFrom.
+**Full operator catalog:** audit, buffer, bufferCount, catchError, concatMap, count, debounce, defaultIfEmpty, delay, delayUntil, distinctUntilChanged, distinctUntilKeyChanged, elementAt, elementNth, every, expand, filter, first, fork, groupBy, ignoreElements, last, map, max, mergeMap, min, observeOn, partition, reduce, sample, scan, select, shareReplay, skip, skipUntil, skipWhile, slidingPair, some, switchMap, take, takeUntil, takeWhile, tap, throttle, throwError, toArray, unique, withLatestFrom.
 
 ---
 
