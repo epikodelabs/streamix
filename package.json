@@ -8,7 +8,7 @@
     "watch": "ng build --watch --configuration development",
     "jasmine": "testify --headless --browser node",
     "jasmine:coverage": "testify --headless --browser node --coverage",
-    "minify": "node terser.mjs && npx dts-bundler",
+    "minify": "node terser.mjs && npx typegen",
     "clean": "eslint --config eslint.config.js --fix",
     "docs:generate": "node scripts/copy-vitepress-config.mjs && typedoc --plugin typedoc-plugin-markdown --out dist/api",
     "docs:prepare": "node scripts/docs-prepare.mjs",
