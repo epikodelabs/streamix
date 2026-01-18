@@ -170,6 +170,37 @@ const magicShow = from(storyBook)
 
 **Full operator catalog:** audit, buffer, bufferCount, catchError, concatMap, debounce, defaultIfEmpty, delay, delayUntil, distinctUntilChanged, distinctUntilKeyChanged, endWith, expand, filter, finalize, first, fork, groupBy, ignoreElements, last, map, mergeMap, observeOn, partition, reduce, sample, scan, select, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, take, takeUntil, takeWhile, tap, throttle, throwError, toArray, withLatestFrom.
 
+### Build custom operators
+
+Every built-in operator you already know is just a wrapper around `createOperator`. It lets you capture the underlying iterator and return a new async iterator that applies whatever scheduling, buffering, or branching logic you need before handing values to the downstream consumer.
+
+```typescript
+import { createOperator, DONE, NEXT } from '@epikodelabs/streamix';
+
+const evenOnly = () =>
+  createOperator<number, number>('evenOnly', function (source) {
+    return {
+      async next() {
+        while (true) {
+          const result = await source.next();
+          if (result.done) return DONE;
+          if (result.value % 2 === 0) return NEXT(result.value);
+        }
+      },
+      return: source.return?.bind(source),
+      throw: source.throw?.bind(source),
+    };
+  });
+```
+
+Now you can mix `evenOnly()` into any pipeline just like the built-ins:
+
+```typescript
+const stream = from([1, 2, 3, 4]).pipe(evenOnly(), map(n => n * 10));
+```
+
+Because `createOperator` works directly with async iterators, you get the same pull-based backpressure behavior that powers the rest of the library and can freely interleave async callbacks, metadata, and cancellation hooks.
+
 ---
 
 ### Subjects
@@ -353,6 +384,3 @@ MIT License
   <a href="https://github.com/epikodelabs/streamix">View on GitHub</a> -
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
-
-
-
