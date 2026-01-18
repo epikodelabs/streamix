@@ -222,7 +222,7 @@ import {
   useBase,
   useLogger,
   useTimeout
-} from '@epikodelabs/streamix/http';
+} from '@epikodelabs/streamix/networking';
 
 const client = createHttpClient().withDefaults(
   useBase("https://api.example.com"),
