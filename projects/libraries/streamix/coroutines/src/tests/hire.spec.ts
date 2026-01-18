@@ -1,8 +1,8 @@
 import { eachValueFrom } from "@epikodelabs/streamix";
-import { coroutine, type CoroutineMessage, seize, type SeizedWorker } from "@epikodelabs/streamix/coroutines";
+import { coroutine, hire, type CoroutineMessage, type HiredWorker } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
-idescribe("seize", () => {
+idescribe("hire", () => {
   let originalWorker: any;
   // Global tracker for all created mock workers
   const mockWorkersById: Record<number, any> = {};
@@ -52,7 +52,7 @@ idescribe("seize", () => {
             this.listeners["message"]?.forEach(fn => fn(successEvent));
 
           } catch (err: any) {
-            // 1. Send the global ErrorEvent (for seize's onError callback)
+            // 1. Send the global ErrorEvent (for hire's onError callback)
             const errorEvent: ErrorEvent = { error: err } as any;
             this.listeners["error"]?.forEach(fn => fn(errorEvent));
 
@@ -91,45 +91,45 @@ idescribe("seize", () => {
     Object.keys(mockWorkersById).forEach(key => delete (mockWorkersById as any)[key]);
   });
 
-  it("should yield a SeizedWorker and successfully execute a task", async () => {
+  it("should yield a HiredWorker and successfully execute a task", async () => {
     const co = coroutine((x: number) => x + 1);
     (globalThis as any).currentMainTask = (x: number) => x + 1;
 
     const messages: CoroutineMessage[] = [];
     const errors: Error[] = [];
 
-    const stream = seize(co, msg => { messages.push(msg); }, err => { errors.push(err); });
+    const stream = hire(co, msg => { messages.push(msg); }, err => { errors.push(err); });
 
     const iterator = eachValueFrom(stream);
-    const seized: SeizedWorker<number, number> = (await iterator.next()).value;
+    const hired: HiredWorker<number, number> = (await iterator.next()).value;
 
     // Execute task
-    const result = await seized.sendTask(5);
+    const result = await hired.sendTask(5);
     expect(result).toBe(6);
 
-    seized.release();
+    hired.release();
     await co.finalize();
 
     expect(messages.some(m => m.type === "response")).toBeTrue();
     expect(errors.length).toBe(0);
   });
 
-  it("should support multiple sequential tasks on the same seized worker", async () => {
+  it("should support multiple sequential tasks on the same hired worker", async () => {
     const co = coroutine((x: number) => x * 10);
     (globalThis as any).currentMainTask = (x: number) => x * 10;
 
-    const stream = seize(co, () => { }, () => { });
+    const stream = hire(co, () => { }, () => { });
     const iterator = eachValueFrom(stream);
-    const seized: SeizedWorker<number, number> = (await iterator.next()).value;
+    const hired: HiredWorker<number, number> = (await iterator.next()).value;
 
     // Execute tasks sequentially
-    const r1 = await seized.sendTask(1);
-    const r2 = await seized.sendTask(2);
-    const r3 = await seized.sendTask(3);
+    const r1 = await hired.sendTask(1);
+    const r2 = await hired.sendTask(2);
+    const r3 = await hired.sendTask(3);
 
     expect([r1, r2, r3]).toEqual([10, 20, 30]);
 
-    seized.release();
+    hired.release();
     await co.finalize();
   });
 
@@ -150,26 +150,26 @@ idescribe("seize", () => {
 
     let capturedError: any = null;
 
-    const stream = seize(co, () => { }, err => { capturedError = err; });
+    const stream = hire(co, () => { }, err => { capturedError = err; });
 
     const iterator = eachValueFrom(stream);
-    const seized: SeizedWorker<number, number> = (await iterator.next()).value;
+    const hired: HiredWorker<number, number> = (await iterator.next()).value;
 
     let rejectionError: any = null;
     try {
       // Task triggers error path and the promise from sendTask will reject
-      await seized.sendTask(99);
+      await hired.sendTask(99);
     } catch (err) {
       rejectionError = err; // Catch the rejection to prevent test failure/timeout
     }
 
-    // Assert that the error was captured by the 'seize' onError callback
+    // Assert that the error was captured by the 'hire' onError callback
     expect(capturedError?.message).toBe("boom");
 
     // Optionally assert the error thrown by the promise rejection
     expect(rejectionError?.message).toBe("boom");
 
-    seized.release();
+    hired.release();
     // Ensure cleanup runs
     await co.finalize();
   });
@@ -178,21 +178,21 @@ idescribe("seize", () => {
   // 3. Resource Management and Cleanup
   // ===============================================
 
-  // seize operator > should release worker and clean up event listeners on manual release()
+  // hire operator > should release worker and clean up event listeners on manual release()
   it("should release worker and clean up event listeners on manual release()", async () => {
     const co = coroutine((x: number) => x + 1);
     (globalThis as any).currentMainTask = (x: number) => x + 1;
 
     const messages: CoroutineMessage[] = [];
-    const stream = seize(co, msg => { messages.push(msg); }, () => { });
+    const stream = hire(co, msg => { messages.push(msg); }, () => { });
 
     const iterator = eachValueFrom(stream);
-    const seized: SeizedWorker<number, number> = (await iterator.next()).value;
+    const hired: HiredWorker<number, number> = (await iterator.next()).value;
 
-    const result = await seized.sendTask(2);
+    const result = await hired.sendTask(2);
     expect(result).toBe(3);
 
-    seized.release();
+    hired.release();
     await co.finalize();
   });
 
@@ -201,10 +201,10 @@ idescribe("seize", () => {
     (globalThis as any).currentMainTask = (x: number) => x;
 
     const messages: CoroutineMessage[] = [];
-    const stream = seize(co, msg => { messages.push(msg); }, () => { });
+    const stream = hire(co, msg => { messages.push(msg); }, () => { });
 
     const iterator = eachValueFrom(stream);
-    const seized: SeizedWorker<number, number> = (await iterator.next()).value;
+    const hired: HiredWorker<number, number> = (await iterator.next()).value;
 
     // Access the mock worker instance via the file-scoped mock map created in the test setup
     // Find the actual mock worker instance that has message listeners attached
@@ -216,18 +216,18 @@ idescribe("seize", () => {
     }
 
     // Trigger a message with a different workerId (should be ignored)
-    const evWrong = { data: { workerId: seized.workerId + 999, type: 'response', payload: 123 } } as any;
+    const evWrong = { data: { workerId: hired.workerId + 999, type: 'response', payload: 123 } } as any;
     worker.listeners?.['message']?.forEach((fn: Function) => fn(evWrong));
     await new Promise((r) => setTimeout(r, 10));
     expect(messages.length).toBe(0);
 
     // Now trigger a message for the correct workerId
-    const evGood = { data: { workerId: seized.workerId, type: 'response', payload: 5 } } as any;
+    const evGood = { data: { workerId: hired.workerId, type: 'response', payload: 5 } } as any;
     worker.listeners?.['message']?.forEach((fn: Function) => fn(evGood));
     await new Promise((r) => setTimeout(r, 10));
     expect(messages.some(m => (m as any).payload === 5)).toBeTrue();
 
-    seized.release();
+    hired.release();
     await co.finalize();
   });
 
@@ -235,13 +235,13 @@ idescribe("seize", () => {
     const co = coroutine((x: number) => x + 1);
     (globalThis as any).currentMainTask = (x: number) => x + 1;
 
-    const stream = seize(co, () => { }, () => { });
+    const stream = hire(co, () => { }, () => { });
     const iterator = eachValueFrom(stream);
-    const seized: SeizedWorker<number, number> = (await iterator.next()).value;
+    const hired: HiredWorker<number, number> = (await iterator.next()).value;
 
-    seized.release();
+    hired.release();
     // second release should not throw
-    expect(() => seized.release()).not.toThrow();
+    expect(() => hired.release()).not.toThrow();
 
     await co.finalize();
   });

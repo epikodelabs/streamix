@@ -9,8 +9,8 @@ export * from './delay';
 export * from './delayUntil';
 export * from './distinctUntilChanged';
 export * from './distinctUntilKeyChanged';
-
 export * from './endWith';
+export * from './exhaustMap';
 export * from './expand';
 export * from './filter';
 export * from './finalize';
@@ -33,6 +33,7 @@ export * from './skipUntil';
 export * from './skipWhile';
 export * from './slidingPair';
 export * from './startWith';
+export * from './switchMap';
 export * from './take';
 export * from './takeUntil';
 export * from './takeWhile';
