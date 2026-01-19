@@ -4,8 +4,8 @@ import { average } from '@epikodelabs/streamix/aggregates';
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe('average', () => {
-  let subject: ReturnType<typeof createSubject<number>>;
-  let source: Stream<number>;
+  let subject: ReturnType<typeof createSubject<any>>;
+  let source: Stream<any>;
 
   beforeEach(() => {
     subject = createSubject<number>();
@@ -33,7 +33,7 @@ describe('average', () => {
 
   it('should use the provided selector and await promises', async () => {
     const averageStream = source.pipe(
-      average(async (value) => value.score * 2)
+      average(async (value: { score: number }) => value.score * 2)
     );
     const results: number[] = [];
 
