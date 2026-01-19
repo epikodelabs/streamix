@@ -242,9 +242,11 @@ export function applyPipeStreamHooks(
 
   if (hooks?.onPipeStream) {
     const patch = hooks.onPipeStream(ctx);
-    if (patch?.source) iterator = patch.source;
-    if (patch?.operators) operators = patch.operators;
-    if (patch?.final) finalWrap = patch.final;
+    if (patch && typeof patch === 'object') {
+      if ('source' in patch && patch.source) iterator = patch.source;
+      if ('operators' in patch && patch.operators) operators = patch.operators;
+      if ('final' in patch && patch.final) finalWrap = patch.final;
+    }
   }
 
   for (const op of operators) {

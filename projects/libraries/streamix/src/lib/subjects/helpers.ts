@@ -1,14 +1,14 @@
 import {
-    createReceiver,
-    getCurrentEmissionStamp,
-    isPromiseLike,
-    MaybePromise,
-    nextEmissionStamp,
-    setIteratorEmissionStamp,
-    withEmissionStamp,
-    type Receiver,
-    type StrictReceiver,
-    type Subscription
+  createReceiver,
+  getCurrentEmissionStamp,
+  isPromiseLike,
+  MaybePromise,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  withEmissionStamp,
+  type Receiver,
+  type StrictReceiver,
+  type Subscription
 } from "../abstractions";
 
 /* ------------------------------------------------------------------------- */
@@ -29,59 +29,73 @@ export function createTryCommit<T>(opts: {
   const { receivers, ready, queue, setLatestValue } = opts;
 
   let isCommitting = false;
+  let pendingCommit = false;
 
   return function tryCommit() {
-    if (isCommitting) return;
+    if (isCommitting) {
+      pendingCommit = true;
+      return;
+    }
     isCommitting = true;
 
     try {
-      while (queue.length > 0 && ready.size === receivers.size) {
-        const item = queue[0];
-        const targets = Array.from(ready);
+      do {
+        pendingCommit = false;
+        
+        while (queue.length > 0 && ready.size === receivers.size) {
+          const item = queue[0];
+          const targets = Array.from(ready).filter(r => receivers.has(r));
 
-        queue.shift();
-        ready.clear();
+          queue.shift();
+          ready.clear();
 
-        const stamp = item.stamp;
-        let pendingAsync = 0;
+          const stamp = item.stamp;
+          let pendingAsync = 0;
 
-        withEmissionStamp(stamp, () => {
-          if (item.kind === "next") {
-            setLatestValue(item.value);
+          withEmissionStamp(stamp, () => {
+            if (item.kind === "next") {
+              setLatestValue(item.value);
 
-            for (const r of targets) {
-              const result = r.next(item.value);
+              for (const r of targets) {
+                // Check if receiver is still in receivers set (not unsubscribed)
+                if (!receivers.has(r)) {
+                  // Skip this receiver, it was unsubscribed
+                  continue;
+                }
+                
+                const result = r.next(item.value);
 
-              if (isPromiseLike(result)) {
-                pendingAsync++;
-                result.finally(() => {
+                if (isPromiseLike(result)) {
+                  pendingAsync++;
+                  result.finally(() => {
+                    if (!r.completed && receivers.has(r)) {
+                      ready.add(r);
+                      tryCommit();
+                    }
+                  });
+                } else {
                   if (!r.completed && receivers.has(r)) {
                     ready.add(r);
-                    tryCommit();
                   }
-                });
-              } else {
-                if (!r.completed && receivers.has(r)) {
-                  ready.add(r);
                 }
               }
+            } else {
+              for (const r of targets) {
+                if (item.kind === "complete") r.complete();
+                else r.error(item.error);
+              }
+              receivers.clear();
+              ready.clear();
+              queue.length = 0;
+              return;
             }
-          } else {
-            for (const r of targets) {
-              if (item.kind === "complete") r.complete();
-              else r.error(item.error);
-            }
-            receivers.clear();
-            ready.clear();
-            queue.length = 0;
-            return;
-          }
-        });
+          });
 
-        if (pendingAsync > 0) {
-          break;
+          if (pendingAsync > 0) {
+            break;
+          }
         }
-      }
+      } while (pendingCommit);
     } finally {
       isCommitting = false;
     }

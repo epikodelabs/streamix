@@ -671,9 +671,11 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
         operators: ops,
       });
 
-      if (patch?.source) iterator = patch.source;
-      if (patch?.operators) ops = patch.operators;
-      if (patch?.final) finalWrap = patch.final;
+      if (patch && typeof patch === 'object') {
+        if ('source' in patch && patch.source) iterator = patch.source;
+        if ('operators' in patch && patch.operators) ops = patch.operators;
+        if ('final' in patch && patch.final) finalWrap = patch.final;
+      }
     }
 
     for (const op of ops) {
