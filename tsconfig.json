@@ -27,6 +27,9 @@
       "dom"
     ],
     "paths": {
+      "@epikodelabs/streamix/aggregates": [
+        "./projects/libraries/streamix/aggregates/src/lib/index.ts"
+      ],
       "@epikodelabs/streamix/coroutines": [
         "./projects/libraries/streamix/coroutines/src/lib/index.ts"
       ],
