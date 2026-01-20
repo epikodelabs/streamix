@@ -72,52 +72,37 @@ export function createSubscription(
 ): Subscription {
   /** Internal mutable subscription state */
   let _unsubscribed = false;
-  let _unsubscribing = false;
 
-  const subscription: Subscription = {
+  return {
+    /**
+   * - `true`  - subscription has been unsubscribed and is inactive
+     */
     get unsubscribed() {
       return _unsubscribed;
     },
 
-    unsubscribe: function (): void {
-      // Prevent double unsubscribe
-      if (_unsubscribed || _unsubscribing) {
-        return;
-      }
-      
-      _unsubscribing = true;
-      
-      try {
-        const result = onUnsubscribe?.();
-        
-        if (result && typeof result === 'object' && 'then' in result) {
-          // Handle async cleanup
-          result.then(
-            () => {
-              _unsubscribed = true;
-              _unsubscribing = false;
-            },
-            (err: any) => {
-              console.error("Error during unsubscribe callback:", err);
-              _unsubscribed = true;
-              _unsubscribing = false;
-            }
-          );
-        } else {
-          // Sync cleanup
-          _unsubscribed = true;
-          _unsubscribing = false;
-        }
-      } catch (err: any) {
-        // Handle sync errors
-        console.error("Error during unsubscribe callback:", err);
+    /**
+     * Unsubscribes from the subscription.
+     *
+     * This method:
+     * 1. Marks the subscription as unsubscribed
+     * 2. Executes the `onUnsubscribe` callback (if present)
+     * 3. Suppresses and logs any errors thrown during cleanup
+     */
+    unsubscribe: async function (): Promise<void> {
+      if (!_unsubscribed) {
         _unsubscribed = true;
-        _unsubscribing = false;
+        try {
+          await this.onUnsubscribe?.();
+        } catch (err) {
+          console.error("Error during unsubscribe callback:", err);
+        }
       }
     },
 
+    /**
+     * Cleanup callback executed when unsubscribing.
+     */
     onUnsubscribe
   };
-
-  return subscription;
 }
