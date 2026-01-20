@@ -1,5 +1,5 @@
 import { unwrapPrimitive } from "./hooks";
-import { isPromiseLike, type MaybePromise } from "./operator";
+import { type MaybePromise } from "./operator";
 
 /**
  * Defines a receiver interface for handling a stream's lifecycle events.
@@ -66,17 +66,6 @@ export function createReceiver<T = any>(
   callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
 ): StrictReceiver<T> {
   let _completed = false;
-  let _processing = false;
-  let _pendingComplete = false;
-  let _pendingError: Error | null = null;
-
-  type QueuedValue = {
-    value: T;
-    resolve: () => void;
-    reject: (err?: any) => void;
-  };
-
-  const _queue: QueuedValue[] = [];
 
   const baseReceiver = {
     get completed() { return _completed; }
@@ -90,93 +79,46 @@ export function createReceiver<T = any>(
 
   const wantsRaw = (receiver as any).__wantsRawValues === true;
 
-  const scheduleCallback = <R>(
+  const safeCall = <R>(
     handler?: ((...args: any[]) => MaybePromise<R>) | undefined,
     ...args: any[]
-  ): Promise<R | undefined> => {
-    if (!handler) return Promise.resolve<R | undefined>(undefined);
-
-    return new Promise<R | undefined>((resolve, reject) => {
-      queueMicrotask(() => {
-        try {
-          const result = handler.apply(receiver, args);
-          if (isPromiseLike(result)) {
-            result.then(resolve, reject);
-          } else {
-            resolve(result as R | undefined);
-          }
-        } catch (err) {
-          reject(err);
-        }
-      });
-    });
-  };
-
-  // Create a single async processor function
-  const processQueue = async () => {
-    _processing = true;
+  ): MaybePromise<R | undefined> => {
+    if (!handler) return undefined;
     try {
-      while (_queue.length > 0 && !_completed) {
-        const queuedItem = _queue.shift()!;
-        const val = wantsRaw ? queuedItem.value : unwrapPrimitive(queuedItem.value);
-        try {
-          await scheduleCallback(receiver.next, val);
-          queuedItem.resolve();
-        } catch (err) {
-          queuedItem.reject(err);
-          await wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
-          return;
-        }
-      }
-    } finally {
-      _processing = false;
-      if (_pendingComplete && !_completed) {
-        _pendingComplete = false;
-        await wrappedReceiver.complete();
-      }
+      return handler.apply(receiver, args);
+    } catch (err) {
+      void wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
+      return undefined;
     }
   };
 
+  const runNext = (value: T) => {
+    if (_completed) return;
+    const payload = wantsRaw ? value : unwrapPrimitive(value);
+    return safeCall(receiver.next, payload);
+  };
+
+  const runError = (err: any) => {
+    if (_completed) return;
+    _completed = true;
+    const normalizedError = err instanceof Error ? err : new Error(String(err));
+    safeCall(receiver.error, normalizedError);
+    safeCall(receiver.complete);
+  };
+
+  const runComplete = () => {
+    if (_completed) return;
+    _completed = true;
+    safeCall(receiver.complete);
+  };
+
   const wrappedReceiver: StrictReceiver<T> = {
-    next: (value: T) => {
-      if (_completed || _pendingError) return Promise.resolve();
-
-      return new Promise<void>((resolve, reject) => {
-        _queue.push({ value, resolve, reject });
-
-        if (!_processing) {
-          void processQueue();
-        }
-      });
-    },
+    next: (value: T) => runNext(value),
     error: async function (err: any) {
-      if (_completed || _pendingError) return;
-
-      const normalizedError = err instanceof Error ? err : new Error(String(err));
-      _pendingError = normalizedError;
-      _pendingComplete = true;
-
-      try {
-        await scheduleCallback(receiver.error, normalizedError);
-      } catch (e) {
-        console.error('Unhandled error in error handler:', e);
-      }
-
-      await wrappedReceiver.complete();
+      runError(err);
     },
     complete: async () => {
-      if (_completed) return;
-
-      if (_processing) {
-        _pendingComplete = true;
-      } else {
-        _completed = true;
-        try {
-          await scheduleCallback(receiver.complete);
-        } catch (err) {
-          console.error('Unhandled error in complete handler:', err);
-        }
-      }
+      runComplete();
     },
     get completed() {
       return _completed;
