@@ -181,5 +181,46 @@ describe('switchMap', () => {
       }
     });
   });
+
+  it('should accept scalar project results', (done) => {
+    const testStream = from([1, 2, 3]);
+    const project = (value: number) => value * 10;
+
+    const switchedStream = testStream.pipe(switchMap(project));
+
+    const results: number[] = [];
+    switchedStream.subscribe({
+      next: (value) => results.push(value),
+      complete: () => {
+        expect(results).toEqual([10, 20, 30]);
+        done();
+      }
+    });
+  });
+
+  it('should wait for promised inner stream before switching', (done) => {
+    const subject = createSubject<number>();
+
+    const project = (value: number) => {
+      return new Promise<number>((resolve) => {
+        setTimeout(() => resolve(value * 10), value === 1 ? 100 : 10);
+      });
+    };
+
+    const switchedStream = subject.pipe(switchMap(project));
+
+    const results: number[] = [];
+    switchedStream.subscribe({
+      next: (value) => results.push(value),
+      complete: () => {
+        expect(results).toEqual([20]);
+        done();
+      }
+    });
+
+    subject.next(1);
+    setTimeout(() => subject.next(2), 20);
+    setTimeout(() => subject.complete(), 150);
+  });
 });
 
