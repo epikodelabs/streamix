@@ -68,7 +68,15 @@ export function createReceiver<T = any>(
   let _completed = false;
   let _processing = false;
   let _pendingComplete = false;
-  const _queue: T[] = [];
+  let _pendingError: Error | null = null;
+
+  type QueuedValue = {
+    value: T;
+    resolve: () => void;
+    reject: (err?: any) => void;
+  };
+
+  const _queue: QueuedValue[] = [];
 
   const baseReceiver = {
     get completed() { return _completed; }
@@ -104,56 +112,69 @@ export function createReceiver<T = any>(
     });
   };
 
-  const wrappedReceiver: StrictReceiver<T> = {
-    next: (value: T) => {
-      if (_completed) return;
-
-      _queue.push(value);
-      if (_processing) return;
-
-      const processQueue = async () => {
-        _processing = true;
+  // Create a single async processor function
+  const processQueue = async () => {
+    _processing = true;
+    try {
+      while (_queue.length > 0 && !_completed) {
+        const queuedItem = _queue.shift()!;
+        const val = wantsRaw ? queuedItem.value : unwrapPrimitive(queuedItem.value);
         try {
-          while (_queue.length > 0 && !_completed) {
-            const queuedVal = _queue.shift()!;
-            const val = wantsRaw ? queuedVal : unwrapPrimitive(queuedVal);
-            await scheduleCallback(receiver.next, val);
-          }
+          await scheduleCallback(receiver.next, val);
+          queuedItem.resolve();
         } catch (err) {
+          queuedItem.reject(err);
           await wrappedReceiver.error(err instanceof Error ? err : new Error(String(err)));
           return;
-        } finally {
-          _processing = false;
-          if (_pendingComplete && !_completed) {
-            _pendingComplete = false;
-            await wrappedReceiver.complete();
-          }
         }
-      };
-
-      void processQueue();
-    },
-    error: async function (err: any) {
-      if (!_completed) {
-        try {
-          await scheduleCallback(receiver.error, err);
-        } catch (e) {
-          console.error('Unhandled error in error handler:', e);
-        }
+      }
+    } finally {
+      _processing = false;
+      if (_pendingComplete && !_completed) {
+        _pendingComplete = false;
         await wrappedReceiver.complete();
       }
+    }
+  };
+
+  const wrappedReceiver: StrictReceiver<T> = {
+    next: (value: T) => {
+      if (_completed || _pendingError) return Promise.resolve();
+
+      return new Promise<void>((resolve, reject) => {
+        _queue.push({ value, resolve, reject });
+
+        if (!_processing) {
+          void processQueue();
+        }
+      });
+    },
+    error: async function (err: any) {
+      if (_completed || _pendingError) return;
+
+      const normalizedError = err instanceof Error ? err : new Error(String(err));
+      _pendingError = normalizedError;
+      _pendingComplete = true;
+
+      try {
+        await scheduleCallback(receiver.error, normalizedError);
+      } catch (e) {
+        console.error('Unhandled error in error handler:', e);
+      }
+
+      await wrappedReceiver.complete();
     },
     complete: async () => {
-      if (!_completed) {
-        if (_processing) {
-          _pendingComplete = true;
-        } else {
-          _completed = true;
-          try {
-            await scheduleCallback(receiver.complete);
-          } catch (err) {
-            console.error('Unhandled error in complete handler:', err);
-          }
+      if (_completed) return;
+
+      if (_processing) {
+        _pendingComplete = true;
+      } else {
+        _completed = true;
+        try {
+          await scheduleCallback(receiver.complete);
+        } catch (err) {
+          console.error('Unhandled error in complete handler:', err);
         }
       }
     },
