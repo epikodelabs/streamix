@@ -1,4 +1,4 @@
-import { createSubject, delay, EMPTY, from, switchMap } from '@epikodelabs/streamix';
+import { createSubject, delay, EMPTY, from, of, switchMap } from '@epikodelabs/streamix';
 
 describe('switchMap', () => {
   it('should switch to new inner streams correctly', (done) => {
@@ -222,5 +222,205 @@ describe('switchMap', () => {
     setTimeout(() => subject.next(2), 20);
     setTimeout(() => subject.complete(), 150);
   });
+ 
+  it('should handle rapid switching correctly', (done) => {
+    const subject = createSubject<number>();
+    const results: number[] = [];
+    
+    const switched = subject.pipe(
+      switchMap(value => {
+        // Inner stream that emits after a delay based on the value
+        const inner = createSubject<number>();
+        setTimeout(() => {
+          inner.next(value * 10);
+          inner.next(value * 100);
+          inner.complete();
+        }, value * 50);
+        return inner;
+      })
+    );
+    
+    let count = 0;
+    switched.subscribe({
+      next: value => {
+        results.push(value);
+        count++;
+      },
+      complete: () => {
+        // With rapid switching, only the last inner stream should emit
+        // Since we emit 1, 2, 3 in quick succession, only 3's inner stream should survive
+        expect(results).toEqual([30, 300]);
+        done();
+      }
+    });
+    
+    // Emit values rapidly
+    subject.next(1);
+    setTimeout(() => subject.next(2), 10);
+    setTimeout(() => subject.next(3), 20);
+    setTimeout(() => subject.complete(), 300);
+  });
+  
+  it('should continue emitting the active inner even if outer completes', (done) => {
+    const subject = createSubject<number>();
+    const results: number[] = [];
+    
+    const switched = subject.pipe(
+      switchMap(value => {
+        const inner = createSubject<number>();
+        // Inner stream emits after outer completes
+        setTimeout(() => {
+          inner.next(value * 10);
+          inner.complete();
+        }, 100);
+        return inner;
+      })
+    );
+    
+    switched.subscribe({
+      next: value => results.push(value),
+      complete: () => {
+        expect(results).toEqual([10]);
+        done();
+      }
+    });
+    
+    subject.next(1);
+    setTimeout(() => subject.complete(), 50); // Complete outer before inner emits
+  });
+  
+  it('should handle errors in inner streams and continue with next values', (done) => {
+    const subject = createSubject<number>();
+    const results: number[] = [];
+    let errorCount = 0;
+    
+    const switched = subject.pipe(
+      switchMap(value => {
+        if (value === 2) {
+          throw new Error('Test error');
+        }
+        return of(value * 10); // Return a simple observable
+      })
+    );
+    
+    switched.subscribe({
+      next: value => results.push(value),
+      error: (err) => {
+        errorCount++;
+        expect(err.message).toBe('Test error');
+        expect(results).toEqual([10]); // Should get value from first emission
+        done();
+      }
+    });
+    
+    subject.next(1);
+    setTimeout(() => subject.next(2), 10);
+  });
+  
+  it('should cleanup active inner subscription when unsubscribed', (done) => {
+    const subject = createSubject<number>();
+    const results: number[] = [];
+    
+    const switched = subject.pipe(
+      switchMap(value => {
+        const inner = createSubject<number>();
+        setTimeout(() => {
+          inner.next(value * 10);
+          inner.complete();
+        }, 50);
+        return inner;
+      })
+    );
+    
+    const subscription = switched.subscribe({
+      next: value => results.push(value),
+      complete: () => {}
+    });
+    
+    subject.next(1);
+    setTimeout(() => {
+      subscription.unsubscribe();
+    }, 10);
+    
+    setTimeout(() => {
+      expect(results).toEqual([]);
+      done();
+    }, 100);
+  });
+  
+  it('should work with synchronous inner observables', (done) => {
+    const subject = createSubject<number>();
+    const results: number[] = [];
+    
+    const switched = subject.pipe(
+      switchMap(value => {
+        // Synchronous inner observable
+        return from([value, value * 10, value * 100]);
+      })
+    );
+    
+    switched.subscribe({
+      next: value => results.push(value),
+      complete: () => {
+        // When we emit 1, then 2, only 2's values should survive
+        expect(results).toEqual([2, 20, 200]);
+        done();
+      }
+    });
+    
+    subject.next(1);
+    subject.next(2); // This should cancel the first inner stream
+    subject.complete();
+  });
+  
+  it('should handle project function returning a value (not a stream)', (done) => {
+    const subject = createSubject<number>();
+    const results: number[] = [];
+    
+    const switched = subject.pipe(
+      switchMap(value => value * 10) // Just returns a value, not a stream
+    );
+    
+    switched.subscribe({
+      next: value => results.push(value),
+      complete: () => {
+        expect(results).toEqual([10, 20, 30]);
+        done();
+      }
+    });
+    
+    subject.next(1);
+    setTimeout(() => subject.next(2), 20);
+    setTimeout(() => subject.next(3), 40);
+    setTimeout(() => subject.complete(), 60);
+  });
+  
+  it('should handle concurrent promises correctly', async () => {
+    const subject = createSubject<number>();
+    const results: number[] = [];
+    
+    const switched = subject.pipe(
+      switchMap(async (value) => {
+        await new Promise(resolve => setTimeout(resolve, value * 10));
+        return value * 10;
+      })
+    );
+    
+    const promise = new Promise<void>((resolve) => {
+      switched.subscribe({
+        next: value => results.push(value),
+        complete: () => resolve()
+      });
+    });
+    
+    // Send values in reverse order of resolution time
+    subject.next(3); // Will resolve in 30ms
+    subject.next(1); // Will resolve in 10ms - should cancel the promise for 3
+    subject.next(2); // Will resolve in 20ms - should cancel the promise for 1
+    
+    setTimeout(() => subject.complete(), 100);
+    
+    await promise;
+    expect(results).toEqual([20]); // Only the last value (2) should survive
+  });
 });
-
