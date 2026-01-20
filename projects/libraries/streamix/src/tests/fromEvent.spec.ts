@@ -1,6 +1,8 @@
 import { fromEvent } from '@epikodelabs/streamix';
 import { idescribe } from './env.spec';
 
+const flushMicrotasks = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 idescribe('fromEvent', () => {
 
   it('should call the overridden subscribe method', (done) => {
@@ -17,21 +19,20 @@ idescribe('fromEvent', () => {
     subscription.unsubscribe(); // trigger cleanup
 });
 
-  it('should emit multiple events correctly', (done) => {
+  it('should emit multiple events correctly', async () => {
     const element = document.createElement('button');
     const stream = fromEvent(element, 'click');
 
     const emitted: Event[] = [];
     const subscription = stream.subscribe((ev) => {
       emitted.push(ev);
-      if (emitted.length === 2) {
-        expect(emitted.length).toBe(2);
-        done();
-      }
     });
 
     element.click();
     element.click();
+    await flushMicrotasks();
+
+    expect(emitted.length).toBe(2);
     subscription.unsubscribe(); // trigger cleanup
   });
 

@@ -70,10 +70,8 @@ export function createReplaySubject<T = any>(
     startIndex: number,
     onDone: () => void
   ) => {
-    if (r.completed) return onDone();
-
     const step = (i: number) => {
-      if (r.completed) return onDone();
+      if (r.completed || !receivers.has(r)) return onDone();
       if (i >= replay.length) return onDone();
 
       const it = replay[i];
@@ -88,15 +86,20 @@ export function createReplaySubject<T = any>(
         res.finally(() => {
           if (!r.completed && receivers.has(r)) {
             ready.add(r);
+            replayWithCursor(r, i + 1, onDone);
+          } else {
+            onDone();
           }
-          step(i + 1);
-          tryCommit();
         });
       } else {
+        if (!receivers.has(r)) {
+          return onDone();
+        }
         step(i + 1);
       }
     };
 
+    if (r.completed || !receivers.has(r)) return onDone();
     step(startIndex);
   };
 
@@ -160,27 +163,22 @@ export function createReplaySubject<T = any>(
     const term = terminalRef.current;
     if (term) {
       const replayStart = capacity === Infinity ? 0 : Math.max(0, replay.length - capacity);
+      const cleanup = () => {
+        receivers.delete(r);
+        ready.delete(r);
+      };
 
-      let allSync = true;
-      for (let i = replayStart; i < replay.length; i++) {
-        const it = replay[i];
-        let res: any;
-        withEmissionStamp(it.stamp, () => {
-          res = r.next(it.value);
-        });
-        if (isPromiseLike(res)) {
-          allSync = false;
-          const capturedTerm = term;
-          res.finally(() => {
-            replayWithCursor(r, i + 1, () => deliverTerminalToReceiver(r, capturedTerm!));
-          });
-          break;
-        }
-      }
-      if (allSync) {
+      const deliverTerminal = () => {
+        cleanup();
         deliverTerminalToReceiver(r, term);
-      }
-      return createSubscription();
+      };
+
+      receivers.add(r);
+      ready.add(r);
+
+      replayWithCursor(r, replayStart, deliverTerminal);
+
+      return createSubscription(cleanup);
     }
 
     receivers.add(r);
@@ -188,8 +186,10 @@ export function createReplaySubject<T = any>(
 
     if (replay.length > 0) {
       const replayStart = capacity === Infinity ? 0 : Math.max(0, replay.length - capacity);
-      let cursor = replayStart;
-      for (; cursor < replay.length; cursor++) {
+      for (let cursor = replayStart; cursor < replay.length; cursor++) {
+        if (!receivers.has(r)) {
+          break;
+        }
         const it = replay[cursor];
         let res: any;
         withEmissionStamp(it.stamp, () => {
@@ -200,12 +200,22 @@ export function createReplaySubject<T = any>(
           ready.delete(r);
           const startFrom = cursor + 1;
           res.finally(() => {
-            if (!r.completed && receivers.has(r)) ready.add(r);
-            replayWithCursor(r, startFrom, () => {
-              if (!r.completed && receivers.has(r)) ready.add(r);
+            if (receivers.has(r)) {
+              ready.add(r);
+              replayWithCursor(r, startFrom, () => {
+                if (receivers.has(r)) {
+                  ready.add(r);
+                }
+                tryCommit();
+              });
+            } else {
               tryCommit();
-            });
+            }
           });
+          break;
+        }
+
+        if (!receivers.has(r)) {
           break;
         }
       }
