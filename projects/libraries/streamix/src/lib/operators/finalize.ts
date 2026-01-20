@@ -29,9 +29,8 @@ export const finalize = <T = any>(callback: () => MaybePromise<T>) => {
         finalizationPromise = (async () => {
           try {
             await callback?.();
-          } catch (error) {
-            // Log error but don't throw to prevent unhandled promise rejection
-            console.error('Finalization callback error:', error);
+          } catch {
+            // Swallow errors to avoid affecting downstream consumers
           }
         })();
       }
@@ -44,8 +43,8 @@ export const finalize = <T = any>(callback: () => MaybePromise<T>) => {
   };
 
   return createOperator<T, T>("finalize", function (this: Operator, source) {
-    return {
-      next: async () => {
+    const iterator: AsyncIterator<T> = {
+      async next() {
         while (true) {
           if (completed) {
             return DONE;
@@ -65,7 +64,27 @@ export const finalize = <T = any>(callback: () => MaybePromise<T>) => {
             throw err;
           }
         }
+      },
+      async return(value?: unknown) {
+        await doFinalize();
+
+        if (source.return) {
+          return source.return(value);
+        }
+
+        return { done: true, value: undefined };
+      },
+      async throw(error?: unknown) {
+        await doFinalize();
+
+        if (source.throw) {
+          return source.throw(error);
+        }
+
+        throw error;
       }
     };
+
+    return iterator;
   });
 };
