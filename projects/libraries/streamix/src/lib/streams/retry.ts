@@ -24,7 +24,17 @@ export function retry<T = any>(
 ): Stream<T> {
   return createStream<T>("retry", async function* (signal) {
     const resolvedMaxRetries = isPromiseLike(maxRetries) ? await maxRetries : maxRetries;
-    const resolvedDelay = isPromiseLike(delay) ? await delay : delay;
+    let resolvedDelayValue: number | undefined;
+    const resolveDelayValue = async () => {
+      if (resolvedDelayValue !== undefined) {
+        return resolvedDelayValue;
+      }
+      if (delay === undefined) {
+        return undefined;
+      }
+      resolvedDelayValue = isPromiseLike(delay) ? await delay : delay;
+      return resolvedDelayValue;
+    };
 
     let retryCount = 0;
     let lastError: Error | null = null;
@@ -68,6 +78,7 @@ export function retry<T = any>(
         retryCount++;
 
         // Only delay if we're going to retry (check BEFORE sleeping)
+        const resolvedDelay = await resolveDelayValue();
         if (retryCount <= resolvedMaxRetries && resolvedDelay !== undefined && resolvedDelay > 0) {
           // Allow abortion during delay
           try {
