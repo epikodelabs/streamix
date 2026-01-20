@@ -73,6 +73,7 @@ export function delayUntil<T = any, R = any>(
       },
       error(err) {
         notifierError = err;
+        source.return?.().catch(() => {});
       },
       complete() {
         // Notifier completed without emitting - discard buffer
@@ -86,6 +87,10 @@ export function delayUntil<T = any, R = any>(
     (async () => {
       try {
         while (true) {
+          if (notifierError) {
+            break;
+          }
+
           const r = await source.next();
           const stamp = getIteratorEmissionStamp(source) ?? nextEmissionStamp();
 
