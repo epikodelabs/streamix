@@ -21,26 +21,27 @@ import {
 } from "./helpers";
 import type { Subject } from "./subject";
 
-/* ========================================================================== */
-/* ReplaySubject                                                              */
-/* ========================================================================== */
-
 type ReplayItem<T> = { value: T; stamp: number };
 
 /**
- * Subject that retains a buffer of past emissions so new subscribers receive
- * the most recent values in order before shifting into live mode.
- *
- * @template T Value type replayed to late subscribers.
+ * A subject that replays buffered emissions to new subscribers before continuing
+ * with live delivery. The buffering logic preserves insertion order, stamps each
+ * value to maintain deterministic delivery when mixing synchronous and
+ * asynchronous receiver handlers, and prevents replay from mutating the live
+ * queue state.
  */
 export type ReplaySubject<T = any> = Subject<T>;
 
 /**
- * Construct a `ReplaySubject` with an optional buffer `capacity` that limits
- * how many past values are replayed to late subscribers.
+ * Constructs a replay subject whose buffer is limited to `capacity` entries.
+ * Late subscribers see the last `capacity` emissions in chronological order
+ * (or every emission when `capacity` is `Infinity`) before the subject switches
+ * to the live commit queue. Buffer population and terminal delivery reuse the
+ * same emission stamps as the live queue, ensuring iterator consumers observe
+ * consistent timestamps from replayed and live events.
  *
- * @template T Value type replayed to subscribers.
- * @param capacity Maximum number of past values stored in the buffer.
+ * @param capacity Maximum number of past values retained for replay; defaults
+ *   to `Infinity` for an unbounded history.
  */
 export function createReplaySubject<T = any>(
   capacity: number = Infinity
@@ -57,16 +58,13 @@ export function createReplaySubject<T = any>(
   let isCompleted = false;
   const terminalRef = { current: null as QueueItem<T> | null };
 
-  /* ------------------------------------------------------------------------ */
-  /* Helpers                                                                  */
-  /* ------------------------------------------------------------------------ */
-
   const pushReplay = (value: T, stamp: number) => {
     replay.push({ value, stamp });
-    if (replay.length > capacity) replay.shift();
+    if (replay.length > capacity) {
+      replay.shift();
+    }
   };
   
-  /* Cursor-based replay for async receivers (needed if any replay step returns a Promise) */
   const replayWithCursor = (
     r: StrictReceiver<T>,
     startIndex: number,
@@ -109,13 +107,8 @@ export function createReplaySubject<T = any>(
     });
   };
 
-  /* ------------------------------------------------------------------------ */
-  /* Commit barrier (same as Subject for LIVE values)                          */
-  /* ------------------------------------------------------------------------ */
-
   const setLatestValue = (v: T) => {
     latestValue = v;
-    // Also push into replay buffer
     pushReplay(v, getCurrentEmissionStamp() ?? nextEmissionStamp());
   };
 
@@ -125,10 +118,6 @@ export function createReplaySubject<T = any>(
     queue,
     setLatestValue,
   });
-
-  /* ------------------------------------------------------------------------ */
-  /* Producer API                                                             */
-  /* ------------------------------------------------------------------------ */
 
   const next = (value?: T) => {
     if (isCompleted) return;
@@ -166,21 +155,14 @@ export function createReplaySubject<T = any>(
     tryCommit();
   };
 
-  /* ------------------------------------------------------------------------ */
-  /* Subscription                                                             */
-  /* ------------------------------------------------------------------------ */
-
   const register = (receiver: Receiver<T>): Subscription => {
     const r = receiver as StrictReceiver<T>;
-    // Late subscriber: replay buffer then terminal, just for this receiver.
     const term = terminalRef.current;
     if (term) {
-      // Replay should not depend on being in receivers set.
-      // Still respect async receivers by cursor replay.
-      const startLen = replay.length;
-      // Fast sync path
+      const replayStart = capacity === Infinity ? 0 : Math.max(0, replay.length - capacity);
+
       let allSync = true;
-      for (let i = 0; i < startLen; i++) {
+      for (let i = replayStart; i < replay.length; i++) {
         const it = replay[i];
         let res: any;
         withEmissionStamp(it.stamp, () => {
@@ -190,7 +172,6 @@ export function createReplaySubject<T = any>(
           allSync = false;
           const capturedTerm = term;
           res.finally(() => {
-            // continue remaining replay, then deliver terminal
             replayWithCursor(r, i + 1, () => deliverTerminalToReceiver(r, capturedTerm!));
           });
           break;
@@ -205,11 +186,9 @@ export function createReplaySubject<T = any>(
     receivers.add(r);
     ready.add(r);
 
-    // Replay existing buffered values to THIS receiver only.
-    // If any replay step is async, use cursor replay to finish, and mark readiness accordingly.
     if (replay.length > 0) {
-      // Attempt sync replay first
-      let cursor = 0;
+      const replayStart = capacity === Infinity ? 0 : Math.max(0, replay.length - capacity);
+      let cursor = replayStart;
       for (; cursor < replay.length; cursor++) {
         const it = replay[cursor];
         let res: any;
@@ -223,7 +202,6 @@ export function createReplaySubject<T = any>(
           res.finally(() => {
             if (!r.completed && receivers.has(r)) ready.add(r);
             replayWithCursor(r, startFrom, () => {
-              // when replay finishes, ensure commit can resume
               if (!r.completed && receivers.has(r)) ready.add(r);
               tryCommit();
             });
@@ -248,10 +226,6 @@ export function createReplaySubject<T = any>(
 
   const subscribe = (cb?: ((value: T) => any) | Receiver<T>) =>
     register(createReceiver(cb));
-
-  /* ------------------------------------------------------------------------ */
-  /* Async iterator (same as Subject)                                         */
-  /* ------------------------------------------------------------------------ */
 
   const asyncIterator = (): AsyncIterator<T> => {
     const receiver = createReceiver<T>();
@@ -392,10 +366,6 @@ export function createReplaySubject<T = any>(
 
     return iterator;
   };
-
-  /* ------------------------------------------------------------------------ */
-  /* Public API                                                               */
-  /* ------------------------------------------------------------------------ */
 
   const subject: ReplaySubject<T> = {
     type: "subject",
