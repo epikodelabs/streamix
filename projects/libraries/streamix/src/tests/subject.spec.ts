@@ -37,7 +37,7 @@ describe('createSubject', () => {
     expect(values).toEqual([]);
   });
 
-  it('supports independent subscriptions with different lifetimes', (done) => {
+  it('supports independent subscriptions with different lifetimes', async () => {
     const subject = createSubject<any>();
     const a: any[] = [];
     const b: any[] = [];
@@ -47,21 +47,21 @@ describe('createSubject', () => {
     subject.next('value1');
 
     const sub2 = subject.subscribe({
-      next: v => b.push(v),
-      complete: () => {
-        expect(a).toEqual(['value1', 'value2', 'value3', 'value4']);
-        expect(b).toEqual(['value2', 'value3', 'value4']);
-        sub1.unsubscribe();
-        sub2.unsubscribe();
-        done();
-      }
+      next: v => b.push(v)
     });
 
     subject.next('value2');
     subject.next('value3');
     subject.next('value4');
+    await flushMicrotasks();
+
     sub1.unsubscribe();
     subject.complete();
+    await flushMicrotasks();
+
+    expect(a).toEqual(['value1', 'value2', 'value3', 'value4']);
+    expect(b).toEqual(['value2', 'value3', 'value4']);
+    sub2.unsubscribe();
   });
 
   it('does not replay past values to late subscribers', (done) => {
