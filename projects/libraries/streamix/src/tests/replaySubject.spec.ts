@@ -265,6 +265,36 @@ describe('createReplaySubject', () => {
     emptySub.unsubscribe();
   });
 
+  it('replays buffered values after asynchronous receivers resolve', async () => {
+    const subject = createReplaySubject<number>(2);
+    subject.next(1);
+    subject.next(2);
+
+    const received: number[] = [];
+    let finishFirst: (() => void) | null = null;
+
+    const sub = subject.subscribe({
+      next(value) {
+        received.push(value);
+        if (value === 1) {
+          return new Promise<void>((resolve) => {
+            finishFirst = resolve;
+          });
+        }
+        return Promise.resolve();
+      },
+      complete() {}
+    });
+
+    await waitFor(() => received.length === 1);
+    expect(finishFirst).toBeDefined();
+    finishFirst!();
+    await waitFor(() => received.length === 2);
+    expect(received).toEqual([1, 2]);
+
+    sub.unsubscribe();
+  });
+
   it('terminates active and late subscribers through completion and error signals', async () => {
     const completeSubject = createReplaySubject<number>(2);
     const completion: (number | 'complete')[] = [];
