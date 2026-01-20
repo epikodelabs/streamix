@@ -20,26 +20,25 @@ import {
 } from "./helpers";
 import type { Subject } from "./subject";
 
-/* ========================================================================== */
-/* BehaviorSubject                                                            */
-/* ========================================================================== */
-
-/**
- * Subject variant that synchronously emits the latest pushed value to every
- * subscriber as soon as they register.
- *
- * @template T Value type managed by this subject.
- */
 export type BehaviorSubject<T = any> = Subject<T> & {
+  /**
+   * Always reflects the most recent value emitted by the subject, even while
+   * the subject is paused by asynchronous `next` handlers.
+   */
   get value(): T;
 };
 
 /**
- * Create a `BehaviorSubject` seeded with an initial value so that the first
- * subscriber immediately receives the current state.
+ * Returns a subject that immediately emits `initialValue` to every subscriber
+ * before processing the normal `tryCommit` queue. All subscribers, whether
+ * added before or after the initial emission, always receive the latest value
+ * at subscription time and then follow live emissions. The subject preserves
+ * ordering guarantees across asynchronous handlers by buffering live
+ * notifications until each consumer has resolved `next`.
  *
- * @template T Value type managed by the subject.
- * @param initialValue Value that subscribers receive immediately.
+ * @param initialValue The default value held until the first explicit `next`.
+ * @returns A behavior subject that exposes `next`, `complete`, `error`, the
+ *   synchronous `value` getter, and async iterator support.
  */
 export function createBehaviorSubject<T>(initialValue: T): BehaviorSubject<T> {
   const id = generateStreamId();
@@ -52,10 +51,6 @@ export function createBehaviorSubject<T>(initialValue: T): BehaviorSubject<T> {
   let isCompleted = false;
   const terminalRef = { current: null as QueueItem<T> | null };
 
-  /* ------------------------------------------------------------------------ */
-  /* Commit barrier (IDENTICAL to Subject)                                     */
-  /* ------------------------------------------------------------------------ */
-
   const setLatestValue = (v: T) => {
     latestValue = v;
   };
@@ -66,10 +61,6 @@ export function createBehaviorSubject<T>(initialValue: T): BehaviorSubject<T> {
     queue,
     setLatestValue,
   });
-
-  /* ------------------------------------------------------------------------ */
-  /* Producer API                                                             */
-  /* ------------------------------------------------------------------------ */
 
   const next = (value: T) => {
     if (isCompleted) return;
@@ -107,10 +98,6 @@ export function createBehaviorSubject<T>(initialValue: T): BehaviorSubject<T> {
     tryCommit();
   };
 
-  /* ------------------------------------------------------------------------ */
-  /* Subscription                                                             */
-  /* ------------------------------------------------------------------------ */
-
   const register = (receiver: Receiver<T>): Subscription => {
     const r = receiver as StrictReceiver<T>;
     const item = terminalRef.current;
@@ -127,18 +114,22 @@ export function createBehaviorSubject<T>(initialValue: T): BehaviorSubject<T> {
     receivers.add(r);
     ready.add(r);
 
-    /* BehaviorSubject semantic: emit latest value directly to THIS receiver only */
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    ready.delete(r);
+
     withEmissionStamp(stamp, () => {
       const res = r.next(latestValue);
       if (isPromiseLike(res)) {
-        ready.delete(r);
         res.finally(() => {
           if (!r.completed && receivers.has(r)) {
             ready.add(r);
             tryCommit();
           }
         });
+      } else {
+        if (!r.completed && receivers.has(r)) {
+          ready.add(r);
+        }
       }
     });
 
@@ -155,19 +146,10 @@ export function createBehaviorSubject<T>(initialValue: T): BehaviorSubject<T> {
     });
   };
 
-
   const subscribe = (cb?: ((v: T) => any) | Receiver<T>) =>
     register(createReceiver(cb));
 
-  /* ------------------------------------------------------------------------ */
-  /* Async iterator                                                           */
-  /* ------------------------------------------------------------------------ */
-
   const asyncIterator = createAsyncIterator<T>({ register });
-
-  /* ------------------------------------------------------------------------ */
-  /* Public API                                                               */
-  /* ------------------------------------------------------------------------ */
 
   return {
     type: "subject",
