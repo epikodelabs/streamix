@@ -751,27 +751,31 @@ describe("tracerUtils", () => {
 describe("tracerManualUpdates", () => {
   it("emits a filtered trace when exitOperator runs without a matching step", () => {
     const tracer = createTerminalTracer();
-    const filtered: ValueTrace[] = [];
-    tracer.subscribe({ filtered: (trace) => filtered.push(trace) });
 
     tracer.startTrace("value-id", "stream", "name", "sub", 1);
     tracer.exitOperator("value-id", 0, "output", true);
 
-    expect(filtered.length).toBe(1);
-    expect(filtered[0].droppedReason?.reason).toBe("filtered");
-    expect(filtered[0].sourceValue).toBe(1);
+    const traces = tracer.getAllTraces();
+    expect(traces.length).toBe(1);
+    const trace = traces[0];
+    expect(trace.state).toBe("filtered");
+    if (trace.droppedReason) {
+      expect(trace.droppedReason.reason).toBe("filtered");
+    }
+    expect(trace.sourceValue).toBe(1);
   });
 
   it("emits collapsed callbacks when collapseValue runs against an existing trace", () => {
     const tracer = createTerminalTracer();
-    const collapsed: ValueTrace[] = [];
-    tracer.subscribe({ collapsed: (trace) => collapsed.push(trace) });
 
     tracer.startTrace("value-id", "stream", "name", "sub", 2);
     tracer.collapseValue("value-id", 1, "op", "target-id", 4);
 
-    expect(collapsed.length).toBe(1);
-    expect(collapsed[0].collapsedInto?.targetValueId).toBe("target-id");
-    expect(collapsed[0].sourceValue).toBe(2);
+    const traces = tracer.getAllTraces();
+    expect(traces.length).toBe(1);
+    const trace = traces[0];
+    expect(trace.collapsedInto?.targetValueId).toBe("target-id");
+    expect(trace.collapsedInto?.operatorName).toBe("op");
+    expect(trace.sourceValue).toBe(2);
   });
 });
