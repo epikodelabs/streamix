@@ -1,5 +1,11 @@
 import { createReplaySubject, createStream, type Stream } from '@epikodelabs/streamix';
 
+const LOG_PREFIX = '[httpClient]';
+
+const logWarning = (message: string, ...details: any[]) => {
+  console.warn(`${LOG_PREFIX} ${message}`, ...details);
+};
+
 /**
  * Represents a stream of HTTP responses.
  *
@@ -233,11 +239,6 @@ export const useRetry = (
 
         // Calculate exponential backoff delay
         const delay = backoffBase * Math.pow(2, retryCount);
-        console.warn(`[http retry] attempt=${retryCount + 1}/${maxRetries} delay=${delay}ms`, {
-          message: error?.message ?? String(error),
-          url: context.url,
-          method: context.method,
-        });
 
         // Wait for the delay before retrying
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -247,7 +248,7 @@ export const useRetry = (
     }
 
     // This line should never be reached, but TypeScript requires a return statement
-    throw new Error('Retry middleware failed unexpectedly');
+    throw new Error(`${LOG_PREFIX} Retry middleware failed unexpectedly after ${maxRetries} attempts`);
   };
 };
 
@@ -266,34 +267,78 @@ export const useRedirect = (maxRedirects: number = 5): Middleware => {
     while (true) {
       const result = await next(context);
 
-      // No redirect ??? finished
+      // 1. Check if the result indicates a redirect is needed
       if (result.redirectTo === undefined) {
         return result;
       }
 
+      // 2. Increment and check limit
       redirects++;
       if (redirects > maxRedirects) {
-        throw new Error('Too many redirects');
+        throw new Error(`${LOG_PREFIX} Too many redirects while requesting ${context.url} (max: ${maxRedirects})`);
       }
 
+      // 3. Robust location check
       const location = result.redirectTo;
-      if (!location) {
-        throw new Error('Redirect response missing Location header');
+      if (!location || typeof location !== 'string') {
+        throw new Error(`${LOG_PREFIX} Redirect response missing Location header for ${result.url}`);
       }
 
-      // Resolve new URL
+      // 4. Resolve the URL relative to the previous request
       const nextUrl = new URL(location, result.url).toString();
 
+      // 5. Build the next context
       context = {
         ...result,
         url: nextUrl,
-        redirectTo: undefined,
+        redirectTo: undefined, 
       };
 
-      // RFC 7231: 303 ??? GET + drop body
+      // 6. Handle RFC 7231 (303 See Other)
       if (result.status === 303) {
         context.method = 'GET';
         context.body = undefined;
+        
+        // Handle headers properly - only if headers exist
+        if (context.headers) {
+          try {
+            // Convert headers to a format we can work with
+            let headersObj: Record<string, string>;
+            
+            if (context.headers instanceof Headers) {
+              headersObj = {};
+              context.headers.forEach((value, key) => {
+                headersObj[key] = value;
+              });
+            } else if (Array.isArray(context.headers)) {
+              headersObj = Object.fromEntries(context.headers);
+            } else if (typeof context.headers === 'object') {
+              headersObj = { ...context.headers };
+            } else {
+              // Unknown headers format, keep as is
+              headersObj = context.headers;
+            }
+            
+            // Delete specific headers
+            delete headersObj['content-type'];
+            delete headersObj['content-length'];
+            delete headersObj['Content-Type'];
+            delete headersObj['Content-Length'];
+            
+            context.headers = headersObj;
+          } catch (error) {
+            logWarning('Failed to process headers for 303 redirect', {
+              url: context.url,
+              status: context.status,
+              redirectCount: redirects,
+            }, error);
+            // If header processing fails, set to empty object
+            context.headers = {};
+          }
+        } else {
+          // Ensure headers exists as at least an empty object
+          context.headers = {};
+        }
       }
     }
   };
@@ -378,7 +423,7 @@ export const useTimeout = (ms: number): Middleware => {
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        throw new Error('Request timed out');
+        throw new Error(`${LOG_PREFIX} Request timed out for ${context.method ?? 'UNKNOWN'} ${context.url}`);
       }
       throw error;
     }
@@ -504,13 +549,18 @@ export const createHttpClient = (): HttpClient => {
 
       // Handle redirects
       if ([301, 302, 303, 307, 308].includes(response.status)) {
-        context.redirectTo = response.headers.get('Location') || undefined;
+        const location = response.headers.get('Location');
+        if (!location) {
+          // If no location, it's not a valid redirect context, it's an error
+          throw new Error(`${LOG_PREFIX} Redirect response (${response.status}) missing Location header for ${url}`);
+        }
+        context.redirectTo = location;
         return context;
       }
 
       // **Handle errors before processing response**
       if (!response.ok) {
-        throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
+        throw new Error(`${LOG_PREFIX} HTTP Error: ${response.status} ${response.statusText} for ${method} ${url}`);
       }
 
       const data = createReplaySubject();
@@ -566,8 +616,14 @@ export const createHttpClient = (): HttpClient => {
     const promise = chainMiddleware(middlewares)(async (ctx) => ctx)(context);
 
     const stream = createStream('httpData', async function* () {
-      const ctx = await promise;
-      yield* ctx.data!;
+      const ctx = await promise; // If middleware throws, this rejection happens here
+      
+      if (!ctx || !ctx.data) {
+        // This prevents the Symbol.asyncIterator error on undefined
+        return; 
+      }
+      
+      yield* ctx.data;
     }) as HttpStream<T>;
 
     stream.abort = () => abortController.abort();
@@ -694,7 +750,7 @@ export const readChunks = <T = Uint8Array>(
   chunkParser: (chunk: any) => T = (chunk) => chunk
 ): ParserFunction<ChunkData<T>> => async function* (response) {
   if (!response.body) {
-    throw new Error("Response body is not readable");
+    throw new Error(`${LOG_PREFIX} Response body for ${response.url || 'unknown'} is not readable`);
   }
 
   const contentLength = response.headers.get("Content-Length");
@@ -727,16 +783,16 @@ export const readChunks = <T = Uint8Array>(
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
-          for (const line of lines) {
-            if (line.trim()) {
-              try {
-                parsedChunk = chunkParser(line);
-                yield { chunk: parsedChunk, progress, done: false };
-              } catch (error) {
-                console.warn("Invalid NDJSON line:", line, error);
+            for (const line of lines) {
+              if (line.trim()) {
+                try {
+                  parsedChunk = chunkParser(line);
+                  yield { chunk: parsedChunk, progress, done: false };
+                } catch (error) {
+                  logWarning('Invalid NDJSON line', line, error);
+                }
               }
             }
-          }
           continue; // Skip standard yield for NDJSON
         }
 
@@ -770,8 +826,16 @@ export const readBinaryChunk = (chunk: Uint8Array): Uint8Array => chunk;
 /**
  * Decodes a binary chunk into a text string.
  */
-export const readTextChunk = (chunk: Uint8Array, encoding: string = "utf-8"): string =>
-  new TextDecoder(encoding).decode(chunk);
+export function readTextChunk(chunk: any, encoding = 'utf-8'): string {
+  // If chunk is null or undefined (like the final signal in readChunks)
+  if (chunk === null || chunk === undefined) return '';
+  
+  if (chunk instanceof ArrayBuffer || ArrayBuffer.isView(chunk)) {
+    return new TextDecoder(encoding).decode(chunk, { stream: true });
+  }
+  
+  return typeof chunk === 'string' ? chunk : '';
+}
 
 /**
  * Parses a binary chunk as JSON.
@@ -780,7 +844,7 @@ export const readJsonChunk = (chunk: string): any => {
   try {
     return JSON.parse(chunk);
   } catch {
-    console.warn("Invalid JSON chunk:", chunk);
+    logWarning('Invalid JSON chunk', chunk);
     return null;
   }
 };
@@ -792,7 +856,7 @@ export const readNdjsonChunk = (line: string): any => {
   try {
     return JSON.parse(line);
   } catch {
-    console.warn("Invalid NDJSON line:", line);
+    logWarning('Invalid NDJSON line', line);
     return null;
   }
 };
@@ -830,7 +894,7 @@ function getEncoding(contentType: string): string {
  */
 export const readFull: ParserFunction<Uint8Array> = async function* (response) {
   if (!response.body) {
-    throw new Error("Response body is not readable");
+    throw new Error(`${LOG_PREFIX} Response body for ${response.url || 'unknown'} is not readable`);
   }
 
   const reader = response.body.getReader();

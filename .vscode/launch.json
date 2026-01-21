@@ -4,18 +4,21 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug current spec (ts-jasmine-cli)",
+      "name": "Debug current spec file",
       "runtimeExecutable": "node",
       "runtimeArgs": [
         "--loader",
-        "@actioncrew/ts-test-runner/esm-loader.mjs",
+        "@epikodelabs/testify/esm-loader.mjs",
         "--enable-source-maps"
       ],
-      "program": "${workspaceFolder}/node_modules/@actioncrew/ts-test-runner/bin/ts-jasmine-cli",
+      "program": "${workspaceFolder}/node_modules/@epikodelabs/testify/bin/jasmine",
       "args": [
         "--spec",
         "${file}"
       ],
+      "env": {
+        "TS_NODE_PROJECT": "${workspaceFolder}/tsconfig.json"
+      },
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "skipFiles": [

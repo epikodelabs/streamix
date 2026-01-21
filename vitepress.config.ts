@@ -1,46 +1,4 @@
-import fs from 'node:fs'
-import path from 'node:path'
-import { defineConfig } from 'vitepress'
-
-const docsDir = path.resolve(process.cwd(), 'docs')
-
-function formatDocLabel(fileBase: string) {
-  const normalized = fileBase
-    .replace(/[-_]+/g, ' ')
-    .toLowerCase()
-    .replace(/\b\w/g, (char) => char.toUpperCase())
-  return normalized
-}
-
-function getDocsSidebarItems() {
-  if (!fs.existsSync(docsDir)) {
-    return [
-      { text: 'Getting Started', link: '/' },
-      { text: 'Changelog', link: '/CHANGELOG' }
-    ]
-  }
-
-  const files = fs
-    .readdirSync(docsDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
-    .map((entry) => entry.name)
-
-  const items = files
-    .map((fileName) => {
-      const base = fileName.replace(/\.md$/i, '')
-      if (base.toLowerCase() === 'readme') {
-        return { text: 'Getting Started', link: '/' }
-      }
-      return { text: formatDocLabel(base), link: `/${base}` }
-    })
-    .sort((a, b) => {
-      if (a.link === '/') return -1
-      if (b.link === '/') return 1
-      return a.text.localeCompare(b.text)
-    })
-
-  return items
-}
+import { defineConfig } from 'vitepress';
 
 export default defineConfig({
   base: '/streamix/',
@@ -81,8 +39,9 @@ export default defineConfig({
             { text: 'Changelog', link: '/CHANGELOG' },
             { text: 'Coroutines', link: '/COROUTINES' },
             { text: 'Generators', link: '/GENERATORS' },
-            { text: 'Scheduler', link: '/SCHEDULER' },
-            { text: 'Subjects', link: '/SUBJECTS' }
+            { text: 'Subjects', link: '/SUBJECTS' },
+            { text: 'Angular', link: '/ANGULAR' },
+            { text: 'React', link: '/REACT' }
           ]
         },
         {

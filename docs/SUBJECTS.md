@@ -1,55 +1,95 @@
-# 🧵 The Ordeal of a Pull-Based Subject Implementation
+# ⚡ Subjects
 
-Implementing a pull-based hot subject (like RxJS's Subject, but with pull semantics), is a deceptively complex task. While a simple observer pattern seems straightforward, building a robust, thread-safe, and predictable subject requires careful management of asynchronous operations, state, and multiple consumers. The core challenge is bridging the push-based nature of the `next()` method with the pull-based nature of the `subscribe()` loop, all while handling a variety of edge cases correctly.
+Subjects are hot, push-based streams that behave like every other `Stream` while letting you imperatively `next`, `complete`, or `error`. A single commit loop stamps each emission, keeps ordering deterministic, and makes sure late joins learn the terminal state instantly.
 
-## ⏳ 1. The Async Queue: Managing Concurrency
+## 🚦 Core characteristics
 
-One of the first challenges is managing the concurrency of operations. The `next()`, `complete()`, `error()`, and `subscribe()` methods can all be called at any time, potentially in rapid succession. Without a mechanism to serialize these actions, you risk race conditions and an inconsistent state.
+- 🔁 **Multicast broadcasting** – every emission is sent once through the shared commit loop so all active subscribers observe it simultaneously.
+- 🚦 **Global readiness gate** – the reporter only dequeues the next item when `ready.size === receivers.size`, which means no new emission starts until every receiver has finished processing the previous one (including any async work that re-adds the receiver to `ready` upon resolution).
+- ⏸️ **Per-receiver flow control** – each subscriber runs through `createReceiver`, so slow handlers buffer values locally while the subject keeps advancing for the rest; once an async handler resolves, it rejoins the ready set and lets the next stamp commit.
+- 🧱 **Imperative producer API** – `next`, `complete`, and `error` push stamped queue entries through `tryCommit`, so producers never race with delivery.
+- 🏁 **Late terminal replay** – subscribers that register after completion or an error immediately see the stored terminal stamp and notification before returning their `Subscription`.
 
-The code addresses this by using a `createQueue` primitive. All state-modifying operations (writing to the buffer, completing the stream, or detaching a reader) are pushed into this single, sequential queue. This ensures that actions are processed one at a time, preventing multiple async calls from corrupting the subject's state.
+## 🧭 Emission stamping and delivery
 
-## ❤️ 2. The Multi-Reader Buffer: The Heart of the Hot Stream
+Every producer call records a monotonic stamp. `createTryCommit` clears entries only when every receiver is ready and reenters the commit loop once asynchronous reactions re-add themselves to `ready`. This keeps delivery deterministic even if downstream handlers return promises.
 
-A "hot" stream needs to broadcast the same values to all of its listeners. Unlike a "cold" stream that creates a new data source for each subscriber, a subject's single source of truth must be accessible by all.
+## 🔗 Subscription lifecycle
 
-The implementation uses a `createSingleValueBuffer` primitive. This special buffer allows multiple readers to "attach" to it. When a new value is written to the buffer, it notifies all attached readers, allowing them to pull the value. This design is the key to multicasting. The buffer holds the responsibility of notifying all readers, which is a significant part of the subject's complexity.
+- 📥 **Subscribe** with a callback or full `Receiver` to get a `Subscription` that can `unsubscribe()`.
+- 🧵 **Per-receiver queuing** – `createReceiver` serializes `next` calls, buffers values when the handler is running, defers completion until the queue drains, and defers each handler call via `queueMicrotask`.
+- 🧹 **Unsubscribe cleanup** – removing a receiver triggers `complete()` inside a stamped emission so cleanup sees a deterministic stop.
+- 🕒 **Late subscribers** – new receivers connect either to the pending queue or immediately replay the terminal stamp (complete/error) if the subject already finished.
 
-## 🔁 3. The Endless Subscription Loop: Pulling Values `while (true)`
+## 🌀 Lazy async iterator with true backpressure
 
-A pull-based subject's core functionality relies on a continuous pull loop. This loop, often implemented with `while (true)`, repeatedly calls `await buffer.read(readerId)` to pause execution until a new value is available from the buffer. The `await` keyword pulls the subscriber into action when a value is ready.
+```ts
+for await (const value of subject) {
+  // Buffered values are stamped and delivered in order.
+}
+```
 
-To prevent blocking the application, the `await` operation utilizes the microtask queue. This ensures that even when a value is being pulled from a different asynchronous context (e.g., a web worker or database query), the subscriber's loop can resume without halting the main event loop, keeping the application responsive.
+- 🧾 **Lazy registration** – the iterator only subscribes on the first `next()` invocation.
+- ↔️ **Iterator-level buffering** – the iterator manages its own backpressure while the subject keeps emitting for other consumers.
+- ✅ **Clean termination** – breaking or returning from the iterator detaches it without completing the subject, so other subscribers remain live.
 
-## 🧹 4. Subscription Lifecycle and Cleanup: Preventing Leaks
+## 📦 Value helpers
 
-A subject implementation must manage the lifecycle of each subscription to prevent memory leaks and ensure resources are properly released.
+- 🔍 **`value` getter** exposes the latest emission (or `undefined` before anything emits).
+- 🎯 **`query()`** acts like `firstValueFrom`, resolving with the next emission and immediately unsubscribing.
 
-The `subscribe()` function returns a `Subscription` object. This object includes an `unsubscribe()` method that triggers the unsubscribing flag. This flag, in turn, queues a task to detach the reader from the buffer.
+## ⚠️ Error handling
 
-The use of `readerId` is critical here; it provides a unique identifier for each subscriber, allowing the buffer to correctly detach only the specified reader when `unsubscribe()` is called.
+- 🔗 **Receiver errors** stay local; calling `receiver.error()` runs the handler without moving the subject into a terminal state unless `error(err)` was explicitly invoked.
+- 🧨 **Explicit `error(err)`** stamps the terminal state just like any other emission, ensuring late subscribers immediately see the stored exception.
+- 🌙 **Unhandled error logging** – errors thrown inside user handlers are caught, logged, and routed through the stamped lifecycle so the commit loop stays consistent.
 
-## ⚡ 5. The "Snappy" and "Query" APIs: Bridging Imperative Gaps
+## 🌱 `createBehaviorSubject(initialValue)`
 
-To be truly useful, a reactive stream needs to interoperate with existing imperative code. Providing synchronous and one-shot async access to the latest value adds another layer of complexity.
+`BehaviorSubject` seeds the stream with a value, keeps `latestValue` up to date, and replays the seed (and every new value) synchronously to each new subscriber before letting it join the live commit loop.
 
-- **snappy**: This getter is a simple, synchronous way to access the most recently pushed value of a subject. It's a pragmatic convenience that bridges the asynchronous, reactive world with the synchronous, imperative needs of an application.
-- **query()**: This method uses `firstValueFrom` to get the next value from the stream and resolve a promise with it. This is a great pattern for one-shot reads, but it relies on the underlying stream (`this`) and its subscription logic to work correctly.
+- 🤲 `value` never becomes `undefined` because the subject always retains the seeded state.
+- 🔁 Late subscribers immediately receive the current snapshot before seeing future emissions.
+- 💡 Ideal for propagating shared state where every consumer needs a warm start.
 
-## Conclusion
+## 🔄 `createReplaySubject(capacity = Infinity)`
 
-In conclusion, a pull-based subject is a complex orchestration of asynchronous primitives. Its difficulty lies in building a robust system that can gracefully handle multiple, concurrent subscribers while maintaining state, ensuring correct cleanup, and providing a clean API that bridges reactive and imperative paradigms.
+`ReplaySubject` keeps a sliding buffer of recent `{ value, stamp }` entries and replays them in order before handing the live flow back to the supplier.
 
----
+- 📚 **Replayed history** drains in sequence; async handlers resolve in stamp order so replay respects their pacing.
+- 📦 **Capacity** keeps the buffer bounded, trimming the oldest values when needed.
+- 🚨 **Terminal replays** deliver completion or errors after the buffer drains, even for subscribers that join after the terminal stamp.
+
+Use replay subjects when new subscribers must catch up before rejoining live emissions.
+
+## 🧭 Usage patterns
+
+```ts
+const events = createSubject<{ type: string }>();
+events.subscribe(event => console.log("Logger:", event));
+events.subscribe(event => sendToAnalytics(event));
+events.next({ type: "ready" });
+
+const state = createBehaviorSubject({ user: null });
+state.subscribe(s => updateUi(s));
+state.next({ user: "alice" });
+console.log(state.value); // { user: "alice" }
+
+const logger = createReplaySubject<string>(3);
+logger.next("a");
+logger.next("b");
+logger.subscribe(async v => {
+  await writeToDisk(v);
+});
+```
 
 <p align="center">
-  <strong>Ready to stream? Get started with Streamix today! 🚀</strong><br>
-  <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> 📦 
-  <a href="https://github.com/actioncrew/streamix">View on GitHub</a> 🐙 
-  <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
+  <strong>Ready to stream? Get started with Streamix today! ⚙️</strong><br>
+  <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> ⚡ 
+  <a href="https://github.com/actioncrew/streamix">View on GitHub</a> 📦 
+  <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a> 💬
 </p>
 
 ---
 
-*Remember: Choose your tools wisely, keep it simple, and may your reactive pipelines be pragmatic and interoperable with everything else. 💡*
-
-
+*Choose your tools wisely, keep it simple, and may your reactive pipelines be pragmatic and interoperable. 🤝*

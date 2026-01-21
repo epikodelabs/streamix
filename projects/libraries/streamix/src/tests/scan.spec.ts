@@ -41,6 +41,22 @@ describe('scan', () => {
       }
     });
   });
+
+  it('should support promise-based accumulators', async () => {
+    const testStream = from([1, 2, 3]);
+    const accumulator = async (acc: number, value: number) => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      return acc + value;
+    };
+    const seed = 0;
+
+    const results: number[] = [];
+    for await (const value of testStream.pipe(scan(accumulator, seed))) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([1, 3, 6]);
+  });
 });
 
 

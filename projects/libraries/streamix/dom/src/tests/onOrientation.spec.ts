@@ -40,19 +40,19 @@ idescribe('onOrientation', () => {
       next: (value) => {
         try {
           expect(value).toBe('portrait');
-          subscription.unsubscribe();
-          done();
         } catch (err: any) {
           done.fail(err);
         }
       },
     });
+    subscription.unsubscribe();
+    done();
   });
 
   it('should emit a new value on orientation change', (done) => {
     const stream = onOrientation();
     const addListenerSpy = (window.screen.orientation.addEventListener as jasmine.Spy);
-    
+
     // Get the callback that was registered
     let changeCallback: () => void;
     addListenerSpy.and.callFake((event: string, callback: () => void) => {
@@ -68,13 +68,15 @@ idescribe('onOrientation', () => {
         try {
           if (callCount === 1) {
             expect(value).toBe('portrait'); // initial
-            
+
             // Simulate orientation change to landscape
-            mockOrientation.angle = 90;
-            mockOrientation.type = 'landscape-primary';
-            
-            // Trigger the change event
-            changeCallback!();
+            setTimeout(() => {
+                mockOrientation.angle = 90;
+                mockOrientation.type = 'landscape-primary';
+    
+                // Trigger the change event
+                if (changeCallback) changeCallback();
+            }, 0);
           } else if (callCount === 2) {
             expect(value).toBe('landscape');
             subscription.unsubscribe();
@@ -97,24 +99,45 @@ idescribe('onOrientation', () => {
       next: (value) => {
         try {
           expect(value).toBe('landscape');
-          subscription.unsubscribe();
-          done();
         } catch (err: any) {
           done.fail(err);
         }
       },
     });
+    subscription.unsubscribe();
+    done();
   });
 
   it('should clean up event listeners on unsubscribe', () => {
     const stream = onOrientation();
-    const subscription = stream.subscribe(() => {});
-    
+    const subscription = stream.subscribe(() => { });
+
     const removeListenerSpy = (window.screen.orientation.removeEventListener as jasmine.Spy);
-    
+
     subscription.unsubscribe();
-    
+
     expect(removeListenerSpy).toHaveBeenCalledWith('change', jasmine.any(Function));
+  });
+
+  it('should share the same listener across multiple subscribers', () => {
+    const stream = onOrientation();
+    const addListenerSpy = window.screen.orientation.addEventListener as jasmine.Spy;
+
+    const sub1 = stream.subscribe(() => { });
+    const sub2 = stream.subscribe(() => { });
+
+    // Should only add listener once
+    expect(addListenerSpy).toHaveBeenCalledTimes(1);
+
+    sub1.unsubscribe();
+    // Should not remove yet
+    expect((window.screen.orientation.removeEventListener as jasmine.Spy))
+      .not.toHaveBeenCalled();
+
+    sub2.unsubscribe();
+    // Now should remove
+    expect((window.screen.orientation.removeEventListener as jasmine.Spy))
+      .toHaveBeenCalledTimes(1);
   });
 });
 

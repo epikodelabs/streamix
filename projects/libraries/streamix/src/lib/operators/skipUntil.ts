@@ -1,61 +1,116 @@
-import { createOperator, type Operator, type Stream } from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
-import { createSubject } from '../subjects';
+import {
+  createOperator,
+  getIteratorEmissionStamp,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  type Operator,
+  type Stream,
+} from "../abstractions";
+import { eachValueFrom, fromAny } from "../converters";
+import { createSubject } from "../subjects";
 
 /**
- * Creates a stream operator that skips all values from the source stream until
- * a value is emitted by a `notifier` stream.
+ * Skip source values until a notifier emits.
  *
- * This operator controls the flow of data based on an external signal. It initially
- * drops all values from the source stream. It also subscribes to a separate `notifier`
- * stream. When the notifier emits its first value, the operator's internal state
- * changes, allowing all subsequent values from the source stream to pass through.
+ * `skipUntil` suppresses (drops) source values until the provided `notifier`
+ * produces its first emission. After the notifier emits, subsequent source
+ * values are forwarded normally. Uses stamp-based filtering to ensure correct
+ * ordering between notifier and source events.
  *
- * This is useful for delaying the start of a data-intensive process until a specific
- * condition is met, for example, waiting for a user to click a button or for
- * an application to finish loading.
+ * Important details:
+ * - Ordering and stamps: when the gate opens (notifier emits) only source
+ *   values whose stamp is strictly greater than the gate-opening stamp will be
+ *   forwarded. This prevents forwarding values that were logically emitted
+ *   before or concurrently with the notifier signal.
+ * - Notifier completion without emission: if the notifier completes without
+ *   emitting, the operator remains closed and continues to drop source values.
+ * - Error propagation: errors from either the notifier or source are propagated
+ *   to the output and will terminate the subscription.
  *
- * @template T The type of the values in the source and output streams.
- * @param notifier The stream (or promise) that, upon its first emission, signals that
- * the operator should stop skipping values.
- * @returns An `Operator` instance that can be used in a stream's `pipe` method.
+ * Common uses:
+ * - Ignore initial values until a readiness signal arrives.
+ * - Wait for user interaction before processing inputs.
+ *
+ * @template T Source/output value type.
+ * @template R Notifier value type (ignored by this operator).
+ * @param notifier A `Stream<R>` or `Promise<R>` that opens the gate when it emits.
+ * @returns An `Operator<T, T>` that drops source values until the notifier emits.
  */
-export function skipUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
-  return createOperator<T, T>('skipUntil', function (this: Operator, source: AsyncIterator<T>) {
+export function skipUntil<T = any, R = any>(
+  notifier: Stream<R> | Promise<R>
+): Operator<T, T> {
+  return createOperator<T, T>("skipUntil", function (
+    this: Operator,
+    source: AsyncIterator<T>
+  ) {
     const output = createSubject<T>();
-    let canEmit = false;
+    const outIt = eachValueFrom(output);
 
-    // Subscribe to notifier
-    const notifierSubscription = fromAny(notifier).subscribe({
-      next: () => {
-        canEmit = true;
-        notifierSubscription.unsubscribe();
+    /* ---------------------------------------------------------------------- */
+    /* Shared state                                                            */
+    /* ---------------------------------------------------------------------- */
+
+    let gateOpened = false;
+    let gateStamp: number | null = null;
+    let notifierError: any = null;
+
+    /* ---------------------------------------------------------------------- */
+    /* Notifier producer                                                       */
+    /* ---------------------------------------------------------------------- */
+
+    const notifierSub = fromAny(notifier).subscribe({
+      next() {
+        if (!gateOpened) {
+          gateOpened = true;
+          gateStamp = nextEmissionStamp();
+        }
       },
-      error: (err) => {
-        notifierSubscription.unsubscribe();
-        output.error(err);
+      error(err) {
+        notifierError = err;
       },
-      complete: () => {
-        notifierSubscription.unsubscribe();
+      complete() {
+        // Notifier completed without emitting - gate stays closed
       },
     });
 
-    // Process source
+    /* ---------------------------------------------------------------------- */
+    /* Source producer                                                         */
+    /* ---------------------------------------------------------------------- */
+
     (async () => {
       try {
         while (true) {
-          const { done, value } = await source.next();
-          if (done) break;
-          if (canEmit) output.next(value);
+          const r = await source.next();
+          const stamp = getIteratorEmissionStamp(source) ?? nextEmissionStamp();
+
+          if (r.done) {
+            break;
+          }
+
+          if (notifierError) {
+            break;
+          }
+
+          // Only forward if gate is open AND stamp is strictly after gate stamp
+          if (gateOpened && gateStamp !== null && Math.abs(stamp) > Math.abs(gateStamp)) {
+            setIteratorEmissionStamp(outIt as any, stamp);
+            output.next(r.value);
+          }
         }
       } catch (err) {
-        if (!output.completed()) output.error(err);
+        output.error(err);
+        return;
       } finally {
-        output.complete();
-        notifierSubscription.unsubscribe();
+        notifierSub.unsubscribe();
+
+        if (notifierError) {
+          output.error(notifierError);
+        } else {
+          output.complete();
+        }
       }
     })();
 
-    return eachValueFrom(output);
+    return outIt;
   });
 }

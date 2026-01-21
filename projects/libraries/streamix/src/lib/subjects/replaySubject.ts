@@ -1,142 +1,402 @@
-import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
+import {
+  createReceiver,
+  createSubscription,
+  generateStreamId,
+  getCurrentEmissionStamp,
+  isPromiseLike,
+  nextEmissionStamp,
+  pipeSourceThrough,
+  setIteratorEmissionStamp,
+  withEmissionStamp,
+  type Operator,
+  type Receiver,
+  type Stream,
+  type StrictReceiver,
+  type Subscription,
+} from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { createReplayBuffer, type ReplayBuffer } from "../primitives";
+import {
+  createTryCommit,
+  QueueItem
+} from "./helpers";
 import type { Subject } from "./subject";
 
+type ReplayItem<T> = { value: T; stamp: number };
+
 /**
- * A type alias for a ReplaySubject, which is a type of Subject.
- *
- * A ReplaySubject stores a specified number of the latest values it has emitted
- * and "replays" them to any new subscribers. This allows late subscribers to
- * receive past values they may have missed.
- *
- * @template T The type of the values emitted by the subject.
- * @extends {Subject<T>}
+ * A subject that replays buffered emissions to new subscribers before continuing
+ * with live delivery. The buffering logic preserves insertion order, stamps each
+ * value to maintain deterministic delivery when mixing synchronous and
+ * asynchronous receiver handlers, and prevents replay from mutating the live
+ * queue state.
  */
 export type ReplaySubject<T = any> = Subject<T>;
 
 /**
- * Creates a new ReplaySubject.
+ * Constructs a replay subject whose buffer is limited to `capacity` entries.
+ * Late subscribers see the last `capacity` emissions in chronological order
+ * (or every emission when `capacity` is `Infinity`) before the subject switches
+ * to the live commit queue. Buffer population and terminal delivery reuse the
+ * same emission stamps as the live queue, ensuring iterator consumers observe
+ * consistent timestamps from replayed and live events.
  *
- * A ReplaySubject is a variant of a Subject that stores a specified number of
- * the latest values it has emitted and "replays" them to any new subscribers.
- * This allows late subscribers to receive past values they may have missed.
- *
- * This subject provides asynchronous delivery while preserving emission order.
- *
- * @template T The type of the values the subject will emit.
- * @param {number} [capacity=Infinity] The maximum number of past values to buffer and replay to new subscribers.
- * @returns {ReplaySubject<T>} A new ReplaySubject instance.
+ * @param capacity Maximum number of past values retained for replay; defaults
+ *   to `Infinity` for an unbounded history.
  */
-export function createReplaySubject<T = any>(capacity: number = Infinity): ReplaySubject<T> {
-  const buffer = createReplayBuffer<T>(capacity) as ReplayBuffer;
-  let isCompleted = false;
-  let hasError = false;
-  let latestValue: T | undefined = undefined;
-  let writeChain = Promise.resolve();
+export function createReplaySubject<T = any>(
+  capacity: number = Infinity
+): ReplaySubject<T> {
+  const id = generateStreamId();
 
-  const enqueueWrite = (task: () => Promise<void>) => {
-    writeChain = writeChain.then(task).catch(() => {});
-    return writeChain;
+  const receivers = new Set<StrictReceiver<T>>();
+  const ready = new Set<StrictReceiver<T>>();
+  const queue: QueueItem<T>[] = [];
+
+  const replay: ReplayItem<T>[] = [];
+
+  let latestValue: T | undefined = undefined;
+  let isCompleted = false;
+  const terminalRef = { current: null as QueueItem<T> | null };
+
+  const pushReplay = (value: T, stamp: number) => {
+    replay.push({ value, stamp });
+    if (replay.length > capacity) {
+      replay.shift();
+    }
+  };
+  
+  const replayWithCursor = (
+    r: StrictReceiver<T>,
+    startIndex: number,
+    onDone: () => void
+  ) => {
+    const step = (i: number) => {
+      if (r.completed || !receivers.has(r)) return onDone();
+      if (i >= replay.length) return onDone();
+
+      const it = replay[i];
+      let res: any;
+
+      withEmissionStamp(it.stamp, () => {
+        res = r.next(it.value);
+      });
+
+      if (isPromiseLike(res)) {
+        ready.delete(r);
+        res.finally(() => {
+          if (!r.completed && receivers.has(r)) {
+            ready.add(r);
+            replayWithCursor(r, i + 1, onDone);
+          } else {
+            onDone();
+          }
+        });
+      } else {
+        if (!receivers.has(r)) {
+          return onDone();
+        }
+        step(i + 1);
+      }
+    };
+
+    if (r.completed || !receivers.has(r)) return onDone();
+    step(startIndex);
   };
 
-  const next = (value: T) => {
-    scheduler.enqueue(() => {
-      if (isCompleted || hasError) return;
-      latestValue = value;
-      void enqueueWrite(() => buffer.write(value));
+  const deliverTerminalToReceiver = (r: StrictReceiver<T>, t: QueueItem<T>) => {
+    withEmissionStamp(t.stamp, () => {
+      if (t.kind === "complete") r.complete();
+      else if (t.kind === "error") r.error(t.error);
     });
+  };
+
+  const setLatestValue = (v: T) => {
+    latestValue = v;
+    pushReplay(v, getCurrentEmissionStamp() ?? nextEmissionStamp());
+  };
+
+  const tryCommit = createTryCommit<T>({
+    receivers,
+    ready,
+    queue,
+    setLatestValue,
+  });
+
+  const next = (value?: T) => {
+    if (isCompleted) return;
+
+    const current = getCurrentEmissionStamp();
+    const base = current ?? nextEmissionStamp();
+    const stamp = current === null ? -base : base;
+
+    queue.push({ kind: "next", value: value as T, stamp });
+    tryCommit();
   };
 
   const complete = () => {
-    scheduler.enqueue(() => {
-      if (isCompleted) return;
-      isCompleted = true;
-      void enqueueWrite(() => buffer.complete());
-    });
+    if (isCompleted) return;
+    isCompleted = true;
+    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    const item: QueueItem<T> = { kind: "complete", stamp };
+    terminalRef.current = item;
+    queue.push(item);
+    tryCommit();
   };
 
   const error = (err: any) => {
-    scheduler.enqueue(() => {
-      if (isCompleted || hasError) return;
-      hasError = true;
-      isCompleted = true;
-      void enqueueWrite(async () => {
-        await buffer.error(err);
-        await buffer.complete();
-      });
-    });
+    if (isCompleted) return;
+    isCompleted = true;
+
+    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    const item: QueueItem<T> = {
+      kind: "error",
+      error: err instanceof Error ? err : new Error(String(err)),
+      stamp,
+    };
+    terminalRef.current = item;
+    queue.push(item);
+    tryCommit();
   };
 
-  const registerReceiver = (receiver: Receiver<T>): Subscription => {
-    let unsubscribing = false;
-    let readerId: number | null = null;
-    let readerLatestValue: T | undefined;
+  const register = (receiver: Receiver<T>): Subscription => {
+    const r = receiver as StrictReceiver<T>;
+    const term = terminalRef.current;
+    if (term) {
+      const replayStart = capacity === Infinity ? 0 : Math.max(0, replay.length - capacity);
+      const cleanup = () => {
+        receivers.delete(r);
+        ready.delete(r);
+      };
 
-    const subscription = createSubscription(() => {
-      if (!unsubscribing) {
-        unsubscribing = true;
-        if (readerId !== null) {
-          scheduler.enqueue(async () => {
-            if (readerId !== null) await buffer.detachReader(readerId);
+      const deliverTerminal = () => {
+        cleanup();
+        deliverTerminalToReceiver(r, term);
+      };
+
+      receivers.add(r);
+      ready.add(r);
+
+      replayWithCursor(r, replayStart, deliverTerminal);
+
+      return createSubscription(cleanup);
+    }
+
+    receivers.add(r);
+    ready.add(r);
+
+    if (replay.length > 0) {
+      const replayStart = capacity === Infinity ? 0 : Math.max(0, replay.length - capacity);
+      for (let cursor = replayStart; cursor < replay.length; cursor++) {
+        if (!receivers.has(r)) {
+          break;
+        }
+        const it = replay[cursor];
+        let res: any;
+        withEmissionStamp(it.stamp, () => {
+          res = r.next(it.value);
+        });
+
+        if (isPromiseLike(res)) {
+          ready.delete(r);
+          const startFrom = cursor + 1;
+          res.finally(() => {
+            if (receivers.has(r)) {
+              ready.add(r);
+              replayWithCursor(r, startFrom, () => {
+                if (receivers.has(r)) {
+                  ready.add(r);
+                }
+                tryCommit();
+              });
+            } else {
+              tryCommit();
+            }
           });
+          break;
+        }
+
+        if (!receivers.has(r)) {
+          break;
         }
       }
-    });
+    }
 
-    scheduler.enqueue(() => buffer.attachReader()).then(async (id: number) => {
-      readerId = id;
-      try {
-        while (true) {
-          const result = await buffer.read(readerId!);
-          if (result.done) break;
-          readerLatestValue = result.value;
-          await receiver.next?.(readerLatestValue!);
-        }
-      } catch (err: any) {
-        await receiver.error?.(err);
-      } finally {
-        if (readerId !== null) {
-          scheduler.enqueue(async () => {
-            await buffer.detachReader(readerId!);
-            await receiver.complete?.();
-          });
-        } else {
-          scheduler.enqueue(async () => {
-            await receiver.complete?.();
-          });
-        }
-      }
-    });
+    tryCommit();
 
-    return subscription;
+    return createSubscription(() => {
+      receivers.delete(r);
+      ready.delete(r);
+
+      const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+      withEmissionStamp(stamp, () => r.complete());
+
+      tryCommit();
+    });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
-    const receiver = createReceiver(callbackOrReceiver);
-    return registerReceiver(receiver);
+  const subscribe = (cb?: ((value: T) => any) | Receiver<T>) =>
+    register(createReceiver(cb));
+
+  const asyncIterator = (): AsyncIterator<T> => {
+    const receiver = createReceiver<T>();
+
+    let pullResolve: ((v: IteratorResult<T>) => void) | null = null;
+    let pullReject: ((e: any) => void) | null = null;
+
+    let backpressureResolve: (() => void) | null = null;
+
+    let pending: IteratorResult<T> | null = null;
+    let pendingStamp: number | null = null;
+
+    let pendingError: any = null;
+    let pendingErrorStamp: number | null = null;
+
+    let sub: Subscription | null = null;
+
+    const iterator: AsyncIterator<T> = {
+      next() {
+        if (!sub) sub = register(iteratorReceiver);
+
+        if (pendingError) {
+          const err = pendingError;
+          const stamp = pendingErrorStamp!;
+          pendingError = null;
+          pendingErrorStamp = null;
+          setIteratorEmissionStamp(iterator as any, stamp);
+          return Promise.reject(err);
+        }
+
+        if (pending) {
+          const r = pending;
+          const stamp = pendingStamp!;
+          pending = null;
+          pendingStamp = null;
+          setIteratorEmissionStamp(iterator as any, stamp);
+
+          if (backpressureResolve) {
+            const resolve = backpressureResolve;
+            backpressureResolve = null;
+            resolve();
+          }
+
+          return Promise.resolve(r);
+        }
+
+        return new Promise((res, rej) => {
+          pullResolve = res;
+          pullReject = rej;
+        });
+      },
+
+      return() {
+        sub?.unsubscribe();
+        sub = null;
+
+        if (pullResolve) {
+          const r = pullResolve;
+          pullResolve = pullReject = null;
+          r({ done: true, value: undefined });
+        }
+
+        if (backpressureResolve) {
+          backpressureResolve();
+          backpressureResolve = null;
+        }
+
+        return Promise.resolve({ done: true, value: undefined });
+      },
+
+      throw(err) {
+        sub?.unsubscribe();
+        sub = null;
+
+        if (pullReject) {
+          const r = pullReject;
+          pullResolve = pullReject = null;
+          r(err);
+        }
+
+        if (backpressureResolve) {
+          backpressureResolve();
+          backpressureResolve = null;
+        }
+
+        return Promise.reject(err);
+      },
+    };
+
+    const iteratorReceiver: StrictReceiver<T> = {
+      ...receiver,
+
+      next(value: T) {
+        const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+
+        if (pullResolve) {
+          setIteratorEmissionStamp(iterator as any, stamp);
+          const r = pullResolve;
+          pullResolve = pullReject = null;
+          r({ done: false, value });
+          return;
+        }
+
+        pending = { done: false, value };
+        pendingStamp = stamp;
+
+        return new Promise<void>((resolve) => {
+          backpressureResolve = resolve;
+        });
+      },
+
+      complete() {
+        const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+        if (pullResolve) {
+          setIteratorEmissionStamp(iterator as any, stamp);
+          const r = pullResolve;
+          pullResolve = pullReject = null;
+          r({ done: true, value: undefined });
+          return;
+        }
+        pending = { done: true, value: undefined };
+        pendingStamp = stamp;
+      },
+
+      error(err) {
+        const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+        if (pullReject) {
+          setIteratorEmissionStamp(iterator as any, stamp);
+          const r = pullReject;
+          pullResolve = pullReject = null;
+          r(err);
+          return;
+        }
+        pendingError = err;
+        pendingErrorStamp = stamp;
+      },
+    };
+
+    return iterator;
   };
 
-  const replaySubject: ReplaySubject<T> = {
+  const subject: ReplaySubject<T> = {
     type: "subject",
     name: "replaySubject",
-    id: generateStreamId(),
-    pipe(...operators: Operator<any, any>[]): Stream<any> {
-      return pipeSourceThrough(this, operators);
+    id,
+    get value() {
+      return latestValue;
+    },
+    pipe(...steps: Operator<any, any>[]): Stream<any> {
+      return pipeSourceThrough(this, steps);
     },
     subscribe,
     async query(): Promise<T> {
-      return await firstValueFrom(this);
-    },
-    get snappy(): T | undefined {
-      return latestValue;
+      return firstValueFrom(this);
     },
     next,
     complete,
-    completed: () => isCompleted,
     error,
-    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
+    completed: () => isCompleted,
+    [Symbol.asyncIterator]: asyncIterator,
   };
 
-  return replaySubject;
+  return subject;
 }

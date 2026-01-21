@@ -22,16 +22,16 @@ export function loop<T = any>(
 ): Stream<T> {
   return createStream<T>(
     'loop',
-    async function* (signal: AbortSignal): AsyncGenerator<T, void, unknown> {
+    async function* (signal?: AbortSignal): AsyncGenerator<T, void, unknown> {
       let currentValue = isPromiseLike(initialValue) ? await initialValue : initialValue;
       while (true) {
-        if (signal.aborted) break;
+        if (signal?.aborted) break;
         const shouldContinue = condition(currentValue);
         const continueValue = isPromiseLike(shouldContinue) ? await shouldContinue : shouldContinue;
         if (!continueValue) break;
         yield currentValue;
         await Promise.resolve();
-        if (signal.aborted) break;
+        if (signal?.aborted) break;
         const nextValue = iterateFn(currentValue);
         currentValue = isPromiseLike(nextValue) ? await nextValue : nextValue;
       }

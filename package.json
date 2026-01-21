@@ -1,14 +1,14 @@
 {
   "name": "streamix",
-  "version": "2.0.28",
+  "version": "2.0.30",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "jasmine": "npx ts-test-runner --headless",
-    "jasmine:coverage": "npx ts-test-runner --headless --coverage",
-    "minify": "node terser.mjs && npx dts-bundler",
+    "jasmine": "testify --headless --browser node",
+    "jasmine:coverage": "testify --headless --browser node --coverage",
+    "minify": "node terser.mjs && npx typegen",
     "clean": "eslint --config eslint.config.js --fix",
     "docs:generate": "node scripts/copy-vitepress-config.mjs && typedoc --plugin typedoc-plugin-markdown --out dist/api",
     "docs:prepare": "node scripts/docs-prepare.mjs",
@@ -30,15 +30,14 @@
     "zone.js": "0.14.3"
   },
   "devDependencies": {
-    "@actioncrew/dts-bundler": "file:dependencies/actioncrew-dts-bundler-1.0.11.tgz",
-    "@actioncrew/ts-test-runner": "file:dependencies/actioncrew-ts-test-runner-1.0.16.tgz",
     "@angular-devkit/build-angular": "18.0.1",
     "@angular/cli": "18.0.1",
     "@angular/compiler-cli": "18.0.0",
+    "@epikodelabs/testify": "file:dependencies/epikodelabs-testify-1.0.16.tgz",
+    "@epikodelabs/typegen": "file:dependencies/epikodelabs-typegen-1.0.11.tgz",
     "@types/jasmine": "5.1.8",
     "@types/markdown-it": "13.0.9",
     "@types/node": "24.2.0",
-    "jasmine": "5.9.0",
     "ng-packagr": "18.0.0",
     "prettier": "3.7.4",
     "rollup": "4.52.4",
@@ -51,12 +50,5 @@
     "vitepress": "1.6.4"
   },
   "type": "module",
-  "sideEffects": false,
-  "exports": {
-    ".": "./projects/libraries/streamix/src/lib/index.ts",
-    "./coroutines": "./projects/libraries/streamix/coroutines/src/lib/index.ts",
-    "./dom": "./projects/libraries/streamix/dom/src/lib/index.ts",
-    "./networking": "./projects/libraries/streamix/networking/src/lib/index.ts",
-    "./tracing": "./projects/libraries/streamix/tracing/src/lib/index.ts"
-  }
+  "sideEffects": false
 }

@@ -1,4 +1,6 @@
-import { createStream, map, registerRuntimeHooks, scheduler } from "@epikodelabs/streamix";
+import { createStream, map, registerRuntimeHooks } from "@epikodelabs/streamix";
+
+const scheduler = { flush: () => new Promise(r => setTimeout(r, 0)) };
 
 describe("runtimeHooks", () => {
   let previousHooks: any;

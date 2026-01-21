@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -63,8 +63,9 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
     let outerIndex = 0;
     let innerIterator: AsyncIterator<R> | null = null;
     let outerValue: T | undefined;
+    let currentMeta: { valueId: string; operatorIndex: number; operatorName: string } | undefined;
 
-    return {
+    const iterator: AsyncIterator<R> = {
       next: async () => {
         while (true) {
           // If no active inner iterator, get next outer value
@@ -74,6 +75,7 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
               return DONE;
             }
 
+            currentMeta = getIteratorMeta(source);
             let matched: typeof resolvedOptions[number] | undefined;
             outerValue = result.value;
             const currentIndex = outerIndex++;
@@ -100,8 +102,27 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
             continue;
           }
 
+          if (currentMeta) {
+            // Attach per-value metadata so tracers can attribute outputs even when emitted asynchronously.
+            const tagged = setValueMeta(
+              innerResult.value,
+              { valueId: currentMeta.valueId, kind: "expand" },
+              currentMeta.operatorIndex,
+              currentMeta.operatorName
+            );
+            setIteratorMeta(
+              iterator,
+              { valueId: currentMeta.valueId, kind: "expand" },
+              currentMeta.operatorIndex,
+              currentMeta.operatorName
+            );
+            return NEXT(tagged);
+          }
+
           return NEXT(innerResult.value);
         }
       }
     };
+
+    return iterator;
   });

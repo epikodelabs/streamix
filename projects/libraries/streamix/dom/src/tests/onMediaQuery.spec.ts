@@ -123,6 +123,41 @@ idescribe('onMediaQuery', () => {
     expect(callback).toHaveBeenCalledWith(true);  // after promise resolves
   });
 
+  it('does not emit after promise resolves when unsubscribed early', async () => {
+    const query = '(min-width: 1000px)';
+    const listeners: ((event: MediaQueryListEvent) => void)[] = [];
+
+    const matchMediaSpy = jasmine.createSpy('matchMedia').and.callFake(() => ({
+      matches: true,
+      addEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) => listeners.push(cb),
+      removeEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) => {
+        const idx = listeners.indexOf(cb);
+        if (idx >= 0) listeners.splice(idx, 1);
+      },
+    }));
+
+    (window as any).matchMedia = matchMediaSpy;
+
+    let resolveQuery: (value: string) => void;
+    const queryPromise = new Promise<string>(resolve => {
+      resolveQuery = resolve;
+    });
+
+    const callback = jasmine.createSpy('callback');
+    const stream: Stream<boolean> = onMediaQuery(queryPromise);
+    const subscription = stream.subscribe(callback);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(callback).toHaveBeenCalledWith(false);
+
+    subscription.unsubscribe();
+    resolveQuery!(query);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
   it('should fall back to addListener/removeListener when addEventListener is not available', async () => {
     const query = '(min-width: 900px)';
     const listeners: ((event: MediaQueryListEvent) => void)[] = [];

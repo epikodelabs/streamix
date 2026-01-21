@@ -1,6 +1,6 @@
 {
   "name": "@epikodelabs/streamix",
-  "version": "2.0.28",
+  "version": "2.0.30",
   "description": "Reactive TypeScript library",
   "license": "MIT",
   "keywords": [
@@ -9,15 +9,15 @@
     "data streams"
   ],
   "dependencies": {
-    "tslib": "^2.3.0"
+    "tslib": "^2.8.1"
   },
   "main": "public-api.ts",
   "type": "module",
   "sideEffects": false,
-  "homepage": "https://epikodelabslabs.github.io/streamix/",
+  "homepage": "https://epikodelabs.github.io/streamix/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/epikodelabslabs/streamix.git"
+    "url": "git+https://github.com/epikodelabs/streamix.git"
   },
   "author": "Oleksii Shepel",
   "email": "oleksii.shepel@outlook.com"

@@ -1,4 +1,3 @@
-import { scheduler } from '@epikodelabs/streamix';
 import { type NetworkState, onNetwork } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
@@ -7,7 +6,7 @@ import { idescribe } from './env.spec';
 /* -------------------------------------------------- */
 
 async function flush() {
-  await scheduler.flush();
+  await new Promise(r => setTimeout(r, 0));
 }
 
 /**
@@ -233,6 +232,33 @@ idescribe('onNetwork', () => {
 
     expect(values.length).toBe(1); // snapshot still emitted
     sub.unsubscribe();
+  });
+
+  it('does nothing when navigator is unavailable', () => {
+    const originalAdd = window.addEventListener;
+    const originalRemove = window.removeEventListener;
+
+    const addSpy = spyOn(window, 'addEventListener').and.stub();
+
+    const originalNavigator = (globalThis as any).navigator;
+    delete (globalThis as any).navigator;
+
+    try {
+      const subscription = onNetwork().subscribe(() => {});
+
+      expect(addSpy).not.toHaveBeenCalled();
+
+      subscription.unsubscribe();
+    } finally {
+      (globalThis as any).addEventListener = originalAdd;
+      (globalThis as any).removeEventListener = originalRemove;
+
+      if (originalNavigator) {
+        (globalThis as any).navigator = originalNavigator;
+      } else {
+        delete (globalThis as any).navigator;
+      }
+    }
   });
 });
 

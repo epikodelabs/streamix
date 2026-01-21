@@ -68,7 +68,7 @@ export function onNetwork(): Stream<NetworkState> {
     window.addEventListener("offline", emit);
     connection?.addEventListener?.("change", emit);
 
-    emit(); // initial snapshot
+    emit();
   };
 
   const stop = () => {
@@ -89,14 +89,19 @@ export function onNetwork(): Stream<NetworkState> {
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: NetworkState) => void) | Receiver<NetworkState>
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      start();
-    }
+    scheduleStart();
 
     const o = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

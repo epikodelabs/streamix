@@ -147,13 +147,13 @@ describe('eachValueFrom', () => {
     let capturedSignal: AbortSignal | undefined;
     let generatorFinallyRan = false;
 
-    const stream = createStream<number>('abortable', async function* (signal: AbortSignal) {
+    const stream = createStream<number>('abortable', async function* (signal?: AbortSignal) {
       capturedSignal = signal;
       try {
         yield 1;
-        if (signal.aborted) return;
+        if (signal?.aborted) return;
         await new Promise<void>(resolve =>
-          signal.addEventListener('abort', () => resolve(), { once: true })
+          signal?.addEventListener('abort', () => resolve(), { once: true })
         );
       } finally {
         generatorFinallyRan = true;

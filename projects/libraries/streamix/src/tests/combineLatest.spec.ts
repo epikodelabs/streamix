@@ -145,6 +145,34 @@ describe('combineLatest', () => {
       },
     });
   });
+
+  it('should resolve promise-based inputs before emitting', (done) => {
+    const combinedStream = combineLatest(Promise.resolve(1), Promise.resolve(2));
+    const emitted: number[][] = [];
+
+    combinedStream.subscribe({
+      next: (value) => emitted.push(value as number[]),
+      complete: () => {
+        expect(emitted).toEqual([[1, 2]]);
+        done();
+      },
+      error: (error) => done.fail(error),
+    });
+  });
+
+  it('should complete immediately with no sources', (done) => {
+    const combinedStream = combineLatest();
+    const timeout = setTimeout(() => done.fail('did not complete'), 50);
+
+    combinedStream.subscribe({
+      next: () => done.fail('should not emit'),
+      complete: () => {
+        clearTimeout(timeout);
+        done();
+      },
+      error: (error) => done.fail(error),
+    });
+  });
 });
 
 

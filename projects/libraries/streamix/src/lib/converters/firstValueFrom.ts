@@ -22,26 +22,51 @@ import type { Stream, Subscription } from "../abstractions";
  * @returns A promise that resolves with the first value from the stream or rejects on error or completion without a value.
  */
 export function firstValueFrom<T = any>(stream: Stream<T>): Promise<T> {
-  let subscription: Subscription;
+  let subscription: Subscription | undefined;
   let seen = false;
+  let settled = false;
+  let pendingUnsubscribe = false;
+
+  const requestUnsubscribe = (): void => {
+    if (subscription) {
+      const sub = subscription;
+      subscription = undefined;
+      sub.unsubscribe();
+      return;
+    }
+
+    pendingUnsubscribe = true;
+  };
 
   return new Promise<T>((resolve, reject) => {
     subscription = stream.subscribe({
       next(value: T) {
+        if (settled) return;
+        settled = true;
         seen = true;
         resolve(value);
-        subscription.unsubscribe();
+        requestUnsubscribe();
       },
       error(err: any) {
+        if (settled) return;
+        settled = true;
         reject(err);
-        subscription.unsubscribe();
+        requestUnsubscribe();
       },
       complete() {
+        if (settled) return;
+        settled = true;
         if (!seen) {
           reject(new Error("Stream completed without emitting a value"));
+        } else {
+          // If the stream synchronously completes after emitting, ignore.
         }
-        subscription.unsubscribe();
+        requestUnsubscribe();
       }
     });
+
+    if (pendingUnsubscribe) {
+      requestUnsubscribe();
+    }
   });
 }

@@ -1,5 +1,9 @@
 import { createReceiver } from '@epikodelabs/streamix';
 
+const flushMicrotasks = async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+};
+
 describe('createReceiver', () => {
   let consoleErrorSpy: jasmine.Spy;
 
@@ -66,6 +70,7 @@ describe('createReceiver', () => {
     });
 
     await receiver.next(123);
+    await flushMicrotasks();
 
     expect(errorSpy).toHaveBeenCalledWith(jasmine.any(Error));
   });
@@ -77,6 +82,7 @@ describe('createReceiver', () => {
     });
 
     await receiver.next(1);
+    await flushMicrotasks();
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       'Unhandled error in error handler:',
@@ -112,6 +118,8 @@ describe('createReceiver', () => {
     // Call complete while still processing
     const completePromise = receiver.complete();
 
+    await flushMicrotasks();
+
     // Not completed yet
     expect(receiver.completed).toBeFalse();
     expect(completeSpy).not.toHaveBeenCalled();
@@ -120,6 +128,7 @@ describe('createReceiver', () => {
     resolveNext!();
     await nextPromise;
     await completePromise;
+    await flushMicrotasks();
 
     expect(receiver.completed).toBeTrue();
     expect(completeSpy).toHaveBeenCalled();

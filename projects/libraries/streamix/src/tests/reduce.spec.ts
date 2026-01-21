@@ -121,6 +121,59 @@ describe('reduce', () => {
 
     expect(results).toEqual(['constant']);  // The accumulator always returns 'constant'
   });
+
+  it('should await async accumulator before emitting final value', async () => {
+    const accumulatedStream = source.pipe(
+      reduce(async (acc, value) => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return acc + value;
+      }, 0)
+    );
+    const results: number[] = [];
+
+    (async () => {
+      for await (const value of accumulatedStream) {
+        results.push(value);
+      }
+    })();
+
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(results).toEqual([5]);
+  });
+
+  it('should propagate accumulator errors', async () => {
+    const accumulatedStream = source.pipe(
+      reduce((acc, value) => {
+        if (value === 2) {
+          throw new Error('Accumulator failure');
+        }
+        return acc + value;
+      }, 0)
+    );
+
+    let caught: Error | null = null;
+
+    (async () => {
+      try {
+        for await (const _ of accumulatedStream) {
+          void _;
+        }
+      } catch (err) {
+        caught = err as Error;
+      }
+    })();
+
+    subject.next(1);
+    subject.next(2);
+    await subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(caught!.message).toEqual('Accumulator failure');
+  });
 });
 
 

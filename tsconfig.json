@@ -16,16 +16,20 @@
     "experimentalDecorators": true,
     "moduleResolution": "bundler",
     "importHelpers": true,
-    "target": "ES2022",
-    "module": "ES2022",
+    "target": "ESNext",
+    "module": "ESNext",
     "useDefineForClassFields": false,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "skipLibCheck": true,
     "lib": [
-      "ES2022",
+      "ESNext",
       "dom"
     ],
     "paths": {
+      "@epikodelabs/streamix/aggregates": [
+        "./projects/libraries/streamix/aggregates/src/lib/index.ts"
+      ],
       "@epikodelabs/streamix/coroutines": [
         "./projects/libraries/streamix/coroutines/src/lib/index.ts"
       ],

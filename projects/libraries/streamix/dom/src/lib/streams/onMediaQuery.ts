@@ -44,31 +44,45 @@ export function onMediaQuery(
   /* Lifecycle                                          */
   /* -------------------------------------------------- */
 
-  const start = async () => {
+  const start = () => {
     if (active) return;
     active = true;
 
-    // Promise query ??? emit false immediately
     if (isPromiseLike(query)) {
-      subject.next(false);
-    }
+      // Async path for promise query
+      subject.next(false); // Emit false immediately
+      void (async () => {
+        const q = await query;
+        if (!active) return;
 
-    const q = isPromiseLike(query) ? await query : query;
-    if (!active) return;
+        mql = window.matchMedia(q);
+        subject.next(mql.matches);
 
-    mql = window.matchMedia(q);
+        listener = (e: MediaQueryListEvent) => {
+          subject.next(e.matches);
+        };
 
-    // Emit resolved state
-    subject.next(mql.matches);
+        if (typeof mql.addEventListener === 'function') {
+          mql.addEventListener('change', listener);
+        } else if (typeof (mql as any).addListener === 'function') {
+          (mql as any).addListener(listener);
+        }
+      })();
+    } else {
+      // Synchronous path for immediate query
+      mql = window.matchMedia(query);
 
-    listener = (e: MediaQueryListEvent) => {
-      subject.next(e.matches);
-    };
+      listener = (e: MediaQueryListEvent) => {
+        subject.next(e.matches);
+      };
 
-    if (typeof mql.addEventListener === 'function') {
-      mql.addEventListener('change', listener);
-    } else if (typeof (mql as any).addListener === 'function') {
-      (mql as any).addListener(listener);
+      if (typeof mql.addEventListener === 'function') {
+        mql.addEventListener('change', listener);
+      } else if (typeof (mql as any).addListener === 'function') {
+        (mql as any).addListener(listener);
+      }
+      
+      if (active && mql) subject.next(mql.matches);
     }
   };
 
@@ -93,14 +107,19 @@ export function onMediaQuery(
   /* -------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: boolean) => void) | Receiver<boolean>
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      void start();
-    }
+    scheduleStart();
 
     const prev = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

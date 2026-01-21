@@ -128,7 +128,7 @@ describe('fromPromise', () => {
     let capturedSignal: AbortSignal | undefined;
     const emittedValues: any[] = [];
 
-    const stream = fromPromise<string>((signal) => {
+    const stream = fromPromise<string>((signal: AbortSignal) => {
       capturedSignal = signal;
 
       return new Promise((resolve, reject) => {
@@ -152,6 +152,93 @@ describe('fromPromise', () => {
     expect(capturedSignal).toBeDefined();
     expect(capturedSignal!.aborted).toBe(true);
     expect(emittedValues).toEqual([]);
+  });
+
+  it('should invoke factory for each subscription', async () => {
+    const factory = jasmine.createSpy('factory').and.returnValue(Promise.resolve('result'));
+    const stream = fromPromise(factory);
+
+    await new Promise<void>((resolve, reject) => {
+      stream.subscribe({
+        next: () => {},
+        complete: () => {
+          try {
+            expect(factory).toHaveBeenCalledTimes(1);
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        },
+        error: reject
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      stream.subscribe({
+        next: () => {},
+        complete: () => {
+          try {
+            expect(factory).toHaveBeenCalledTimes(2);
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        },
+        error: reject
+      });
+    });
+  });
+
+  it('should emit error when factory throws immediately', async () => {
+    const error = new Error('sync failure');
+    const stream = fromPromise(() => {
+      throw error;
+    });
+
+    await expectAsync(
+      new Promise<void>((resolve, reject) => {
+        stream.subscribe({
+          next: () => reject(new Error('Should not emit')),
+          error: (err) => {
+            try {
+              expect(err).toBe(error);
+              resolve();
+            } catch (inner) {
+              reject(inner);
+            }
+          },
+          complete: () => reject(new Error('Should not complete'))
+        });
+      })
+    ).toBeResolved();
+  });
+
+  it('should emit synchronous value without promise', async () => {
+    const stream = fromPromise(123);
+    const values: number[] = [];
+
+    (async () => {
+      for await (const value of stream) {
+        values.push(value as number);
+      }
+    })();
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(values).toEqual([123]);
+  });
+
+  it('should emit sync factory result without promise', async () => {
+    const stream = fromPromise(() => 'sync-factory');
+    const values: string[] = [];
+
+    (async () => {
+      for await (const value of stream) {
+        values.push(value as string);
+      }
+    })();
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(values).toEqual(['sync-factory']);
   });
 });
 

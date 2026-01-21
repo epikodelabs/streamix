@@ -40,6 +40,33 @@ describe('timer', () => {
 
     expect(emittedValues.length).toBe(previousLength); // No new emissions should occur after unsubscribe
   });
-});
 
+  it('should support promise-based delay and interval inputs', (done) => {
+    const timerStream = timer(Promise.resolve(0), Promise.resolve(10));
+    const emitted: number[] = [];
+    const subscription = timerStream.subscribe((value) => {
+      emitted.push(value);
+      if (emitted.length === 2) {
+        subscription.unsubscribe();
+        expect(emitted).toEqual([0, 1]);
+        done();
+      }
+    });
+  });
+
+  it('should use the delay value when no interval is provided', (done) => {
+    const timerStream = timer(20);
+    const emitted: number[] = [];
+    const subscription = timerStream.subscribe((value) => {
+      emitted.push(value);
+    });
+
+    setTimeout(() => {
+      subscription.unsubscribe();
+      expect(emitted[0]).toBe(0);
+      expect(emitted[1]).toBe(1);
+      done();
+    }, 80);
+  });
+});
 

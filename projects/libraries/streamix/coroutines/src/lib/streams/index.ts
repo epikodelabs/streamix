@@ -1,3 +1,3 @@
 export * from './compute';
-export * from './seize';
+export * from './hire';
 
