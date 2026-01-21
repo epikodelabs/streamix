@@ -82,7 +82,7 @@ export function onViewportChange(): Stream<ViewportState> {
     target.addEventListener("resize", emit);
     target.addEventListener("scroll", emit);
 
-    emit(); // initial snapshot
+    emit();
   };
 
   const stop = () => {
@@ -102,14 +102,19 @@ export function onViewportChange(): Stream<ViewportState> {
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: ViewportState) => void) | Receiver<ViewportState>
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      start();
-    }
+    scheduleStart();
 
     const o = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

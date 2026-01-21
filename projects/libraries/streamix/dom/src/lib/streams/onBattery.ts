@@ -53,7 +53,10 @@ export function onBattery(): Stream<BatteryState> {
     }
 
     battery = await (navigator as any).getBattery();
-    emit();
+    if (stopped || subscriberCount === 0) return;
+    
+    // Defer initial emission to allow subscription variable assignment
+    if (!stopped) emit();
 
     battery.addEventListener("chargingchange", emit);
     battery.addEventListener("levelchange", emit);
@@ -80,14 +83,19 @@ export function onBattery(): Stream<BatteryState> {
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      void start(); // Always async due to getBattery API
+    }
+  };
+
   subject.subscribe = (
     cb?: ((v: BatteryState) => void) | Receiver<BatteryState>
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      void start();
-    }
+    scheduleStart();
 
     const o = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

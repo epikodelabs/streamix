@@ -1,4 +1,8 @@
-import { createStream, createSubject, from, scheduler, withLatestFrom } from '@epikodelabs/streamix';
+import { createStream, createSubject, from, withLatestFrom } from '@epikodelabs/streamix';
+
+const scheduler = {
+  flush: () => new Promise(resolve => setTimeout(resolve, 0))
+};
 
 describe('withLatestFrom', () => {
   it('should handle cancellation of the main stream', (done) => {
@@ -249,12 +253,11 @@ describe('withLatestFrom', () => {
     const combined = main$.pipe(withLatestFrom(aux1$, aux2$));
 
     const errorSpy = jasmine.createSpy("errorSpy");
-    combined.subscribe({ error: errorSpy });
+    combined.subscribe({ next: (value) => console.log(value), error: errorSpy });
 
-    await scheduler.flush();
     aux1$.error(new Error("FIRST"));
     aux2$.error("SECOND");
-    await scheduler.flush();
+    await new Promise((r) => setTimeout(r, 0));
 
     expect(errorSpy).toHaveBeenCalledTimes(1);
   });

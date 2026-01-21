@@ -70,19 +70,39 @@ describe('retry', () => {
     expect(factory).toHaveBeenCalledTimes(3);
   });
 
+  it('should not retry when maxRetries is zero', async () => {
+    const factory = jasmine.createSpy('factory').and.callFake(() => {
+      return createStream("errorStream", async function* () {
+        throw new Error('Immediate failure');
+      });
+    });
+
+    let caught: Error | null = null;
+    try {
+      for await (const _ of retry(factory, 0, 0)) {
+        void _;
+      }
+    } catch (err: any) {
+      caught = err;
+    }
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(caught).toEqual(new Error('Immediate failure'));
+  });
+
   it('should emit correct values after retrying stream multiple times', async () => {
     let attempt = 0;
     const factory = () => createStream<number>("errorStream", async function* () {
-        attempt++;
-        if (attempt === 1) {
-          yield 1;
-          yield 2;
-          throw new Error('Test Error');
-        } else {
-          yield 3;
-          yield 4;
-        }
-      });
+      attempt++;
+      if (attempt === 1) {
+        yield 1;
+        yield 2;
+        throw new Error('Test Error');
+      } else {
+        yield 3;
+        yield 4;
+      }
+    });
 
     const result: number[] = [];
     const stream$ = retry(factory, 3, 1000);
@@ -111,6 +131,47 @@ describe('retry', () => {
 
     expect(result).toEqual([5]);
     expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it('should wait for a promised delay before retrying', async () => {
+    let attempt = 0;
+    let delayResolve!: (value: number) => void;
+    const delayPromise = new Promise<number>((resolve) => {
+      delayResolve = resolve;
+    });
+
+    const factory = jasmine.createSpy('factory').and.callFake(() => {
+      attempt++;
+      return createStream<number>("delayedRetry", async function* () {
+        if (attempt === 1) {
+          yield 1;
+          throw new Error('Need retry');
+        }
+        yield 2;
+      });
+    });
+
+    const result: number[] = [];
+    const consumePromise = (async () => {
+      for await (const value of retry(factory, 1, delayPromise)) {
+        result.push(value);
+      }
+    })();
+
+    // Wait for first attempt to complete and fail
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([]); // No values emitted yet (buffered from failed attempt)
+
+    // At this point, retry is waiting for delayPromise to resolve
+    // Resolve the delay to allow retry
+    delayResolve(0);
+
+    // Wait for the retry and completion
+    await consumePromise;
+
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(result).toEqual([2]); // Only value from successful attempt
   });
 });
 

@@ -1,5 +1,21 @@
-import type { MaybePromise, Operator, Stream } from '../abstractions';
-import { recurse, type RecurseOptions } from './recurse';
+import {
+  createOperator,
+  DONE,
+  getIteratorMeta,
+  isPromiseLike,
+  NEXT,
+  setIteratorMeta,
+  setValueMeta,
+  type MaybePromise,
+  type Operator,
+  type Stream,
+} from '../abstractions';
+import { eachValueFrom, fromAny } from '../converters';
+
+export type ExpandOptions = {
+  traversal?: 'depth' | 'breadth';
+  maxDepth?: number;
+};
 
 /**
  * Creates a stream operator that recursively expands each emitted value.
@@ -16,15 +32,94 @@ import { recurse, type RecurseOptions } from './recurse';
  * @template T The type of the values in the source and output streams.
  * @param project A function that takes a value and returns a stream, value/array,
  * or a promise of those shapes to be expanded.
- * @param options An optional configuration object for the underlying `recurse` operator.
+ * @param options An optional configuration object for traversal strategy and max depth.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const expand = <T = any>(
   project: (value: T) => MaybePromise<Stream<T> | Array<T> | T>,
-  options: RecurseOptions = {}
+  options: ExpandOptions = {}
 ): Operator<T, T> =>
-  recurse<T>(
-    () => true,
-    project,
-    options
-  );
+  createOperator<T, T>('expand', function (this: Operator, source) {
+    type QueueItem = {
+      value: T;
+      depth: number;
+      meta?: { valueId: string; operatorIndex: number; operatorName: string };
+    };
+    const queue: QueueItem[] = [];
+    let sourceDone = false;
+
+    const enqueueChildren = async (
+      value: T,
+      depth: number,
+      meta?: QueueItem['meta']
+    ) => {
+      if (options.maxDepth !== undefined && depth >= options.maxDepth) return;
+
+      const projected = project(value);
+      const normalized = isPromiseLike(projected) ? await projected : projected;
+
+      for await (const child of eachValueFrom(fromAny(normalized))) {
+        const item = { value: child, depth: depth + 1, meta };
+        if (options.traversal === 'breadth') {
+          queue.push(item);
+        } else {
+          queue.unshift(item);
+        }
+      }
+    };
+
+    const iterator: AsyncIterator<T> = {
+      next: async () => {
+        while (true) {
+          while (queue.length === 0 && !sourceDone) {
+            const result = await source.next();
+            if (result.done) {
+              sourceDone = true;
+              break;
+            }
+
+            const meta = getIteratorMeta(source);
+            queue.push({ value: result.value, depth: 0, meta });
+          }
+
+          if (queue.length > 0) {
+            const item =
+              options.traversal === 'breadth' ? queue.shift()! : queue.pop()!;
+            await enqueueChildren(item.value, item.depth, item.meta);
+
+            let value = item.value;
+            if (item.meta) {
+              value = setValueMeta(
+                value,
+                {
+                  valueId: item.meta.valueId,
+                  ...(item.depth > 0 ? { kind: 'expand' as const } : {}),
+                },
+                item.meta.operatorIndex,
+                item.meta.operatorName
+              );
+              setIteratorMeta(
+                iterator,
+                {
+                  valueId: item.meta.valueId,
+                  ...(item.depth > 0 ? { kind: 'expand' as const } : {}),
+                },
+                item.meta.operatorIndex,
+                item.meta.operatorName
+              );
+            }
+
+            return NEXT(value);
+          }
+
+          if (sourceDone && queue.length === 0) {
+            return DONE;
+          }
+
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+      },
+    };
+
+    return iterator;
+  });

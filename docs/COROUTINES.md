@@ -1,19 +1,19 @@
-# Streamix Coroutines: Making Heavy Tasks Feel Light
+# 🚀 Streamix Coroutines: Making Heavy Tasks Feel Light
 
 Ever noticed how your web app freezes when processing large files, running complex calculations, or handling lots of data? That's your browser's main thread getting overwhelmed. Streamix coroutines solve this by moving heavy work to background threads, keeping your app smooth and responsive.
 
-## The Problem: When Apps Get Stuck
+## ⛔ The Problem: When Apps Get Stuck
 
 Imagine you're building a photo editor, data analyzer, or game. When users upload large files or request complex operations, everything stops:
 
 - ⛔ UI becomes unresponsive
 - 🖱️ Buttons don't click
 - 🧊 Animations freeze
-- 😬 Users think the app crashed
+-  Users think the app crashed
 
 This happens because JavaScript normally runs everything on one thread - like having one person handle all tasks in a restaurant.
 
-## The Solution: Coroutines as Your Background Workers
+## ⚡ The Solution: Coroutines as Your Background Workers
 
 Coroutines are like hiring extra staff for your restaurant. They:
 
@@ -23,7 +23,7 @@ Coroutines are like hiring extra staff for your restaurant. They:
 - 🔁 **Communicate safely** - Send data back and forth between main app and workers
 - ✨ **Support modern code** - Use TypeScript, async/await, and all your favorite features
 
-### Key Advantages Over Traditional Solutions
+### 📊 Key Advantages Over Traditional Solutions
 
 | Feature | Streamix Coroutines | Traditional Web Workers | Other Libraries |
 |---------|---------------------|------------------------|----------------|
@@ -34,7 +34,7 @@ Coroutines are like hiring extra staff for your restaurant. They:
 | Progress Reporting | ✅ Built-in | 🧩 Manual | ⚠️ Limited |
 | Resource Management | ✅ Automatic | 🧩 Manual | ⚠️ Limited |
 
-## Installation
+## 📦 Installation
 
 Getting started with Streamix Coroutines is simple:
 
@@ -46,12 +46,12 @@ npm install @epikodelabs/streamix
 yarn add @epikodelabs/streamix
 ```
 
-## Your First Coroutine
+## 🧪 Your First Coroutine
 
 Let's say you want to process a large list of numbers without freezing your app:
 
 ```typescript
-import { coroutine } from '@epikodelabs/streamix';
+import { coroutine } from '@epikodelabs/streamix/coroutines';
 
 // Create a background worker for heavy math
 const mathWorker = coroutine(function calculatePrimes(data: { max: number }) {
@@ -82,22 +82,18 @@ Your app stays responsive while the heavy calculation runs in the background!
 ## ⚠️ Common Mistakes to Avoid
 
 ```typescript
-// ❌ WRONG: Function declaration (use function expression instead)
-function badTask(data) { return data.value * 2; }
-const badWorker1 = coroutine(badTask);
-
 // ❌ WRONG: Arrow function
-const badWorker2 = coroutine((data) => data.value * 2);
+const badWorker1 = coroutine((data) => data.value * 2);
 
 // ❌ WRONG: References external variable
 const multiplier = 10;
-const badWorker3 = coroutine(function task(data) {
+const badWorker2 = coroutine(function task(data) {
   return data.value * multiplier; // References external 'multiplier'
 });
 
 // ❌ WRONG: Uses imported modules
 import { someUtility } from './utils';
-const badWorker4 = coroutine(function task(data) {
+const badWorker3 = coroutine(function task(data) {
   return someUtility(data); // Can't use imports inside worker
 });
 ```
@@ -169,7 +165,7 @@ const mathWorker = coroutineFactory(function mathWithConstants(data: { value: nu
 });
 ```
 
-## Three Ways to Use Coroutines
+## 🔁 Three Ways to Use Coroutines
 
 Understanding when to use each approach:
 
@@ -192,32 +188,32 @@ from([data1, data2, data3])
   .subscribe(result => handleResult(result));
 ```
 
-### 3. **Persistent Worker** - Use `seize()`
+### 3. **Persistent Worker** - Use `hire()`
 Perfect for running multiple sequential tasks on the same worker instance without reinitializing it each time:
 
 ```typescript
-import { seize } from '@epikodelabs/streamix';
+import { hire } from '@epikodelabs/streamix/coroutines';
 
-const [seizedWorker] = await seize(mathWorker).query();
+const [hiredWorker] = await hire(mathWorker).query();
 try {
-  const result1 = await seizedWorker.sendTask(data1);
-  const result2 = await seizedWorker.sendTask(data2);
-  const result3 = await seizedWorker.sendTask(data3);
+  const result1 = await hiredWorker.sendTask(data1);
+  const result2 = await hiredWorker.sendTask(data2);
+  const result3 = await hiredWorker.sendTask(data3);
 } finally {
-  seizedWorker.release(); // Always release!
+  hiredWorker.release(); // Always release!
 }
 ```
 
 These three approaches keep your UI responsive, each excelling in a different scenario — single tasks, continuous streams, or reusing a worker for multiple jobs.
 
 
-## Advanced Features (When You Need Them)
+## 🛠️ Advanced Features (When You Need Them)
 
-### Fine-Tuning Your Coroutines
+### ⚙️ Fine-Tuning Your Coroutines
 For specialized use cases, Streamix coroutines offer powerful configuration options:
 
 ```typescript
-import { coroutine, CoroutineConfig } from '@epikodelabs/streamix';
+import { coroutine, CoroutineConfig } from '@epikodelabs/streamix/coroutines';
 
 // Create a custom configuration
 const config: CoroutineConfig = {
@@ -254,22 +250,22 @@ const output = await customWorker.processTask(inputData);
 
 ### Dedicated Workers: Persistent Worker Connections
 
-For scenarios requiring multiple sequential operations on the same worker, use `seize`:
+For scenarios requiring multiple sequential operations on the same worker, use `hire`:
 
 ```typescript
-import { seize } from '@epikodelabs/streamix';
+import { hire } from '@epikodelabs/streamix/coroutines';
 
 const processSequentialTasks = async () => {
-  const seizedWorker = await seize(mathWorker).query();
+  const hiredWorker = await hire(mathWorker).query();
   
   try {
-    await seizedWorker.sendTask({ operation: 'initialize', data: largeDataset });
-    await seizedWorker.sendTask({ operation: 'process', params: { threshold: 0.5 } });
-    const finalResult = await seizedWorker.sendTask({ operation: 'finalize' });
+    await hiredWorker.sendTask({ operation: 'initialize', data: largeDataset });
+    await hiredWorker.sendTask({ operation: 'process', params: { threshold: 0.5 } });
+    const finalResult = await hiredWorker.sendTask({ operation: 'finalize' });
     
     return finalResult;
   } finally {
-    seizedWorker.release();
+    hiredWorker.release();
   }
 };
 ```
@@ -279,7 +275,7 @@ const processSequentialTasks = async () => {
 Chain multiple processing steps:
 
 ```typescript
-import { cascade } from '@epikodelabs/streamix';
+import { cascade } from '@epikodelabs/streamix/coroutines';
 
 // Create specialized workers for each step
 const decoder = coroutine(function decode(rawData) { /* decode logic */ });
@@ -293,7 +289,7 @@ const pipeline = cascade(decoder, processor, encoder);
 const result = await pipeline.processTask(inputData);
 ```
 
-## When to Use Coroutines
+## 🎯 When to Use Coroutines
 
 **Perfect for:**
 - 🎬 Image/video processing
@@ -309,7 +305,7 @@ const result = await pipeline.processTask(inputData);
 - 🎞️ Simple UI animations
 - 🪶 Small data operations
 
-## Getting Started Checklist
+## ✅ Getting Started Checklist
 
 1. **Identify heavy tasks** - What makes your app slow or unresponsive?
 2. **Create a coroutine** - Use `coroutine(function taskName() {})` syntax
@@ -318,7 +314,7 @@ const result = await pipeline.processTask(inputData);
 5. **Handle results** - Your app stays responsive while getting results
 6. **Add progress updates** - Keep users informed for long operations
 
-## Key Rules (Keep These Simple)
+## 📜 Key Rules (Keep These Simple)
 
 ✅ **Use this syntax**: `coroutine(function myTask() {})`  
 ❌ **Don't use**: Arrow functions or separate function declarations
@@ -329,7 +325,7 @@ const result = await pipeline.processTask(inputData);
 ✅ **TypeScript works perfectly**: Use all your favorite TypeScript features  
 ✅ **Async/await supported**: Modern JavaScript features work great
 
-## Why Streamix Coroutines Are Special
+## 🌟 Why Streamix Coroutines Are Special
 
 Unlike other solutions, Streamix coroutines:
 
@@ -339,7 +335,7 @@ Unlike other solutions, Streamix coroutines:
 - **Scale naturally** - Use all available CPU cores automatically
 - **Stay safe** - Prevent memory leaks and resource issues
 
-## Try It Today
+## 🚀 Try It Today
 
 Start small - pick one slow operation in your app and wrap it in a coroutine. You'll immediately notice:
 
@@ -353,5 +349,7 @@ Your users will thank you for keeping things responsive, and you'll wonder how y
 ---
 
 *Ready to make your heavy tasks feel light? Install Streamix and start with your first coroutine today. 🚀*
+
+
 
 

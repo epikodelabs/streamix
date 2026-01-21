@@ -1,4 +1,4 @@
-import type { MaybePromise } from "../abstractions";
+import { scheduler, type MaybePromise } from "../abstractions";
 
 /**
  * Represents a subscription to a stream-like source.
@@ -93,7 +93,7 @@ export function createSubscription(
       if (!_unsubscribed) {
         _unsubscribed = true;
         try {
-          await this.onUnsubscribe?.();
+          scheduler.enqueue(async () => await this.onUnsubscribe?.());
         } catch (err) {
           console.error("Error during unsubscribe callback:", err);
         }

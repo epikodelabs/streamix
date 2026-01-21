@@ -1,4 +1,4 @@
-import { delay, from } from '@epikodelabs/streamix';
+import { createStream, delay, from } from '@epikodelabs/streamix';
 
 describe('delay', () => {
   it('should delay each value by the specified time', (done) => {
@@ -59,6 +59,59 @@ describe('delay', () => {
         expect(emitCount).toBe(5);
         done();
       }
+    });
+  });
+
+  it('should respect promise-based delay inputs', (done) => {
+    const testStream = from([1]);
+    const delayPromise = Promise.resolve(10);
+
+    const delayedStream = testStream.pipe(delay(delayPromise));
+    const startTime = Date.now();
+
+    delayedStream.subscribe({
+      next: (value) => {
+        expect(value).toBe(1);
+        const elapsed = Date.now() - startTime;
+        expect(elapsed).toBeGreaterThanOrEqual(9);
+      },
+      complete: () => done(),
+      error: done.fail,
+    });
+  });
+
+  it('should treat undefined delay durations as immediate', (done) => {
+    const testStream = from([42]);
+    const delayPromise = Promise.resolve<number | undefined>(undefined);
+
+    const delayedStream = testStream.pipe(delay(delayPromise as any));
+    const startTime = Date.now();
+
+    delayedStream.subscribe({
+      next: (value) => {
+        expect(value).toBe(42);
+        expect(Date.now() - startTime).toBeLessThan(10);
+      },
+      complete: () => done(),
+      error: done.fail,
+    });
+  });
+
+  it('should forward source errors through the delay operator', (done) => {
+    const stream = createStream('error-source', async function* () {
+      yield 1;
+      throw new Error('boom');
+    });
+
+    const delayedStream = stream.pipe(delay(5));
+
+    delayedStream.subscribe({
+      next: () => {},
+      error: (err: any) => {
+        expect(err.message).toBe('boom');
+        done();
+      },
+      complete: () => done.fail('should error before completing'),
     });
   });
 });

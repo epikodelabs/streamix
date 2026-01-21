@@ -88,6 +88,30 @@ idescribe("compute", () => {
     // if it emitted more than one, we'd catch it here
     expect(results.length).toBe(1);
   });
+
+  it("should await promised parameters before computing", async () => {
+    const mainTask = (x: number) => x + 7;
+    const co = coroutine(mainTask);
+
+    let resolver: (value: number) => void;
+    const promiseParam = new Promise<number>((resolve) => {
+      resolver = resolve;
+    });
+
+    const stream = compute<number>(co, promiseParam);
+
+    const results: number[] = [];
+    const iterate = (async () => {
+      for await (const v of stream) {
+        results.push(v);
+      }
+    })();
+
+    setTimeout(() => resolver!(5), 10);
+    await iterate;
+
+    expect(results).toEqual([12]);
+  });
 });
 
 

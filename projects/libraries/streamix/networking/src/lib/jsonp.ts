@@ -15,7 +15,7 @@ import { createStream, isPromiseLike, type MaybePromise, type Stream } from '@ep
  * @returns {Stream<T>} A new stream that emits the JSONP data and then completes.
  */
 export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePromise<string> = 'callback'): Stream<T> {
-  return createStream<T>('jsonp', async function* () {
+  return createStream<T>('jsonp', async function* (signal) {
     const resolvedUrl = isPromiseLike(url) ? await url : url;
     const resolvedCallbackParam = isPromiseLike(callbackParam) ? await callbackParam : callbackParam;
 
@@ -27,7 +27,6 @@ export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePr
     // Promise that resolves when JSONP callback fires or rejects on error
     const dataPromise = new Promise<T>((resolve, reject) => {
       (window as any)[uniqueCallbackName] = (data: T) => resolve(data);
-
       script.onerror = () => reject(new Error(`JSONP request failed: ${fullUrl}`));
     });
 
@@ -42,9 +41,17 @@ export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePr
       }
     };
 
+    const abortPromise = new Promise<never>((_, reject) => {
+      if (signal?.aborted) {
+        reject(new Error('Aborted'));
+      } else {
+        signal?.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+      }
+    });
+
     try {
       // Race the dataPromise against abort signal
-      yield await dataPromise;
+      yield await Promise.race([dataPromise, abortPromise]);
     } finally {
       cleanup();
     }

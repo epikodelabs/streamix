@@ -1,415 +1,385 @@
-import { createBehaviorSubject, createBehaviorSubjectBuffer } from '@epikodelabs/streamix';
+import { createBehaviorSubject } from '@epikodelabs/streamix';
+
+const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 describe('createBehaviorSubject', () => {
-  it('should emit the current value to new subscribers immediately', (done) => {
-    const initialValue = 'initial_value';
-    const behaviorSubject = createBehaviorSubject(initialValue);
-
-    const emittedValues: string[] = [];
-
-    behaviorSubject.subscribe({
-      next: (value: string) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual([initialValue, 'value1', 'value2']);
-        done();
-      }
-    });
-
-    behaviorSubject.next('value1');
-    behaviorSubject.next('value2');
-    behaviorSubject.complete();
-  });
-
-  it('should not emit values after an immediate unsubscribe', async () => {
-    const subject = createBehaviorSubject<number>(1);
-    const values: number[] = [];
-
-    const sub = subject.subscribe(value => values.push(value));
-    sub.unsubscribe();
-
-    subject.next(2);
-    subject.complete();
-
-    await new Promise(resolve => setTimeout(resolve, 10));
-    expect(values).toEqual([1]);
-  });
-
-  it('should always expose the latest value via the snappy getter', () => {
-    const initial = 42;
-    const behaviorSubject = createBehaviorSubject(initial);
-
-    expect(behaviorSubject.snappy).toBe(42);
-
-    behaviorSubject.next(100);
-    expect(behaviorSubject.snappy).toBe(100);
-
-    behaviorSubject.next(999);
-    expect(behaviorSubject.snappy).toBe(999);
-
-    behaviorSubject.complete();
-    expect(behaviorSubject.snappy).toBe(999);
-  });
-
-  it('should always define snappy on the subject (getter present and readable)', () => {
-    const subject = createBehaviorSubject<number>(1);
-
-    expect('snappy' in subject).toBeTrue();
-
-    const descriptor = Object.getOwnPropertyDescriptor(subject, 'snappy');
-    expect(descriptor).toBeDefined();
-    expect(descriptor?.get).toEqual(jasmine.any(Function));
-
-    expect(subject.snappy).toBe(1);
-
-    subject.next(0);
-    // snappy updates synchronously (even though emissions are scheduled)
-    expect(subject.snappy).toBe(0);
-
-    subject.complete();
-    expect(subject.snappy).toBe(0);
-  });
-
-  it('should allow multiple subscribers to receive the same latest value', async () => {
+  it('emits the latest value to every subscriber while honoring unsubscriptions', async () => {
     const subject = createBehaviorSubject<number>(0);
-
     const valuesA: number[] = [];
     const valuesB: number[] = [];
 
     subject.subscribe(v => valuesA.push(v));
-    subject.subscribe(v => valuesB.push(v));
-
     subject.next(1);
-    subject.next(2);
+    await delay();
 
-    // Wait for async operations to complete
-    await new Promise(resolve => setTimeout(resolve, 10));
+    const subB = subject.subscribe(v => valuesB.push(v));
+    await delay();
+
+    subject.next(2);
+    await delay();
 
     expect(valuesA).toEqual([0, 1, 2]);
-    expect(valuesB).toEqual([0, 1, 2]);
+    expect(valuesB).toEqual([1, 2]);
+
+    const lateValues: number[] = [];
+    subject.subscribe(v => lateValues.push(v));
+    await delay();
+    expect(lateValues).toEqual([2]);
+
+    const resubValues: number[] = [];
+    const resub = subject.subscribe(v => resubValues.push(v));
+    subject.next(3);
+    await delay();
+    resub.unsubscribe();
+
+    subject.next(4);
+    await delay();
+
+    expect(resubValues).toEqual([2, 3]);
+
+    const finalValues: number[] = [];
+    subject.subscribe(v => finalValues.push(v));
+    await delay();
+    subject.next(5);
+    await delay();
+    expect(finalValues).toEqual([4, 5]);
+
+    subB.unsubscribe();
+    subject.next(6);
+    await delay();
+    expect(valuesA[valuesA.length - 1]).toBe(6);
+
+    const immediateSubject = createBehaviorSubject<number>(10);
+    const immediateReceived: number[] = [];
+    const immediateSub = immediateSubject.subscribe(v => immediateReceived.push(v));
+    immediateSub.unsubscribe();
+    immediateSubject.next(11);
+    await delay();
+    expect(immediateReceived).toEqual([10]);
   });
 
-  it('should not emit values after completion', async () => {
-    const subject = createBehaviorSubject<string>('init');
+  it('enforces completion and error semantics while exposing terminal state', async () => {
+    const completeSubject = createBehaviorSubject<number>(0);
+    const delivered: number[] = [];
+    let completions = 0;
+    completeSubject.subscribe({
+      next: v => delivered.push(v),
+      complete: () => completions++
+    });
 
-    const values: string[] = [];
-    subject.subscribe(v => values.push(v));
+    completeSubject.next(1);
+    completeSubject.complete();
+    completeSubject.next(2);
+    await delay();
 
-    subject.next('a');
-    subject.complete();
-    subject.next('b'); // should be ignored
+    expect(delivered).toEqual([0, 1]);
+    expect(completions).toBe(1);
+    expect(completeSubject.completed()).toBeTrue();
 
-    // Wait for async operations to complete
-    await new Promise(resolve => setTimeout(resolve, 10));
+    let lateComplete = false;
+    completeSubject.subscribe({
+      next: () => { throw new Error('should not receive next'); },
+      complete: () => { lateComplete = true; }
+    });
+    await delay();
+    expect(lateComplete).toBeTrue();
 
-    expect(values).toEqual(['init', 'a']);
+    expect(() => completeSubject.error(new Error('ignored'))).not.toThrow();
+    expect(completeSubject.completed()).toBeTrue();
+
+    const errorSubject = createBehaviorSubject<number>(0);
+    const errorValues: number[] = [];
+    let caughtError: Error | null = null;
+    errorSubject.subscribe({
+      next: v => errorValues.push(v),
+      error: e => caughtError = e as Error
+    });
+
+    errorSubject.next(1);
+    errorSubject.error('boom');
+    errorSubject.next(2);
+    await delay();
+
+    expect(errorValues).toEqual([0, 1]);
+    expect(caughtError).toEqual(jasmine.any(Error));
+    expect(caughtError!.message).toBe('boom');
+    expect(errorSubject.completed()).toBeTrue();
+
+    let lateError: any | null = null;
+    errorSubject.subscribe({
+      next: () => {},
+      error: e => lateError = e as Error
+    });
+    await delay();
+    expect(lateError?.message).toBe('boom');
+
+    const numericErrorSubject = createBehaviorSubject<number>(0);
+    let numericError: Error | null = null;
+    numericErrorSubject.subscribe({ error: e => numericError = e as Error });
+    numericErrorSubject.error(404);
+    await delay();
+    expect(numericError).toBeInstanceOf(Error);
+    expect(numericError!.message).toBe('404');
+
+    const afterErrorSubject = createBehaviorSubject<number>(0);
+    let completionCount = 0;
+    afterErrorSubject.subscribe({ complete: () => completionCount++ });
+    afterErrorSubject.error(new Error('boom'));
+    afterErrorSubject.complete();
+    await delay();
+    expect(completionCount).toBe(1);
   });
 
-  it('should allow late subscribers to still receive the last value', async () => {
-    const subject = createBehaviorSubject<number>(123);
+  it('exposes value getter, query, observer, and iterator helpers consistently', async () => {
+    const getterSubject = createBehaviorSubject<number>(0);
+    expect(getterSubject.value).toBe(0);
+    getterSubject.next(1);
+    expect(getterSubject.value).toBe(1);
+    getterSubject.next(2);
+    expect(getterSubject.value).toBe(2);
+    getterSubject.complete();
+    expect(getterSubject.value).toBe(2);
 
-    subject.next(456);
+    const descriptor = Object.getOwnPropertyDescriptor(getterSubject, 'value');
+    expect(descriptor).toBeDefined();
+    expect(typeof descriptor?.get).toBe('function');
 
-    // Wait for the next to process
-    await new Promise(resolve => setTimeout(resolve, 10));
+    const multiAccessSubject = createBehaviorSubject<number>(42);
+    const v1 = multiAccessSubject.value;
+    const v2 = multiAccessSubject.value;
+    expect(v1).toBe(42);
+    expect(v2).toBe(42);
 
-    const values: number[] = [];
-    subject.subscribe(v => values.push(v));
+    const querySubject = createBehaviorSubject<number>(10);
+    expect(await querySubject.query()).toBe(10);
+    querySubject.next(20);
+    expect(await querySubject.query()).toBe(20);
+    querySubject.next(30);
+    expect(await querySubject.query()).toBe(30);
 
-    // Wait for subscription to process
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await delay();
+    const queryValues: number[] = [];
+    querySubject.subscribe(v => queryValues.push(v));
+    querySubject.next(40);
+    await delay();
+    expect(queryValues).toEqual([30, 40]);
 
-    expect(values).toEqual([456]);
+    const observerEvents: string[] = [];
+    const observerSubject = createBehaviorSubject<number>(0);
+    observerSubject.subscribe({
+      next: v => observerEvents.push(`next:${v}`),
+      error: e => observerEvents.push(`error:${(e as Error).message}`),
+      complete: () => observerEvents.push('complete')
+    });
+    observerSubject.next(1);
+    observerSubject.next(2);
+    observerSubject.complete();
+    await delay();
+    expect(observerEvents).toEqual(['next:0', 'next:1', 'next:2', 'complete']);
+
+    const callbackSubject = createBehaviorSubject<number>(0);
+    const callbackValues: number[] = [];
+    callbackSubject.subscribe(v => callbackValues.push(v));
+    callbackSubject.next(1);
+    callbackSubject.complete();
+    await delay();
+    expect(callbackValues).toEqual([0, 1]);
+
+    const partialSubject = createBehaviorSubject<number>(0);
+    const partialValues: number[] = [];
+    partialSubject.subscribe({
+      next: v => partialValues.push(v),
+      complete: () => partialValues.push(-1)
+    });
+    partialSubject.next(1);
+    partialSubject.complete();
+    await delay();
+    expect(partialValues).toEqual([0, 1, -1]);
+
+    const iteratorSubject = createBehaviorSubject<number>(0);
+    const iterValues: number[] = [];
+    const iteratorRunner = (async () => {
+      for await (const value of iteratorSubject) {
+        iterValues.push(value);
+        if (iterValues.length === 3) break;
+      }
+    })();
+    iteratorSubject.next(1);
+    iteratorSubject.next(2);
+    await iteratorRunner;
+    expect(iterValues).toEqual([0, 1, 2]);
+
+    const iteratorCompleteSubject = createBehaviorSubject<number>(0);
+    const iterValues2: number[] = [];
+    const iteratorRunner2 = (async () => {
+      for await (const value of iteratorCompleteSubject) {
+        iterValues2.push(value);
+      }
+    })();
+    iteratorCompleteSubject.next(1);
+    iteratorCompleteSubject.complete();
+    await iteratorRunner2;
+    expect(iterValues2).toEqual([0, 1]);
+
+    const iteratorBreakSubject = createBehaviorSubject<number>(0);
+    const iterValues3: number[] = [];
+    const iteratorRunner3 = (async () => {
+      for await (const value of iteratorBreakSubject) {
+        iterValues3.push(value);
+        if (value === 1) break;
+      }
+    })();
+    iteratorBreakSubject.next(1);
+    iteratorBreakSubject.next(2);
+    await iteratorRunner3;
+    expect(iterValues3).toEqual([0, 1]);
   });
 
-  it('late subscribers should complete immediately after completion without emitting', async () => {
-    const subject = createBehaviorSubject<number>(10);
-    subject.next(20);
-    subject.complete();
+  it('accepts diverse value shapes and complex type usages', async () => {
+    const scenarios = [
+      {
+        label: 'undefined',
+        initial: undefined as number | undefined,
+        next: [42, undefined],
+        expected: [undefined, 42, undefined],
+        final: undefined
+      },
+      {
+        label: 'null',
+        initial: null as string | null,
+        next: ['value', null],
+        expected: [null, 'value', null],
+        final: null
+      },
+      {
+        label: 'object',
+        initial: { id: 1 },
+        next: [{ id: 2 }, { id: 3 }],
+        expected: [{ id: 1 }, { id: 2 }, { id: 3 }],
+        final: { id: 3 }
+      },
+      {
+        label: 'array',
+        initial: [1, 2] as number[],
+        next: [[3, 4], []],
+        expected: [[1, 2], [3, 4], []],
+        final: []
+      },
+      {
+        label: 'boolean',
+        initial: false,
+        next: [true, false, true],
+        expected: [false, true, false, true],
+        final: true
+      },
+      {
+        label: 'zero',
+        initial: 0,
+        next: [1, 0, -1],
+        expected: [0, 1, 0, -1],
+        final: -1
+      },
+      {
+        label: 'empty-string',
+        initial: '',
+        next: ['text', ''],
+        expected: ['', 'text', ''],
+        final: ''
+      }
+    ];
 
-    await new Promise(resolve => setTimeout(resolve, 0));
+    for (const scenario of scenarios) {
+      const subject = createBehaviorSubject<typeof scenario.initial>(scenario.initial);
+      const values: typeof scenario.initial[] = [];
+      subject.subscribe(v => values.push(v));
+      for (const next of scenario.next) {
+        subject.next(next as typeof scenario.initial);
+      }
+      await delay();
+      expect(values).toEqual(scenario.expected);
+      expect(subject.value).toEqual(scenario.final);
+    }
 
-    const values: number[] = [];
-    let completed = false;
+    interface User {
+      id: number;
+      name: string;
+    }
 
-    subject.subscribe({
-      next: v => values.push(v),
-      complete: () => {
-        completed = true;
+    const complexSubject = createBehaviorSubject<User>({ id: 1, name: 'Alice' });
+    const complexValues: User[] = [];
+    complexSubject.subscribe(v => complexValues.push(v));
+    complexSubject.next({ id: 2, name: 'Bob' });
+    complexSubject.next({ id: 3, name: 'Charlie' });
+    await delay();
+    expect(complexValues).toEqual([
+      { id: 1, name: 'Alice' },
+      { id: 2, name: 'Bob' },
+      { id: 3, name: 'Charlie' }
+    ]);
+
+    const unionSubject = createBehaviorSubject<string | number>('start');
+    const unionValues: (string | number)[] = [];
+    unionSubject.subscribe(v => unionValues.push(v));
+    unionSubject.next(99);
+    unionSubject.next('end');
+    await delay();
+    expect(unionValues).toEqual(['start', 99, 'end']);
+
+    type Maybe<T> = T | null | undefined;
+    const optionalSubject = createBehaviorSubject<Maybe<string>>(null);
+    expect(optionalSubject.value).toBeNull();
+    optionalSubject.next(undefined);
+    expect(optionalSubject.value).toBeUndefined();
+    optionalSubject.next('final');
+    expect(optionalSubject.value).toBe('final');
+  });
+
+  it('survives subscription churn and high-volume emissions', async () => {
+    const churnSubject = createBehaviorSubject<number>(0);
+    for (let i = 0; i < 10; i++) {
+      const sub = churnSubject.subscribe(() => {});
+      churnSubject.next(i + 1);
+      sub.unsubscribe();
+    }
+    await delay();
+    expect(churnSubject.value).toBe(10);
+
+    const onceSubject = createBehaviorSubject<number>(0);
+    const onceValues: number[] = [];
+    let onceSubscription: any = null;
+    onceSubscription = onceSubject.subscribe(v => {
+      onceValues.push(v);
+      if (v === 1) {
+        onceSubscription.unsubscribe();
       }
     });
+    await delay();
+    onceSubject.next(1);
+    await delay();
+    onceSubject.next(2);
+    await delay();
+    expect(onceValues).toEqual([0, 1]);
 
-    await new Promise(resolve => setTimeout(resolve, 10));
+    const idleSubject = createBehaviorSubject<number>(0);
+    const idleSubs = Array.from({ length: 3 }, () => idleSubject.subscribe(() => {}));
+    idleSubs.forEach(sub => sub.unsubscribe());
+    idleSubject.next(1);
+    await delay();
+    const idleValues: number[] = [];
+    idleSubject.subscribe(v => idleValues.push(v));
+    await delay();
+    expect(idleValues).toEqual([1]);
 
-    expect(values).toEqual([]);
-    expect(completed).toBeTrue();
-  });
-
-  it('should support unsubscribe and stop receiving further values', async () => {
-    const subject = createBehaviorSubject<number>(0);
-
-    const values: number[] = [];
-    const sub = subject.subscribe(v => values.push(v));
-
-    subject.next(1);
-
-    // Wait for value to be processed
-    await new Promise(resolve => setTimeout(resolve, 10));
-
-    sub.unsubscribe();
-    subject.next(2); // should not be received
-
-    // Wait a bit more to ensure no further values
-    await new Promise(resolve => setTimeout(resolve, 10));
-
-    expect(values).toEqual([0, 1]);
-  });
-
-  it('should emit error and stop further emissions when errored', async () => {
-    const subject = createBehaviorSubject<number>(0);
-
-    const values: number[] = [];
-    let caughtError: any = null;
-
-    subject.subscribe({
-      next: v => values.push(v),
-      error: e => caughtError = e
-    });
-
-    subject.next(1);
-    subject.error(new Error('boom!'));
-    subject.next(2); // ignored
-
-    // Wait for async operations to complete
-    await new Promise(resolve => setTimeout(resolve, 10));
-
-    expect(values).toEqual([0, 1]);
-    expect(caughtError).toEqual(jasmine.any(Error));
-    expect((caughtError as Error).message).toBe('boom!');
-  });
-
-  it('should support query() to get the latest value without subscribing', async () => {
-    const subject = createBehaviorSubject<number>(10);
-    expect(await subject.query()).toBe(10);
-
-    subject.next(20);
-    expect(await subject.query()).toBe(20);
-
-    subject.next(30);
-    expect(await subject.query()).toBe(30);
-    subject.complete();
+    const heavySubject = createBehaviorSubject<number>(0);
+    const heavyValues: number[] = [];
+    heavySubject.subscribe(v => heavyValues.push(v));
+    const emissionCount = 500;
+    for (let i = 1; i <= emissionCount; i++) {
+      heavySubject.next(i);
+    }
+    await delay(50);
+    expect(heavyValues.length).toBe(emissionCount + 1);
+    expect(heavyValues[0]).toBe(0);
+    expect(heavyValues[heavyValues.length - 1]).toBe(emissionCount);
   });
 });
-
-describe('createBehaviorSubjectBuffer', () => {
-  it('should deliver the initial value immediately on first read after attachReader', async () => {
-    const buffer = createBehaviorSubjectBuffer<number>(123);
-
-    const readerId = await buffer.attachReader();
-    const result = await buffer.read(readerId);
-
-    expect(result).toEqual({ value: 123, done: false });
-  });
-
-  it('should deliver subsequent values in order to readers', async () => {
-    const buffer = createBehaviorSubjectBuffer<string>('first');
-    const r = await buffer.attachReader();
-
-    // Initial
-    let res = await buffer.read(r);
-    expect(res.value).toBe('first');
-
-    // Write new values
-    await buffer.write('second');
-    res = await buffer.read(r);
-    expect(res.value).toBe('second');
-
-    await buffer.write('third');
-    res = await buffer.read(r);
-    expect(res.value).toBe('third');
-  });
-
-  it('should let late subscribers see the latest value immediately', async () => {
-    const buffer = createBehaviorSubjectBuffer<string>('init');
-    const r1 = await buffer.attachReader();
-    await buffer.read(r1); // consume "init"
-
-    await buffer.write('latest');
-
-    // Attach new reader after new value
-    const r2 = await buffer.attachReader();
-    const res2 = await buffer.read(r2);
-    expect(res2.value).toBe('latest');
-  });
-
-  it('should support peek without consuming the value', async () => {
-    const buffer = createBehaviorSubjectBuffer<number>(10);
-    const r = await buffer.attachReader();
-
-    const peek1 = await buffer.peek(r);
-    expect(peek1.value).toBe(10);
-
-    // After peek, read should still return the same
-    const res = await buffer.read(r);
-    expect(res.value).toBe(10);
-  });
-
-  it('should mark reader as completed after complete()', async () => {
-    const buffer = createBehaviorSubjectBuffer<number>(1);
-    const r = await buffer.attachReader();
-
-    await buffer.read(r); // consume initial
-    await buffer.complete();
-
-    const doneRes = await buffer.read(r);
-    expect(doneRes.done).toBe(true);
-    expect(buffer.completed(r)).toBe(true);
-  });
-
-  it('should propagate errors to readers', async () => {
-    const buffer = createBehaviorSubjectBuffer<number>(0);
-    const r = await buffer.attachReader();
-
-    await buffer.read(r); // consume initial
-
-    const err = new Error('fail');
-    await buffer.error(err);
-
-    await expectAsync(buffer.read(r)).toBeRejectedWith(err);
-  });
-
-  it('should allow multiple readers independently', async () => {
-    const buffer = createBehaviorSubjectBuffer<string>('init');
-
-    const r1 = await buffer.attachReader();
-    const r2 = await buffer.attachReader();
-
-    const v1 = await buffer.read(r1);
-    const v2 = await buffer.read(r2);
-
-    expect(v1.value).toBe('init');
-    expect(v2.value).toBe('init');
-
-    await buffer.write('next');
-
-    const n1 = await buffer.read(r1);
-    const n2 = await buffer.read(r2);
-
-    expect(n1.value).toBe('next');
-    expect(n2.value).toBe('next');
-  });
-
-  it('should keep latest value for new readers even after many writes', async () => {
-    const buffer = createBehaviorSubjectBuffer<number>(0);
-
-    await buffer.write(1);
-    await buffer.write(2);
-    await buffer.write(3);
-
-    const r = await buffer.attachReader();
-    const res = await buffer.read(r);
-
-    expect(res.value).toBe(3); // only latest survives
-  });
-
-  it('should allow peek multiple times without consuming', async () => {
-    const buffer = createBehaviorSubjectBuffer<number>(5);
-    const r = await buffer.attachReader();
-
-    const peek1 = await buffer.peek(r);
-    const peek2 = await buffer.peek(r);
-
-    expect(peek1.value).toBe(5);
-    expect(peek2.value).toBe(5);
-
-    // Still consumable
-    const res = await buffer.read(r);
-    expect(res.value).toBe(5);
-  });
-
-  it('should complete new readers immediately if buffer is already completed', async () => {
-    const buffer = createBehaviorSubjectBuffer<string>('init');
-    await buffer.complete();
-
-    const r = await buffer.attachReader();
-    const res = await buffer.read(r);
-
-    expect(res.done).toBeTrue();
-  });
-
-  it('should reject new readers immediately if buffer is already errored', async () => {
-    const buffer = createBehaviorSubjectBuffer<string>('init');
-    const err = new Error('already failed');
-    await buffer.error(err);
-    
-    // attachReader should succeed
-    const readerId = await buffer.attachReader();
-    
-    // But reading should throw the error
-    await expectAsync(buffer.read(readerId)).toBeRejectedWith(err);
-  });
-
-  it('should isolate completion per reader', async () => {
-    const buffer = createBehaviorSubjectBuffer<number>(10);
-
-    const r1 = await buffer.attachReader();
-    const r2 = await buffer.attachReader();
-
-    await buffer.read(r1); // consume init
-    await buffer.read(r2); // consume init
-    await buffer.complete();
-
-    const done1 = await buffer.read(r1);
-    const done2 = await buffer.read(r2);
-
-    expect(done1.done).toBeTrue();
-    expect(done2.done).toBeTrue();
-  });
-
-  it('should isolate error per reader', async () => {
-    const buffer = createBehaviorSubjectBuffer<number>(99);
-    const r1 = await buffer.attachReader();
-    const r2 = await buffer.attachReader();
-
-    await buffer.read(r1);
-    await buffer.read(r2);
-
-    const err = new Error('boom');
-    await buffer.error(err);
-
-    await expectAsync(buffer.read(r1)).toBeRejectedWith(err);
-    await expectAsync(buffer.read(r2)).toBeRejectedWith(err);
-  });
-
-  it('should handle rapid writes before a read', async () => {
-    const buffer = createBehaviorSubjectBuffer<number>(1);
-    const r = await buffer.attachReader();
-
-    await buffer.write(2);
-    await buffer.write(3);
-    await buffer.write(4);
-
-    const res = await buffer.read(r);
-    expect(res.value).toBe(4); // only the latest survives
-  });
-
-  it('peek should throw if current value is error', async () => {
-    const buffer = createBehaviorSubjectBuffer<number>(42);
-    const r = await buffer.attachReader();
-
-    await buffer.read(r); // consume initial
-    const err = new Error('peek-fail');
-    await buffer.error(err);
-
-    await expectAsync(buffer.peek(r)).toBeRejectedWith(err);
-  });
-
-  it('value should return undefined if last value is error', async () => {
-    const buffer = createBehaviorSubjectBuffer<number>(5);
-    const err = new Error('bad');
-    await buffer.error(err);
-
-    expect(buffer.value).toBeUndefined();
-  });
-});
-
-

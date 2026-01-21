@@ -40,20 +40,20 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
 
   const start = () => {
     if (!stopped) return;
-    stopped = false;
+      stopped = false;
+      
+      if (
+        typeof window === "undefined" ||
+        !window.screen ||
+        !window.screen.orientation
+      ) {
+        return;
+      }
 
-    // SSR / unsupported guard
-    if (
-      typeof window === "undefined" ||
-      !window.screen ||
-      !window.screen.orientation
-    ) {
-      return;
-    }
-
-    window.screen.orientation.addEventListener("change", emit);
-    emit(); // initial value
-  };
+      window.screen.orientation.addEventListener("change", emit);
+      
+      emit();
+    };
 
   const stop = () => {
     if (stopped) return;
@@ -75,14 +75,19 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
    * ---------------------------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: "portrait" | "landscape") => void) | Receiver<"portrait" | "landscape">
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      start();
-    }
+    scheduleStart();
 
     const o = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

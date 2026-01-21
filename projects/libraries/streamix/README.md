@@ -25,17 +25,15 @@ Small bundle, pull-based execution, and a familiar operator API.
   </a>
 </p>
 
----
 
 ## Give a Star on GitHub
 
 If streamix helps you, please give it a star: https://github.com/epikodelabs/streamix
 
----
 
-## Why Streamix
+## ✨ Why Streamix
 
-streamix is a reactive streams library built on async generators. It focuses on a small bundle size and pull-based execution while keeping an API that feels familiar to RxJS users.
+**streamix** is a reactive streams library built on async generators. It focuses on a small bundle size and pull-based execution while keeping an API that feels familiar to RxJS users, and normalizing async operations toward an iterator-first workflow keeps each stream predictable, which makes debugging and testing easier whether you are building a dashboard, a CLI, or a background job processor.
 
 ### Highlights
 
@@ -47,9 +45,8 @@ streamix is a reactive streams library built on async generators. It focuses on 
 - Subjects for manual emission and multicasting
 - Optional HTTP client and DOM observation utilities
 
----
 
-## Installation
+## 📦 Installation
 
 ```bash
 # npm
@@ -62,9 +59,10 @@ yarn add @epikodelabs/streamix
 pnpm add @epikodelabs/streamix
 ```
 
----
 
-## Quick start
+## ⚡️ Quick start
+
+The quick start below shows how to lift generators or ranged sequences into operator pipelines; you can iterate them directly or fall back to `subscribe` when you need push-style delivery.
 
 ### Basic stream operations
 
@@ -101,51 +99,7 @@ for await (const searchTerm of searchStream) {
 }
 ```
 
-### Subscribe with async callbacks
-
-```typescript
-import { interval } from '@epikodelabs/streamix';
-
-const sub = interval(1000).subscribe(async value => {
-  await fetch('/metrics', { method: 'POST', body: JSON.stringify({ value }) });
-});
-
-// Later:
-sub.unsubscribe();
-```
-
-### Subscribe with a receiver
-
-```typescript
-import { interval, take } from '@epikodelabs/streamix';
-
-const sub = interval(500)
-  .pipe(take(3))
-  .subscribe({
-    next: value => console.log('tick:', value),
-    error: err => console.error('error:', err),
-    complete: () => console.log('complete'),
-  });
-
-sub.unsubscribe();
-```
-
-### Subscribe and cancel on a condition
-
-```typescript
-import { interval } from '@epikodelabs/streamix';
-
-const sub = interval(1000).subscribe(value => {
-  console.log('value:', value);
-  if (value >= 5) {
-    sub.unsubscribe();
-  }
-});
-```
-
----
-
-## Core concepts
+## 🧠 Core concepts
 
 ### Streams
 
@@ -164,20 +118,90 @@ async function* numberStream() {
 const stream = createStream('numbers', numberStream);
 ```
 
-### Operators
+### 🏭 Available factories
 
-Transform, filter, and combine streams with familiar operators:
+The library ships a range of helper factories so you can stand up common sources without calling `createStream` directly:
+
+- `combineLatest(...sources)` - join the latest values from multiple streams.
+- `concat(...sources)` - run sources sequentially, one after another.
+- `defer(factory)` - build a fresh stream by invoking the factory per subscription.
+- `EMPTY()` - a stream that immediately completes without emitting anything.
+- `forkJoin(...sources)` - emit once with the final values after all sources complete.
+- `from(source)` - lift arrays, iterables, async generators, or promises into a stream.
+- `fromEvent(target, event)` - convert DOM/Node-style events into a stream.
+- `fromPromise(promise)` - wrap a promise-producing operation so it emits once and completes.
+- `iif(condition, trueSource, falseSource)` - branch between two creator callbacks.
+- `interval(ms)` - emit an increasing counter every `ms` milliseconds.
+- `loop(factory)` - repeat a factory-based generator while it keeps yielding.
+- `merge(...sources)` - interleave concurrent emissions from multiple sources.
+- `of(...values)` - emit the provided values in order and then complete.
+- `race(...sources)` - mirror the first source to emit and cancel the rest.
+- `range(start, count)` - emit a fixed range of sequential numbers.
+- `retry(source, attempts)` - repeat a source when it errors, up to `attempts` times.
+- `timer(delay, period?)` - emit after an initial delay and optionally repeat.
+ - `zip(...sources)` - pair emissions from sources by matching indexes.
+
+## 🛠️ Available operators
+
+Operators compose async generators with familiar transformations so you can restructure logic without nested blocks.
 
 ```typescript
-import { map, filter, mergeMap, combineLatest } from '@epikodelabs/streamix';
+stream.pipe(
+  map(x => x * 2),
+  filter(x => x > 10),
+  take(5),
+  debounce(100)
+)
+```
 
-const processedStream = sourceStream
+Operators handle sync and async callbacks transparently:
+
+```typescript
+const magicShow = from(storyBook)
   .pipe(
-    map(x => x * 2),
-    filter(x => x > 10),
-    mergeMap(x => fetchDataFor(x))
+    map(page => page.length),
+    map(async length => {
+      await thinkAboutIt(1000);
+      return length * 2;
+    }),
+    filter(num => num > 10)
   );
 ```
+
+**Full operator catalog:** audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, concatMap, debounce, defaultIfEmpty, delay, delayUntil, distinctUntilChanged, distinctUntilKeyChanged, endWith, expand, exhaustMap, filter, finalize, first, fork, groupBy, ignoreElements, last, map, mergeMap, observeOn, partition, reduce, sample, scan, select, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, switchMap, take, takeUntil, takeWhile, tap, throttle, throwError, toArray, withLatestFrom.
+
+### Build custom operators
+
+Every built-in operator you already know is just a wrapper around `createOperator`. It lets you capture the underlying iterator and return a new async iterator that applies whatever scheduling, buffering, or branching logic you need before handing values to the downstream consumer.
+
+```typescript
+import { createOperator, DONE, NEXT } from '@epikodelabs/streamix';
+
+const evenOnly = () =>
+  createOperator<number, number>('evenOnly', function (source) {
+    return {
+      async next() {
+        while (true) {
+          const result = await source.next();
+          if (result.done) return DONE;
+          if (result.value % 2 === 0) return NEXT(result.value);
+        }
+      },
+      return: source.return?.bind(source),
+      throw: source.throw?.bind(source),
+    };
+  });
+```
+
+Now you can mix `evenOnly()` into any pipeline just like the built-ins:
+
+```typescript
+const stream = from([1, 2, 3, 4]).pipe(evenOnly(), map(n => n * 10));
+```
+
+Because `createOperator` works directly with async iterators, you get the same pull-based backpressure behavior that powers the rest of the library and can freely interleave async callbacks, metadata, and cancellation hooks.
+
+---
 
 ### Subjects
 
@@ -216,9 +240,8 @@ const result = await transformed.query();
 console.log('result:', result);
 ```
 
----
 
-## HTTP client
+## 🌐 HTTP client
 
 streamix includes an HTTP client that composes well with streams:
 
@@ -230,7 +253,7 @@ import {
   useBase,
   useLogger,
   useTimeout
-} from '@epikodelabs/streamix/http';
+} from '@epikodelabs/streamix/networking';
 
 const client = createHttpClient().withDefaults(
   useBase("https://api.example.com"),
@@ -248,9 +271,7 @@ for await (const activeUsers of dataStream) {
 }
 ```
 
----
-
-## Real-world example
+## 🧪 Real-world example
 
 Live search with API calls and basic error handling:
 
@@ -292,46 +313,14 @@ for await (const result of searchResults) {
 }
 ```
 
----
-
-## Available operators
-
-### Transformation
-- `map` - Transform each value
-- `scan` - Accumulate values over time
-- `buffer` - Collect values into arrays
-
-### Filtering
-- `filter` - Keep values that match criteria
-- `take` - Take first N values
-- `takeWhile` - Take while condition is true
-- `skip` - Skip first N values
-- `distinct` - Remove duplicates
-
-### Combination
-- `mergeMap` - Merge multiple streams
-- `switchMap` - Switch to latest stream
-- `combineLatest` - Combine latest values
-- `concat` - Connect streams sequentially
-
-### Utility
-- `tap` - Side effects without changing stream
-- `delay` - Add delays between emissions
-- `retry` - Retry failed operations
-- `finalize` - Cleanup when stream completes
-- `debounce` - Limit emission rate
-
----
-
-## Live demos
+## 🎬 Live demos
 
 - [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
 - [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
 - [Travel Blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w)
 
----
 
-## Generator-based architecture
+## 🧬 Generator-based architecture
 
 Unlike push-based streams, streamix uses pull-based async generators:
 
@@ -353,9 +342,8 @@ This enables:
 - Lower memory usage per stream
 - Natural backpressure from the consumer
 
----
 
-## Streamix vs RxJS
+## ⚖️ Streamix vs RxJS
 
 | Feature | Streamix | RxJS |
 | --- | --- | --- |
@@ -365,18 +353,16 @@ This enables:
 | Async/await | Native | Limited |
 | Backpressure | Consumer-driven | Requires patterns |
 
----
 
-## Documentation and resources
+## 📚 Documentation and resources
 
 - [API Documentation](https://epikodelabs.github.io/streamix)
 - [Blog: Exploring streamix](https://medium.com/p/00d5467f0c01)
 - [streamix 2.0 Updates](https://medium.com/p/a1eb9e7ce1d7)
 - [Reactive Programming Guide](https://medium.com/p/0bfc206ad41c)
 
----
 
-## Contributing
+## 🤝 Contributing
 
 We welcome issues and pull requests. If you are new to the codebase:
 
@@ -386,13 +372,11 @@ We welcome issues and pull requests. If you are new to the codebase:
 
 [Share your feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
 
----
 
-## License
+## 📜 License
 
 MIT License
 
----
 
 <p align="center">
   <strong>Get started</strong><br>
@@ -400,6 +384,3 @@ MIT License
   <a href="https://github.com/epikodelabs/streamix">View on GitHub</a> -
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
-
-
-

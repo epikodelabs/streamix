@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
@@ -28,8 +28,9 @@ export const concatMap = <T = any, R = T>(
     let outerIndex = 0;
     let innerIterator: AsyncIterator<R> | null = null;
     let result: IteratorResult<T> | null = null;
+    let currentMeta: { valueId: string; operatorIndex: number; operatorName: string } | undefined;
 
-    return {
+    const iterator: AsyncIterator<R> = {
       next: async () => {
         while (true) {
           // If no active inner iterator, pull the next outer value
@@ -38,6 +39,7 @@ export const concatMap = <T = any, R = T>(
 
             if (result.done) return DONE;
 
+            currentMeta = getIteratorMeta(source);
             const projected = project(result.value, outerIndex++);
             const normalized = isPromiseLike(projected) ? await projected : projected;
             innerIterator = eachValueFrom(fromAny<R>(normalized));
@@ -53,9 +55,28 @@ export const concatMap = <T = any, R = T>(
             continue;
           }
 
+          let value = innerResult.value;
+          if (currentMeta) {
+            // Attach per-value metadata so tracers can attribute outputs even when emitted asynchronously.
+            value = setValueMeta(
+              value,
+              { valueId: currentMeta.valueId, kind: "expand" },
+              currentMeta.operatorIndex,
+              currentMeta.operatorName
+            );
+            setIteratorMeta(
+              iterator,
+              { valueId: currentMeta.valueId, kind: "expand" },
+              currentMeta.operatorIndex,
+              currentMeta.operatorName
+            );
+          }
+
           // Mark that inner stream produced a value
-          return NEXT(innerResult.value);
+          return NEXT(value);
         }
       },
     };
+
+    return iterator;
   });

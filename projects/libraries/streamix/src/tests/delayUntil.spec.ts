@@ -154,6 +154,63 @@ describe("delayUntil", () => {
     })).toBeResolved(); // Expect the promise to resolve (because we resolved it on successful error handling)
   });
 
+  it("should propagate notifier errors", async () => {
+    const sourceStream = createSubject<number>();
+    const conditionStream = createSubject<any>();
+
+    await expectAsync(
+      new Promise<void>((resolve, reject) => {
+        const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
+
+        delayedStream.subscribe({
+          next: () => reject(new Error("Should not emit")),
+          complete: () => reject(new Error("Should not complete")),
+          error: (err) => {
+            try {
+              expect(err.message).toBe("Notifier failed");
+              resolve();
+            } catch (e) {
+              reject(e);
+            }
+          },
+        });
+
+        sourceStream.next(7);
+        conditionStream.error(new Error("Notifier failed"));
+      })
+    ).toBeResolved();
+  });
+
+  it("should flush buffer when notifier promise resolves", async () => {
+    const sourceStream = createSubject<number>();
+    const notifierPromise = new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    const emittedValues: number[] = [];
+    const delayedStream = sourceStream.pipe(delayUntil(notifierPromise));
+
+    await new Promise<void>((resolve, reject) => {
+      delayedStream.subscribe({
+        next: (value) => emittedValues.push(value),
+        complete: () => {
+          try {
+            expect(emittedValues).toEqual([8, 9]);
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        },
+        error: (err) => reject(new Error(`Stream failed: ${err}`)),
+      });
+
+      sourceStream.next(8);
+      sourceStream.next(9);
+
+      setTimeout(() => {
+        sourceStream.complete();
+      }, 40);
+    });
+  });
+
   it("should complete the stream after both source and condition streams complete", async () => {
     const sourceStream = createSubject<number>();
     const conditionStream = createSubject<any>();

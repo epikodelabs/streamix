@@ -1,4 +1,4 @@
-import { DONE, type MaybePromise, NEXT, type Operator, createOperator, isPromiseLike } from "../abstractions";
+import { DONE, type MaybePromise, NEXT, type Operator, createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta } from "../abstractions";
 
 /**
  * Buffers a fixed number of values from the source stream and emits them as arrays,
@@ -11,29 +11,15 @@ import { DONE, type MaybePromise, NEXT, type Operator, createOperator, isPromise
 export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity) =>
   createOperator<T, T[]>("bufferCount", function (this: Operator, source) {
     let completed = false;
-    let resolvedBufferSize: number | undefined;
-    const resolveBufferSize = (): MaybePromise<number> => {
-      if (resolvedBufferSize !== undefined) {
-        return resolvedBufferSize;
-      }
-      if (isPromiseLike(bufferSize)) {
-        return bufferSize.then((val) => {
-          resolvedBufferSize = val;
-          return val;
-        });
-      }
-      resolvedBufferSize = bufferSize;
-      return resolvedBufferSize;
-    };
 
-    return {
+    const iterator: AsyncIterator<any> = {
       next: async () => {
         if (completed) return DONE;
 
         const buffer: IteratorResult<T>[] = [];
-
-        const sizeOrPromise = resolveBufferSize();
-        const size = isPromiseLike(sizeOrPromise) ? await sizeOrPromise : sizeOrPromise;
+        const metaByIndex: ({ valueId: string; operatorIndex: number; operatorName: string } | undefined)[] = [];
+        
+        const size = isPromiseLike(bufferSize) ? await bufferSize : bufferSize;
         while (buffer.length < size) {
           const result = await source.next();
 
@@ -42,16 +28,61 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
 
             // Flush any remaining buffered values
             if (buffer.length > 0) {
-              return NEXT(buffer.map((r) => r.value!));
+              const metas = metaByIndex.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
+              const lastMeta = metas[metas.length - 1];
+              let values = buffer.map((r) => r.value!);
+              if (lastMeta) {
+                setIteratorMeta(
+                  iterator as any,
+                  {
+                    valueId: lastMeta.valueId,
+                    kind: "collapse",
+                    inputValueIds: metas.map((m) => m.valueId),
+                  },
+                  lastMeta.operatorIndex,
+                  lastMeta.operatorName
+                );
+                values = setValueMeta(
+                  values,
+                  { valueId: lastMeta.valueId, kind: "collapse", inputValueIds: metas.map((m) => m.valueId) },
+                  lastMeta.operatorIndex,
+                  lastMeta.operatorName
+                );
+              }
+              return NEXT(values);
             }
 
             return DONE;
           }
 
           buffer.push(result);
+          metaByIndex.push(getIteratorMeta(source));
         }
 
-        return NEXT(buffer.map((r) => r.value!));
+        const metas = metaByIndex.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
+        const lastMeta = metas[metas.length - 1];
+        let values = buffer.map((r) => r.value!);
+        if (lastMeta) {
+          setIteratorMeta(
+            iterator as any,
+            {
+              valueId: lastMeta.valueId,
+              kind: "collapse",
+              inputValueIds: metas.map((m) => m.valueId),
+            },
+            lastMeta.operatorIndex,
+            lastMeta.operatorName
+          );
+          values = setValueMeta(
+            values,
+            { valueId: lastMeta.valueId, kind: "collapse", inputValueIds: metas.map((m) => m.valueId) },
+            lastMeta.operatorIndex,
+            lastMeta.operatorName
+          );
+        }
+        return NEXT(values);
       },
     };
+
+    return iterator;
   });

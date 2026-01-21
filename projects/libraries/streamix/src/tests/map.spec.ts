@@ -39,6 +39,24 @@ describe('map', () => {
       }
     });
   });
+
+  it('should handle promise-based transformations', (done) => {
+    const testStream = from([1, 2, 3]);
+    const transform = (value: number, index: number) =>
+      Promise.resolve(value + index);
+
+    const mappedStream = testStream.pipe(map(transform));
+
+    const results: number[] = [];
+    mappedStream.subscribe({
+      next: (value) => results.push(value),
+      complete: () => {
+        expect(results).toEqual([1, 3, 5]);
+        done();
+      },
+      error: done.fail,
+    });
+  });
 });
 
 

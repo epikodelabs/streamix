@@ -22,37 +22,80 @@ export function retry<T = any>(
   maxRetries: MaybePromise<number> = 3,
   delay: MaybePromise<number> = 1000
 ): Stream<T> {
-  return createStream<T>("retry", async function* () {
+  return createStream<T>("retry", async function* (signal) {
     const resolvedMaxRetries = isPromiseLike(maxRetries) ? await maxRetries : maxRetries;
-    const resolvedDelay = isPromiseLike(delay) ? await delay : delay;
+    let resolvedDelayValue: number | undefined;
+    const resolveDelayValue = async () => {
+      if (resolvedDelayValue !== undefined) {
+        return resolvedDelayValue;
+      }
+      if (delay === undefined) {
+        return undefined;
+      }
+      resolvedDelayValue = isPromiseLike(delay) ? await delay : delay;
+      return resolvedDelayValue;
+    };
 
     let retryCount = 0;
+    let lastError: Error | null = null;
 
     while (retryCount <= resolvedMaxRetries) {
       let iterator: AsyncGenerator<T> | null = null;
       let buffered: T[] = [];
 
       try {
-        const produced = factory();
+        // Check abort signal at loop start
+        if (signal?.aborted) {
+          throw new Error("Stream aborted");
+        }
+
+        // Wrap factory call in try-catch to handle factory errors
+        let produced: Stream<T> | MaybePromise<T>;
+        try {
+          produced = factory();
+        } catch (factoryError) {
+          throw factoryError instanceof Error ? factoryError : new Error(String(factoryError));
+        }
+
         const source = isPromiseLike(produced) ? await produced : produced;
         iterator = eachValueFrom(fromAny(source));
 
         for await (const value of iterator) {
+          // Check abort signal during iteration
+          if (signal?.aborted) {
+            throw new Error("Stream aborted");
+          }
           buffered.push(value);
         }
 
         for (const value of buffered) {
           yield value;
         }
+        lastError = null;
         break;
       } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
         retryCount++;
-        if (retryCount > resolvedMaxRetries) {
-          throw error;
-        }
 
-        if (resolvedDelay !== undefined) {
-          await new Promise<void>((resolve) => setTimeout(resolve, resolvedDelay));
+        // Only delay if we're going to retry (check BEFORE sleeping)
+        const resolvedDelay = await resolveDelayValue();
+        if (retryCount <= resolvedMaxRetries && resolvedDelay !== undefined && resolvedDelay > 0) {
+          // Allow abortion during delay
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const timeoutId = setTimeout(resolve, resolvedDelay);
+
+              if (signal) {
+                const abortHandler = () => {
+                  clearTimeout(timeoutId);
+                  reject(new Error("Stream aborted"));
+                };
+                signal.addEventListener("abort", abortHandler, { once: true });
+              }
+            });
+          } catch (delayError) {
+            throw delayError;
+          }
         }
       } finally {
         if (iterator?.return) {
@@ -63,6 +106,11 @@ export function retry<T = any>(
           }
         }
       }
+    }
+
+    // If we exhausted retries and had errors, throw the last error
+    if (lastError) {
+      throw lastError;
     }
   });
 }

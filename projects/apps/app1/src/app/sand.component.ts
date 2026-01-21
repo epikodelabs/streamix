@@ -1,11 +1,9 @@
-import { fromEvent, merge, Stream, Subscription, tap } from '@epikodelabs/streamix';
 import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { fromEvent, merge, Stream, Subscription, tap } from '@epikodelabs/streamix';
 
 @Component({
   selector: 'app-sand',
   standalone: true,
-  imports: [RouterOutlet],
   template: '<canvas #canvas></canvas>',
   styles: ['canvas { display: block; }']
 })

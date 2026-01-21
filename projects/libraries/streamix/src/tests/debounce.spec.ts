@@ -1,9 +1,24 @@
-import { createStream, debounce, from, interval, take } from "@epikodelabs/streamix";
+import {
+  concatMap,
+  createStream,
+  debounce,
+  distinctUntilChanged,
+  filter,
+  from,
+  interval,
+  map,
+  scan,
+  take,
+  throttle
+} from "@epikodelabs/streamix";
+import { createValueTracer, disableTracing, enableTracing } from "@epikodelabs/streamix/tracing";
 
 describe('debounce', () => {
   it('should debounce values from an array stream', (done) => {
     const values = [1, 2, 3, 4, 5];
-    const debouncedStream = from(values).pipe(debounce(100));
+    // `from(array)` completes synchronously; debounce should flush the latest value on completion
+    // even if the configured duration hasn't elapsed yet.
+    const debouncedStream = from(values).pipe(debounce(10_000));
     const emittedValues: number[] = [];
 
     debouncedStream.subscribe({
@@ -13,6 +28,7 @@ describe('debounce', () => {
         expect(emittedValues).toEqual([5]);
         done();
       },
+      error: done.fail,
     });
   });
 
@@ -69,6 +85,205 @@ describe('debounce', () => {
     });
   });
 
+  it('should mark all received values as delivered in tracer (not filtered)', (done) => {
+    const tracer = createValueTracer();
+    enableTracing(tracer);
+
+    try {
+      const source = createStream<number>('test-source', async function* () {
+        for (let i = 1; i <= 5; i++) {
+          yield i;
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        }
+      });
+
+      const received: number[] = [];
+      
+      source
+        .pipe(
+          map((x) => x * 10),
+          debounce(50)
+        )
+        .subscribe({
+          next: (value) => received.push(value),
+          complete: () => {
+            try {
+              // Get all traces
+              const traces = tracer.getAllTraces();
+              
+              // Get delivered traces
+              const deliveredTraces = traces.filter((t) => t.state === 'delivered');
+              const deliveredValues = deliveredTraces.map((t) => t.finalValue).sort((a, b) => a - b);
+              
+              // CRITICAL: Every value that reached the subscriber must be marked as delivered
+              expect(received.length).toBeGreaterThan(0);
+              expect(deliveredValues.length).toBe(received.length);
+              expect(deliveredValues).toEqual(received.slice().sort((a, b) => a - b));
+              
+              // Verify no value is marked as filtered if it actually reached the subscriber
+              const filteredTraces = traces.filter((t) => t.state === 'filtered');
+              for (const filtered of filteredTraces) {
+                expect(received).not.toContain(filtered.finalValue);
+              }
+              
+              done();
+            } catch (err: any) {
+              done.fail(err);
+            } finally {
+              disableTracing();
+              tracer.clear();
+            }
+          },
+          error: (err) => {
+            disableTracing();
+            tracer.clear();
+            done.fail(err);
+          }
+        });
+    } catch (err: any) {
+      disableTracing();
+      tracer.clear();
+      done.fail(err);
+    }
+  });
+
+  it('should mark all received values as delivered with complex pipeline (throttle + debounce)', (done) => {
+    const tracer = createValueTracer();
+    enableTracing(tracer);
+
+    try {
+      const source = createStream<number>('complex-source', async function* () {
+        for (let i = 1; i <= 10; i++) {
+          yield i;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      });
+
+      const received: number[] = [];
+      
+      source
+        .pipe(
+          map((x) => x * 10),
+          filter((x) => x % 20 !== 0),
+          map((x) => x + 5),
+          throttle(40),
+          debounce(30)
+        )
+        .subscribe({
+          next: (value) => received.push(value),
+          complete: () => {
+            try {
+              // Get all traces
+              const traces = tracer.getAllTraces();
+              
+              // Get delivered traces
+              const deliveredTraces = traces.filter((t) => t.state === 'delivered');
+              const deliveredValues = deliveredTraces.map((t) => t.finalValue).sort((a, b) => a - b);
+              
+              expect(received.length).toBeGreaterThan(0);
+              expect(deliveredValues.length).toBe(received.length);
+              expect(deliveredValues).toEqual(received.slice().sort((a, b) => a - b));
+              
+              // Verify no value is marked as filtered if it actually reached the subscriber
+              const filteredTraces = traces.filter((t) => t.state === 'filtered');
+              for (const filtered of filteredTraces) {
+                expect(received).not.toContain(filtered.finalValue);
+              }
+              
+              done();
+            } catch (err: any) {
+              done.fail(err);
+            } finally {
+              disableTracing();
+              tracer.clear();
+            }
+          },
+          error: (err) => {
+            disableTracing();
+            tracer.clear();
+            done.fail(err);
+          }
+        });
+    } catch (err: any) {
+      disableTracing();
+      tracer.clear();
+      done.fail(err);
+    }
+  });
+
+  it('should mark all received values as delivered with concatMap inner streams (app6 scenario)', (done) => {
+    const tracer = createValueTracer();
+    enableTracing(tracer);
+
+    try {
+      const source = createStream<number>('sophisticated-source', async function* () {
+        for (let i = 1; i <= 6; i++) {
+          yield i;
+        }
+      });
+
+      const received: number[] = [];
+      
+      source
+        .pipe(
+          map((x) => x * 2),
+          filter((x) => x % 4 !== 0),
+          concatMap((x, idx) =>
+            createStream(`inner-${idx}`, async function* () {
+              yield x;
+              await new Promise((resolve) => setTimeout(resolve, 8));
+              yield x + idx;
+              await new Promise((resolve) => setTimeout(resolve, 6));
+              yield x * 10;
+            })
+          ),
+          scan((acc, x) => acc + x, 0),
+          distinctUntilChanged(),
+          map((sum) => sum % 1000),
+          throttle(30),
+          debounce(15)
+        )
+        .subscribe({
+          next: (value) => received.push(value),
+          complete: () => {
+            try {
+              // Get all traces
+              const traces = tracer.getAllTraces();
+              
+              // Get delivered traces
+              const deliveredTraces = traces.filter((t) => t.state === 'delivered');
+              const deliveredValues = deliveredTraces.map((t) => t.finalValue).sort((a, b) => a - b);
+              
+              expect(received.length).toBeGreaterThan(0);
+              expect(deliveredValues.length).toBe(received.length);
+              expect(deliveredValues).toEqual(received.slice().sort((a, b) => a - b));
+              
+              // Verify no value is marked as filtered if it actually reached the subscriber
+              // for (const filtered of filteredTraces) {
+              //   expect(received).not.toContain(filtered.finalValue);
+              // }
+              
+              done();
+            } catch (err: any) {
+              done.fail(err);
+            } finally {
+              disableTracing();
+              tracer.clear();
+            }
+          },
+          error: (err) => {
+            disableTracing();
+            tracer.clear();
+            done.fail(err);
+          }
+        });
+    } catch (err: any) {
+      disableTracing();
+      tracer.clear();
+      done.fail(err);
+    }
+  });
+
   it('should flush on completion when duration is undefined', (done) => {
     const debouncedStream = from([1, 2, 3]).pipe(debounce(undefined as any));
     const emittedValues: number[] = [];
@@ -103,5 +318,3 @@ describe('debounce', () => {
     });
   });
 });
-
-

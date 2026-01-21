@@ -1,5 +1,14 @@
 # Changelog
 
+
+### 2.0.30
+
+Subjects were tightened again around async-iterator backpressure, the `takeUntil`/`skipUntil`/`delayUntil` operators now mirror the iterator-first lifecycle so cancellation and cleanup behave predictably. The scheduler was removed in favor of direct task coordination.
+
+### 2.0.29
+
+Rewrote subjects internals to guard async-iterator backpressure and avoid races; all subjects are sync; deferred iterator processing to avoid notifier/source races. Fixed several unsubscribe and race issues in subject/operator chains that caused flaky tests.
+
 ## 2.0.28
 
 Buffer and subject internals were reworked: synchronization removed in favor of scheduler-queued methods, `ReplaySubject` now uses the scheduler, and `shareReplay` aligns with strict backpressure and async delivery. Lock and semaphore are deprecated. Added edge-case tests for subjects and buffers, with various type/config/docs corrections and cleanup.
@@ -46,7 +55,7 @@ We have added AbortController support to most stream creators to enable proper c
 
 ## 2.0.12
 
-Refactored core operators to use pure AsyncIterator logic without relying on Subject, resulting in cleaner and more predictable behavior. Added the `observeOn` operator for microtask/macrotask scheduling. Renamed the `value` property of Subject to `snappy` to better reflect its intention and humorous design.
+Refactored core operators to use pure AsyncIterator logic without relying on Subject, resulting in cleaner and more predictable behavior. Added the `observeOn` operator for microtask/macrotask scheduling. Renamed the `value` property of Subject to `value` to better reflect its intention and humorous design.
 
 ## 2.0.11
 

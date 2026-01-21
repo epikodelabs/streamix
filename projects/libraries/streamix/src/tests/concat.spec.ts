@@ -1,4 +1,5 @@
-import { concat, createStream, from } from '@epikodelabs/streamix';
+import type { Stream } from '@epikodelabs/streamix';
+import { concat, createStream, createSubscription, from } from '@epikodelabs/streamix';
 
 
 describe('concat', () => {
@@ -83,6 +84,58 @@ describe('concat', () => {
     expect(caughtError).toBeTruthy();
     expect(caughtError.message).toBe(errorMessage);
   });
+
+  it('awaits promised sources before emitting', async () => {
+    const values: string[] = [];
+
+    const promisedSource = from(['promise-1', 'promise-2']);
+    const regularSource = from(['regular']);
+
+    for await (const value of concat(promisedSource, regularSource)) {
+      values.push(value);
+    }
+
+    expect(values).toEqual(['promise-1', 'promise-2', 'regular']);
+  });
+
+  it('handles sources whose iterator lacks a return hook', async () => {
+    const values: string[] = [];
+
+    const bareIteratorStream = createBareIteratorStream();
+
+    for await (const value of concat(bareIteratorStream, from(['next']))) {
+      values.push(value);
+    }
+
+    expect(values).toEqual(['bare', 'next']);
+  });
 });
+
+function createBareIteratorStream(): Stream<string> {
+  const stream = {} as Stream<string>;
+
+  stream.type = 'stream';
+  stream.id = 'bare-it';
+  stream.name = 'bare-iterator';
+  stream.pipe = (() => stream) as any;
+  stream.subscribe = () => createSubscription(async () => {});
+  stream.query = async () => 'bare';
+  stream[Symbol.asyncIterator] = () => {
+    let emitted = false;
+
+    return {
+      async next() {
+        if (emitted) return { done: true, value: undefined };
+        emitted = true;
+        return { done: false, value: 'bare' };
+      },
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    } as AsyncIterator<string>;
+  };
+
+  return stream;
+}
 
 

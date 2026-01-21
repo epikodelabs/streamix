@@ -84,6 +84,34 @@ describe("bufferCount", () => {
 
     expect(results).toEqual([]);
   });
+
+  it("should respect promised buffer sizes", async () => {
+    let resolveSize!: (value: number) => void;
+    const promisedSize = new Promise<number>((resolve) => {
+      resolveSize = resolve;
+    });
+
+    const buffered = source.pipe(bufferCount(promisedSize));
+    const results: number[][] = [];
+
+    (async () => {
+      for await (const value of buffered) {
+        results.push(value);
+      }
+    })();
+
+    await new Promise<void>((resolve) => setTimeout(() => (resolveSize(2), resolve()), 0));
+    
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.next(4);
+    subject.complete();
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 200));
+
+    expect(results).toEqual([[1, 2], [3, 4]]);
+  });
 });
 
 

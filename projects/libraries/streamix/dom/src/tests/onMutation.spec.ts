@@ -99,6 +99,46 @@ idescribe('onMutation', () => {
       nestedParent.appendChild(newChild);
     }, 100);
   });
+
+  it('should resolve promised element and options before observing', (done) => {
+    const elementPromise = Promise.resolve(observedElement);
+    const optionsPromise = Promise.resolve({ attributes: true });
+
+    const mutationStream = onMutation(elementPromise, optionsPromise);
+    const subscription = mutationStream.subscribe({
+      next: (mutations: MutationRecord[]) => {
+        try {
+          expect(mutations.some(m => m.type === 'attributes')).toBeTrue();
+          expect(mutations.some(m => m.attributeName === 'data-test')).toBeTrue();
+          subscription.unsubscribe();
+          done();
+        } catch (error: any) {
+          done.fail(error);
+        }
+      },
+    });
+
+    setTimeout(() => {
+      observedElement.setAttribute('data-test', 'async-value');
+    }, 100);
+  });
+
+  it('should no-op when MutationObserver is unavailable', (done) => {
+    const savedObserver = (globalThis as any).MutationObserver;
+    (globalThis as any).MutationObserver = undefined;
+
+    const mutationStream = onMutation(observedElement, { childList: true });
+    const subscription = mutationStream.subscribe({
+      next: () => fail('Should not emit without MutationObserver'),
+    });
+
+    setTimeout(() => {
+      observedElement.appendChild(document.createElement('span'));
+      subscription.unsubscribe();
+      (globalThis as any).MutationObserver = savedObserver;
+      done();
+    }, 150);
+  });
 });
 
 

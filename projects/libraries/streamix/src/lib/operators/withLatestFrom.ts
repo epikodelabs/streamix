@@ -1,4 +1,4 @@
-import { createOperator, createReceiver, isPromiseLike, type MaybePromise, type Operator, type Receiver, type Stream, type Subscription } from "../abstractions";
+import { createOperator, createReceiver, getIteratorMeta, isPromiseLike, Receiver, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
@@ -32,44 +32,80 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
 ) {
   return createOperator<T, [T, ...R]>("withLatestFrom", function (this: Operator, source) {
     const output = createSubject<[T, ...R]>();
+    const outputIterator = eachValueFrom(output);
     const abortController = new AbortController();
     const { signal } = abortController;
     
     let latestValues: any[] = [];
     let hasValue: boolean[] = [];
     const subscriptions: Subscription[] = [];
+    let errorEmitted = false;
+    let auxiliaryError: any = null;
+    let isCompleted = false;
     const normalizedInputs = streams.length === 1 && Array.isArray(streams[0]) ? streams[0] : streams;
 
-    // The entire operator logic is wrapped in an async function to ensure auxiliary
-    // stream subscriptions (and potential sync emissions) are handled before
-    // the source stream iteration starts, preventing a race condition.
-    (async () => {
+    // Setup function for auxiliary streams
+    const setupAuxiliary = (inputs: any[]) => {
+      latestValues = new Array(inputs.length).fill(undefined);
+      hasValue = new Array(inputs.length).fill(false);
+
+      for (let i = 0; i < inputs.length; i++) {
+        const subscription = fromAny(inputs[i]).subscribe({
+          next: (value) => {
+            latestValues[i] = value;
+            hasValue[i] = true;
+          },
+          error: (err) => {
+            // Only the first error is recorded
+            if (!errorEmitted && !isCompleted) {
+              errorEmitted = true;
+              auxiliaryError = err instanceof Error ? err : new Error(String(err));
+              // Emit error in next microtask to ensure proper propagation
+              queueMicrotask(() => {
+                if (!isCompleted) {
+                  output.error(auxiliaryError);
+                  abortController.abort();
+                }
+              });
+            }
+          },
+        });
+        subscriptions.push(subscription);
+      }
+    };
+
+    const cleanup = () => {
+      subscriptions.forEach(sub => sub.unsubscribe());
+      if (typeof source.return === "function") {
+        source.return().catch(() => {});
+      }
+    };
+
+    // Main iteration function
+    const iterate = async () => {
       try {
         // --- 1. Setup Auxiliary Streams ---
-        const resolvedInputs = await Promise.all(
-          normalizedInputs.map(async (stream) => (isPromiseLike(stream) ? await stream : stream))
-        );
+        const hasPromises = normalizedInputs.some(isPromiseLike);
+        
+        if (hasPromises) {
+          const resolvedInputs = await Promise.all(
+            normalizedInputs.map(async (stream) => (isPromiseLike(stream) ? await stream : stream))
+          );
+          
+          if (signal.aborted) {
+            cleanup();
+            return;
+          }
+          
+          setupAuxiliary(resolvedInputs);
+        } else {
+          setupAuxiliary(normalizedInputs);
+        }
 
-        latestValues = new Array(resolvedInputs.length).fill(undefined);
-        hasValue = new Array(resolvedInputs.length).fill(false);
-
-        for (let i = 0; i < resolvedInputs.length; i++) {
-          const subscription = fromAny(resolvedInputs[i]).subscribe({
-            next: (value) => {
-              latestValues[i] = value;
-              hasValue[i] = true;
-            },
-            error: (err) => {
-              // Immediately propagate errors from auxiliary streams and clean up
-              if (!signal.aborted) {
-                output.error(err instanceof Error ? err : new Error(String(err)));
-                abortController.abort(); // Signal the main loop to stop
-              }
-            },
-            // Note: Auxiliary stream completion does not complete the main stream
-            // but stops that specific auxiliary stream from providing updates.
-          });
-          subscriptions.push(subscription);
+        // Check for auxiliary errors that occurred during setup
+        if (auxiliaryError || signal.aborted) {
+          cleanup();
+          return;
         }
 
         // --- 2. Iterate Source Stream ---
@@ -88,36 +124,54 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
             iterator.next().then(result => ({ result }))
           ]);
 
-          if ('aborted' in winner || signal.aborted) break;
+          // Check for auxiliary errors each iteration
+          if (auxiliaryError || signal.aborted) {
+            cleanup();
+            return;
+          }
+
+          if ('aborted' in winner) break;
           const result = winner.result;
 
           if (result.done) break;
+          const meta = getIteratorMeta(source);
 
           // Gate check: Only emit if ALL auxiliary streams have emitted a value
           if (hasValue.length > 0 && hasValue.every(Boolean)) {
-            output.next([result.value, ...latestValues] as [T, ...R]);
+            let combined = [result.value, ...latestValues] as [T, ...R];
+            if (meta) {
+              setIteratorMeta(
+                outputIterator,
+                { valueId: meta.valueId },
+                meta.operatorIndex,
+                meta.operatorName
+              );
+              combined = setValueMeta(combined, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+            }
+            output.next(combined);
           }
+        }
+
+        // Complete normally if no errors occurred
+        if (!errorEmitted && !isCompleted) {
+          isCompleted = true;
+          output.complete();
         }
       } catch (err) {
         // Catch errors from source iteration
-        if (!signal.aborted) {
+        if (!errorEmitted && !isCompleted) {
+          errorEmitted = true;
           output.error(err instanceof Error ? err : new Error(String(err)));
         }
       } finally {
-        // --- 3. Cleanup on Completion/Error ---
-        if (!signal.aborted) {
-          output.complete();
-        }
-        // Ensure all resources are closed
-        subscriptions.forEach(sub => sub.unsubscribe());
-        if (typeof source.return === "function") {
-          // Attempt to close the source iterator
-          source.return().catch(() => {});
-        }
+        cleanup();
       }
-    })(); // End of main async IIFE
+    };
 
-    // --- 4. Custom Subscription Handling ---
+    // Start iteration
+    iterate();
+
+    // --- Custom Subscription Handling ---
     const originalSubscribe = output.subscribe;
     output.subscribe = (
       callbackOrReceiver?: ((value: [T, ...R]) => MaybePromise) | Receiver<[T, ...R]>
@@ -125,22 +179,18 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
       const receiver = createReceiver(callbackOrReceiver);
       const subscription = originalSubscribe.call(output, receiver);
 
-      // Custom unsubscription logic ensures the main loop is aborted
+      const originalOnUnsubscribe = subscription.onUnsubscribe;
       subscription.onUnsubscribe = () => {
         if (!signal.aborted) {
           abortController.abort();
         }
-        subscription.unsubscribe();
-        // Auxiliary subscriptions are cleaned up in the `finally` block of the IIFE
-        // once the abort signal propagates, but we call them here for immediate effect
-        // if they haven't been resolved yet (less common, but safe).
-        subscriptions.forEach(sub => sub.unsubscribe()); 
+        subscriptions.forEach(sub => sub.unsubscribe());
+        originalOnUnsubscribe?.call(subscription);
       };
 
       return subscription;
     };
 
-    // Return the async iterator for stream piping compatibility
-    return eachValueFrom(output);
+    return outputIterator;
   });
 }

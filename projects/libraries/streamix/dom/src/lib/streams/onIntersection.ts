@@ -37,7 +37,7 @@ export function onIntersection(
 
   /* -------------------------------------------------- */
 
-  const start = async () => {
+  const start = () => {
     if (active) return;
     active = true;
 
@@ -48,30 +48,66 @@ export function onIntersection(
       return;
     }
 
-    el = isPromiseLike(element) ? await element : element;
-    const resolvedOptions = isPromiseLike(options) ? await options : options;
+    if (isPromiseLike(element) || isPromiseLike(options)) {
+      // Async path for promise element/options
+      void (async () => {
+        el = isPromiseLike(element) ? await element : element;
+        const resolvedOptions = isPromiseLike(options) ? await options : options;
 
-    if (!active || !el) return;
+        if (!active || !el) return;
 
-    io = new IntersectionObserver(entries => {
-      subject.next(entries[0]?.isIntersecting ?? false);
-    }, resolvedOptions);
+        io = new IntersectionObserver(entries => {
+          subject.next(entries[0]?.isIntersecting ?? false);
+        }, resolvedOptions);
 
-    io.observe(el);
+        io.observe(el);
 
-    // ???? REQUIRED: detect DOM removal
-    mo = new MutationObserver(() => {
-      if (el && !document.body.contains(el)) {
-        // Force-unsubscribe ALL subscribers
-        for (const sub of subscriptions) {
-          sub.unsubscribe();
-        }
-        subscriptions.clear();
-        stop();
+        // ???? REQUIRED: detect DOM removal
+        mo = new MutationObserver(() => {
+          if (el && !document.body.contains(el)) {
+            // Force-unsubscribe ALL subscribers
+            for (const sub of subscriptions) {
+              sub.unsubscribe();
+            }
+            subscriptions.clear();
+            stop();
+          }
+        });
+
+        mo.observe(document.body, { childList: true, subtree: true });
+      })();
+    } else {
+      // Synchronous path for immediate element/options
+      el = element;
+      const resolvedOptions = options;
+
+      io = new IntersectionObserver(entries => {
+        subject.next(entries[0]?.isIntersecting ?? false);
+      }, resolvedOptions);
+
+      io.observe(el);
+      
+      // Emit initial value immediately
+      if (active && io) {
+        // Trigger initial observation synchronously
+        const rect = el!.getBoundingClientRect();
+        subject.next(rect.top < window.innerHeight && rect.bottom > 0);
       }
-    });
 
-    mo.observe(document.body, { childList: true, subtree: true });
+      // ???? REQUIRED: detect DOM removal
+      mo = new MutationObserver(() => {
+        if (el && !document.body.contains(el)) {
+          // Force-unsubscribe ALL subscribers
+          for (const sub of subscriptions) {
+            sub.unsubscribe();
+          }
+          subscriptions.clear();
+          stop();
+        }
+      });
+
+      mo.observe(document.body, { childList: true, subtree: true });
+    }
   };
 
   const stop = () => {
@@ -95,6 +131,13 @@ export function onIntersection(
   /* -------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
+
   subject.subscribe = (
     cb?: ((value: boolean) => void) | Receiver<boolean>
   ) => {
@@ -102,9 +145,7 @@ export function onIntersection(
 
     subscriptions.add(sub);
 
-    if (++subscriberCount === 1) {
-      void start();
-    }
+    scheduleStart();
 
     const prev = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

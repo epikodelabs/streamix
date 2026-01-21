@@ -1,138 +1,174 @@
-import { createAsyncGenerator, createReceiver, createSubscription, generateStreamId, type MaybePromise, type Operator, pipeSourceThrough, type Receiver, scheduler, type Stream, type Subscription } from "../abstractions";
+import {
+  createReceiver,
+  createSubscription,
+  generateStreamId,
+  getCurrentEmissionStamp,
+  isPromiseLike,
+  nextEmissionStamp,
+  pipeSourceThrough,
+  withEmissionStamp,
+  type Operator,
+  type Receiver,
+  type StrictReceiver,
+  type Subscription
+} from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { createBehaviorSubjectBuffer } from "../primitives";
+import {
+  createAsyncIterator,
+  createTryCommit,
+  type QueueItem,
+} from "./helpers";
 import type { Subject } from "./subject";
 
-/**
- * A BehaviorSubject is a special type of Subject that maintains
- * a current value and emits that value immediately to new subscribers.
- * It allows synchronous retrieval of the latest emitted value via `.snappy`.
- *
- * It is "stateful" in that it remembers the last value it emitted.
- *
- * @template T The type of the values held and emitted by the subject.
- * @extends {Subject<T>}
- */
 export type BehaviorSubject<T = any> = Subject<T> & {
   /**
-   * Provides synchronous access to the most recently pushed value.
-   * This value is the last value passed to the `next()` method, or the initial value if none have been emitted.
-   *
-   * @type {T}
+   * Always reflects the most recent value emitted by the subject, even while
+   * the subject is paused by asynchronous `next` handlers.
    */
-  get snappy(): T;
+  get value(): T;
 };
 
 /**
- * Creates a BehaviorSubject that holds a current value and emits it immediately to new subscribers.
- * It maintains the latest value internally and allows synchronous access via the `snappy` getter.
+ * Returns a subject that immediately emits `initialValue` to every subscriber
+ * before processing the normal `tryCommit` queue. All subscribers, whether
+ * added before or after the initial emission, always receive the latest value
+ * at subscription time and then follow live emissions. The subject preserves
+ * ordering guarantees across asynchronous handlers by buffering live
+ * notifications until each consumer has resolved `next`.
  *
- * The subject queues emitted values and delivers them to subscribers asynchronously,
- * supporting safe concurrent access and orderly processing.
- *
- * @template T The type of the values the subject will hold.
- * @param {T} initialValue The value that the subject will hold upon creation.
- * @returns {BehaviorSubject<T>} A new BehaviorSubject instance.
+ * @param initialValue The default value held until the first explicit `next`.
+ * @returns A behavior subject that exposes `next`, `complete`, `error`, the
+ *   synchronous `value` getter, and async iterator support.
  */
-export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
-  const buffer = createBehaviorSubjectBuffer<T>(initialValue);
-  let latestValue = initialValue;
+export function createBehaviorSubject<T>(initialValue: T): BehaviorSubject<T> {
+  const id = generateStreamId();
+
+  const receivers = new Set<StrictReceiver<T>>();
+  const ready = new Set<StrictReceiver<T>>();
+  const queue: QueueItem<T>[] = [];
+
+  let latestValue: T = initialValue;
   let isCompleted = false;
-  let hasError = false;
+  const terminalRef = { current: null as QueueItem<T> | null };
+
+  const setLatestValue = (v: T) => {
+    latestValue = v;
+  };
+
+  const tryCommit = createTryCommit<T>({
+    receivers,
+    ready,
+    queue,
+    setLatestValue,
+  });
 
   const next = (value: T) => {
-    if (isCompleted || hasError) return;
-    latestValue = value;
-    scheduler.enqueue(async () => {
-      await buffer.write(value);
-    });
+    if (isCompleted) return;
+
+    const current = getCurrentEmissionStamp();
+    const base = current ?? nextEmissionStamp();
+    const stamp = current === null ? -base : base;
+
+    queue.push({ kind: "next", value, stamp });
+    tryCommit();
   };
 
   const complete = () => {
-    if (isCompleted || hasError) return;
+    if (isCompleted) return;
     isCompleted = true;
-    scheduler.enqueue(async () => {
-      await buffer.complete();
-    });
+    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    const item: QueueItem<T> = { kind: "complete", stamp };
+    terminalRef.current = item;
+    queue.push(item);
+    tryCommit();
   };
 
   const error = (err: any) => {
-    if (isCompleted || hasError) return;
-    hasError = true;
+    if (isCompleted) return;
     isCompleted = true;
-    scheduler.enqueue(async () => {
-      await buffer.error(err);
-      await buffer.complete();
-    });
+
+    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    const item: QueueItem<T> = {
+      kind: "error",
+      error: err instanceof Error ? err : new Error(String(err)),
+      stamp,
+    };
+    terminalRef.current = item;
+    queue.push(item);
+    tryCommit();
   };
 
-  const registerReceiver = (receiver: Receiver<T>): Subscription => {
-    let unsubscribing = false;
-    let readerId: number | null = null;
+  const register = (receiver: Receiver<T>): Subscription => {
+    const r = receiver as StrictReceiver<T>;
+    const item = terminalRef.current;
+    if (item) {
+      if (item.kind === "complete") {
+        withEmissionStamp(item.stamp, () => r.complete());
+      } else if (item.kind === "error") {
+        const err = item.error;
+        withEmissionStamp(item.stamp, () => r.error(err));
+      }
+      return createSubscription();
+    }
 
-    const subscription = createSubscription(() => {
-      if (!unsubscribing) {
-        unsubscribing = true;
-        scheduler.enqueue(async () => {
-          if (readerId !== null) {
-            await buffer.detachReader(readerId);
+    receivers.add(r);
+    ready.add(r);
+
+    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    ready.delete(r);
+
+    withEmissionStamp(stamp, () => {
+      const res = r.next(latestValue);
+      if (isPromiseLike(res)) {
+        res.finally(() => {
+          if (!r.completed && receivers.has(r)) {
+            ready.add(r);
+            tryCommit();
           }
         });
-      }
-    });
-
-    scheduler.enqueue(() => buffer.attachReader()).then(async (id: number) => {
-      readerId = id;
-      try {
-        while (true) {
-          const result = await buffer.read(readerId!);
-          if (result.done) break;
-          await receiver.next?.(result.value!);
-        }
-      } catch (err: any) {
-        await receiver.error?.(err);
-      } finally {
-        if (!unsubscribing && readerId !== null) {
-          scheduler.enqueue(async () => {
-            await buffer.detachReader(readerId!);
-            await receiver.complete?.();
-          });
-        } else {
-          scheduler.enqueue(async () => {
-            await receiver.complete?.();
-          });
+      } else {
+        if (!r.completed && receivers.has(r)) {
+          ready.add(r);
         }
       }
     });
 
-    return subscription;
+    tryCommit();
+
+    return createSubscription(() => {
+      receivers.delete(r);
+      ready.delete(r);
+
+      const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+      withEmissionStamp(stamp, () => r.complete());
+
+      tryCommit();
+    });
   };
 
-  const subscribe = (callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
-    const receiver = createReceiver(callbackOrReceiver);
-    return registerReceiver(receiver);
-  };
+  const subscribe = (cb?: ((v: T) => any) | Receiver<T>) =>
+    register(createReceiver(cb));
 
-  const subject: BehaviorSubject<T> = {
+  const asyncIterator = createAsyncIterator<T>({ register });
+
+  return {
     type: "subject",
     name: "behaviorSubject",
-    id: generateStreamId(),
-    get snappy() {
+    id,
+    get value() {
       return latestValue;
     },
-    pipe(...operators: Operator<any, any>[]): Stream<any> {
-      return pipeSourceThrough(this, operators);
+    pipe(...ops: Operator<any, any>[]) {
+      return pipeSourceThrough(this, ops);
     },
     subscribe,
-    async query(): Promise<T> {
-      return await firstValueFrom(this);
+    async query() {
+      return firstValueFrom(this);
     },
     next,
     complete,
-    completed: () => isCompleted,
     error,
-    [Symbol.asyncIterator]: () => createAsyncGenerator(registerReceiver),
+    completed: () => isCompleted,
+    [Symbol.asyncIterator]: asyncIterator,
   };
-
-  return subject;
 }

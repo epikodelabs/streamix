@@ -1,4 +1,4 @@
-import { createOperator, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -16,14 +16,28 @@ import { createSubject, type Subject } from '../subjects';
 export const throttle = <T = any>(duration: MaybePromise<number>) =>
   createOperator<T, T>('throttle', function (this: Operator, source) {
     const output: Subject<T> = createSubject<T>();
+    const outputIterator = eachValueFrom(output);
+    
     let lastEmit = 0;
-    let pendingResult: IteratorResult<T> | undefined;
+    let pendingResult: (IteratorResult<T> & { meta?: ReturnType<typeof getIteratorMeta> }) | undefined;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let resolvedDuration: number | undefined = undefined;
 
     const flushPending = () => {
       if (pendingResult !== undefined) {
-        output.next(pendingResult.value!);
+        const value = pendingResult.value!;
+        
+        if (pendingResult.meta) {
+          setIteratorMeta(
+            outputIterator,
+            pendingResult.meta,
+            pendingResult.meta.operatorIndex,
+            pendingResult.meta.operatorName
+          );
+        }
+
+        // Emit value directly - tracer tracks it via inputQueue
+        output.next(value);
         pendingResult = undefined;
       }
       timer = null;
@@ -40,16 +54,44 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
 
           const now = Date.now();
           if (resolvedDuration === undefined) {
+            // If duration isn't available, we can't throttle properly yet?
+            // Original code had this check to possibly consume stream while waiting for duration (unlikely)
+            // or just safe-guard. 
+            // We just buffer it.
             pendingResult = result;
+             const meta = getIteratorMeta(source);
+             if (meta) {
+               (pendingResult as any).meta = meta;
+             }
+            getIteratorMeta(source);
             continue;
           }
 
           if (now - lastEmit >= resolvedDuration) {
-            // Emit immediately
-            output.next(result.value);
+            // Emit immediately (Leading edge)
+            const value = result.value;
+            const meta = getIteratorMeta(source);
+
+            if (meta) {
+              setIteratorMeta(
+                outputIterator,
+                meta,
+                meta.operatorIndex,
+                meta.operatorName
+              );
+            }
+            
+            // Emit value directly - tracer tracks it via inputQueue
+            output.next(value);
             lastEmit = now;
           } else {
+            // Throttling - buffer as trailing
             pendingResult = result;
+            const meta = getIteratorMeta(source);
+            
+            if (meta) {
+              (pendingResult as any).meta = meta;
+            }
 
             // Schedule trailing emit
             if (!timer) {
@@ -72,5 +114,5 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
       }
     })();
 
-    return eachValueFrom(output);
+    return outputIterator;
   });

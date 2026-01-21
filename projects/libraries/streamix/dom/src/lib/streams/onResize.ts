@@ -49,7 +49,7 @@ export function onResize(
   /* Lifecycle                                          */
   /* -------------------------------------------------- */
 
-  const start = async () => {
+  const start = () => {
     if (active) return;
     active = true;
 
@@ -59,21 +59,26 @@ export function onResize(
       return;
     }
 
-    const el = isPromiseLike(element) ? await element : element;
+    if (isPromiseLike(element)) {
+      // Async: wait for element resolution
+      void (async () => {
+        const el = await element;
+        if (!active || !el) return;
 
-    // Guard against unsubscribe during await
-    if (!active || !el) return;
-
-    resolvedElement = el;
-
-    observer = new ResizeObserver(entries => {
-      emit(entries[0]);
-    });
-
-    observer.observe(resolvedElement);
-
-    // Initial synchronous emission
-    emit();
+        resolvedElement = el;
+        observer = new ResizeObserver(entries => emit(entries[0]));
+        observer.observe(resolvedElement);
+        
+        if (active) emit();
+      })();
+    } else {
+      // Sync: setup immediately, defer emission
+      resolvedElement = element;
+      observer = new ResizeObserver(entries => emit(entries[0]));
+      observer.observe(resolvedElement);
+      
+      if (active) emit();
+    }
   };
 
   const stop = () => {
@@ -90,6 +95,12 @@ export function onResize(
   /* -------------------------------------------------- */
 
   const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
 
   subject.subscribe = (
     cb?: ((value: { width: number; height: number }) => void) |
@@ -97,9 +108,7 @@ export function onResize(
   ) => {
     const sub = originalSubscribe.call(subject, cb);
 
-    if (++subscriberCount === 1) {
-      void start();
-    }
+    scheduleStart();
 
     const prev = sub.onUnsubscribe;
     sub.onUnsubscribe = () => {

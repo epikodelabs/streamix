@@ -1,88 +1,128 @@
-import { createOperator, isPromiseLike, type Operator, type Stream, type Subscription } from "../abstractions";
-import { eachValueFrom, fromAny } from '../converters';
+import {
+  createOperator,
+  getIteratorEmissionStamp,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  type Operator,
+  type Stream,
+} from "../abstractions";
+import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
 /**
- * Creates a stream operator that delays the emission of values from the source stream
- * until a separate `notifier` stream emits at least one value.
+ * Delay values from the source until a notifier emits.
  *
- * This operator acts as a gate. It buffers all values from the source stream
- * until the `notifier` stream emits its first value. Once the notifier emits,
- * the operator immediately flushes all buffered values and then passes through
- * all subsequent values from the source without delay.
+ * This operator buffers every value produced by the source stream and releases
+ * them only after the provided `notifier` produces its first emission. After the
+ * notifier emits, the operator flushes the buffered values and forwards all
+ * subsequent source values immediately.
  *
- * If the `notifier` stream completes without ever emitting a value, the buffered 
- * values are DISCARDED, and the operator simply waits for the source to complete.
+ * Important semantics:
+ * - Buffering: values are buffered until the notifier emits, then flushed in order
+ * - Notifier completion without emission: if the notifier completes without
+ *   emitting, buffered values are discarded and the operator will not forward
+ *   any buffered values (it simply waits for the source to continue/complete).
+ * - Error propagation: any error from the notifier or source is propagated to
+ *   the output (the operator records the error and terminates the output
+ *   iterator accordingly).
  *
- * @template T The type of the values in the source and output streams.
- * @param notifier The stream or promise that acts as a gatekeeper.
- * @returns An `Operator` instance that can be used in a stream's `pipe` method.
+ * Use-cases:
+ * - Delay producing values until an initialization step completes (e.g. wait
+ *   for a connection or configuration event).
+ * - Gate values until user interaction or external readiness signal occurs.
+ *
+ * @template T Source/output value type.
+ * @template R Notifier value type (ignored by this operator).
+ * @param notifier A `Stream<R>` or `Promise<R>` that gates the source.
+ * @returns An `Operator<T, T>` that can be used in a stream pipeline.
  */
-export function delayUntil<T = any, R = T>(notifier: Stream<R> | Promise<R>) {
-  return createOperator<T, T>("delayUntil", function (this: Operator, source: AsyncIterator<T>) {
+export function delayUntil<T = any, R = any>(
+  notifier: Stream<R> | Promise<R>
+): Operator<T, T> {
+  return createOperator<T, T>("delayUntil", function (
+    this: Operator,
+    source: AsyncIterator<T>
+  ) {
     const output = createSubject<T>();
-    let canEmit = false;
-    let notifierEmitted = false;
-    let gateClosedWithoutEmit = false;
-    const buffer: T[] = [];
-    let notifierSubscription: Subscription | undefined;
+    const outIt = eachValueFrom(output);
 
-    const setupNotifier = async () => {
-      try {
-        const resolvedNotifier = isPromiseLike(notifier) ? await notifier : notifier;
-        notifierSubscription = fromAny(resolvedNotifier).subscribe({
-          next: () => {
-            // The gate is open. Flush the buffer and start live emission.
-            if (!canEmit && !gateClosedWithoutEmit) { // Only run the flush on the *first* emission
-              canEmit = true;
-              notifierEmitted = true;
-              for (const v of buffer) output.next(v);
-              buffer.length = 0;
-            }
-            // Unsubscribe from the notifier immediately after the first next()
-            notifierSubscription?.unsubscribe();
-          },
-          error: (err) => {
-            notifierSubscription?.unsubscribe();
-            output.error(err);
-          },
-          complete: () => {
-            notifierSubscription?.unsubscribe();
-            // If the notifier completes before emitting (i.e., !canEmit), 
-            // the buffered values are discarded and no new values are emitted.
-            if (!canEmit && !notifierEmitted) {
-              gateClosedWithoutEmit = true;
-              buffer.length = 0;
-            }
-          },
-        });
-      } catch (err) {
-        output.error(err instanceof Error ? err : new Error(String(err)));
-      }
-    };
+    /* ---------------------------------------------------------------------- */
+    /* Shared state                                                            */
+    /* ---------------------------------------------------------------------- */
 
-    setupNotifier();
+    let gateOpened = false;
+    let notifierError: any = null;
+    const buffer: Array<{ value: T; stamp: number }> = [];
+
+    /* ---------------------------------------------------------------------- */
+    /* Notifier producer                                                       */
+    /* ---------------------------------------------------------------------- */
+
+    const notifierSub = fromAny(notifier).subscribe({
+      next() {
+        if (!gateOpened) {
+          gateOpened = true;
+          
+          // Flush buffered values
+          for (const b of buffer) {
+            setIteratorEmissionStamp(outIt as any, b.stamp);
+            output.next(b.value);
+          }
+          buffer.length = 0;
+        }
+      },
+      error(err) {
+        notifierError = err;
+        source.return?.().catch(() => {});
+      },
+      complete() {
+        // Notifier completed without emitting - discard buffer
+      },
+    });
+
+    /* ---------------------------------------------------------------------- */
+    /* Source producer                                                         */
+    /* ---------------------------------------------------------------------- */
 
     (async () => {
       try {
         while (true) {
-          const { done, value } = await source.next();
-          if (done) break;
+          if (notifierError) {
+            break;
+          }
 
-          if (canEmit) {
-            output.next(value);
-          } else if (!gateClosedWithoutEmit) {
-            buffer.push(value);
+          const r = await source.next();
+          const stamp = getIteratorEmissionStamp(source) ?? nextEmissionStamp();
+
+          if (r.done) {
+            break;
+          }
+
+          if (notifierError) {
+            break;
+          }
+
+          if (!gateOpened) {
+            buffer.push({ value: r.value, stamp });
+          } else {
+            setIteratorEmissionStamp(outIt as any, stamp);
+            output.next(r.value);
           }
         }
       } catch (err) {
         output.error(err);
+        return;
       } finally {
-        output.complete();
-        notifierSubscription?.unsubscribe();
+        notifierSub.unsubscribe();
+
+        if (notifierError) {
+          output.error(notifierError);
+        } else {
+          output.complete();
+        }
       }
     })();
 
-    return eachValueFrom(output);
+    return outIt;
   });
 }

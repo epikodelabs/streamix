@@ -1,4 +1,5 @@
 import type { Stream } from "../abstractions";
+import type { Subscription } from "../abstractions";
 
 /**
  * Returns a promise that resolves with the last emitted value from a `Stream`.
@@ -24,24 +25,46 @@ export function lastValueFrom<T = any>(stream: Stream<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let lastValue: T | undefined;
     let hasValue = false;
+    let settled = false;
 
-    const subscription = stream.subscribe({
+    let subscription: Subscription | undefined;
+    let pendingUnsubscribe = false;
+
+    const requestUnsubscribe = (): void => {
+      if (subscription) {
+        const sub = subscription;
+        subscription = undefined;
+        sub.unsubscribe();
+        return;
+      }
+      pendingUnsubscribe = true;
+    };
+
+    subscription = stream.subscribe({
       next(value: T) {
         lastValue = value;
         hasValue = true;
       },
       error(err: any) {
+        if (settled) return;
+        settled = true;
         reject(err);
-        subscription.unsubscribe();
+        requestUnsubscribe();
       },
       complete() {
+        if (settled) return;
+        settled = true;
         if (hasValue) {
           resolve(lastValue as T);
         } else {
           reject(new Error("Stream completed without emitting a value"));
         }
-        subscription.unsubscribe();
+        requestUnsubscribe();
       }
     });
+
+    if (pendingUnsubscribe) {
+      requestUnsubscribe();
+    }
   });
 }
