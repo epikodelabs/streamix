@@ -1,4 +1,4 @@
-import { createSubject } from '@epikodelabs/streamix';
+import { createSubject, scheduler } from '@epikodelabs/streamix';
 
 const flushMicrotasks = async () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -252,5 +252,130 @@ describe('createSubject', () => {
     });
 
     subject.next(1);
+  });
+
+  it('tracks the latest value and completion state', async () => {
+    const subject = createSubject<string>();
+
+    expect(subject.value).toBeUndefined();
+    expect(subject.completed()).toBeFalse();
+
+    subject.next('alpha');
+    expect(subject.value).toBe('alpha');
+    expect(subject.completed()).toBeFalse();
+
+    subject.complete();
+    await flushMicrotasks();
+
+    expect(subject.completed()).toBeTrue();
+    expect(subject.value).toBe('alpha');
+  });
+
+  it('query() resolves with the first emitted value', async () => {
+    const subject = createSubject<number>();
+    const firstValue = subject.query();
+
+    subject.next(42);
+    await flushMicrotasks();
+
+    expect(await firstValue).toBe(42);
+  });
+
+  it('allows piping through derived streams', async () => {
+    const subject = createSubject<number>();
+    const piped = subject.pipe();
+    const subscription = piped.subscribe();
+
+    subject.next(7);
+    subject.complete();
+    await flushMicrotasks();
+
+    expect(subject.completed()).toBeTrue();
+    expect(subject.value).toBe(7);
+    subscription.unsubscribe();
+  });
+
+  it('delivers errors to current subscribers and blocks new emissions', async () => {
+    const subject = createSubject<number>();
+    const events: Array<[string, any?]> = [];
+
+    subject.subscribe({
+      next: (value) => events.push(['next', value]),
+      error: (err) => events.push(['error', (err as Error).message]),
+      complete: () => events.push(['complete'])
+    });
+
+    subject.next(1);
+    subject.error(new Error('boom'));
+    subject.next(2);
+
+    await flushMicrotasks();
+
+    expect(events).toEqual([
+      ['next', 1],
+      ['error', 'boom'],
+      ['complete']
+    ]);
+    expect(subject.completed()).toBeTrue();
+    expect(subject.value).toBe(1);
+  });
+
+  it('ignores duplicate completions', async () => {
+    const subject = createSubject<number>();
+    let completes = 0;
+
+    subject.subscribe({
+      complete: () => completes++
+    });
+
+    subject.complete();
+    subject.complete();
+
+    await flushMicrotasks();
+    expect(completes).toBe(1);
+  });
+
+  it('ignores duplicate errors', async () => {
+    const subject = createSubject<number>();
+    const errors: string[] = [];
+
+    subject.subscribe({
+      error: (err) => errors.push((err as Error).message)
+    });
+
+    subject.error(new Error('first'));
+    subject.error(new Error('second'));
+
+    await flushMicrotasks();
+    expect(errors).toEqual(['first']);
+  });
+
+  it('skips cleanup when unsubscribing after completion', async () => {
+    const subject = createSubject<number>();
+    const subscription = subject.subscribe({
+      complete: () => void 0
+    });
+
+    subject.next(1);
+    subject.complete();
+
+    await subscription.unsubscribe();
+    await scheduler.flush();
+
+    expect(subject.completed()).toBeTrue();
+  });
+
+  it('runs cleanup when unsubscribing while active', async () => {
+    const subject = createSubject<number>();
+    let completes = 0;
+
+    const subscription = subject.subscribe({
+      complete: () => completes++
+    });
+
+    await subscription.unsubscribe();
+    await scheduler.flush();
+
+    expect(completes).toBe(1);
   });
 });

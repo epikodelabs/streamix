@@ -3,12 +3,10 @@ import {
   createSubscription,
   generateStreamId,
   getCurrentEmissionStamp,
-  isPromiseLike,
   nextEmissionStamp,
   pipeSourceThrough,
   scheduler,
   withEmissionStamp,
-  type MaybePromise,
   type Operator,
   type Receiver,
   type Stream,
@@ -16,6 +14,7 @@ import {
   type Subscription
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
+import { createAsyncIterator } from "./helpers";
 
 export type Subject<T = any> = Stream<T> & {
   next(value: T): void;
@@ -28,326 +27,120 @@ export type Subject<T = any> = Stream<T> & {
 export function createSubject<T = any>(): Subject<T> {
   const id = generateStreamId();
   let operationId = 0;
+  let latestValue: T | undefined;
+  let isCompleted = false;
+  let terminalItem: { kind: 'complete' | 'error', error?: any, stamp: number } | null = null;
 
   type TrackedReceiver = StrictReceiver<T> & { subscribedAt: number };
   const receivers = new Set<TrackedReceiver>();
-  const ready = new Set<TrackedReceiver>();
-  
-  const queue: Array<
-    | { kind: "next"; value: T; stamp: number; opId: number }
-    | { kind: "complete"; stamp: number; opId: number }
-    | { kind: "error"; error: Error; stamp: number; opId: number }
-  > = [];
-
-  let latestValue: T | undefined;
-  let isCompleted = false;
-  let hasError = false;
-  let isCommitting = false;
-  const terminalRef = { current: null as any };
-
-  const tryCommit = async (): Promise<void> => {
-    if (isCommitting) return;
-    isCommitting = true;
-
-    try {
-      // Process queue as long as all receivers are ready for the next value
-      while (queue.length > 0 && ready.size === receivers.size) {
-        const item = queue[0];
-        
-        // Filter targets based on subscription time vs enqueue time
-        const targets = Array.from(ready).filter(r => 
-          receivers.has(r) && item.opId > r.subscribedAt
-        );
-        
-        queue.shift();
-        const stamp = item.stamp;
-        let asyncPromises: Promise<void>[] = [];
-
-        await withEmissionStamp(stamp, async () => {
-          if (item.kind === "next") {
-            latestValue = item.value;
-
-            for (const r of targets) {
-              if (!receivers.has(r)) continue;
-
-              const result = r.next(item.value);
-
-              if (isPromiseLike(result)) {
-                ready.delete(r);
-                asyncPromises.push(
-                  result.then(
-                    () => {
-                      if (!r.completed && receivers.has(r)) {
-                        ready.add(r);
-                        // Re-entrant scheduler handles this immediately if in pump
-                        void tryCommit();
-                      }
-                    },
-                    () => {
-                      if (!r.completed && receivers.has(r)) {
-                        ready.add(r);
-                        void tryCommit();
-                      }
-                    }
-                  )
-                );
-              }
-            }
-          } else {
-            // Terminal item
-            const allTargets = Array.from(ready).filter(r => receivers.has(r));
-            for (const r of allTargets) {
-              if (item.kind === "complete") {
-                r.complete();
-              } else {
-                r.error(item.error);
-              }
-            }
-            receivers.clear();
-            ready.clear();
-            queue.length = 0;
-            terminalRef.current = item;
-          }
-        });
-
-        // If any receivers are async, we must wait for them before next queue item
-        if (asyncPromises.length > 0) {
-          await Promise.allSettled(asyncPromises);
-        }
-      }
-    } finally {
-      isCommitting = false;
-    }
-  };
 
   const next = (value: T) => {
-    if (isCompleted || hasError) return;
-    const current = getCurrentEmissionStamp();
-    const base = current ?? nextEmissionStamp();
-    const stamp = current === null ? -base : base;
+    if (isCompleted) return;
+    latestValue = value;
     const opId = ++operationId;
+    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
 
-    scheduler.enqueue(async () => {
-      queue.push({ kind: "next", value, stamp, opId });
-      await tryCommit();
+    scheduler.enqueue(() => {
+      if (receivers.size === 0) return;
+      const targets = Array.from(receivers).filter(r => opId > r.subscribedAt);
+      const promises: Promise<any>[] = [];
+      withEmissionStamp(stamp, () => {
+        for (const r of targets) {
+          promises.push(Promise.resolve(r.next(value)));
+        }
+      });
+      return Promise.allSettled(promises);
     });
   };
 
   const complete = () => {
-    if (isCompleted || hasError) return;
+    if (isCompleted) return;
     isCompleted = true;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    const opId = ++operationId;
-    const item = { kind: "complete", stamp, opId } as const;
-    
-    scheduler.enqueue(async () => {
-      queue.push(item);
-      await tryCommit();
+    terminalItem = { kind: 'complete', stamp };
+
+    scheduler.enqueue(() => {
+      const targets = Array.from(receivers);
+      const promises: Promise<any>[] = [];
+      withEmissionStamp(stamp, () => {
+        for (const r of targets) {
+          promises.push(Promise.resolve(r.complete()));
+        }
+      });
+      receivers.clear();
+      return Promise.allSettled(promises);
     });
   };
 
   const error = (err: any) => {
-    if (isCompleted || hasError) return;
-    hasError = true;
+    if (isCompleted) return;
     isCompleted = true;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    const opId = ++operationId;
-    const errorValue = err instanceof Error ? err : new Error(String(err));
-    const item = { kind: "error", error: errorValue, stamp, opId } as const;
-    
-    scheduler.enqueue(async () => {
-      queue.push(item);
-      await tryCommit();
+    terminalItem = { kind: 'error', error: err, stamp };
+
+    scheduler.enqueue(() => {
+      const targets = Array.from(receivers);
+      const promises: Promise<any>[] = [];
+      withEmissionStamp(stamp, () => {
+        for (const r of targets) {
+          promises.push(Promise.resolve(r.error(err)));
+        }
+      });
+      receivers.clear();
+      return Promise.allSettled(promises);
     });
   };
 
   const register = (receiver: Receiver<T>): Subscription => {
     const r = receiver as StrictReceiver<T>;
-    const term = terminalRef.current;
+    const trackedReceiver: TrackedReceiver = { ...r, subscribedAt: operationId };
 
-    if (term) {
-      withEmissionStamp(term.stamp, () => {
-        if (term.kind === "complete") r.complete();
-        else r.error(term.error);
+    if (terminalItem) {
+      const term = terminalItem;
+      scheduler.enqueue(() => {
+        withEmissionStamp(term.stamp, () => {
+          term.kind === 'error' ? r.error(term.error) : undefined;
+          r.complete()
+        });
       });
       return createSubscription();
     }
 
-    const subscribedAt = ++operationId;
-    const trackedReceiver: TrackedReceiver = { ...r, subscribedAt };
-
     receivers.add(trackedReceiver);
-    ready.add(trackedReceiver);
-    
-    if (queue.length > 0) {
-      scheduler.enqueue(() => tryCommit());
-    }
+
+    Object.defineProperty(trackedReceiver, "completed", {
+      get() {
+        return r.completed;
+      },
+      enumerable: true,
+      configurable: true
+    });
 
     return createSubscription(() => {
       receivers.delete(trackedReceiver);
-      ready.delete(trackedReceiver);
-      
-      // Scheduler detects re-entrancy and runs this immediately 
-      // if called inside a 'next' callback.
       scheduler.enqueue(() => {
-        const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-        withEmissionStamp(stamp, () => {
-          if (!trackedReceiver.completed) r.complete();
-        });
+        if (!trackedReceiver.completed) {
+          const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+          withEmissionStamp(stamp, () => r.complete());
+        }
       });
     });
   };
 
-  const subscribe = (cb?: ((value: T) => MaybePromise) | Receiver<T>) =>
-    register(createReceiver(cb));
-  
-  const asyncIterator = (): AsyncIterator<T> => {
-    const receiver = createReceiver<T>();
-
-    let pullResolve: ((v: IteratorResult<T>) => void) | null = null;
-    let pullReject: ((e: any) => void) | null = null;
-    let backpressureResolve: (() => void) | null = null;
-    let pending: IteratorResult<T> | null = null;
-    let pendingError: any = null;
-    let sub: Subscription | null = null;
-
-    const iterator: AsyncIterator<T> = {
-      next() {
-        if (!sub) {
-          sub = register(iteratorReceiver);
-        }
-
-        if (pendingError) {
-          const err = pendingError;
-          pendingError = null;
-          return Promise.reject(err);
-        }
-
-        if (pending) {
-          const r = pending;
-          pending = null;
-
-          if (backpressureResolve) {
-            const resolve = backpressureResolve;
-            backpressureResolve = null;
-            scheduler.enqueue(() => resolve());
-          }
-
-          return Promise.resolve(r);
-        }
-
-        return new Promise((res, rej) => {
-          pullResolve = res;
-          pullReject = rej;
-        });
-      },
-
-      return() {
-        if (sub) {
-          sub.unsubscribe();
-          sub = null;
-        }
-        if (pullResolve) {
-          const r = pullResolve;
-          pullResolve = pullReject = null;
-          scheduler.enqueue(() => r({ done: true, value: undefined }));
-        }
-        if (backpressureResolve) {
-          scheduler.enqueue(() => {
-            backpressureResolve!();
-            backpressureResolve = null;
-          });
-        }
-        return Promise.resolve({ done: true, value: undefined });
-      },
-
-      throw(err) {
-        if (sub) {
-          sub.unsubscribe();
-          sub = null;
-        }
-        if (pullReject) {
-          const r = pullReject;
-          pullResolve = pullReject = null;
-          scheduler.enqueue(() => r(err));
-        }
-        if (backpressureResolve) {
-          scheduler.enqueue(() => {
-            backpressureResolve!();
-            backpressureResolve = null;
-          });
-        }
-        return Promise.reject(err);
-      },
-    };
-
-    const iteratorReceiver: StrictReceiver<T> = {
-      ...receiver,
-
-      next(value: T) {
-        scheduler.enqueue(() => {
-          if (pullResolve) {
-            const r = pullResolve;
-            pullResolve = pullReject = null;
-            r({ done: false, value });
-          } else {
-            pending = { done: false, value };
-          }
-        });
-        
-        return new Promise<void>((resolve) => {
-          backpressureResolve = resolve;
-        });
-      },
-
-      complete() {
-        scheduler.enqueue(() => {
-          if (pullResolve) {
-            const r = pullResolve;
-            pullResolve = pullReject = null;
-            r({ done: true, value: undefined });
-          } else {
-            pending = { done: true, value: undefined };
-          }
-        });
-      },
-
-      error(err) {
-        scheduler.enqueue(() => {
-          if (pullReject) {
-            const r = pullReject;
-            pullResolve = pullReject = null;
-            r(err);
-          } else {
-            pendingError = err;
-          }
-        });
-      },
-    };
-
-    return iterator;
-  };
-
-  const subject: Subject<T> = {
+  return {
     type: "subject",
     name: "subject",
     id,
-    get value() {
-      return latestValue;
-    },
+    get value() { return latestValue; },
     pipe(...steps: Operator<any, any>[]): Stream<any> {
       return pipeSourceThrough(this, steps);
     },
-    subscribe,
-    async query(): Promise<T> {
-      return firstValueFrom(this);
-    },
+    subscribe: (cb) => register(createReceiver(cb)),
+    async query(): Promise<T> { return firstValueFrom(this); },
     next,
     complete,
     error,
     completed: () => isCompleted,
-    [Symbol.asyncIterator]: asyncIterator,
-  };
-
-  return subject;
+    [Symbol.asyncIterator]: createAsyncIterator({ register })
+  } as Subject<T>;
 }
