@@ -150,14 +150,12 @@ export function createAsyncIterator<T>(opts: {
     let pullResolve: ((v: IteratorResult<T>) => void) | null = null;
     let pullReject: ((e: any) => void) | null = null;
 
-    let backpressureResolve: (() => void) | null = null;
-
-    let pending: IteratorResult<T> | null = null;
-    let pendingStamp: number | null = null;
+    // Use queues instead of single variables
+    const queue: Array<{ result: IteratorResult<T>; stamp: number }> = [];
+    const backpressureQueue: Array<() => void> = [];
 
     let pendingError: any = null;
     let pendingErrorStamp: number | null = null;
-
     let sub: Subscription | null = null;
 
     const iterator: AsyncIterator<T> & {
@@ -176,20 +174,18 @@ export function createAsyncIterator<T>(opts: {
           return Promise.reject(err);
         }
 
-        if (pending) {
-          const r = pending;
-          const stamp = pendingStamp!;
-          pending = null;
-          pendingStamp = null;
+        // Pull from the queue
+        if (queue.length > 0) {
+          const { result, stamp } = queue.shift()!;
           setIteratorEmissionStamp(iterator as any, stamp);
 
-          if (backpressureResolve) {
-            const resolve = backpressureResolve;
-            backpressureResolve = null;
+          // Resolve the oldest backpressure promise
+          if (backpressureQueue.length > 0) {
+            const resolve = backpressureQueue.shift()!;
             resolve();
           }
 
-          return Promise.resolve(r);
+          return Promise.resolve(result);
         }
 
         return new Promise((res, rej) => {
@@ -206,10 +202,8 @@ export function createAsyncIterator<T>(opts: {
           pullResolve = pullReject = null;
           r({ done: true, value: undefined });
         }
-        if (backpressureResolve) {
-          backpressureResolve();
-          backpressureResolve = null;
-        }
+        backpressureQueue.forEach(resolve => resolve());
+        backpressureQueue.length = 0;
         return Promise.resolve({ done: true, value: undefined });
       },
 
@@ -221,10 +215,8 @@ export function createAsyncIterator<T>(opts: {
           pullResolve = pullReject = null;
           r(err);
         }
-        if (backpressureResolve) {
-          backpressureResolve();
-          backpressureResolve = null;
-        }
+        backpressureQueue.forEach(resolve => resolve());
+        backpressureQueue.length = 0;
         return Promise.reject(err);
       },
     };
@@ -243,11 +235,11 @@ export function createAsyncIterator<T>(opts: {
           return;
         }
 
-        pending = { done: false, value };
-        pendingStamp = stamp;
+        // Push to queue instead of overwriting
+        queue.push({ result: { done: false, value }, stamp });
 
         return new Promise<void>((resolve) => {
-          backpressureResolve = resolve;
+          backpressureQueue.push(resolve);
         });
       },
 
@@ -260,8 +252,7 @@ export function createAsyncIterator<T>(opts: {
           r({ done: true, value: undefined });
           return;
         }
-        pending = { done: true, value: undefined };
-        pendingStamp = stamp;
+        queue.push({ result: { done: true, value: undefined }, stamp });
       },
 
       error(err) {
@@ -278,7 +269,7 @@ export function createAsyncIterator<T>(opts: {
       },
     };
 
-    iterator.__hasBufferedValues = () => !!pending || !!pendingError;
+    iterator.__hasBufferedValues = () => queue.length > 0 || !!pendingError;
 
     iterator.__tryNext = () => {
       if (pendingError) {
@@ -290,20 +281,16 @@ export function createAsyncIterator<T>(opts: {
         throw err;
       }
 
-      if (pending) {
-        const r = pending;
-        const stamp = pendingStamp!;
-        pending = null;
-        pendingStamp = null;
+      if (queue.length > 0) {
+        const { result, stamp } = queue.shift()!;
         setIteratorEmissionStamp(iterator as any, stamp);
 
-        if (backpressureResolve) {
-          const resolve = backpressureResolve;
-          backpressureResolve = null;
+        if (backpressureQueue.length > 0) {
+          const resolve = backpressureQueue.shift()!;
           resolve();
         }
 
-        return r;
+        return result;
       }
 
       return null;
