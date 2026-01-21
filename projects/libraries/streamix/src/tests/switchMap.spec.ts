@@ -441,7 +441,7 @@ describe('switchMap', () => {
     });
   });
 
-  fit('should ignore completion of stale inner streams', (done) => {
+  it('should ignore completion of stale inner streams', (done) => {
     const source = createSubject<number>();
     const inner1 = createSubject<string>();
     const inner2 = createSubject<string>();

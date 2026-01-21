@@ -1,5 +1,6 @@
 import { unwrapPrimitive } from "./hooks";
 import { isPromiseLike, type MaybePromise } from "./operator";
+import { scheduler } from "./scheduler";
 
 export type Receiver<T = any> = {
   next?: (value: T) => MaybePromise;
@@ -13,135 +14,74 @@ export function createReceiver<T = any>(
   callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
 ): StrictReceiver<T> {
   let _completed = false;
-  let _completionHandled = false;
-  let _processing = false;
-  let _pendingComplete = false;
-  let pendingCompleteResolve: (() => void) | null = null;
-  type QueueEntry = { value: T; resolve: () => void; reject: (err: any) => void };
-  const _queue: QueueEntry[] = [];
 
-  const baseReceiver = {
-    get completed() { return _completed; }
-  } as { readonly completed: boolean; };
+  // Normalize input to a receiver object
+  const target = (typeof callbackOrReceiver === 'function'
+    ? { next: callbackOrReceiver }
+    : callbackOrReceiver || {}) as Receiver<T>;
 
-  const receiver = (typeof callbackOrReceiver === 'function'
-    ? { ...baseReceiver, next: callbackOrReceiver }
-    : callbackOrReceiver
-      ? { ...baseReceiver, ...callbackOrReceiver }
-      : baseReceiver) as Receiver<T>;
+  const wantsRaw = (target as any).__wantsRawValues === true;
 
-  const wantsRaw = (receiver as any).__wantsRawValues === true;
+  // Helper to safely execute a user-provided handler within the scheduler
+  const runAction = (handler?: (...args: any[]) => MaybePromise, ...args: any[]): Promise<void> => {
+    if (!handler || _completed) return Promise.resolve();
 
-  const scheduleCallback = <R>(
-    handler?: ((...args: any[]) => MaybePromise<R>) | undefined,
-    ...args: any[]
-  ): Promise<R | undefined> => {
-    if (!handler) return Promise.resolve<R | undefined>(undefined);
-
-    return new Promise<R | undefined>((resolve, reject) => {
-      queueMicrotask(() => {
-        try {
-          const result = handler.apply(receiver, args);
-          if (isPromiseLike(result)) {
-            result.then(resolve, reject);
-          } else {
-            resolve(result as R | undefined);
-          }
-        } catch (err) {
-          reject(err);
+    return scheduler.enqueue(async () => {
+      // Re-check completed status inside the scheduled task
+      if (_completed) return;
+      
+      try {
+        const result = handler.apply(target, args);
+        if (isPromiseLike(result)) await result;
+      } catch (err) {
+        // If 'next' fails, trigger error flow
+        if (handler === target.next) {
+          await wrapped.error(err);
+        } else {
+          console.error("Unhandled error in Receiver:", err);
         }
-      });
+      }
     });
   };
 
-  const ensureCompletion = async () => {
-    if (_completionHandled) return;
-    _completionHandled = true;
-    _completed = true;
-    try {
-      await scheduleCallback(receiver.complete);
-    } catch (err) {
-      console.error('Unhandled error in complete handler:', err);
-    }
-    pendingCompleteResolve?.();
-    pendingCompleteResolve = null;
-  };
-
-  const handleError = async (err: any) => {
-    if (_completed && _completionHandled) return;
-    _queue.length = 0;
-    _pendingComplete = false;
-    const normalizedError = err instanceof Error ? err : new Error(String(err));
-    try {
-      await scheduleCallback(receiver.error, normalizedError);
-    } catch (handlerErr) {
-      console.error('Unhandled error in error handler:', handlerErr);
-    }
-    await ensureCompletion();
-  };
-
-  const processQueue = async () => {
-    _processing = true;
-    try {
-      while (_queue.length > 0 && !_completionHandled) {
-        const entry = _queue.shift()!;
-        const payload = wantsRaw ? entry.value : unwrapPrimitive(entry.value);
-        try {
-          await scheduleCallback(receiver.next, payload);
-          entry.resolve();
-          
-          // Check if complete was called during the callback
-          if (_completed && !_completionHandled) {
-            break;
-          }
-        } catch (err) {
-          await handleError(err);
-          entry.resolve();
-          return;
-        }
-      }
-    } finally {
-      _processing = false;
-      if (_pendingComplete && !_completionHandled) {
-        _pendingComplete = false;
-        await ensureCompletion();
-      }
-    }
-  };
-
-  const wrappedReceiver: StrictReceiver<T> = {
+  const wrapped: StrictReceiver<T> = {
     next: (value: T) => {
       if (_completed) return Promise.resolve();
-      return new Promise<void>((resolve, reject) => {
-        _queue.push({ value, resolve, reject });
-        if (_processing) return;
-        void processQueue();
+      const payload = wantsRaw ? value : unwrapPrimitive(value);
+      return runAction(target.next, payload);
+    },
+
+    error: (err: any) => {
+      if (_completed) return Promise.resolve();
+      _completed = true;
+      const normalizedError = err instanceof Error ? err : new Error(String(err));
+      
+      return scheduler.enqueue(async () => {
+        try {
+          const result = target.error?.(normalizedError);
+          if (isPromiseLike(result)) await result;
+        } finally {
+          // Always ensure complete runs after error
+          const compResult = target.complete?.();
+          if (isPromiseLike(compResult)) await compResult;
+        }
       });
     },
-    error: async function (err: any) {
-      await handleError(err);
-    },
+
     complete: () => {
-      if (_completionHandled) return Promise.resolve();
+      if (_completed) return Promise.resolve();
+      _completed = true;
       
-      // If we're in the middle of processing, just mark as complete
-      // The current next() will finish, but no more will be processed
-      if (_processing) {
-        _completed = true;
-        _queue.length = 0; // Clear remaining queue
-        _pendingComplete = true;
-        return new Promise<void>((resolve) => {
-          pendingCompleteResolve = resolve;
-        });
-      }
-      
-      // Otherwise complete immediately
-      return ensureCompletion();
+      return scheduler.enqueue(async () => {
+        const result = target.complete?.();
+        if (isPromiseLike(result)) await result;
+      });
     },
+
     get completed() {
       return _completed;
     },
   };
 
-  return wrappedReceiver;
+  return wrapped;
 }
