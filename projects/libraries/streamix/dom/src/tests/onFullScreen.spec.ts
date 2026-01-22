@@ -1,11 +1,10 @@
 import { onFullscreen } from "@epikodelabs/streamix/dom";
-import { idescribe } from "./env.spec";
 
 function delay(ms = 0): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-idescribe("onFullscreen", () => {
+describe("onFullscreen", () => {
   let eventListeners: Map<string, Set<EventListener>>;
   let fullscreenElement: any;
   let webkitFullscreenElement: any;

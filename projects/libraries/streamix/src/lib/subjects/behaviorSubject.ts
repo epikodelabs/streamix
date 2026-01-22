@@ -26,7 +26,6 @@ export type BehaviorSubject<T = any> = Stream<T> & {
 
 export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
   const id = generateStreamId();
-  let operationId = 0;
   let latestValue: T = initialValue;
   let isCompleted = false;
   let terminalItem: { kind: "complete" | "error"; error?: any; stamp: number } | null = null;
@@ -37,11 +36,11 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
   const next = (value: T) => {
     if (isCompleted) return;
     latestValue = value;
-    const opId = ++operationId;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
 
     scheduler.enqueue(() => {
-      const targets = Array.from(receivers).filter((r) => opId > r.subscribedAt);
+      // delivery is based on emission stamps; ensure we compare stamps
+      const targets = Array.from(receivers).filter((r) => stamp > r.subscribedAt);
       const promises: Promise<any>[] = [];
       withEmissionStamp(stamp, () => {
         for (const r of targets) {
@@ -83,6 +82,8 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       withEmissionStamp(stamp, () => {
         for (const r of targets) {
           promises.push(Promise.resolve(r.error(err)));
+          // also signal completion to match terminal semantics
+          promises.push(Promise.resolve(r.complete()));
         }
       });
       receivers.clear();
@@ -108,29 +109,46 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     const replayValue = latestValue;
     const replayStamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     
-    // We use a "fresh" operationId for future live values
-    const subscriptionTime = operationId;
-
-    const trackedReceiver: TrackedReceiver = { ...r, subscribedAt: subscriptionTime };
+    // Use the emission stamp as the subscription marker so delivery logic
+    // (which compares emission stamps) remains consistent across helpers.
+    // Mutate the receiver to attach `subscribedAt` so helpers that expect
+    // the property on the original receiver work correctly.
+    (r as any).subscribedAt = replayStamp;
+    const trackedReceiver = r as TrackedReceiver;
     receivers.add(trackedReceiver);
 
-    // Replay the current state to the new subscriber
-    scheduler.enqueue(() => {
-      // Safety check: if they unsubscribed or completed before this task ran
-      if (receivers.has(trackedReceiver) && !trackedReceiver.completed) {
+    // Replay the current state to the new subscriber immediately so
+    // async iterators see the value before returning.
+    try {
+      if (!r.completed && receivers.has(trackedReceiver)) {
         withEmissionStamp(replayStamp, () => r.next(replayValue));
       }
-    });
+    } catch (_) {}
 
-    return createSubscription(() => {
-      receivers.delete(trackedReceiver);
+    const baseSub = createSubscription(() => {
+      // Schedule completion via scheduler to preserve ordering semantics
       scheduler.enqueue(() => {
-        if (!trackedReceiver.completed) {
+        if (!r.completed) {
           const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
           withEmissionStamp(stamp, () => r.complete());
         }
+        receivers.delete(trackedReceiver);
       });
     });
+
+    const wrappedSub: Subscription = {
+      get unsubscribed() {
+        return baseSub.unsubscribed;
+      },
+      unsubscribe() {
+        // Remove receiver synchronously to prevent further deliveries
+        receivers.delete(trackedReceiver);
+        return baseSub.unsubscribe();
+      },
+      onUnsubscribe: baseSub.onUnsubscribe,
+    };
+
+    return wrappedSub;
   };
 
   return {

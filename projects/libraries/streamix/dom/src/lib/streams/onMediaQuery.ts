@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `true` or `false` whenever a CSS media
@@ -137,7 +137,7 @@ export function onMediaQuery(
   /* -------------------------------------------------- */
 
   subject[Symbol.asyncIterator] = () =>
-    createAsyncGenerator(r => subject.subscribe(r));
+    createAsyncIterator({ register: (r: Receiver<any>) => subject.subscribe(r) })();
 
   return subject;
 }
