@@ -1,9 +1,9 @@
 import { firstValueFrom } from "../converters";
+import { createAsyncIterator } from "../subjects/helpers";
 import {
   getCurrentEmissionStamp,
   getIteratorEmissionStamp,
   nextEmissionStamp,
-  setIteratorEmissionStamp,
   withEmissionStamp,
 } from "./emission";
 import {
@@ -119,266 +119,7 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
 }
 
 /* ========================================================================== */
-/* AsyncGenerator bridge (push -> pull)                                        */
-/* ========================================================================== */
-
-/**
- * Creates a pull-based async iterator view over a stream.
- *
- * This bridges the push-based subscription model with
- * the pull-based async-iterator protocol.
- *
- * Characteristics:
- * - Buffers values when the producer is faster than the consumer
- * - Propagates errors via iterator throws
- * - Guarantees subscription cleanup on completion, error, or early exit
- *
- * IMPORTANT (stamp-ordered terminals):
- * - complete/error are terminal EVENTS with stamps and must NOT overtake buffered
- *   values already queued for the iterator.
- */
-export function createAsyncGenerator<T = any>(
-  register: (receiver: Receiver<T>) => Subscription
-): AsyncIterator<T> {
-  let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
-  let rejectNext: ((error: any) => void) | null = null;
-
-  let completed = false;
-  let terminalError: any = null;
-
-  const queue: Array<{ value: T; stamp: number }> = [];
-
-  // Pending terminal is stamp-ordered; only surfaced when queue is drained.
-  let pendingTerminal:
-    | null
-    | { kind: "complete"; stamp: number }
-    | { kind: "error"; stamp: number; error: any } = null;
-
-  let subscription: Subscription | undefined;
-  let pendingUnsubscribe = false;
-
-  const ensureSubscription = () => {
-    if (subscription || completed || terminalError) return;
-    subscription = register(receiverCallbacks);
-    if (pendingUnsubscribe) {
-      const sub = subscription;
-      subscription = undefined;
-      pendingUnsubscribe = false;
-      sub?.unsubscribe();
-    }
-  };
-
-  const requestUnsubscribe = (): void => {
-    if (subscription) {
-      const sub = subscription;
-      subscription = undefined;
-      sub.unsubscribe();
-      return;
-    }
-    pendingUnsubscribe = true;
-  };
-
-  const flushTerminalIfReady = (): boolean => {
-    if (!pendingTerminal) return false;
-    if (queue.length > 0) return false;
-
-    const t = pendingTerminal;
-    pendingTerminal = null;
-
-    completed = true;
-
-    if (t.kind === "complete") {
-      if (resolveNext) {
-        setIteratorEmissionStamp(iterator as any, t.stamp);
-        const r = resolveNext;
-        resolveNext = null;
-        rejectNext = null;
-        r({ done: true, value: undefined });
-      }
-      requestUnsubscribe();
-      return true;
-    }
-
-    // error
-    terminalError = t.error;
-    if (rejectNext) {
-      setIteratorEmissionStamp(iterator as any, t.stamp);
-      const r = rejectNext;
-      resolveNext = null;
-      rejectNext = null;
-      r(t.error);
-    }
-    requestUnsubscribe();
-    return true;
-  };
-
-  const iterator: AsyncIterator<T> &
-    AsyncIterable<T> & {
-      __tryNext?: () => IteratorResult<T> | null;
-      __hasBufferedValues?: () => boolean;
-    } = {
-    async next(): Promise<IteratorResult<T>> {
-      if (terminalError) throw terminalError;
-
-      ensureSubscription();
-      if (terminalError) throw terminalError;
-
-      if (queue.length > 0) {
-        const item = queue.shift()!;
-        setIteratorEmissionStamp(iterator as any, item.stamp);
-
-        // Terminal events must not overtake buffered values.
-        flushTerminalIfReady();
-
-        return { done: false, value: item.value };
-      }
-
-      // If terminal is pending and buffer is empty, surface it now.
-      if (flushTerminalIfReady()) {
-        if (terminalError) throw terminalError;
-        return { done: true, value: undefined };
-      }
-
-      if (completed) {
-        return { done: true, value: undefined };
-      }
-
-      return await new Promise<IteratorResult<T>>((resolve, reject) => {
-        resolveNext = resolve;
-        rejectNext = reject;
-      });
-    },
-
-    async return(value?: any): Promise<IteratorResult<T>> {
-      // Early exit: consumer stops. This is not a stamp-ordered terminal from producer,
-      // but a consumer-driven cancellation. We mark completed and unsubscribe.
-      completed = true;
-
-      if (resolveNext) {
-        const r = resolveNext;
-        resolveNext = null;
-        rejectNext = null;
-        r({ done: true, value });
-      }
-
-      requestUnsubscribe();
-      return { done: true, value };
-    },
-
-    async throw(err?: any): Promise<IteratorResult<T>> {
-      terminalError = err;
-
-      if (rejectNext) {
-        const r = rejectNext;
-        resolveNext = null;
-        rejectNext = null;
-        r(err);
-      }
-
-      requestUnsubscribe();
-      throw err;
-    },
-
-    [Symbol.asyncIterator]() {
-      return this as any;
-    },
-  };
-
-  iterator.__tryNext = (): IteratorResult<T> | null => {
-    if (terminalError) throw terminalError;
-
-    ensureSubscription();
-    if (terminalError) throw terminalError;
-
-    if (queue.length > 0) {
-      const item = queue.shift()!;
-      setIteratorEmissionStamp(iterator as any, item.stamp);
-
-      flushTerminalIfReady();
-
-      return { done: false, value: item.value };
-    }
-
-    // Surface pending terminal synchronously when buffer is empty.
-    if (pendingTerminal && queue.length === 0) {
-      const t = pendingTerminal;
-      pendingTerminal = null;
-      completed = true;
-
-      if (t.kind === "complete") {
-        setIteratorEmissionStamp(iterator as any, t.stamp);
-        requestUnsubscribe();
-        return { done: true, value: undefined };
-      } else {
-        terminalError = t.error;
-        setIteratorEmissionStamp(iterator as any, t.stamp);
-        requestUnsubscribe();
-        throw t.error;
-      }
-    }
-
-    if (completed) {
-      return { done: true, value: undefined };
-    }
-
-    return null;
-  };
-
-  iterator.__hasBufferedValues = () => queue.length > 0;
-
-  const receiverCallbacks: Receiver<T> = {
-    next(value: T) {
-      if (completed || terminalError) return;
-
-      const currentStamp = getCurrentEmissionStamp();
-      const baseStamp = currentStamp ?? nextEmissionStamp();
-      const stamp = currentStamp === null ? -baseStamp : baseStamp;
-
-      if (resolveNext) {
-        setIteratorEmissionStamp(iterator as any, stamp);
-        const r = resolveNext;
-        resolveNext = null;
-        rejectNext = null;
-        r({ done: false, value });
-      } else {
-        queue.push({ value, stamp });
-      }
-    },
-
-    error(err: any) {
-      // Defer error until buffered values are drained (stamp-ordered terminal).
-      if (completed || terminalError || pendingTerminal) return;
-
-      const currentStamp = getCurrentEmissionStamp();
-      const stamp = currentStamp ?? nextEmissionStamp();
-
-      pendingTerminal = { kind: "error", stamp, error: err };
-
-      // If no buffered values, we can flush immediately (and wake waiter).
-      if (queue.length === 0) {
-        flushTerminalIfReady();
-      }
-    },
-
-    complete() {
-      // Defer completion until buffered values are drained (stamp-ordered terminal).
-      if (completed || terminalError || pendingTerminal) return;
-
-      const currentStamp = getCurrentEmissionStamp();
-      const stamp = currentStamp ?? nextEmissionStamp();
-
-      pendingTerminal = { kind: "complete", stamp };
-
-      if (queue.length === 0) {
-        flushTerminalIfReady();
-      }
-    },
-  };
-
-  (receiverCallbacks as any).__wantsRawValues = true;
-
-  return iterator;
-}
+/* AsyncGenerator bridge removed — consolidated to createAsyncIterator in subjects/helpers */
 
 /* ========================================================================== */
 /* Receiver scheduling wrapper                                                 */
@@ -487,6 +228,8 @@ async function drainIterator<T>(
     return false;
   };
 
+  let forwardedError = false;
+
   try {
     while (true) {
       if (iterator.__tryNext) {
@@ -512,6 +255,7 @@ async function drainIterator<T>(
       for (const { receiver, subscription } of getReceivers()) {
         if (!subscription.unsubscribed) {
           receiver.error?.(error);
+          forwardedError = true;
         }
       }
     }
@@ -522,7 +266,7 @@ async function drainIterator<T>(
       } catch {}
     }
 
-    if (!signal.aborted) {
+    if (!signal.aborted && !forwardedError) {
       for (const { receiver, subscription } of getReceivers()) {
         if (!subscription.unsubscribed) {
           receiver.complete?.();
@@ -607,7 +351,8 @@ export function createStream<T>(
     subscribe: (cb) => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(self),
     [Symbol.asyncIterator]: () => {
-      const it = createAsyncGenerator(registerReceiver);
+      const factory = createAsyncIterator({ register: registerReceiver });
+      const it = factory();
       (it as any).__streamix_streamId = id;
       return it;
     },
@@ -645,7 +390,8 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
     },
 
     [Symbol.asyncIterator]: () => {
-      const it = createAsyncGenerator(registerReceiver);
+      const factory = createAsyncIterator({ register: registerReceiver });
+      const it = factory();
       (it as any).__streamix_streamId = pipedStream.id;
       return it;
     },

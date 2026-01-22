@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Represents the current battery status.
@@ -113,7 +113,7 @@ export function onBattery(): Stream<BatteryState> {
    * ---------------------------------------------------------------------- */
 
   subject[Symbol.asyncIterator] = () =>
-    createAsyncGenerator(receiver => subject.subscribe(receiver));
+    createAsyncIterator({ register: (receiver: Receiver<BatteryState>) => subject.subscribe(receiver) })();
 
   subject.name = "onBattery";
   return subject;

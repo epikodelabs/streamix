@@ -6,7 +6,7 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "jasmine": "testify --headless --browser node",
+    "jasmine": "node scripts/run-jasmine.mjs",
     "jasmine:coverage": "testify --headless --browser node --coverage",
     "minify": "node terser.mjs && npx typegen",
     "clean": "eslint --config eslint.config.js --fix",

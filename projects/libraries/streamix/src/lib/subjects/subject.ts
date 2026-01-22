@@ -5,16 +5,12 @@ import {
   getCurrentEmissionStamp,
   nextEmissionStamp,
   pipeSourceThrough,
-  scheduler,
-  withEmissionStamp,
   type Operator,
-  type Receiver,
   type Stream,
-  type StrictReceiver,
-  type Subscription
+  type StrictReceiver
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { createAsyncIterator } from "./helpers";
+import { createAsyncIterator, createRegister, createTryCommit, type QueueItem } from "./helpers";
 
 export type Subject<T = any> = Stream<T> & {
   next(value: T): void;
@@ -26,112 +22,52 @@ export type Subject<T = any> = Stream<T> & {
 
 export function createSubject<T = any>(): Subject<T> {
   const id = generateStreamId();
-  let operationId = 0;
   let latestValue: T | undefined;
   let isCompleted = false;
-  let terminalItem: { kind: 'complete' | 'error', error?: any, stamp: number } | null = null;
 
-  type TrackedReceiver = StrictReceiver<T> & { subscribedAt: number };
-  const receivers = new Set<TrackedReceiver>();
+  const receivers = new Set<StrictReceiver<T>>();
+  const ready = new Set<StrictReceiver<T>>();
+  const queue: QueueItem<T>[] = [];
+  const terminalRef: { current: QueueItem<T> | null } = { current: null };
+
+  const setLatestValue = (v: T) => (latestValue = v);
+
+  const tryCommit = createTryCommit<T>({ receivers, ready, queue, setLatestValue });
+
+  const register = createRegister<T>({
+    receivers,
+    ready,
+    terminalRef,
+    createSubscription: (onUnsubscribe?: () => any) => createSubscription(onUnsubscribe),
+    tryCommit,
+  });
 
   const next = (value: T) => {
     if (isCompleted) return;
-    latestValue = value;
-    const opId = ++operationId;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-
-    scheduler.enqueue(() => {
-      if (receivers.size === 0) return;
-      const targets = Array.from(receivers).filter(r => opId > r.subscribedAt);
-      const promises: Promise<any>[] = [];
-      withEmissionStamp(stamp, () => {
-        for (const r of targets) {
-          promises.push(Promise.resolve(r.next(value)));
-        }
-      });
-      return Promise.allSettled(promises);
-    });
+    queue.push({ kind: 'next', value: value as any, stamp } as QueueItem<T>);
+    tryCommit();
   };
 
   const complete = () => {
     if (isCompleted) return;
     isCompleted = true;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    terminalItem = { kind: 'complete', stamp };
-
-    scheduler.enqueue(() => {
-      const targets = Array.from(receivers);
-      const promises: Promise<any>[] = [];
-      withEmissionStamp(stamp, () => {
-        for (const r of targets) {
-          promises.push(Promise.resolve(r.complete()));
-        }
-      });
-      receivers.clear();
-      return Promise.allSettled(promises);
-    });
+    // Record terminal and enqueue it so current receivers get the terminal
+    // delivery via the normal commit loop; also ensure late subscribers
+    // observe the terminal immediately via `terminalRef` in `register`.
+    terminalRef.current = { kind: 'complete', stamp } as QueueItem<T>;
+    queue.push({ kind: 'complete', stamp } as QueueItem<T>);
+    tryCommit();
   };
 
   const error = (err: any) => {
     if (isCompleted) return;
     isCompleted = true;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    terminalItem = { kind: 'error', error: err, stamp };
-
-    scheduler.enqueue(() => {
-      const targets = Array.from(receivers);
-      const promises: Promise<any>[] = [];
-      withEmissionStamp(stamp, () => {
-        for (const r of targets) {
-          promises.push(Promise.resolve(r.error(err)));
-        }
-      });
-      receivers.clear();
-      return Promise.allSettled(promises);
-    });
-  };
-
-  const register = (receiver: Receiver<T>): Subscription => {
-    const r = receiver as StrictReceiver<T>;
-    const trackedReceiver: TrackedReceiver = { ...r, subscribedAt: operationId };
-
-    if (terminalItem) {
-      const term = terminalItem;
-      scheduler.enqueue(() => {
-        const res = withEmissionStamp(term.stamp, () => {
-          if (term.kind === 'error') return r.error(term.error);
-          else return r.complete();
-        });
-
-        if (res && typeof (res as any).then === 'function') {
-          // Prevent unhandled rejection if the receiver's handler throws.
-          (res as Promise<any>).catch(() => {});
-        }
-      });
-      return createSubscription();
-    }
-
-    receivers.add(trackedReceiver);
-
-    Object.defineProperty(trackedReceiver, "completed", {
-      get() {
-        return r.completed;
-      },
-      enumerable: true,
-      configurable: true
-    });
-
-  return createSubscription(() => {
-      receivers.delete(trackedReceiver);
-      if (isCompleted) return;
-
-      scheduler.enqueue(() => {
-        if (!trackedReceiver.completed) {
-          const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-          withEmissionStamp(stamp, () => r.complete());
-        }
-      });
-  });
+    terminalRef.current = { kind: 'error', error: err, stamp } as QueueItem<T>;
+    queue.push({ kind: 'error', error: err, stamp } as QueueItem<T>);
+    tryCommit();
   };
 
   return {
