@@ -8,30 +8,28 @@ export type Scheduler = {
 };
 
 export function createScheduler(): Scheduler {
-  const tasks: Array<() => any> = [];
+  const tasks: Array<{ fn: () => any; stack?: string }> = [];
   const resolves: Array<(v: any) => void> = [];
   const rejects: Array<(e: any) => void> = [];
 
   let flushResolvers: Array<() => void> = [];
   let pumping = false;
-  
-  /**
-   * Tracks how many tasks are currently on the stack.
-   * If > 0, we are in a re-entrant state.
-   */
   let executionStack = 0;
 
-  const scheduleMicrotask = (cb: () => void) => queueMicrotask(cb);
-
+  /**
+   * Resolves any pending flush() calls if there is no more work.
+   * We check tasks.length and executionStack. We do NOT check 
+   * the 'pumping' flag here to avoid hanging during the transition 
+   * from pumping to idle.
+   */
   const resolveFlushIfIdle = (): void => {
-    scheduleMicrotask(() => {
-      // Ensure we are truly idle across a microtask turn
-      if (!pumping && tasks.length === 0 && flushResolvers.length > 0) {
+    if (tasks.length === 0 && executionStack === 0) {
+      if (flushResolvers.length > 0) {
         const current = flushResolvers;
         flushResolvers = [];
         for (const resolve of current) resolve();
       }
-    });
+    }
   };
 
   const pump = async (): Promise<void> => {
@@ -40,13 +38,15 @@ export function createScheduler(): Scheduler {
 
     try {
       while (tasks.length > 0) {
-        const task = tasks.shift()!;
+        const taskObj = tasks.shift()!;
         const resolve = resolves.shift()!;
         const reject = rejects.shift()!;
 
         try {
           executionStack++;
-          const result = task();
+          const result = taskObj.fn();
+          // If the task is a promise, we await it here.
+          // This is a yield point where other microtasks can run.
           const value = isPromiseLike(result) ? await result : result;
           resolve(value);
         } catch (err) {
@@ -55,8 +55,8 @@ export function createScheduler(): Scheduler {
           executionStack--;
         }
 
-        // Yield to allow microtask-queued tasks (like promise .thens) 
-        // to re-populate the queue before the next loop iteration.
+        // Forced yield to prevent starvation and allow 
+        // microtasks to populate the queue.
         await Promise.resolve();
       }
     } finally {
@@ -65,18 +65,11 @@ export function createScheduler(): Scheduler {
     }
   };
 
-  const ensurePump = (): void => {
-    if (!pumping) {
-      scheduleMicrotask(() => void pump());
-    }
-  };
-
   const enqueue = <T>(fn: () => Promise<T> | T): Promise<T> => {
     /**
      * RE-ENTRANCY LOGIC:
-     * If we are already executing a task (executionStack > 0), 
-     * we run this immediately. This prevents deadlocks in 
-     * Subject.next() -> Receiver.next() -> Unsubscribe() flows.
+     * If we are already executing a task, run this immediately.
+     * This prevents deadlocks during synchronous observer chains.
      */
     if (executionStack > 0) {
       try {
@@ -87,21 +80,35 @@ export function createScheduler(): Scheduler {
       }
     }
 
-    // Standard FIFO queuing
     return new Promise<T>((resolve, reject) => {
-      tasks.push(fn as any);
+      tasks.push({ fn: fn as any });
       resolves.push(resolve as any);
       rejects.push(reject as any);
-      ensurePump();
+
+      if (!pumping) {
+        // Start the pump on the next microtask turn.
+        queueMicrotask(() => void pump());
+      }
     });
   };
 
   const flush = (): Promise<void> => {
-    if (!pumping && tasks.length === 0) return Promise.resolve();
+    /**
+     * IDLE CHECK:
+     * If there are no tasks and no current execution, we are idle.
+     * We ignore the 'pumping' flag status to avoid the "exit gap" hang.
+     */
+    if (tasks.length === 0) {
+      return Promise.resolve();
+    }
+
     return new Promise<void>((resolve) => {
       flushResolvers.push(resolve);
-      ensurePump();
-      resolveFlushIfIdle();
+      
+      // If work exists but pump is off, start it.
+      if (!pumping && tasks.length > 0) {
+        void pump();
+      }
     });
   };
 
