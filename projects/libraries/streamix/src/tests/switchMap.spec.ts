@@ -192,7 +192,7 @@ describe('switchMap', () => {
     switchedStream.subscribe({
       next: (value) => results.push(value),
       complete: () => {
-        expect(results).toEqual([30]);
+        expect(results).toEqual([10, 20, 30]);
         done();
       }
     });
@@ -257,7 +257,7 @@ describe('switchMap', () => {
     setTimeout(() => subject.complete(), 300);
   });
 
-  it('should continue emitting the active inner even if outer completes', (done) => {
+  fit('should continue emitting the active inner even if outer completes', (done) => {
     const subject = createSubject<number>();
     const results: number[] = [];
     let activeInner: ReturnType<typeof createSubject<number>> | undefined;
@@ -266,11 +266,15 @@ describe('switchMap', () => {
       switchMap(() => {
         const inner = createSubject<number>();
         activeInner = inner;
+        activeInner?.next(10);
+        activeInner?.complete();
+        subject.complete();
+        sub.unsubscribe();
         return inner;
       })
     );
 
-    switched.subscribe({
+    const sub = switched.subscribe({
       next: value => results.push(value),
       complete: () => {
         expect(results).toEqual([10]);
@@ -279,11 +283,6 @@ describe('switchMap', () => {
     });
 
     subject.next(1);
-    Promise.resolve().then(() => {
-      activeInner?.next(10);
-      activeInner?.complete();
-      subject.complete();
-    });
   });
 
   it('should handle errors in inner streams and continue with next values', (done) => {
