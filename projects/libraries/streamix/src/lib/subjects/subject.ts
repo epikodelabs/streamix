@@ -98,10 +98,15 @@ export function createSubject<T = any>(): Subject<T> {
     if (terminalItem) {
       const term = terminalItem;
       scheduler.enqueue(() => {
-        withEmissionStamp(term.stamp, () => {
-          term.kind === 'error' ? r.error(term.error) : undefined;
-          r.complete()
+        const res = withEmissionStamp(term.stamp, () => {
+          if (term.kind === 'error') return r.error(term.error);
+          else return r.complete();
         });
+
+        if (res && typeof (res as any).then === 'function') {
+          // Prevent unhandled rejection if the receiver's handler throws.
+          (res as Promise<any>).catch(() => {});
+        }
       });
       return createSubscription();
     }
@@ -116,15 +121,17 @@ export function createSubject<T = any>(): Subject<T> {
       configurable: true
     });
 
-    return createSubscription(() => {
+  return createSubscription(() => {
       receivers.delete(trackedReceiver);
+      if (isCompleted) return;
+
       scheduler.enqueue(() => {
         if (!trackedReceiver.completed) {
           const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
           withEmissionStamp(stamp, () => r.complete());
         }
       });
-    });
+  });
   };
 
   return {

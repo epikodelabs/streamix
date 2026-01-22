@@ -229,12 +229,10 @@ describe('createSubject', () => {
     const err = new Error('late-error');
     subject.error(err);
 
-    await Promise.resolve();
-
     let caught: Error | null = null;
     subject.subscribe({ error: e => (caught = e as Error) });
 
-    await Promise.resolve();
+    await flushMicrotasks();
     expect(caught!.message).toBe('late-error');
   });
 

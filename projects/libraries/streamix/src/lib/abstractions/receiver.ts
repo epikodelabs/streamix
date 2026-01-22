@@ -53,7 +53,6 @@ export function createReceiver<T = any>(
 
     error: (err: any) => {
       if (_completed) return Promise.resolve();
-      _completed = true;
       const normalizedError = err instanceof Error ? err : new Error(String(err));
       
       return scheduler.enqueue(async () => {

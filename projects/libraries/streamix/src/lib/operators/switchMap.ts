@@ -42,7 +42,7 @@ export function switchMap<T = any, R = any>(
       }
     };
 
-    const subscribeToInner = async (
+    const subscribeToInner = (
       innerStream: Stream<R>,
       streamId: number,
       parentMeta?: { valueId: string; operatorIndex: number; operatorName: string }
@@ -53,13 +53,59 @@ export function switchMap<T = any, R = any>(
         currentSubscription = null;
       }
 
-      let pendingFinalize = false;
-      let nextSubscription: Subscription | null = null;
+      const iterator = eachValueFrom(innerStream);
 
-      nextSubscription = innerStream.subscribe({
-        next: (value) => {
-          if (streamId === currentInnerStreamId) {
-            let outputValue = value;
+      // Expose an unsubscribe wrapper so callers can cancel the iterator.
+      currentSubscription = {
+        unsubscribe() {
+          try {
+            (iterator as any).return && (iterator as any).return();
+          } catch (e) {
+            // ignore
+          }
+        },
+        unsubscribed: false
+      };
+
+      // Start async drain task — do not await here so subscribeToInner returns
+      // immediately (matching the previous subscribe-based behavior).
+      (async () => {
+        try {
+          for (;;) {
+            if (streamId !== currentInnerStreamId) return;
+
+            // Prefer synchronous drain when possible to avoid races where an
+            // inner reports completion before an already-buffered value is
+            // observed by the operator.
+            const tryNext = (iterator as any).__tryNext;
+            let res: IteratorResult<R> | null;
+
+            if (typeof tryNext === "function") {
+              try {
+                res = tryNext.call(iterator);
+              } catch (err) {
+                if (streamId !== currentInnerStreamId) return;
+                currentSubscription = null;
+                output.error(err);
+                return;
+              }
+              if (res === null) {
+                res = await iterator.next();
+              }
+            } else {
+              res = await iterator.next();
+            }
+
+            if (streamId !== currentInnerStreamId) return;
+
+            if (res.done) {
+              // active inner completed
+              currentSubscription = null;
+              checkComplete();
+              return;
+            }
+
+            let outputValue: any = res.value;
             if (parentMeta) {
               setIteratorMeta(
                 outputIterator,
@@ -76,36 +122,12 @@ export function switchMap<T = any, R = any>(
             }
             output.next(outputValue);
           }
-        },
-        error: (err) => {
+        } catch (err) {
           if (streamId !== currentInnerStreamId) return;
-          if (!nextSubscription) {
-            pendingFinalize = true;
-            output.error(err);
-            return;
-          }
           currentSubscription = null;
-          nextSubscription = null;
           output.error(err);
-        },
-        complete: () => {
-          if (streamId !== currentInnerStreamId) return;
-          if (!nextSubscription) {
-            pendingFinalize = true;
-            return;
-          }
-          currentSubscription = null;
-          nextSubscription = null;
-          checkComplete();
-        },
-      });
-
-      currentSubscription = nextSubscription;
-      if (pendingFinalize) {
-        currentSubscription = null;
-        nextSubscription = null;
-        checkComplete();
-      }
+        }
+      })();
     };
 
     (async () => {
