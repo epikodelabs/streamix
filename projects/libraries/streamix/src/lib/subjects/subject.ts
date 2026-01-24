@@ -9,6 +9,7 @@ import {
   type Stream,
   type StrictReceiver
 } from "../abstractions";
+import { scheduler } from "../abstractions/scheduler";
 import { firstValueFrom } from "../converters";
 import { createAsyncIterator, createRegister, createTryCommit, type QueueItem } from "./helpers";
 
@@ -38,36 +39,45 @@ export function createSubject<T = any>(): Subject<T> {
     receivers,
     ready,
     terminalRef,
-    createSubscription: (onUnsubscribe?: () => any) => createSubscription(onUnsubscribe),
+    createSubscription: (onUnsubscribe?: () => any) => {
+      return createSubscription(async () => {
+        if (onUnsubscribe) {
+          return scheduler.enqueue(() => onUnsubscribe());
+        }
+      });
+    },
     tryCommit,
   });
 
   const next = (value: T) => {
     if (isCompleted) return;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    queue.push({ kind: 'next', value: value as any, stamp } as QueueItem<T>);
-    tryCommit();
+    scheduler.enqueue(() => {
+      queue.push({ kind: 'next', value: value as any, stamp } as QueueItem<T>);
+      tryCommit();
+    });
   };
 
   const complete = () => {
     if (isCompleted) return;
-    isCompleted = true;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    // Record terminal and enqueue it so current receivers get the terminal
-    // delivery via the normal commit loop; also ensure late subscribers
-    // observe the terminal immediately via `terminalRef` in `register`.
+    isCompleted = true;
     terminalRef.current = { kind: 'complete', stamp } as QueueItem<T>;
-    queue.push({ kind: 'complete', stamp } as QueueItem<T>);
-    tryCommit();
+    scheduler.enqueue(() => {
+      queue.push({ kind: 'complete', stamp } as QueueItem<T>);
+      tryCommit();
+    });
   };
 
   const error = (err: any) => {
     if (isCompleted) return;
-    isCompleted = true;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    isCompleted = true;
     terminalRef.current = { kind: 'error', error: err, stamp } as QueueItem<T>;
-    queue.push({ kind: 'error', error: err, stamp } as QueueItem<T>);
-    tryCommit();
+    scheduler.enqueue(() => {
+      queue.push({ kind: 'error', error: err, stamp } as QueueItem<T>);
+      tryCommit();
+    });
   };
 
   return {

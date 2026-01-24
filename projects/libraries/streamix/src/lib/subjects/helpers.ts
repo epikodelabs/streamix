@@ -20,6 +20,7 @@ export type QueueItem<T> =
   | { kind: "complete"; stamp: number }
   | { kind: "error"; error: Error; stamp: number };
 
+
 export function createTryCommit<T>(opts: {
   receivers: Set<StrictReceiver<T>>;
   ready: Set<StrictReceiver<T>>;
@@ -27,7 +28,6 @@ export function createTryCommit<T>(opts: {
   setLatestValue: (v: T) => void;
 }) {
   const { receivers, ready, queue, setLatestValue } = opts;
-
   let isCommitting = false;
   let pendingCommit = false;
 
@@ -38,83 +38,47 @@ export function createTryCommit<T>(opts: {
     }
 
     isCommitting = true;
-      try {
-      // Always drain the queue. Even when there are no receivers, subjects
-      // still need to update internal state (e.g. `.value`) and drop
-      // undeliverable emissions to avoid leaking queued items.
-      //
-      // Exception: if we're currently inside an emission context and there are
-      // no receivers yet, keep items queued so a receiver that registers as
-      // part of the same synchronous emission chain (e.g. switchMap creating
-      // and wiring an inner Subject) can still observe those emissions.
+    try {
       while (queue.length > 0) {
         if (receivers.size === 0) {
           const ctx = getCurrentEmissionStamp();
           if (ctx !== null && ctx !== undefined) break;
         }
+        
         const item = queue[0];
-        // Deliver only to receivers that were registered before the
-        // emission stamp to avoid replaying past values to late subscribers.
-        // Use the full receivers set (not the `ready` subset) so that all
-        // current subscribers receive the emission even if some returned
-        // backpressure Promises.
-        const targets = receivers.size === 0 ? [] : Array.from(receivers).filter((r) => {
-          if (!receivers.has(r)) return false;
-          const s = Number((r as any).subscribedAt as any);
-          const st = Number(item.stamp as any);
-          return Number.isFinite(s) && Number.isFinite(st) ? s <= st : true;
+        const targets = Array.from(receivers).filter((r) => {
+          const s = (r as any).subscribedAt;
+          return s <= item.stamp;
         });
-        // processing item
 
-        queue.shift();
+        if (item.kind === "next") {
+          queue.shift(); // Remove only after we are sure we are processing it
+          setLatestValue(item.value);
+          let pendingAsync = 0;
 
-        const stamp = item.stamp;
-        let pendingAsync = 0;
-
-        withEmissionStamp(stamp, () => {
-          if (item.kind === "next") {
-            setLatestValue(item.value);
-
+          withEmissionStamp(item.stamp, () => {
             for (const r of targets) {
-              if (!receivers.has(r)) {
-                continue;
-              }
-
               const result = r.next(item.value);
-
               if (isPromiseLike(result)) {
                 pendingAsync++;
-                // Do not remove from `ready` here; receivers handle their
-                // own buffering. When the Promise settles we re-run
-                // tryCommit in case there are queued items to process.
-                result.finally(() => {
-                  if (!r.completed && receivers.has(r)) {
-                    tryCommit();
-                  }
-                });
-              } else if (!r.completed && receivers.has(r)) {
-                // Receiver completed synchronously but still active; keep it ready.
+                result.finally(() => { if (receivers.has(r)) tryCommit(); });
               }
             }
-          } else {
-            for (const r of targets) {
-              if (item.kind === "complete") {
-                r.complete();
-              } else {
-                // Streamix terminal semantics: error is followed by completion.
-                r.error(item.error);
-                r.complete();
-              }
-            }
-            receivers.clear();
-            ready.clear();
-            queue.length = 0;
-            return;
-          }
-        });
+          });
 
-        if (pendingAsync > 0) {
-          break;
+          if (pendingAsync > 0) break; 
+        } else {
+          // Terminal items: clear queue and notify
+          queue.shift();
+          withEmissionStamp(item.stamp, () => {
+            for (const r of targets) {
+              if (item.kind === "complete") r.complete();
+              else { r.error(item.error); r.complete(); }
+            }
+          });
+          receivers.clear();
+          ready.clear();
+          return;
         }
       }
     } finally {
@@ -157,11 +121,10 @@ export function createRegister<T>(opts: {
 
     // Record registration stamp so this receiver does not receive
     // previously queued emissions.
-    try {
-      (r as any).subscribedAt = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    } catch (_) {
-      (r as any).subscribedAt = nextEmissionStamp();
-    }
+    // IMPORTANT: always use a fresh stamp (even inside an emission context)
+    // so a subscription created while an emission is in-flight does not
+    // receive that same emission.
+    (r as any).subscribedAt = nextEmissionStamp();
 
     receivers.add(r);
     ready.add(r);

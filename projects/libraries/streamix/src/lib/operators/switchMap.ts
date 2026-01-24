@@ -1,28 +1,17 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
-import { eachValueFrom, fromAny } from '../converters';
-import { createSubject } from "../subjects";
+import type { MaybePromise, Operator, Stream, Subscription } from "@epikodelabs/streamix";
+import {
+  createOperator,
+  createSubject,
+  eachValueFrom,
+  fromAny,
+  getIteratorMeta,
+  isPromiseLike,
+  setIteratorMeta, setValueMeta
+} from "@epikodelabs/streamix";
 
 /**
- * Creates a stream operator that maps each value from the source stream to a new inner stream
- * and "switches" to emitting values from the most recent inner stream, canceling the previous one.
- *
- * For each value from the source:
- * 1. The `project` function is called with the value and its index.
- * 2. The returned value is normalized into a stream using {@link fromAny}.
- * 3. The operator subscribes to the new inner stream and immediately cancels any previous active inner stream.
- * 4. Only values from the latest inner stream are emitted.
- *
- * This operator is useful for scenarios such as:
- * - Type-ahead search where only the latest query results are relevant.
- * - Handling user events where new events invalidate previous operations.
- *
- * @template T The type of values in the source stream.
- * @template R The type of values emitted by the inner and output streams.
- * @param project A function that maps a source value and its index to either:
- *   - a {@link Stream<R>},
- *   - a {@link MaybePromise<R>} (value or promise),
- *   - or an array of `R`.
- * @returns An {@link Operator} instance suitable for use in a stream's `pipe` method.
+ * Projects each source value to a Stream which is merged into the output Stream,
+ * emitting values only from the most recently projected Stream.
  */
 export function switchMap<T = any, R = any>(
   project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
@@ -36,100 +25,112 @@ export function switchMap<T = any, R = any>(
     let currentInnerStreamId = 0;
     let index = 0;
 
+    /**
+     * Checks if the overall operator should complete.
+     * Only completes if the source is done AND no inner stream is active.
+     */
     const checkComplete = () => {
       if (inputCompleted && !currentSubscription) {
         output.complete();
       }
     };
 
-    const subscribeToInner = (
+    const subscribeToInner = async (
       innerStream: Stream<R>,
       streamId: number,
-      parentMeta?: { valueId: string; operatorIndex: number; operatorName: string }
+      parentMeta?: any
     ) => {
-      // Cancel previous inner stream
-      if (currentSubscription) {
-        currentSubscription.unsubscribe();
-        currentSubscription = null;
+      // 1. Unsubscribe from previous inner stream
+      const previousSubscription = currentSubscription;
+      if (previousSubscription) {
+        void previousSubscription.unsubscribe();
       }
 
       const iterator = eachValueFrom(innerStream);
 
-      // Expose an unsubscribe wrapper so callers can cancel the iterator.
-      currentSubscription = {
+      // 2. Create and immediately set the new subscription
+      const thisSubscription: Subscription = {
         unsubscribe() {
           try {
-            (iterator as any).return && (iterator as any).return();
+            return (iterator as any).return?.();
           } catch (e) {
-            // ignore
+            return Promise.resolve();
           }
         },
         unsubscribed: false
       };
 
-      // Start async drain task — do not await here so subscribeToInner returns
-      // immediately (matching the previous subscribe-based behavior).
+      // Set BEFORE starting the async loop
+      currentSubscription = thisSubscription;
+
+      // 3. Start the drain loop for this inner stream
       (async () => {
         try {
-          for (;;) {
-            if (streamId !== currentInnerStreamId) return;
-
-            // Prefer synchronous drain when possible to avoid races where an
-            // inner reports completion before an already-buffered value is
-            // observed by the operator.
-            const tryNext = (iterator as any).__tryNext;
-            let res: IteratorResult<R> | null;
-
-            if (typeof tryNext === "function") {
-              try {
-                res = tryNext.call(iterator);
-              } catch (err) {
-                if (streamId !== currentInnerStreamId) return;
-                currentSubscription = null;
-                output.error(err);
-                return;
-              }
-              if (res === null) {
-                res = await iterator.next();
-              }
-            } else {
-              res = await iterator.next();
-            }
-
-            if (streamId !== currentInnerStreamId) return;
-
-            if (res.done) {
-              // active inner completed
-              currentSubscription = null;
-              checkComplete();
+          while (true) {
+            // ID Guard: If a new inner stream has started, kill this loop
+            if (streamId !== currentInnerStreamId || thisSubscription.unsubscribed) {
               return;
             }
 
-            let outputValue: any = res.value;
+            // Prefer synchronous pulling via __tryNext if available
+            const tryNext = (iterator as any).__tryNext;
+            let res: IteratorResult<R> | null = null;
+
+            if (typeof tryNext === "function") {
+              res = tryNext.call(iterator);
+            }
+
+            // Fall back to async pull if no sync value is ready
+            if (res === null) {
+              res = await iterator.next();
+            }
+
+            // Re-check ID after await
+            if (streamId !== currentInnerStreamId || thisSubscription.unsubscribed) {
+              return;
+            }
+
+            if (res.done) {
+              // Only clear currentSubscription if we are still the active generation
+              if (currentSubscription === thisSubscription) {
+                currentSubscription = null;
+                checkComplete();
+              }
+              return;
+            }
+
+            // Handle metadata for tracing/debugging
+            // Replace this.index and this.name with the actual operator metadata
+            const operatorIndex = (this as any).index ?? 0; // The position in the .pipe() chain
+            const operatorName = "switchMap";
+            let outputValue = res.value;
+            
             if (parentMeta) {
               setIteratorMeta(
                 outputIterator,
                 { valueId: parentMeta.valueId, kind: "expand" },
-                parentMeta.operatorIndex,
-                parentMeta.operatorName
+                operatorIndex,
+                operatorName
               );
               outputValue = setValueMeta(
                 outputValue,
                 { valueId: parentMeta.valueId, kind: "expand" },
-                parentMeta.operatorIndex,
-                parentMeta.operatorName
+                operatorIndex,
+                operatorName
               );
             }
             output.next(outputValue);
           }
         } catch (err) {
-          if (streamId !== currentInnerStreamId) return;
-          currentSubscription = null;
-          output.error(err);
+          if (streamId === currentInnerStreamId) {
+            currentSubscription = null;
+            output.error(err);
+          }
         }
       })();
     };
 
+    // Main source consumption loop
     (async () => {
       try {
         while (true) {
@@ -138,10 +139,13 @@ export function switchMap<T = any, R = any>(
 
           const streamId = ++currentInnerStreamId;
           const parentMeta = getIteratorMeta(source);
+          
           const projected = project(result.value, index++);
           const normalized = isPromiseLike(projected) ? await projected : projected;
           const innerStream = fromAny(normalized);
-          await subscribeToInner(innerStream, streamId, parentMeta);
+
+          // Initiate inner subscription (non-blocking)
+          subscribeToInner(innerStream, streamId, parentMeta);
         }
 
         inputCompleted = true;

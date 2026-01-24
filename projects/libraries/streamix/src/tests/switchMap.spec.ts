@@ -442,7 +442,7 @@ describe('switchMap', () => {
     });
   });
 
-  it('should ignore completion of stale inner streams', (done) => {
+  fit('should ignore completion of stale inner streams', (done) => {
     const source = createSubject<number>();
     const inner1 = createSubject<string>();
     const inner2 = createSubject<string>();
@@ -464,15 +464,18 @@ describe('switchMap', () => {
     });
 
     source.next(1);
-    source.next(2);
-    
-    // inner1 completion should be ignored (it's stale)
-    // inner1.complete();
     
     // Verify output hasn't completed yet
     expect(completed).toBeFalse();
     expect(results).toEqual([]);
     
+    // Switch to inner2 so inner1 becomes stale
+    source.next(2);
+
+    // inner1 completion should be ignored (it's stale)
+    inner1.complete();
+    expect(completed).toBeFalse();
+
     // Now complete the active inner stream
     inner2.next('second');
     

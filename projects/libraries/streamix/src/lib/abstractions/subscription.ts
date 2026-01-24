@@ -93,7 +93,7 @@ export function createSubscription(
       if (!_unsubscribed) {
         _unsubscribed = true;
         try {
-          scheduler.enqueue(async () => await this.onUnsubscribe?.());
+          await scheduler.enqueue(async () => await this.onUnsubscribe?.());
         } catch (err) {
           console.error("Error during unsubscribe callback:", err);
         }
