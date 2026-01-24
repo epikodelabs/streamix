@@ -98,18 +98,33 @@ export function createScheduler(): Scheduler {
      * If there are no tasks and no current execution, we are idle.
      * We ignore the 'pumping' flag status to avoid the "exit gap" hang.
      */
-    if (tasks.length === 0) {
-      return Promise.resolve();
-    }
+    const waitForDrain = () =>
+      new Promise<void>((resolve) => {
+        flushResolvers.push(resolve);
 
-    return new Promise<void>((resolve) => {
-      flushResolvers.push(resolve);
-      
-      // If work exists but pump is off, start it.
-      if (!pumping && tasks.length > 0) {
-        void pump();
+        // If work exists but pump is off, start it.
+        if (!pumping && tasks.length > 0) {
+          void pump();
+        }
+      });
+
+    // `enqueue()` may execute work immediately when called re-entrantly
+    // (executionStack > 0). That immediate work can await promises that
+    // resolve on the microtask queue without adding new scheduler tasks.
+    // To make `flush()` reliable as "wait until callbacks settle", we yield
+    // at least one microtask turn after the queue drains.
+    return (async () => {
+      if (tasks.length > 0) {
+        await waitForDrain();
       }
-    });
+
+      await Promise.resolve();
+
+      if (tasks.length > 0) {
+        await waitForDrain();
+        await Promise.resolve();
+      }
+    })();
   };
 
   const awaitNonBlocking = <T>(promise: Promise<T>): Promise<T> => {
