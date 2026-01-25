@@ -15,16 +15,15 @@ describe('concatMap', () => {
     const mockStream$ = from(values).pipe(concatMap((value: any) => (value === '2' ? errorInnerStream() : project(value))));
 
     const emittedValues: any[] = [];
-    const errors: any[] = [];
 
     mockStream$.subscribe({
       next: (value: any) => emittedValues.push(value),
-      error: (error: any) => errors.push(error),
-      complete: () => {
+      error: (error: any) => {
         expect(emittedValues).toEqual(['innerValue1']);
-        expect(errors[0].message).toEqual('Inner Stream Error'); // Only second emission should throw
+        expect(error.message).toEqual('Inner Stream Error'); // Only second emission should throw
         done();
-      }
+      },
+      complete: () => done.fail('Stream completed unexpectedly'),
     });
   });
 

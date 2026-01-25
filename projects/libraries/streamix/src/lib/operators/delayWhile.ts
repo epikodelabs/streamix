@@ -76,7 +76,7 @@ export const delayWhile = <T = any>(
         output.error(err);
         return;
       } finally {
-        output.complete();
+        if (!output.completed()) output.complete();
       }
     })();
 

@@ -116,9 +116,9 @@ export function delayUntil<T = any, R = any>(
         notifierSub.unsubscribe();
 
         if (notifierError) {
-          output.error(notifierError);
+          if (!output.completed()) output.error(notifierError);
         } else {
-          output.complete();
+          if (!output.completed()) output.complete();
         }
       }
     })();

@@ -347,7 +347,7 @@ describe('createReplaySubject', () => {
     afterErrorSubject.error(new Error('boom'));
     afterErrorSubject.complete();
     await shortDelay();
-    expect(completeAfterError).toBe(1);
+    expect(completeAfterError).toBe(0);
   });
 
   it('supports query, async iterator, observer, and type-safe helpers', async () => {
