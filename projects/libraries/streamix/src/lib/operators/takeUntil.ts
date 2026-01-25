@@ -45,9 +45,9 @@ export function takeUntil<T = any>(
 
     let gateStamp: number | null = null;   // ONLY for notifier emit
     let notifierError: any = null;
+    let notifierErrorStamp: number | null = null;
 
     let pending: { value: T; stamp: number } | null = null;
-    let throwAfterPending = false;
 
     const stampOf = (it: any) => {
       const s = getIteratorEmissionStamp(it);
@@ -68,6 +68,7 @@ export function takeUntil<T = any>(
       } catch (err) {
         // notifier ERROR → NO source cancellation
         notifierError = err;
+        notifierErrorStamp = stampOf(notifierIt);
       }
     })();
 
@@ -94,21 +95,17 @@ export function takeUntil<T = any>(
             return { done: false, value };
           }
 
-          // 2) throw notifier error after pending value
-          if (throwAfterPending) {
-            throwAfterPending = false;
-            throw notifierError;
-          }
-
+          // 2) notifier ERROR: flush buffered source values that happened
+          // before the notifier error stamp, then throw.
           if (notifierError) {
             const buffered = tryDrainBufferedValue();
             if (buffered && !buffered.done) {
               const stamp = stampOf(sourceIt);
-              pending = { value: buffered.value, stamp };
-              throwAfterPending = true;
-              continue;
+              if (notifierErrorStamp === null || stamp < notifierErrorStamp) {
+                setIteratorEmissionStamp(iterator as any, stamp);
+                return { done: false, value: buffered.value };
+              }
             }
-
             throw notifierError;
           }
 
@@ -128,9 +125,11 @@ export function takeUntil<T = any>(
 
           // 5) notifier errored AFTER pull → yield value, then error
           if (notifierError) {
-            pending = { value: r.value, stamp };
-            throwAfterPending = true;
-            continue;
+            if (notifierErrorStamp === null || stamp < notifierErrorStamp) {
+              pending = { value: r.value, stamp };
+              continue;
+            }
+            throw notifierError;
           }
         
           // 6) normal path
@@ -143,7 +142,6 @@ export function takeUntil<T = any>(
         try { sourceIt.return?.(); } catch {}
         try { notifierIt.return?.(); } catch {}
         pending = null;
-        throwAfterPending = false;
         return { done: true, value: undefined };
       },
 
@@ -151,7 +149,6 @@ export function takeUntil<T = any>(
         try { sourceIt.return?.(); } catch {}
         try { notifierIt.return?.(); } catch {}
         pending = null;
-        throwAfterPending = false;
         throw err;
       },
     };

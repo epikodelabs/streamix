@@ -70,11 +70,11 @@ describe('stream', () => {
       error: (err) => {
         events.push('error');
         expect(err.message).toBe('boom');
+        expect(events).toEqual(['error']);
+        done();
       },
       complete: () => {
-        events.push('complete');
-        expect(events).toEqual(['error', 'complete']);
-        done();
+        done.fail('Should not complete after error');
       }
     });
   });

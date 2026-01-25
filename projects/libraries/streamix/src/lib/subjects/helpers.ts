@@ -211,6 +211,7 @@ export function createAsyncIterator<T>(opts: {
     let iteratorReceiver!: StrictReceiver<T>;
 
     const ensureSubscribed = () => {
+      if (completed) return;
       if (!sub) sub = register(iteratorReceiver);
     };
 
@@ -238,10 +239,23 @@ export function createAsyncIterator<T>(opts: {
           setIteratorEmissionStamp(iterator, stamp);
           // Resolves the backpressure promise returned by receiver.next().
           backpressureQueue.shift()?.();
+          if (result.done) {
+            const unsubscribePromise = sub?.unsubscribe();
+            sub = null;
+            if (unsubscribePromise && isPromiseLike(unsubscribePromise)) {
+              unsubscribePromise.catch(() => {});
+            }
+          }
           return Promise.resolve(result);
         }
 
         if (completed) {
+          const unsubscribePromise = sub?.unsubscribe();
+          sub = null;
+          // Ensure teardown has a chance to run, but don't block iteration.
+          if (unsubscribePromise && isPromiseLike(unsubscribePromise)) {
+            unsubscribePromise.catch(() => {});
+          }
           return Promise.resolve(DONE);
         }
 
@@ -251,9 +265,9 @@ export function createAsyncIterator<T>(opts: {
         });
       },
 
-      return() {
+      async return() {
         completed = true;
-        sub?.unsubscribe();
+        const unsubscribePromise = sub?.unsubscribe();
         sub = null;
 
         if (pullResolve) {
@@ -266,12 +280,16 @@ export function createAsyncIterator<T>(opts: {
         for (const resolve of backpressureQueue) resolve();
         backpressureQueue.length = 0;
 
+        try {
+          await unsubscribePromise;
+        } catch {
+        }
         return Promise.resolve(DONE);
       },
 
-      throw(err) {
+      async throw(err) {
         completed = true;
-        sub?.unsubscribe();
+        const unsubscribePromise = sub?.unsubscribe();
         sub = null;
 
         if (pullReject) {
@@ -283,6 +301,10 @@ export function createAsyncIterator<T>(opts: {
         for (const resolve of backpressureQueue) resolve();
         backpressureQueue.length = 0;
 
+        try {
+          await unsubscribePromise;
+        } catch {
+        }
         return Promise.reject(err);
       }
     };
@@ -304,10 +326,26 @@ export function createAsyncIterator<T>(opts: {
         const { result, stamp } = queue.shift()!;
         setIteratorEmissionStamp(iterator, stamp);
         backpressureQueue.shift()?.();
+        if (result.done) {
+          const unsubscribePromise = sub?.unsubscribe();
+          sub = null;
+          if (unsubscribePromise && isPromiseLike(unsubscribePromise)) {
+            unsubscribePromise.catch(() => {});
+          }
+        }
         return result;
       }
 
-      return completed ? DONE : null;
+      if (completed) {
+        const unsubscribePromise = sub?.unsubscribe();
+        sub = null;
+        if (unsubscribePromise && isPromiseLike(unsubscribePromise)) {
+          unsubscribePromise.catch(() => {});
+        }
+        return DONE;
+      }
+
+      return null;
     };
 
     const _iteratorReceiver: StrictReceiver<T> = {

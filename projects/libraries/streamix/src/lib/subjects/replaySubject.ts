@@ -192,12 +192,14 @@ export function createReplaySubject<T = any>(
     const replayStart =
       capacity === Infinity ? 0 : Math.max(0, replay.length - capacity);
     const snapshot = replay.slice(replayStart);
+    const terminal = terminalRef.current;
 
     let pullResolve: ((v: IteratorResult<T>) => void) | null = null;
     let pullReject: ((e: any) => void) | null = null;
     const localQueue: Array<{ result: IteratorResult<T>; stamp: number }> = [];
     const backpressureQueue: Array<() => void> = [];
     let pendingError: { err: any; stamp: number } | null = null;
+    let terminalError: { err: any; stamp: number } | null = null;
     let completed = false;
     let sub: Subscription | null = null;
 
@@ -217,6 +219,13 @@ export function createReplaySubject<T = any>(
           return Promise.resolve(result);
         }
 
+        if (terminalError) {
+          const { err, stamp } = terminalError;
+          terminalError = null;
+          setIteratorEmissionStamp(iterator, stamp);
+          return Promise.reject(err);
+        }
+
         if (completed) return Promise.resolve(DONE);
 
         return new Promise((res, rej) => {
@@ -227,7 +236,7 @@ export function createReplaySubject<T = any>(
 
       async return() {
         completed = true;
-        sub?.unsubscribe();
+        await sub?.unsubscribe();
         sub = null;
 
         if (pullResolve) {
@@ -244,7 +253,7 @@ export function createReplaySubject<T = any>(
 
       async throw(err: any) {
         completed = true;
-        sub?.unsubscribe();
+        await sub?.unsubscribe();
         sub = null;
 
         if (pullReject) {
@@ -345,7 +354,16 @@ export function createReplaySubject<T = any>(
       localQueue.push({ result: { done: false, value: it.value }, stamp: it.stamp });
     }
 
-    sub = registerLive(iteratorReceiver);
+    if (terminal) {
+      if (terminal.kind === "complete") {
+        completed = true;
+      } else if (terminal.kind === "error") {
+        terminalError = { err: terminal.error, stamp: terminal.stamp };
+        completed = true;
+      }
+    } else {
+      sub = registerLive(iteratorReceiver);
+    }
     return iterator;
   };
 
