@@ -163,6 +163,18 @@ async function drainIterator<T>(
       }
     }
   } finally {
+    // Ensure subscriptions are torn down on terminal signals (complete/error).
+    // Many tests (and users) rely on "completion implies cleanup" semantics,
+    // and leaving subscriptions active creates unbounded receiver growth.
+    const entries = getReceivers();
+    for (const { subscription } of entries) {
+      if (!subscription.unsubscribed) {
+        try {
+          void subscription.unsubscribe();
+        } catch {}
+      }
+    }
+
     if (iterator.return) {
       try {
         await iterator.return();
@@ -170,7 +182,7 @@ async function drainIterator<T>(
     }
 
     if (!signal.aborted && !forwardedError) {
-      for (const { receiver, subscription } of getReceivers()) {
+      for (const { receiver, subscription } of entries) {
         if (!subscription.unsubscribed) {
           receiver.complete?.();
         }
