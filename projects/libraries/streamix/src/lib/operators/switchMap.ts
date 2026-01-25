@@ -6,7 +6,8 @@ import {
   fromAny,
   getIteratorMeta,
   isPromiseLike,
-  setIteratorMeta, setValueMeta
+  setIteratorMeta,
+  setValueMeta
 } from "@epikodelabs/streamix";
 
 /**
@@ -35,125 +36,180 @@ export function switchMap<T = any, R = any>(
       }
     };
 
-    const subscribeToInner = async (
+    const subscribeToInner = (
       innerStream: Stream<R>,
       streamId: number,
       parentMeta?: any
     ) => {
-      // 1. Unsubscribe from previous inner stream
       const previousSubscription = currentSubscription;
+
+      let unsubscribed = false;
+      let innerSubscription: Subscription | null = null;
+
+      const thisSubscription: Subscription = {
+        unsubscribe() {
+          if (unsubscribed) return Promise.resolve();
+          unsubscribed = true;
+          return innerSubscription?.unsubscribe() ?? Promise.resolve();
+        },
+        get unsubscribed() {
+          return unsubscribed;
+        }
+      };
+
+      // Set BEFORE subscribing so synchronous inner completion can't
+      // "re-activate" this subscription after it already completed.
+      currentSubscription = thisSubscription;
+
+      // Unsubscribe the previous inner after the new one is marked active.
       if (previousSubscription) {
         void previousSubscription.unsubscribe();
       }
 
-      const iterator = eachValueFrom(innerStream);
-
-      // 2. Create and immediately set the new subscription
-      const thisSubscription: Subscription = {
-        unsubscribe() {
-          try {
-            return (iterator as any).return?.();
-          } catch (e) {
-            return Promise.resolve();
+      innerSubscription = innerStream.subscribe({
+        next: (value) => {
+          if (streamId !== currentInnerStreamId || thisSubscription.unsubscribed) {
+            return;
           }
+
+          const operatorIndex = (this as any).index ?? 0;
+          const operatorName = "switchMap";
+          let outputValue = value;
+          if (parentMeta) {
+            setIteratorMeta(
+              outputIterator,
+              { valueId: parentMeta.valueId, kind: "expand" },
+              operatorIndex,
+              operatorName
+            );
+            outputValue = setValueMeta(
+              outputValue,
+              { valueId: parentMeta.valueId, kind: "expand" },
+              operatorIndex,
+              operatorName
+            );
+          }
+          output.next(outputValue);
         },
-        unsubscribed: false
-      };
 
-      // Set BEFORE starting the async loop
-      currentSubscription = thisSubscription;
-
-      // 3. Start the drain loop for this inner stream
-      (async () => {
-        try {
-          while (true) {
-            // ID Guard: If a new inner stream has started, kill this loop
-            if (streamId !== currentInnerStreamId || thisSubscription.unsubscribed) {
-              return;
-            }
-
-            // Prefer synchronous pulling via __tryNext if available
-            const tryNext = (iterator as any).__tryNext;
-            let res: IteratorResult<R> | null = null;
-
-            if (typeof tryNext === "function") {
-              res = tryNext.call(iterator);
-            }
-
-            // Fall back to async pull if no sync value is ready
-            if (res === null) {
-              res = await iterator.next();
-            }
-
-            // Re-check ID after await
-            if (streamId !== currentInnerStreamId || thisSubscription.unsubscribed) {
-              return;
-            }
-
-            if (res.done) {
-              // Only clear currentSubscription if we are still the active generation
-              if (currentSubscription === thisSubscription) {
-                currentSubscription = null;
-                checkComplete();
-              }
-              return;
-            }
-
-            // Handle metadata for tracing/debugging
-            // Replace this.index and this.name with the actual operator metadata
-            const operatorIndex = (this as any).index ?? 0; // The position in the .pipe() chain
-            const operatorName = "switchMap";
-            let outputValue = res.value;
-            
-            if (parentMeta) {
-              setIteratorMeta(
-                outputIterator,
-                { valueId: parentMeta.valueId, kind: "expand" },
-                operatorIndex,
-                operatorName
-              );
-              outputValue = setValueMeta(
-                outputValue,
-                { valueId: parentMeta.valueId, kind: "expand" },
-                operatorIndex,
-                operatorName
-              );
-            }
-            output.next(outputValue);
+        error: (err) => {
+          if (streamId !== currentInnerStreamId || thisSubscription.unsubscribed) {
+            return;
           }
-        } catch (err) {
-          if (streamId === currentInnerStreamId) {
-            currentSubscription = null;
-            output.error(err);
+          currentSubscription = null;
+          output.error(err);
+        },
+ 
+        complete: () => {
+          if (streamId !== currentInnerStreamId || thisSubscription.unsubscribed) {
+            return;
           }
+          currentSubscription = null;
+          checkComplete();
         }
-      })();
+      });
     };
 
-    // Main source consumption loop
-    (async () => {
-      try {
-        while (true) {
-          const result = await source.next();
-          if (result.done) break;
+    const drainOuter = () => {
+      const tryNext = (source as any).__tryNext as undefined | (() => IteratorResult<T> | null);
 
-          const streamId = ++currentInnerStreamId;
-          const parentMeta = getIteratorMeta(source);
-          
-          const projected = project(result.value, index++);
-          const normalized = isPromiseLike(projected) ? await projected : projected;
-          const innerStream = fromAny(normalized);
+      // Fallback for iterators without buffering support.
+      if (typeof tryNext !== "function") {
+        (async () => {
+          try {
+            while (true) {
+              const result = await source.next();
+              if (result.done) break;
 
-          // Initiate inner subscription (non-blocking)
-          subscribeToInner(innerStream, streamId, parentMeta);
+              const streamId = ++currentInnerStreamId;
+              const parentMeta = getIteratorMeta(source);
+
+              let projected: any;
+              try {
+                projected = project(result.value, index++);
+              } catch (err) {
+                output.error(err);
+                return;
+              }
+
+              if (isPromiseLike(projected)) {
+                const capturedId = streamId;
+                Promise.resolve(projected).then(
+                  (normalized) => {
+                    if (capturedId !== currentInnerStreamId) return;
+                    subscribeToInner(
+                      fromAny<R>(normalized as any),
+                      capturedId,
+                      parentMeta
+                    );
+                  },
+                  (err) => {
+                    if (capturedId !== currentInnerStreamId) return;
+                    output.error(err);
+                  }
+                );
+              } else {
+                subscribeToInner(fromAny<R>(projected as any), streamId, parentMeta);
+              }
+            }
+
+            inputCompleted = true;
+            checkComplete();
+          } catch (err) {
+            output.error(err);
+          }
+        })();
+        return;
+      }
+
+      while (true) {
+        let result: IteratorResult<T> | null;
+        try {
+          result = tryNext.call(source);
+        } catch (err) {
+          output.error(err);
+          return;
         }
 
-        inputCompleted = true;
-        checkComplete();
-      } catch (err) {
-        output.error(err);
+        if (!result) return;
+
+        if (result.done) {
+          inputCompleted = true;
+          checkComplete();
+          return;
+        }
+
+        const streamId = ++currentInnerStreamId;
+        const parentMeta = getIteratorMeta(source);
+
+        let projected: any;
+        try {
+          projected = project(result.value, index++);
+        } catch (err) {
+          output.error(err);
+          return;
+        }
+
+        if (isPromiseLike(projected)) {
+          const capturedId = streamId;
+          Promise.resolve(projected).then(
+            (normalized) => {
+              if (capturedId !== currentInnerStreamId) return;
+              subscribeToInner(fromAny<R>(normalized as any), capturedId, parentMeta);
+            },
+            (err) => {
+              if (capturedId !== currentInnerStreamId) return;
+              output.error(err);
+            }
+          );
+        } else {
+          subscribeToInner(fromAny<R>(projected as any), streamId, parentMeta);
+        }
       }
-    })();
+    };
+
+    (source as any).__onPush = drainOuter;
+    drainOuter();
 
     return outputIterator;
   });

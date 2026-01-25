@@ -1,16 +1,19 @@
 import { isPromiseLike } from "./operator"; // Adjust path as needed
+import { createLock, type SimpleLock } from "../primitives/lock";
 
 export type Scheduler = {
   enqueue: <T>(fn: () => Promise<T> | T) => Promise<T>;
   flush: () => Promise<void>;
   await: <T>(promise: Promise<T>) => Promise<T>;
   delay: (ms: number) => Promise<void>;
+  lock: SimpleLock;
 };
 
 export function createScheduler(): Scheduler {
   const tasks: Array<{ fn: () => any; stack?: string }> = [];
   const resolves: Array<(v: any) => void> = [];
   const rejects: Array<(e: any) => void> = [];
+  const lock = createLock();
 
   let flushResolvers: Array<() => void> = [];
   let pumping = false;
@@ -55,9 +58,12 @@ export function createScheduler(): Scheduler {
           executionStack--;
         }
 
-        // Forced yield to prevent starvation and allow 
-        // microtasks to populate the queue.
-        await Promise.resolve();
+        // Yield only if more work is already queued. Yielding when the queue is
+        // empty creates a "gap" where `pumping === true` but new work won't run
+        // until the next microtask, which can break same-tick operator chains.
+        if (tasks.length > 0) {
+          await Promise.resolve();
+        }
       }
     } finally {
       pumping = false;
@@ -86,8 +92,11 @@ export function createScheduler(): Scheduler {
       rejects.push(reject as any);
 
       if (!pumping) {
-        // Start the pump on the next microtask turn.
-        queueMicrotask(() => void pump());
+        // Start the pump immediately. `pump()` is async, but calling it will
+        // execute synchronously until its first `await`, which means simple
+        // synchronous tasks (like stream emissions) can propagate within the
+        // current tick.
+        void pump();
       }
     });
   };
@@ -140,7 +149,7 @@ export function createScheduler(): Scheduler {
     return awaitNonBlocking(new Promise((res) => setTimeout(res, ms)));
   };
 
-  return { enqueue, flush, await: awaitNonBlocking, delay };
+  return { enqueue, flush, await: awaitNonBlocking, delay, lock };
 }
 
 export const scheduler = createScheduler();
