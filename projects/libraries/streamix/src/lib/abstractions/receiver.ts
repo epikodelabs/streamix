@@ -85,16 +85,6 @@ export function createReceiver<T = any>(
             }
           } finally {
             _completed = true;
-            try {
-              const compResult = target.complete?.();
-              if (isPromiseLike(compResult)) await compResult;
-            } catch (err2) {
-              try {
-                console.error('Unhandled error in complete handler:', err2);
-              } catch (_) {
-                /* ignore logging failures */
-              }
-            }
           }
       });
     },

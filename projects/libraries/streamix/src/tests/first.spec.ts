@@ -38,8 +38,10 @@ describe('first', () => {
       next: () => {
         done.fail("Should not emit value");
       },
-      error: (err) => expect(err.message).toBe("No elements in sequence"),
-      complete: () => { done(); }
+      error: (err) => {
+        expect(err.message).toBe("No elements in sequence");
+        done();
+      },
     });
   });
 
@@ -66,8 +68,10 @@ describe('first', () => {
       next: () => {
         done.fail("should not emit value");
       },
-      error: (err) => expect(err.message).toBe("No elements in sequence"),
-      complete: () => { done(); }
+      error: (err) => {
+        expect(err.message).toBe("No elements in sequence");
+        done();
+      },
     });
   });
 });

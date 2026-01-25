@@ -86,7 +86,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
       } catch (err) {
         output.error(err);
       } finally {
-        output.complete();
+        if (!output.completed()) output.complete();
       }
     })();
 

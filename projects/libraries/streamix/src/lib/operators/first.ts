@@ -22,8 +22,17 @@ import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromise
 export const first = <T = any>(predicate?: (value: T) => MaybePromise<boolean>) =>
   createOperator<T, T>('first', function (this: Operator, source) {
     let found = false;
-    let firstValue: T | undefined;
     let sourceDone = false;
+    let stopped = false;
+
+    const stopSource = async () => {
+      if (stopped) return;
+      stopped = true;
+      try {
+        await source.return?.();
+      } catch {
+      }
+    };
 
     return {
       next: async () => {
@@ -39,6 +48,7 @@ export const first = <T = any>(predicate?: (value: T) => MaybePromise<boolean>) 
           const result = await source.next();
           if (result.done) {
             sourceDone = true;
+            await stopSource();
             throw new Error("No elements in sequence");
           }
 
@@ -47,12 +57,22 @@ export const first = <T = any>(predicate?: (value: T) => MaybePromise<boolean>) 
           const matches = predicate ? (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) : predicateResult;
           if (matches) {
             found = true;
-            firstValue = value;
-            return NEXT(firstValue!);
+            await stopSource();
+            return NEXT(value);
           }
         }
 
         return DONE;
-      }
+      },
+
+      return: async () => {
+        await stopSource();
+        return DONE;
+      },
+
+      throw: async (err: any) => {
+        await stopSource();
+        throw err;
+      },
     };
   });

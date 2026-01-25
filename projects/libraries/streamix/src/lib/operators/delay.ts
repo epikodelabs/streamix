@@ -53,7 +53,7 @@ export function delay<T = any>(ms: MaybePromise<number>) {
       } catch (err) {
         output.error(err);
       } finally {
-        output.complete();
+        if (!output.completed()) output.complete();
       }
     })();
 

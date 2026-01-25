@@ -225,13 +225,14 @@ export function createStream<T>(
       });
     });
 
-    scheduler.enqueue(() => {
-      activeSubscriptions = [...activeSubscriptions, { receiver: wrapped, subscription }];
+    // IMPORTANT: register synchronously so operators like switchMap can
+    // subscribe/unsubscribe inner streams in the same tick without racing the
+    // scheduler queue. Receiver callbacks are still scheduled by `wrapReceiver`.
+    activeSubscriptions = [...activeSubscriptions, { receiver: wrapped, subscription }];
 
-      if (!isRunning) {
-        startMulticastLoop();
-      }
-    });
+    if (!isRunning) {
+      startMulticastLoop();
+    }
 
     return subscription;
   };
@@ -249,7 +250,7 @@ export function createStream<T>(
     subscribe: (cb) => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(self),
     [Symbol.asyncIterator]: () => {
-      const factory = createAsyncIterator({ register: registerReceiver });
+      const factory = createAsyncIterator({ register: registerReceiver, lazy: true });
       const it = factory();
       (it as any).__streamix_streamId = id;
       return it;

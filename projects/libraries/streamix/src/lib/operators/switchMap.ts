@@ -1,14 +1,13 @@
-import type { MaybePromise, Operator, Stream, Subscription } from "@epikodelabs/streamix";
+import type { MaybePromise, Operator, Stream, Subscription } from "../abstractions";
 import {
   createOperator,
-  createSubject,
-  eachValueFrom,
-  fromAny,
   getIteratorMeta,
   isPromiseLike,
   setIteratorMeta,
   setValueMeta
-} from "@epikodelabs/streamix";
+} from "../abstractions";
+import { eachValueFrom, fromAny } from "../converters";
+import { createSubject } from "../subjects";
 
 /**
  * Projects each source value to a Stream which is merged into the output Stream,
@@ -25,6 +24,7 @@ export function switchMap<T = any, R = any>(
     let inputCompleted = false;
     let currentInnerStreamId = 0;
     let index = 0;
+    let stopped = false;
 
     /**
      * Checks if the overall operator should complete.
@@ -106,110 +106,105 @@ export function switchMap<T = any, R = any>(
           }
           currentSubscription = null;
           checkComplete();
-        }
-      });
-    };
+         }
+       });
+     };
 
-    const drainOuter = () => {
-      const tryNext = (source as any).__tryNext as undefined | (() => IteratorResult<T> | null);
+    const processOuterValue = (value: T) => {
+      const streamId = ++currentInnerStreamId;
+      const parentMeta = getIteratorMeta(source);
 
-      // Fallback for iterators without buffering support.
-      if (typeof tryNext !== "function") {
-        (async () => {
-          try {
-            while (true) {
-              const result = await source.next();
-              if (result.done) break;
-
-              const streamId = ++currentInnerStreamId;
-              const parentMeta = getIteratorMeta(source);
-
-              let projected: any;
-              try {
-                projected = project(result.value, index++);
-              } catch (err) {
-                output.error(err);
-                return;
-              }
-
-              if (isPromiseLike(projected)) {
-                const capturedId = streamId;
-                Promise.resolve(projected).then(
-                  (normalized) => {
-                    if (capturedId !== currentInnerStreamId) return;
-                    subscribeToInner(
-                      fromAny<R>(normalized as any),
-                      capturedId,
-                      parentMeta
-                    );
-                  },
-                  (err) => {
-                    if (capturedId !== currentInnerStreamId) return;
-                    output.error(err);
-                  }
-                );
-              } else {
-                subscribeToInner(fromAny<R>(projected as any), streamId, parentMeta);
-              }
-            }
-
-            inputCompleted = true;
-            checkComplete();
-          } catch (err) {
-            output.error(err);
-          }
-        })();
+      let projected: any;
+      try {
+        projected = project(value, index++);
+      } catch (err) {
+        output.error(err);
         return;
       }
 
-      while (true) {
-        let result: IteratorResult<T> | null;
-        try {
-          result = tryNext.call(source);
-        } catch (err) {
-          output.error(err);
-          return;
-        }
-
-        if (!result) return;
-
-        if (result.done) {
-          inputCompleted = true;
-          checkComplete();
-          return;
-        }
-
-        const streamId = ++currentInnerStreamId;
-        const parentMeta = getIteratorMeta(source);
-
-        let projected: any;
-        try {
-          projected = project(result.value, index++);
-        } catch (err) {
-          output.error(err);
-          return;
-        }
-
-        if (isPromiseLike(projected)) {
-          const capturedId = streamId;
-          Promise.resolve(projected).then(
-            (normalized) => {
-              if (capturedId !== currentInnerStreamId) return;
-              subscribeToInner(fromAny<R>(normalized as any), capturedId, parentMeta);
-            },
-            (err) => {
-              if (capturedId !== currentInnerStreamId) return;
-              output.error(err);
-            }
-          );
-        } else {
-          subscribeToInner(fromAny<R>(projected as any), streamId, parentMeta);
-        }
+      if (isPromiseLike(projected)) {
+        const capturedId = streamId;
+        Promise.resolve(projected).then(
+          (normalized) => {
+            if (stopped || capturedId !== currentInnerStreamId) return;
+            subscribeToInner(fromAny<R>(normalized as any), capturedId, parentMeta);
+          },
+          (err) => {
+            if (stopped || capturedId !== currentInnerStreamId) return;
+            output.error(err);
+          }
+        );
+      } else {
+        subscribeToInner(fromAny<R>(projected as any), streamId, parentMeta);
       }
     };
 
-    (source as any).__onPush = drainOuter;
-    drainOuter();
+    const tryNext = (source as any).__tryNext as undefined | (() => IteratorResult<T> | null);
+
+    if (typeof tryNext === "function") {
+      const drain = () => {
+        while (!stopped) {
+          let result: IteratorResult<T> | null;
+          try {
+            result = tryNext.call(source);
+          } catch (err) {
+            output.error(err);
+            return;
+          }
+
+          if (!result) return;
+          if (result.done) {
+            inputCompleted = true;
+            checkComplete();
+            return;
+          }
+
+          processOuterValue(result.value);
+        }
+      };
+
+      (source as any).__onPush = drain;
+      drain();
+    } else {
+      (async () => {
+        try {
+          while (!stopped) {
+            const result = await source.next();
+            if (result.done) break;
+            processOuterValue(result.value);
+          }
+
+          inputCompleted = true;
+          checkComplete();
+        } catch (err) {
+          output.error(err);
+        }
+      })();
+    }
+
+    const baseReturn = outputIterator.return?.bind(outputIterator);
+    const baseThrow = outputIterator.throw?.bind(outputIterator);
+
+    (outputIterator as any).return = async () => {
+      stopped = true;
+      try {
+        await currentSubscription?.unsubscribe();
+      } finally {
+        currentSubscription = null;
+      }
+      return baseReturn ? baseReturn(undefined as any) : { done: true, value: undefined };
+    };
+
+    (outputIterator as any).throw = async (err: any) => {
+      stopped = true;
+      try {
+        await currentSubscription?.unsubscribe();
+      } finally {
+        currentSubscription = null;
+      }
+      if (baseThrow) return baseThrow(err);
+      throw err;
+    };
 
     return outputIterator;
   });

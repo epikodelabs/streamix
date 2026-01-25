@@ -72,7 +72,8 @@ describe('shareReplay', () => {
       complete: () => { completed = true; },
     });
 
-    await waitFor(() => errorCount === 2 && completed);
+    await waitFor(() => errorCount === 2);
+    expect(completed).toBeFalse();
   });
 
   it('should support async bufferSize and replay the last N values', async () => {

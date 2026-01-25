@@ -88,7 +88,6 @@ export function createTryCommit<T>(opts: {
               if (item.kind === "complete") r.complete();
               else {
                 r.error(item.error);
-                r.complete();
               }
             }
           });
@@ -129,7 +128,6 @@ export function createRegister<T>(opts: {
         const err = item.error;
         withEmissionStamp(item.stamp, () => {
           r.error(err);
-          r.complete();
         });
       }
       return createSubscription();
@@ -184,8 +182,19 @@ export function createRegister<T>(opts: {
 
 export function createAsyncIterator<T>(opts: {
   register: (receiver: Receiver<T>) => Subscription;
+  /**
+   * When `true`, the iterator does not register with the source until the
+   * consumer actually pulls (`next()`/`__tryNext()`).
+   *
+   * Streams should generally use `lazy: true` to avoid creating hidden
+   * subscriptions when an iterator is constructed but never consumed.
+   *
+   * Subjects should generally use `lazy: false` so operators that eagerly
+   * emit into an internal Subject can buffer values for downstream consumers.
+   */
+  lazy?: boolean;
 }) {
-  const { register } = opts;
+  const { register, lazy = false } = opts;
 
   // IMPORTANT: return a *fresh* iterator per call. The old implementation
   // registered a receiver eagerly during subject creation, which could
@@ -199,6 +208,12 @@ export function createAsyncIterator<T>(opts: {
     let completed = false;
     let sub: Subscription | null = null;
 
+    let iteratorReceiver!: StrictReceiver<T>;
+
+    const ensureSubscribed = () => {
+      if (!sub) sub = register(iteratorReceiver);
+    };
+
     const iterator: AsyncIterator<T> & {
       // Non-standard helpers used by internal Stream piping/tests.
       __tryNext?: () => IteratorResult<T> | null;
@@ -209,7 +224,7 @@ export function createAsyncIterator<T>(opts: {
       __onPush?: () => void;
     } = {
       next() {
-        if (!sub) sub = register(iteratorReceiver);
+        ensureSubscribed();
 
         if (pendingError) {
           const { err, stamp } = pendingError;
@@ -272,9 +287,12 @@ export function createAsyncIterator<T>(opts: {
       }
     };
 
-    iterator.__hasBufferedValues = () => queue.length > 0 || pendingError != null || completed;
+    iterator.__hasBufferedValues = () =>
+      queue.length > 0 || pendingError != null || completed;
 
     iterator.__tryNext = () => {
+      ensureSubscribed();
+
       if (pendingError) {
         const { err, stamp } = pendingError;
         pendingError = null;
@@ -292,7 +310,7 @@ export function createAsyncIterator<T>(opts: {
       return completed ? DONE : null;
     };
 
-    const iteratorReceiver: StrictReceiver<T> = {
+    const _iteratorReceiver: StrictReceiver<T> = {
       next(value: T) {
         if (completed) return;
         const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
@@ -303,12 +321,17 @@ export function createAsyncIterator<T>(opts: {
           pullResolve = pullReject = null;
           setIteratorEmissionStamp(iterator, stamp);
           r(result);
+          iterator.__onPush?.();
           return;
         }
 
         queue.push({ result, stamp });
         // Give consumers a chance to drain synchronously from the buffer.
-        iterator.__onPush?.();
+        if (typeof iterator.__onPush === "function") {
+          iterator.__onPush();
+          return;
+        }
+
         // Producer backpressure: block the producer until the consumer pulls.
         return new Promise<void>((resolve) => backpressureQueue.push(resolve));
       },
@@ -351,6 +374,15 @@ export function createAsyncIterator<T>(opts: {
         return completed;
       }
     };
+
+    iteratorReceiver = _iteratorReceiver;
+
+    // Subjects rely on buffering: many operators push into an internal Subject
+    // immediately during `apply()`, before the downstream consumer starts
+    // awaiting `next()`. Eager registration ensures those pushes are buffered.
+    if (!lazy) {
+      ensureSubscribed();
+    }
 
     return iterator;
   };

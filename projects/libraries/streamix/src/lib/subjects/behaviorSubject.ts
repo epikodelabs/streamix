@@ -82,8 +82,6 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       withEmissionStamp(stamp, () => {
         for (const r of targets) {
           promises.push(Promise.resolve(r.error(err)));
-          // also signal completion to match terminal semantics
-          promises.push(Promise.resolve(r.complete()));
         }
       });
       receivers.clear();
@@ -98,8 +96,8 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       const term = terminalItem;
       scheduler.enqueue(() => {
         withEmissionStamp(term.stamp, () => {
-          if (term.kind === 'error') r.error(term.error);
-          r.complete();
+          if (term.kind === "complete") r.complete();
+          else if (term.kind === "error") r.error(term.error);
         });
       });
       return createSubscription();
