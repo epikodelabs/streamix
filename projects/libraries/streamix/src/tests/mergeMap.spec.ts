@@ -1,4 +1,4 @@
-import { delay, EMPTY, filter, from, map, mergeMap, take, timer } from '@epikodelabs/streamix';
+import { createSubject, delay, EMPTY, filter, from, map, mergeMap, of, take, timer } from '@epikodelabs/streamix';
 
 describe('mergeMap', () => {
   it('should merge emissions from inner streams correctly', (done) => {
@@ -170,6 +170,170 @@ describe('mergeMap', () => {
         expect(results).toEqual([2, 4, 6]); // Inner streams complete in order
         done();
       },
+    });
+  });
+
+  describe('edge cases', () => {
+    it('should run all rapid emissions concurrently', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+      const startTimes: number[] = [];
+
+      const merged = source.pipe(
+        mergeMap((val) => {
+          startTimes.push(Date.now());
+          return new Promise<number>((resolve) => {
+            setTimeout(() => resolve(val * 10), (4 - val) * 20);
+          });
+        })
+      );
+
+      merged.subscribe({
+        next: (val) => results.push(val),
+        complete: () => {
+          // Results should be in completion order, not emission order
+          expect(results).toEqual([30, 20, 10]);
+          // All should start nearly simultaneously
+          const maxDiff = Math.max(...startTimes) - Math.min(...startTimes);
+          expect(maxDiff).toBeLessThan(50);
+          done();
+        }
+      });
+
+      source.next(1);
+      source.next(2);
+      source.next(3);
+      source.complete();
+    });
+
+    it('should handle mix of sync and async inners concurrently', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+
+      const merged = source.pipe(
+        mergeMap((val) => {
+          if (val % 2 === 0) {
+            return of(val * 10); // sync
+          }
+          return new Promise<number>((resolve) => {
+            setTimeout(() => resolve(val * 10), 50);
+          });
+        })
+      );
+
+      merged.subscribe({
+        next: (val) => results.push(val),
+        complete: () => {
+          // Sync values first, then async
+          expect(results).toEqual([20, 40, 10, 30]);
+          done();
+        }
+      });
+
+      source.next(1); // async
+      source.next(2); // sync
+      source.next(3); // async
+      source.next(4); // sync
+      source.complete();
+    });
+
+    it('should continue other inners when one errors', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+
+      const merged = source.pipe(
+        mergeMap((val) => {
+          return new Promise<number>((resolve, reject) => {
+            setTimeout(() => {
+              if (val === 2) {
+                reject(new Error('Error at 2'));
+              } else {
+                resolve(val * 10);
+              }
+            }, val * 20);
+          });
+        })
+      );
+
+      merged.subscribe({
+        next: (val) => results.push(val),
+        error: (err) => {
+          expect(err.message).toBe('Error at 2');
+          // First value completes before error
+          expect(results).toEqual([10]);
+          done();
+        }
+      });
+
+      source.next(1);
+      source.next(2);
+      source.next(3);
+      source.complete();
+    });
+
+    it('should handle rapid emissions with varying inner durations', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+
+      const merged = source.pipe(
+        mergeMap((val, index) => {
+          const delayMs = index === 0 ? 100 : index === 1 ? 50 : 10;
+          return new Promise<number>((resolve) => {
+            setTimeout(() => resolve(val * 10), delayMs);
+          });
+        })
+      );
+
+      merged.subscribe({
+        next: (val) => results.push(val),
+        complete: () => {
+          // Should complete in reverse order of delays
+          expect(results).toEqual([30, 20, 10]);
+          done();
+        }
+      });
+
+      source.next(1); // 100ms
+      source.next(2); // 50ms
+      source.next(3); // 10ms
+      source.complete();
+    });
+
+    it('should handle unsubscribe with multiple active inners', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+      const completions: number[] = [];
+
+      const merged = source.pipe(
+        mergeMap((val) => {
+          return new Promise<number>((resolve) => {
+            setTimeout(() => {
+              completions.push(val);
+              resolve(val * 10);
+            }, val * 30);
+          });
+        })
+      );
+
+      const sub = merged.subscribe({
+        next: (val) => {
+          results.push(val);
+          if (val === 10) {
+            sub.unsubscribe();
+          }
+        }
+      });
+
+      source.next(1);
+      source.next(2);
+      source.next(3);
+
+      setTimeout(() => {
+        expect(results).toEqual([10]);
+        // Unsubscribe stops delivery, but does not cancel already-started work.
+        expect(completions).toEqual([1, 2, 3]);
+        done();
+      }, 150);
     });
   });
 });

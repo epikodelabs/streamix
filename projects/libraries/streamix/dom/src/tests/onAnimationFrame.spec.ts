@@ -78,35 +78,41 @@ idescribe('onAnimationFrame', () => {
   it('should cancel animation frame on unsubscribe', (done) => {
     const originalRAF = (globalThis as any).requestAnimationFrame;
     const originalCancel = (globalThis as any).cancelAnimationFrame;
-    let capturedId: number | null = null;
-    let cancelCalled = false;
+    const requestedIds: number[] = [];
+    let cancelledIds: number[] = [];
+    let frameCounter = 0;
 
-    // Mock RAF to capture the ID
+    // Mock RAF to capture the ID and invoke the callback
     (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
-      const id = originalRAF(cb);
-      capturedId = id;
+      const id = frameCounter++;
+      requestedIds.push(id);
+      // Invoke callback once immediately to ensure frame loop starts
+      if (requestedIds.length === 1) {
+        cb(performance.now());
+      }
+      // Return the ID (don't actually schedule more frames)
       return id;
     };
 
     // Mock cancel to track calls
     (globalThis as any).cancelAnimationFrame = (id: number) => {
-      cancelCalled = true;
-      originalCancel(id);
+      cancelledIds.push(id);
     };
 
     const stream = onAnimationFrame();
     const subscription = stream.subscribe(() => {});
 
+    // Give it a moment for the RAF to be called
     setTimeout(() => {
       subscription.unsubscribe();
-      expect(cancelCalled).toBe(true);
-      expect(capturedId).not.toBeNull();
+      expect(cancelledIds.length).toBeGreaterThan(0);
+      expect(requestedIds.length).toBeGreaterThan(0);
       
       // Restore originals
       (globalThis as any).requestAnimationFrame = originalRAF;
       (globalThis as any).cancelAnimationFrame = originalCancel;
       done();
-    }, 20);
+    }, 0);
   });
 
   it('should share the same RAF loop for multiple subscribers', async () => {

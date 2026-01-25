@@ -144,39 +144,28 @@ export function createRegister<T>(opts: {
     ready.add(r);
     tryCommit();
 
-    // Wrap the created subscription so that deletion from the `receivers`
-    // and `ready` sets happens synchronously when `unsubscribe()` is
-    // invoked. The underlying `createSubscription` schedules the
-    // provided cleanup via the scheduler; we still delegate to it for
-    // completing the receiver and running `tryCommit` in the scheduled
-    // cleanup, but remove the receiver immediately so no in-flight
-    // emissions target it after unsubscribe.
+    // Schedule receiver completion via the subscription's onUnsubscribe, but
+    // remove the receiver from the delivery sets synchronously so that values
+    // pushed after `unsubscribe()` are not delivered.
     const baseSub = createSubscription(() => {
       const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
       withEmissionStamp(stamp, () => r.complete());
       tryCommit();
     });
 
-    const wrapped: Subscription = {
-      get unsubscribed() {
-        return baseSub.unsubscribed;
-      },
-      unsubscribe() {
-        // Ensure removal is synchronous so unsubscribing prevents
-        // any subsequent deliveries in the current commit loop.
+    const baseUnsubscribe = baseSub.unsubscribe.bind(baseSub);
+    let removed = false;
+
+    baseSub.unsubscribe = () => {
+      if (!removed) {
+        removed = true;
         receivers.delete(r);
         ready.delete(r);
-        return baseSub.unsubscribe();
-      },
-      get onUnsubscribe() {
-        return baseSub.onUnsubscribe;
-      },
-      set onUnsubscribe(cb) {
-        baseSub.onUnsubscribe = cb;
-      },
+      }
+      return baseUnsubscribe();
     };
 
-    return wrapped;
+    return baseSub;
   };
 }
 

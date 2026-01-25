@@ -482,4 +482,164 @@ describe('switchMap', () => {
     inner2.complete();
     source.complete();
   });
+
+  describe('edge cases', () => {
+    it('should handle rapid successive emissions with sync inners', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+
+      const switched = source.pipe(
+        switchMap(val => from([val * 10, val * 100]))
+      );
+
+      switched.subscribe({
+        next: val => results.push(val),
+        complete: () => {
+          // Only last emission should complete
+          expect(results).toEqual([30, 300]);
+          done();
+        }
+      });
+
+      // Rapid emissions - only last one should complete
+      source.next(1);
+      source.next(2);
+      source.next(3);
+      source.complete();
+    });
+
+    it('should handle rapid emissions with mixed sync/async inners', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+
+      const switched = source.pipe(
+        switchMap(val => {
+          if (val === 3) {
+            // Async inner
+            return new Promise<number>(resolve => {
+              setTimeout(() => resolve(val * 10), 50);
+            });
+          }
+          // Sync inner
+          return of(val * 10);
+        })
+      );
+
+      switched.subscribe({
+        next: val => results.push(val),
+        complete: () => {
+          // Only the async result from value 3
+          expect(results).toEqual([30]);
+          done();
+        }
+      });
+
+      source.next(1);
+      source.next(2);
+      source.next(3);
+      setTimeout(() => source.complete(), 100);
+    });
+
+    it('should ignore emissions from stale inners after rapid switching', (done) => {
+      const source = createSubject<number>();
+      const inner1 = createSubject<string>();
+      const inner2 = createSubject<string>();
+      const inner3 = createSubject<string>();
+      const results: string[] = [];
+
+      const switched = source.pipe(
+        switchMap(val => val === 1 ? inner1 : val === 2 ? inner2 : inner3)
+      );
+
+      switched.subscribe({
+        next: val => results.push(val),
+        complete: () => {
+          expect(results).toEqual(['c1', 'c2']);
+          done();
+        }
+      });
+
+      source.next(1);
+      source.next(2);
+      source.next(3);
+
+      // Stale inners should be ignored
+      inner1.next('a1');
+      inner2.next('b1');
+
+      // Only active inner emissions should pass through
+      inner3.next('c1');
+      inner3.next('c2');
+
+      inner1.complete();
+      inner2.complete();
+      inner3.complete();
+      source.complete();
+    });
+
+    it('should handle unsubscribe during rapid inner switching', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+      let completionCount = 0;
+
+      const switched = source.pipe(
+        switchMap(val => {
+          const inner = createSubject<number>();
+          setTimeout(() => {
+            inner.next(val * 10);
+            inner.complete();
+            completionCount++;
+          }, val * 20);
+          return inner;
+        })
+      );
+
+      const sub = switched.subscribe({
+        next: val => {
+          results.push(val);
+          if (val === 30) {
+            sub.unsubscribe();
+          }
+        }
+      });
+
+      source.next(1);
+      source.next(2);
+      source.next(3);
+
+      setTimeout(() => {
+        expect(results).toEqual([30]);
+        // Unsubscribe stops delivery but does not cancel already-scheduled work.
+        expect(completionCount).toBe(3);
+        done();
+      }, 150);
+    });
+
+    it('should handle errors in rapid succession', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+
+      const switched = source.pipe(
+        switchMap(val => {
+          if (val === 3) {
+            throw new Error('Error at 3');
+          }
+          return of(val * 10);
+        })
+      );
+
+      switched.subscribe({
+        next: val => results.push(val),
+        error: err => {
+          expect(err.message).toBe('Error at 3');
+          expect(results).toEqual([]);
+          done();
+        }
+      });
+
+      source.next(1);
+      source.next(2);
+      source.next(3);
+    });
+  });
 });

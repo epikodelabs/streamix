@@ -159,7 +159,11 @@ describe('fromPromise', () => {
   });
 
   it('should invoke factory for each subscription', async () => {
-    const factory = jasmine.createSpy('factory').and.returnValue(Promise.resolve('result'));
+    let callCount = 0;
+    const factory = () => {
+      callCount++;
+      return Promise.resolve('result');
+    };
     const stream = fromPromise(factory);
 
     await new Promise<void>((resolve, reject) => {
@@ -167,7 +171,7 @@ describe('fromPromise', () => {
         next: () => {},
         complete: () => {
           try {
-            expect(factory).toHaveBeenCalledTimes(1);
+            expect(callCount).toBe(1);
             resolve();
           } catch (err) {
             reject(err);
@@ -182,7 +186,7 @@ describe('fromPromise', () => {
         next: () => {},
         complete: () => {
           try {
-            expect(factory).toHaveBeenCalledTimes(2);
+            expect(callCount).toBe(2);
             resolve();
           } catch (err) {
             reject(err);

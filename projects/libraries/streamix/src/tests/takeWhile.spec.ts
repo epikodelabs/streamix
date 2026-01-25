@@ -57,7 +57,7 @@ describe('takeWhile', () => {
     const results: number[] = [];
     const indices: number[] = [];
 
-    testStream.pipe(takeWhile((val, index) => {
+    testStream.pipe(takeWhile((_, index) => {
       indices.push(index);
       return index < 2; // Take first 2 values by index
     })).subscribe({

@@ -1,4 +1,4 @@
-import { concatMap, createStream, from, of, type Stream } from '@epikodelabs/streamix';
+import { concatMap, createStream, createSubject, from, of, type Stream } from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
 
@@ -85,6 +85,139 @@ describe('concatMap', () => {
         expect(emittedValues).toEqual(['inner1a', 'inner1b', 'inner2a', 'inner2b']);
         done();
       }
+    });
+  });
+
+  describe('edge cases', () => {
+    it('should queue rapid successive emissions and process sequentially', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+      const order: string[] = [];
+
+      const concatenated = source.pipe(
+        concatMap((val) => {
+          order.push(`start-${val}`);
+          const inner = createSubject<number>();
+          setTimeout(() => {
+            inner.next(val * 10);
+            inner.complete();
+            order.push(`end-${val}`);
+          }, (4 - val) * 20); // Reverse timing
+          return inner;
+        })
+      );
+
+      concatenated.subscribe({
+        next: (val) => results.push(val),
+        complete: () => {
+          expect(results).toEqual([10, 20, 30]);
+          // Should process in order despite timing
+          expect(order).toEqual([
+            'start-1', 'end-1',
+            'start-2', 'end-2',
+            'start-3', 'end-3'
+          ]);
+          done();
+        }
+      });
+
+      source.next(1);
+      source.next(2);
+      source.next(3);
+      source.complete();
+    });
+
+    it('should handle mix of sync and async inners in order', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+
+      const concatenated = source.pipe(
+        concatMap((val) => {
+          if (val % 2 === 0) {
+            // Async
+            return new Promise<number>((resolve) => {
+              setTimeout(() => resolve(val * 10), 50);
+            });
+          }
+          // Sync
+          return of(val * 10);
+        })
+      );
+
+      concatenated.subscribe({
+        next: (val) => results.push(val),
+        complete: () => {
+          expect(results).toEqual([10, 20, 30, 40]);
+          done();
+        }
+      });
+
+      source.next(1); // sync
+      source.next(2); // async
+      source.next(3); // sync
+      source.next(4); // async
+      source.complete();
+    });
+
+    it('should handle rapid emissions with empty inners', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+
+      const concatenated = source.pipe(
+        concatMap((val) => {
+          if (val === 2) {
+            return from([]); // empty
+          }
+          return of(val * 10);
+        })
+      );
+
+      concatenated.subscribe({
+        next: (val) => results.push(val),
+        complete: () => {
+          expect(results).toEqual([10, 30]);
+          done();
+        }
+      });
+
+      source.next(1);
+      source.next(2); // empty
+      source.next(3);
+      source.complete();
+    });
+
+    it('should stop on first inner error in rapid emissions', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+
+      const concatenated = source.pipe(
+        concatMap((val) => {
+          const inner = createSubject<number>();
+          setTimeout(() => {
+            if (val === 2) {
+              inner.error(new Error('Error at 2'));
+            } else {
+              inner.next(val * 10);
+              inner.complete();
+            }
+          }, 20);
+          return inner;
+        })
+      );
+
+      concatenated.subscribe({
+        next: (val) => results.push(val),
+        error: (err) => {
+          expect(err.message).toBe('Error at 2');
+          expect(results).toEqual([10]);
+          done();
+        }
+      });
+
+      source.next(1);
+      source.next(2);
+      source.next(3); // Should never process
+      source.complete();
     });
   });
 });

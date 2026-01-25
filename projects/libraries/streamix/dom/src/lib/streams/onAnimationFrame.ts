@@ -24,7 +24,7 @@ export function onAnimationFrame(): Stream<number> {
 
   let rafId: number | null = null;
   let lastTime = 0;
-  let usingTimeoutFallback = false;
+  let cancelFrame: ((id: any) => void) | null = null;
 
   const startLoop = () => {
     if (!stopped) return;
@@ -33,6 +33,7 @@ export function onAnimationFrame(): Stream<number> {
     // SSR / non-browser guard
     if (typeof globalThis.performance === "undefined") return;
 
+    const hasRaf = typeof (globalThis as any).requestAnimationFrame === "function";
     const raf: (cb: FrameRequestCallback) => number =
       typeof (globalThis as any).requestAnimationFrame === "function"
         ? (globalThis as any).requestAnimationFrame.bind(globalThis)
@@ -42,8 +43,14 @@ export function onAnimationFrame(): Stream<number> {
               16
             )) as unknown as (cb: FrameRequestCallback) => number;
 
-    usingTimeoutFallback =
-      typeof (globalThis as any).requestAnimationFrame !== "function";
+    // Pick the corresponding cancellation function.
+    // Prefer `cancelAnimationFrame` when RAF is used, but fall back to `clearTimeout`
+    // for environments where RAF is timer-based or cancelAnimationFrame is missing.
+    if (hasRaf && typeof (globalThis as any).cancelAnimationFrame === "function") {
+      cancelFrame = (globalThis as any).cancelAnimationFrame.bind(globalThis);
+    } else {
+      cancelFrame = globalThis.clearTimeout.bind(globalThis);
+    }
 
     const tick = (now: number) => {
       if (stopped) return;
@@ -71,16 +78,10 @@ export function onAnimationFrame(): Stream<number> {
     stopped = true;
 
     if (rafId !== null) {
-      if (
-        !usingTimeoutFallback &&
-        typeof (globalThis as any).cancelAnimationFrame === "function"
-      ) {
-        (globalThis as any).cancelAnimationFrame(rafId);
-      } else {
-        globalThis.clearTimeout(rafId);
-      }
+      cancelFrame?.(rafId);
       rafId = null;
     }
+    cancelFrame = null;
   };
 
   /* ------------------------------------------------------------------------
@@ -102,12 +103,28 @@ export function onAnimationFrame(): Stream<number> {
 
     scheduleStart();
 
-    const originalOnUnsubscribe = subscription.onUnsubscribe;
-    subscription.onUnsubscribe = () => {
-      if (--subscriberCount === 0) {
-        stopLoop();
+    const baseUnsubscribe = subscription.unsubscribe.bind(subscription);
+    let cleaned = false;
+
+    subscription.unsubscribe = () => {
+      if (!cleaned) {
+        cleaned = true;
+
+        subscriberCount = Math.max(0, subscriberCount - 1);
+        if (subscriberCount === 0) {
+          stopLoop();
+        }
+
+        // Some specs expect onUnsubscribe to run synchronously.
+        const onUnsubscribe = subscription.onUnsubscribe;
+        subscription.onUnsubscribe = undefined;
+        try {
+          onUnsubscribe?.();
+        } catch {
+        }
       }
-      originalOnUnsubscribe?.call(subscription);
+
+      return baseUnsubscribe();
     };
 
     return subscription;

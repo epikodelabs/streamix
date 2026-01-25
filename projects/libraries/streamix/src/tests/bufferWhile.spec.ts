@@ -6,7 +6,7 @@ describe("bufferWhile", () => {
   it("flushes the buffer when the predicate resolves truthy", async () => {
     const subject = createSubject<number>();
     const results: number[][] = [];
-    const buffered = subject.pipe(bufferWhile((buffer) => buffer.length < 3));
+    const buffered = subject.pipe(bufferWhile((_value, _index, buffer) => buffer.length < 3));
 
     (async () => {
       for await (const value of buffered) {
@@ -50,7 +50,7 @@ describe("bufferWhile", () => {
     const results: number[][] = [];
     const indices: number[] = [];
     const buffered = subject.pipe(
-      bufferWhile((buffer, next, index) => {
+      bufferWhile((_value, index, buffer) => {
         indices.push(index);
         return buffer.length < 3; // Flush when buffer size reaches 3
       })
@@ -79,7 +79,7 @@ describe("bufferWhile", () => {
     const subject = createSubject<string>();
     const results: string[][] = [];
     const buffered = subject.pipe(
-      bufferWhile((_, __, index) => index < 2) // Flush after 2 values
+      bufferWhile((_value, index) => index < 2) // Flush after 2 values
     );
 
     (async () => {
