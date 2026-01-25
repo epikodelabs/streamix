@@ -209,6 +209,8 @@ export function createAsyncIterator<T>(opts: {
       __onPush?: () => void;
     } = {
       next() {
+        if (!sub) sub = register(iteratorReceiver);
+
         if (pendingError) {
           const { err, stamp } = pendingError;
           pendingError = null;
@@ -349,8 +351,6 @@ export function createAsyncIterator<T>(opts: {
         return completed;
       }
     };
-
-    sub = register(iteratorReceiver);
 
     return iterator;
   };
