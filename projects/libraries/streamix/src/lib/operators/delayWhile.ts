@@ -1,14 +1,14 @@
+import {
+    createOperator,
+    getIteratorEmissionStamp,
+    isPromiseLike,
+    nextEmissionStamp,
+    setIteratorEmissionStamp,
+    type MaybePromise,
+    type Operator,
+} from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
-import {
-  createOperator,
-  getIteratorEmissionStamp,
-  isPromiseLike,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  type MaybePromise,
-  type Operator,
-} from '../abstractions';
 
 /**
  * Buffers values while a predicate returns `true` and releases them once the predicate flips to `false`.
