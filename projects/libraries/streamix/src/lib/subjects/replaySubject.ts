@@ -4,9 +4,11 @@ import {
   DONE,
   generateStreamId,
   getCurrentEmissionStamp,
+  isPromiseLike,
   nextEmissionStamp,
   pipeSourceThrough,
   setIteratorEmissionStamp,
+  withEmissionStamp,
   type Operator,
   type Receiver,
   type Stream,
@@ -48,31 +50,18 @@ export function createReplaySubject<T = any>(
 
   const setLatestValue = (v: T) => {
     latestValue = v;
-    // Note: Replay buffer is populated during tryCommit to ensure 
-    // it reflects actual delivered values and stamps.
-    pushReplay(v, getCurrentEmissionStamp() ?? nextEmissionStamp());
   };
 
   const tryCommit = createTryCommit<T>({ receivers, ready, queue, setLatestValue });
 
-  // Replay helper that respects backpressure and is scheduled
-  const replayToReceiver = (r: StrictReceiver<T>, index: number) => {
-    if (index >= replay.length || r.completed || !receivers.has(r)) {
-      ready.add(r);
-      tryCommit();
-      return;
-    }
-
-    const item = replay[index];
-    // Delivery happens in a scheduler task
-    scheduler.enqueue(() => {
-      if (r.completed || !receivers.has(r)) return;
-      
-      const res = r.next(item.value);
-      if (res instanceof Promise) {
-        res.finally(() => replayToReceiver(r, index + 1));
-      } else {
-        replayToReceiver(r, index + 1);
+  const deliverTerminal = (r: StrictReceiver<T>, terminal: QueueItem<T>) => {
+    withEmissionStamp(terminal.stamp, () => {
+      if (terminal.kind === "complete") {
+        r.complete();
+        return;
+      }
+      if (terminal.kind === "error") {
+        r.error(terminal.error);
       }
     });
   };
@@ -94,8 +83,11 @@ export function createReplaySubject<T = any>(
   const next = (value: T) => {
     if (isCompleted) return;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    // Keep `.value` in sync with the latest producer call (tests expect this
+    // synchronously, even though delivery is scheduled).
+    setLatestValue(value);
+    pushReplay(value, stamp);
     scheduler.enqueue(() => {
-      if (isCompleted) return;
       queue.push({ kind: 'next', value: value as any, stamp } as QueueItem<T>);
       tryCommit();
     });
@@ -125,63 +117,52 @@ export function createReplaySubject<T = any>(
     });
   };
 
-  const replayToReceiverThenTerminal = (
-    r: StrictReceiver<T>,
-    index: number,
-    terminal: QueueItem<T>
-  ) => {
-    if (index >= replay.length || r.completed || !receivers.has(r)) {
-      // Replay done, now deliver terminal
-      scheduler.enqueue(() => {
-        if (r.completed || !receivers.has(r)) return;
-
-        if (terminal.kind === 'complete') {
-          r.complete?.();
-        } else if (terminal.kind === 'error') {
-          r.error?.(terminal.error);
-        }
-      });
-      return;
-    }
-
-    const item = replay[index];
-    scheduler.enqueue(() => {
-      if (r.completed || !receivers.has(r)) return;
-
-      const res = r.next(item.value);
-      if (res instanceof Promise) {
-        res.finally(() => replayToReceiverThenTerminal(r, index + 1, terminal));
-      } else {
-        replayToReceiverThenTerminal(r, index + 1, terminal);
-      }
-    });
-  };
-
   const subscribe = (cb?: ((value: T) => any) | Receiver<T>): Subscription => {
     const r = createReceiver(cb) as StrictReceiver<T>;
+    const snapshot = replay.slice();
+    const terminal = terminalRef.current;
 
-    // For terminated subjects with replay buffer, handle specially
-    if (terminalRef.current && replay.length > 0) {
-      // Don't use register() yet - manually add to receivers
-      receivers.add(r);
-
+    // Late subscribers should get replay values (snapshot) first, then terminal.
+    // createRegister's terminal fast-path completes immediately, so we bypass it.
+    if (terminal) {
+      let active = true;
       const sub = createSubscription(() => {
-        receivers.delete(r);
-        ready.delete(r);
-        tryCommit();
+        active = false;
+        return r.complete();
       });
 
-      // Replay values, then deliver terminal
-      replayToReceiverThenTerminal(r, 0, terminalRef.current);
+      void scheduler.enqueue(async () => {
+        for (const it of snapshot) {
+          if (!active || r.completed) return;
+          const res = withEmissionStamp(it.stamp, () => r.next(it.value));
+          if (isPromiseLike(res)) await res;
+        }
+
+        if (!active || r.completed) return;
+        deliverTerminal(r, terminal);
+      });
+
       return sub;
     }
 
     // Normal registration
     const sub = register(r);
 
-    if (replay.length > 0) {
+    if (snapshot.length > 0) {
+      // Block live delivery until replay finishes to avoid interleaving.
       ready.delete(r);
-      replayToReceiver(r, 0);
+
+      void scheduler.enqueue(async () => {
+        for (const it of snapshot) {
+          if (r.completed || !receivers.has(r)) return;
+          const res = withEmissionStamp(it.stamp, () => r.next(it.value));
+          if (isPromiseLike(res)) await res;
+        }
+
+        if (r.completed || !receivers.has(r)) return;
+        ready.add(r);
+        tryCommit();
+      });
     }
 
     return sub;
