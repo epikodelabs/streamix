@@ -52,10 +52,8 @@ export function createSubject<T = any>(): Subject<T> {
   const next = (value: T) => {
     if (isCompleted) return;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    scheduler.enqueue(() => {
-      queue.push({ kind: 'next', value: value as any, stamp } as QueueItem<T>);
-      tryCommit();
-    });
+    queue.push({ kind: 'next', value: value as any, stamp } as QueueItem<T>);
+    tryCommit();
   };
 
   const complete = () => {
@@ -63,10 +61,8 @@ export function createSubject<T = any>(): Subject<T> {
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     isCompleted = true;
     terminalRef.current = { kind: 'complete', stamp } as QueueItem<T>;
-    scheduler.enqueue(() => {
-      queue.push({ kind: 'complete', stamp } as QueueItem<T>);
-      tryCommit();
-    });
+    queue.push({ kind: 'complete', stamp } as QueueItem<T>);
+    tryCommit();
   };
 
   const error = (err: any) => {
@@ -74,10 +70,8 @@ export function createSubject<T = any>(): Subject<T> {
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     isCompleted = true;
     terminalRef.current = { kind: 'error', error: err, stamp } as QueueItem<T>;
-    scheduler.enqueue(() => {
-      queue.push({ kind: 'error', error: err, stamp } as QueueItem<T>);
-      tryCommit();
-    });
+    queue.push({ kind: 'error', error: err, stamp } as QueueItem<T>);
+    tryCommit();
   };
 
   return {
