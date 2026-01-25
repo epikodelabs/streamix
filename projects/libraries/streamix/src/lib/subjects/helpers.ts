@@ -46,34 +46,50 @@ export function createTryCommit<T>(opts: {
         }
         
         const item = queue[0];
-        const targets = Array.from(receivers).filter((r) => {
+        const eligible = Array.from(receivers).filter((r) => {
           const s = (r as any).subscribedAt;
-          return s <= item.stamp;
+          const subscribedAt =
+            typeof s === "number" ? s : Number.NEGATIVE_INFINITY;
+          return subscribedAt <= item.stamp;
         });
 
         if (item.kind === "next") {
-          queue.shift(); // Remove only after we are sure we are processing it
-          setLatestValue(item.value);
+          // Backpressure: if there are eligible receivers and any is not ready,
+          // pause committing to preserve ordering and avoid drops.
+          if (eligible.length > 0 && eligible.some((r) => !ready.has(r))) {
+            break;
+          }
+
+          queue.shift();
           let pendingAsync = 0;
 
           withEmissionStamp(item.stamp, () => {
-            for (const r of targets) {
+            setLatestValue(item.value);
+            for (const r of eligible) {
               const result = r.next(item.value);
               if (isPromiseLike(result)) {
                 pendingAsync++;
-                result.finally(() => { if (receivers.has(r)) tryCommit(); });
+                ready.delete(r);
+                result.finally(() => {
+                  if (!r.completed && receivers.has(r)) {
+                    ready.add(r);
+                    tryCommit();
+                  }
+                });
               }
             }
           });
 
-          if (pendingAsync > 0) break; 
+          if (pendingAsync > 0) break;
         } else {
-          // Terminal items: clear queue and notify
           queue.shift();
           withEmissionStamp(item.stamp, () => {
-            for (const r of targets) {
+            for (const r of eligible) {
               if (item.kind === "complete") r.complete();
-              else { r.error(item.error); r.complete(); }
+              else {
+                r.error(item.error);
+                r.complete();
+              }
             }
           });
           receivers.clear();
@@ -154,7 +170,12 @@ export function createRegister<T>(opts: {
         ready.delete(r);
         return baseSub.unsubscribe();
       },
-      onUnsubscribe: baseSub.onUnsubscribe,
+      get onUnsubscribe() {
+        return baseSub.onUnsubscribe;
+      },
+      set onUnsubscribe(cb) {
+        baseSub.onUnsubscribe = cb;
+      },
     };
 
     return wrapped;
