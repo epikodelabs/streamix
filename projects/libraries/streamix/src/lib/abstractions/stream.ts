@@ -163,17 +163,7 @@ async function drainIterator<T>(
       }
     }
   } finally {
-    // Ensure subscriptions are torn down on terminal signals (complete/error).
-    // Many tests (and users) rely on "completion implies cleanup" semantics,
-    // and leaving subscriptions active creates unbounded receiver growth.
     const entries = getReceivers();
-    for (const { subscription } of entries) {
-      if (!subscription.unsubscribed) {
-        try {
-          void subscription.unsubscribe();
-        } catch {}
-      }
-    }
 
     if (iterator.return) {
       try {
@@ -188,6 +178,12 @@ async function drainIterator<T>(
         }
       }
     }
+
+    // Streams created with `createStream` keep subscribers in an array until they
+    // explicitly unsubscribe. Most consumers/tests do not call `unsubscribe()`
+    // after natural completion, so we drop references here to prevent receiver
+    // growth across long test runs.
+    entries.length = 0;
   }
 }
 
@@ -216,6 +212,10 @@ export function createStream<T>(
         await drainIterator(iterator, getActiveReceivers, signal);
       } finally {
         isRunning = false;
+        // Once the generator terminates, all current subscribers are terminal.
+        // Clear references so future subscriptions restart cleanly and we don't
+        // retain completed receivers between runs.
+        activeSubscriptions = [];
       }
     })();
   };

@@ -1,8 +1,11 @@
 import type { MaybePromise, Operator, Stream, Subscription } from "../abstractions";
 import {
   createOperator,
+  getIteratorEmissionStamp,
   getIteratorMeta,
   isPromiseLike,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
   setIteratorMeta,
   setValueMeta
 } from "../abstractions";
@@ -20,7 +23,7 @@ export function switchMap<T = any, R = any>(
     const output = createSubject<R>();
     const outputIterator = eachValueFrom(output);
 
-    let currentSubscription: Subscription | null = null;
+    let currentInner: { id: number; it: AsyncIterator<R> } | null = null;
     let inputCompleted = false;
     let currentInnerStreamId = 0;
     let index = 0;
@@ -31,7 +34,7 @@ export function switchMap<T = any, R = any>(
      * Only completes if the source is done AND no inner stream is active.
      */
     const checkComplete = () => {
-      if (inputCompleted && !currentSubscription) {
+      if (inputCompleted && !currentInner) {
         output.complete();
       }
     };
@@ -41,74 +44,61 @@ export function switchMap<T = any, R = any>(
       streamId: number,
       parentMeta?: any
     ) => {
-      const previousSubscription = currentSubscription;
-
-      let unsubscribed = false;
-      let innerSubscription: Subscription | null = null;
-
-      const thisSubscription: Subscription = {
-        unsubscribe() {
-          if (unsubscribed) return Promise.resolve();
-          unsubscribed = true;
-          return innerSubscription?.unsubscribe() ?? Promise.resolve();
-        },
-        get unsubscribed() {
-          return unsubscribed;
-        }
-      };
-
-      // Set BEFORE subscribing so synchronous inner completion can't
-      // "re-activate" this subscription after it already completed.
-      currentSubscription = thisSubscription;
-
-      // Unsubscribe the previous inner after the new one is marked active.
-      if (previousSubscription) {
-        void previousSubscription.unsubscribe();
+      // Cancel the previous inner immediately so sync inner streams can't
+      // interleave emissions out-of-order via re-entrant scheduler execution.
+      const prev = currentInner;
+      if (prev) {
+        try {
+          void prev.it.return?.();
+        } catch {}
       }
 
-      innerSubscription = innerStream.subscribe({
-        next: (value) => {
-          if (streamId !== currentInnerStreamId || thisSubscription.unsubscribed) {
-            return;
-          }
+      const it = innerStream[Symbol.asyncIterator]();
+      currentInner = { id: streamId, it };
 
-          const operatorIndex = (this as any).index ?? 0;
-          const operatorName = "switchMap";
-          let outputValue = value;
-          if (parentMeta) {
-            setIteratorMeta(
-              outputIterator,
-              { valueId: parentMeta.valueId, kind: "expand" },
-              operatorIndex,
-              operatorName
-            );
-            outputValue = setValueMeta(
-              outputValue,
-              { valueId: parentMeta.valueId, kind: "expand" },
-              operatorIndex,
-              operatorName
-            );
-          }
-          output.next(outputValue);
-        },
+      void (async () => {
+        try {
+          while (!stopped && streamId === currentInnerStreamId) {
+            const r = await it.next();
+            const stamp = getIteratorEmissionStamp(it) ?? nextEmissionStamp();
 
-        error: (err) => {
-          if (streamId !== currentInnerStreamId || thisSubscription.unsubscribed) {
-            return;
+            if (r.done) break;
+            if (stopped || streamId !== currentInnerStreamId) break;
+
+            const operatorIndex = (this as any).index ?? 0;
+            const operatorName = "switchMap";
+            let outputValue: any = r.value;
+
+            if (parentMeta) {
+              setIteratorMeta(
+                outputIterator,
+                { valueId: parentMeta.valueId, kind: "expand" },
+                operatorIndex,
+                operatorName
+              );
+              outputValue = setValueMeta(
+                outputValue,
+                { valueId: parentMeta.valueId, kind: "expand" },
+                operatorIndex,
+                operatorName
+              );
+            }
+
+            setIteratorEmissionStamp(outputIterator as any, stamp);
+            output.next(outputValue);
           }
-          currentSubscription = null;
-          output.error(err);
-        },
- 
-        complete: () => {
-          if (streamId !== currentInnerStreamId || thisSubscription.unsubscribed) {
-            return;
+        } catch (err) {
+          if (!stopped && streamId === currentInnerStreamId) {
+            output.error(err);
           }
-          currentSubscription = null;
+        } finally {
+          if (currentInner?.id === streamId) {
+            currentInner = null;
+          }
           checkComplete();
-         }
-       });
-     };
+        }
+      })();
+    };
 
     const processOuterValue = (value: T) => {
       const streamId = ++currentInnerStreamId;
@@ -188,9 +178,11 @@ export function switchMap<T = any, R = any>(
     (outputIterator as any).return = async () => {
       stopped = true;
       try {
-        await currentSubscription?.unsubscribe();
+        try {
+          await currentInner?.it.return?.();
+        } catch {}
       } finally {
-        currentSubscription = null;
+        currentInner = null;
       }
       return baseReturn ? baseReturn(undefined as any) : { done: true, value: undefined };
     };
@@ -198,9 +190,11 @@ export function switchMap<T = any, R = any>(
     (outputIterator as any).throw = async (err: any) => {
       stopped = true;
       try {
-        await currentSubscription?.unsubscribe();
+        try {
+          await currentInner?.it.return?.();
+        } catch {}
       } finally {
-        currentSubscription = null;
+        currentInner = null;
       }
       if (baseThrow) return baseThrow(err);
       throw err;
