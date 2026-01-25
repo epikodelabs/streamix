@@ -1,5 +1,4 @@
-import { createSubject, from } from '@epikodelabs/streamix';
-import { delayWhile } from '@epikodelabs/streamix';
+import { createSubject, delayWhile, from } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
