@@ -48,7 +48,8 @@ export function createTryCommit<T>(opts: {
         const item = queue[0];
         const targets = Array.from(receivers).filter((r) => {
           const s = (r as any).subscribedAt;
-          return s <= item.stamp;
+          const subscribedAt = typeof s === "number" ? s : Number.NEGATIVE_INFINITY;
+          return subscribedAt <= item.stamp;
         });
 
         if (item.kind === "next") {
