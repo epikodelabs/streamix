@@ -24,24 +24,28 @@ export function onAnimationFrame(): Stream<number> {
 
   let rafId: number | null = null;
   let lastTime = 0;
+  let usingTimeoutFallback = false;
 
   const startLoop = () => {
     if (!stopped) return;
     stopped = false;
 
     // SSR / non-browser guard
-    if (typeof performance === "undefined") return;
+    if (typeof globalThis.performance === "undefined") return;
 
-    const raf: typeof requestAnimationFrame =
-      typeof requestAnimationFrame === "function"
-        ? requestAnimationFrame
+    const raf: (cb: FrameRequestCallback) => number =
+      typeof (globalThis as any).requestAnimationFrame === "function"
+        ? (globalThis as any).requestAnimationFrame.bind(globalThis)
         : ((cb: FrameRequestCallback) =>
-            setTimeout(
-              () => cb(performance.now()),
+            globalThis.setTimeout(
+              () => cb(globalThis.performance.now()),
               16
-            )) as unknown as typeof requestAnimationFrame;
+            )) as unknown as (cb: FrameRequestCallback) => number;
 
-    lastTime = performance.now();
+    usingTimeoutFallback =
+      typeof (globalThis as any).requestAnimationFrame !== "function";
+
+    lastTime = globalThis.performance.now();
 
     const tick = (now: number) => {
       if (stopped) return;
@@ -61,10 +65,13 @@ export function onAnimationFrame(): Stream<number> {
     stopped = true;
 
     if (rafId !== null) {
-      if (typeof cancelAnimationFrame === "function") {
-        cancelAnimationFrame(rafId);
+      if (
+        !usingTimeoutFallback &&
+        typeof (globalThis as any).cancelAnimationFrame === "function"
+      ) {
+        (globalThis as any).cancelAnimationFrame(rafId);
       } else {
-        clearTimeout(rafId);
+        globalThis.clearTimeout(rafId);
       }
       rafId = null;
     }

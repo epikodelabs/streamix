@@ -73,4 +73,51 @@ describe('delayWhile', () => {
     await reader;
     expect(results).toEqual([1, 2, 3]);
   });
+
+  it('supports index parameter in predicate', async () => {
+    const subject = createSubject<number>();
+    const results: number[] = [];
+    const indices: number[] = [];
+    const reader = (async () => {
+      for await (const value of subject.pipe(
+        delayWhile((value, index) => {
+          indices.push(index);
+          return index < 2; // Delay first 2 values by index
+        })
+      )) {
+        results.push(value);
+      }
+    })();
+
+    subject.next(10);
+    await wait(5);
+    subject.next(20);
+    await wait(5);
+    subject.next(30);
+    subject.complete();
+    await reader;
+
+    expect(results).toEqual([10, 20, 30]);
+    expect(indices).toEqual([0, 1, 2]);
+  });
+
+  it('uses index to delay based on position not value', async () => {
+    const subject = createSubject<string>();
+    const results: string[] = [];
+    const reader = (async () => {
+      for await (const value of subject.pipe(
+        delayWhile((_, index) => index < 1) // Delay only first value
+      )) {
+        results.push(value);
+      }
+    })();
+
+    subject.next('a');
+    await wait(5);
+    subject.next('b');
+    subject.complete();
+    await reader;
+
+    expect(results).toEqual(['a', 'b']);
+  });
 });

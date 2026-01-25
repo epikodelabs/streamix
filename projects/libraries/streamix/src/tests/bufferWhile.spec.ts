@@ -6,7 +6,7 @@ describe("bufferWhile", () => {
   it("flushes the buffer when the predicate resolves truthy", async () => {
     const subject = createSubject<number>();
     const results: number[][] = [];
-    const buffered = subject.pipe(bufferWhile((_, next) => next % 3 === 0));
+    const buffered = subject.pipe(bufferWhile((buffer) => buffer.length < 3));
 
     (async () => {
       for await (const value of buffered) {
@@ -43,5 +43,59 @@ describe("bufferWhile", () => {
     await waitTick();
 
     expect(results).toEqual([[9]]);
+  });
+
+  it("supports index parameter in predicate", async () => {
+    const subject = createSubject<number>();
+    const results: number[][] = [];
+    const indices: number[] = [];
+    const buffered = subject.pipe(
+      bufferWhile((buffer, next, index) => {
+        indices.push(index);
+        return buffer.length < 3; // Flush when buffer size reaches 3
+      })
+    );
+
+    (async () => {
+      for await (const value of buffered) {
+        results.push(value);
+      }
+    })();
+
+    subject.next(10);
+    subject.next(20);
+    subject.next(30);
+    await waitTick();
+
+    subject.next(40);
+    subject.complete();
+    await waitTick();
+
+    expect(results).toEqual([[10, 20, 30], [40]]);
+    expect(indices).toEqual([0, 1, 2, 3]);
+  });
+
+  it("uses index to flush based on value position", async () => {
+    const subject = createSubject<string>();
+    const results: string[][] = [];
+    const buffered = subject.pipe(
+      bufferWhile((_, __, index) => index < 2) // Flush after 2 values
+    );
+
+    (async () => {
+      for await (const value of buffered) {
+        results.push(value);
+      }
+    })();
+
+    subject.next("a");
+    subject.next("b");
+    await waitTick();
+
+    subject.next("c");
+    subject.complete();
+    await waitTick();
+
+    expect(results).toEqual([["a", "b"], ["c"]]);
   });
 });

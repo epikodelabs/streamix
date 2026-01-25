@@ -1,9 +1,15 @@
 // Environment detection
+/**
+ * Indicates whether the current runtime is Node.js.
+ */
 const isNode =
   typeof process !== "undefined" &&
   process.versions != null &&
   process.versions.node != null;
 
+/**
+ * Indicates whether the current runtime is a browser with a `document`.
+ */
 const isBrowser =
   typeof window !== "undefined" &&
   typeof window.document !== "undefined";

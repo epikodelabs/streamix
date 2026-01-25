@@ -51,6 +51,37 @@ describe('takeWhile', () => {
       }
     });
   });
+
+  it('should support index parameter in predicate', (done) => {
+    const testStream = from([10, 20, 30, 40, 50]);
+    const results: number[] = [];
+    const indices: number[] = [];
+
+    testStream.pipe(takeWhile((val, index) => {
+      indices.push(index);
+      return index < 2; // Take first 2 values by index
+    })).subscribe({
+      next: (value) => results.push(value),
+      complete: () => {
+        expect(results).toEqual([10, 20]);
+        expect(indices).toEqual([0, 1, 2]); // Index 2 checked before predicate returns false
+        done();
+      }
+    });
+  });
+
+  it('should use index to take based on position not value', (done) => {
+    const testStream = from([100, 100, 100, 100, 100]);
+    const results: number[] = [];
+
+    testStream.pipe(takeWhile((_, index) => index < 3)).subscribe({
+      next: (value) => results.push(value),
+      complete: () => {
+        expect(results).toEqual([100, 100, 100]);
+        done();
+      }
+    });
+  });
 });
 
 

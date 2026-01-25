@@ -1,4 +1,14 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from "../abstractions";
+import {
+  createOperator,
+  DONE,
+  getIteratorMeta,
+  isPromiseLike,
+  NEXT,
+  setIteratorMeta,
+  setValueMeta,
+  type MaybePromise,
+  type Operator
+} from "../abstractions";
 
 type BufferRecord<T> = {
   result: IteratorResult<T>;
@@ -6,29 +16,29 @@ type BufferRecord<T> = {
 };
 
 /**
- * Buffers values until the provided predicate returns `true`, then flushes automatically.
+ * Buffers values while the provided predicate returns `true`.
  *
- * The predicate receives the current buffer contents and the most recent value (including timestamps if present).
- * When it resolves truthy, the current buffer is emitted and reset. When the source completes, any remaining
- * buffered values are emitted automatically.
+ * The predicate is evaluated for each incoming value against the *current* buffer (before the value is added).
+ * If it resolves to `true`, the value is appended to the current buffer. If it resolves to `false`, the current
+ * buffer is flushed and a new buffer is started with the incoming value.
+ *
+ * When the source completes, any remaining buffered values are emitted automatically.
  *
  * @template T Source value type.
- * @param predicate Function invoked for each value to decide whether to flush. Receives the buffer (after the latest value is pushed)
- * and the latest value itself. It may return a promise.
- * @param flushOnComplete Whether to emit the last partially-filled buffer when the source completes (default: `true`).
+ * @param predicate Function invoked for each value to decide whether the value should remain in the current buffer.
+ * Receives the current buffer (before pushing the value), the incoming value, and the index. It may return a promise.
  */
 export const bufferWhile = <T = any>(
-  predicate: (buffer: T[], next: T) => MaybePromise<boolean>
+  predicate: (buffer: T[], next: T, index: number) => MaybePromise<boolean>
 ) =>
-  createOperator<T, T[]>("bufferUntil", function (this: Operator, source) {
+  createOperator<T, T[]>("bufferWhile", function (this: Operator, source) {
     let completed = false;
+    let index = 0;
+
+    const buffer: BufferRecord<T>[] = [];
 
     const iterator: AsyncIterator<any> = {
       next: async () => {
-        if (completed) return DONE;
-
-        const buffer: BufferRecord<T>[] = [];
-
         const flushBuffer = (): IteratorResult<T[]> => {
           const records = buffer.splice(0);
           if (records.length === 0) return NEXT([]);
@@ -61,6 +71,13 @@ export const bufferWhile = <T = any>(
           return NEXT(values);
         };
 
+        if (completed) {
+          if (buffer.length > 0) {
+            return flushBuffer();
+          }
+          return DONE;
+        }
+
         while (true) {
           const result = await source.next();
           if (result.done) {
@@ -72,15 +89,27 @@ export const bufferWhile = <T = any>(
           }
 
           const record = { result, meta: getIteratorMeta(source) };
-          buffer.push(record);
 
           const values = buffer.map((item) => item.result.value!);
-          const predicateResult = predicate(values, result.value);
-          const shouldFlush = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
+          const predicateResult = predicate(values, result.value, index++);
+          const shouldKeep = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
 
-          if (shouldFlush) {
-            return flushBuffer();
+          // Always start a buffer with the first value.
+          if (buffer.length === 0) {
+            buffer.push(record);
+            continue;
           }
+
+          if (shouldKeep) {
+            buffer.push(record);
+            continue;
+          }
+
+          // Boundary: flush the current buffer and start a new one with this value.
+          const flushed = flushBuffer();
+          buffer.push(record);
+
+          return flushed;
         }
       },
     };

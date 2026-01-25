@@ -14,15 +14,16 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
  * condition, such as processing user input until an invalid entry is made.
  *
  * @template T The type of the values in the source and output streams.
- * @param predicate The function to test each value. `true` means to continue emitting,
+ * @param predicate The function to test each value. Receives the value and its index. `true` means to continue emitting,
  * and `false` means to stop and complete. It can be synchronous or asynchronous.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const takeWhile = <T = any>(
-  predicate: (value: T) => MaybePromise<boolean>
+  predicate: (value: T, index: number) => MaybePromise<boolean>
 ) =>
   createOperator<T, T>("takeWhile", function (this: Operator, source) {
     let active = true;
+    let index = 0;
 
     return {
       next: async () => {
@@ -34,7 +35,7 @@ export const takeWhile = <T = any>(
 
         if (result.done) return DONE;
 
-        const predicateResult = predicate(result.value);
+        const predicateResult = predicate(result.value, index++);
         const pass = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
         if (!pass) {
           active = false;
