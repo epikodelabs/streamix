@@ -4,12 +4,23 @@ let lastEmissionStamp = 0;
 let currentEmissionStamp: number | null = null;
 
 export function nextEmissionStamp(): number {
-  const now = Date.now();
-  if (now > lastEmissionStamp) {
-    lastEmissionStamp = now;
+  // Use a monotonic performance counter when available for higher-resolution
+  // and to avoid clock skew issues with Date.now().
+  const hasPerfNow =
+    typeof globalThis !== "undefined" &&
+    typeof (globalThis as any).performance !== "undefined" &&
+    typeof (globalThis as any).performance.now === "function";
+
+  const micros = hasPerfNow
+    ? Math.floor((globalThis as any).performance.now() * 1000)
+    : Date.now() * 1000;
+
+  if (micros > lastEmissionStamp) {
+    lastEmissionStamp = micros;
   } else {
-    lastEmissionStamp++;
+    lastEmissionStamp += 1;
   }
+
   return lastEmissionStamp;
 }
 

@@ -79,7 +79,7 @@ describe('delayWhile', () => {
     const indices: number[] = [];
     const reader = (async () => {
       for await (const value of subject.pipe(
-        delayWhile((value, index) => {
+        delayWhile((_, index) => {
           indices.push(index);
           return index < 2; // Delay first 2 values by index
         })

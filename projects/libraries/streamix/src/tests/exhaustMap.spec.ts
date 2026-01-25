@@ -1,4 +1,4 @@
-import { createSubject, delay, exhaustMap, from } from '@epikodelabs/streamix';
+import { createSubject, delay, exhaustMap, from, of } from '@epikodelabs/streamix';
 
 jasmine.DEFAULT_TIMEOUT_INTERVAL = 10000;
 
@@ -104,5 +104,122 @@ describe('exhaustMap', () => {
     expect(error).toBeInstanceOf(Error);
     expect((error as any)!.message).toBe('boom');
     expect(results).toEqual([1]);
+  });
+
+  describe('edge cases', () => {
+    it('should ignore rapid emissions while inner is active', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+      const processed: number[] = [];
+
+      const exhausted = source.pipe(
+        exhaustMap((val) => {
+          processed.push(val);
+          return new Promise<number>((resolve) => {
+            setTimeout(() => resolve(val * 10), 50);
+          });
+        })
+      );
+
+      exhausted.subscribe({
+        next: (val) => results.push(val),
+        complete: () => {
+          expect(processed).toEqual([1, 4]); // Only 1 and 4 processed
+          expect(results).toEqual([10, 40]);
+          done();
+        }
+      });
+
+      source.next(1);
+      setTimeout(() => source.next(2), 10); // Ignored
+      setTimeout(() => source.next(3), 20); // Ignored
+      setTimeout(() => source.next(4), 100); // Accepted
+      setTimeout(() => source.complete(), 200);
+    });
+
+    it('should accept new emissions immediately after inner completes', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+
+      const exhausted = source.pipe(exhaustMap((val) => of(val * 10)));
+
+      exhausted.subscribe({
+        next: (val) => results.push(val),
+        complete: () => {
+          // All sync inners complete immediately, so all accepted
+          expect(results).toEqual([10, 20, 30]);
+          done();
+        }
+      });
+
+      source.next(1);
+      source.next(2);
+      source.next(3);
+      source.complete();
+    });
+
+    it('should handle errors in active inner during rapid emissions', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+
+      const exhausted = source.pipe(
+        exhaustMap((val) => {
+          return new Promise<number>((_, reject) => {
+            setTimeout(() => {
+              if (val === 1) {
+                reject(new Error('Error in first'));
+              }
+            }, 50);
+          });
+        })
+      );
+
+      exhausted.subscribe({
+        next: (val) => results.push(val),
+        error: (err) => {
+          expect(err.message).toBe('Error in first');
+          expect(results).toEqual([]);
+          done();
+        }
+      });
+
+      source.next(1);
+      setTimeout(() => source.next(2), 10); // Ignored
+      setTimeout(() => source.next(3), 20); // Ignored
+    });
+
+    it('should ignore emissions during re-entrant inner emissions', (done) => {
+      const source = createSubject<number>();
+      const results: number[] = [];
+      let reentrantEmitted = false;
+
+      const exhausted = source.pipe(
+        exhaustMap((val) => {
+          const inner = createSubject<number>();
+          setTimeout(() => {
+            inner.next(val * 10);
+            // Try to emit to source during inner emission (re-entrant)
+            if (!reentrantEmitted) {
+              reentrantEmitted = true;
+              source.next(99); // Should be ignored
+            }
+            inner.complete();
+          }, 20);
+          return inner;
+        })
+      );
+
+      exhausted.subscribe({
+        next: (val) => results.push(val),
+        complete: () => {
+          expect(results).toEqual([10]);
+          expect(reentrantEmitted).toBe(true);
+          done();
+        }
+      });
+
+      source.next(1);
+      setTimeout(() => source.complete(), 100);
+    });
   });
 });

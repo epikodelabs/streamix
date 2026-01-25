@@ -26,10 +26,10 @@ type BufferRecord<T> = {
  *
  * @template T Source value type.
  * @param predicate Function invoked for each value to decide whether the value should remain in the current buffer.
- * Receives the current buffer (before pushing the value), the incoming value, and the index. It may return a promise.
+ * Receives the incoming value, the index, and the current buffer (before pushing the value). It may return a promise.
  */
 export const bufferWhile = <T = any>(
-  predicate: (buffer: T[], next: T, index: number) => MaybePromise<boolean>
+  predicate: (value: T, index: number, buffer: T[]) => MaybePromise<boolean>
 ) =>
   createOperator<T, T[]>("bufferWhile", function (this: Operator, source) {
     let completed = false;
@@ -91,7 +91,7 @@ export const bufferWhile = <T = any>(
           const record = { result, meta: getIteratorMeta(source) };
 
           const values = buffer.map((item) => item.result.value!);
-          const predicateResult = predicate(values, result.value, index++);
+          const predicateResult = predicate(result.value, index++, values);
           const shouldKeep = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
 
           // Always start a buffer with the first value.

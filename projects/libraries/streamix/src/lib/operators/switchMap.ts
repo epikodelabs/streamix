@@ -1,4 +1,4 @@
-import type { MaybePromise, Operator, Stream, Subscription } from "../abstractions";
+import type { MaybePromise, Operator, Stream } from "../abstractions";
 import {
   createOperator,
   getIteratorEmissionStamp,
