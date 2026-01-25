@@ -37,7 +37,7 @@ describe('createReceiver', () => {
 
     expect(nextSpy).toHaveBeenCalledWith(1);
     expect(errorSpy).toHaveBeenCalledWith(jasmine.any(Error));
-    expect(completeSpy).toHaveBeenCalled();
+    expect(completeSpy).not.toHaveBeenCalled();
     expect(receiver.completed).toBeTrue();
   });
 

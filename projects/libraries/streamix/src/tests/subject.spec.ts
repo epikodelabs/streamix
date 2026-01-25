@@ -364,8 +364,7 @@ describe('createSubject', () => {
 
     expect(events).toEqual([
       ['next', 1],
-      ['error', 'boom'],
-      ['complete']
+      ['error', 'boom']
     ]);
     expect(subject.completed()).toBeTrue();
     expect(subject.value).toBe(1);

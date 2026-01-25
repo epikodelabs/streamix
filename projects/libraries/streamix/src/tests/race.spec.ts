@@ -78,8 +78,9 @@ describe('race', () => {
       },
       error: (err) => {
         expect(err.message).toBe(errorMsg);
+        done();
       },
-      complete: () => done(),
+      complete: () => done.fail("Should not complete after error"),
     });
 
     stream1.next(1);

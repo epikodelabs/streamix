@@ -70,9 +70,10 @@ describe('fromPromise', () => {
 
     stream.subscribe({
       next: () => fail('Value emitted unexpectedly'),
-      complete: () => done(),
+      complete: () => done.fail('Stream completed unexpectedly'),
       error: (err) => {
         expect(err).toBe(expectedError);
+        done();
       }
     });
   });
@@ -98,11 +99,14 @@ describe('fromPromise', () => {
 
     let receivedError: Error | undefined;
     const subscription = stream.subscribe({
-      error: (error: any) => receivedError = error,
-      complete: () => {
+      error: (error: any) => {
+        receivedError = error;
         expect(receivedError).toBe(error);
         subscription.unsubscribe();
         done();
+      },
+      complete: () => {
+        done.fail('Stream completed unexpectedly');
       }
     });
   });

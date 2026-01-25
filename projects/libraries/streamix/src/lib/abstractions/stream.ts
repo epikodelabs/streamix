@@ -7,6 +7,8 @@ import {
   withEmissionStamp,
 } from "./emission";
 import {
+  applyPipeStreamHooks,
+  generateSubscriptionId,
   generateStreamId,
   getRuntimeHooks
 } from "./hooks";
@@ -264,16 +266,22 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
   source: Stream<TIn>,
   operators: [...Ops]
 ): Stream<any> {
+  const pipedId = generateStreamId();
+
   function registerReceiver(receiver: Receiver<any>): Subscription {
     const wrapped = wrapReceiver(receiver);
     const abortController = new AbortController();
     const signal = abortController.signal;
 
-    let iterator: AsyncIterator<any> = source[Symbol.asyncIterator]();
-    let ops: Operator<any, any>[] = operators;
-    for (const op of ops) {
-      iterator = op.apply(iterator);
-    }
+    const subscriptionId = generateSubscriptionId();
+    const baseSource = source[Symbol.asyncIterator]();
+    const iterator = applyPipeStreamHooks({
+      streamId: pipedId,
+      streamName: source.name,
+      subscriptionId,
+      source: baseSource,
+      operators,
+    });
 
     const subscription = createSubscription(async () => {
       return scheduler.enqueue(async () => {
@@ -291,17 +299,21 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
 
   const pipedStream: Stream<any> = {
     name: `${source.name}Sink`,
-    id: generateStreamId(),
+    id: pipedId,
     type: "stream",
     pipe: (...nextOps: Operator<any, any>[]) => pipeSourceThrough(source, [...operators, ...nextOps]),
     subscribe: (cb) => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(pipedStream),
     [Symbol.asyncIterator]: () => {
-      let it = source[Symbol.asyncIterator]();
-      for (const op of operators) {
-        it = op.apply(it);
-      }
-      return it;
+      const subscriptionId = generateSubscriptionId();
+      const baseSource = source[Symbol.asyncIterator]();
+      return applyPipeStreamHooks({
+        streamId: pipedId,
+        streamName: source.name,
+        subscriptionId,
+        source: baseSource,
+        operators,
+      });
     },
   };
 

@@ -68,9 +68,10 @@ describe('defer', () => {
     deferStream.subscribe({
       error: (e: Error) => {
         expect(e).toEqual(error);
+        done();
       },
       complete: () => {
-        done();
+        done.fail('Should not complete after error');
       },
       next: () => {
         fail('Should not emit');

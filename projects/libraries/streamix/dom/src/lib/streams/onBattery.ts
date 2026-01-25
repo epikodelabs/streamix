@@ -97,12 +97,28 @@ export function onBattery(): Stream<BatteryState> {
 
     scheduleStart();
 
-    const o = sub.onUnsubscribe;
-    sub.onUnsubscribe = () => {
-      if (--subscriberCount === 0) {
-        stop();
+    const baseUnsubscribe = sub.unsubscribe.bind(sub);
+    let cleaned = false;
+
+    sub.unsubscribe = () => {
+      if (!cleaned) {
+        cleaned = true;
+
+        subscriberCount = Math.max(0, subscriberCount - 1);
+        if (subscriberCount === 0) {
+          stop();
+        }
+
+        // Some DOM specs expect the onUnsubscribe callback to run synchronously.
+        const onUnsubscribe = sub.onUnsubscribe;
+        sub.onUnsubscribe = undefined;
+        try {
+          onUnsubscribe?.();
+        } catch {
+        }
       }
-      o?.call(sub);
+
+      return baseUnsubscribe();
     };
 
     return sub;

@@ -83,10 +83,10 @@ describe('partition', () => {
       },
       error: (err) => {
         expect(err).toEqual(new Error('Test error'));
-
+        done();
       },
       complete: () => {
-        done();
+        done.fail('Should not complete after error');
       }
     });
   });
