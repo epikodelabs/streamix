@@ -23,15 +23,16 @@ import {
  * The predicate is allowed to return either a boolean or a promise of a boolean.
  *
  * @template T The type of values flowing through the stream.
- * @param predicate Function to test each value; `true` means delay, `false` means emit immediately.
+ * @param predicate Function to test each value. Receives the value and its index; `true` means delay, `false` means emit immediately.
  */
 export const delayWhile = <T = any>(
-  predicate: (value: T) => MaybePromise<boolean>
+  predicate: (value: T, index: number) => MaybePromise<boolean>
 ) =>
   createOperator<T, T>('delayWhile', function (this: Operator, source) {
     const output = createSubject<T>();
     const outputIterator = eachValueFrom(output);
     const queue: Array<{ value: T; stamp: number }> = [];
+    let index = 0;
 
     const flushQueue = () => {
       for (const item of queue) {
@@ -51,7 +52,7 @@ export const delayWhile = <T = any>(
             break;
           }
 
-          const predicateResult = predicate(result.value);
+          const predicateResult = predicate(result.value, index++);
           const shouldDelay = isPromiseLike(predicateResult)
             ? await predicateResult
             : predicateResult;

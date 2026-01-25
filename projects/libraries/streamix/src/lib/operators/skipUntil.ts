@@ -6,8 +6,7 @@ import {
   type Operator,
   type Stream,
 } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
-import { createSubject } from "../subjects";
+import { fromAny } from "../converters";
 
 /**
  * Skip source values until a notifier emits.
@@ -39,78 +38,82 @@ import { createSubject } from "../subjects";
 export function skipUntil<T = any, R = any>(
   notifier: Stream<R> | Promise<R>
 ): Operator<T, T> {
-  return createOperator<T, T>("skipUntil", function (
-    this: Operator,
-    source: AsyncIterator<T>
-  ) {
-    const output = createSubject<T>();
-    const outIt = eachValueFrom(output);
+  return createOperator<T, T>("skipUntil", (sourceIt) => {
+    const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
 
-    /* ---------------------------------------------------------------------- */
-    /* Shared state                                                            */
-    /* ---------------------------------------------------------------------- */
-
-    let gateOpened = false;
     let gateStamp: number | null = null;
     let notifierError: any = null;
 
-    /* ---------------------------------------------------------------------- */
-    /* Notifier producer                                                       */
-    /* ---------------------------------------------------------------------- */
+    const stampOf = (it: any) => {
+      const s = getIteratorEmissionStamp(it);
+      return typeof s === "number" ? s : nextEmissionStamp();
+    };
 
-    const notifierSub = fromAny(notifier).subscribe({
-      next() {
-        if (!gateOpened) {
-          gateOpened = true;
-          gateStamp = nextEmissionStamp();
-        }
-      },
-      error(err) {
-        notifierError = err;
-      },
-      complete() {
-        // Notifier completed without emitting - gate stays closed
-      },
-    });
-
-    /* ---------------------------------------------------------------------- */
-    /* Source producer                                                         */
-    /* ---------------------------------------------------------------------- */
-
+    // Observe notifier exactly once
     (async () => {
       try {
-        while (true) {
-          const r = await source.next();
-          const stamp = getIteratorEmissionStamp(source) ?? nextEmissionStamp();
-
-          if (r.done) {
-            break;
-          }
-
-          if (notifierError) {
-            break;
-          }
-
-          // Only forward if gate is open AND stamp is strictly after gate stamp
-          if (gateOpened && gateStamp !== null && Math.abs(stamp) > Math.abs(gateStamp)) {
-            setIteratorEmissionStamp(outIt as any, stamp);
-            output.next(r.value);
-          }
+        const r = await notifierIt.next();
+        const stamp = stampOf(notifierIt);
+        if (!r.done) {
+          gateStamp = stamp;
         }
       } catch (err) {
-        output.error(err);
-        return;
-      } finally {
-        notifierSub.unsubscribe();
-
-        if (notifierError) {
-          if (!output.completed()) output.error(notifierError);
-        } else {
-          if (!output.completed()) output.complete();
-        }
+        notifierError = err;
+        try {
+          sourceIt.return?.();
+        } catch {}
       }
     })();
 
-    return outIt;
+    const iterator: AsyncIterator<T> = {
+      async next() {
+        while (true) {
+          if (notifierError) throw notifierError;
+
+          const r = await sourceIt.next();
+          const stamp = stampOf(sourceIt);
+
+          if (r.done) {
+            if (notifierError) throw notifierError;
+            return { done: true, value: undefined };
+          }
+
+          // Gate closed: drop values until notifier emits.
+          if (gateStamp === null) {
+            continue;
+          }
+
+          // Only forward values strictly after the gate-opening stamp.
+          if (stamp <= gateStamp) {
+            continue;
+          }
+
+          setIteratorEmissionStamp(iterator as any, stamp);
+          return { done: false, value: r.value };
+        }
+      },
+
+      async return() {
+        try {
+          sourceIt.return?.();
+        } catch {}
+        try {
+          notifierIt.return?.();
+        } catch {}
+        return { done: true, value: undefined };
+      },
+
+      async throw(err) {
+        try {
+          sourceIt.return?.();
+        } catch {}
+        try {
+          notifierIt.return?.();
+        } catch {}
+        throw err;
+      },
+    };
+
+    return iterator;
   });
 }
