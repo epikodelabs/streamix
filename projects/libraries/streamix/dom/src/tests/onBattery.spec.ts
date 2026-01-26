@@ -42,6 +42,36 @@ idescribe('onBattery', () => {
     }
   });
 
+  it('does not emit when unsubscribed before getBattery resolves', async () => {
+    let resolveBattery!: (value: any) => void;
+
+    const batteryPromise = new Promise<any>((resolve) => {
+      resolveBattery = resolve;
+    });
+
+    (navigator as any).getBattery = jasmine
+      .createSpy('getBattery')
+      .and.returnValue(batteryPromise);
+
+    const updates: any[] = [];
+    const sub = onBattery().subscribe(update => updates.push(update));
+
+    // Unsubscribe before getBattery resolves.
+    sub.unsubscribe();
+
+    resolveBattery({
+      charging: true,
+      level: 1,
+      chargingTime: 0,
+      dischargingTime: 0,
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(updates).toEqual([]);
+  });
+
   it('emits updates and unregisters listeners', async () => {
     const listeners: Record<string, ((...args: any[]) => void)[]> = {
       chargingchange: [],

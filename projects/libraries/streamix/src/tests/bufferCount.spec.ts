@@ -112,6 +112,41 @@ describe("bufferCount", () => {
 
     expect(results).toEqual([[1, 2], [3, 4]]);
   });
+
+  it("should behave like identity wrapped in arrays for buffer count 1", async () => {
+    const buffered = source.pipe(bufferCount(1));
+    const results: number[][] = [];
+
+    (async () => {
+      for await (const value of buffered) {
+        results.push(value);
+      }
+    })();
+
+    subject.next(1);
+    subject.next(2);
+    subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(results).toEqual([[1], [2]]);
+  });
+
+  it("should fail gracefully if bufferSize promise rejects", async () => {
+     const errorMsg = "invalid size";
+     const buffered = source.pipe(bufferCount(Promise.reject(new Error(errorMsg))));
+     let capturedError;
+ 
+     try {
+       // We need to trigger the loop
+       const it = buffered[Symbol.asyncIterator]();
+       await it.next();
+     } catch (e) {
+       capturedError = e;
+     }
+ 
+     expect(capturedError).toBeDefined();
+     expect((capturedError as any).message).toBe(errorMsg);
+   });
 });
 
 

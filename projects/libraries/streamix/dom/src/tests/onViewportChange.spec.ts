@@ -248,6 +248,29 @@ idescribe('onViewportChange', () => {
     expect(values.length).toBe(1);
     sub.unsubscribe();
   });
+
+  it('falls back to window event listeners when visualViewport is unavailable', async () => {
+    const addSpy = spyOn(window, 'addEventListener').and.callThrough();
+    const removeSpy = spyOn(window, 'removeEventListener').and.callThrough();
+
+    restore.push(
+      patchObject(window, {
+        visualViewport: undefined,
+      })
+    );
+
+    const sub = onViewportChange().subscribe();
+    await flush();
+
+    expect(addSpy).toHaveBeenCalledWith('resize', jasmine.any(Function));
+    expect(addSpy).toHaveBeenCalledWith('scroll', jasmine.any(Function));
+
+    sub.unsubscribe();
+    await flush();
+
+    expect(removeSpy).toHaveBeenCalledWith('resize', jasmine.any(Function));
+    expect(removeSpy).toHaveBeenCalledWith('scroll', jasmine.any(Function));
+  });
 });
 
 
