@@ -94,6 +94,8 @@ describe('fromAny', () => {
   it('should propagate promise rejection as stream error', async () => {
     const error = new Error('Test error');
     const promise = Promise.reject(error);
+    // Prevent Node's unhandledRejection warning before the stream consumes it.
+    void promise.catch(() => {});
     const result = fromAny(promise);
 
     let caughtError: any = null;

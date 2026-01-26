@@ -8,7 +8,7 @@ idescribe('onMutation', () => {
   beforeEach(function() {
     // Skip all tests if MutationObserver is not available
     if (typeof MutationObserver === 'undefined') {
-      this.skip();
+      pending('MutationObserver is not available in this environment');
       return;
     }
     // Create a DOM element for testing

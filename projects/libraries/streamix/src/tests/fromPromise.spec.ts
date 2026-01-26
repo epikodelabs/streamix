@@ -41,6 +41,8 @@ describe('fromPromise', () => {
   it('should propagate an error from a rejected Promise', async () => {
     const expectedError = new Error('Promise rejection');
     const promise = Promise.reject(expectedError);
+    // Prevent Node's unhandledRejection warning before fromPromise subscribes.
+    void promise.catch(() => {});
     const stream = fromPromise(promise);
 
     // We expect the promise to be rejected, so we use async/await with try/catch
@@ -95,6 +97,8 @@ describe('fromPromise', () => {
   it('should handle promise rejection', (done) => {
     const error = new Error('Test error');
     const promise = Promise.reject(error);
+    // Prevent Node's unhandledRejection warning before fromPromise subscribes.
+    void promise.catch(() => {});
     const stream = fromPromise(promise);
 
     let receivedError: Error | undefined;
@@ -113,19 +117,23 @@ describe('fromPromise', () => {
 
   it('should not emit if unsubscribed before run', (done) => {
     const value = 'test_value';
-    const promise = Promise.resolve(value);
+    const promise = new Promise<string>((resolve) => setTimeout(() => resolve(value), 20));
     const stream = fromPromise(promise);
 
     const emittedValues: any[] = [];
     const subscription = stream.subscribe({
       next: (value: any) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual([]);
-        done();
-      }
+      error: (err) => done.fail(err),
+      complete: () => {}
     });
 
-    subscription.unsubscribe(); // Unsubscribe before running
+    // Unsubscribe immediately; do not rely on `complete` being delivered.
+    Promise.resolve(subscription.unsubscribe()).then(() => {
+      setTimeout(() => {
+        expect(emittedValues).toEqual([]);
+        done();
+      }, 40);
+    });
   });
 
   it('should abort an abortable promise factory when unsubscribed', async () => {
