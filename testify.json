@@ -37,7 +37,7 @@
   "jasmineConfig": {
     "env": {
       "stopSpecOnExpectationFailure": false,
-      "random": true,
+      "random": false,
       "timeout": 120000
     }
   },
