@@ -27,10 +27,12 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
   let stopped = true;
 
   const getState = (): DocumentVisibilityState => {
-    if (typeof document === "undefined" || !("visibilityState" in document)) {
+    if (typeof document === "undefined") {
       return "visible";
     }
-    return document.visibilityState;
+
+    const state = (document as any).visibilityState;
+    return typeof state === "string" ? state : "visible";
   };
 
   const emit = () => {

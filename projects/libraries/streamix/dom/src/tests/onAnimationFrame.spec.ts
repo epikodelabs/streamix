@@ -202,6 +202,74 @@ idescribe('onAnimationFrame', () => {
       (globalThis as any).clearTimeout = originalClearTimeout;
     }
   });
+
+  it('uses clearTimeout for cancellation when RAF exists but cancelAnimationFrame is missing', (done) => {
+    const originalRAF = (globalThis as any).requestAnimationFrame;
+    const originalCancel = (globalThis as any).cancelAnimationFrame;
+    const originalClearTimeout = (globalThis as any).clearTimeout;
+
+    const clearSpy = jasmine.createSpy('clearTimeout').and.callFake(originalClearTimeout);
+    (globalThis as any).clearTimeout = clearSpy;
+
+    // RAF exists, but cancelAnimationFrame is missing => cancelFrame falls back to clearTimeout.
+    (globalThis as any).cancelAnimationFrame = undefined;
+    (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
+      return globalThis.setTimeout(() => cb(performance.now()), 0) as any;
+    };
+
+    const subscription = onAnimationFrame().subscribe();
+
+    setTimeout(() => {
+      subscription.unsubscribe();
+      expect(clearSpy).toHaveBeenCalled();
+
+      (globalThis as any).requestAnimationFrame = originalRAF;
+      (globalThis as any).cancelAnimationFrame = originalCancel;
+      (globalThis as any).clearTimeout = originalClearTimeout;
+      done();
+    }, 10);
+  });
+
+  it('clamps non-monotonic RAF timestamps to 0-delta frames', (done) => {
+    const originalRAF = (globalThis as any).requestAnimationFrame;
+    const originalCancel = (globalThis as any).cancelAnimationFrame;
+
+    const times = [100, 90, 110];
+    let i = 0;
+
+    (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
+      const id = i + 1;
+      if (i < times.length) {
+        const t = times[i++];
+        queueMicrotask(() => cb(t));
+      }
+      return id;
+    };
+
+    (globalThis as any).cancelAnimationFrame = jasmine.createSpy('cancelAnimationFrame');
+
+    const deltas: number[] = [];
+    const subscription = onAnimationFrame().subscribe({
+      next: (delta: number) => {
+        deltas.push(delta);
+        if (deltas.length === 3) {
+          try {
+            // First tick is always 0, second is non-monotonic => 0, third is 110-100 => 10
+            expect(deltas).toEqual([0, 0, 10]);
+            subscription.unsubscribe();
+            (globalThis as any).requestAnimationFrame = originalRAF;
+            (globalThis as any).cancelAnimationFrame = originalCancel;
+            done();
+          } catch (err: any) {
+            subscription.unsubscribe();
+            (globalThis as any).requestAnimationFrame = originalRAF;
+            (globalThis as any).cancelAnimationFrame = originalCancel;
+            done.fail(err);
+          }
+        }
+      },
+    });
+  });
 });
 
 
