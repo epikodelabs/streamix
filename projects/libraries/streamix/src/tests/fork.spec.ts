@@ -83,221 +83,188 @@ describe('fork', () => {
     });
   });
 
-  describe('edge cases', () => {
-    it('should route rapid emissions based on predicates', (done) => {
-      const source = createSubject<number>();
-      const results: number[] = [];
+  it('edge: should route rapid emissions based on predicates', (done) => {
+    const source = createSubject<number>();
+    const results: number[] = [];
 
-      const forked = source.pipe(
-        fork(
-          {
-            on: (val) => val === 1,
-            handler: (val) => from([val * 10, val * 100])
-          },
-          {
-            on: (val) => val === 2,
-            handler: (val) => of(val * 10)
-          },
-          {
-            on: (val) => val === 3,
-            handler: (val) => [val * 10, val * 100]
-          }
-        )
-      );
-
-      forked.subscribe({
-        next: (val) => results.push(val),
-        complete: () => {
-          expect(results).toEqual([10, 100, 20, 30, 300]);
-          done();
+    const forked = source.pipe(
+      fork(
+        {
+          on: (val) => val === 1,
+          handler: (val) => from([val * 10, val * 100])
+        },
+        {
+          on: (val) => val === 2,
+          handler: (val) => of(val * 10)
+        },
+        {
+          on: (val) => val === 3,
+          handler: (val) => [val * 10, val * 100]
         }
-      });
+      )
+    );
 
-      source.next(1);
-      source.next(2);
-      source.next(3);
-      source.complete();
+    forked.subscribe({
+      next: (val) => results.push(val),
+      complete: () => {
+        expect(results).toEqual([10, 100, 20, 30, 300]);
+        done();
+      }
     });
 
-    it('should handle predicates with index parameter in rapid emissions', (done) => {
-      const source = createSubject<number>();
-      const results: number[] = [];
+    source.next(1);
+    source.next(2);
+    source.next(3);
+    source.complete();
+  });
 
-      const forked = source.pipe(
-        fork(
-          {
-            on: (_, index) => index === 0,
-            handler: (val) => from([val * 10, val * 100])
-          },
-          {
-            on: (_, index) => index === 1,
-            handler: (val) => of(val * 10)
-          },
-          {
-            on: (_, index) => index === 2,
-            handler: (val) => of(val * 10)
-          }
-        )
-      );
+  it('edge: should handle predicates with index parameter in rapid emissions', (done) => {
+    const source = createSubject<number>();
+    const results: number[] = [];
 
-      forked.subscribe({
-        next: (val) => results.push(val),
-        complete: () => {
-          expect(results).toEqual([10, 100, 20, 30]);
-          done();
+    const forked = source.pipe(
+      fork(
+        {
+          on: (_, index) => index === 0,
+          handler: (val) => from([val * 10, val * 100])
+        },
+        {
+          on: (_, index) => index === 1,
+          handler: (val) => of(val * 10)
+        },
+        {
+          on: (_, index) => index === 2,
+          handler: (val) => of(val * 10)
         }
-      });
+      )
+    );
 
-      source.next(1); // index 0
-      source.next(2); // index 1
-      source.next(3); // index 2
-      source.complete();
+    forked.subscribe({
+      next: (val) => results.push(val),
+      complete: () => {
+        expect(results).toEqual([10, 100, 20, 30]);
+        done();
+      }
     });
 
-    it('should handle async predicates during rapid emissions', (done) => {
-      const source = createSubject<number>();
-      const results: number[] = [];
+    source.next(1); // index 0
+    source.next(2); // index 1
+    source.next(3); // index 2
+    source.complete();
+  });
 
-      const forked = source.pipe(
-        fork(
-          {
-            on: async (val) => {
-              await new Promise(resolve => setTimeout(resolve, 10));
-              return val < 2;
-            },
-            handler: (val) => from([val * 10])
+  it('edge: should handle async predicates during rapid emissions', (done) => {
+    const source = createSubject<number>();
+    const results: number[] = [];
+
+    const forked = source.pipe(
+      fork(
+        {
+          on: async (val) => {
+            await new Promise(resolve => setTimeout(resolve, 10));
+            return val < 2;
           },
-          {
-            on: async (val) => {
-              await new Promise(resolve => setTimeout(resolve, 5));
-              return val >= 2;
-            },
-            handler: (val) => of(val * 100)
-          }
-        )
-      );
-
-      forked.subscribe({
-        next: (val) => results.push(val),
-        complete: () => {
-          expect(results).toEqual([10, 200, 300]);
-          done();
+          handler: (val) => from([val * 10])
+        },
+        {
+          on: async (val) => {
+            await new Promise(resolve => setTimeout(resolve, 5));
+            return val >= 2;
+          },
+          handler: (val) => of(val * 100)
         }
-      });
+      )
+    );
 
-      source.next(1);
-      source.next(2);
-      source.next(3);
-      source.complete();
+    forked.subscribe({
+      next: (val) => results.push(val),
+      complete: () => {
+        expect(results).toEqual([10, 200, 300]);
+        done();
+      }
     });
 
-    it('should handle mixed handler types (stream, promise, array, scalar)', (done) => {
-      const source = createSubject<number>();
-      const results: number[] = [];
+    source.next(1);
+    source.next(2);
+    source.next(3);
+    source.complete();
+  });
 
-      const forked = source.pipe(
-        fork(
-          {
-            on: (val) => val === 1,
-            handler: (val) => from([val * 10]) // Stream
-          },
-          {
-            on: (val) => val === 2,
-            handler: (val) => new Promise<number>((resolve) =>
-              setTimeout(() => resolve(val * 10), 10)
-            ) // Promise
-          },
-          {
-            on: (val) => val === 3,
-            handler: (val) => [val * 10, val * 100] // Array
-          },
-          {
-            on: (val) => val === 4,
-            handler: (val) => val * 10 // Scalar
-          }
-        )
-      );
+  it('edge: should handle mixed handler types (stream, promise, array, scalar)', (done) => {
+    const source = createSubject<number>();
+    const results: number[] = [];
 
-      forked.subscribe({
-        next: (val) => results.push(val),
-        complete: () => {
-          expect(results).toEqual([10, 20, 30, 300, 40]);
-          done();
+    const forked = source.pipe(
+      fork(
+        {
+          on: (val) => val === 1,
+          handler: (val) => from([val * 10]) // Stream
+        },
+        {
+          on: (val) => val === 2,
+          handler: (val) => new Promise<number>((resolve) =>
+            setTimeout(() => resolve(val * 10), 10)
+          ) // Promise
+        },
+        {
+          on: (val) => val === 3,
+          handler: (val) => [val * 10, val * 100] // Array
+        },
+        {
+          on: (val) => val === 4,
+          handler: (val) => val * 10 // Scalar
         }
-      });
+      )
+    );
 
-      source.next(1);
-      source.next(2);
-      source.next(3);
-      source.next(4);
-      source.complete();
+    forked.subscribe({
+      next: (val) => results.push(val),
+      complete: () => {
+        expect(results).toEqual([10, 20, 30, 300, 40]);
+        done();
+      }
     });
 
-    it('should throw if no predicate matches', (done) => {
-      const source = createSubject<number>();
-      const results: number[] = [];
+    source.next(1);
+    source.next(2);
+    source.next(3);
+    source.next(4);
+    source.complete();
+  });
 
-      const forked = source.pipe(
-        fork(
-          {
-            on: (val) => val === 1,
-            handler: (val) => of(val * 10)
-          },
-          {
-            on: (val) => val === 2,
-            handler: (val) => of(val * 10)
-          }
-        )
-      );
+  it('edge: should handle sequential routing with rapid emissions', (done) => {
+    const source = createSubject<string>();
+    const results: string[] = [];
 
-      forked.subscribe({
-        next: (val) => results.push(val),
-        error: (err) => {
-          expect(err).toBeDefined();
-          expect(results).toEqual([10, 20]);
-          done();
+    const forked = source.pipe(
+      fork(
+        {
+          on: (val) => val.startsWith('a'),
+          handler: (val) => of(`[A:${val}]`)
+        },
+        {
+          on: (val) => val.startsWith('b'),
+          handler: (val) => of(`[B:${val}]`)
+        },
+        {
+          on: () => true, // Catch-all
+          handler: (val) => of(`[?:${val}]`)
         }
-      });
+      )
+    );
 
-      source.next(1);
-      source.next(2);
-      source.next(3); // No matching predicate - should error
+    forked.subscribe({
+      next: (val) => results.push(val),
+      complete: () => {
+        expect(results).toEqual(['[A:apple]', '[B:banana]', '[?:cherry]']);
+        done();
+      }
     });
 
-    it('should handle sequential routing with rapid emissions', (done) => {
-      const source = createSubject<string>();
-      const results: string[] = [];
-
-      const forked = source.pipe(
-        fork(
-          {
-            on: (val) => val.startsWith('a'),
-            handler: (val) => of(`[A:${val}]`)
-          },
-          {
-            on: (val) => val.startsWith('b'),
-            handler: (val) => of(`[B:${val}]`)
-          },
-          {
-            on: () => true, // Catch-all
-            handler: (val) => of(`[?:${val}]`)
-          }
-        )
-      );
-
-      forked.subscribe({
-        next: (val) => results.push(val),
-        complete: () => {
-          expect(results).toEqual(['[A:apple]', '[B:banana]', '[?:cherry]']);
-          done();
-        }
-      });
-
-      source.next('apple');
-      source.next('banana');
-      source.next('cherry');
-      source.complete();
-    });
+    source.next('apple');
+    source.next('banana');
+    source.next('cherry');
+    source.complete();
   });
 });
 
