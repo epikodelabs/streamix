@@ -123,6 +123,79 @@ idescribe('onMediaQuery', () => {
     expect(callback).toHaveBeenCalledWith(true);  // after promise resolves
   });
 
+  it('supports async iteration', async () => {
+    const query = '(min-width: 1234px)';
+
+    const listeners: ((event: MediaQueryListEvent) => void)[] = [];
+    (window as any).matchMedia = jasmine.createSpy('matchMedia').and.callFake((_q: string) => {
+      return {
+        matches: false,
+        addEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) => listeners.push(cb),
+        removeEventListener: (_: string, cb: (e: MediaQueryListEvent) => void) => {
+          const idx = listeners.indexOf(cb);
+          if (idx >= 0) listeners.splice(idx, 1);
+        },
+      };
+    });
+
+    const iterPromise = (async () => {
+      const values: boolean[] = [];
+      for await (const v of onMediaQuery(query)) {
+        values.push(v);
+        if (values.length === 2) break;
+      }
+      return values;
+    })();
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    listeners.forEach(cb => cb({ matches: true } as MediaQueryListEvent));
+
+    expect(await iterPromise).toEqual([false, true]);
+  });
+
+  it('uses addListener/removeListener for promise queries when addEventListener is not available', async () => {
+    const listeners: ((event: MediaQueryListEvent) => void)[] = [];
+
+    (window as any).matchMedia = jasmine.createSpy('matchMedia').and.callFake((_q: string) => {
+      return {
+        matches: false,
+        addEventListener: undefined,
+        removeEventListener: undefined,
+        addListener: (cb: (e: MediaQueryListEvent) => void) => listeners.push(cb),
+        removeListener: (cb: (e: MediaQueryListEvent) => void) => {
+          const idx = listeners.indexOf(cb);
+          if (idx >= 0) listeners.splice(idx, 1);
+        },
+      };
+    });
+
+    let resolveQuery!: (value: string) => void;
+    const queryPromise = new Promise<string>((resolve) => {
+      resolveQuery = resolve;
+    });
+
+    const callback = jasmine.createSpy('callback');
+    const stream: Stream<boolean> = onMediaQuery(queryPromise);
+    const sub = stream.subscribe(callback);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(callback).toHaveBeenCalledWith(false); // immediate false for thenable path
+
+    resolveQuery('(min-width: 9000px)');
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(listeners.length).toBe(1);
+
+    listeners.forEach(cb => cb({ matches: true } as MediaQueryListEvent));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(callback).toHaveBeenCalledWith(true);
+
+    sub.unsubscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(listeners.length).toBe(0);
+  });
+
   it('does not emit after promise resolves when unsubscribed early', async () => {
     const query = '(min-width: 1000px)';
     const listeners: ((event: MediaQueryListEvent) => void)[] = [];

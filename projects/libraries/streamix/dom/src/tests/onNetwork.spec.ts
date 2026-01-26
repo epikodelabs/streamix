@@ -184,6 +184,33 @@ idescribe('onNetwork', () => {
     sub.unsubscribe();
   });
 
+  it('emits on connection change events (Network Information API)', async () => {
+    const env = mockNetworkEnv(true);
+
+    restore.push(
+      patchObject(window, {
+        addEventListener: () => env.addEventListener,
+        removeEventListener: () => env.removeEventListener,
+      }),
+      patchObject(navigator as any, {
+        onLine: () => env.onLine,
+        connection: env.connection,
+      })
+    );
+
+    const values: NetworkState[] = [];
+    const sub = onNetwork().subscribe(v => values.push(v));
+    await flush();
+
+    env.connection.downlink = 42;
+    env.fireConnectionChange();
+    await flush();
+
+    expect(values.length).toBe(2);
+    expect(values[1].downlink).toBe(42);
+    sub.unsubscribe();
+  });
+
   it('supports async iteration', async () => {
     const env = mockNetworkEnv(true);
 
