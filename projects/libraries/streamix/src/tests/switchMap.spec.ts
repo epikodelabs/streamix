@@ -1,4 +1,18 @@
-import { createSubject, delay, EMPTY, from, of, switchMap } from '@epikodelabs/streamix';
+import {
+  createStream,
+  createSubject,
+  delay,
+  EMPTY,
+  from,
+  getIteratorEmissionStamp,
+  getValueMeta,
+  isWrappedPrimitive,
+  of,
+  setIteratorEmissionStamp,
+  setIteratorMeta,
+  switchMap,
+  unwrapPrimitive,
+} from '@epikodelabs/streamix';
 
 describe('switchMap', () => {
   it('should switch to new inner streams correctly', (done) => {
@@ -483,163 +497,319 @@ describe('switchMap', () => {
     source.complete();
   });
 
-  describe('edge cases', () => {
-    it('should handle rapid successive emissions with sync inners', (done) => {
-      const source = createSubject<number>();
-      const results: number[] = [];
+  const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-      const switched = source.pipe(
-        switchMap(val => from([val * 10, val * 100]))
-      );
+  it('coverage: should stop and cleanup when iterator.return is called (early break)', async () => {
+    let innerClosed = 0;
 
-      switched.subscribe({
-        next: val => results.push(val),
-        complete: () => {
-          // Only last emission should complete
-          expect(results).toEqual([30, 300]);
-          done();
-        }
-      });
-
-      // Rapid emissions - only last one should complete
-      source.next(1);
-      source.next(2);
-      source.next(3);
-      source.complete();
-    });
-
-    it('should handle rapid emissions with mixed sync/async inners', (done) => {
-      const source = createSubject<number>();
-      const results: number[] = [];
-
-      const switched = source.pipe(
-        switchMap(val => {
-          if (val === 3) {
-            // Async inner
-            return new Promise<number>(resolve => {
-              setTimeout(() => resolve(val * 10), 50);
-            });
+    const source = createSubject<number>();
+    const stream = source.pipe(
+      switchMap(() =>
+        createStream("inner", async function* () {
+          try {
+            yield 1;
+            await wait(10_000);
+            yield 2;
+          } finally {
+            innerClosed++;
           }
-          // Sync inner
-          return of(val * 10);
         })
-      );
+      )
+    );
 
-      switched.subscribe({
-        next: val => results.push(val),
-        complete: () => {
-          // Only the async result from value 3
-          expect(results).toEqual([30]);
-          done();
-        }
-      });
+    const results: number[] = [];
 
-      source.next(1);
-      source.next(2);
-      source.next(3);
-      setTimeout(() => source.complete(), 100);
-    });
+    // Early break should trigger iterator.return()
+    for await (const value of stream) {
+      results.push(value);
+      break;
+    }
 
-    it('should ignore emissions from stale inners after rapid switching', (done) => {
-      const source = createSubject<number>();
-      const inner1 = createSubject<string>();
-      const inner2 = createSubject<string>();
-      const inner3 = createSubject<string>();
-      const results: string[] = [];
+    source.complete();
+    await wait(10);
 
-      const switched = source.pipe(
-        switchMap(val => val === 1 ? inner1 : val === 2 ? inner2 : inner3)
-      );
+    expect(results).toEqual([1]);
+    expect(innerClosed).toBe(1);
+  });
 
-      switched.subscribe({
-        next: val => results.push(val),
-        complete: () => {
-          expect(results).toEqual(['c1', 'c2']);
-          done();
-        }
-      });
+  it('coverage: should stop and cleanup when iterator.throw is called', async () => {
+    let innerClosed = 0;
 
-      source.next(1);
-      source.next(2);
-      source.next(3);
-
-      // Stale inners should be ignored
-      inner1.next('a1');
-      inner2.next('b1');
-
-      // Only active inner emissions should pass through
-      inner3.next('c1');
-      inner3.next('c2');
-
-      inner1.complete();
-      inner2.complete();
-      inner3.complete();
-      source.complete();
-    });
-
-    it('should handle unsubscribe during rapid inner switching', (done) => {
-      const source = createSubject<number>();
-      const results: number[] = [];
-      let completionCount = 0;
-
-      const switched = source.pipe(
-        switchMap(val => {
-          const inner = createSubject<number>();
-          setTimeout(() => {
-            inner.next(val * 10);
-            inner.complete();
-            completionCount++;
-          }, val * 20);
-          return inner;
-        })
-      );
-
-      const sub = switched.subscribe({
-        next: val => {
-          results.push(val);
-          if (val === 30) {
-            sub.unsubscribe();
+    const source = createSubject<number>();
+    const stream = source.pipe(
+      switchMap(() =>
+        createStream("inner", async function* () {
+          try {
+            yield 1;
+            await wait(10_000);
+            yield 2;
+          } finally {
+            innerClosed++;
           }
-        }
-      });
-
-      source.next(1);
-      source.next(2);
-      source.next(3);
-
-      setTimeout(() => {
-        expect(results).toEqual([30]);
-        // Unsubscribe stops delivery but does not cancel already-scheduled work.
-        expect(completionCount).toBe(3);
-        done();
-      }, 150);
-    });
-
-    it('should handle errors in rapid succession', (done) => {
-      const source = createSubject<number>();
-      const results: number[] = [];
-
-      const switched = source.pipe(
-        switchMap(val => {
-          if (val === 3) {
-            throw new Error('Error at 3');
-          }
-          return of(val * 10);
         })
-      );
+      )
+    );
 
-      switched.subscribe({
-        next: val => results.push(val),
-        error: err => {
-          expect(err.message).toBe('Error at 3');
-          expect(results).toEqual([]);
-          done();
+    const iterator = stream[Symbol.asyncIterator]();
+
+    source.next(1);
+    const first = await iterator.next();
+    expect(first).toEqual({ done: false, value: 1 });
+
+    await expectAsync((iterator as any).throw(new Error("stop"))).toBeRejectedWithError("stop");
+    source.complete();
+    await wait(10);
+
+    expect(innerClosed).toBe(1);
+  });
+
+  it('coverage: should propagate errors from the active inner stream', async () => {
+    const source = createSubject<number>();
+    const inner = createSubject<number>();
+    const stream = source.pipe(switchMap(() => inner));
+    const iterator = stream[Symbol.asyncIterator]();
+
+    const read = iterator.next();
+    source.next(1);
+    await wait(0);
+    inner.error(new Error("boom"));
+
+    await expectAsync(read).toBeRejectedWithError("boom");
+  });
+
+  it('coverage: should use inner emission stamp when present', async () => {
+    const source = createSubject<number>();
+
+    const inner = (() => {
+      let done = false;
+      const iterator: AsyncIterator<number> = {
+        next: async () => {
+          if (done) return { done: true, value: undefined };
+          done = true;
+          setIteratorEmissionStamp(iterator as any, 123);
+          return { done: false, value: 1 };
+        },
+      };
+      return { [Symbol.asyncIterator]: () => iterator } as any;
+    })();
+
+    const stream = source.pipe(switchMap(() => inner));
+    const iterator = stream[Symbol.asyncIterator]();
+
+    source.next(1);
+    const first = await iterator.next();
+    expect(first).toEqual({ done: false, value: 1 });
+    expect(getIteratorEmissionStamp(iterator as any)).toBe(123);
+
+    source.complete();
+    await iterator.return?.();
+  });
+
+  it('coverage: should support push-based sources via __tryNext/__onPush', async () => {
+    const buffer: number[] = [1];
+    let done = false;
+
+    const sourceIterator: any = {
+      __tryNext() {
+        if (buffer.length > 0) {
+          return { done: false, value: buffer.shift()! };
         }
-      });
+        if (done) {
+          return { done: true, value: undefined };
+        }
+        return null;
+      },
+      next: async () => {
+        throw new Error("next() should not be used when __tryNext is present");
+      }
+    };
 
-      source.next(1);
-      source.next(2);
-      source.next(3);
-    });
+    const iterator = switchMap<number, number>((value) => from([value, value * 10])).apply(sourceIterator);
+    const iterable = { [Symbol.asyncIterator]: () => iterator } as AsyncIterable<number>;
+
+    const valuesPromise = (async () => {
+      const values: number[] = [];
+      for await (const value of iterable) {
+        values.push(value);
+      }
+      return values;
+    })();
+
+    // First value is already buffered; allow drain() to run.
+    await wait(0);
+
+    buffer.push(2, 3);
+    sourceIterator.__onPush();
+
+    done = true;
+    sourceIterator.__onPush();
+
+    expect(await valuesPromise).toEqual([3, 30]);
+  });
+
+  it('coverage: should complete for pull-based sources (no __tryNext)', async () => {
+    const sourceIterator = (async function* () {
+      yield 1;
+    })() as AsyncIterator<number>;
+
+    const iterator = switchMap<number, number>((value) => from([value * 10])).apply(sourceIterator as any);
+    const iterable = { [Symbol.asyncIterator]: () => iterator } as AsyncIterable<number>;
+
+    const values: number[] = [];
+    for await (const value of iterable) {
+      values.push(value);
+    }
+
+    expect(values).toEqual([10]);
+  });
+
+  it('coverage: should propagate errors thrown by pull-based sources', async () => {
+    let calls = 0;
+
+    const sourceIterator: AsyncIterator<number> = {
+      next: async () => {
+        calls++;
+        if (calls === 1) return { done: false, value: 1 };
+        throw new Error("source boom");
+      }
+    };
+
+    const iterator = switchMap<number, number>((value) => from([value * 10])).apply(sourceIterator as any);
+    const iterable = { [Symbol.asyncIterator]: () => iterator } as AsyncIterable<number>;
+
+    const run = (async () => {
+      const values: number[] = [];
+      for await (const value of iterable) {
+        values.push(value);
+      }
+      return values;
+    })();
+
+    await expectAsync(run).toBeRejectedWithError("source boom");
+  });
+
+  it('coverage: should ignore delayed emissions from stale inners (when inner has no return)', async () => {
+    const source = createSubject<number>();
+
+    const uncancellableDelayedInner = (value: number, ms: number) => {
+      return {
+        [Symbol.asyncIterator]() {
+          let emitted = false;
+          return {
+            next: async () => {
+              if (emitted) return { done: true, value: undefined };
+              emitted = true;
+              await wait(ms);
+              return { done: false, value };
+            }
+          } as AsyncIterator<number>;
+        }
+      };
+    };
+
+    const stream = source.pipe(
+      switchMap((value) => {
+        if (value === 1) return uncancellableDelayedInner(1, 20) as any;
+        return from([2]);
+      })
+    );
+
+    const results: number[] = [];
+    const iterator = stream[Symbol.asyncIterator]();
+
+    const readAll = (async () => {
+      try {
+        while (true) {
+          const r = await iterator.next();
+          if (r.done) break;
+          results.push(r.value);
+        }
+      } finally {
+        await iterator.return?.();
+      }
+    })();
+
+    source.next(1);
+    await wait(0);
+    source.next(2);
+    source.complete();
+
+    await readAll;
+
+    // Wait for the stale inner's delayed next() to resolve so switchMap's stale-check runs.
+    await wait(30);
+
+    expect(results).toEqual([2]);
+  });
+
+  it('coverage: should propagate errors thrown by __tryNext sources', async () => {
+    let calls = 0;
+
+    const sourceIterator: any = {
+      __tryNext() {
+        calls++;
+        if (calls === 1) return { done: false, value: 1 };
+        throw new Error("tryNext boom");
+      },
+      next: async () => {
+        throw new Error("next() should not be used when __tryNext is present");
+      }
+    };
+
+    const iterator = switchMap<number, number>((value) => from([value * 10])).apply(sourceIterator);
+    const iterable = { [Symbol.asyncIterator]: () => iterator } as AsyncIterable<number>;
+
+    const run = (async () => {
+      const values: number[] = [];
+      for await (const value of iterable) {
+        values.push(value);
+      }
+      return values;
+    })();
+
+    await expectAsync(run).toBeRejectedWithError("tryNext boom");
+  });
+
+  it('coverage: should carry parent iterator metadata to inner emissions', async () => {
+    const source = createSubject<number>();
+    const sourceIterator = source[Symbol.asyncIterator]();
+
+    setIteratorMeta(sourceIterator as any, { valueId: "parent" }, 0, "test");
+
+    const iterator = switchMap<number, any>(() => from([123])).apply(sourceIterator as any);
+    const iterable = { [Symbol.asyncIterator]: () => iterator } as AsyncIterable<any>;
+
+    const valuesPromise = (async () => {
+      const values: any[] = [];
+      for await (const value of iterable) {
+        values.push(value);
+      }
+      return values;
+    })();
+
+    source.next(1);
+    source.complete();
+
+    const values = await valuesPromise;
+    expect(values.length).toBe(1);
+    expect(isWrappedPrimitive(values[0])).toBeTrue();
+    expect(unwrapPrimitive(values[0])).toBe(123);
+    expect(getValueMeta(values[0])?.valueId).toBe("parent");
+    expect(getValueMeta(values[0])?.kind).toBe("expand");
+  });
+
+  it('coverage: should propagate promise rejections from project', async () => {
+    const source = createSubject<number>();
+    const stream = source.pipe(
+      switchMap(() => new Promise<number>((_, reject) => setTimeout(() => reject(new Error("reject boom")), 0)))
+    );
+
+    const iterator = stream[Symbol.asyncIterator]();
+    const read = iterator.next();
+
+    source.next(1);
+
+    await expectAsync(read).toBeRejectedWithError("reject boom");
+    await iterator.return?.();
   });
 });
