@@ -5,6 +5,7 @@ import {
   getIteratorMeta,
   isPromiseLike,
   nextEmissionStamp,
+  withEmissionStamp,
   setIteratorEmissionStamp,
   setIteratorMeta,
   setValueMeta
@@ -84,8 +85,11 @@ export function switchMap<T = any, R = any>(
               );
             }
 
-            setIteratorEmissionStamp(outputIterator as any, stamp);
-            output.next(outputValue);
+            // Ensure downstream subject emissions carry the inner iterator stamp.
+            withEmissionStamp(stamp, () => {
+              setIteratorEmissionStamp(outputIterator as any, stamp);
+              output.next(outputValue);
+            });
           }
         } catch (err) {
           if (!stopped && streamId === currentInnerStreamId) {

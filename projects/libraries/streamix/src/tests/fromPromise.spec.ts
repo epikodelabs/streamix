@@ -174,35 +174,15 @@ describe('fromPromise', () => {
     };
     const stream = fromPromise(factory);
 
-    await new Promise<void>((resolve, reject) => {
-      stream.subscribe({
-        next: () => {},
-        complete: () => {
-          try {
-            expect(callCount).toBe(1);
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        },
-        error: reject
-      });
-    });
+    const it1 = stream[Symbol.asyncIterator]();
+    expect(await it1.next()).toEqual({ done: false, value: 'result' });
+    await it1.return?.();
+    expect(callCount).toBe(1);
 
-    await new Promise<void>((resolve, reject) => {
-      stream.subscribe({
-        next: () => {},
-        complete: () => {
-          try {
-            expect(callCount).toBe(2);
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        },
-        error: reject
-      });
-    });
+    const it2 = stream[Symbol.asyncIterator]();
+    expect(await it2.next()).toEqual({ done: false, value: 'result' });
+    await it2.return?.();
+    expect(callCount).toBe(2);
   });
 
   it('should emit error when factory throws immediately', async () => {

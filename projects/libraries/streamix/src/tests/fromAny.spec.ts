@@ -350,6 +350,9 @@ describe('fromAny', () => {
     }
     expect(values1).toEqual([1, 2, 3]);
 
+    // Allow any async teardown/scheduler work to flush between iterations.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     // Second iteration
     const values2: number[] = [];
     for await (const value of result) {
