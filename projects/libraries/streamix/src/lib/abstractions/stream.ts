@@ -1,6 +1,7 @@
 import { firstValueFrom } from "../converters";
 import { createAsyncIterator } from "../subjects/helpers";
 import {
+  getCurrentEmissionStamp,
   getIteratorEmissionStamp,
   nextEmissionStamp,
   withEmissionStamp
@@ -13,7 +14,6 @@ import {
 } from "./hooks";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
-import { createScheduler } from "./scheduler";
 import { createSubscription, type Subscription } from "./subscription";
 
 export type Stream<T = any> = AsyncIterable<T> & {
@@ -45,6 +45,24 @@ type SubscriberEntry<T> = {
   subscription: Subscription;
 };
 
+function enqueueMicrotask(fn: () => void): void {
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(fn);
+  } else {
+    void Promise.resolve().then(fn);
+  }
+}
+
+function runInMicrotask<T>(fn: () => MaybePromise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    enqueueMicrotask(() => {
+      Promise.resolve()
+        .then(fn)
+        .then(resolve, reject);
+    });
+  });
+}
+
 function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) =>
@@ -56,7 +74,16 @@ function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
   const wrapped: Receiver<T> = {};
 
   const execute = (cb: () => MaybePromise) => {
-    return queueMicrotask(cb);
+    const stamp = getCurrentEmissionStamp();
+    if (stamp !== null) {
+      try {
+        return cb();
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    }
+
+    return runInMicrotask(cb).then(() => void 0);
   };
 
   if (receiver.next) {
@@ -187,7 +214,6 @@ export function createStream<T>(
   generatorFn: (signal?: AbortSignal) => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
   const id = generateStreamId();
-  const scheduler = createScheduler();
 
   getRuntimeHooks()?.onCreateStream?.({ id, name });
 
@@ -221,8 +247,10 @@ export function createStream<T>(
     let subscription!: Subscription;
 
     subscription = createSubscription(async () => {
-      return scheduler.enqueue(async () => {
-        const entry = activeSubscriptions.find((s) => s.subscription === subscription);
+      return runInMicrotask(async () => {
+        const entry = activeSubscriptions.find(
+          (s) => s.subscription === subscription
+        );
 
         if (entry) {
           activeSubscriptions = activeSubscriptions.filter((s) => s !== entry);
@@ -237,7 +265,7 @@ export function createStream<T>(
 
     // IMPORTANT: register synchronously so operators like switchMap can
     // subscribe/unsubscribe inner streams in the same tick without racing the
-    // scheduler queue. Receiver callbacks are still scheduled by `wrapReceiver`.
+    // microtask-delivery loop. Receiver callbacks are still scheduled by `wrapReceiver`.
     activeSubscriptions = [...activeSubscriptions, { receiver: wrapped, subscription }];
 
     if (!isRunning) {
@@ -275,7 +303,6 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
   operators: [...Ops]
 ): Stream<any> {
   const pipedId = generateStreamId();
-  const scheduler = createScheduler();
 
   function registerReceiver(receiver: Receiver<any>): Subscription {
     const wrapped = wrapReceiver(receiver);
@@ -293,14 +320,16 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
     });
 
     const subscription = createSubscription(async () => {
-      return scheduler.enqueue(async () => {
+      return runInMicrotask(async () => {
         abortController.abort();
         wrapped.complete?.();
       });
     });
 
-    scheduler.enqueue(() => {
-      drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(() => {});
+    enqueueMicrotask(() => {
+      drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(
+        () => {}
+      );
     });
 
     return subscription;
