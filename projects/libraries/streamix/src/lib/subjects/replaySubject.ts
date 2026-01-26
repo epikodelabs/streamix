@@ -4,7 +4,6 @@ import {
   DONE,
   generateStreamId,
   getCurrentEmissionStamp,
-  isPromiseLike,
   nextEmissionStamp,
   pipeSourceThrough,
   setIteratorEmissionStamp,
@@ -15,7 +14,6 @@ import {
   type StrictReceiver,
   type Subscription
 } from "../abstractions";
-import { scheduler } from "../abstractions/scheduler";
 import { firstValueFrom } from "../converters";
 import {
   createRegister,
@@ -27,7 +25,6 @@ import type { Subject } from "./subject";
 type ReplayItem<T> = { value: T; stamp: number };
 
 export type ReplaySubject<T = any> = Subject<T>;
-
 export function createReplaySubject<T = any>(
   capacity: number = Infinity
 ): ReplaySubject<T> {
@@ -70,27 +67,17 @@ export function createReplaySubject<T = any>(
     receivers,
     ready,
     terminalRef,
-    createSubscription: (onUnsubscribe?: () => any) => {
-      return createSubscription(async () => {
-        if (onUnsubscribe) {
-          return scheduler.enqueue(() => onUnsubscribe());
-        }
-      });
-    },
+    createSubscription,
     tryCommit,
   });
 
   const next = (value: T) => {
     if (isCompleted) return;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    // Keep `.value` in sync with the latest producer call (tests expect this
-    // synchronously, even though delivery is scheduled).
     setLatestValue(value);
     pushReplay(value, stamp);
-    scheduler.enqueue(() => {
-      queue.push({ kind: 'next', value: value as any, stamp } as QueueItem<T>);
-      tryCommit();
-    });
+    queue.push({ kind: 'next', value: value as any, stamp } as QueueItem<T>);
+    tryCommit();
   };
 
   const complete = () => {
@@ -99,10 +86,8 @@ export function createReplaySubject<T = any>(
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     const item = { kind: 'complete', stamp } as QueueItem<T>;
     terminalRef.current = item;
-    scheduler.enqueue(() => {
-      queue.push(item);
-      tryCommit();
-    });
+    queue.push(item);
+    tryCommit();
   };
 
   const error = (err: any) => {
@@ -111,10 +96,24 @@ export function createReplaySubject<T = any>(
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     const item = { kind: 'error', error: err, stamp } as QueueItem<T>;
     terminalRef.current = item;
-    scheduler.enqueue(() => {
-      queue.push(item);
-      tryCommit();
-    });
+    queue.push(item);
+    tryCommit();
+  };
+
+  const deliverReplayAsync = async (
+    r: StrictReceiver<T>,
+    snapshot: ReplayItem<T>[],
+    isActive: () => boolean,
+    onDone?: () => void
+  ) => {
+    for (const it of snapshot) {
+      if (!isActive() || r.completed) break;
+      const result = withEmissionStamp(it.stamp, () => r.next(it.value));
+      if (result && typeof (result as any).then === 'function') {
+        await result;
+      }
+    }
+    onDone?.();
   };
 
   const subscribe = (cb?: ((value: T) => any) | Receiver<T>): Subscription => {
@@ -128,18 +127,15 @@ export function createReplaySubject<T = any>(
       let active = true;
       const sub = createSubscription(() => {
         active = false;
-        return r.complete();
+        const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+        return withEmissionStamp(stamp, () => r.complete());
       });
 
-      void scheduler.enqueue(async () => {
-        for (const it of snapshot) {
-          if (!active || r.completed) return;
-          const res = withEmissionStamp(it.stamp, () => r.next(it.value));
-          if (isPromiseLike(res)) await res;
+      // Deliver replay with backpressure support
+      deliverReplayAsync(r, snapshot, () => active, () => {
+        if (active && !r.completed) {
+          deliverTerminal(r, terminal);
         }
-
-        if (!active || r.completed) return;
-        deliverTerminal(r, terminal);
       });
 
       return sub;
@@ -149,20 +145,8 @@ export function createReplaySubject<T = any>(
     const sub = register(r);
 
     if (snapshot.length > 0) {
-      // Block live delivery until replay finishes to avoid interleaving.
-      ready.delete(r);
-
-      void scheduler.enqueue(async () => {
-        for (const it of snapshot) {
-          if (r.completed || !receivers.has(r)) return;
-          const res = withEmissionStamp(it.stamp, () => r.next(it.value));
-          if (isPromiseLike(res)) await res;
-        }
-
-        if (r.completed || !receivers.has(r)) return;
-        ready.add(r);
-        tryCommit();
-      });
+      // Deliver replay with backpressure support
+      deliverReplayAsync(r, snapshot, () => !r.completed && receivers.has(r));
     }
 
     return sub;

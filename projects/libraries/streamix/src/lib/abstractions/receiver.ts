@@ -1,6 +1,6 @@
 import { unwrapPrimitive } from "./hooks";
 import { isPromiseLike, type MaybePromise } from "./operator";
-import { scheduler } from "./scheduler";
+import { getCurrentEmissionStamp } from "./emission";
 
 export type Receiver<T = any> = {
   next?: (value: T) => MaybePromise;
@@ -9,6 +9,14 @@ export type Receiver<T = any> = {
 };
 
 export type StrictReceiver<T = any> = Required<Receiver<T>> & { readonly completed: boolean; };
+
+function enqueueMicrotask(fn: () => void): void {
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(fn);
+  } else {
+    void Promise.resolve().then(fn);
+  }
+}
 
 export function createReceiver<T = any>(
   callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
@@ -29,7 +37,7 @@ export function createReceiver<T = any>(
   const runAction = (handler?: (...args: any[]) => MaybePromise, ...args: any[]): Promise<void> => {
     if (!handler || _completed || _completedScheduled) return Promise.resolve();
 
-    return scheduler.enqueue(async () => {
+    const action = async () => {
       // Re-check completed status inside the scheduled task
       if (_completed) return;
 
@@ -51,6 +59,17 @@ export function createReceiver<T = any>(
           for (const r of resolvers) r();
         }
       }
+    };
+
+    // If we're already in an emission context (i.e. called from a Subject/Stream
+    // delivery loop), execute inline to preserve sync semantics.
+    const stamp = getCurrentEmissionStamp();
+    if (stamp !== null) {
+      return action();
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      enqueueMicrotask(() => void action().then(resolve, reject));
     });
   };
 
@@ -66,7 +85,7 @@ export function createReceiver<T = any>(
       _completedScheduled = true;
       const normalizedError = err instanceof Error ? err : new Error(String(err));
 
-      return scheduler.enqueue(async () => {
+      const action = async () => {
         if (_completed) return;
 
         // Wait until any active handlers finish before delivering terminal
@@ -86,6 +105,15 @@ export function createReceiver<T = any>(
           } finally {
             _completed = true;
           }
+      };
+
+      const stamp = getCurrentEmissionStamp();
+      if (stamp !== null) {
+        return action();
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        enqueueMicrotask(() => void action().then(resolve, reject));
       });
     },
 
@@ -93,7 +121,7 @@ export function createReceiver<T = any>(
       if (_completed || _completedScheduled) return Promise.resolve();
       _completedScheduled = true;
 
-      return scheduler.enqueue(async () => {
+      const action = async () => {
         if (_completed) return;
 
         // Wait until any active handlers finish before delivering terminal
@@ -112,6 +140,15 @@ export function createReceiver<T = any>(
             /* ignore logging failures */
           }
         }
+      };
+
+      const stamp = getCurrentEmissionStamp();
+      if (stamp !== null) {
+        return action();
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        enqueueMicrotask(() => void action().then(resolve, reject));
       });
     },
 

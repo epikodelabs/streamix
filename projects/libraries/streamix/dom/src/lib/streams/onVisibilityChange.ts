@@ -32,7 +32,10 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
     }
 
     const state = (document as any).visibilityState;
-    return typeof state === "string" ? state : "visible";
+    if (state === "visible" || state === "hidden") {
+      return state;
+    }
+    return "visible";
   };
 
   const emit = () => {

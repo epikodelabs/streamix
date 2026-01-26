@@ -1,20 +1,19 @@
 import { firstValueFrom } from "../converters";
 import { createAsyncIterator } from "../subjects/helpers";
 import {
-  getCurrentEmissionStamp,
   getIteratorEmissionStamp,
   nextEmissionStamp,
-  withEmissionStamp,
+  withEmissionStamp
 } from "./emission";
 import {
   applyPipeStreamHooks,
-  generateSubscriptionId,
   generateStreamId,
+  generateSubscriptionId,
   getRuntimeHooks
 } from "./hooks";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
-import { scheduler } from "./scheduler";
+import { createScheduler } from "./scheduler";
 import { createSubscription, type Subscription } from "./subscription";
 
 export type Stream<T = any> = AsyncIterable<T> & {
@@ -57,11 +56,7 @@ function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
   const wrapped: Receiver<T> = {};
 
   const execute = (cb: () => MaybePromise) => {
-    const stamp = getCurrentEmissionStamp();
-    if (stamp !== null) {
-      return cb();
-    }
-    return scheduler.enqueue(cb);
+    return queueMicrotask(cb);
   };
 
   if (receiver.next) {
@@ -192,6 +187,7 @@ export function createStream<T>(
   generatorFn: (signal?: AbortSignal) => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
   const id = generateStreamId();
+  const scheduler = createScheduler();
 
   getRuntimeHooks()?.onCreateStream?.({ id, name });
 
@@ -279,6 +275,7 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
   operators: [...Ops]
 ): Stream<any> {
   const pipedId = generateStreamId();
+  const scheduler = createScheduler();
 
   function registerReceiver(receiver: Receiver<any>): Subscription {
     const wrapped = wrapReceiver(receiver);

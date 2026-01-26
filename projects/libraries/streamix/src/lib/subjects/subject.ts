@@ -9,7 +9,6 @@ import {
   type Stream,
   type StrictReceiver
 } from "../abstractions";
-import { scheduler } from "../abstractions/scheduler";
 import { firstValueFrom } from "../converters";
 import { createAsyncIterator, createRegister, createTryCommit, type QueueItem } from "./helpers";
 
@@ -39,19 +38,14 @@ export function createSubject<T = any>(): Subject<T> {
     receivers,
     ready,
     terminalRef,
-    createSubscription: (onUnsubscribe?: () => any) => {
-      return createSubscription(async () => {
-        if (onUnsubscribe) {
-          return scheduler.enqueue(() => onUnsubscribe());
-        }
-      });
-    },
+    createSubscription,
     tryCommit,
   });
 
   const next = (value: T) => {
     if (isCompleted) return;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    setLatestValue(value);
     queue.push({ kind: 'next', value: value as any, stamp } as QueueItem<T>);
     tryCommit();
   };

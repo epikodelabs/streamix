@@ -26,8 +26,13 @@ export function createTryCommit<T>(opts: {
   ready: Set<StrictReceiver<T>>;
   queue: QueueItem<T>[];
   setLatestValue: (v: T) => void;
+  /**
+   * Optional hook used by Subjects to ensure commit continuation runs on the
+   * subject's scheduler. When omitted, continuations call `tryCommit()` directly.
+   */
+  scheduleCommit?: () => void;
 }) {
-  const { receivers, ready, queue, setLatestValue } = opts;
+  const { receivers, ready, queue, setLatestValue, scheduleCommit } = opts;
   let isCommitting = false;
   let pendingCommit = false;
 
@@ -73,7 +78,11 @@ export function createTryCommit<T>(opts: {
                 result.finally(() => {
                   if (!r.completed && receivers.has(r)) {
                     ready.add(r);
-                    tryCommit();
+                    if (typeof scheduleCommit === "function") {
+                      scheduleCommit();
+                    } else {
+                      tryCommit();
+                    }
                   }
                 });
               }

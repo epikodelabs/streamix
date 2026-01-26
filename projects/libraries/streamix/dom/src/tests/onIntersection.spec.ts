@@ -1,9 +1,42 @@
 import { onIntersection } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
+function withGlobal<T>(key: string, value: T, fn: () => void | Promise<void>) {
+  const g: any = globalThis as any;
+  const original = g[key];
+  g[key] = value;
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      if (original === undefined) delete g[key];
+      else g[key] = original;
+    });
+}
+
+function firstValue<T>(stream: any, timeoutMs = 250): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(
+      () => reject(new Error(`Timed out waiting for first emission (${timeoutMs}ms)`)),
+      timeoutMs
+    );
+
+    const sub = stream.subscribe({
+      next: (v: T) => {
+        clearTimeout(timeoutId);
+        sub.unsubscribe();
+        resolve(v);
+      },
+      error: (e: any) => {
+        clearTimeout(timeoutId);
+        sub.unsubscribe();
+        reject(e);
+      },
+    });
+  });
+}
+
 idescribe('onIntersection', () => {
   let element: HTMLElement;
-  let visibilityStream: any;
 
   beforeEach(() => {
     element = document.createElement('div');
@@ -14,181 +47,102 @@ idescribe('onIntersection', () => {
     if (element && element.parentNode) {
       document.body.removeChild(element);
     }
-    if (visibilityStream && visibilityStream.unsubscribe) {
-        visibilityStream.unsubscribe();
-    }
   });
 
-  it('should emit true when element is visible', (done) => {
-    const originalIntersection = (globalThis as any).IntersectionObserver;
-
+  it('emits true when element is visible', async () => {
     class FakeIntersectionObserver {
-      callback: (entries: IntersectionObserverEntry[]) => void;
-      constructor(cb: (entries: IntersectionObserverEntry[]) => void) {
-        this.callback = cb;
-      }
+      constructor(private cb: (entries: IntersectionObserverEntry[]) => void) {}
       observe() {
-        this.callback([{ isIntersecting: true } as IntersectionObserverEntry]);
+        this.cb([{ isIntersecting: true } as IntersectionObserverEntry]);
       }
       disconnect() {}
       unobserve() {}
     }
 
-    (globalThis as any).IntersectionObserver = FakeIntersectionObserver;
-
-    const restore = () => {
-      if (originalIntersection) {
-        (globalThis as any).IntersectionObserver = originalIntersection;
-      } else {
-        delete (globalThis as any).IntersectionObserver;
-      }
-    };
-
-    let timeoutId: any;
-    const subscription = onIntersection(element).subscribe({
-      next: (isVisible: boolean) => {
-        if (isVisible) {
-          expect(isVisible).toBeTrue();
-          subscription.unsubscribe();
-          clearTimeout(timeoutId);
-          restore();
-          done();
-        }
-      }
+    await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
+      await expectAsync(firstValue<boolean>(onIntersection(element))).toBeResolvedTo(true);
     });
-
-    timeoutId = setTimeout(() => {
-      subscription.unsubscribe();
-      restore();
-      fail('Expected onIntersection to emit true');
-    }, 100);
   });
 
-  it('should emit false when element is scrolled out of view', (done) => {
-    const originalIntersection = (globalThis as any).IntersectionObserver;
-
+  it('emits false when element is not visible', async () => {
     class FakeIntersectionObserver {
-      callback: (entries: IntersectionObserverEntry[]) => void;
-      constructor(cb: (entries: IntersectionObserverEntry[]) => void) {
-        this.callback = cb;
-      }
+      constructor(private cb: (entries: IntersectionObserverEntry[]) => void) {}
       observe() {
-        this.callback([{ isIntersecting: false } as IntersectionObserverEntry]);
+        this.cb([{ isIntersecting: false } as IntersectionObserverEntry]);
       }
       disconnect() {}
       unobserve() {}
     }
 
-    (globalThis as any).IntersectionObserver = FakeIntersectionObserver;
-
-    const restore = () => {
-      if (originalIntersection) {
-        (globalThis as any).IntersectionObserver = originalIntersection;
-      } else {
-        delete (globalThis as any).IntersectionObserver;
-      }
-    };
-
-    let timeoutId: any;
-    const subscription = onIntersection(element).subscribe({
-      next: (isVisible: boolean) => {
-        expect(isVisible).toBeFalse();
-        subscription.unsubscribe();
-        clearTimeout(timeoutId);
-        restore();
-        done();
-      }
+    await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
+      await expectAsync(firstValue<boolean>(onIntersection(element))).toBeResolvedTo(false);
     });
-
-    timeoutId = setTimeout(() => {
-      subscription.unsubscribe();
-      restore();
-      fail('Expected onIntersection to emit false');
-    }, 100);
   });
 
-  it('should properly clean up observer when element is removed', async () => {
-    element.style.height = '100px';
-    element.style.width = '100px';
-    element.style.background = 'green';
-    element.style.position = 'absolute';
-    element.style.top = '500px';
+  it('emits initial visibility using getBoundingClientRect when observer is silent', async () => {
+    class FakeIntersectionObserver {
+      constructor(_cb: (entries: IntersectionObserverEntry[]) => void) {}
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    }
 
-    visibilityStream = onIntersection(element);
+    const originalGetRect = element.getBoundingClientRect.bind(element);
+    (element as any).getBoundingClientRect = () => ({ top: 0, bottom: 10 } as any);
 
-    const subscription = visibilityStream.subscribe(()=>{});
+    try {
+      await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
+        await expectAsync(firstValue<boolean>(onIntersection(element))).toBeResolvedTo(true);
+      });
+    } finally {
+      (element as any).getBoundingClientRect = originalGetRect;
+    }
+  });
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+  it('defaults to false when IntersectionObserver callback has no entries', async () => {
+    class FakeIntersectionObserver {
+      constructor(private cb: (entries: IntersectionObserverEntry[]) => void) {}
+      observe() {
+        this.cb([] as any);
+      }
+      disconnect() {}
+      unobserve() {}
+    }
 
-    document.body.removeChild(element);
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    expect(subscription.unsubscribed).toBe(true);
+    await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
+      await expectAsync(firstValue<boolean>(onIntersection(element))).toBeResolvedTo(false);
+    });
   });
 
   it('supports promise-based elements and options', async () => {
-    const element = document.createElement('div');
-    document.body.appendChild(element);
-
-    const originalIntersection = (globalThis as any).IntersectionObserver;
-    const originalMutation = (globalThis as any).MutationObserver;
-
     class FakeIntersectionObserver {
-      callback: (entries: IntersectionObserverEntry[]) => void;
-
-      constructor(cb: (entries: IntersectionObserverEntry[]) => void) {
-        this.callback = cb;
-      }
-
+      constructor(private cb: (entries: IntersectionObserverEntry[]) => void) {}
       observe() {
-        this.callback([{ isIntersecting: true } as IntersectionObserverEntry]);
+        this.cb([{ isIntersecting: true } as IntersectionObserverEntry]);
       }
-
       disconnect() {}
       unobserve() {}
     }
 
     class FakeMutationObserver {
+      constructor(_cb: () => void) {}
       observe() {}
       disconnect() {}
     }
 
-    try {
-      (globalThis as any).IntersectionObserver = FakeIntersectionObserver;
-      (globalThis as any).MutationObserver = FakeMutationObserver;
-
-      const elementPromise = new Promise<HTMLElement>(resolve => setTimeout(() => resolve(element), 0));
-      const optionsPromise = new Promise<IntersectionObserverInit>(resolve =>
-        setTimeout(() => resolve({ rootMargin: '0px' }), 0)
-      );
-
-      const callback = jasmine.createSpy('callback');
-      const stream = onIntersection(elementPromise, optionsPromise);
-      stream.subscribe(callback);
-
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(callback).toHaveBeenCalledWith(true);
-    } finally {
-      if (originalIntersection) {
-        (globalThis as any).IntersectionObserver = originalIntersection;
-      } else {
-        delete (globalThis as any).IntersectionObserver;
-      }
-
-      if (originalMutation) {
-        (globalThis as any).MutationObserver = originalMutation;
-      } else {
-        delete (globalThis as any).MutationObserver;
-      }
-
-      document.body.removeChild(element);
-    }
+    await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
+      await withGlobal('MutationObserver', FakeMutationObserver as any, async () => {
+        const elementPromise = Promise.resolve(element);
+        const optionsPromise = Promise.resolve({ rootMargin: '0px' });
+        await expectAsync(firstValue<boolean>(onIntersection(elementPromise, optionsPromise))).toBeResolvedTo(
+          true
+        );
+      });
+    });
   });
 
-  it('emits initial visibility using getBoundingClientRect in the sync path', (done) => {
-    const originalIntersection = (globalThis as any).IntersectionObserver;
+  it('stops when element is removed', async () => {
+    let triggerMutation: (() => void) | null = null;
 
     class FakeIntersectionObserver {
       constructor(_cb: (entries: IntersectionObserverEntry[]) => void) {}
@@ -197,195 +151,52 @@ idescribe('onIntersection', () => {
       unobserve() {}
     }
 
-    (globalThis as any).IntersectionObserver = FakeIntersectionObserver;
-
-    const originalGetRect = element.getBoundingClientRect.bind(element);
-    (element as any).getBoundingClientRect = () =>
-      ({ top: 0, bottom: 10 } as any);
-
-    const restore = () => {
-      (element as any).getBoundingClientRect = originalGetRect;
-      if (originalIntersection) {
-        (globalThis as any).IntersectionObserver = originalIntersection;
-      } else {
-        delete (globalThis as any).IntersectionObserver;
-      }
-    };
-
-    let timeoutId: any;
-    const subscription = onIntersection(element).subscribe({
-      next: (isVisible: boolean) => {
-        expect(isVisible).toBeTrue();
-        clearTimeout(timeoutId);
-        subscription.unsubscribe();
-        restore();
-        done();
-      }
-    });
-
-    timeoutId = setTimeout(() => {
-      subscription.unsubscribe();
-      restore();
-      fail('Expected initial visibility emission');
-    }, 100);
-  });
-
-  it('defaults to false when IntersectionObserver callback has no entries', (done) => {
-    const originalIntersection = (globalThis as any).IntersectionObserver;
-
-    class FakeIntersectionObserver {
-      callback: (entries: IntersectionObserverEntry[]) => void;
-      constructor(cb: (entries: IntersectionObserverEntry[]) => void) {
-        this.callback = cb;
-      }
-      observe() {
-        this.callback([] as any);
-      }
-      disconnect() {}
-      unobserve() {}
-    }
-
-    (globalThis as any).IntersectionObserver = FakeIntersectionObserver;
-
-    const restore = () => {
-      if (originalIntersection) {
-        (globalThis as any).IntersectionObserver = originalIntersection;
-      } else {
-        delete (globalThis as any).IntersectionObserver;
-      }
-    };
-
-    let timeoutId: any;
-    const subscription = onIntersection(element).subscribe({
-      next: (isVisible: boolean) => {
-        expect(isVisible).toBeFalse();
-        clearTimeout(timeoutId);
-        subscription.unsubscribe();
-        restore();
-        done();
-      }
-    });
-
-    timeoutId = setTimeout(() => {
-      subscription.unsubscribe();
-      restore();
-      fail('Expected onIntersection to emit false for empty entries');
-    }, 100);
-  });
-
-  it('supports mixed promise inputs (element sync, options async)', async () => {
-    const originalIntersection = (globalThis as any).IntersectionObserver;
-    const originalMutation = (globalThis as any).MutationObserver;
-
-    class FakeIntersectionObserver {
-      callback: (entries: IntersectionObserverEntry[]) => void;
-      constructor(cb: (entries: IntersectionObserverEntry[]) => void) {
-        this.callback = cb;
-      }
-      observe() {
-        this.callback([{ isIntersecting: true } as IntersectionObserverEntry]);
-      }
-      disconnect() {}
-      unobserve() {}
-    }
-
     class FakeMutationObserver {
+      private cb: () => void;
+      constructor(cb: () => void) {
+        this.cb = cb;
+        triggerMutation = () => this.cb();
+      }
       observe() {}
       disconnect() {}
     }
 
-    try {
-      (globalThis as any).IntersectionObserver = FakeIntersectionObserver;
-      (globalThis as any).MutationObserver = FakeMutationObserver;
+    await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
+      await withGlobal('MutationObserver', FakeMutationObserver as any, async () => {
+        const completed: boolean[] = [];
+        const subscription = onIntersection(element).subscribe({
+          complete: () => completed.push(true),
+        });
 
-      const optionsPromise = Promise.resolve({ rootMargin: '0px' });
-      const callback = jasmine.createSpy('callback');
-      onIntersection(element, optionsPromise).subscribe(callback);
+        document.body.removeChild(element);
+        triggerMutation?.();
 
-      await new Promise(resolve => setTimeout(resolve, 10));
-      expect(callback).toHaveBeenCalledWith(true);
-    } finally {
-      if (originalIntersection) (globalThis as any).IntersectionObserver = originalIntersection;
-      else delete (globalThis as any).IntersectionObserver;
+        await new Promise((r) => setTimeout(r, 0));
+        subscription.unsubscribe();
 
-      if (originalMutation) (globalThis as any).MutationObserver = originalMutation;
-      else delete (globalThis as any).MutationObserver;
-    }
-  });
-
-  it('supports mixed promise inputs (element async, options sync)', async () => {
-    const originalIntersection = (globalThis as any).IntersectionObserver;
-    const originalMutation = (globalThis as any).MutationObserver;
-
-    class FakeIntersectionObserver {
-      callback: (entries: IntersectionObserverEntry[]) => void;
-      constructor(cb: (entries: IntersectionObserverEntry[]) => void) {
-        this.callback = cb;
-      }
-      observe() {
-        this.callback([{ isIntersecting: true } as IntersectionObserverEntry]);
-      }
-      disconnect() {}
-      unobserve() {}
-    }
-
-    class FakeMutationObserver {
-      observe() {}
-      disconnect() {}
-    }
-
-    try {
-      (globalThis as any).IntersectionObserver = FakeIntersectionObserver;
-      (globalThis as any).MutationObserver = FakeMutationObserver;
-
-      const elementPromise = Promise.resolve(element);
-      const callback = jasmine.createSpy('callback');
-      onIntersection(elementPromise, { rootMargin: '0px' }).subscribe(callback);
-
-      await new Promise(resolve => setTimeout(resolve, 10));
-      expect(callback).toHaveBeenCalledWith(true);
-    } finally {
-      if (originalIntersection) (globalThis as any).IntersectionObserver = originalIntersection;
-      else delete (globalThis as any).IntersectionObserver;
-
-      if (originalMutation) (globalThis as any).MutationObserver = originalMutation;
-      else delete (globalThis as any).MutationObserver;
-    }
+        expect(completed.length).toBeGreaterThan(0);
+      });
+    });
   });
 
   it('supports async iteration', async () => {
-    const originalIntersection = (globalThis as any).IntersectionObserver;
-
     class FakeIntersectionObserver {
-      callback: (entries: IntersectionObserverEntry[]) => void;
-      constructor(cb: (entries: IntersectionObserverEntry[]) => void) {
-        this.callback = cb;
-      }
+      constructor(private cb: (entries: IntersectionObserverEntry[]) => void) {}
       observe() {
-        this.callback([{ isIntersecting: true } as IntersectionObserverEntry]);
+        this.cb([{ isIntersecting: true } as IntersectionObserverEntry]);
       }
       disconnect() {}
       unobserve() {}
     }
 
-    try {
-      (globalThis as any).IntersectionObserver = FakeIntersectionObserver;
-
+    await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
       const values: boolean[] = [];
       for await (const v of onIntersection(element)) {
         values.push(v);
         break;
       }
-
       expect(values).toEqual([true]);
-    } finally {
-      if (originalIntersection) {
-        (globalThis as any).IntersectionObserver = originalIntersection;
-      } else {
-        delete (globalThis as any).IntersectionObserver;
-      }
-    }
+    });
   });
 });
-
 

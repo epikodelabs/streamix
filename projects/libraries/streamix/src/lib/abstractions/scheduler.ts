@@ -1,19 +1,16 @@
 import { isPromiseLike } from "./operator"; // Adjust path as needed
-import { createLock, type SimpleLock } from "../primitives/lock";
 
 export type Scheduler = {
   enqueue: <T>(fn: () => Promise<T> | T) => Promise<T>;
   flush: () => Promise<void>;
   await: <T>(promise: Promise<T>) => Promise<T>;
   delay: (ms: number) => Promise<void>;
-  lock: SimpleLock;
 };
 
 export function createScheduler(): Scheduler {
   const tasks: Array<{ fn: () => any; stack?: string }> = [];
   const resolves: Array<(v: any) => void> = [];
   const rejects: Array<(e: any) => void> = [];
-  const lock = createLock();
 
   let flushResolvers: Array<() => void> = [];
   let pumping = false;
@@ -142,7 +139,5 @@ export function createScheduler(): Scheduler {
     return awaitNonBlocking(new Promise((res) => setTimeout(res, ms)));
   };
 
-  return { enqueue, flush, await: awaitNonBlocking, delay, lock };
+  return { enqueue, flush, await: awaitNonBlocking, delay };
 }
-
-export const scheduler = createScheduler();
