@@ -1,5 +1,4 @@
 import type { Stream } from "../abstractions";
-import type { Subscription } from "../abstractions";
 
 /**
  * Returns a promise that resolves with the last emitted value from a `Stream`.
@@ -22,49 +21,30 @@ import type { Subscription } from "../abstractions";
  * @returns A promise that resolves with the last value from the stream or rejects on completion without a value or on error.
  */
 export function lastValueFrom<T = any>(stream: Stream<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let lastValue: T | undefined;
+  const iterator = stream[Symbol.asyncIterator]();
+
+  return (async () => {
     let hasValue = false;
-    let settled = false;
+    let lastValue!: T;
 
-    let subscription: Subscription | undefined;
-    let pendingUnsubscribe = false;
-
-    const requestUnsubscribe = (): void => {
-      if (subscription) {
-        const sub = subscription;
-        subscription = undefined;
-        sub.unsubscribe();
-        return;
-      }
-      pendingUnsubscribe = true;
-    };
-
-    subscription = stream.subscribe({
-      next(value: T) {
-        lastValue = value;
+    try {
+      while (true) {
+        const next = await iterator.next();
+        if (next.done) break;
         hasValue = true;
-      },
-      error(err: any) {
-        if (settled) return;
-        settled = true;
-        reject(err);
-        requestUnsubscribe();
-      },
-      complete() {
-        if (settled) return;
-        settled = true;
-        if (hasValue) {
-          resolve(lastValue as T);
-        } else {
-          reject(new Error("Stream completed without emitting a value"));
-        }
-        requestUnsubscribe();
+        lastValue = next.value;
       }
-    });
 
-    if (pendingUnsubscribe) {
-      requestUnsubscribe();
+      if (!hasValue) {
+        throw new Error("Stream completed without emitting a value");
+      }
+
+      return lastValue;
+    } finally {
+      try {
+        await iterator.return?.();
+      } catch {
+      }
     }
-  });
+  })();
 }

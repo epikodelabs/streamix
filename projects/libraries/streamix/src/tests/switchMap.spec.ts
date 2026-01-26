@@ -5,6 +5,7 @@ import {
   EMPTY,
   from,
   getIteratorEmissionStamp,
+  nextEmissionStamp,
   getValueMeta,
   isWrappedPrimitive,
   of,
@@ -502,64 +503,85 @@ describe('switchMap', () => {
   it('coverage: should stop and cleanup when iterator.return is called (early break)', async () => {
     let innerClosed = 0;
 
-    const source = createSubject<number>();
-    const stream = source.pipe(
-      switchMap(() =>
-        createStream("inner", async function* () {
-          try {
-            yield 1;
-            await wait(10_000);
-            yield 2;
-          } finally {
+    const buffer: number[] = [1];
+    let done = false;
+
+    const sourceIterator: any = {
+      __tryNext() {
+        if (buffer.length > 0) return { done: false, value: buffer.shift()! };
+        if (done) return { done: true, value: undefined };
+        return null;
+      },
+      next: async () => {
+        throw new Error("next() should not be used when __tryNext is present");
+      }
+    };
+
+    const iterator = switchMap<number, number>(() =>
+      (() => {
+        let yielded = false;
+        const innerIterator: AsyncIterator<number> = {
+          next: async () => {
+            if (yielded) return new Promise<IteratorResult<number>>(() => {});
+            yielded = true;
+            return { done: false, value: 1 };
+          },
+          return: async () => {
             innerClosed++;
+            return { done: true, value: undefined };
           }
-        })
-      )
-    );
+        };
+        return { type: "stream", id: "inner-break", [Symbol.asyncIterator]: () => innerIterator } as any;
+      })()
+    ).apply(sourceIterator as any);
 
-    const results: number[] = [];
-
-    // Early break should trigger iterator.return()
-    for await (const value of stream) {
-      results.push(value);
-      break;
-    }
-
-    source.complete();
-    await wait(10);
-
-    expect(results).toEqual([1]);
+    expect(await iterator.next()).toEqual({ done: false, value: 1 });
+    await iterator.return?.();
+    done = true;
+    sourceIterator.__onPush?.();
     expect(innerClosed).toBe(1);
   });
 
   it('coverage: should stop and cleanup when iterator.throw is called', async () => {
     let innerClosed = 0;
 
-    const source = createSubject<number>();
-    const stream = source.pipe(
-      switchMap(() =>
-        createStream("inner", async function* () {
-          try {
-            yield 1;
-            await wait(10_000);
-            yield 2;
-          } finally {
+    const buffer: number[] = [1];
+    let done = false;
+
+    const sourceIterator: any = {
+      __tryNext() {
+        if (buffer.length > 0) return { done: false, value: buffer.shift()! };
+        if (done) return { done: true, value: undefined };
+        return null;
+      },
+      next: async () => {
+        throw new Error("next() should not be used when __tryNext is present");
+      }
+    };
+
+    const iterator = switchMap<number, number>(() =>
+      (() => {
+        let yielded = false;
+        const innerIterator: AsyncIterator<number> = {
+          next: async () => {
+            if (yielded) return new Promise<IteratorResult<number>>(() => {});
+            yielded = true;
+            return { done: false, value: 1 };
+          },
+          return: async () => {
             innerClosed++;
+            return { done: true, value: undefined };
           }
-        })
-      )
-    );
+        };
+        return { type: "stream", id: "inner-throw", [Symbol.asyncIterator]: () => innerIterator } as any;
+      })()
+    ).apply(sourceIterator as any);
 
-    const iterator = stream[Symbol.asyncIterator]();
-
-    source.next(1);
-    const first = await iterator.next();
-    expect(first).toEqual({ done: false, value: 1 });
+    expect(await iterator.next()).toEqual({ done: false, value: 1 });
 
     await expectAsync((iterator as any).throw(new Error("stop"))).toBeRejectedWithError("stop");
-    source.complete();
-    await wait(10);
-
+    done = true;
+    sourceIterator.__onPush?.();
     expect(innerClosed).toBe(1);
   });
 
@@ -578,7 +600,20 @@ describe('switchMap', () => {
   });
 
   it('coverage: should use inner emission stamp when present', async () => {
-    const source = createSubject<number>();
+    const buffer: number[] = [1];
+    let done = false;
+    let expectedStamp = 0;
+
+    const sourceIterator: any = {
+      __tryNext() {
+        if (buffer.length > 0) return { done: false, value: buffer.shift()! };
+        if (done) return { done: true, value: undefined };
+        return null;
+      },
+      next: async () => {
+        throw new Error("next() should not be used when __tryNext is present");
+      }
+    };
 
     const inner = (() => {
       let done = false;
@@ -586,23 +621,22 @@ describe('switchMap', () => {
         next: async () => {
           if (done) return { done: true, value: undefined };
           done = true;
-          setIteratorEmissionStamp(iterator as any, 123);
+          expectedStamp = nextEmissionStamp();
+          setIteratorEmissionStamp(iterator as any, expectedStamp);
           return { done: false, value: 1 };
         },
       };
-      return { [Symbol.asyncIterator]: () => iterator } as any;
+      return { type: "stream", id: "inner-stamp", [Symbol.asyncIterator]: () => iterator } as any;
     })();
 
-    const stream = source.pipe(switchMap(() => inner));
-    const iterator = stream[Symbol.asyncIterator]();
+    const iterator = switchMap<number, number>(() => inner).apply(sourceIterator as any);
 
-    source.next(1);
-    const first = await iterator.next();
-    expect(first).toEqual({ done: false, value: 1 });
-    expect(getIteratorEmissionStamp(iterator as any)).toBe(123);
+    expect(await iterator.next()).toEqual({ done: false, value: 1 });
+    expect(getIteratorEmissionStamp(iterator as any)).toBe(expectedStamp);
 
-    source.complete();
     await iterator.return?.();
+    done = true;
+    sourceIterator.__onPush?.();
   });
 
   it('coverage: should support push-based sources via __tryNext/__onPush', async () => {
@@ -636,8 +670,19 @@ describe('switchMap', () => {
     })();
 
     // First value is already buffered; allow drain() to run.
-    await wait(0);
+    // await wait(0);
 
+    // buffer.push(2, 3);
+    // sourceIterator.__onPush();
+
+    // done = true;
+    // sourceIterator.__onPush();
+
+    // await wait(0);
+
+    // expect(await valuesPromise).toEqual([3, 30]);
+
+    // Re-writing the test section properly
     buffer.push(2, 3);
     sourceIterator.__onPush();
 
@@ -693,6 +738,8 @@ describe('switchMap', () => {
 
     const uncancellableDelayedInner = (value: number, ms: number) => {
       return {
+        type: "stream",
+        id: `uncancellable-${value}-${ms}`,
         [Symbol.asyncIterator]() {
           let emitted = false;
           return {

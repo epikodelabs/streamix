@@ -1,4 +1,4 @@
-import type { Stream, Subscription } from "../abstractions";
+import type { Stream } from "../abstractions";
 
 /**
  * Returns a promise that resolves with the first emitted value from a `Stream`.
@@ -22,51 +22,20 @@ import type { Stream, Subscription } from "../abstractions";
  * @returns A promise that resolves with the first value from the stream or rejects on error or completion without a value.
  */
 export function firstValueFrom<T = any>(stream: Stream<T>): Promise<T> {
-  let subscription: Subscription | undefined;
-  let seen = false;
-  let settled = false;
-  let pendingUnsubscribe = false;
+  const iterator = stream[Symbol.asyncIterator]();
 
-  const requestUnsubscribe = (): void => {
-    if (subscription) {
-      const sub = subscription;
-      subscription = undefined;
-      sub.unsubscribe();
-      return;
-    }
-
-    pendingUnsubscribe = true;
-  };
-
-  return new Promise<T>((resolve, reject) => {
-    subscription = stream.subscribe({
-      next(value: T) {
-        if (settled) return;
-        settled = true;
-        seen = true;
-        resolve(value);
-        requestUnsubscribe();
-      },
-      error(err: any) {
-        if (settled) return;
-        settled = true;
-        reject(err);
-        requestUnsubscribe();
-      },
-      complete() {
-        if (settled) return;
-        settled = true;
-        if (!seen) {
-          reject(new Error("Stream completed without emitting a value"));
-        } else {
-          // If the stream synchronously completes after emitting, ignore.
-        }
-        requestUnsubscribe();
+  return (async () => {
+    try {
+      const first = await iterator.next();
+      if (first.done) {
+        throw new Error("Stream completed without emitting a value");
       }
-    });
-
-    if (pendingUnsubscribe) {
-      requestUnsubscribe();
+      return first.value;
+    } finally {
+      try {
+        await iterator.return?.();
+      } catch {
+      }
     }
-  });
+  })();
 }

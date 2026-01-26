@@ -1,10 +1,19 @@
 import { createSubject, delay, exhaustMap, from, of } from '@epikodelabs/streamix';
 
-jasmine.DEFAULT_TIMEOUT_INTERVAL = 10000;
+let previousTimeoutInterval = jasmine.DEFAULT_TIMEOUT_INTERVAL;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('exhaustMap', () => {
+  beforeAll(() => {
+    previousTimeoutInterval = jasmine.DEFAULT_TIMEOUT_INTERVAL;
+    jasmine.DEFAULT_TIMEOUT_INTERVAL = 10000;
+  });
+
+  afterAll(() => {
+    jasmine.DEFAULT_TIMEOUT_INTERVAL = previousTimeoutInterval;
+  });
+
   it('does not start a second inner stream while the first is active', async () => {
     const subject = createSubject<number>();
     const results: number[] = [];
