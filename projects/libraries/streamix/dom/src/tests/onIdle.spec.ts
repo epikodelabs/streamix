@@ -149,6 +149,25 @@ idescribe('onIdle', () => {
     sub.unsubscribe();
   });
 
+  it('passes timeout option to requestIdleCallback when provided', async () => {
+    const env = mockRICEnv();
+
+    restore.push(
+      patchGlobal('requestIdleCallback', env.requestIdleCallback),
+      patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
+    );
+
+    const sub = onIdle(123).subscribe();
+    await flush();
+
+    expect(env.requestIdleCallback).toHaveBeenCalledWith(
+      jasmine.any(Function),
+      { timeout: 123 }
+    );
+
+    sub.unsubscribe();
+  });
+
   it('continues scheduling until unsubscribed', async () => {
     const env = mockRICEnv();
 

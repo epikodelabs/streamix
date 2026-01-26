@@ -198,6 +198,27 @@ idescribe('onVisibilityChange', () => {
 
     expect(await iter).toEqual(['visible', 'hidden', 'visible']);
   });
+
+  it('defaults to visible when document has no visibilityState', async () => {
+    const env = mockVisibility('visible');
+
+    restore.push(
+      patchObject(document, {
+        // Simulate an environment where `visibilityState` is not meaningful.
+        // `onVisibilityChange` should treat non-string values as "visible".
+        visibilityState: () => undefined,
+        addEventListener: () => env.addEventListener,
+        removeEventListener: () => env.removeEventListener,
+      })
+    );
+
+    const values: DocumentVisibilityState[] = [];
+    const sub = onVisibilityChange().subscribe(v => values.push(v));
+    await flush();
+
+    expect(values).toEqual(['visible']);
+    sub.unsubscribe();
+  });
 });
 
 

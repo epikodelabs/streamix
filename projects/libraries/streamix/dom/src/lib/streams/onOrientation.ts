@@ -42,15 +42,18 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
   const start = () => {
     if (!stopped) return;
 
-    if (
-      typeof window === "undefined" ||
-      !window.screen ||
-      !window.screen.orientation
-    ) {
+    stopped = false;
+
+    if (typeof window === "undefined" || !window.screen) {
       return;
     }
 
-    stopped = false;
+    // If the Orientation API is unavailable, still emit a sane default once.
+    if (!window.screen.orientation) {
+      emit();
+      return;
+    }
+
     orientation = window.screen.orientation;
 
     orientation.addEventListener("change", emit);

@@ -108,6 +108,70 @@ idescribe('onOrientation', () => {
     done();
   });
 
+  it('treats angle 180 as portrait', (done) => {
+    mockOrientation.angle = 180;
+    mockOrientation.type = 'portrait-secondary';
+
+    const stream = onOrientation();
+    const subscription = stream.subscribe({
+      next: (value) => {
+        try {
+          expect(value).toBe('portrait');
+        } catch (err: any) {
+          done.fail(err);
+        }
+      },
+    });
+
+    subscription.unsubscribe();
+    done();
+  });
+
+  it('treats angle 270 as landscape', (done) => {
+    mockOrientation.angle = 270;
+    mockOrientation.type = 'landscape-secondary';
+
+    const stream = onOrientation();
+    const subscription = stream.subscribe({
+      next: (value) => {
+        try {
+          expect(value).toBe('landscape');
+        } catch (err: any) {
+          done.fail(err);
+        }
+      },
+    });
+
+    subscription.unsubscribe();
+    done();
+  });
+
+  it('emits a default value when the Orientation API is unavailable', (done) => {
+    // @ts-ignore
+    delete (window.screen as any).orientation;
+
+    const stream = onOrientation();
+    const values: any[] = [];
+
+    const subscription = stream.subscribe({
+      next: (value) => {
+        values.push(value);
+      },
+    });
+
+    setTimeout(() => {
+      try {
+        expect(values).toEqual(['portrait']);
+        expect(mockOrientation.addEventListener).not.toHaveBeenCalled();
+        subscription.unsubscribe();
+        done();
+      } catch (err: any) {
+        subscription.unsubscribe();
+        done.fail(err);
+      }
+    }, 0);
+  });
+
   it('should clean up event listeners on unsubscribe', () => {
     const stream = onOrientation();
     const subscription = stream.subscribe(() => { });
