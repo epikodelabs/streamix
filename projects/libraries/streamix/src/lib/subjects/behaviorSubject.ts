@@ -5,7 +5,6 @@ import {
   getCurrentEmissionStamp,
   nextEmissionStamp,
   pipeSourceThrough,
-  scheduler,
   withEmissionStamp,
   type Operator,
   type Receiver,
@@ -38,16 +37,12 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     latestValue = value;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
 
-    scheduler.enqueue(() => {
-      // delivery is based on emission stamps; ensure we compare stamps
-      const targets = Array.from(receivers).filter((r) => stamp > r.subscribedAt);
-      const promises: Promise<any>[] = [];
-      withEmissionStamp(stamp, () => {
-        for (const r of targets) {
-          promises.push(Promise.resolve(r.next(value)));
-        }
-      });
-      return Promise.allSettled(promises);
+    // Synchronous delivery
+    const targets = Array.from(receivers).filter((r) => stamp > r.subscribedAt);
+    withEmissionStamp(stamp, () => {
+      for (const r of targets) {
+        r.next(value);
+      }
     });
   };
 
@@ -57,17 +52,14 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     terminalItem = { kind: "complete", stamp };
 
-    scheduler.enqueue(() => {
-      const targets = Array.from(receivers);
-      const promises: Promise<any>[] = [];
-      withEmissionStamp(stamp, () => {
-        for (const r of targets) {
-          promises.push(Promise.resolve(r.complete()));
-        }
-      });
-      receivers.clear();
-      return Promise.allSettled(promises);
+    // Synchronous delivery
+    const targets = Array.from(receivers);
+    withEmissionStamp(stamp, () => {
+      for (const r of targets) {
+        r.complete();
+      }
     });
+    receivers.clear();
   };
 
   const error = (err: any) => {
@@ -76,17 +68,14 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     terminalItem = { kind: "error", error: err, stamp };
 
-    scheduler.enqueue(() => {
-      const targets = Array.from(receivers);
-      const promises: Promise<any>[] = [];
-      withEmissionStamp(stamp, () => {
-        for (const r of targets) {
-          promises.push(Promise.resolve(r.error(err)));
-        }
-      });
-      receivers.clear();
-      return Promise.allSettled(promises);
+    // Synchronous delivery
+    const targets = Array.from(receivers);
+    withEmissionStamp(stamp, () => {
+      for (const r of targets) {
+        r.error(err);
+      }
     });
+    receivers.clear();
   };
 
   const register = (receiver: Receiver<T>): Subscription => {
@@ -94,11 +83,9 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
 
     if (terminalItem) {
       const term = terminalItem;
-      scheduler.enqueue(() => {
-        withEmissionStamp(term.stamp, () => {
-          if (term.kind === "complete") r.complete();
-          else if (term.kind === "error") r.error(term.error);
-        });
+      withEmissionStamp(term.stamp, () => {
+        if (term.kind === "complete") r.complete();
+        else if (term.kind === "error") r.error(term.error);
       });
       return createSubscription();
     }
@@ -124,14 +111,12 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     } catch (_) {}
 
     const baseSub = createSubscription(() => {
-      // Schedule completion via scheduler to preserve ordering semantics
-      scheduler.enqueue(() => {
-        if (!r.completed) {
-          const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-          withEmissionStamp(stamp, () => r.complete());
-        }
-        receivers.delete(trackedReceiver);
-      });
+      // Synchronous completion
+      if (!r.completed) {
+        const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+        withEmissionStamp(stamp, () => r.complete());
+      }
+      receivers.delete(trackedReceiver);
     });
 
     const wrappedSub: Subscription = {

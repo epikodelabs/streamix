@@ -1,4 +1,4 @@
-import { createSubject, delay, exhaustMap, from, of } from '@epikodelabs/streamix';
+import { createSubject, delay, exhaustMap, from } from '@epikodelabs/streamix';
 
 let previousTimeoutInterval = jasmine.DEFAULT_TIMEOUT_INTERVAL;
 
