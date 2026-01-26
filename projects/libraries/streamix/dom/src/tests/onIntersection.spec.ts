@@ -20,49 +20,91 @@ idescribe('onIntersection', () => {
   });
 
   it('should emit true when element is visible', (done) => {
-    element.style.height = '100px';
-    element.style.width = '100px';
-    element.style.background = 'red';
-    element.style.position = 'absolute';
-    element.style.top = '500px';
+    const originalIntersection = (globalThis as any).IntersectionObserver;
 
-    visibilityStream = onIntersection(element);
+    class FakeIntersectionObserver {
+      callback: (entries: IntersectionObserverEntry[]) => void;
+      constructor(cb: (entries: IntersectionObserverEntry[]) => void) {
+        this.callback = cb;
+      }
+      observe() {
+        this.callback([{ isIntersecting: true } as IntersectionObserverEntry]);
+      }
+      disconnect() {}
+      unobserve() {}
+    }
 
-    const emittedValues: boolean[] = [];
-    const subscription = visibilityStream.subscribe({
+    (globalThis as any).IntersectionObserver = FakeIntersectionObserver;
+
+    const restore = () => {
+      if (originalIntersection) {
+        (globalThis as any).IntersectionObserver = originalIntersection;
+      } else {
+        delete (globalThis as any).IntersectionObserver;
+      }
+    };
+
+    let timeoutId: any;
+    const subscription = onIntersection(element).subscribe({
       next: (isVisible: boolean) => {
-        emittedValues.push(isVisible);
-      },
-      complete: () => {
-        subscription.unsubscribe();
+        if (isVisible) {
+          expect(isVisible).toBeTrue();
+          subscription.unsubscribe();
+          clearTimeout(timeoutId);
+          restore();
+          done();
+        }
       }
     });
 
-    setTimeout(() => {
-      expect(emittedValues).toContain(true);
-      done();
+    timeoutId = setTimeout(() => {
+      subscription.unsubscribe();
+      restore();
+      fail('Expected onIntersection to emit true');
     }, 100);
   });
 
-  it('should emit false when element is scrolled out of view', async () => {
-    element.style.height = '100px';
-    element.style.width = '100px';
-    element.style.background = 'blue';
-    element.style.position = 'absolute';
-    element.style.top = '-1000px';
+  it('should emit false when element is scrolled out of view', (done) => {
+    const originalIntersection = (globalThis as any).IntersectionObserver;
 
-    visibilityStream = onIntersection(element);
+    class FakeIntersectionObserver {
+      callback: (entries: IntersectionObserverEntry[]) => void;
+      constructor(cb: (entries: IntersectionObserverEntry[]) => void) {
+        this.callback = cb;
+      }
+      observe() {
+        this.callback([{ isIntersecting: false } as IntersectionObserverEntry]);
+      }
+      disconnect() {}
+      unobserve() {}
+    }
 
-    const emittedValues: boolean[] = [];
-    visibilityStream.subscribe({
+    (globalThis as any).IntersectionObserver = FakeIntersectionObserver;
+
+    const restore = () => {
+      if (originalIntersection) {
+        (globalThis as any).IntersectionObserver = originalIntersection;
+      } else {
+        delete (globalThis as any).IntersectionObserver;
+      }
+    };
+
+    let timeoutId: any;
+    const subscription = onIntersection(element).subscribe({
       next: (isVisible: boolean) => {
-        emittedValues.push(isVisible);
-      },
+        expect(isVisible).toBeFalse();
+        subscription.unsubscribe();
+        clearTimeout(timeoutId);
+        restore();
+        done();
+      }
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    expect(emittedValues).toContain(false);
+    timeoutId = setTimeout(() => {
+      subscription.unsubscribe();
+      restore();
+      fail('Expected onIntersection to emit false');
+    }, 100);
   });
 
   it('should properly clean up observer when element is removed', async () => {
