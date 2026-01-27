@@ -297,6 +297,61 @@ idescribe('onMediaQuery', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(listeners.length).toBe(0);
   });
+
+  it('does not start when already active', async () => {
+    const query = '(min-width: 800px)';
+    const stream = onMediaQuery(query);
+
+    const sub1 = stream.subscribe();
+    const sub2 = stream.subscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Should only add listener once
+    expect(mqlMap[query].listeners.length).toBe(1);
+
+    sub1.unsubscribe();
+    sub2.unsubscribe();
+  });
+
+  it('does not stop when not active', async () => {
+    const query = '(min-width: 600px)';
+    const stream = onMediaQuery(query);
+    
+    // Try to unsubscribe without subscribing
+    const sub = stream.subscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    
+    sub.unsubscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    
+    // Calling unsubscribe again should be safe
+    expect(() => sub.unsubscribe()).not.toThrow();
+  });
+
+  it('handles stop before promise query resolves', async () => {
+    let resolveQuery: (value: string) => void;
+    const queryPromise = new Promise<string>(resolve => {
+      resolveQuery = resolve;
+    });
+
+    const callback = jasmine.createSpy('callback');
+    const stream = onMediaQuery(queryPromise);
+    const sub = stream.subscribe(callback);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Unsubscribe before promise resolves
+    sub.unsubscribe();
+
+    // Now resolve
+    resolveQuery!('(min-width: 1000px)');
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Should only have initial false, no further emissions
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenCalledWith(false);
+  });
 });
 
 

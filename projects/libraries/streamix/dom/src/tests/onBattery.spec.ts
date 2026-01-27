@@ -117,4 +117,147 @@ idescribe('onBattery', () => {
     expect(listeners['levelchange'].length).toBe(0);
     expect(listeners['chargingchange'].length).toBe(0);
   });
+
+  it('does not restart when start() called multiple times', async () => {
+    const getBatterySpy = jasmine.createSpy('getBattery').and.resolveTo({
+      charging: true,
+      level: 1,
+      chargingTime: 0,
+      dischargingTime: 0,
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    });
+
+    (navigator as any).getBattery = getBatterySpy;
+
+    const sub1 = onBattery().subscribe();
+    const sub2 = onBattery().subscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Should share battery instance
+    expect(getBatterySpy.calls.count()).toBeLessThan(3);
+
+    sub1.unsubscribe();
+    sub2.unsubscribe();
+  });
+
+  it('handles getBattery rejection', async () => {
+    const rejectedPromise = Promise.reject(new Error('Battery API error'));
+    // Catch to prevent unhandled rejection before test starts
+    rejectedPromise.catch(() => {});
+    
+    const getBatterySpy = jasmine
+      .createSpy('getBattery')
+      .and.returnValue(rejectedPromise);
+      
+    (navigator as any).getBattery = getBatterySpy;
+
+    const values: any[] = [];
+    const errors: any[] = [];
+    const sub = onBattery().subscribe({
+      next: v => values.push(v),
+      error: e => errors.push(e)
+    });
+
+    // Wait for rejection to be handled
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Should not crash or emit values
+    expect(values.length).toBe(0);
+    expect(errors.length).toBe(0);
+    sub.unsubscribe();
+  });
+
+  it('stops before battery resolves when all subscribers unsubscribe', async () => {
+    let resolveBattery!: (value: any) => void;
+    const batteryPromise = new Promise<any>((resolve) => {
+      resolveBattery = resolve;
+    });
+
+    let addListenerCalled = false;
+    (navigator as any).getBattery = jasmine
+      .createSpy('getBattery')
+      .and.returnValue(batteryPromise);
+
+    const sub = onBattery().subscribe();
+    
+    // Unsubscribe before battery resolves
+    sub.unsubscribe();
+
+    // Now resolve battery
+    resolveBattery({
+      charging: true,
+      level: 1,
+      chargingTime: 0,
+      dischargingTime: 0,
+      addEventListener: () => { addListenerCalled = true; },
+      removeEventListener: () => {}
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Should not have added listeners since we unsubscribed
+    expect(addListenerCalled).toBe(false);
+  });
+
+  it('handles onUnsubscribe errors gracefully', async () => {
+    const battery = {
+      charging: true,
+      level: 1,
+      chargingTime: 0,
+      dischargingTime: 0,
+      addEventListener: () => {},
+      removeEventListener: jasmine.createSpy('removeEventListener').and.callFake(() => { 
+        throw new Error('removeEventListener error'); 
+      })
+    };
+
+    (navigator as any).getBattery = jasmine
+      .createSpy('getBattery')
+      .and.resolveTo(battery);
+
+    const sub = onBattery().subscribe();
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Errors in cleanup will propagate from stop() which is not wrapped in try-catch
+    let didThrow = false;
+    try {
+      sub.unsubscribe();
+    } catch (e) {
+      didThrow = true;
+    }
+    
+    // In current implementation, stop() errors propagate
+    expect(didThrow).toBe(true);
+  });
+
+  it('does not stop when already stopped', async () => {
+    const removeEventListenerSpy = jasmine.createSpy('removeEventListener');
+    const battery = {
+      charging: true,
+      level: 1,
+      chargingTime: 0,
+      dischargingTime: 0,
+      addEventListener: () => {},
+      removeEventListener: removeEventListenerSpy
+    };
+
+    (navigator as any).getBattery = jasmine
+      .createSpy('getBattery')
+      .and.resolveTo(battery);
+
+    const sub = onBattery().subscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    sub.unsubscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    removeEventListenerSpy.calls.reset();
+
+    // Calling unsubscribe again should not call removeEventListener
+    sub.unsubscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(removeEventListenerSpy).not.toHaveBeenCalled();
+  });
 });

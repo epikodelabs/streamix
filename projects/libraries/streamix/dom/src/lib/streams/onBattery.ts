@@ -52,16 +52,21 @@ export function onBattery(): Stream<BatteryState> {
       return;
     }
 
-    battery = await (navigator as any).getBattery();
-    if (stopped || subscriberCount === 0) return;
-    
-    // Defer initial emission to allow subscription variable assignment
-    if (!stopped) emit();
+    try {
+      battery = await (navigator as any).getBattery();
+      if (stopped || subscriberCount === 0) return;
+      
+      // Defer initial emission to allow subscription variable assignment
+      if (!stopped) emit();
 
-    battery.addEventListener("chargingchange", emit);
-    battery.addEventListener("levelchange", emit);
-    battery.addEventListener("chargingtimechange", emit);
-    battery.addEventListener("dischargingtimechange", emit);
+      battery.addEventListener("chargingchange", emit);
+      battery.addEventListener("levelchange", emit);
+      battery.addEventListener("chargingtimechange", emit);
+      battery.addEventListener("dischargingtimechange", emit);
+    } catch (err) {
+      // getBattery() rejected - silently fail (e.g., permission denied)
+      stopped = true;
+    }
   };
 
   const stop = () => {
