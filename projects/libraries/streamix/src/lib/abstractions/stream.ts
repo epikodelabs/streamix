@@ -1,4 +1,5 @@
 import { firstValueFrom } from "../converters";
+import { enqueueMicrotask, runInMicrotask } from "../primitives/scheduling";
 import { createAsyncIterator } from "../subjects/helpers";
 import {
   getCurrentEmissionStamp,
@@ -45,25 +46,8 @@ type SubscriberEntry<T> = {
   subscription: Subscription;
 };
 
-function enqueueMicrotask(fn: () => void): void {
-  if (typeof queueMicrotask === "function") {
-    queueMicrotask(fn);
-  } else {
-    void Promise.resolve().then(fn);
-  }
-}
-
-function runInMicrotask<T>(fn: () => MaybePromise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    enqueueMicrotask(() => {
-      Promise.resolve()
-        .then(fn)
-        .then(resolve, reject);
-    });
-  });
-}
-
 function waitForAbort(signal: AbortSignal): Promise<void> {
+
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) =>
     signal.addEventListener("abort", resolve as any, { once: true })
