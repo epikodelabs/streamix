@@ -1,6 +1,7 @@
+import { enqueueMicrotask } from "../primitives/scheduling";
+import { getCurrentEmissionStamp } from "./emission";
 import { unwrapPrimitive } from "./hooks";
 import { isPromiseLike, type MaybePromise } from "./operator";
-import { getCurrentEmissionStamp } from "./emission";
 
 export type Receiver<T = any> = {
   next?: (value: T) => MaybePromise;
@@ -9,14 +10,6 @@ export type Receiver<T = any> = {
 };
 
 export type StrictReceiver<T = any> = Required<Receiver<T>> & { readonly completed: boolean; };
-
-function enqueueMicrotask(fn: () => void): void {
-  if (typeof queueMicrotask === "function") {
-    queueMicrotask(fn);
-  } else {
-    void Promise.resolve().then(fn);
-  }
-}
 
 export function createReceiver<T = any>(
   callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>

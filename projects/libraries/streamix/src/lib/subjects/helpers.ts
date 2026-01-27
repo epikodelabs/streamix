@@ -126,7 +126,7 @@ export function createRegister<T>(opts: {
 }) {
   const { receivers, ready, terminalRef, createSubscription, tryCommit } = opts;
 
-  return function register(receiver: Receiver<T>) : Subscription {
+  return function register(receiver: Receiver<T>, paused = false) : Subscription {
     const r = receiver as StrictReceiver<T>;
 
     const item = terminalRef.current;
@@ -150,7 +150,7 @@ export function createRegister<T>(opts: {
     (r as any).subscribedAt = nextEmissionStamp();
 
     receivers.add(r);
-    ready.add(r);
+    if (!paused) ready.add(r);
     tryCommit();
 
     // Schedule receiver completion via the subscription's onUnsubscribe, but
