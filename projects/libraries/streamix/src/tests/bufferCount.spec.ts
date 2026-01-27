@@ -1,4 +1,12 @@
-import { bufferCount, createSubject, type Stream } from "@epikodelabs/streamix";
+import {
+  bufferCount,
+  createOperator,
+  createSubject,
+  getIteratorMeta,
+  getValueMeta,
+  setIteratorMeta,
+  type Stream,
+} from "@epikodelabs/streamix";
 
 describe("bufferCount", () => {
   let source: Stream<number>;
@@ -147,6 +155,246 @@ describe("bufferCount", () => {
      expect(capturedError).toBeDefined();
      expect((capturedError as any).message).toBe(errorMsg);
    });
+
+  it("should handle error in the middle of buffering without emitting partial buffer", async () => {
+    const buffered = source.pipe(bufferCount(3));
+    const results: number[][] = [];
+    let error: any = null;
+
+    (async () => {
+      try {
+        for await (const value of buffered) {
+          results.push(value);
+        }
+      } catch (err) {
+        error = err;
+      }
+    })();
+
+    subject.next(1);
+    subject.next(2);
+    subject.error(new Error("Error during buffering"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(results).toEqual([]);
+    expect(error.message).toBe("Error during buffering");
+  });
+
+  it("should work with different data types", async () => {
+    const objectSubject = createSubject<{ id: number; name: string }>();
+    const buffered = objectSubject.pipe(bufferCount(2));
+    const results: { id: number; name: string }[][] = [];
+
+    (async () => {
+      for await (const value of buffered) {
+        results.push(value);
+      }
+    })();
+
+    objectSubject.next({ id: 1, name: "Alice" });
+    objectSubject.next({ id: 2, name: "Bob" });
+    objectSubject.next({ id: 3, name: "Charlie" });
+    objectSubject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(results).toEqual([
+      [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }],
+      [{ id: 3, name: "Charlie" }]
+    ]);
+  });
+
+  it("should handle null and undefined values in buffers", async () => {
+    const nullableSubject = createSubject<number | null | undefined>();
+    const buffered = nullableSubject.pipe(bufferCount(3));
+    const results: (number | null | undefined)[][] = [];
+
+    (async () => {
+      for await (const value of buffered) {
+        results.push(value);
+      }
+    })();
+
+    nullableSubject.next(1);
+    nullableSubject.next(null);
+    nullableSubject.next(undefined);
+    nullableSubject.next(2);
+    nullableSubject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(results).toEqual([[1, null, undefined], [2]]);
+  });
+
+  it("should handle fractional buffer sizes", async () => {
+    const buffered = source.pipe(bufferCount(2.7));
+    const results: number[][] = [];
+
+    (async () => {
+      for await (const value of buffered) {
+        results.push(value);
+      }
+    })();
+
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.next(4);
+    subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(results).toEqual([[1, 2, 3], [4]]);
+  });
+
+  it("should handle completion immediately after creating buffer full", async () => {
+    const buffered = source.pipe(bufferCount(2));
+    const results: number[][] = [];
+
+    (async () => {
+      for await (const value of buffered) {
+        results.push(value);
+      }
+    })();
+
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(results).toEqual([[1, 2], [3]]);
+  });
+
+  it("should emit multiple complete buffers followed by partial on completion", async () => {
+    const buffered = source.pipe(bufferCount(3));
+    const results: number[][] = [];
+
+    (async () => {
+      for await (const value of buffered) {
+        results.push(value);
+      }
+    })();
+
+    for (let i = 1; i <= 8; i++) {
+      subject.next(i);
+    }
+    subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(results).toEqual([[1, 2, 3], [4, 5, 6], [7, 8]]);
+  });
+
+  it("should call next multiple times after source completes", async () => {
+    const buffered = source.pipe(bufferCount(2));
+    const it = buffered[Symbol.asyncIterator]();
+
+    subject.next(1);
+    subject.next(2);
+    subject.complete();
+
+    const result1 = await it.next();
+    expect(result1.done).toBe(false);
+    expect(result1.value).toEqual([1, 2]);
+
+    const result2 = await it.next();
+    expect(result2.done).toBe(true);
+
+    const result3 = await it.next();
+    expect(result3.done).toBe(true);
+  });
+
+  it("should attach collapse metadata when upstream iterator has meta (full buffers)", async () => {
+    const tagIds = createOperator<number, number>("tagIds", function (source) {
+      let n = 0;
+      const iterator: AsyncIterator<number> = {
+        next: async () => {
+          const result = await source.next();
+          if (result.done) return result;
+
+          n += 1;
+          setIteratorMeta(iterator as any, { valueId: `id${n}` }, 0, "tagIds");
+          return result;
+        },
+      };
+      return iterator;
+    });
+
+    const buffered = source.pipe(tagIds, bufferCount(2));
+    const it = buffered[Symbol.asyncIterator]();
+
+    subject.next(10);
+    subject.next(20);
+
+    const result = await it.next();
+    expect(result.done).toBe(false);
+    expect(result.value).toEqual([10, 20]);
+
+    const iteratorMeta = getIteratorMeta(it as any);
+    expect(iteratorMeta).toEqual(
+      jasmine.objectContaining({
+        valueId: "id2",
+        kind: "collapse",
+        inputValueIds: ["id1", "id2"],
+      })
+    );
+
+    const valueMeta = getValueMeta(result.value);
+    expect(valueMeta).toEqual(
+      jasmine.objectContaining({
+        valueId: "id2",
+        kind: "collapse",
+        inputValueIds: ["id1", "id2"],
+      })
+    );
+  });
+
+  it("should attach collapse metadata when flushing partial buffer on completion", async () => {
+    const tagIds = createOperator<number, number>("tagIds", function (source) {
+      let n = 0;
+      const iterator: AsyncIterator<number> = {
+        next: async () => {
+          const result = await source.next();
+          if (result.done) return result;
+
+          n += 1;
+          setIteratorMeta(iterator as any, { valueId: `id${n}` }, 0, "tagIds");
+          return result;
+        },
+      };
+      return iterator;
+    });
+
+    const buffered = source.pipe(tagIds, bufferCount(2));
+    const it = buffered[Symbol.asyncIterator]();
+
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
+
+    const result1 = await it.next();
+    expect(result1.done).toBe(false);
+    expect(result1.value).toEqual([1, 2]);
+    expect(getValueMeta(result1.value)).toEqual(
+      jasmine.objectContaining({
+        valueId: "id2",
+        kind: "collapse",
+        inputValueIds: ["id1", "id2"],
+      })
+    );
+
+    const result2 = await it.next();
+    expect(result2.done).toBe(false);
+    expect(result2.value).toEqual([3]);
+    expect(getValueMeta(result2.value)).toEqual(
+      jasmine.objectContaining({
+        valueId: "id3",
+        kind: "collapse",
+        inputValueIds: ["id3"],
+      })
+    );
+
+    const done = await it.next();
+    expect(done.done).toBe(true);
+  });
 });
 
 
