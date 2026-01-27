@@ -63,12 +63,14 @@ export function takeUntil<T = any>(
         if (!r.done) {
           // notifier EMIT → gate + cancel source
           gateStamp = stamp;
-          try { sourceIt.return?.(); } catch {}
+          try { await sourceIt.return?.(); } catch {}
         }
       } catch (err) {
         // notifier ERROR → NO source cancellation
         notifierError = err;
         notifierErrorStamp = stampOf(notifierIt);
+      } finally {
+        try { await notifierIt.return?.(); } catch {}
       }
     })();
 
@@ -131,7 +133,7 @@ export function takeUntil<T = any>(
             }
             throw notifierError;
           }
-        
+
           // 6) normal path
           setIteratorEmissionStamp(iterator as any, stamp);
           return { done: false, value: r.value };
@@ -139,15 +141,15 @@ export function takeUntil<T = any>(
       },
 
       async return() {
-        try { sourceIt.return?.(); } catch {}
-        try { notifierIt.return?.(); } catch {}
+        try { await sourceIt.return?.(); } catch {}
+        try { await notifierIt.return?.(); } catch {}
         pending = null;
         return { done: true, value: undefined };
       },
 
       async throw(err) {
-        try { sourceIt.return?.(); } catch {}
-        try { notifierIt.return?.(); } catch {}
+        try { await sourceIt.return?.(); } catch {}
+        try { await notifierIt.return?.(); } catch {}
         pending = null;
         throw err;
       },
