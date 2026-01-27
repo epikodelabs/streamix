@@ -1,12 +1,12 @@
 import {
-  createOperator,
-  DONE,
-  getIteratorEmissionStamp,
-  NEXT,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  type Operator,
-  type Stream,
+    createOperator,
+    DONE,
+    getIteratorEmissionStamp,
+    NEXT,
+    nextEmissionStamp,
+    setIteratorEmissionStamp,
+    type Operator,
+    type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 
