@@ -1,6 +1,19 @@
-import { createStream, createSubject, race } from "@epikodelabs/streamix";
+import { createStream, createSubject, from, race } from "@epikodelabs/streamix";
 
 describe('race', () => {
+  it('should complete without emitting when called with no streams', (done) => {
+    const results: unknown[] = [];
+
+    race().subscribe({
+      next: (v) => results.push(v),
+      error: done.fail,
+      complete: () => {
+        expect(results).toEqual([]);
+        done();
+      },
+    });
+  });
+
   it('should only emit values from the winning stream', (done) => {
     const stream1 = createSubject<number>();
     const stream2 = createSubject<number>();
@@ -169,6 +182,62 @@ describe('race', () => {
         done();
       },
     });
+  });
+
+  it('should emit nothing if the winning stream completes immediately (and cancel losers)', async () => {
+    let cancelled = false;
+    let returnCalls = 0;
+
+    const losing = createStream<number>('losing', async function* () {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      yield 123;
+    });
+
+    const originalAsyncIterator = (losing as any)[Symbol.asyncIterator].bind(losing);
+    (losing as any)[Symbol.asyncIterator] = () => {
+      const it = originalAsyncIterator();
+      const originalReturn = it.return?.bind(it);
+      if (originalReturn) {
+        it.return = (...args: any[]) => {
+          returnCalls += 1;
+          cancelled = true;
+          return originalReturn(...args);
+        };
+      }
+      return it;
+    };
+
+    const results: number[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      race(from([] as number[]), losing).subscribe({
+        next: (v) => results.push(v),
+        error: reject,
+        complete: resolve,
+      });
+    });
+
+    expect(results).toEqual([]);
+
+    // Allow cancellation microtasks to run.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(cancelled).toBe(true);
+    expect(returnCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('supports promise inputs', async () => {
+    const results: number[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      race(Promise.resolve(1), Promise.resolve(2)).subscribe({
+        next: (v) => results.push(v),
+        error: reject,
+        complete: resolve,
+      });
+    });
+
+    expect(results.length).toBe(1);
+    expect([1, 2]).toContain(results[0]);
   });
 });
 

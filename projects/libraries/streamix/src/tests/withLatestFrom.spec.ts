@@ -1,4 +1,13 @@
-import { createStream, createSubject, from, withLatestFrom } from '@epikodelabs/streamix';
+import {
+  createOperator,
+  createStream,
+  createSubject,
+  from,
+  getIteratorMeta,
+  getValueMeta,
+  setIteratorMeta,
+  withLatestFrom,
+} from '@epikodelabs/streamix';
 
 const scheduler = {
   flush: () => new Promise(resolve => setTimeout(resolve, 0))
@@ -287,6 +296,90 @@ describe('withLatestFrom', () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not emit until all auxiliary streams have a value', async () => {
+    const main$ = createSubject<number>();
+    const aux$ = createSubject<string>();
+    const combined = main$.pipe(withLatestFrom(aux$));
+
+    const results: any[] = [];
+    combined.subscribe({ next: (v) => results.push(v) });
+
+    await scheduler.flush();
+
+    // Main emits before aux has any value -> gated, no emission.
+    main$.next(1);
+    await scheduler.flush();
+    expect(results).toEqual([]);
+
+    aux$.next('A');
+    await scheduler.flush();
+
+    main$.next(2);
+    await scheduler.flush();
+
+    expect(results).toEqual([[2, 'A']]);
+  });
+
+  it('supports auxiliary inputs that are plain values and promises', async () => {
+    const mainStream = from([1, 2]);
+    const combined = mainStream.pipe(withLatestFrom(100 as any, Promise.resolve('X') as any));
+
+    const results: any[] = [];
+    await new Promise<void>((resolve, reject) => {
+      combined.subscribe({
+        next: (v) => results.push(v),
+        complete: resolve,
+        error: reject,
+      });
+    });
+
+    expect(results).toEqual([
+      [1, 100, 'X'],
+      [2, 100, 'X'],
+    ]);
+  });
+
+  it('attaches iterator/value metadata from the source emission', async () => {
+    const tagIds = createOperator<number, number>('tagIds', function (source) {
+      let n = 0;
+      const iterator: AsyncIterator<number> = {
+        next: async () => {
+          const result = await source.next();
+          if (result.done) return result;
+
+          n += 1;
+          setIteratorMeta(iterator as any, { valueId: `id${n}` }, 0, 'tagIds');
+          return result;
+        },
+      };
+      return iterator;
+    });
+
+    const main$ = createSubject<number>();
+    const aux$ = createSubject<string>();
+
+    const combined = main$.pipe(tagIds, withLatestFrom(aux$));
+    const it = combined[Symbol.asyncIterator]();
+
+    aux$.next('A');
+    await scheduler.flush();
+
+    main$.next(5);
+    await scheduler.flush();
+
+    const r1 = await it.next();
+    expect(r1.done).toBe(false);
+    expect(r1.value).toEqual([5, 'A']);
+
+    expect(getIteratorMeta(it as any)).toEqual(
+      jasmine.objectContaining({ valueId: 'id1' })
+    );
+
+    expect(getValueMeta(r1.value)).toEqual(
+      jasmine.objectContaining({ valueId: 'id1' })
+    );
   });
 });
 
