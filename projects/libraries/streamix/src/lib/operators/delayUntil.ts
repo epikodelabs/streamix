@@ -1,12 +1,11 @@
 import {
   createOperator,
   getIteratorEmissionStamp,
-  nextEmissionStamp,
   setIteratorEmissionStamp,
   type Operator,
   type Stream,
 } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
+import { fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
 /**
@@ -39,90 +38,119 @@ import { createSubject } from "../subjects";
 export function delayUntil<T = any, R = any>(
   notifier: Stream<R> | Promise<R>
 ): Operator<T, T> {
-  return createOperator<T, T>("delayUntil", function (
-    this: Operator,
-    source: AsyncIterator<T>
-  ) {
+  return createOperator<T, T>("delayUntil", (source) => {
     const output = createSubject<T>();
-    const outIt = eachValueFrom(output);
+    const outputIt = output[Symbol.asyncIterator]();
+    const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
 
-    /* ---------------------------------------------------------------------- */
-    /* Shared state                                                            */
-    /* ---------------------------------------------------------------------- */
-
-    let gateOpened = false;
-    let notifierError: any = null;
     const buffer: Array<{ value: T; stamp: number }> = [];
+    let gateOpened = false;
+    let cancelled = false;
+    let resolveSourceLoop: (() => void) | null = null;
 
-    /* ---------------------------------------------------------------------- */
-    /* Notifier producer                                                       */
-    /* ---------------------------------------------------------------------- */
+    // Flush buffered values when gate opens
+    const flushBuffer = () => {
+      if (buffer.length === 0) return;
 
-    const notifierSub = fromAny(notifier).subscribe({
-      next() {
-        if (!gateOpened) {
-          gateOpened = true;
-          
-          // Flush buffered values
-          for (const b of buffer) {
-            setIteratorEmissionStamp(outIt as any, b.stamp);
-            output.next(b.value);
-          }
-          buffer.length = 0;
-        }
-      },
-      error(err) {
-        notifierError = err;
-        source.return?.().catch(() => {});
-      },
-      complete() {
-        // Notifier completed without emitting - discard buffer
-      },
-    });
+      for (const { value, stamp } of buffer) {
+        setIteratorEmissionStamp(outputIt as any, stamp);
+        output.next(value);
+      }
+      buffer.length = 0;
+    };
 
-    /* ---------------------------------------------------------------------- */
-    /* Source producer                                                         */
-    /* ---------------------------------------------------------------------- */
-
+    // Notifier observer - wait for first emission to open gate
     (async () => {
       try {
-        while (true) {
-          if (notifierError) {
-            break;
-          }
-
-          const r = await source.next();
-          const stamp = getIteratorEmissionStamp(source) ?? nextEmissionStamp();
-
-          if (r.done) {
-            break;
-          }
-
-          if (notifierError) {
-            break;
-          }
-
-          if (!gateOpened) {
-            buffer.push({ value: r.value, stamp });
-          } else {
-            setIteratorEmissionStamp(outIt as any, stamp);
-            output.next(r.value);
+        const result = await notifierIt.next();
+        if (!result.done && !cancelled) {
+          gateOpened = true;
+          // Flush synchronously so buffered values come before new source values
+          flushBuffer();
+          // Wake up the source loop if it was waiting
+          if (resolveSourceLoop) {
+            const resolve = resolveSourceLoop as any;
+            resolveSourceLoop = null;
+            resolve();
           }
         }
+        // Close notifier iterator after first emission or completion
+        try {
+          await notifierIt.return?.();
+        } catch {}
       } catch (err) {
-        output.error(err);
-        return;
-      } finally {
-        notifierSub.unsubscribe();
-
-        if (notifierError) {
-          if (!output.completed()) output.error(notifierError);
-        } else {
-          if (!output.completed()) output.complete();
+        if (!cancelled) {
+          output.error(err);
         }
       }
     })();
 
-    return outIt;
+    // Source producer
+    (async () => {
+      try {
+        while (!cancelled) {
+          const r = await source.next();
+          if (r.done || cancelled) break;
+
+          const stamp = getIteratorEmissionStamp(source) ?? 0;
+
+          if (gateOpened) {
+            // Gate is open, forward immediately
+            setIteratorEmissionStamp(outputIt as any, stamp);
+            output.next(r.value);
+          } else {
+            // Gate is closed, buffer the value
+            buffer.push({ value: r.value, stamp });
+          }
+        }
+
+        // Source completed - flush if gate is open, otherwise discard buffer
+        if (!cancelled && gateOpened) {
+          flushBuffer();
+        }
+
+        if (!cancelled) {
+          output.complete();
+        }
+      } catch (err) {
+        if (!cancelled) {
+          output.error(err);
+        }
+      } finally {
+        if (!cancelled) {
+          try {
+            await notifierIt.return?.();
+          } catch {}
+        }
+      }
+    })();
+
+    // Custom iterator with cleanup
+    const iterator: AsyncIterator<T> = {
+      next: () => outputIt.next(),
+      return: async (value?: any) => {
+        cancelled = true;
+
+        // Cleanup source iterator
+        try {
+          await source.return?.();
+        } catch {}
+
+        // Cleanup notifier iterator
+        try {
+          await notifierIt.return?.();
+        } catch {}
+
+        output.complete();
+        return outputIt.return?.(value) ?? { done: true as const, value };
+      },
+      throw: async (error?: any) => {
+        cancelled = true;
+        output.error(error);
+        return outputIt.throw?.(error) ?? Promise.reject(error);
+      },
+    };
+
+    return iterator;
   });
 }

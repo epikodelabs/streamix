@@ -60,7 +60,11 @@ export function skipUntil<T = any, R = any>(
       } catch (err) {
         notifierError = err;
         try {
-          sourceIt.return?.();
+          await sourceIt.return?.();
+        } catch {}
+      } finally {
+        try {
+          await notifierIt.return?.();
         } catch {}
       }
     })();
@@ -95,20 +99,20 @@ export function skipUntil<T = any, R = any>(
 
       async return() {
         try {
-          sourceIt.return?.();
+          await sourceIt.return?.();
         } catch {}
         try {
-          notifierIt.return?.();
+          await notifierIt.return?.();
         } catch {}
         return { done: true, value: undefined };
       },
 
       async throw(err) {
         try {
-          sourceIt.return?.();
+          await sourceIt.return?.();
         } catch {}
         try {
-          notifierIt.return?.();
+          await notifierIt.return?.();
         } catch {}
         throw err;
       },
