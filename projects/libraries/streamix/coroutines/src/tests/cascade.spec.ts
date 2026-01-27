@@ -1,6 +1,6 @@
 import { createStream } from "@epikodelabs/streamix";
 import { cascade, coroutine } from "@epikodelabs/streamix/coroutines";
-import { ndescribe, idescribe } from "./env.spec";
+import { idescribe } from "./env.spec";
 
 idescribe("cascade", () => {
   it("should process tasks sequentially via processTask", async () => {
@@ -86,9 +86,7 @@ idescribe("cascade", () => {
 
     await cascaded.finalize();
   });
-});
 
-ndescribe("cascade (node)", () => {
   it("return() marks the operator as completed", async () => {
     const c1 = coroutine((x: number) => x + 1);
     const cascaded = cascade(c1);
