@@ -940,7 +940,7 @@ describe("tracer", () => {
   });
 
   it("handles error in operator before pulling input", async () => {
-      const throwImmediate = createOperator("throwImmediate", (source) => {
+      const throwImmediate = createOperator("throwImmediate", () => {
           return {
               async next() {
                   throw new Error("Immediate failure");
