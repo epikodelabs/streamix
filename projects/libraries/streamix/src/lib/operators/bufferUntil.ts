@@ -1,10 +1,12 @@
 import {
   createOperator,
+  DONE,
   getIteratorMeta,
+  NEXT,
   setIteratorMeta,
   setValueMeta,
   type Operator,
-  type Stream,
+  type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createSubject } from "../subjects";
@@ -136,7 +138,10 @@ export const bufferUntil = <T = any>(notifier: Stream<any>) =>
         } catch {}
 
         output.complete();
-        return outputIt.return?.(value) ?? { done: true as const, value };
+        if (value !== undefined) {
+          return NEXT(value);
+        }
+        return DONE;
       },
       throw: async (error?: any) => {
         cancelled = true;
