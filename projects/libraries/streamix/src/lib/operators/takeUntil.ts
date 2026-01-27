@@ -1,6 +1,8 @@
 import {
   createOperator,
+  DONE,
   getIteratorEmissionStamp,
+  NEXT,
   nextEmissionStamp,
   setIteratorEmissionStamp,
   type Operator,
@@ -140,11 +142,14 @@ export function takeUntil<T = any>(
         }
       },
 
-      async return() {
+      async return(value?: any) {
         try { await sourceIt.return?.(); } catch {}
         try { await notifierIt.return?.(); } catch {}
         pending = null;
-        return { done: true, value: undefined };
+        if (value !== undefined) {
+          return NEXT(value);
+        }
+        return DONE;
       },
 
       async throw(err) {
