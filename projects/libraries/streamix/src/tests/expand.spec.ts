@@ -1,4 +1,4 @@
-import { expand, from } from '@epikodelabs/streamix';
+import { expand, from, map } from '@epikodelabs/streamix';
 
 describe('expand', () => {
   it('should handle errors thrown by the project function', async () => {
@@ -88,6 +88,93 @@ describe('expand', () => {
     }
 
     expect(result).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('should handle async project functions with promises', async () => {
+    const project = async (value: number) => {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      if (value >= 3) return [];
+      return [value + 1];
+    };
+
+    const result: number[] = [];
+    for await (const value of from([1]).pipe(expand(project))) {
+      result.push(value);
+    }
+
+    expect(result).toEqual([1, 2, 3]);
+  });
+
+  it('should preserve metadata through expansions', async () => {
+    const project = (value: number) => {
+      if (value >= 3) return from([]);
+      return from([value + 1]);
+    };
+
+    const result: number[] = [];
+    const stream = from([1]).pipe(
+      map(x => x), // Add metadata through map
+      expand(project)
+    );
+
+    for await (const value of stream) {
+      result.push(value);
+    }
+
+    expect(result).toEqual([1, 2, 3]);
+  });
+
+  it('should handle depth-first traversal with metadata', async () => {
+    const project = (value: number) => {
+      if (value >= 3) return from([]);
+      return from([value + 1]).pipe(map(x => x)); // Add metadata
+    };
+
+    const result: number[] = [];
+    for await (const value of from([1]).pipe(expand(project, { traversal: 'depth' }))) {
+      result.push(value);
+    }
+
+    expect(result).toEqual([1, 2, 3]);
+  });
+
+  it('should handle multiple source values with depth-first', async () => {
+    const project = (value: number) => {
+      if (value >= 10) return from([]);
+      return from([value * 2]);
+    };
+
+    const result: number[] = [];
+    for await (const value of from([1, 5]).pipe(expand(project))) {
+      result.push(value);
+    }
+
+    // Depth-first: 1 -> 2 -> 4 -> 8 -> 16 (16 emitted but not expanded), then 5 -> 10 (10 emitted but not expanded)
+    expect(result).toEqual([1, 2, 4, 8, 16, 5, 10]);
+  });
+
+  it('should handle slow source with queue processing', async () => {
+    let sourceIndex = 0;
+    const slowSource = {
+      async *[Symbol.asyncIterator]() {
+        while (sourceIndex < 2) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          yield sourceIndex++;
+        }
+      }
+    };
+
+    const project = (value: number) => {
+      if (value >= 2) return [];
+      return [value + 10];
+    };
+
+    const result: number[] = [];
+    for await (const value of from(slowSource).pipe(expand(project))) {
+      result.push(value);
+    }
+
+    expect(result).toEqual([0, 10, 1, 11]);
   });
 });
 
