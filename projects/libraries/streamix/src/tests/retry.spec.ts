@@ -304,6 +304,137 @@ describe('retry', () => {
     expect(factory).toHaveBeenCalledTimes(2);
     expect(result).toEqual([2]); // Only value from successful attempt
   });
+
+  it('should abort at loop start when signal is already aborted', async () => {
+    const factory = jasmine.createSpy('factory').and.callFake(() => {
+      return createStream<number>("testStream", async function* () {
+        yield 1;
+      });
+    });
+
+    const stream$ = retry(factory, 1, 0);
+    const sub = stream$.subscribe({
+      next: () => fail('Should not emit'),
+      error: () => {},
+      complete: () => {},
+    });
+
+    // Immediately abort
+    sub.unsubscribe();
+
+    await sleep(10);
+
+    // Factory should be called once before abort check
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it('should abort during iteration when signal is aborted', async () => {
+    let iterationCount = 0;
+    let abortCheckCount = 0;
+    
+    const factory = jasmine.createSpy('factory').and.callFake(() => {
+      return createStream<number>("slowStream", async function* (signal) {
+        while (true) {
+          // Check if signal was aborted
+          if (signal?.aborted) {
+            abortCheckCount++;
+            throw new Error("Stream aborted");
+          }
+          iterationCount++;
+          yield iterationCount;
+          await sleep(10);
+        }
+      });
+    });
+
+    const values: number[] = [];
+    const stream$ = retry(factory, 3, 0);
+    
+    const sub = stream$.subscribe({
+      next: (v) => values.push(v),
+      error: () => {},
+      complete: () => {},
+    });
+
+    // Let a few iterations happen (values are buffered, not emitted yet)
+    await sleep(35);
+    
+    // Abort during iteration
+    sub.unsubscribe();
+    
+    await sleep(20);
+
+    // Since retry buffers values, no values will be emitted before abort
+    // But we can verify that iterations started and then stopped
+    expect(iterationCount).toBeGreaterThan(0);
+    expect(iterationCount).toBeLessThan(10); // Should stop before too many iterations
+    expect(values.length).toBe(0); // No values yielded due to abort during buffering
+  });
+
+  it('should handle abort during delay and cleanup iterator', async () => {
+    let attempt = 0;
+    let returnCalled = false;
+    
+    const factory = jasmine.createSpy('factory').and.callFake(() => {
+      attempt++;
+      return createStream<number>("cleanupTest", async function* () {
+        try {
+          yield 1;
+          throw new Error("Fail for retry");
+        } finally {
+          returnCalled = true;
+        }
+      });
+    });
+
+    const stream$ = retry(factory, 2, 100);
+    
+    const sub = stream$.subscribe({
+      next: () => {},
+      error: () => {},
+      complete: () => {},
+    });
+
+    // Wait for first attempt to fail
+    await sleep(10);
+    
+    // Abort during the delay
+    sub.unsubscribe();
+    
+    await sleep(50);
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(returnCalled).toBe(true);
+  });
+
+  it('should cleanup iterator on error even if return throws', async () => {
+    const factory = jasmine.createSpy('factory').and.callFake(() => {
+      const gen = (async function* () {
+        yield 1;
+        throw new Error("Fail");
+      })();
+
+      gen.return = async () => {
+        throw new Error("Return error");
+      };
+      
+      return createStream("throwOnReturn", async function* () {
+        for await (const v of gen) {
+          yield v;
+        }
+      });
+    });
+
+    let caught: any;
+    try {
+      for await (const _ of retry(factory, 0, 0)) {
+        void _;
+      }
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(factory).toHaveBeenCalled();
+    expect(caught).toBeDefined();
+  });
 });
-
-
