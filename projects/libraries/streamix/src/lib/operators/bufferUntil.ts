@@ -6,7 +6,7 @@ import {
   type Operator,
   type Stream,
 } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
+import { fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
 type BufferRecord<T> = {
@@ -18,22 +18,21 @@ type BufferRecord<T> = {
  * Buffers values until the notifier emits once, then flushes the collected values.
  *
  * Every notifier emission triggers a flush of the current buffer; values are released
- * as a collapsed array, preserving metadata for PipeContext tracing. When `flushOnComplete`
- * is true the last buffered items are emitted after the source completes.
+ * as a collapsed array, preserving metadata for PipeContext tracing. When the source
+ * completes, any remaining buffered values are emitted.
  *
  * @template T Source value type.
  * @param notifier Stream or Promise whose emissions cause buffer flushes.
- * @param flushOnComplete Emit the remaining buffer when the source completes.
  */
-export const bufferUntil = <T = any>(
-  notifier: Stream<any>
-) =>
+export const bufferUntil = <T = any>(notifier: Stream<any>) =>
   createOperator<T, T[]>("bufferUntil", function (this: Operator, source) {
     const output = createSubject<T[]>();
-    const outputIterator = eachValueFrom(output);
-
     const buffer: BufferRecord<T>[] = [];
     const notifierIterator = fromAny(notifier)[Symbol.asyncIterator]();
+    let cancelled = false;
+
+    // Create the output iterator once so metadata sticks
+    const outputIt = output[Symbol.asyncIterator]();
 
     const flushBuffer = () => {
       if (buffer.length === 0) return;
@@ -41,14 +40,18 @@ export const bufferUntil = <T = any>(
       const records = buffer.splice(0);
       const metas = records
         .map((record) => record.meta)
-        .filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
+        .filter(Boolean) as {
+        valueId: string;
+        operatorIndex: number;
+        operatorName: string;
+      }[];
 
       const lastMeta = metas[metas.length - 1];
       let values = records.map((record) => record.result.value!);
 
       if (lastMeta) {
         setIteratorMeta(
-          outputIterator,
+          iterator,
           {
             valueId: lastMeta.valueId,
             kind: "collapse",
@@ -59,7 +62,11 @@ export const bufferUntil = <T = any>(
         );
         values = setValueMeta(
           values,
-          { valueId: lastMeta.valueId, kind: "collapse", inputValueIds: metas.map((meta) => meta.valueId) },
+          {
+            valueId: lastMeta.valueId,
+            kind: "collapse",
+            inputValueIds: metas.map((meta) => meta.valueId),
+          },
           lastMeta.operatorIndex,
           lastMeta.operatorName
         );
@@ -68,37 +75,75 @@ export const bufferUntil = <T = any>(
       output.next(values);
     };
 
+    // Notifier loop - flush on each emission
     (async () => {
       try {
-        while (true) {
+        while (!cancelled) {
           const result = await notifierIterator.next();
-          if (result.done) break;
+          if (result.done || cancelled) break;
           queueMicrotask(() => flushBuffer());
         }
       } catch (err) {
-        output.error(err);
+        if (!cancelled) {
+          output.error(err);
+        }
       }
     })();
 
+    // Source loop - buffer values
     (async () => {
       try {
-        while (true) {
+        while (!cancelled) {
           const result = await source.next();
-          if (result.done) break;
+          if (result.done || cancelled) break;
           buffer.push({
             result,
             meta: getIteratorMeta(source),
           });
         }
 
-        flushBuffer();
-        output.complete();
+        if (!cancelled) {
+          flushBuffer();
+          output.complete();
+        }
       } catch (err) {
-        output.error(err);
+        if (!cancelled) {
+          output.error(err);
+        }
       } finally {
-        notifierIterator.return?.();
+        if (!cancelled) {
+          try {
+            await notifierIterator.return?.();
+          } catch {}
+        }
       }
     })();
 
-    return outputIterator;
+    // Custom iterator with cleanup
+    const iterator: AsyncIterator<T[]> = {
+      next: () => outputIt.next(),
+      return: async (value?: any) => {
+        cancelled = true;
+
+        // Cleanup source iterator
+        try {
+          await source.return?.();
+        } catch {}
+
+        // Cleanup notifier iterator
+        try {
+          await notifierIterator.return?.();
+        } catch {}
+
+        output.complete();
+        return outputIt.return?.(value) ?? { done: true as const, value };
+      },
+      throw: async (error?: any) => {
+        cancelled = true;
+        output.error(error);
+        return outputIt.throw?.(error) ?? Promise.reject(error);
+      },
+    };
+
+    return iterator;
   });
