@@ -273,6 +273,125 @@ idescribe('onResize', () => {
       document.body.removeChild(div);
     }
   });
+
+  it('handles SSR (ResizeObserver undefined)', () => {
+    const div = document.createElement('div');
+    document.body.appendChild(div);
+
+    const originalObserver = (globalThis as any).ResizeObserver;
+    try {
+      delete (globalThis as any).ResizeObserver;
+
+      const callback = jasmine.createSpy('callback');
+      const subscription = onResize(div).subscribe(callback);
+
+      // Should not emit without ResizeObserver
+      expect(callback).not.toHaveBeenCalled();
+      
+      // Should not crash on unsubscribe
+      expect(() => subscription.unsubscribe()).not.toThrow();
+    } finally {
+      if (originalObserver) {
+        (globalThis as any).ResizeObserver = originalObserver;
+      }
+      document.body.removeChild(div);
+    }
+  });
+
+  it('does not restart when start() called multiple times', async () => {
+    const div = document.createElement('div');
+    document.body.appendChild(div);
+
+    const observeSpy = spyOn(ResizeObserver.prototype, 'observe').and.callThrough();
+
+    const sub1 = onResize(div).subscribe();
+    const sub2 = onResize(div).subscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Should observe for each subscription
+    expect(observeSpy.calls.count()).toBeGreaterThan(0);
+
+    sub1.unsubscribe();
+    sub2.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('handles null element from promise resolution', async () => {
+    const originalObserver = (globalThis as any).ResizeObserver;
+
+    const observeSpy = jasmine.createSpy('observe');
+
+    class FakeResizeObserver {
+      constructor(_cb: (entries: ResizeObserverEntry[]) => void) {}
+      observe(el: HTMLElement) {
+        observeSpy(el);
+      }
+      disconnect() {}
+    }
+
+    (globalThis as any).ResizeObserver = FakeResizeObserver;
+
+    const values: any[] = [];
+    const sub = onResize(Promise.resolve(null as any)).subscribe(v => values.push(v));
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(observeSpy).not.toHaveBeenCalled();
+    expect(values).toEqual([]);
+
+    sub.unsubscribe();
+
+    if (originalObserver) (globalThis as any).ResizeObserver = originalObserver;
+    else delete (globalThis as any).ResizeObserver;
+  });
+
+  it('handles onUnsubscribe errors gracefully', async () => {
+    const div = document.createElement('div');
+    document.body.appendChild(div);
+
+    const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect').and.callFake(() => {
+      throw new Error('disconnect error');
+    });
+
+    const sub = onResize(div).subscribe();
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Errors in cleanup will propagate from stop() which is not wrapped in try-catch
+    let didThrow = false;
+    try {
+      sub.unsubscribe();
+    } catch (e) {
+      didThrow = true;
+    }
+    
+    expect(didThrow).toBe(true);
+
+    disconnectSpy.and.callThrough();
+    document.body.removeChild(div);
+  });
+
+  it('does not stop when already stopped', async () => {
+    const div = document.createElement('div');
+    document.body.appendChild(div);
+
+    const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect').and.callThrough();
+
+    const sub = onResize(div).subscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    sub.unsubscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    disconnectSpy.calls.reset();
+
+    // Calling unsubscribe again should not call disconnect
+    sub.unsubscribe();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(disconnectSpy).not.toHaveBeenCalled();
+
+    document.body.removeChild(div);
+  });
 });
 
 

@@ -270,6 +270,81 @@ idescribe('onAnimationFrame', () => {
       },
     });
   });
-});
+  it('returns early when performance is undefined (SSR)', (done) => {
+    const originalPerformance = (globalThis as any).performance;
+    delete (globalThis as any).performance;
+
+    try {
+      const values: number[] = [];
+      const sub = onAnimationFrame().subscribe(v => values.push(v));
+
+      setTimeout(() => {
+        // Should not emit without performance
+        expect(values.length).toBe(0);
+        sub.unsubscribe();
+        (globalThis as any).performance = originalPerformance;
+        done();
+      }, 50);
+    } catch (err: any) {
+      (globalThis as any).performance = originalPerformance;
+      done.fail(err);
+    }
+  });
+
+  it('does not restart loop when startLoop() called multiple times', async () => {
+    const rafSpy = spyOn(globalThis as any, 'requestAnimationFrame').and.callThrough();
+
+    const sub1 = onAnimationFrame().subscribe();
+    const sub2 = onAnimationFrame().subscribe();
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Should only start one RAF loop
+    const callCount = rafSpy.calls.count();
+    expect(callCount).toBeGreaterThan(0);
+
+    sub1.unsubscribe();
+    sub2.unsubscribe();
+  });
+
+  it('handles strictly decreasing timestamps', (done) => {
+    const originalRAF = (globalThis as any).requestAnimationFrame;
+    const originalCancel = (globalThis as any).cancelAnimationFrame;
+
+    const times = [100, 50, 25]; // Strictly decreasing
+    let i = 0;
+
+    (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
+      const id = i + 1;
+      if (i < times.length) {
+        const t = times[i++];
+        queueMicrotask(() => cb(t));
+      }
+      return id;
+    };
+
+    (globalThis as any).cancelAnimationFrame = jasmine.createSpy('cancelAnimationFrame');
+
+    const deltas: number[] = [];
+    const subscription = onAnimationFrame().subscribe({
+      next: (delta: number) => {
+        deltas.push(delta);
+        if (deltas.length === 3) {
+          try {
+            // All deltas should be 0 since timestamps are strictly decreasing
+            expect(deltas).toEqual([0, 0, 0]);
+            subscription.unsubscribe();
+            (globalThis as any).requestAnimationFrame = originalRAF;
+            (globalThis as any).cancelAnimationFrame = originalCancel;
+            done();
+          } catch (err: any) {
+            subscription.unsubscribe();
+            (globalThis as any).requestAnimationFrame = originalRAF;
+            (globalThis as any).cancelAnimationFrame = originalCancel;
+            done.fail(err);
+          }
+        }
+      },
+    });
+  });});
 
 

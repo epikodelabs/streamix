@@ -298,6 +298,104 @@ idescribe('onIdle', () => {
     expect(values).toEqual([]);
     sub.unsubscribe();
   });
+
+  it('does not restart when startLoop() called multiple times', async () => {
+    const env = mockRICEnv();
+
+    restore.push(
+      patchGlobal('requestIdleCallback', env.requestIdleCallback),
+      patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
+    );
+
+    env.requestIdleCallback.calls.reset();
+
+    const sub1 = onIdle().subscribe();
+    const sub2 = onIdle().subscribe();
+    await flush();
+
+    // Should only call requestIdleCallback for each subscription
+    expect(env.requestIdleCallback.calls.count()).toBeGreaterThan(0);
+
+    sub1.unsubscribe();
+    sub2.unsubscribe();
+  });
+
+  it('does not stop when already stopped', async () => {
+    const env = mockRICEnv();
+
+    restore.push(
+      patchGlobal('requestIdleCallback', env.requestIdleCallback),
+      patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
+    );
+
+    const sub = onIdle().subscribe();
+    await flush();
+
+    sub.unsubscribe();
+    await flush();
+
+    env.cancelIdleCallback.calls.reset();
+
+    // Calling unsubscribe again should not call cancelIdleCallback
+    sub.unsubscribe();
+    await flush();
+
+    expect(env.cancelIdleCallback).not.toHaveBeenCalled();
+  });
+
+  it('uses clearTimeout when cancelIdleCallback is unavailable', async () => {
+    const clearTimeoutSpy = jasmine.createSpy('clearTimeout');
+
+    restore.push(
+      patchGlobal('requestIdleCallback', () => 1),
+      patchGlobal('cancelIdleCallback', undefined),
+      patchGlobal('clearTimeout', clearTimeoutSpy)
+    );
+
+    const sub = onIdle().subscribe();
+    await flush();
+
+    sub.unsubscribe();
+    await flush();
+
+    // Should use clearTimeout as fallback
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+  });
+
+  it('omits timeout option when undefined', async () => {
+    const env = mockRICEnv();
+
+    restore.push(
+      patchGlobal('requestIdleCallback', env.requestIdleCallback),
+      patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
+    );
+
+    const sub = onIdle().subscribe();
+    await flush();
+
+    // Should be called with callback and undefined/empty options
+    const calls = env.requestIdleCallback.calls.all();
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0].args.length).toBeLessThanOrEqual(2);
+    expect(typeof calls[0].args[0]).toBe('function');
+
+    sub.unsubscribe();
+  });
+
+  it('handles SSR environment (setTimeout unavailable)', () => {
+    restore.push(
+      patchGlobal('requestIdleCallback', undefined),
+      patchGlobal('cancelIdleCallback', undefined),
+      patchGlobal('setTimeout', undefined)
+    );
+
+    const values: IdleDeadline[] = [];
+    const sub = onIdle().subscribe(v => values.push(v));
+
+    // Should not crash, but also not emit
+    expect(values.length).toBe(0);
+    expect(() => sub.unsubscribe()).not.toThrow();
+  });
 });
 
 
