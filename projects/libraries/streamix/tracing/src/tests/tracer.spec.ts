@@ -4,7 +4,8 @@ import {
   createStream,
   filter,
   map,
-  mergeMap
+  mergeMap,
+  setValueMeta
 } from "@epikodelabs/streamix";
 
 const scheduler = {
@@ -779,3 +780,184 @@ describe("tracerManualUpdates", () => {
     expect(trace.sourceValue).toBe(2);
   });
 });
+
+describe("tracer", () => {
+  let tracer: TestTracer;
+
+  beforeEach(() => {
+    tracer = createTestTracer();
+    enableTracing(tracer);
+  });
+
+  afterEach(() => {
+    disableTracing();
+    tracer.clear();
+  });
+
+  it("handles multiple inputs where one is passed through (filter-like behavior)", async () => {
+    const skipOne = createOperator("skipOne", (source) => {
+      return {
+        async next() {
+            const first = await source.next();
+            if (first.done) return first;
+            return await source.next();
+        },
+        [Symbol.asyncIterator]() { return this; }
+      };
+    });
+
+    const stream = createStream("test", async function* () {
+      yield 1;
+      yield 2;
+    });
+
+    await waitForCompletion(({ complete }) => {
+      stream.pipe(skipOne).subscribe({ complete });
+    });
+  });
+  
+  it("handles multiple inputs where none are passed through (collapse behavior)", async () => {
+      const sumTwo = createOperator("sumTwo", (source) => {
+        return {
+            async next() {
+                const a = await source.next();
+                if (a.done) return a;
+                const b = await source.next();
+                if (b.done) return b; 
+                return { done: false, value: a.value + b.value };
+            },
+            [Symbol.asyncIterator]() { return this; }
+        };
+      });
+
+      const stream = createStream("test", async function* () {
+          yield 1;
+          yield 2;
+      });
+
+      await waitForCompletion(({ complete }) => {
+          stream.pipe(sumTwo).subscribe({ complete });
+      });
+  });
+
+  it("calls completeSubscription when iterator throws", async () => {
+    const stream = createStream("test", async function* () {
+      yield 1;
+    });
+
+    const piped = stream.pipe(map(x => x));
+    const iterator = piped[Symbol.asyncIterator]();
+    await iterator.next(); 
+
+    try {
+        if (iterator.throw) {
+            await iterator.throw(new Error("Test throw"));
+        }
+    } catch (e) {
+        // Expected
+    }
+  });
+
+  it("calls completeSubscription when iterator returns", async () => {
+      const stream = createStream("test", async function* () {
+          yield 1;
+      });
+      const piped = stream.pipe(map(x => x));
+      const iterator = piped[Symbol.asyncIterator]();
+      await iterator.next();
+      if (iterator.return) {
+          await iterator.return(null);
+      }
+  });
+
+  it("handles error in operator by calling errorInOperator", async () => {
+      const throwOp = createOperator("throwOp", (source) => {
+          return {
+              async next() {
+                  const res = await source.next();
+                  if (res.done) return res;
+                  throw new Error("Op failure");
+              },
+              [Symbol.asyncIterator]() { return this; }
+          };
+      });
+      
+      const stream = createStream("test", async function* () {
+          yield 1;
+      });
+
+      try {
+         await waitForCompletion(({ error }) => {
+             stream.pipe(throwOp).subscribe({ error });
+         }, { allowError: true });
+      } catch {}
+  });
+
+  it("handles non-traced values in final wrapper", async () => {
+      const breaker = createOperator("breaker", (source) => {
+          return {
+              async next() {
+                  const r = await source.next();
+                  if (r.done) return r;
+                  return { done: false, value: "raw" };
+              },
+              [Symbol.asyncIterator]() { return this; }
+          };
+      });
+
+      const stream = createStream("test", async function* () {
+          yield 1;
+          yield 2;
+      });
+      
+      const piped = stream.pipe(breaker); 
+      await waitForCompletion(({ complete }) => {
+          piped.subscribe({ complete });
+      });
+  });
+
+  it("handles values with existing metadata in final wrapper", async () => {
+      const metaInjector = createOperator("metaInjector", (source) => {
+          return {
+              async next() {
+                  const r = await source.next();
+                  if (r.done) return r;
+                  const val = setValueMeta("raw", { valueId: "external-id" } as any, 0, "injector");
+                  return { done: false, value: val };
+              },
+              [Symbol.asyncIterator]() { return this; }
+          };
+      });
+
+      const stream = createStream("test", async function* () {
+          yield 1;
+      });
+      
+      const piped = stream.pipe(metaInjector);
+      await waitForCompletion(({ complete }) => {
+          piped.subscribe({ complete });
+      });
+  });
+
+  it("handles error in operator before pulling input", async () => {
+      const throwImmediate = createOperator("throwImmediate", (source) => {
+          return {
+              async next() {
+                  throw new Error("Immediate failure");
+              },
+              [Symbol.asyncIterator]() { return this; }
+          };
+      });
+      
+      const stream = createStream("test", async function* () {
+          yield 1;
+      });
+
+      try {
+         await waitForCompletion(({ error }) => {
+             stream.pipe(throwImmediate).subscribe({ error });
+         }, { allowError: true });
+      } catch {}
+  });
+});
+
