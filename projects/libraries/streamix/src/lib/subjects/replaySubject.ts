@@ -53,6 +53,7 @@ export function createReplaySubject<T = any>(
     ready,
     queue,
     setLatestValue,
+    ownerId: id,
   });
 
   const deliverTerminal = (r: StrictReceiver<T>, terminal: QueueItem<T>) => {

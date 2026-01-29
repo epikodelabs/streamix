@@ -1,5 +1,4 @@
 import { firstValueFrom } from "../converters";
-import { enqueueMicrotask, runInMicrotask } from "../primitives/scheduling";
 import { createAsyncIterator } from "../subjects/helpers";
 import {
   getCurrentEmissionStamp,
@@ -15,6 +14,7 @@ import {
 } from "./hooks";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
+import { runInMicrotask, scheduler } from "./scheduler";
 import { createSubscription, type Subscription } from "./subscription";
 
 export type Stream<T = any> = AsyncIterable<T> & {
@@ -227,7 +227,8 @@ export function createStream<T>(
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
-    const wrapped = wrapReceiver(receiver);
+    // Pass the stream ID as the owner of this receiver
+    const wrapped = createReceiver(receiver, { ownerId: id });
     let subscription!: Subscription;
 
     subscription = createSubscription(async () => {
@@ -269,7 +270,11 @@ export function createStream<T>(
     name,
     id,
     pipe,
-    subscribe: (cb) => registerReceiver(createReceiver(cb)),
+    subscribe: (cb) => {
+      // Pass the stream ID to implicit receiver creation
+      const r = createReceiver(cb, { ownerId: id });
+      return registerReceiver(r);
+    },
     query: () => firstValueFrom(self),
     [Symbol.asyncIterator]: () => {
       const factory = createAsyncIterator({ register: registerReceiver, lazy: true });
@@ -310,10 +315,14 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
       });
     });
 
-    enqueueMicrotask(() => {
-      drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(
-        () => {}
-      );
+    scheduler.schedule({
+      execute: () => {
+        drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(
+          () => {}
+        );
+      },
+      ownerId: source.id,
+      kind: 'drainIterator'
     });
 
     return subscription;

@@ -1,7 +1,7 @@
-import { enqueueMicrotask } from "../primitives/scheduling";
 import { getCurrentEmissionStamp } from "./emission";
 import { unwrapPrimitive } from "./hooks";
 import { isPromiseLike, type MaybePromise } from "./operator";
+import { scheduler } from "./scheduler";
 
 export type Receiver<T = any> = {
   next?: (value: T) => MaybePromise;
@@ -12,12 +12,14 @@ export type Receiver<T = any> = {
 export type StrictReceiver<T = any> = Required<Receiver<T>> & { readonly completed: boolean; };
 
 export function createReceiver<T = any>(
-  callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
+  callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>,
+  options?: { ownerId?: string }
 ): StrictReceiver<T> {
   let _completed = false;
   let _completedScheduled = false;
   let _active = 0;
   const _idleResolvers: Array<() => void> = [];
+  const { ownerId } = options || {};
 
   // Normalize input to a receiver object
   const target = (typeof callbackOrReceiver === 'function'
@@ -62,7 +64,11 @@ export function createReceiver<T = any>(
     }
 
     return new Promise<void>((resolve, reject) => {
-      enqueueMicrotask(() => void action().then(resolve, reject));
+      scheduler.schedule({
+        execute: () => void action().then(resolve, reject),
+        ownerId,
+        kind: 'next'
+      });
     });
   };
 
@@ -106,7 +112,11 @@ export function createReceiver<T = any>(
       }
 
       return new Promise<void>((resolve, reject) => {
-        enqueueMicrotask(() => void action().then(resolve, reject));
+        scheduler.schedule({
+           execute: () => void action().then(resolve, reject),
+           ownerId,
+           kind: 'error'
+        });
       });
     },
 
@@ -141,7 +151,11 @@ export function createReceiver<T = any>(
       }
 
       return new Promise<void>((resolve, reject) => {
-        enqueueMicrotask(() => void action().then(resolve, reject));
+        scheduler.schedule({
+           execute: () => void action().then(resolve, reject),
+           ownerId,
+           kind: 'complete'
+        });
       });
     },
 

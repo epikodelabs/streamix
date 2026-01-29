@@ -20,7 +20,7 @@ export type Subject<T = any> = Stream<T> & {
   get value(): T | undefined;
 };
 
-export function createSubject<T = any>(): Subject<T> {
+export function createSubject<T = any>(options?: { scheduleCommit?: (commitFn: () => void) => void }): Subject<T> {
   const id = generateStreamId();
   let latestValue: T | undefined;
   let isCompleted = false;
@@ -32,7 +32,14 @@ export function createSubject<T = any>(): Subject<T> {
 
   const setLatestValue = (v: T) => (latestValue = v);
 
-  const tryCommit = createTryCommit<T>({ receivers, ready, queue, setLatestValue });
+  const tryCommit = createTryCommit<T>({ 
+    receivers, 
+    ready, 
+    queue, 
+    setLatestValue, 
+    ownerId: id,
+    scheduleCommit: options?.scheduleCommit
+  });
 
   const register = createRegister<T>({
     receivers,
