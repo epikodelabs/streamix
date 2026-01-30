@@ -25,7 +25,7 @@ describe('every', () => {
     subject.next(2);
     subject.next(3); // All values > 0
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([true]);
   });
@@ -44,7 +44,7 @@ describe('every', () => {
     subject.next(1);
     subject.next(-1); // Does not satisfy predicate (value > 0)
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([false]);
   });
@@ -61,7 +61,7 @@ describe('every', () => {
     })();
 
     subject.complete(); // Empty stream, so it should emit true
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([true]);
   });
@@ -82,7 +82,7 @@ describe('every', () => {
     })();
 
     subject.error(new Error('Test Error'));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(error).toEqual(new Error('Test Error')); // Propagate error
   });
@@ -102,7 +102,7 @@ describe('every', () => {
     subject.next(1);
     subject.next(2);
     subject.complete(); // All values > 0, should emit true and complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(completed).toBe(true);
   });
@@ -121,7 +121,7 @@ describe('every', () => {
 
     subject.next(1);
     subject.next(-1); // Does not satisfy predicate, should emit false and complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(completed).toBe(true);
   });

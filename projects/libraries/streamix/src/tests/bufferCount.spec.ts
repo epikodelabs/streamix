@@ -34,7 +34,7 @@ describe("bufferCount", () => {
     subject.next(5);
     subject.next(6); // Emits [4, 5, 6]
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[1, 2, 3], [4, 5, 6]]);
   });
@@ -52,7 +52,7 @@ describe("bufferCount", () => {
     subject.next(1);
     subject.next(2);
     subject.complete(); // Emits [1, 2]
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[1, 2]]);
   });
@@ -72,7 +72,7 @@ describe("bufferCount", () => {
     })();
 
     subject.error(new Error("Test error"));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(error.message).toBe("Test error");
   });
@@ -88,7 +88,7 @@ describe("bufferCount", () => {
     })();
 
     subject.complete(); // Should not emit anything
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([]);
   });
@@ -174,7 +174,7 @@ describe("bufferCount", () => {
     subject.next(1);
     subject.next(2);
     subject.error(new Error("Error during buffering"));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([]);
     expect(error.message).toBe("Error during buffering");
@@ -289,6 +289,7 @@ describe("bufferCount", () => {
     subject.next(1);
     subject.next(2);
     subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const result1 = await it.next();
     expect(result1.done).toBe(false);
@@ -322,6 +323,7 @@ describe("bufferCount", () => {
 
     subject.next(10);
     subject.next(20);
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const result = await it.next();
     expect(result.done).toBe(false);
@@ -342,6 +344,22 @@ describe("bufferCount", () => {
         valueId: "id2",
         kind: "collapse",
         inputValueIds: ["id1", "id2"],
+      })
+    );
+
+    subject.next(30);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    
+    const result2 = await it.next();
+    expect(result2.done).toBe(false);
+    expect(result2.value).toEqual([30]);
+    expect(getValueMeta(result2.value)).toEqual(
+      jasmine.objectContaining({
+        valueId: "id3",
+        kind: "collapse",
+        inputValueIds: ["id3"],
       })
     );
   });
@@ -369,7 +387,8 @@ describe("bufferCount", () => {
     subject.next(2);
     subject.next(3);
     subject.complete();
-
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    
     const result1 = await it.next();
     expect(result1.done).toBe(false);
     expect(result1.value).toEqual([1, 2]);

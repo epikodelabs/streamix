@@ -5,10 +5,11 @@ import {
   getIteratorMeta,
   isPromiseLike,
   nextEmissionStamp,
-  withEmissionStamp,
+  scheduler,
   setIteratorEmissionStamp,
   setIteratorMeta,
-  setValueMeta
+  setValueMeta,
+  withEmissionStamp
 } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
@@ -35,9 +36,20 @@ export function switchMap<T = any, R = any>(
      * Only completes if the source is done AND no inner stream is active.
      */
     const checkComplete = () => {
-      if (inputCompleted && !currentInner) {
+      // Only complete when source is done AND no inner stream is active
+      if (!inputCompleted || currentInner || stopped) return;
+
+      // Enqueue completion on the same global scheduler as Subjects.
+      // This guarantees FIFO ordering vs. already-enqueued `output.next(...)`
+      // commits and prevents "complete" overtaking the last value.
+      const token = currentInnerStreamId;
+      scheduler.enqueue(() => {
+        if (stopped) return;
+        if (!inputCompleted || currentInner) return;
+        if (token !== currentInnerStreamId) return;
+        if (output.completed()) return;
         output.complete();
-      }
+      });
     };
 
     const subscribeToInner = (
@@ -57,49 +69,91 @@ export function switchMap<T = any, R = any>(
       const it = innerStream[Symbol.asyncIterator]();
       currentInner = { id: streamId, it };
 
+      const innerTryNext = (it as any).__tryNext as undefined | (() => IteratorResult<R> | null);
+
+      const forwardValue = (value: R) => {
+        const stamp = getIteratorEmissionStamp(it) ?? nextEmissionStamp();
+        if (stopped || streamId !== currentInnerStreamId) return;
+
+        const operatorIndex = (this as any).index ?? 0;
+        const operatorName = "switchMap";
+        let outputValue: any = value;
+
+        if (parentMeta) {
+          setIteratorMeta(
+            outputIterator,
+            { valueId: parentMeta.valueId, kind: "expand" },
+            operatorIndex,
+            operatorName
+          );
+          outputValue = setValueMeta(
+            outputValue,
+            { valueId: parentMeta.valueId, kind: "expand" },
+            operatorIndex,
+            operatorName
+          );
+        }
+
+        withEmissionStamp(stamp, () => {
+          setIteratorEmissionStamp(outputIterator as any, stamp);
+          output.next(outputValue);
+        });
+      };
+
+      const finishInner = () => {
+        if (currentInner?.id === streamId) {
+          currentInner = null;
+        }
+        if (streamId === currentInnerStreamId) {
+          checkComplete();
+        }
+      };
+
+      if (typeof innerTryNext === "function") {
+        const drainInner = () => {
+          while (!stopped && streamId === currentInnerStreamId) {
+            let r: IteratorResult<R> | null;
+            try {
+              r = innerTryNext.call(it);
+            } catch (err) {
+              if (!stopped && streamId === currentInnerStreamId) {
+                output.error(err as any);
+              }
+              finishInner();
+              return;
+            }
+
+            if (!r) return;
+            if (r.done) {
+              finishInner();
+              return;
+            }
+
+            forwardValue(r.value);
+          }
+        };
+
+        (it as any).__onPush = drainInner;
+        drainInner();
+        return;
+      }
+
       void (async () => {
         try {
           while (!stopped && streamId === currentInnerStreamId) {
             const r = await it.next();
-            const stamp = getIteratorEmissionStamp(it) ?? nextEmissionStamp();
 
             if (r.done) break;
             if (stopped || streamId !== currentInnerStreamId) break;
 
-            const operatorIndex = (this as any).index ?? 0;
-            const operatorName = "switchMap";
-            let outputValue: any = r.value;
-
-            if (parentMeta) {
-              setIteratorMeta(
-                outputIterator,
-                { valueId: parentMeta.valueId, kind: "expand" },
-                operatorIndex,
-                operatorName
-              );
-              outputValue = setValueMeta(
-                outputValue,
-                { valueId: parentMeta.valueId, kind: "expand" },
-                operatorIndex,
-                operatorName
-              );
-            }
-
-            // Ensure downstream subject emissions carry the inner iterator stamp.
-            withEmissionStamp(stamp, () => {
-              setIteratorEmissionStamp(outputIterator as any, stamp);
-              output.next(outputValue);
-            });
+            forwardValue(r.value);
           }
         } catch (err) {
           if (!stopped && streamId === currentInnerStreamId) {
             output.error(err);
           }
         } finally {
-          if (currentInner?.id === streamId) {
-            currentInner = null;
-          }
-          checkComplete();
+          finishInner();
         }
       })();
     };

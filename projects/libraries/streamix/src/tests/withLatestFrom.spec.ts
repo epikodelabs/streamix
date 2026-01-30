@@ -364,10 +364,8 @@ describe('withLatestFrom', () => {
     const it = combined[Symbol.asyncIterator]();
 
     aux$.next('A');
-    await scheduler.flush();
-
     main$.next(5);
-    await scheduler.flush();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const r1 = await it.next();
     expect(r1.done).toBe(false);

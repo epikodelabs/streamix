@@ -36,6 +36,11 @@ export const bufferWhile = <T = any>(
     let index = 0;
 
     const buffer: BufferRecord<T>[] = [];
+    let pending: BufferRecord<T> | null = null;
+
+    // If the predicate doesn't declare the `buffer` parameter, treat it as a
+    // boundary predicate: the first value that fails starts the *next* buffer.
+    const boundaryIsNextValue = predicate.length < 3;
 
     const iterator: AsyncIterator<any> = {
       next: async () => {
@@ -79,6 +84,13 @@ export const bufferWhile = <T = any>(
         }
 
         while (true) {
+          // If we previously flushed and staged a value for the next buffer,
+          // install it now before pulling more from source.
+          if (pending) {
+            buffer.push(pending);
+            pending = null;
+          }
+
           const result = await source.next();
           if (result.done) {
             completed = true;
@@ -90,26 +102,29 @@ export const bufferWhile = <T = any>(
 
           const record = { result, meta: getIteratorMeta(source) };
 
-          const values = buffer.map((item) => item.result.value!);
-          const predicateResult = predicate(result.value, index++, values);
-          const shouldKeep = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
-
-          // Always start a buffer with the first value.
-          if (buffer.length === 0) {
-            buffer.push(record);
-            continue;
-          }
-
-          if (shouldKeep) {
-            buffer.push(record);
-            continue;
-          }
-
-          // Boundary: flush the current buffer and start a new one with this value.
-          const flushed = flushBuffer();
+          // Push first, then evaluate predicate against the updated buffer.
           buffer.push(record);
+          const valuesAfterPush = buffer.map((item) => item.result.value!);
+          const predicateResult = predicate(result.value, index++, valuesAfterPush);
+          const shouldKeep = isPromiseLike(predicateResult)
+            ? await predicateResult
+            : predicateResult;
 
-          return flushed;
+          if (shouldKeep) continue;
+
+          // Predicate is false: flush.
+          if (boundaryIsNextValue) {
+            // Current value belongs to the next buffer.
+            pending = buffer.pop() ?? null;
+            // If we'd flush an empty buffer, just keep buffering.
+            if (buffer.length === 0 && pending) {
+              buffer.push(pending);
+              pending = null;
+              continue;
+            }
+          }
+
+          return flushBuffer();
         }
       },
     };

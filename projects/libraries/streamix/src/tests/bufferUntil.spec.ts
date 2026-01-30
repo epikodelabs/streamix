@@ -2,110 +2,84 @@ import {
   bufferUntil,
   createOperator,
   createSubject,
+  getIteratorEmissionStamp,
   getIteratorMeta,
   getValueMeta,
-  setIteratorMeta,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  setIteratorMeta
 } from "@epikodelabs/streamix";
-
-const waitTick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("bufferUntil", () => {
   it("flushes buffered values whenever the notifier emits", async () => {
     const source = createSubject<number>();
     const notifier = createSubject<void>();
-    const results: number[][] = [];
     const buffered = source.pipe(bufferUntil(notifier));
-
-    (async () => {
-      for await (const value of buffered) {
-        results.push(value);
-      }
-    })();
+    const it = buffered[Symbol.asyncIterator]();
+    await new Promise(resolve => setTimeout(resolve, 0)); // Allow async loops to start pulling
 
     source.next(1);
     source.next(2);
     notifier.next();
-    await waitTick();
+    expect((await it.next()).value).toEqual([1, 2]);
 
     source.next(3);
     notifier.next();
-    await waitTick();
+    expect((await it.next()).value).toEqual([3]);
 
     source.next(4);
     source.complete();
-    await waitTick();
-
-    expect(results.length).toBe(3);
-    expect(results[0]).toEqual([1, 2]);
-    expect(results[1]).toEqual([3]);
-    expect(results[2]).toEqual([4]);
+    expect((await it.next()).value).toEqual([4]);
+    expect((await it.next()).done).toBe(true);
   });
 
   it("does emit the final buffer", async () => {
     const source = createSubject<number>();
     const notifier = createSubject<void>();
-    const results: number[][] = [];
     const buffered = source.pipe(bufferUntil(notifier));
-
-    (async () => {
-      for await (const value of buffered) {
-        results.push(value);
-      }
-    })();
+    const it = buffered[Symbol.asyncIterator]();
+    await new Promise(resolve => setTimeout(resolve, 0)); // Allow async loops to start pulling
 
     source.next(1);
     source.complete();
-    await waitTick();
 
-    expect(results).toEqual([[1]]);
+    expect((await it.next()).value).toEqual([1]);
+    expect((await it.next()).done).toBe(true);
   });
 
   it("does not emit empty buffers when notifier emits with an empty buffer", async () => {
     const source = createSubject<number>();
     const notifier = createSubject<void>();
-    const results: number[][] = [];
     const buffered = source.pipe(bufferUntil(notifier));
-
-    (async () => {
-      for await (const value of buffered) {
-        results.push(value);
-      }
-    })();
+    const it = buffered[Symbol.asyncIterator]();
+    await new Promise(resolve => setTimeout(resolve, 0)); // Allow async loops to start pulling
 
     notifier.next();
-    await waitTick();
 
     source.next(1);
     notifier.next();
-    await waitTick();
+
+    expect((await it.next()).value).toEqual([1]);
 
     source.complete();
-    await waitTick();
-
-    expect(results).toEqual([[1]]);
+    expect((await it.next()).done).toBe(true);
   });
 
   it("propagates notifier errors", async () => {
     const source = createSubject<number>();
     const notifier = createSubject<void>();
     const buffered = source.pipe(bufferUntil(notifier));
-
-    let error: any;
-    (async () => {
-      try {
-        for await (const _ of buffered) {
-          void _;
-        }
-      } catch (e) {
-        error = e;
-      }
-    })();
+    const it = buffered[Symbol.asyncIterator]();
 
     notifier.error(new Error("NOTIFIER"));
-    await waitTick();
 
-    expect(error).toEqual(jasmine.any(Error));
-    expect((error as Error).message).toBe("NOTIFIER");
+    try {
+      await it.next();
+      fail("Should have thrown");
+    } catch (e) {
+      expect(e).toEqual(jasmine.any(Error));
+      expect((e as Error).message).toBe("NOTIFIER");
+    }
   });
 
   it("propagates source errors and cancels the notifier iterator", async () => {
@@ -127,23 +101,18 @@ describe("bufferUntil", () => {
     };
 
     const buffered = source.pipe(bufferUntil(notifier));
-
-    let error: any;
-    (async () => {
-      try {
-        for await (const _ of buffered) {
-          void _;
-        }
-      } catch (e) {
-        error = e;
-      }
-    })();
+    const it = buffered[Symbol.asyncIterator]();
 
     source.error(new Error("SOURCE"));
-    await waitTick();
 
-    expect(error).toEqual(jasmine.any(Error));
-    expect((error as Error).message).toBe("SOURCE");
+    try {
+      await it.next();
+      fail("Should have thrown");
+    } catch (e) {
+      expect(e).toEqual(jasmine.any(Error));
+      expect((e as Error).message).toBe("SOURCE");
+    }
+    // With strict loop, cancellation might happen in microtask cleanup, so yield once
     expect(returnCalls).toBeGreaterThanOrEqual(1);
   });
 
@@ -156,6 +125,13 @@ describe("bufferUntil", () => {
           if (result.done) return result;
 
           n += 1;
+          // IMPORTANT: propagate the source emission stamp through this wrapper
+          // so downstream operators (like bufferUntil) can order notifier/source
+          // events deterministically.
+          setIteratorEmissionStamp(
+            iterator as any,
+            getIteratorEmissionStamp(sourceIt as any) ?? nextEmissionStamp()
+          );
           setIteratorMeta(iterator as any, { valueId: `id${n}` }, 0, "tagIds");
           return result;
         },
@@ -168,15 +144,10 @@ describe("bufferUntil", () => {
     const buffered = source.pipe(tagIds, bufferUntil(notifier));
 
     const it = buffered[Symbol.asyncIterator]();
-
+    
     source.next(1);
     source.next(2);
-    // `bufferUntil` consumes the source on an async loop. If we trigger the notifier
-    // immediately, the flush can happen before both source values have been pulled
-    // into the internal buffer (depending on scheduling/backpressure).
-    await waitTick();
     notifier.next();
-    await waitTick();
 
     const r1 = await it.next();
     expect(r1.done).toBe(false);
@@ -233,10 +204,10 @@ describe("bufferUntil", () => {
 
     const buffered = source.pipe(bufferUntil(notifier));
     const it = buffered[Symbol.asyncIterator]();
+    await new Promise(resolve => setTimeout(resolve, 0)); // Allow async loops to start pulling
 
     source.next(1);
     notifier.next();
-    await waitTick();
 
     const r1 = await it.next();
     expect(r1.done).toBe(false);

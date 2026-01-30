@@ -5,6 +5,7 @@ import {
   getCurrentEmissionStamp,
   nextEmissionStamp,
   pipeSourceThrough,
+  scheduler,
   withEmissionStamp,
   type Operator,
   type Receiver,
@@ -82,7 +83,7 @@ export function createReplaySubject<T = any>(
     setLatestValue(value);
     pushReplay(value, stamp);
     queue.push({ kind: "next", value: value as any, stamp } as QueueItem<T>);
-    tryCommit();
+    scheduler.enqueue(tryCommit);
   };
 
   const complete = () => {
@@ -92,17 +93,18 @@ export function createReplaySubject<T = any>(
     const item = { kind: "complete", stamp } as QueueItem<T>;
     terminalRef.current = item;
     queue.push(item);
-    tryCommit();
+    scheduler.enqueue(tryCommit);
   };
 
   const error = (err: any) => {
     if (isCompleted) return;
     isCompleted = true;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    const item = { kind: "error", error: err, stamp } as QueueItem<T>;
+    const wrappedError = err instanceof Error ? err : new Error(String(err));
+    const item = { kind: "error", error: wrappedError, stamp } as QueueItem<T>;
     terminalRef.current = item;
     queue.push(item);
-    tryCommit();
+    scheduler.enqueue(tryCommit);
   };
 
   const deliverReplayAsync = async (

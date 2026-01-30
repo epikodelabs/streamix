@@ -5,6 +5,7 @@ import {
   getCurrentEmissionStamp,
   nextEmissionStamp,
   pipeSourceThrough,
+  scheduler,
   type Operator,
   type Stream,
   type StrictReceiver
@@ -54,7 +55,7 @@ export function createSubject<T = any>(options?: { scheduleCommit?: (commitFn: (
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     setLatestValue(value);
     queue.push({ kind: 'next', value: value as any, stamp } as QueueItem<T>);
-    tryCommit();
+    scheduler.enqueue(tryCommit);
   };
 
   const complete = () => {
@@ -63,16 +64,17 @@ export function createSubject<T = any>(options?: { scheduleCommit?: (commitFn: (
     isCompleted = true;
     terminalRef.current = { kind: 'complete', stamp } as QueueItem<T>;
     queue.push({ kind: 'complete', stamp } as QueueItem<T>);
-    tryCommit();
+    scheduler.enqueue(tryCommit);
   };
 
   const error = (err: any) => {
     if (isCompleted) return;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     isCompleted = true;
-    terminalRef.current = { kind: 'error', error: err, stamp } as QueueItem<T>;
-    queue.push({ kind: 'error', error: err, stamp } as QueueItem<T>);
-    tryCommit();
+    const wrappedError = err instanceof Error ? err : new Error(String(err));
+    terminalRef.current = { kind: 'error', error: wrappedError, stamp } as QueueItem<T>;
+    queue.push({ kind: 'error', error: wrappedError, stamp } as QueueItem<T>);
+    scheduler.enqueue(tryCommit);
   };
 
   return {

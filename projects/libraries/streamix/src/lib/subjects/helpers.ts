@@ -35,8 +35,17 @@ export function createTryCommit<T>(opts: {
   ownerId?: string;
 }) {
   const { receivers, ready, queue, setLatestValue, scheduleCommit } = opts;
+
   let isCommitting = false;
   let pendingCommit = false;
+
+  const schedule = (commitFn: () => void) => {
+    if (typeof scheduleCommit === "function") {
+      scheduleCommit(commitFn);
+    } else {
+      scheduler.enqueue(commitFn);
+    }
+  };
 
   const tryCommit = () => {
     if (isCommitting) {
@@ -51,18 +60,15 @@ export function createTryCommit<T>(opts: {
           const ctx = getCurrentEmissionStamp();
           if (ctx !== null && ctx !== undefined) break;
         }
-        
+
         const item = queue[0];
         const eligible = Array.from(receivers).filter((r) => {
           const s = (r as any).subscribedAt;
-          const subscribedAt =
-            typeof s === "number" ? s : Number.NEGATIVE_INFINITY;
+          const subscribedAt = typeof s === "number" ? s : Number.NEGATIVE_INFINITY;
           return subscribedAt <= item.stamp;
         });
 
         if (item.kind === "next") {
-          // Backpressure: if there are eligible receivers and any is not ready,
-          // pause committing to preserve ordering and avoid drops.
           if (eligible.length > 0 && eligible.some((r) => !ready.has(r))) {
             break;
           }
@@ -75,59 +81,45 @@ export function createTryCommit<T>(opts: {
             for (const r of eligible) {
               const result = r.next(item.value);
               if (isPromiseLike(result)) {
-                pendingAsync++;
+                pendingAsync += 1;
                 ready.delete(r);
                 result.finally(() => {
                   if (!r.completed && receivers.has(r)) {
                     ready.add(r);
-                        if (typeof scheduleCommit === "function") {
-                          scheduleCommit(tryCommit);
-                        } else {
-                          // Default to global scheduler if no custom one provided
-                          scheduler.schedule({
-                            execute: tryCommit, 
-                            ownerId: opts.ownerId, 
-                            kind: 'subject-commit'
-                          });
-                        }
-                      }
-                    });
+                    schedule(tryCommit);
                   }
-                }
-              });
-
-              if (pendingAsync > 0) break;
-            } else {
-              queue.shift();
-              withEmissionStamp(item.stamp, () => {
-                for (const r of eligible) {
-                  if (item.kind === "complete") r.complete();
-                  else {
-                    r.error(item.error);
-                  }
-                }
-              });
-              receivers.clear();
-              ready.clear();
-              return;
+                });
+              }
             }
-          }
-        } finally {
-          isCommitting = false;
-          if (pendingCommit) {
-            pendingCommit = false;
-            // Schedule via global scheduler instead of direct recursion
-            scheduler.schedule({
-               execute: tryCommit, 
-               ownerId: opts.ownerId, 
-               kind: 'subject-commit-pending'
-            });
-          }
+          });
+
+          if (pendingAsync > 0) break;
+          continue;
         }
-      };
-    
-      return tryCommit;
+
+        // complete/error
+        queue.shift();
+        withEmissionStamp(item.stamp, () => {
+          for (const r of eligible) {
+            if (item.kind === "complete") r.complete();
+            else r.error(item.error);
+          }
+        });
+        receivers.clear();
+        ready.clear();
+        return;
+      }
+    } finally {
+      isCommitting = false;
+      if (pendingCommit) {
+        pendingCommit = false;
+        schedule(tryCommit);
+      }
     }
+  };
+
+  return tryCommit;
+}
 export function createRegister<T>(opts: {
   receivers: Set<StrictReceiver<T>>;
   ready: Set<StrictReceiver<T>>;
@@ -155,10 +147,14 @@ export function createRegister<T>(opts: {
 
     // Record registration stamp so this receiver does not receive
     // previously queued emissions.
-    // IMPORTANT: always use a fresh stamp (even inside an emission context)
-    // so a subscription created while an emission is in-flight does not
-    // receive that same emission.
-    (r as any).subscribedAt = nextEmissionStamp();
+    // IMPORTANT: if subscribing during an emission, we must not receive the
+    // in-flight emission stamp, but we *should* be eligible for subsequent
+    // emissions that occur after it (even if they were queued before the
+    // subscription registration runs due to async scheduling).
+    const ctx = getCurrentEmissionStamp();
+    (r as any).subscribedAt = (ctx !== null && ctx !== undefined)
+      ? ctx + 1
+      : nextEmissionStamp();
 
     receivers.add(r);
     if (!paused) ready.add(r);
@@ -212,7 +208,6 @@ export function createAsyncIterator<T>(opts: {
     let pullResolve: ((v: IteratorResult<T>) => void) | null = null;
     let pullReject: ((e: any) => void) | null = null;
     const queue: Array<{ result: IteratorResult<T>; stamp: number }> = [];
-    const backpressureQueue: Array<() => void> = [];
     let pendingError: { err: any; stamp: number } | null = null;
     let completed = false;
     let sub: Subscription | null = null;
@@ -246,8 +241,6 @@ export function createAsyncIterator<T>(opts: {
         if (queue.length > 0) {
           const { result, stamp } = queue.shift()!;
           setIteratorEmissionStamp(iterator, stamp);
-          // Resolves the backpressure promise returned by receiver.next().
-          backpressureQueue.shift()?.();
           if (result.done) {
             const unsubscribePromise = sub?.unsubscribe();
             sub = null;
@@ -285,10 +278,6 @@ export function createAsyncIterator<T>(opts: {
           r(DONE);
         }
 
-        // Release any pending producer backpressure.
-        for (const resolve of backpressureQueue) resolve();
-        backpressureQueue.length = 0;
-
         try {
           await unsubscribePromise;
         } catch {
@@ -306,9 +295,6 @@ export function createAsyncIterator<T>(opts: {
           pullResolve = pullReject = null;
           r(err);
         }
-
-        for (const resolve of backpressureQueue) resolve();
-        backpressureQueue.length = 0;
 
         try {
           await unsubscribePromise;
@@ -334,7 +320,6 @@ export function createAsyncIterator<T>(opts: {
       if (queue.length > 0) {
         const { result, stamp } = queue.shift()!;
         setIteratorEmissionStamp(iterator, stamp);
-        backpressureQueue.shift()?.();
         if (result.done) {
           const unsubscribePromise = sub?.unsubscribe();
           sub = null;
@@ -376,11 +361,7 @@ export function createAsyncIterator<T>(opts: {
         // Give consumers a chance to drain synchronously from the buffer.
         if (typeof iterator.__onPush === "function") {
           iterator.__onPush();
-          return;
         }
-
-        // Producer backpressure: block the producer until the consumer pulls.
-        return new Promise<void>((resolve) => backpressureQueue.push(resolve));
       },
 
       complete() {

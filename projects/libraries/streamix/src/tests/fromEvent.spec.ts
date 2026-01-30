@@ -5,19 +5,23 @@ const flushMicrotasks = () => new Promise<void>((resolve) => setTimeout(resolve,
 
 idescribe('fromEvent', () => {
 
-  it('should call the overridden subscribe method', (done) => {
+  it('should call the overridden subscribe method', async () => {
     const element = document.createElement('button');
     const stream = fromEvent(element, 'click');
 
+    const events: Event[] = [];
     const subscription = stream.subscribe((ev) => {
-      expect(ev).toBeInstanceOf(Event);
-      done();
+      events.push(ev);
     });
 
     // Trigger the listener
     element.click();
+    await flushMicrotasks();
+
+    expect(events.length).toBe(1);
+    expect(events[0]).toBeInstanceOf(Event);
     subscription.unsubscribe(); // trigger cleanup
-});
+  });
 
   it('should emit multiple events correctly', async () => {
     const element = document.createElement('button');
@@ -59,7 +63,7 @@ idescribe('fromEvent', () => {
     }, 10);
   });
 
-  it('should not emit events after unsubscribe', (done) => {
+  it('should not emit events after unsubscribe', async () => {
     const element = document.createElement('button');
     const stream = fromEvent(element, 'click');
 
@@ -67,13 +71,13 @@ idescribe('fromEvent', () => {
     const subscription = stream.subscribe(() => count++);
 
     element.click();          // first event should increment count
+    await flushMicrotasks();
+    
     subscription.unsubscribe();
     element.click();          // second event should be ignored
+    await flushMicrotasks();
 
-    setTimeout(() => {
-      expect(count).toBe(1);
-      done();
-    }, 10);
+    expect(count).toBe(1);
   });
 
   it('supports promise-based targets and event names', (done) => {

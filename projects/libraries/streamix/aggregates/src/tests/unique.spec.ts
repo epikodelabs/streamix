@@ -26,7 +26,7 @@ describe('unique', () => {
     subject.next(3);
     subject.next(1); // Duplicate, should not emit
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([1, 2, 3]);
   });
@@ -46,7 +46,7 @@ describe('unique', () => {
     subject.next({ key: 1, value: 'c' }); // Same key, should not emit
     subject.next({ key: 3, value: 'd' });
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([
       { key: 1, value: 'a' },
@@ -70,7 +70,7 @@ describe('unique', () => {
     subject.next({ value: 'b' });
     subject.next({ value: 'c' });
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([
       { value: 'a' },
@@ -91,7 +91,7 @@ describe('unique', () => {
     })();
 
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([]); // No values emitted
   });
@@ -111,7 +111,7 @@ describe('unique', () => {
     })();
 
     subject.error(new Error('Test Error'));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(error).toEqual(new Error('Test Error'));
   });
@@ -131,7 +131,7 @@ describe('unique', () => {
     subject.next({ id: 1, name: 'John' }); // Duplicate, should not emit
     subject.next({ id: 3, name: 'Jake' });
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([
       { id: 1, name: 'John' },

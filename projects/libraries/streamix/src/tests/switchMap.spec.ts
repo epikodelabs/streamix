@@ -8,6 +8,7 @@ import {
   isWrappedPrimitive,
   nextEmissionStamp,
   of,
+  scheduler,
   setIteratorEmissionStamp,
   setIteratorMeta,
   switchMap,
@@ -456,7 +457,7 @@ describe('switchMap', () => {
     });
   });
 
-  it('should ignore completion of stale inner streams', (done) => {
+  it('should ignore completion of stale inner streams', async () => {
     const source = createSubject<number>();
     const inner1 = createSubject<string>();
     const inner2 = createSubject<string>();
@@ -467,14 +468,15 @@ describe('switchMap', () => {
 
     const results: string[] = [];
     let completed = false;
-    
-    switched.subscribe({
-      next: val => results.push(val),
-      complete: () => {
-        completed = true;
-        expect(results).toEqual(['second']);
-        done();
-      }
+
+    const completion = new Promise<void>((resolve) => {
+      switched.subscribe({
+        next: val => results.push(val),
+        complete: () => {
+          completed = true;
+          resolve();
+        }
+      });
     });
 
     source.next(1);
@@ -486,15 +488,23 @@ describe('switchMap', () => {
     // Switch to inner2 so inner1 becomes stale
     source.next(2);
 
+    // switchMap processes source emissions via scheduled subject commits.
+    // Flush the scheduler so the operator has subscribed to the new inner.
+    await scheduler.flush();
+
+    // switchMap processes source emissions asynchronously (via scheduled subject commits),
+    // so give it a tick to subscribe to the new inner before emitting.
     // inner1 completion should be ignored (it's stale)
     inner1.complete();
     expect(completed).toBeFalse();
 
     // Now complete the active inner stream
     inner2.next('second');
-    
     inner2.complete();
     source.complete();
+
+    await completion;
+    expect(results).toEqual(['second']);
   });
 
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));

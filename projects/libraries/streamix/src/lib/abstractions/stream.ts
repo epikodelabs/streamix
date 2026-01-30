@@ -8,10 +8,9 @@ import {
 } from "./emission";
 import {
   applyPipeStreamHooks,
-  generateStreamId,
-  generateSubscriptionId,
   getRuntimeHooks
 } from "./hooks";
+import { generateStreamId, generateSubscriptionId } from "./identity";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
 import { runInMicrotask, scheduler } from "./scheduler";
@@ -228,7 +227,7 @@ export function createStream<T>(
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
     // Pass the stream ID as the owner of this receiver
-    const wrapped = createReceiver(receiver, { ownerId: id });
+    const wrapped = createReceiver(receiver);
     let subscription!: Subscription;
 
     subscription = createSubscription(async () => {
@@ -272,7 +271,7 @@ export function createStream<T>(
     pipe,
     subscribe: (cb) => {
       // Pass the stream ID to implicit receiver creation
-      const r = createReceiver(cb, { ownerId: id });
+      const r = createReceiver(cb);
       return registerReceiver(r);
     },
     query: () => firstValueFrom(self),
@@ -315,14 +314,10 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
       });
     });
 
-    scheduler.schedule({
-      execute: () => {
-        drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(
-          () => {}
-        );
-      },
-      ownerId: source.id,
-      kind: 'drainIterator'
+    scheduler.enqueue(() => {
+      drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(
+        () => {}
+      );
     });
 
     return subscription;

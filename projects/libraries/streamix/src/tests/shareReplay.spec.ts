@@ -72,6 +72,7 @@ describe('shareReplay', () => {
       complete: () => { completed = true; },
     });
 
+    await new Promise((resolve) => setTimeout(resolve, 0));
     await waitFor(() => errorCount === 2);
     expect(completed).toBeFalse();
   });

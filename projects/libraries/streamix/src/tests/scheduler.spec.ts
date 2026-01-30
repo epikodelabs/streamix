@@ -1,6 +1,6 @@
 import { scheduler } from '../lib/abstractions/scheduler';
 
-describe('Global Scheduler', () => {
+describe('scheduler', () => {
   it('should execute scheduled tasks', async () => {
     let executed = false;
     const task = () => {
@@ -19,7 +19,7 @@ describe('Global Scheduler', () => {
     // Small delay to ensure loop is active
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    scheduler.schedule(task);
+    scheduler.enqueue(task);
 
     // Wait for task execution
     await new Promise(resolve => setTimeout(resolve, 10));

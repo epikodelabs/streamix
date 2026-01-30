@@ -5,7 +5,7 @@ import {
   getValueMeta,
   setIteratorMeta,
   type Stream,
-  toArray,
+  toArray
 } from '@epikodelabs/streamix';
 
 describe('toArray', () => {
@@ -31,7 +31,7 @@ describe('toArray', () => {
     subject.next(2);
     subject.next(3);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[1, 2, 3]]);
   });
@@ -47,7 +47,7 @@ describe('toArray', () => {
     })();
 
     subject.complete(); // No values emitted, just completing
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[]]); // Empty array
   });
@@ -67,7 +67,7 @@ describe('toArray', () => {
     })();
 
     subject.error(new Error('Test Error'));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(error).toEqual(new Error('Test Error'));  // Propagate error
   });
@@ -86,7 +86,7 @@ describe('toArray', () => {
     subject.next(20);
     subject.next(30);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[10, 20, 30]]);
   });
@@ -103,7 +103,7 @@ describe('toArray', () => {
 
     subject.next(42); // Single value
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[42]]);  // Single value in array
   });
@@ -130,6 +130,7 @@ describe('toArray', () => {
     subject.next(1);
     subject.next(2);
     subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const r1 = await it.next();
     expect(r1.done).toBe(false);

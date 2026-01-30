@@ -23,7 +23,7 @@ describe('reduce', () => {
     subject.next(2);
     subject.next(3);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([6]);  // 1 + 2 + 3 = 6
   });
@@ -39,7 +39,7 @@ describe('reduce', () => {
     })();
 
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([0]);  // Seed value should be emitted
   });
@@ -59,7 +59,7 @@ describe('reduce', () => {
     })();
 
     subject.error(new Error('Test Error'));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(error).toEqual(new Error('Test Error'));  // Propagate error
   });
@@ -77,7 +77,7 @@ describe('reduce', () => {
     subject.next(2);
     subject.next(3);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([6]);  // 1 * 2 * 3 = 6
   });
@@ -98,7 +98,7 @@ describe('reduce', () => {
     subject.next(' ');
     subject.next('World');
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual(['Hello World']);
   });
@@ -117,7 +117,7 @@ describe('reduce', () => {
     subject.next('A');
     subject.next('B');
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual(['constant']);  // The accumulator always returns 'constant'
   });
@@ -140,7 +140,7 @@ describe('reduce', () => {
     subject.next(2);
     subject.next(3);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 25));
 
     expect(results).toEqual([5]);
   });
@@ -170,7 +170,7 @@ describe('reduce', () => {
     subject.next(1);
     subject.next(2);
     await subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(caught!.message).toEqual('Accumulator failure');
   });

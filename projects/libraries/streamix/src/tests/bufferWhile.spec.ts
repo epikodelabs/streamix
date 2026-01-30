@@ -4,7 +4,7 @@ import {
   createSubject,
   getIteratorMeta,
   getValueMeta,
-  setIteratorMeta,
+  setIteratorMeta
 } from "@epikodelabs/streamix";
 
 const waitTick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -173,9 +173,7 @@ describe("bufferWhile", () => {
 
     subject.next(1);
     subject.next(2);
-    subject.next(3);
-    subject.complete();
-    await waitTick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const r1 = await it.next();
     expect(r1.done).toBe(false);
@@ -195,6 +193,10 @@ describe("bufferWhile", () => {
         inputValueIds: ["id1", "id2"],
       })
     );
+
+    subject.next(3);
+    subject.complete();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const r2 = await it.next();
     expect(r2.done).toBe(false);

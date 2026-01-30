@@ -50,7 +50,7 @@ export const createSemaphore = (initialCount: number): Semaphore => {
       // Don't call the resolver immediately - schedule it as a microtask
       // to maintain the expected order of execution
       const nextResolver = queue.shift()!;
-      scheduler.schedule(nextResolver);
+      scheduler.enqueue(nextResolver);
     } else {
       count++;
     }

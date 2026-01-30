@@ -175,11 +175,13 @@ describe('fromPromise', () => {
     const stream = fromPromise(factory);
 
     const it1 = stream[Symbol.asyncIterator]();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(await it1.next()).toEqual({ done: false, value: 'result' });
     await it1.return?.();
     expect(callCount).toBe(1);
 
     const it2 = stream[Symbol.asyncIterator]();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(await it2.next()).toEqual({ done: false, value: 'result' });
     await it2.return?.();
     expect(callCount).toBe(2);

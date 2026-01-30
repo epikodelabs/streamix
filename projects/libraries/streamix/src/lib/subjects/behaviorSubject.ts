@@ -5,6 +5,7 @@ import {
   getCurrentEmissionStamp,
   nextEmissionStamp,
   pipeSourceThrough,
+  scheduler,
   withEmissionStamp,
   type Operator,
   type Receiver,
@@ -37,12 +38,14 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     latestValue = value;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
 
-    // Synchronous delivery
+    // Scheduled delivery
     const targets = Array.from(receivers).filter((r) => stamp > r.subscribedAt);
-    withEmissionStamp(stamp, () => {
-      for (const r of targets) {
-        r.next(value);
-      }
+    scheduler.enqueue(() => {
+      withEmissionStamp(stamp, () => {
+        for (const r of targets) {
+          r.next(value);
+        }
+      });
     });
   };
 
@@ -52,30 +55,35 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
     terminalItem = { kind: "complete", stamp };
 
-    // Synchronous delivery
+    // Scheduled delivery
     const targets = Array.from(receivers);
-    withEmissionStamp(stamp, () => {
-      for (const r of targets) {
-        r.complete();
-      }
+    scheduler.enqueue(() => {
+      withEmissionStamp(stamp, () => {
+        for (const r of targets) {
+          r.complete();
+        }
+      });
+      receivers.clear();
     });
-    receivers.clear();
   };
 
   const error = (err: any) => {
     if (isCompleted) return;
     isCompleted = true;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    terminalItem = { kind: "error", error: err, stamp };
+    const wrappedError = err instanceof Error ? err : new Error(String(err));
+    terminalItem = { kind: "error", error: wrappedError, stamp };
 
-    // Synchronous delivery
+    // Scheduled delivery
     const targets = Array.from(receivers);
-    withEmissionStamp(stamp, () => {
-      for (const r of targets) {
-        r.error(err);
-      }
+    scheduler.enqueue(() => {
+      withEmissionStamp(stamp, () => {
+        for (const r of targets) {
+          r.error(wrappedError);
+        }
+      });
+      receivers.clear();
     });
-    receivers.clear();
   };
 
   const register = (receiver: Receiver<T>): Subscription => {
