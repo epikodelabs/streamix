@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the current network state.
@@ -119,7 +119,7 @@ export function onNetwork(): Stream<NetworkState> {
    * ---------------------------------------------------------------------- */
 
   subject[Symbol.asyncIterator] = () =>
-    createAsyncGenerator(receiver => subject.subscribe(receiver));
+    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
 
   return subject;
 }

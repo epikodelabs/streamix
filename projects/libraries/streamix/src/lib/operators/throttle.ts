@@ -110,7 +110,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
           clearTimeout(timer);
           timer = null;
         }
-        output.complete();
+        if (!output.completed()) output.complete();
       }
     })();
 

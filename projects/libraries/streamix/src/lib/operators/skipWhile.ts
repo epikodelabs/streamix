@@ -10,15 +10,16 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
  * subsequent values from the source, regardless of whether they satisfy the predicate.
  *
  * @template T The type of the values in the source and output streams.
- * @param predicate The function to test each value. `true` means to continue skipping,
+ * @param predicate The function to test each value. Receives the value and its index. `true` means to continue skipping,
  * and `false` means to stop skipping and begin emitting.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const skipWhile = <T = any>(
-  predicate: (value: T) => MaybePromise<boolean>
+  predicate: (value: T, index: number) => MaybePromise<boolean>
 ) =>
   createOperator<T, T>('skipWhile', function (this: Operator, source) {
     let skipping = true;
+    let index = 0;
 
     return {
       next: async () => {
@@ -28,7 +29,7 @@ export const skipWhile = <T = any>(
           if (result.done) return DONE;
 
           if (skipping) {
-            const predicateResult = predicate(result.value);
+            const predicateResult = predicate(result.value, index++);
             const shouldSkip = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
             if (!shouldSkip) {
               skipping = false;
@@ -36,6 +37,7 @@ export const skipWhile = <T = any>(
             }
             // Still skipping, ignore this value
           } else {
+            index++;
             return NEXT(result.value);
           }
         }

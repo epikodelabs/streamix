@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the current screen orientation,
@@ -20,6 +20,7 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
 
   let subscriberCount = 0;
   let stopped = true;
+  let orientation: ScreenOrientation | null = null;
 
   const getOrientation = (): "portrait" | "landscape" => {
     if (
@@ -40,34 +41,33 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
 
   const start = () => {
     if (!stopped) return;
-      stopped = false;
-      
-      if (
-        typeof window === "undefined" ||
-        !window.screen ||
-        !window.screen.orientation
-      ) {
-        return;
-      }
 
-      window.screen.orientation.addEventListener("change", emit);
-      
-      emit();
-    };
+    stopped = false;
 
-  const stop = () => {
-    if (stopped) return;
-    stopped = true;
-
-    if (
-      typeof window === "undefined" ||
-      !window.screen ||
-      !window.screen.orientation
-    ) {
+    if (typeof window === "undefined" || !window.screen) {
       return;
     }
 
-    window.screen.orientation.removeEventListener("change", emit);
+    // If the Orientation API is unavailable, still emit a sane default once.
+    if (!window.screen.orientation) {
+      emit();
+      return;
+    }
+
+    orientation = window.screen.orientation;
+
+    orientation.addEventListener("change", emit);
+
+    emit();
+  };
+
+  const stop = () => {
+    if (stopped) return;
+
+    stopped = true;
+
+    orientation?.removeEventListener("change", emit);
+    orientation = null;
   };
 
   /* ------------------------------------------------------------------------
@@ -89,12 +89,28 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
 
     scheduleStart();
 
-    const o = sub.onUnsubscribe;
-    sub.onUnsubscribe = () => {
-      if (--subscriberCount === 0) {
-        stop();
+    const baseUnsubscribe = sub.unsubscribe.bind(sub);
+    let cleaned = false;
+
+    sub.unsubscribe = () => {
+      if (!cleaned) {
+        cleaned = true;
+
+        subscriberCount = Math.max(0, subscriberCount - 1);
+        if (subscriberCount === 0) {
+          stop();
+        }
+
+        // Some DOM specs expect the onUnsubscribe callback to run synchronously.
+        const onUnsubscribe = sub.onUnsubscribe;
+        sub.onUnsubscribe = undefined;
+        try {
+          onUnsubscribe?.();
+        } catch {
+        }
       }
-      o?.call(sub);
+
+      return baseUnsubscribe();
     };
 
     return sub;
@@ -105,7 +121,7 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
    * ---------------------------------------------------------------------- */
 
   subject[Symbol.asyncIterator] = () =>
-    createAsyncGenerator(receiver => subject.subscribe(receiver));
+    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
 
   return subject;
 }

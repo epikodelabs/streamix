@@ -1,10 +1,12 @@
 import {
-  createOperator,
-  getIteratorEmissionStamp,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  type Operator,
-  type Stream,
+    createOperator,
+    DONE,
+    getIteratorEmissionStamp,
+    NEXT,
+    nextEmissionStamp,
+    setIteratorEmissionStamp,
+    type Operator,
+    type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 
@@ -45,9 +47,9 @@ export function takeUntil<T = any>(
 
     let gateStamp: number | null = null;   // ONLY for notifier emit
     let notifierError: any = null;
+    let notifierErrorStamp: number | null = null;
 
     let pending: { value: T; stamp: number } | null = null;
-    let throwAfterPending = false;
 
     const stampOf = (it: any) => {
       const s = getIteratorEmissionStamp(it);
@@ -63,11 +65,14 @@ export function takeUntil<T = any>(
         if (!r.done) {
           // notifier EMIT → gate + cancel source
           gateStamp = stamp;
-          try { sourceIt.return?.(); } catch {}
+          try { await sourceIt.return?.(); } catch {}
         }
       } catch (err) {
         // notifier ERROR → NO source cancellation
         notifierError = err;
+        notifierErrorStamp = stampOf(notifierIt);
+      } finally {
+        try { await notifierIt.return?.(); } catch {}
       }
     })();
 
@@ -94,21 +99,17 @@ export function takeUntil<T = any>(
             return { done: false, value };
           }
 
-          // 2) throw notifier error after pending value
-          if (throwAfterPending) {
-            throwAfterPending = false;
-            throw notifierError;
-          }
-
+          // 2) notifier ERROR: flush buffered source values that happened
+          // before the notifier error stamp, then throw.
           if (notifierError) {
             const buffered = tryDrainBufferedValue();
             if (buffered && !buffered.done) {
               const stamp = stampOf(sourceIt);
-              pending = { value: buffered.value, stamp };
-              throwAfterPending = true;
-              continue;
+              if (notifierErrorStamp === null || stamp < notifierErrorStamp) {
+                setIteratorEmissionStamp(iterator as any, stamp);
+                return { done: false, value: buffered.value };
+              }
             }
-
             throw notifierError;
           }
 
@@ -128,30 +129,33 @@ export function takeUntil<T = any>(
 
           // 5) notifier errored AFTER pull → yield value, then error
           if (notifierError) {
-            pending = { value: r.value, stamp };
-            throwAfterPending = true;
-            continue;
+            if (notifierErrorStamp === null || stamp < notifierErrorStamp) {
+              pending = { value: r.value, stamp };
+              continue;
+            }
+            throw notifierError;
           }
-        
+
           // 6) normal path
           setIteratorEmissionStamp(iterator as any, stamp);
           return { done: false, value: r.value };
         }
       },
 
-      async return() {
-        try { sourceIt.return?.(); } catch {}
-        try { notifierIt.return?.(); } catch {}
+      async return(value?: any) {
+        try { await sourceIt.return?.(); } catch {}
+        try { await notifierIt.return?.(); } catch {}
         pending = null;
-        throwAfterPending = false;
-        return { done: true, value: undefined };
+        if (value !== undefined) {
+          return NEXT(value);
+        }
+        return DONE;
       },
 
       async throw(err) {
-        try { sourceIt.return?.(); } catch {}
-        try { notifierIt.return?.(); } catch {}
+        try { await sourceIt.return?.(); } catch {}
+        try { await notifierIt.return?.(); } catch {}
         pending = null;
-        throwAfterPending = false;
         throw err;
       },
     };

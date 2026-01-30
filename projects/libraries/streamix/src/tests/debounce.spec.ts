@@ -313,8 +313,9 @@ describe('debounce', () => {
         expect(values).toEqual([]); // never flushed before error
         expect(err).toEqual(jasmine.any(Error));
         expect((err as Error).message).toBe("BOOM");
+        done();
       },
-      complete: () => done(),
+      complete: () => done.fail("Should not complete after error"),
     });
   });
 });

@@ -42,7 +42,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       } catch (err) {
         output!.error(err);
       } finally {
-        output!.complete();
+        if (output && !output.completed()) output.complete();
       }
     })();
   };
@@ -52,6 +52,9 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
     if (isSync) {
       if (!output) output = createReplaySubject<T>(resolvedSize!);
       if (!isConnected) connectSource(source);
+      else if (typeof source.return === "function") {
+        Promise.resolve(source.return()).catch(() => {});
+      }
       return eachValueFrom(output);
     }
 
@@ -62,6 +65,9 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       }
       if (!output) output = createReplaySubject<T>(resolvedSize);
       if (!isConnected) connectSource(source);
+      else if (typeof source.return === "function") {
+        Promise.resolve(source.return()).catch(() => {});
+      }
       yield* eachValueFrom(output);
     })();
   });

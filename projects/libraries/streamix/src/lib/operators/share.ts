@@ -30,7 +30,7 @@ export function share<T = any>() {
         shared!.error(err);
         return;
       } finally {
-        shared!.complete();
+        if (shared && !shared.completed()) shared.complete();
       }
     })();
   };
@@ -39,6 +39,11 @@ export function share<T = any>() {
     if (!shared) shared = createSubject<T>();
     if (!isConnected) {
       connect(source);
+    } else if (typeof source.return === "function") {
+      // Each `for await` on the piped stream creates a fresh upstream iterator.
+      // Once we're connected, we must close these unused iterators immediately,
+      // otherwise they remain subscribed and can backpressure the shared source.
+      Promise.resolve(source.return()).catch(() => {});
     }
 
     return eachValueFrom(shared);

@@ -41,6 +41,8 @@ describe('fromPromise', () => {
   it('should propagate an error from a rejected Promise', async () => {
     const expectedError = new Error('Promise rejection');
     const promise = Promise.reject(expectedError);
+    // Prevent Node's unhandledRejection warning before fromPromise subscribes.
+    void promise.catch(() => {});
     const stream = fromPromise(promise);
 
     // We expect the promise to be rejected, so we use async/await with try/catch
@@ -70,9 +72,10 @@ describe('fromPromise', () => {
 
     stream.subscribe({
       next: () => fail('Value emitted unexpectedly'),
-      complete: () => done(),
+      complete: () => done.fail('Stream completed unexpectedly'),
       error: (err) => {
         expect(err).toBe(expectedError);
+        done();
       }
     });
   });
@@ -94,34 +97,43 @@ describe('fromPromise', () => {
   it('should handle promise rejection', (done) => {
     const error = new Error('Test error');
     const promise = Promise.reject(error);
+    // Prevent Node's unhandledRejection warning before fromPromise subscribes.
+    void promise.catch(() => {});
     const stream = fromPromise(promise);
 
     let receivedError: Error | undefined;
     const subscription = stream.subscribe({
-      error: (error: any) => receivedError = error,
-      complete: () => {
+      error: (error: any) => {
+        receivedError = error;
         expect(receivedError).toBe(error);
         subscription.unsubscribe();
         done();
+      },
+      complete: () => {
+        done.fail('Stream completed unexpectedly');
       }
     });
   });
 
   it('should not emit if unsubscribed before run', (done) => {
     const value = 'test_value';
-    const promise = Promise.resolve(value);
+    const promise = new Promise<string>((resolve) => setTimeout(() => resolve(value), 20));
     const stream = fromPromise(promise);
 
     const emittedValues: any[] = [];
     const subscription = stream.subscribe({
       next: (value: any) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual([]);
-        done();
-      }
+      error: (err) => done.fail(err),
+      complete: () => {}
     });
 
-    subscription.unsubscribe(); // Unsubscribe before running
+    // Unsubscribe immediately; do not rely on `complete` being delivered.
+    Promise.resolve(subscription.unsubscribe()).then(() => {
+      setTimeout(() => {
+        expect(emittedValues).toEqual([]);
+        done();
+      }, 40);
+    });
   });
 
   it('should abort an abortable promise factory when unsubscribed', async () => {
@@ -155,38 +167,22 @@ describe('fromPromise', () => {
   });
 
   it('should invoke factory for each subscription', async () => {
-    const factory = jasmine.createSpy('factory').and.returnValue(Promise.resolve('result'));
+    let callCount = 0;
+    const factory = () => {
+      callCount++;
+      return Promise.resolve('result');
+    };
     const stream = fromPromise(factory);
 
-    await new Promise<void>((resolve, reject) => {
-      stream.subscribe({
-        next: () => {},
-        complete: () => {
-          try {
-            expect(factory).toHaveBeenCalledTimes(1);
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        },
-        error: reject
-      });
-    });
+    const it1 = stream[Symbol.asyncIterator]();
+    expect(await it1.next()).toEqual({ done: false, value: 'result' });
+    await it1.return?.();
+    expect(callCount).toBe(1);
 
-    await new Promise<void>((resolve, reject) => {
-      stream.subscribe({
-        next: () => {},
-        complete: () => {
-          try {
-            expect(factory).toHaveBeenCalledTimes(2);
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        },
-        error: reject
-      });
-    });
+    const it2 = stream[Symbol.asyncIterator]();
+    expect(await it2.next()).toEqual({ done: false, value: 'result' });
+    await it2.return?.();
+    expect(callCount).toBe(2);
   });
 
   it('should emit error when factory throws immediately', async () => {

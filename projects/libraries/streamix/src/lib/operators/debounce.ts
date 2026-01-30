@@ -92,7 +92,7 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
         }
 
         if (latestResult) flush();
-        output.complete();
+        if (!output.completed()) output.complete();
       }
     })();
 

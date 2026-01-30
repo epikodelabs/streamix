@@ -1,28 +1,21 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
-import { eachValueFrom, fromAny } from '../converters';
+import type { MaybePromise, Operator, Stream } from "../abstractions";
+import {
+  createOperator,
+  getIteratorEmissionStamp,
+  getIteratorMeta,
+  isPromiseLike,
+  nextEmissionStamp,
+  withEmissionStamp,
+  setIteratorEmissionStamp,
+  setIteratorMeta,
+  setValueMeta
+} from "../abstractions";
+import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
 /**
- * Creates a stream operator that maps each value from the source stream to a new inner stream
- * and "switches" to emitting values from the most recent inner stream, canceling the previous one.
- *
- * For each value from the source:
- * 1. The `project` function is called with the value and its index.
- * 2. The returned value is normalized into a stream using {@link fromAny}.
- * 3. The operator subscribes to the new inner stream and immediately cancels any previous active inner stream.
- * 4. Only values from the latest inner stream are emitted.
- *
- * This operator is useful for scenarios such as:
- * - Type-ahead search where only the latest query results are relevant.
- * - Handling user events where new events invalidate previous operations.
- *
- * @template T The type of values in the source stream.
- * @template R The type of values emitted by the inner and output streams.
- * @param project A function that maps a source value and its index to either:
- *   - a {@link Stream<R>},
- *   - a {@link MaybePromise<R>} (value or promise),
- *   - or an array of `R`.
- * @returns An {@link Operator} instance suitable for use in a stream's `pipe` method.
+ * Projects each source value to a Stream which is merged into the output Stream,
+ * emitting values only from the most recently projected Stream.
  */
 export function switchMap<T = any, R = any>(
   project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
@@ -31,103 +24,185 @@ export function switchMap<T = any, R = any>(
     const output = createSubject<R>();
     const outputIterator = eachValueFrom(output);
 
-    let currentSubscription: Subscription | null = null;
+    let currentInner: { id: number; it: AsyncIterator<R> } | null = null;
     let inputCompleted = false;
     let currentInnerStreamId = 0;
     let index = 0;
+    let stopped = false;
 
+    /**
+     * Checks if the overall operator should complete.
+     * Only completes if the source is done AND no inner stream is active.
+     */
     const checkComplete = () => {
-      if (inputCompleted && !currentSubscription) {
+      if (inputCompleted && !currentInner) {
         output.complete();
       }
     };
 
-    const subscribeToInner = async (
+    const subscribeToInner = (
       innerStream: Stream<R>,
       streamId: number,
-      parentMeta?: { valueId: string; operatorIndex: number; operatorName: string }
+      parentMeta?: any
     ) => {
-      // Cancel previous inner stream
-      if (currentSubscription) {
-        currentSubscription.unsubscribe();
-        currentSubscription = null;
+      // Cancel the previous inner immediately so sync inner streams can't
+      // interleave emissions out-of-order via re-entrant scheduler execution.
+      const prev = currentInner;
+      if (prev) {
+        try {
+          void prev.it.return?.();
+        } catch {}
       }
 
-      let pendingFinalize = false;
-      let nextSubscription: Subscription | null = null;
+      const it = innerStream[Symbol.asyncIterator]();
+      currentInner = { id: streamId, it };
 
-      nextSubscription = innerStream.subscribe({
-        next: (value) => {
-          if (streamId === currentInnerStreamId) {
-            let outputValue = value;
+      void (async () => {
+        try {
+          while (!stopped && streamId === currentInnerStreamId) {
+            const r = await it.next();
+            const stamp = getIteratorEmissionStamp(it) ?? nextEmissionStamp();
+
+            if (r.done) break;
+            if (stopped || streamId !== currentInnerStreamId) break;
+
+            const operatorIndex = (this as any).index ?? 0;
+            const operatorName = "switchMap";
+            let outputValue: any = r.value;
+
             if (parentMeta) {
               setIteratorMeta(
                 outputIterator,
                 { valueId: parentMeta.valueId, kind: "expand" },
-                parentMeta.operatorIndex,
-                parentMeta.operatorName
+                operatorIndex,
+                operatorName
               );
               outputValue = setValueMeta(
                 outputValue,
                 { valueId: parentMeta.valueId, kind: "expand" },
-                parentMeta.operatorIndex,
-                parentMeta.operatorName
+                operatorIndex,
+                operatorName
               );
             }
-            output.next(outputValue);
-          }
-        },
-        error: (err) => {
-          if (streamId !== currentInnerStreamId) return;
-          if (!nextSubscription) {
-            pendingFinalize = true;
-            output.error(err);
-            return;
-          }
-          currentSubscription = null;
-          nextSubscription = null;
-          output.error(err);
-        },
-        complete: () => {
-          if (streamId !== currentInnerStreamId) return;
-          if (!nextSubscription) {
-            pendingFinalize = true;
-            return;
-          }
-          currentSubscription = null;
-          nextSubscription = null;
-          checkComplete();
-        },
-      });
 
-      currentSubscription = nextSubscription;
-      if (pendingFinalize) {
-        currentSubscription = null;
-        nextSubscription = null;
-        checkComplete();
+            // Ensure downstream subject emissions carry the inner iterator stamp.
+            withEmissionStamp(stamp, () => {
+              setIteratorEmissionStamp(outputIterator as any, stamp);
+              output.next(outputValue);
+            });
+          }
+        } catch (err) {
+          if (!stopped && streamId === currentInnerStreamId) {
+            output.error(err);
+          }
+        } finally {
+          if (currentInner?.id === streamId) {
+            currentInner = null;
+          }
+          checkComplete();
+        }
+      })();
+    };
+
+    const processOuterValue = (value: T) => {
+      const streamId = ++currentInnerStreamId;
+      const parentMeta = getIteratorMeta(source);
+
+      let projected: any;
+      try {
+        projected = project(value, index++);
+      } catch (err) {
+        output.error(err);
+        return;
+      }
+
+      if (isPromiseLike(projected)) {
+        const capturedId = streamId;
+        Promise.resolve(projected).then(
+          (normalized) => {
+            if (stopped || capturedId !== currentInnerStreamId) return;
+            subscribeToInner(fromAny<R>(normalized as any), capturedId, parentMeta);
+          },
+          (err) => {
+            if (stopped || capturedId !== currentInnerStreamId) return;
+            output.error(err);
+          }
+        );
+      } else {
+        subscribeToInner(fromAny<R>(projected as any), streamId, parentMeta);
       }
     };
 
-    (async () => {
-      try {
-        while (true) {
-          const result = await source.next();
-          if (result.done) break;
+    const tryNext = (source as any).__tryNext as undefined | (() => IteratorResult<T> | null);
 
-          const streamId = ++currentInnerStreamId;
-          const parentMeta = getIteratorMeta(source);
-          const projected = project(result.value, index++);
-          const normalized = isPromiseLike(projected) ? await projected : projected;
-          const innerStream = fromAny(normalized);
-          await subscribeToInner(innerStream, streamId, parentMeta);
+    if (typeof tryNext === "function") {
+      const drain = () => {
+        while (!stopped) {
+          let result: IteratorResult<T> | null;
+          try {
+            result = tryNext.call(source);
+          } catch (err) {
+            output.error(err);
+            return;
+          }
+
+          if (!result) return;
+          if (result.done) {
+            inputCompleted = true;
+            checkComplete();
+            return;
+          }
+
+          processOuterValue(result.value);
         }
+      };
 
-        inputCompleted = true;
-        checkComplete();
-      } catch (err) {
-        output.error(err);
+      (source as any).__onPush = drain;
+      drain();
+    } else {
+      (async () => {
+        try {
+          while (!stopped) {
+            const result = await source.next();
+            if (result.done) break;
+            processOuterValue(result.value);
+          }
+
+          inputCompleted = true;
+          checkComplete();
+        } catch (err) {
+          output.error(err);
+        }
+      })();
+    }
+
+    const baseReturn = outputIterator.return?.bind(outputIterator);
+    const baseThrow = outputIterator.throw?.bind(outputIterator);
+
+    (outputIterator as any).return = async () => {
+      stopped = true;
+      try {
+        try {
+          await currentInner?.it.return?.();
+        } catch {}
+      } finally {
+        currentInner = null;
       }
-    })();
+      return baseReturn ? baseReturn(undefined as any) : { done: true, value: undefined };
+    };
+
+    (outputIterator as any).throw = async (err: any) => {
+      stopped = true;
+      try {
+        try {
+          await currentInner?.it.return?.();
+        } catch {}
+      } finally {
+        currentInner = null;
+      }
+      if (baseThrow) return baseThrow(err);
+      throw err;
+    };
 
     return outputIterator;
   });

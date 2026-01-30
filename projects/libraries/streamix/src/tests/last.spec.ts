@@ -37,8 +37,11 @@ describe('last', () => {
       next: () => {
         done.fail("Should not emit for empty stream");
       },
-      error: (err) => expect(err.message).toBe("No elements in sequence"),
-      complete: () => { done(); }
+      error: (err) => {
+        expect(err.message).toBe("No elements in sequence");
+        done();
+      },
+      complete: () => done.fail("Should not complete after error"),
     });
   });
 
@@ -63,8 +66,11 @@ describe('last', () => {
       next: () => {
         done.fail("Should not emit for empty stream");
       },
-      error: (err) => expect(err.message).toBe("No elements in sequence"),
-      complete: () => { done(); }
+      error: (err) => {
+        expect(err.message).toBe("No elements in sequence");
+        done();
+      },
+      complete: () => done.fail("Should not complete after error"),
     });
   });
 });

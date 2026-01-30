@@ -1,3 +1,5 @@
+import { CommonModule } from '@angular/common';
+import { AfterViewInit, Component, OnDestroy, OnInit } from '@angular/core';
 import {
   combineLatest,
   createSubject,
@@ -13,9 +15,6 @@ import {
   timer,
   withLatestFrom,
 } from '@epikodelabs/streamix';
-import { CommonModule } from '@angular/common';
-import { AfterViewInit, Component, OnDestroy, OnInit } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
 
 @Component({
   selector: 'app-caption',
@@ -85,7 +84,7 @@ export class CaptionComponent implements OnInit {
 @Component({
   selector: 'app-rain',
   standalone: true,
-  imports: [RouterOutlet, CaptionComponent],
+  imports: [CaptionComponent],
   template: `
   <div class="container">
     <app-caption></app-caption>

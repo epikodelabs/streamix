@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the dimensions of a given DOM element
@@ -110,12 +110,28 @@ export function onResize(
 
     scheduleStart();
 
-    const prev = sub.onUnsubscribe;
-    sub.onUnsubscribe = () => {
-      if (--subscriberCount === 0) {
-        stop();
+    const baseUnsubscribe = sub.unsubscribe.bind(sub);
+    let cleaned = false;
+
+    sub.unsubscribe = () => {
+      if (!cleaned) {
+        cleaned = true;
+
+        subscriberCount = Math.max(0, subscriberCount - 1);
+        if (subscriberCount === 0) {
+          stop();
+        }
+
+        // Some DOM specs expect the onUnsubscribe callback to run synchronously.
+        const onUnsubscribe = sub.onUnsubscribe;
+        sub.onUnsubscribe = undefined;
+        try {
+          onUnsubscribe?.();
+        } catch {
+        }
       }
-      prev?.call(sub);
+
+      return baseUnsubscribe();
     };
 
     return sub;
@@ -126,7 +142,7 @@ export function onResize(
   /* -------------------------------------------------- */
 
   subject[Symbol.asyncIterator] = () =>
-    createAsyncGenerator(receiver => subject.subscribe(receiver));
+    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
 
   return subject;
 }

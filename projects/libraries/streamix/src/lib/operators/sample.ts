@@ -70,7 +70,7 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
         output.error(err);
       } finally {
         stopSampling();
-        output.complete();
+        if (!output.completed()) output.complete();
       }
     })();
 
