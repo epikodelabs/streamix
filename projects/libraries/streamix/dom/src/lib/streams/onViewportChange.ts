@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the visual viewport.
@@ -132,7 +132,7 @@ export function onViewportChange(): Stream<ViewportState> {
    * ---------------------------------------------------------------------- */
 
   subject[Symbol.asyncIterator] = () =>
-    createAsyncGenerator(receiver => subject.subscribe(receiver));
+    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
 
   return subject;
 }

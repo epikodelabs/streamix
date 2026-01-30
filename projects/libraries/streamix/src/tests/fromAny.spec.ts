@@ -94,6 +94,8 @@ describe('fromAny', () => {
   it('should propagate promise rejection as stream error', async () => {
     const error = new Error('Test error');
     const promise = Promise.reject(error);
+    // Prevent Node's unhandledRejection warning before the stream consumes it.
+    void promise.catch(() => {});
     const result = fromAny(promise);
 
     let caughtError: any = null;
@@ -347,6 +349,9 @@ describe('fromAny', () => {
       values1.push(value);
     }
     expect(values1).toEqual([1, 2, 3]);
+
+    // Allow any async teardown/scheduler work to flush between iterations.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Second iteration
     const values2: number[] = [];

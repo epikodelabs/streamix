@@ -172,7 +172,7 @@ describe('reduce', () => {
     await subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    expect(caught).toEqual(new Error('Accumulator failure'));
+    expect(caught!.message).toEqual('Accumulator failure');
   });
 });
 

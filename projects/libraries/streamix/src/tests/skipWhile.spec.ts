@@ -42,6 +42,39 @@ describe('skipWhile', () => {
       error: done.fail
     });
   });
+
+  it('should support index parameter in predicate', (done) => {
+    const source$ = from([10, 20, 30, 40, 50]);
+    const result: number[] = [];
+    const indices: number[] = [];
+
+    source$.pipe(skipWhile((_, index) => {
+      indices.push(index);
+      return index < 2; // Skip first 2 values by index
+    })).subscribe({
+      next: val => result.push(val),
+      complete: () => {
+        expect(result).toEqual([30, 40, 50]);
+        expect(indices).toEqual([0, 1, 2]);
+        done();
+      },
+      error: done.fail
+    });
+  });
+
+  it('should use index to skip based on position not value', (done) => {
+    const source$ = from([100, 100, 100, 100]);
+    const result: number[] = [];
+
+    source$.pipe(skipWhile((_, index) => index < 2)).subscribe({
+      next: val => result.push(val),
+      complete: () => {
+        expect(result).toEqual([100, 100]);
+        done();
+      },
+      error: done.fail
+    });
+  });
 });
 
 

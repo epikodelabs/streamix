@@ -1,4 +1,14 @@
-import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator, type Stream } from "../abstractions";
+import {
+  createOperator,
+  DONE,
+  getIteratorEmissionStamp,
+  isPromiseLike,
+  NEXT,
+  nextEmissionStamp,
+  type MaybePromise,
+  type Operator,
+  type Stream
+} from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
@@ -27,8 +37,16 @@ export const exhaustMap = <T = any, R = T>(
     let innerIterator: AsyncIterator<R> | null = null;
     let isSourceDone = false;
 
-    const drainIgnored = () => {
-      while ((source as any).__tryNext?.()) { /* Drop */ }
+    // Drop source emissions that happened while an inner was active.
+    // We implement this by recording an emission stamp window for the inner:
+    // (ignoreStartStamp, ignoreEndStamp]. Any source value with a stamp inside
+    // that window is skipped.
+    let ignoreStartStamp: number | null = null;
+    let ignoreEndStamp: number | null = null;
+
+    const stampOf = (it: any) => {
+      const s = getIteratorEmissionStamp(it);
+      return typeof s === "number" ? s : nextEmissionStamp();
     };
 
     return {
@@ -36,21 +54,43 @@ export const exhaustMap = <T = any, R = T>(
         while (true) {
           if (innerIterator) {
             const result = await innerIterator.next();
-            drainIgnored(); // Clear values that arrived during the await
 
             if (!result.done) return NEXT(result.value);
             
             innerIterator = null;
+            if (ignoreStartStamp !== null && ignoreEndStamp === null) {
+              ignoreEndStamp = nextEmissionStamp();
+            }
             if (isSourceDone) return DONE;
             continue;
           }
 
           const result = await source.next();
-          if (result.done) return DONE;
+          if (result.done) {
+            isSourceDone = true;
+            return DONE;
+          }
+
+          // Ignore values that arrived while the previous inner was active.
+          if (ignoreStartStamp !== null && ignoreEndStamp !== null) {
+            const stamp = stampOf(source);
+            if (stamp > ignoreStartStamp && stamp <= ignoreEndStamp) {
+              continue;
+            }
+          }
 
           const projected = project(result.value, outerIndex++);
-          const normalized = isPromiseLike(projected) ? await projected : projected;
-          innerIterator = eachValueFrom(fromAny<R>(normalized));
+
+          // Mark the start of a new active-inner window.
+          ignoreStartStamp = nextEmissionStamp();
+          ignoreEndStamp = null;
+
+          if (isPromiseLike(projected)) {
+            const normalized = await projected;
+            innerIterator = eachValueFrom(fromAny<R>(normalized));
+          } else {
+            innerIterator = eachValueFrom(fromAny<R>(projected as any));
+          }
         }
       },
     };

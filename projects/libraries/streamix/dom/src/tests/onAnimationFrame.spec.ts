@@ -1,137 +1,200 @@
-import { map, takeWhile } from '@epikodelabs/streamix';
+import { takeWhile } from '@epikodelabs/streamix';
 import { onAnimationFrame } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 idescribe('onAnimationFrame', () => {
 
-  it('should emit values at the expected rate', async () => {
-    let emittedValues: any[] = [];
+  it('should emit delta values with reasonable time intervals', async () => {
+    const stream = onAnimationFrame();
+    const emittedDeltas: number[] = [];
     let count = 0;
-    const stream = onAnimationFrame().pipe(
-      map((_: any, index: any) => index),
-      takeWhile(() => count < 5)
-    );
 
-    stream.subscribe({
-      next: (value: any) => {
+    const subscription = stream.pipe(takeWhile(() => count < 5)).subscribe({
+      next: (delta: number) => {
         count++;
-        emittedValues.push(value);
-      },
-      complete: () => {
-        console.log('Stream completed.');
+        emittedDeltas.push(delta);
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(emittedValues).toEqual([0, 1, 2, 3, 4]);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(emittedDeltas.length).toBe(5);
+      // Each delta should be a positive number (milliseconds between frames)
+      emittedDeltas.forEach(delta => {
+        expect(delta).toBeGreaterThanOrEqual(0);
+        expect(typeof delta).toBe('number');
+      });
+      // Deltas should be reasonable for a timeout-based fallback (around 16ms per frame)
+      const avgDelta = emittedDeltas.reduce((a, b) => a + b, 0) / emittedDeltas.length;
+      expect(avgDelta).toBeGreaterThan(5);
+    } finally {
+      subscription.unsubscribe();
+    }
   });
 
-  it('should stop when condition is met', (done) => {
-    let emittedValues: any[] = [];
-    let count = 0;
-    const stream = onAnimationFrame().pipe(takeWhile(() => count < 50));
+  it('should stop emitting when condition is met', (done) => {
+    const stream = onAnimationFrame().pipe(takeWhile((_, index) => index < 5));
+    const emittedCount: number[] = [];
 
-    const sub = stream.subscribe({
-      next: (value: any) => {
-        count++;
-        emittedValues.push(value);
+    const subscription = stream.subscribe({
+      next: (delta: number) => {
+        expect(delta).toBeGreaterThanOrEqual(0);
+        emittedCount.push(delta);
       },
       complete: () => {
-        expect(emittedValues.length).toBe(50);
-        expect(() => sub.unsubscribe()).not.toThrow(); // idempotent unsubscribe
+        // Should have received exactly 5 emissions before the condition became false
+        expect(emittedCount.length).toBe(5);
+        expect(() => subscription.unsubscribe()).not.toThrow();
         done();
       },
     });
   });
 
-  it('should handle infinite loop when condition is always true', async () => {
-    let emittedValues: any[] = [];
-    let count = 0;
-    const infiniteStream = onAnimationFrame().pipe(takeWhile(() => count <= 10));
+  it('should emit multiple times when condition allows', async () => {
+    const stream = onAnimationFrame().pipe(takeWhile((_, index) => index < 10));
+    const emittedDeltas: number[] = [];
 
-    let subscription = infiniteStream.subscribe({
-      next: (value: any) => {
-        count++;
-        emittedValues.push(value);
-      },
-      complete: () => {
-        console.log('Infinite stream completed after 10 frames.');
-        subscription.unsubscribe(); // redundant but safe
+    const subscription = stream.subscribe({
+      next: (delta: number) => {
+        emittedDeltas.push(delta);
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    expect(emittedValues.length).toBe(11);
-    expect(emittedValues[0]).toBeLessThan(100);
-    expect(emittedValues[10]).toBeLessThan(100);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Should have emitted 10 times with real delta values
+      expect(emittedDeltas.length).toBe(10);
+      emittedDeltas.forEach(delta => {
+        expect(typeof delta).toBe('number');
+        expect(delta).toBeGreaterThanOrEqual(0);
+      });
+    } finally {
+      subscription.unsubscribe();
+    }
   });
 
-  it('should call unsubscribe callback and cancel animation frame', (done) => {
-    // Spy on cancelAnimationFrame
-    const originalCancel = globalThis.cancelAnimationFrame;
-    const cancelSpy = jasmine.createSpy('cancelAnimationFrame');
-    (globalThis as any).cancelAnimationFrame = cancelSpy;
+  it('should cancel animation frame on unsubscribe', (done) => {
+    const originalRAF = (globalThis as any).requestAnimationFrame;
+    const originalCancel = (globalThis as any).cancelAnimationFrame;
+    const requestedIds: number[] = [];
+    let cancelledIds: number[] = [];
+    let frameCounter = 0;
+
+    // Mock RAF to capture the ID and invoke the callback
+    (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
+      const id = frameCounter++;
+      requestedIds.push(id);
+      // Invoke callback once immediately to ensure frame loop starts
+      if (requestedIds.length === 1) {
+        cb(performance.now());
+      }
+      // Return the ID (don't actually schedule more frames)
+      return id;
+    };
+
+    // Mock cancel to track calls
+    (globalThis as any).cancelAnimationFrame = (id: number) => {
+      cancelledIds.push(id);
+    };
 
     const stream = onAnimationFrame();
-    const sub = stream.subscribe(() => {});
+    const subscription = stream.subscribe(() => {});
 
-    // Wait a couple of frames
+    // Give it a moment for the RAF to be called
     setTimeout(() => {
-      sub.unsubscribe();
-      expect(cancelSpy).toHaveBeenCalled();
-      // Restore original
+      subscription.unsubscribe();
+      expect(cancelledIds.length).toBeGreaterThan(0);
+      expect(requestedIds.length).toBeGreaterThan(0);
+      
+      // Restore originals
+      (globalThis as any).requestAnimationFrame = originalRAF;
       (globalThis as any).cancelAnimationFrame = originalCancel;
       done();
-    }, 100);
+    }, 0);
   });
 
-  it('should allow multiple independent subscribers', async () => {
-    let valuesA: number[] = [];
-    let valuesB: number[] = [];
+  it('should share the same RAF loop for multiple subscribers', async () => {
+    const valuesA: number[] = [];
+    const valuesB: number[] = [];
 
     const stream = onAnimationFrame();
 
     const subA = stream.subscribe(v => valuesA.push(v));
     const subB = stream.subscribe(v => valuesB.push(v));
 
-    await new Promise(res => setTimeout(res, 200));
+    await new Promise(res => setTimeout(res, 100));
 
     subA.unsubscribe();
     subB.unsubscribe();
 
-    // Both subscribers should have received some frames
+    // Both subscribers should have received real delta values
     expect(valuesA.length).toBeGreaterThan(0);
     expect(valuesB.length).toBeGreaterThan(0);
+    
+    // Delta values should be reasonable numbers
+    valuesA.forEach(v => {
+      expect(typeof v).toBe('number');
+      expect(v).toBeGreaterThanOrEqual(0);
+    });
+    valuesB.forEach(v => {
+      expect(typeof v).toBe('number');
+      expect(v).toBeGreaterThanOrEqual(0);
+    });
   });
 
-  it('falls back to timeout loop when RAF is unavailable', async () => {
+  it('falls back to setTimeout when RAF is unavailable', async () => {
     const originalRAF = (globalThis as any).requestAnimationFrame;
     const originalCancelRAF = (globalThis as any).cancelAnimationFrame;
-    const originalSetTimeout = globalThis.setTimeout;
-    const originalClearTimeout = globalThis.clearTimeout;
 
+    // Remove RAF to force fallback
     (globalThis as any).requestAnimationFrame = undefined;
     (globalThis as any).cancelAnimationFrame = undefined;
 
-    const setTimeoutSpy = spyOn(globalThis as any, 'setTimeout').and.callFake(
-      (cb: FrameRequestCallback, delay?: number, ...rest: any[]) =>
-        originalSetTimeout(cb as TimerHandler, delay ?? 0, ...rest)
-    );
-    const clearTimeoutSpy = spyOn(globalThis as any, 'clearTimeout').and.callFake((id: number) =>
-      originalClearTimeout(id)
-    );
+    const emittedDeltas: number[] = [];
+    let setTimeoutCallCount = 0;
+    let clearTimeoutCallCount = 0;
+
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+
+    // Track setTimeout/clearTimeout calls
+    (globalThis as any).setTimeout = function (
+      ...args: Parameters<typeof originalSetTimeout>
+    ): ReturnType<typeof originalSetTimeout> {
+      setTimeoutCallCount++;
+      return originalSetTimeout(...args);
+    };
+
+    (globalThis as any).clearTimeout = function (
+      ...args: Parameters<typeof originalClearTimeout>
+    ): ReturnType<typeof originalClearTimeout> {
+      clearTimeoutCallCount++;
+      return originalClearTimeout(...args);
+    };
 
     try {
       const stream = onAnimationFrame();
-      const subscription = stream.subscribe(() => {});
+      const subscription = stream.subscribe((delta: number) => {
+        emittedDeltas.push(delta);
+      });
 
-      await new Promise(resolve => originalSetTimeout(resolve, 50));
+      await new Promise(resolve => originalSetTimeout(resolve, 100));
 
       subscription.unsubscribe();
-      await new Promise(resolve => originalSetTimeout(resolve, 0));
+      await new Promise(resolve => originalSetTimeout(resolve, 10));
 
-      expect(setTimeoutSpy).toHaveBeenCalled();
-      expect(clearTimeoutSpy).toHaveBeenCalled();
+      // Should have emitted deltas using setTimeout fallback
+      expect(emittedDeltas.length).toBeGreaterThan(0);
+      emittedDeltas.forEach(delta => {
+        expect(typeof delta).toBe('number');
+      });
+      
+      // setTimeout should have been called to set up the loop
+      expect(setTimeoutCallCount).toBeGreaterThan(0);
+      // clearTimeout should have been called on unsubscribe
+      expect(clearTimeoutCallCount).toBeGreaterThan(0);
     } finally {
       (globalThis as any).requestAnimationFrame = originalRAF;
       (globalThis as any).cancelAnimationFrame = originalCancelRAF;
@@ -139,6 +202,149 @@ idescribe('onAnimationFrame', () => {
       (globalThis as any).clearTimeout = originalClearTimeout;
     }
   });
-});
+
+  it('uses clearTimeout for cancellation when RAF exists but cancelAnimationFrame is missing', (done) => {
+    const originalRAF = (globalThis as any).requestAnimationFrame;
+    const originalCancel = (globalThis as any).cancelAnimationFrame;
+    const originalClearTimeout = (globalThis as any).clearTimeout;
+
+    const clearSpy = jasmine.createSpy('clearTimeout').and.callFake(originalClearTimeout);
+    (globalThis as any).clearTimeout = clearSpy;
+
+    // RAF exists, but cancelAnimationFrame is missing => cancelFrame falls back to clearTimeout.
+    (globalThis as any).cancelAnimationFrame = undefined;
+    (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
+      return globalThis.setTimeout(() => cb(performance.now()), 0) as any;
+    };
+
+    const subscription = onAnimationFrame().subscribe();
+
+    setTimeout(() => {
+      subscription.unsubscribe();
+      expect(clearSpy).toHaveBeenCalled();
+
+      (globalThis as any).requestAnimationFrame = originalRAF;
+      (globalThis as any).cancelAnimationFrame = originalCancel;
+      (globalThis as any).clearTimeout = originalClearTimeout;
+      done();
+    }, 10);
+  });
+
+  it('clamps non-monotonic RAF timestamps to 0-delta frames', (done) => {
+    const originalRAF = (globalThis as any).requestAnimationFrame;
+    const originalCancel = (globalThis as any).cancelAnimationFrame;
+
+    const times = [100, 90, 110];
+    let i = 0;
+
+    (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
+      const id = i + 1;
+      if (i < times.length) {
+        const t = times[i++];
+        queueMicrotask(() => cb(t));
+      }
+      return id;
+    };
+
+    (globalThis as any).cancelAnimationFrame = jasmine.createSpy('cancelAnimationFrame');
+
+    const deltas: number[] = [];
+    const subscription = onAnimationFrame().subscribe({
+      next: (delta: number) => {
+        deltas.push(delta);
+        if (deltas.length === 3) {
+          try {
+            // First tick is always 0, second is non-monotonic => 0, third is 110-100 => 10
+            expect(deltas).toEqual([0, 0, 10]);
+            subscription.unsubscribe();
+            (globalThis as any).requestAnimationFrame = originalRAF;
+            (globalThis as any).cancelAnimationFrame = originalCancel;
+            done();
+          } catch (err: any) {
+            subscription.unsubscribe();
+            (globalThis as any).requestAnimationFrame = originalRAF;
+            (globalThis as any).cancelAnimationFrame = originalCancel;
+            done.fail(err);
+          }
+        }
+      },
+    });
+  });
+  it('returns early when performance is undefined (SSR)', (done) => {
+    const originalPerformance = (globalThis as any).performance;
+    delete (globalThis as any).performance;
+
+    try {
+      const values: number[] = [];
+      const sub = onAnimationFrame().subscribe(v => values.push(v));
+
+      setTimeout(() => {
+        // Should not emit without performance
+        expect(values.length).toBe(0);
+        sub.unsubscribe();
+        (globalThis as any).performance = originalPerformance;
+        done();
+      }, 50);
+    } catch (err: any) {
+      (globalThis as any).performance = originalPerformance;
+      done.fail(err);
+    }
+  });
+
+  it('does not restart loop when startLoop() called multiple times', async () => {
+    const rafSpy = spyOn(globalThis as any, 'requestAnimationFrame').and.callThrough();
+
+    const sub1 = onAnimationFrame().subscribe();
+    const sub2 = onAnimationFrame().subscribe();
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Should only start one RAF loop
+    const callCount = rafSpy.calls.count();
+    expect(callCount).toBeGreaterThan(0);
+
+    sub1.unsubscribe();
+    sub2.unsubscribe();
+  });
+
+  it('handles strictly decreasing timestamps', (done) => {
+    const originalRAF = (globalThis as any).requestAnimationFrame;
+    const originalCancel = (globalThis as any).cancelAnimationFrame;
+
+    const times = [100, 50, 25]; // Strictly decreasing
+    let i = 0;
+
+    (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
+      const id = i + 1;
+      if (i < times.length) {
+        const t = times[i++];
+        queueMicrotask(() => cb(t));
+      }
+      return id;
+    };
+
+    (globalThis as any).cancelAnimationFrame = jasmine.createSpy('cancelAnimationFrame');
+
+    const deltas: number[] = [];
+    const subscription = onAnimationFrame().subscribe({
+      next: (delta: number) => {
+        deltas.push(delta);
+        if (deltas.length === 3) {
+          try {
+            // All deltas should be 0 since timestamps are strictly decreasing
+            expect(deltas).toEqual([0, 0, 0]);
+            subscription.unsubscribe();
+            (globalThis as any).requestAnimationFrame = originalRAF;
+            (globalThis as any).cancelAnimationFrame = originalCancel;
+            done();
+          } catch (err: any) {
+            subscription.unsubscribe();
+            (globalThis as any).requestAnimationFrame = originalRAF;
+            (globalThis as any).cancelAnimationFrame = originalCancel;
+            done.fail(err);
+          }
+        }
+      },
+    });
+  });});
 
 

@@ -1,3 +1,4 @@
+import { scheduler } from "../abstractions/scheduler";
 import type { ReleaseFn } from "./lock";
 
 /**
@@ -49,9 +50,7 @@ export const createSemaphore = (initialCount: number): Semaphore => {
       // Don't call the resolver immediately - schedule it as a microtask
       // to maintain the expected order of execution
       const nextResolver = queue.shift()!;
-      Promise.resolve().then(() => {
-        nextResolver();
-      });
+      scheduler.enqueue(nextResolver);
     } else {
       count++;
     }

@@ -1,4 +1,13 @@
-import { createStream, createSubject, from, withLatestFrom } from '@epikodelabs/streamix';
+import {
+  createOperator,
+  createStream,
+  createSubject,
+  from,
+  getIteratorMeta,
+  getValueMeta,
+  setIteratorMeta,
+  withLatestFrom,
+} from '@epikodelabs/streamix';
 
 const scheduler = {
   flush: () => new Promise(resolve => setTimeout(resolve, 0))
@@ -288,6 +297,231 @@ describe('withLatestFrom', () => {
 
     expect(errorSpy).not.toHaveBeenCalled();
   });
+
+  it('does not emit until all auxiliary streams have a value', async () => {
+    const main$ = createSubject<number>();
+    const aux$ = createSubject<string>();
+    const combined = main$.pipe(withLatestFrom(aux$));
+
+    const results: any[] = [];
+    combined.subscribe({ next: (v) => results.push(v) });
+
+    await scheduler.flush();
+
+    // Main emits before aux has any value -> gated, no emission.
+    main$.next(1);
+    await scheduler.flush();
+    expect(results).toEqual([]);
+
+    aux$.next('A');
+    await scheduler.flush();
+
+    main$.next(2);
+    await scheduler.flush();
+
+    expect(results).toEqual([[2, 'A']]);
+  });
+
+  it('supports auxiliary inputs that are plain values and promises', async () => {
+    const mainStream = from([1, 2]);
+    const combined = mainStream.pipe(withLatestFrom(100 as any, Promise.resolve('X') as any));
+
+    const results: any[] = [];
+    await new Promise<void>((resolve, reject) => {
+      combined.subscribe({
+        next: (v) => results.push(v),
+        complete: resolve,
+        error: reject,
+      });
+    });
+
+    expect(results).toEqual([
+      [1, 100, 'X'],
+      [2, 100, 'X'],
+    ]);
+  });
+
+  it('attaches iterator/value metadata from the source emission', async () => {
+    const tagIds = createOperator<number, number>('tagIds', function (source) {
+      let n = 0;
+      const iterator: AsyncIterator<number> = {
+        next: async () => {
+          const result = await source.next();
+          if (result.done) return result;
+
+          n += 1;
+          setIteratorMeta(iterator as any, { valueId: `id${n}` }, 0, 'tagIds');
+          return result;
+        },
+      };
+      return iterator;
+    });
+
+    const main$ = createSubject<number>();
+    const aux$ = createSubject<string>();
+
+    const combined = main$.pipe(tagIds, withLatestFrom(aux$));
+    const it = combined[Symbol.asyncIterator]();
+
+    aux$.next('A');
+    await scheduler.flush();
+
+    main$.next(5);
+    await scheduler.flush();
+
+    const r1 = await it.next();
+    expect(r1.done).toBe(false);
+    expect(r1.value).toEqual([5, 'A']);
+
+    expect(getIteratorMeta(it as any)).toEqual(
+      jasmine.objectContaining({ valueId: 'id1' })
+    );
+
+    expect(getValueMeta(r1.value)).toEqual(
+      jasmine.objectContaining({ valueId: 'id1' })
+    );
+  });
+
+  it('should abort during promise resolution of auxiliary streams', async () => {
+    const main$ = createSubject<number>();
+    
+    // Create a slow-resolving promise for auxiliary stream
+    let resolveAux!: (s: any) => void;
+    const slowAuxPromise = new Promise<any>((resolve) => {
+      resolveAux = resolve;
+    });
+
+    const combined = main$.pipe(withLatestFrom(slowAuxPromise));
+
+    const results: any[] = [];
+    const completeSpy = jasmine.createSpy('completeSpy');
+    
+    const subscription = combined.subscribe({
+      next: (v) => results.push(v),
+      complete: completeSpy,
+      error: () => {},
+    });
+
+    // Unsubscribe immediately before the promise resolves
+    subscription.unsubscribe();
+    
+    // Now resolve the promise
+    resolveAux(from(['A']));
+    
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Should not emit any values since we unsubscribed before setup completed
+    expect(results).toEqual([]);
+  });
+
+  it('should handle auxiliary error during promise resolution setup', async () => {
+    const main$ = createSubject<number>();
+    
+    // Create a promise that rejects
+    const rejectingPromise = Promise.reject(new Error('SETUP_ERROR'));
+    
+    // Suppress unhandled rejection
+    rejectingPromise.catch(() => {});
+
+    const combined = main$.pipe(withLatestFrom(rejectingPromise as any));
+
+    const errorSpy = jasmine.createSpy('errorSpy');
+    
+    combined.subscribe({
+      next: () => fail('Expected no values'),
+      complete: () => {},
+      error: errorSpy,
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // The error should be caught during setup
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it('should call original onUnsubscribe callback when unsubscribing', async () => {
+    const main$ = createSubject<number>();
+    const aux$ = createSubject<string>();
+
+    const combined = main$.pipe(withLatestFrom(aux$));
+
+    let unsubscribeCalled = false;
+    const subscription = combined.subscribe({
+      next: () => {},
+      complete: () => {},
+      error: () => {},
+    });
+
+    // Set a custom onUnsubscribe handler
+    const originalOnUnsubscribe = subscription.onUnsubscribe;
+    subscription.onUnsubscribe = () => {
+      unsubscribeCalled = true;
+      originalOnUnsubscribe?.call(subscription);
+    };
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    subscription.unsubscribe();
+    
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(unsubscribeCalled).toBe(true);
+  });
+
+  it('should handle source error when auxiliary has emitted', async () => {
+    const main$ = createSubject<number>();
+    const aux$ = createSubject<string>();
+
+    const combined = main$.pipe(withLatestFrom(aux$));
+
+    const errorSpy = jasmine.createSpy('errorSpy');
+    const results: any[] = [];
+
+    combined.subscribe({
+      next: (v) => results.push(v),
+      complete: () => {},
+      error: errorSpy,
+    });
+
+    await scheduler.flush();
+
+    aux$.next('A');
+    await scheduler.flush();
+
+    main$.next(1);
+    await scheduler.flush();
+
+    main$.error(new Error('SOURCE_ERROR'));
+    await scheduler.flush();
+
+    expect(results).toEqual([[1, 'A']]);
+    expect(errorSpy).toHaveBeenCalledWith(jasmine.objectContaining({ message: 'SOURCE_ERROR' }));
+  });
+
+  it('should cleanup when auxiliary error occurs before source emits', async () => {
+    const main$ = createSubject<number>();
+    const aux$ = createSubject<string>();
+
+    const combined = main$.pipe(withLatestFrom(aux$));
+
+    const errorSpy = jasmine.createSpy('errorSpy');
+
+    combined.subscribe({
+      next: () => fail('Expected no values'),
+      complete: () => {},
+      error: errorSpy,
+    });
+
+    await scheduler.flush();
+
+    // Emit error from auxiliary before main has emitted
+    aux$.error(new Error('EARLY_AUX_ERROR'));
+    await scheduler.flush();
+
+    // Try to emit from main after error
+    main$.next(1);
+    await scheduler.flush();
+
+    expect(errorSpy).toHaveBeenCalledWith(jasmine.objectContaining({ message: 'EARLY_AUX_ERROR' }));
+  });
 });
-
-

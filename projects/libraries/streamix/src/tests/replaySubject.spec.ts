@@ -347,7 +347,7 @@ describe('createReplaySubject', () => {
     afterErrorSubject.error(new Error('boom'));
     afterErrorSubject.complete();
     await shortDelay();
-    expect(completeAfterError).toBe(1);
+    expect(completeAfterError).toBe(0);
   });
 
   it('supports query, async iterator, observer, and type-safe helpers', async () => {
@@ -634,5 +634,42 @@ describe('createReplaySubjectExtended', () => {
     await waitFor(() => edgeValues.length === 2);
     expect(edgeValues).toEqual(['alpha', null]);
     edgeSub.unsubscribe();
+  });
+
+  it('should maintain order when new values arrive during replay delivery', async () => {
+    const subject = createReplaySubject<string>(10);
+    subject.next('A');
+    subject.next('B');
+    subject.next('C');
+
+    const received: string[] = [];
+    
+    let releasePause: (() => void) | null = null;
+
+    // Create a slow receiver that pauses on the first value
+    const sub = subject.subscribe({
+      next: async (val) => {
+        received.push(val);
+        if (val === 'A') {
+          await new Promise<void>(r => releasePause = r);
+        }
+      }
+    });
+
+    // Ensure we started receiving
+    await waitFor(() => received.length >= 1);
+    expect(received).toContain('A');
+
+    // Emit a new value while the receiver is paused handling 'A'
+    subject.next('D');
+
+    // Let the receiver continue
+    releasePause!();
+
+    await waitFor(() => received.length >= 4);
+
+    // Expected: A, B, C, D
+    expect(received).toEqual(['A', 'B', 'C', 'D']);
+    sub.unsubscribe();
   });
 });

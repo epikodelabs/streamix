@@ -86,6 +86,52 @@ idescribe("cascade", () => {
 
     await cascaded.finalize();
   });
+
+  it("return() marks the operator as completed", async () => {
+    const c1 = coroutine((x: number) => x + 1);
+    const cascaded = cascade(c1);
+
+    const source: AsyncIterator<number> = (async function* () {
+      yield 1;
+    })();
+
+    const it = (cascaded as any).apply(source) as AsyncIterator<number>;
+
+    const r0 = await it.return?.();
+    expect(r0).toEqual(jasmine.objectContaining({ done: true }));
+
+    const r1 = await it.next();
+    expect(r1.done).toBe(true);
+  });
+
+  it("throw() marks the operator as completed and rethrows", async () => {
+    const cascaded = cascade();
+
+    const source: AsyncIterator<number> = (async function* () {
+      yield 1;
+    })();
+
+    const it = (cascaded as any).apply(source) as AsyncIterator<number>;
+
+    await expectAsync(it.throw?.(new Error("boom"))).toBeRejectedWithError("boom");
+
+    const r1 = await it.next();
+    expect(r1.done).toBe(true);
+  });
+
+  it("passes through values when no tasks are provided (stream pipeline)", async () => {
+    const stream = createStream("test", async function* () {
+      yield 1;
+      yield 2;
+    });
+
+    const results: number[] = [];
+    for await (const v of stream.pipe(cascade())) {
+      results.push(v);
+    }
+
+    expect(results).toEqual([1, 2]);
+  });
 });
 
 

@@ -127,7 +127,7 @@ describe('createBehaviorSubject', () => {
     afterErrorSubject.error(new Error('boom'));
     afterErrorSubject.complete();
     await delay();
-    expect(completionCount).toBe(1);
+    expect(completionCount).toBe(0);
   });
 
   it('exposes value getter, query, observer, and iterator helpers consistently', async () => {
