@@ -1,12 +1,10 @@
 import {
-    createOperator,
-    DONE,
-    getIteratorEmissionStamp,
-    NEXT,
-    nextEmissionStamp,
-    setIteratorEmissionStamp,
-    type Operator,
-    type Stream,
+  createOperator,
+  getIteratorEmissionStamp,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  type Operator,
+  type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 
@@ -142,14 +140,11 @@ export function takeUntil<T = any>(
         }
       },
 
-      async return(value?: any) {
+      async return() {
         try { await sourceIt.return?.(); } catch {}
         try { await notifierIt.return?.(); } catch {}
         pending = null;
-        if (value !== undefined) {
-          return NEXT(value);
-        }
-        return DONE;
+        return { done: true, value: undefined };
       },
 
       async throw(err) {

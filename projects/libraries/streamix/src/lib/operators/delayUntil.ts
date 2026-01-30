@@ -1,11 +1,9 @@
 import {
   createOperator,
-  DONE,
   getIteratorEmissionStamp,
-  NEXT,
   setIteratorEmissionStamp,
   type Operator,
-  type Stream
+  type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createSubject } from "../subjects";
@@ -144,12 +142,7 @@ export function delayUntil<T = any, R = any>(
         } catch {}
 
         output.complete();
-
-        if (value !== undefined) {
-          return NEXT(value);
-        }
-
-        return DONE;
+        return outputIt.return?.(value) ?? { done: true as const, value };
       },
       throw: async (error?: any) => {
         cancelled = true;

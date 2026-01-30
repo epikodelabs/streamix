@@ -1,8 +1,6 @@
 import {
   createOperator,
-  DONE,
   getIteratorEmissionStamp,
-  NEXT,
   nextEmissionStamp,
   setIteratorEmissionStamp,
   type Operator,
@@ -99,19 +97,14 @@ export function skipUntil<T = any, R = any>(
         }
       },
 
-      async return(value?: any) {
+      async return() {
         try {
           await sourceIt.return?.();
         } catch {}
         try {
           await notifierIt.return?.();
         } catch {}
-
-        if (value !== undefined) {
-          return NEXT(value);
-        }
-
-        return DONE;
+        return { done: true, value: undefined };
       },
 
       async throw(err) {

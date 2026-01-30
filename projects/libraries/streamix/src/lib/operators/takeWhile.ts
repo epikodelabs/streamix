@@ -44,20 +44,5 @@ export const takeWhile = <T = any>(
 
         return NEXT(result.value);
       },
-      return: async (value?: any) => {
-        try {
-          await source.return?.();
-        } catch {}
-        if (value !== undefined) {
-          return NEXT(value);
-        }
-        return DONE;
-      },
-      throw: async (err: any) => {
-        try {
-          await source.return?.();
-        } catch {}
-        throw err;
-      }
     };
   });

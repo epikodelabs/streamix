@@ -87,16 +87,11 @@ describe('helpers', () => {
       ready.add(receiver);
 
       const setLatestValue = jasmine.createSpy('setLatestValue');
-      
-      let tryCommit: () => void;
-      const scheduleCommit = () => tryCommit();
-      
-      tryCommit = createTryCommit({
+      const tryCommit = createTryCommit({
         receivers,
         ready,
         queue,
         setLatestValue,
-        scheduleCommit
       });
 
       tryCommit();
