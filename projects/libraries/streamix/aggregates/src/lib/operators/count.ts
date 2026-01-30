@@ -1,11 +1,12 @@
-import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Creates a stream operator that counts the number of items emitted by the source stream.
  *
- * This operator consumes all values from the source stream without emitting anything.
- * Once the source stream completes, it emits a single value, which is the total
- * number of items that were in the source stream. It then completes.
+ * This operator consumes every value from the source without emitting until the
+ * upstream completes. After the source finishes, it emits exactly one number:
+ * the total count of consumed values (zero if nothing arrived), and then the
+ * operator completes.
  *
  * @template T The type of the values in the source stream.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.

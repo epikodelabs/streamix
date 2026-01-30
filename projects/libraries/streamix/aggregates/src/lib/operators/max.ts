@@ -1,10 +1,14 @@
-import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromiseLike } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from '@epikodelabs/streamix';
 
 /**
  * Creates a stream operator that emits the maximum value from the source stream.
  *
- * This is a terminal operator that consumes the entire source lazily,
- * emitting phantoms along the way and finally emitting the maximum value.
+ * This terminal operator consumes every downstream value, retains the current maximum
+ * as data flows through, and waits for the source to complete before emitting the winner.
+ * A comparator can be provided to override the default `>` comparison; asynchronous comparators
+ * are supported because they are awaited internally.
+ * The operator emits once with the maximum value (if any values were provided) and then completes.
+ * For empty sources it returns `DONE` without emitting.
  *
  * @template T The type of the values in the source stream.
  * @param comparator Optional comparison function: positive if `a > b`, negative if `a < b`.

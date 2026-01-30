@@ -2,7 +2,7 @@ import { createStream, type MaybePromise, type Stream } from "@epikodelabs/strea
 import type { Coroutine, CoroutineMessage } from "../operators";
 
 /**
- * Interface for a worker that has been "seized" from the coroutine pool.
+ * Interface for a worker that has been "hired" from the coroutine pool.
  * It provides a persistent, bidirectional communication channel and a method
  * to release the worker back to the pool.
  *
@@ -10,12 +10,12 @@ import type { Coroutine, CoroutineMessage } from "../operators";
  * @template R The type of data returned from the worker.
  * @interface
  */
-export interface SeizedWorker<T = any, R = T> {
-  /** The unique identifier of the seized worker. */
+export interface HiredWorker<T = any, R = T> {
+  /** The unique identifier of the hired worker. */
   workerId: number;
 
   /**
-   * Sends a task to the seized worker.
+   * Sends a task to the hired worker.
    * @param {T} data The data to be processed by the worker.
    * @returns {Promise<R>} A promise that resolves with the result from the worker.
    */
@@ -30,30 +30,30 @@ export interface SeizedWorker<T = any, R = T> {
 }
 
 /**
- * Creates a stream that "seizes" a single worker from the coroutine pool,
+ * Creates a stream that "hires" a single worker from the coroutine pool,
  * providing a persistent, manually-controlled communication channel.
  *
  * This operator is ideal for scenarios where you need to perform multiple,
  * sequential tasks on a specific, stateful worker. The worker remains
  * dedicated to the returned stream until the `release()` method is called
- * on the `SeizedWorker` object.
+ * on the `HiredWorker` object.
  *
- * The stream itself will only emit a single `SeizedWorker` object and then complete
+ * The stream itself will only emit a single `HiredWorker` object and then complete
  * after the worker has been released.
  *
  * @template T The type of data sent to the worker.
  * @template R The type of data returned from the worker.
  * @param {Coroutine<T, R>} task The coroutine instance managing the worker pool.
- * @param {(message: CoroutineMessage) => MaybePromise<void>} onMessage A callback function to handle messages received from the seized worker.
- * @param {(error: Error) => MaybePromise<void>} onError A callback function to handle errors originating from the seized worker.
- * @returns {Stream<SeizedWorker<T, R>>} A stream that yields a single `SeizedWorker` object.
+ * @param {(message: CoroutineMessage) => MaybePromise<void>} onMessage A callback function to handle messages received from the hired worker.
+ * @param {(error: Error) => MaybePromise<void>} onError A callback function to handle errors originating from the hired worker.
+ * @returns {Stream<HiredWorker<T, R>>} A stream that yields a single `HiredWorker` object.
  */
-export function seize<T = any, R = T>(
+export function hire<T = any, R = T>(
   task: Coroutine<T, R>,
   onMessage: (message: CoroutineMessage) => MaybePromise<void>,
   onError: (error: Error) => MaybePromise<void>
-): Stream<SeizedWorker<T, R>> {
-  return createStream("seize", async function* () {
+): Stream<HiredWorker<T, R>> {
+  return createStream("hire", async function* () {
     const { worker, workerId } = await task.getIdleWorker();
     let disposed = false;
     const ac = new AbortController();
@@ -85,14 +85,14 @@ export function seize<T = any, R = T>(
 
     worker.addEventListener("error", errorHandler);
 
-    const seizedWorker: SeizedWorker<T, R> = {
+    const hiredWorker: HiredWorker<T, R> = {
       workerId,
       sendTask: (data: T) => task.assignTask(workerId, data),
       release: cleanup,
     };
 
     try {
-      yield seizedWorker;
+      yield hiredWorker;
 
       // Wait until release or iterator is abandoned
       await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));

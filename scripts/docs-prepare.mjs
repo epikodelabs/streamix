@@ -42,17 +42,17 @@ function escapeRegExp(value) {
 ensureDir(distRoot);
 ensureDir(apiRoot);
 
-const introductionPath = path.join(docsRoot, 'INTRODUCTION.md');
-if (!fs.existsSync(introductionPath)) {
-  throw new Error('INTRODUCTION.md not found in docs directory.');
+const readmePath = path.join(repoRoot, 'README.md');
+if (!fs.existsSync(readmePath)) {
+  throw new Error('README.md not found in repository root.');
 }
 
 const indexPath = path.join(distRoot, 'index.md');
-copyFile(introductionPath, indexPath);
+copyFile(readmePath, indexPath);
 
 if (fs.existsSync(docsRoot)) {
   for (const fileName of listMarkdownFiles(docsRoot)) {
-    if (fileName.toLowerCase() === 'introduction.md') {
+    if (fileName.toLowerCase() === 'readme.md') {
       continue;
     }
     copyFile(path.join(docsRoot, fileName), path.join(distRoot, fileName));
@@ -66,10 +66,7 @@ for (const entry of fs.readdirSync(repoRoot, { withFileTypes: true })) {
   if (!entry.name.toLowerCase().endsWith('.md')) {
     continue;
   }
-  if (entry.name.toLowerCase() === 'introduction.md') {
-    continue;
-  }
-  if (entry.name.toLowerCase().startsWith('readme')) {
+  if (entry.name.toLowerCase() === 'readme.md') {
     continue;
   }
   copyIfMissing(path.join(repoRoot, entry.name), path.join(distRoot, entry.name));
@@ -104,10 +101,10 @@ for (const fileName of distMarkdown) {
     );
   }
 
-  content = content.replace(/]\(\.\/INTRODUCTION\.md(#[^)]+)?\)/g, '](./$1)');
-  content = content.replace(/]\(\.\/INTRODUCTION(#[^)]+)?\)/g, '](./$1)');
-  content = content.replace(/]\(\/INTRODUCTION\.md(#[^)]+)?\)/g, '](/$1)');
-  content = content.replace(/]\(\/INTRODUCTION(#[^)]+)?\)/g, '](/$1)');
+  content = content.replace(/]\(\.\/README\.md(#[^)]+)?\)/g, '](./$1)');
+  content = content.replace(/]\(\.\/README(#[^)]+)?\)/g, '](./$1)');
+  content = content.replace(/]\(\/README\.md(#[^)]+)?\)/g, '](/$1)');
+  content = content.replace(/]\(\/README(#[^)]+)?\)/g, '](/$1)');
 
   if (content !== original) {
     writeText(filePath, content);

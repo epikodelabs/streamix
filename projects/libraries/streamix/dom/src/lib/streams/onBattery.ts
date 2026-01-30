@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Represents the current battery status.
@@ -52,16 +52,21 @@ export function onBattery(): Stream<BatteryState> {
       return;
     }
 
-    battery = await (navigator as any).getBattery();
-    if (stopped || subscriberCount === 0) return;
-    
-    // Defer initial emission to allow subscription variable assignment
-    if (!stopped) emit();
+    try {
+      battery = await (navigator as any).getBattery();
+      if (stopped || subscriberCount === 0) return;
+      
+      // Defer initial emission to allow subscription variable assignment
+      if (!stopped) emit();
 
-    battery.addEventListener("chargingchange", emit);
-    battery.addEventListener("levelchange", emit);
-    battery.addEventListener("chargingtimechange", emit);
-    battery.addEventListener("dischargingtimechange", emit);
+      battery.addEventListener("chargingchange", emit);
+      battery.addEventListener("levelchange", emit);
+      battery.addEventListener("chargingtimechange", emit);
+      battery.addEventListener("dischargingtimechange", emit);
+    } catch (err) {
+      // getBattery() rejected - silently fail (e.g., permission denied)
+      stopped = true;
+    }
   };
 
   const stop = () => {
@@ -97,12 +102,28 @@ export function onBattery(): Stream<BatteryState> {
 
     scheduleStart();
 
-    const o = sub.onUnsubscribe;
-    sub.onUnsubscribe = () => {
-      if (--subscriberCount === 0) {
-        stop();
+    const baseUnsubscribe = sub.unsubscribe.bind(sub);
+    let cleaned = false;
+
+    sub.unsubscribe = () => {
+      if (!cleaned) {
+        cleaned = true;
+
+        subscriberCount = Math.max(0, subscriberCount - 1);
+        if (subscriberCount === 0) {
+          stop();
+        }
+
+        // Some DOM specs expect the onUnsubscribe callback to run synchronously.
+        const onUnsubscribe = sub.onUnsubscribe;
+        sub.onUnsubscribe = undefined;
+        try {
+          onUnsubscribe?.();
+        } catch {
+        }
       }
-      o?.call(sub);
+
+      return baseUnsubscribe();
     };
 
     return sub;
@@ -113,7 +134,7 @@ export function onBattery(): Stream<BatteryState> {
    * ---------------------------------------------------------------------- */
 
   subject[Symbol.asyncIterator] = () =>
-    createAsyncGenerator(receiver => subject.subscribe(receiver));
+    createAsyncIterator({ register: (receiver: Receiver<BatteryState>) => subject.subscribe(receiver) })();
 
   subject.name = "onBattery";
   return subject;

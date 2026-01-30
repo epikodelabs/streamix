@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the document's visibility state
@@ -27,10 +27,15 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
   let stopped = true;
 
   const getState = (): DocumentVisibilityState => {
-    if (typeof document === "undefined" || !("visibilityState" in document)) {
+    if (typeof document === "undefined") {
       return "visible";
     }
-    return document.visibilityState;
+
+    const state = (document as any).visibilityState;
+    if (state === "visible" || state === "hidden") {
+      return state;
+    }
+    return "visible";
   };
 
   const emit = () => {
@@ -93,7 +98,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
    * ---------------------------------------------------------------------- */
 
   subject[Symbol.asyncIterator] = () =>
-    createAsyncGenerator(receiver => subject.subscribe(receiver));
+    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
 
   return subject;
 }

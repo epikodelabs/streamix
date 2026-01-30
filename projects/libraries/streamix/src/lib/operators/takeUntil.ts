@@ -45,9 +45,9 @@ export function takeUntil<T = any>(
 
     let gateStamp: number | null = null;   // ONLY for notifier emit
     let notifierError: any = null;
+    let notifierErrorStamp: number | null = null;
 
     let pending: { value: T; stamp: number } | null = null;
-    let throwAfterPending = false;
 
     const stampOf = (it: any) => {
       const s = getIteratorEmissionStamp(it);
@@ -63,69 +63,94 @@ export function takeUntil<T = any>(
         if (!r.done) {
           // notifier EMIT → gate + cancel source
           gateStamp = stamp;
-          try { sourceIt.return?.(); } catch {}
+          try { await sourceIt.return?.(); } catch {}
         }
       } catch (err) {
         // notifier ERROR → NO source cancellation
         notifierError = err;
+        notifierErrorStamp = stampOf(notifierIt);
+      } finally {
+        try { await notifierIt.return?.(); } catch {}
       }
     })();
 
+    const tryDrainBufferedValue = (): IteratorResult<T> | null => {
+      const tryNext = (sourceIt as any).__tryNext;
+      if (typeof tryNext === "function") {
+        try {
+          return tryNext.call(sourceIt);
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    };
+
     const iterator: AsyncIterator<T> = {
       async next() {
-        // 1) deliver buffered value
-        if (pending) {
-          const { value, stamp } = pending;
-          pending = null;
+        while (true) {
+          // 1) deliver buffered value
+          if (pending) {
+            const { value, stamp } = pending;
+            pending = null;
+            setIteratorEmissionStamp(iterator as any, stamp);
+            return { done: false, value };
+          }
+
+          // 2) notifier ERROR: flush buffered source values that happened
+          // before the notifier error stamp, then throw.
+          if (notifierError) {
+            const buffered = tryDrainBufferedValue();
+            if (buffered && !buffered.done) {
+              const stamp = stampOf(sourceIt);
+              if (notifierErrorStamp === null || stamp < notifierErrorStamp) {
+                setIteratorEmissionStamp(iterator as any, stamp);
+                return { done: false, value: buffered.value };
+              }
+            }
+            throw notifierError;
+          }
+
+          // 3) pull source
+          const r = await sourceIt.next();
+          const stamp = stampOf(sourceIt);
+
+          if (r.done) {
+            if (notifierError) throw notifierError;
+            return { done: true, value: undefined };
+          }
+
+          // 4) gate ONLY on notifier emit
+          if (gateStamp !== null && stamp >= gateStamp) {
+            return { done: true, value: undefined };
+          }
+
+          // 5) notifier errored AFTER pull → yield value, then error
+          if (notifierError) {
+            if (notifierErrorStamp === null || stamp < notifierErrorStamp) {
+              pending = { value: r.value, stamp };
+              continue;
+            }
+            throw notifierError;
+          }
+
+          // 6) normal path
           setIteratorEmissionStamp(iterator as any, stamp);
-          return { done: false, value };
+          return { done: false, value: r.value };
         }
-
-        // 2) throw notifier error after pending value
-        if (throwAfterPending) {
-          throwAfterPending = false;
-          throw notifierError;
-        }
-
-        // 3) pull source
-        const r = await sourceIt.next();
-        const stamp = stampOf(sourceIt);
-
-        if (r.done) {
-          if (notifierError) throw notifierError;
-          return { done: true, value: undefined };
-        }
-
-        // 4) gate ONLY on notifier emit
-        if (gateStamp !== null && stamp >= gateStamp) {
-          return { done: true, value: undefined };
-        }
-
-        // 5) notifier errored AFTER pull → yield value, then error
-        if (notifierError) {
-          pending = { value: r.value, stamp };
-          throwAfterPending = true;
-          return this.next();
-        }
-
-        // 6) normal path
-        setIteratorEmissionStamp(iterator as any, stamp);
-        return { done: false, value: r.value };
       },
 
       async return() {
-        try { sourceIt.return?.(); } catch {}
-        try { notifierIt.return?.(); } catch {}
+        try { await sourceIt.return?.(); } catch {}
+        try { await notifierIt.return?.(); } catch {}
         pending = null;
-        throwAfterPending = false;
         return { done: true, value: undefined };
       },
 
       async throw(err) {
-        try { sourceIt.return?.(); } catch {}
-        try { notifierIt.return?.(); } catch {}
+        try { await sourceIt.return?.(); } catch {}
+        try { await notifierIt.return?.(); } catch {}
         pending = null;
-        throwAfterPending = false;
         throw err;
       },
     };

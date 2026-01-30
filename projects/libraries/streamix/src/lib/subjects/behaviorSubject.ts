@@ -3,171 +3,136 @@ import {
   createSubscription,
   generateStreamId,
   getCurrentEmissionStamp,
-  isPromiseLike,
   nextEmissionStamp,
   pipeSourceThrough,
   withEmissionStamp,
   type Operator,
   type Receiver,
+  type Stream,
   type StrictReceiver,
   type Subscription
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
-import {
-  createAsyncIterator,
-  createTryCommit,
-  type QueueItem,
-} from "./helpers";
-import type { Subject } from "./subject";
+import { createAsyncIterator } from "./helpers";
 
-/* ========================================================================== */
-/* BehaviorSubject                                                            */
-/* ========================================================================== */
-
-/**
- * Subject variant that synchronously emits the latest pushed value to every
- * subscriber as soon as they register.
- *
- * @template T Value type managed by this subject.
- */
-export type BehaviorSubject<T = any> = Subject<T> & {
-  get value(): T;
+export type BehaviorSubject<T = any> = Stream<T> & {
+  next(value: T): void;
+  complete(): void;
+  error(err: any): void;
+  completed(): boolean;
+  get value(): T; // BehaviorSubject always has a value
 };
 
-/**
- * Create a `BehaviorSubject` seeded with an initial value so that the first
- * subscriber immediately receives the current state.
- *
- * @template T Value type managed by the subject.
- * @param initialValue Value that subscribers receive immediately.
- */
-export function createBehaviorSubject<T>(initialValue: T): BehaviorSubject<T> {
+export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
   const id = generateStreamId();
-
-  const receivers = new Set<StrictReceiver<T>>();
-  const ready = new Set<StrictReceiver<T>>();
-  const queue: QueueItem<T>[] = [];
-
   let latestValue: T = initialValue;
   let isCompleted = false;
-  const terminalRef = { current: null as QueueItem<T> | null };
+  let terminalItem: { kind: "complete" | "error"; error?: any; stamp: number } | null = null;
 
-  /* ------------------------------------------------------------------------ */
-  /* Commit barrier (IDENTICAL to Subject)                                     */
-  /* ------------------------------------------------------------------------ */
-
-  const setLatestValue = (v: T) => {
-    latestValue = v;
-  };
-
-  const tryCommit = createTryCommit<T>({
-    receivers,
-    ready,
-    queue,
-    setLatestValue,
-  });
-
-  /* ------------------------------------------------------------------------ */
-  /* Producer API                                                             */
-  /* ------------------------------------------------------------------------ */
+  type TrackedReceiver = StrictReceiver<T> & { subscribedAt: number };
+  const receivers = new Set<TrackedReceiver>();
 
   const next = (value: T) => {
     if (isCompleted) return;
+    latestValue = value;
+    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
 
-    const current = getCurrentEmissionStamp();
-    const base = current ?? nextEmissionStamp();
-    const stamp = current === null ? -base : base;
-
-    queue.push({ kind: "next", value, stamp });
-    tryCommit();
+    // Synchronous delivery
+    const targets = Array.from(receivers).filter((r) => stamp > r.subscribedAt);
+    withEmissionStamp(stamp, () => {
+      for (const r of targets) {
+        r.next(value);
+      }
+    });
   };
 
   const complete = () => {
     if (isCompleted) return;
     isCompleted = true;
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    const item: QueueItem<T> = { kind: "complete", stamp };
-    terminalRef.current = item;
-    queue.push(item);
-    tryCommit();
+    terminalItem = { kind: "complete", stamp };
+
+    // Synchronous delivery
+    const targets = Array.from(receivers);
+    withEmissionStamp(stamp, () => {
+      for (const r of targets) {
+        r.complete();
+      }
+    });
+    receivers.clear();
   };
 
   const error = (err: any) => {
     if (isCompleted) return;
     isCompleted = true;
-
     const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    const item: QueueItem<T> = {
-      kind: "error",
-      error: err instanceof Error ? err : new Error(String(err)),
-      stamp,
-    };
-    terminalRef.current = item;
-    queue.push(item);
-    tryCommit();
-  };
+    terminalItem = { kind: "error", error: err, stamp };
 
-  /* ------------------------------------------------------------------------ */
-  /* Subscription                                                             */
-  /* ------------------------------------------------------------------------ */
+    // Synchronous delivery
+    const targets = Array.from(receivers);
+    withEmissionStamp(stamp, () => {
+      for (const r of targets) {
+        r.error(err);
+      }
+    });
+    receivers.clear();
+  };
 
   const register = (receiver: Receiver<T>): Subscription => {
     const r = receiver as StrictReceiver<T>;
-    const item = terminalRef.current;
-    if (item) {
-      if (item.kind === "complete") {
-        withEmissionStamp(item.stamp, () => r.complete());
-      } else if (item.kind === "error") {
-        const err = item.error;
-        withEmissionStamp(item.stamp, () => r.error(err));
-      }
+
+    if (terminalItem) {
+      const term = terminalItem;
+      withEmissionStamp(term.stamp, () => {
+        if (term.kind === "complete") r.complete();
+        else if (term.kind === "error") r.error(term.error);
+      });
       return createSubscription();
     }
 
-    receivers.add(r);
-    ready.add(r);
+    // Capture the value and stamp at the EXACT moment of registration
+    const replayValue = latestValue;
+    const replayStamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+    
+    // Use the emission stamp as the subscription marker so delivery logic
+    // (which compares emission stamps) remains consistent across helpers.
+    // Mutate the receiver to attach `subscribedAt` so helpers that expect
+    // the property on the original receiver work correctly.
+    (r as any).subscribedAt = replayStamp;
+    const trackedReceiver = r as TrackedReceiver;
+    receivers.add(trackedReceiver);
 
-    /* BehaviorSubject semantic: emit latest value directly to THIS receiver only */
-    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    withEmissionStamp(stamp, () => {
-      const res = r.next(latestValue);
-      if (isPromiseLike(res)) {
-        ready.delete(r);
-        res.finally(() => {
-          if (!r.completed && receivers.has(r)) {
-            ready.add(r);
-            tryCommit();
-          }
-        });
+    // Replay the current state to the new subscriber immediately so
+    // async iterators see the value before returning.
+    try {
+      if (!r.completed && receivers.has(trackedReceiver)) {
+        withEmissionStamp(replayStamp, () => r.next(replayValue));
       }
+    } catch (_) {}
+
+    const baseSub = createSubscription(() => {
+      // Synchronous completion
+      if (!r.completed) {
+        const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+        withEmissionStamp(stamp, () => r.complete());
+      }
+      receivers.delete(trackedReceiver);
     });
 
-    tryCommit();
+    const wrappedSub: Subscription = {
+      get unsubscribed() {
+        return baseSub.unsubscribed;
+      },
+      unsubscribe() {
+        // Remove receiver synchronously to prevent further deliveries
+        receivers.delete(trackedReceiver);
+        return baseSub.unsubscribe();
+      },
+      onUnsubscribe: baseSub.onUnsubscribe,
+    };
 
-    return createSubscription(() => {
-      receivers.delete(r);
-      ready.delete(r);
-
-      const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-      withEmissionStamp(stamp, () => r.complete());
-
-      tryCommit();
-    });
+    return wrappedSub;
   };
-
-
-  const subscribe = (cb?: ((v: T) => any) | Receiver<T>) =>
-    register(createReceiver(cb));
-
-  /* ------------------------------------------------------------------------ */
-  /* Async iterator                                                           */
-  /* ------------------------------------------------------------------------ */
-
-  const asyncIterator = createAsyncIterator<T>({ register });
-
-  /* ------------------------------------------------------------------------ */
-  /* Public API                                                               */
-  /* ------------------------------------------------------------------------ */
 
   return {
     type: "subject",
@@ -176,17 +141,17 @@ export function createBehaviorSubject<T>(initialValue: T): BehaviorSubject<T> {
     get value() {
       return latestValue;
     },
-    pipe(...ops: Operator<any, any>[]) {
-      return pipeSourceThrough(this, ops);
+    pipe(...steps: Operator<any, any>[]): Stream<any> {
+      return pipeSourceThrough(this, steps);
     },
-    subscribe,
-    async query() {
+    subscribe: (cb) => register(createReceiver(cb)),
+    async query(): Promise<T> {
       return firstValueFrom(this);
     },
     next,
     complete,
     error,
     completed: () => isCompleted,
-    [Symbol.asyncIterator]: asyncIterator,
-  };
+    [Symbol.asyncIterator]: createAsyncIterator({ register })
+  } as BehaviorSubject<T>;
 }

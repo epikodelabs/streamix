@@ -1,4 +1,4 @@
-import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromiseLike } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Creates a stream operator that emits only distinct values from the source stream.
@@ -10,6 +10,7 @@ import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromise
  * The uniqueness check can be based on the value itself or on a key derived from
  * the value using a provided `keySelector` function. This makes it ideal for de-duplicating
  * streams of primitive values or complex objects.
+ * Duplicate values are dropped quietly, so the operator may emit fewer values than the source.
  *
  * @template T The type of the values in the source stream.
  * @template K The type of the key used for comparison.

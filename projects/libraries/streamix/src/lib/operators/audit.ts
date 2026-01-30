@@ -76,7 +76,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
           clearTimeout(timerId);
           timerId = undefined;
         }
-        output.complete();
+        if (!output.completed()) output.complete();
       }
     })();
 

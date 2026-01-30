@@ -1,4 +1,4 @@
-import { createAsyncGenerator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the time delta (in milliseconds) between
@@ -24,35 +24,52 @@ export function onAnimationFrame(): Stream<number> {
 
   let rafId: number | null = null;
   let lastTime = 0;
+  let cancelFrame: ((id: any) => void) | null = null;
 
   const startLoop = () => {
     if (!stopped) return;
     stopped = false;
 
     // SSR / non-browser guard
-    if (typeof performance === "undefined") return;
+    if (typeof globalThis.performance === "undefined") return;
 
-    const raf: typeof requestAnimationFrame =
-      typeof requestAnimationFrame === "function"
-        ? requestAnimationFrame
+    const hasRaf = typeof (globalThis as any).requestAnimationFrame === "function";
+    const raf: (cb: FrameRequestCallback) => number =
+      typeof (globalThis as any).requestAnimationFrame === "function"
+        ? (globalThis as any).requestAnimationFrame.bind(globalThis)
         : ((cb: FrameRequestCallback) =>
-            setTimeout(
-              () => cb(performance.now()),
+            globalThis.setTimeout(
+              () => cb(globalThis.performance.now()),
               16
-            )) as unknown as typeof requestAnimationFrame;
+            )) as unknown as (cb: FrameRequestCallback) => number;
 
-    lastTime = performance.now();
+    // Pick the corresponding cancellation function.
+    // Prefer `cancelAnimationFrame` when RAF is used, but fall back to `clearTimeout`
+    // for environments where RAF is timer-based or cancelAnimationFrame is missing.
+    if (hasRaf && typeof (globalThis as any).cancelAnimationFrame === "function") {
+      cancelFrame = (globalThis as any).cancelAnimationFrame.bind(globalThis);
+    } else {
+      cancelFrame = globalThis.clearTimeout.bind(globalThis);
+    }
 
     const tick = (now: number) => {
       if (stopped) return;
 
-      const delta = now - lastTime;
-      lastTime = now;
+      // Some RAF polyfills can provide non-monotonic timestamps; clamp to 0.
+      // Also treat the first tick as a 0-delta frame.
+      let delta = 0;
+      if (lastTime > 0 && now >= lastTime) {
+        delta = now - lastTime;
+      }
+      if (now >= lastTime) {
+        lastTime = now;
+      }
 
       subject.next(delta);
       rafId = raf(tick);
     };
 
+    lastTime = 0;
     rafId = raf(tick);
   };
 
@@ -61,13 +78,10 @@ export function onAnimationFrame(): Stream<number> {
     stopped = true;
 
     if (rafId !== null) {
-      if (typeof cancelAnimationFrame === "function") {
-        cancelAnimationFrame(rafId);
-      } else {
-        clearTimeout(rafId);
-      }
+      cancelFrame?.(rafId);
       rafId = null;
     }
+    cancelFrame = null;
   };
 
   /* ------------------------------------------------------------------------
@@ -89,12 +103,28 @@ export function onAnimationFrame(): Stream<number> {
 
     scheduleStart();
 
-    const originalOnUnsubscribe = subscription.onUnsubscribe;
-    subscription.onUnsubscribe = () => {
-      if (--subscriberCount === 0) {
-        stopLoop();
+    const baseUnsubscribe = subscription.unsubscribe.bind(subscription);
+    let cleaned = false;
+
+    subscription.unsubscribe = () => {
+      if (!cleaned) {
+        cleaned = true;
+
+        subscriberCount = Math.max(0, subscriberCount - 1);
+        if (subscriberCount === 0) {
+          stopLoop();
+        }
+
+        // Some specs expect onUnsubscribe to run synchronously.
+        const onUnsubscribe = subscription.onUnsubscribe;
+        subscription.onUnsubscribe = undefined;
+        try {
+          onUnsubscribe?.();
+        } catch {
+        }
       }
-      originalOnUnsubscribe?.call(subscription);
+
+      return baseUnsubscribe();
     };
 
     return subscription;
@@ -105,7 +135,7 @@ export function onAnimationFrame(): Stream<number> {
    * ---------------------------------------------------------------------- */
 
   subject[Symbol.asyncIterator] = () =>
-    createAsyncGenerator(receiver => subject.subscribe(receiver));
+    createAsyncIterator({ register: (receiver: Receiver<number>) => subject.subscribe(receiver) })();
 
   subject.name = "onAnimationFrame";
   return subject;

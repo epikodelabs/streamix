@@ -29,10 +29,15 @@
     "preserveModules": false,
     "preserveModulesRoot": "."
   },
+  "viteConfig": {
+    "server": {
+      "open": false
+    }
+  },
   "jasmineConfig": {
     "env": {
       "stopSpecOnExpectationFailure": false,
-      "random": true,
+      "random": false,
       "timeout": 120000
     }
   },

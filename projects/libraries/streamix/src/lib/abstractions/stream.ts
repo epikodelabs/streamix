@@ -1,84 +1,34 @@
 import { firstValueFrom } from "../converters";
+import { enqueueMicrotask, runInMicrotask } from "../primitives/scheduling";
+import { createAsyncIterator } from "../subjects/helpers";
 import {
   getCurrentEmissionStamp,
   getIteratorEmissionStamp,
   nextEmissionStamp,
-  setIteratorEmissionStamp,
-  withEmissionStamp,
+  withEmissionStamp
 } from "./emission";
 import {
+  applyPipeStreamHooks,
   generateStreamId,
   generateSubscriptionId,
-  getRuntimeHooks,
+  getRuntimeHooks
 } from "./hooks";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
 import { createSubscription, type Subscription } from "./subscription";
 
-/**
- * A reactive stream representing a sequence of values over time.
- *
- * Streams support:
- * - **Subscription** to receive asynchronous values.
- * - **Operator chaining** through `.pipe()`.
- * - **Querying** the first emitted value.
- * - **Async iteration** via `for await...of`.
- *
- * Two variants exist:
- * - `"stream"`: automatically driven, typically created by `createStream()`.
- * - `"subject"`: manually driven (not implemented here but retained for API symmetry).
- *
- * @template T The value type emitted by the stream.
- */
 export type Stream<T = any> = AsyncIterable<T> & {
-  /** Identifies the underlying behavior of the stream. */
   type: "stream" | "subject";
-
-  /** Human-readable name primarily for debugging and introspection. */
   name?: string;
-
-  /**
-   * Internal unique identifier of the stream instance.
-   *
-   * Used by runtime hooks (e.g. tracing, profiling, devtools).
-   * Not part of the public reactive API.
-   */
   id: string;
-
-  /**
-   * Creates a new derived stream by applying one or more `Operator`s.
-   *
-   * Operators compose into an async-iterator pipeline, transforming emitted values.
-   */
   pipe: OperatorChain<T>;
-
-  /**
-   * Subscribes to the stream.
-   *
-   * A callback or Receiver will be invoked for each next/error/complete event.
-   * Returns a `Subscription` that may be used to unsubscribe.
-   *
-   * Note: `complete` can be invoked on unsubscribe (and after error) to give
-   * receivers a single cleanup hook.
-   */
   subscribe: (
     callback?: ((value: T) => MaybePromise) | Receiver<T>
   ) => Subscription;
-
-  /**
-   * Convenience method for retrieving the first emitted value.
-   *
-   * Internally subscribes, resolves on the first `next`, and then unsubscribes.
-   */
   query: () => Promise<T>;
-
-  /** Allows direct async iteration: `for await (const value of stream) { ... }`. */
   [Symbol.asyncIterator](): AsyncIterator<T>;
 };
 
-/**
- * Type guard for Stream-like objects.
- */
 export const isStreamLike = <T = unknown>(
   value: unknown
 ): value is Stream<T> => {
@@ -91,317 +41,33 @@ export const isStreamLike = <T = unknown>(
   );
 };
 
-/**
- * Internal bookkeeping entry binding a receiver to its subscription.
- *
- * This structure is never exposed publicly and is used only for
- * multicast coordination and cleanup.
- */
 type SubscriberEntry<T> = {
   receiver: Receiver<T>;
   subscription: Subscription;
 };
 
-/**
- * Returns a promise that resolves when an AbortSignal becomes aborted.
- *
- * If the signal is already aborted, the promise resolves immediately.
- *
- * @param signal AbortSignal to observe
- * @returns Promise resolved on abort
- */
 function waitForAbort(signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
 
+  if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) =>
     signal.addEventListener("abort", resolve as any, { once: true })
   );
 }
 
-/* ========================================================================== */
-/* AsyncGenerator bridge (push -> pull)                                        */
-/* ========================================================================== */
-
-/**
- * Creates a pull-based async iterator view over a stream.
- *
- * This bridges the push-based subscription model with
- * the pull-based async-iterator protocol.
- *
- * Characteristics:
- * - Buffers values when the producer is faster than the consumer
- * - Propagates errors via iterator throws
- * - Guarantees subscription cleanup on completion, error, or early exit
- *
- * IMPORTANT (stamp-ordered terminals):
- * - complete/error are terminal EVENTS with stamps and must NOT overtake buffered
- *   values already queued for the iterator.
- */
-export function createAsyncGenerator<T = any>(
-  register: (receiver: Receiver<T>) => Subscription
-): AsyncIterator<T> {
-  let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
-  let rejectNext: ((error: any) => void) | null = null;
-
-  let completed = false;
-  let terminalError: any = null;
-
-  const queue: Array<{ value: T; stamp: number }> = [];
-
-  // Pending terminal is stamp-ordered; only surfaced when queue is drained.
-  let pendingTerminal:
-    | null
-    | { kind: "complete"; stamp: number }
-    | { kind: "error"; stamp: number; error: any } = null;
-
-  let subscription: Subscription | undefined;
-  let pendingUnsubscribe = false;
-
-  const ensureSubscription = () => {
-    if (subscription || completed || terminalError) return;
-    subscription = register(receiverCallbacks);
-    if (pendingUnsubscribe) {
-      const sub = subscription;
-      subscription = undefined;
-      pendingUnsubscribe = false;
-      sub?.unsubscribe();
-    }
-  };
-
-  const requestUnsubscribe = (): void => {
-    if (subscription) {
-      const sub = subscription;
-      subscription = undefined;
-      sub.unsubscribe();
-      return;
-    }
-    pendingUnsubscribe = true;
-  };
-
-  const flushTerminalIfReady = (): boolean => {
-    if (!pendingTerminal) return false;
-    if (queue.length > 0) return false;
-
-    const t = pendingTerminal;
-    pendingTerminal = null;
-
-    completed = true;
-
-    if (t.kind === "complete") {
-      if (resolveNext) {
-        setIteratorEmissionStamp(iterator as any, t.stamp);
-        const r = resolveNext;
-        resolveNext = null;
-        rejectNext = null;
-        r({ done: true, value: undefined });
-      }
-      requestUnsubscribe();
-      return true;
-    }
-
-    // error
-    terminalError = t.error;
-    if (rejectNext) {
-      setIteratorEmissionStamp(iterator as any, t.stamp);
-      const r = rejectNext;
-      resolveNext = null;
-      rejectNext = null;
-      r(t.error);
-    }
-    requestUnsubscribe();
-    return true;
-  };
-
-  const iterator: AsyncIterator<T> &
-    AsyncIterable<T> & {
-      __tryNext?: () => IteratorResult<T> | null;
-      __hasBufferedValues?: () => boolean;
-    } = {
-    async next(): Promise<IteratorResult<T>> {
-      if (terminalError) throw terminalError;
-
-      ensureSubscription();
-      if (terminalError) throw terminalError;
-
-      if (queue.length > 0) {
-        const item = queue.shift()!;
-        setIteratorEmissionStamp(iterator as any, item.stamp);
-
-        // Terminal events must not overtake buffered values.
-        flushTerminalIfReady();
-
-        return { done: false, value: item.value };
-      }
-
-      // If terminal is pending and buffer is empty, surface it now.
-      if (flushTerminalIfReady()) {
-        if (terminalError) throw terminalError;
-        return { done: true, value: undefined };
-      }
-
-      if (completed) {
-        return { done: true, value: undefined };
-      }
-
-      return await new Promise<IteratorResult<T>>((resolve, reject) => {
-        resolveNext = resolve;
-        rejectNext = reject;
-      });
-    },
-
-    async return(value?: any): Promise<IteratorResult<T>> {
-      // Early exit: consumer stops. This is not a stamp-ordered terminal from producer,
-      // but a consumer-driven cancellation. We mark completed and unsubscribe.
-      completed = true;
-
-      if (resolveNext) {
-        const r = resolveNext;
-        resolveNext = null;
-        rejectNext = null;
-        r({ done: true, value });
-      }
-
-      requestUnsubscribe();
-      return { done: true, value };
-    },
-
-    async throw(err?: any): Promise<IteratorResult<T>> {
-      terminalError = err;
-
-      if (rejectNext) {
-        const r = rejectNext;
-        resolveNext = null;
-        rejectNext = null;
-        r(err);
-      }
-
-      requestUnsubscribe();
-      throw err;
-    },
-
-    [Symbol.asyncIterator]() {
-      return this as any;
-    },
-  };
-
-  iterator.__tryNext = (): IteratorResult<T> | null => {
-    if (terminalError) throw terminalError;
-
-    ensureSubscription();
-    if (terminalError) throw terminalError;
-
-    if (queue.length > 0) {
-      const item = queue.shift()!;
-      setIteratorEmissionStamp(iterator as any, item.stamp);
-
-      flushTerminalIfReady();
-
-      return { done: false, value: item.value };
-    }
-
-    // Surface pending terminal synchronously when buffer is empty.
-    if (pendingTerminal && queue.length === 0) {
-      const t = pendingTerminal;
-      pendingTerminal = null;
-      completed = true;
-
-      if (t.kind === "complete") {
-        setIteratorEmissionStamp(iterator as any, t.stamp);
-        requestUnsubscribe();
-        return { done: true, value: undefined };
-      } else {
-        terminalError = t.error;
-        setIteratorEmissionStamp(iterator as any, t.stamp);
-        requestUnsubscribe();
-        throw t.error;
-      }
-    }
-
-    if (completed) {
-      return { done: true, value: undefined };
-    }
-
-    return null;
-  };
-
-  iterator.__hasBufferedValues = () => queue.length > 0;
-
-  const receiverCallbacks: Receiver<T> = {
-    next(value: T) {
-      if (completed || terminalError) return;
-
-      const currentStamp = getCurrentEmissionStamp();
-      const baseStamp = currentStamp ?? nextEmissionStamp();
-      const stamp = currentStamp === null ? -baseStamp : baseStamp;
-
-      if (resolveNext) {
-        setIteratorEmissionStamp(iterator as any, stamp);
-        const r = resolveNext;
-        resolveNext = null;
-        rejectNext = null;
-        r({ done: false, value });
-      } else {
-        queue.push({ value, stamp });
-      }
-    },
-
-    error(err: any) {
-      // Defer error until buffered values are drained (stamp-ordered terminal).
-      if (completed || terminalError || pendingTerminal) return;
-
-      const currentStamp = getCurrentEmissionStamp();
-      const stamp = currentStamp ?? nextEmissionStamp();
-
-      pendingTerminal = { kind: "error", stamp, error: err };
-
-      // If no buffered values, we can flush immediately (and wake waiter).
-      if (queue.length === 0) {
-        flushTerminalIfReady();
-      }
-    },
-
-    complete() {
-      // Defer completion until buffered values are drained (stamp-ordered terminal).
-      if (completed || terminalError || pendingTerminal) return;
-
-      const currentStamp = getCurrentEmissionStamp();
-      const stamp = currentStamp ?? nextEmissionStamp();
-
-      pendingTerminal = { kind: "complete", stamp };
-
-      if (queue.length === 0) {
-        flushTerminalIfReady();
-      }
-    },
-  };
-
-  (receiverCallbacks as any).__wantsRawValues = true;
-
-  return iterator;
-}
-
-/* ========================================================================== */
-/* Receiver scheduling wrapper                                                 */
-/* ========================================================================== */
-
-/**
- * Wraps a Receiver so all callbacks are executed via the scheduler.
- *
- * Guarantees:
- * - All callbacks are async-scheduled (no sync re-entrancy)
- * - Errors thrown in `next` are forwarded to `error` if present
- * - Errors in `error` or `complete` are swallowed
- */
 function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
   const wrapped: Receiver<T> = {};
 
   const execute = (cb: () => MaybePromise) => {
     const stamp = getCurrentEmissionStamp();
     if (stamp !== null) {
-      // Synchronous execution when within an emission context
-      return cb();
+      try {
+        return cb();
+      } catch (err) {
+        return Promise.reject(err);
+      }
     }
-    return Promise.resolve().then(cb).catch(() => {});
+
+    return runInMicrotask(cb).then(() => void 0);
   };
 
   if (receiver.next) {
@@ -415,7 +81,6 @@ function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
             try {
               await receiver.error!(error);
             } catch {
-              /* swallowed by design */
             }
           }
         }
@@ -429,7 +94,6 @@ function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
         try {
           return receiver.error!(error);
         } catch {
-          /* swallowed */
         }
       });
     };
@@ -441,7 +105,6 @@ function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
         try {
           return receiver.complete!();
         } catch {
-          /* swallowed */
         }
       });
   }
@@ -449,19 +112,6 @@ function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
   return wrapped;
 }
 
-/* ========================================================================== */
-/* Drain iterator to receivers                                                 */
-/* ========================================================================== */
-
-/**
- * Consumes an async iterator and forwards emitted values to receivers.
- *
- * Semantics:
- * - Stops on iterator completion or abort
- * - Abort does NOT trigger `complete`
- * - Natural completion DOES trigger `complete`
- * - Iterator-thrown errors are forwarded to receivers
- */
 async function drainIterator<T>(
   iterator: AsyncIterator<T> & { __tryNext?: () => IteratorResult<T> | null },
   getReceivers: () => Array<SubscriberEntry<T>>,
@@ -486,6 +136,8 @@ async function drainIterator<T>(
     withEmissionStamp(stamp, forward);
     return false;
   };
+
+  let forwardedError = false;
 
   try {
     while (true) {
@@ -512,33 +164,35 @@ async function drainIterator<T>(
       for (const { receiver, subscription } of getReceivers()) {
         if (!subscription.unsubscribed) {
           receiver.error?.(error);
+          forwardedError = true;
         }
       }
     }
   } finally {
+    const entries = getReceivers();
+
     if (iterator.return) {
       try {
         await iterator.return();
       } catch {}
     }
 
-    if (!signal.aborted) {
-      for (const { receiver, subscription } of getReceivers()) {
+    if (!signal.aborted && !forwardedError) {
+      for (const { receiver, subscription } of entries) {
         if (!subscription.unsubscribed) {
           receiver.complete?.();
         }
       }
     }
+
+    // Streams created with `createStream` keep subscribers in an array until they
+    // explicitly unsubscribe. Most consumers/tests do not call `unsubscribe()`
+    // after natural completion, so we drop references here to prevent receiver
+    // growth across long test runs.
+    entries.length = 0;
   }
 }
 
-/* ========================================================================== */
-/* createStream                                                                */
-/* ========================================================================== */
-
-/**
- * Creates a multicast stream backed by a shared async generator.
- */
 export function createStream<T>(
   name: string,
   generatorFn: (signal?: AbortSignal) => AsyncGenerator<T, void, unknown>
@@ -564,6 +218,10 @@ export function createStream<T>(
         await drainIterator(iterator, getActiveReceivers, signal);
       } finally {
         isRunning = false;
+        // Once the generator terminates, all current subscribers are terminal.
+        // Clear references so future subscriptions restart cleanly and we don't
+        // retain completed receivers between runs.
+        activeSubscriptions = [];
       }
     })();
   };
@@ -573,18 +231,25 @@ export function createStream<T>(
     let subscription!: Subscription;
 
     subscription = createSubscription(async () => {
-      const entry = activeSubscriptions.find((s) => s.subscription === subscription);
+      return runInMicrotask(async () => {
+        const entry = activeSubscriptions.find(
+          (s) => s.subscription === subscription
+        );
 
-      if (entry) {
-        activeSubscriptions = activeSubscriptions.filter((s) => s !== entry);
-        entry.receiver.complete?.();
-      }
+        if (entry) {
+          activeSubscriptions = activeSubscriptions.filter((s) => s !== entry);
+          entry.receiver.complete?.();
+        }
 
-      if (activeSubscriptions.length === 0) {
-        abortController.abort();
-      }
+        if (activeSubscriptions.length === 0) {
+          abortController.abort();
+        }
+      });
     });
 
+    // IMPORTANT: register synchronously so operators like switchMap can
+    // subscribe/unsubscribe inner streams in the same tick without racing the
+    // microtask-delivery loop. Receiver callbacks are still scheduled by `wrapReceiver`.
     activeSubscriptions = [...activeSubscriptions, { receiver: wrapped, subscription }];
 
     if (!isRunning) {
@@ -607,7 +272,8 @@ export function createStream<T>(
     subscribe: (cb) => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(self),
     [Symbol.asyncIterator]: () => {
-      const it = createAsyncGenerator(registerReceiver);
+      const factory = createAsyncIterator({ register: registerReceiver, lazy: true });
+      const it = factory();
       (it as any).__streamix_streamId = id;
       return it;
     },
@@ -616,88 +282,62 @@ export function createStream<T>(
   return self;
 }
 
-/* ========================================================================== */
-/* pipeSourceThrough                                                           */
-/* ========================================================================== */
-
-/**
- * Pipes a source stream through a chain of operators,
- * producing a derived unicast stream.
- */
 export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
   source: Stream<TIn>,
   operators: [...Ops]
 ): Stream<any> {
-  const pipedStream: Stream<any> = {
-    name: `${source.name}Sink`,
-    id: generateStreamId(),
-    type: "stream",
-
-    pipe: ((...nextOps: Operator<any, any>[]) =>
-      pipeSourceThrough(source, [...operators, ...nextOps])) as OperatorChain<any>,
-
-    subscribe(cb?: ((value: any) => MaybePromise) | Receiver<any>) {
-      return registerReceiver(createReceiver(cb));
-    },
-
-    query() {
-      return firstValueFrom(pipedStream);
-    },
-
-    [Symbol.asyncIterator]: () => {
-      const it = createAsyncGenerator(registerReceiver);
-      (it as any).__streamix_streamId = pipedStream.id;
-      return it;
-    },
-  };
+  const pipedId = generateStreamId();
 
   function registerReceiver(receiver: Receiver<any>): Subscription {
     const wrapped = wrapReceiver(receiver);
-
-    const subscriptionId = generateSubscriptionId();
-    const hooks = getRuntimeHooks();
-
-    let iterator: AsyncIterator<any> = source[Symbol.asyncIterator]();
-
-    let ops: Operator<any, any>[] = operators;
-    let finalWrap: ((it: AsyncIterator<any>) => AsyncIterator<any>) | undefined;
-
-    if (hooks?.onPipeStream) {
-      const patch = hooks.onPipeStream({
-        streamName: source.name,
-        streamId: source.id,
-        subscriptionId,
-        source: iterator,
-        operators: ops,
-      });
-
-      if (patch?.source) iterator = patch.source;
-      if (patch?.operators) ops = patch.operators;
-      if (patch?.final) finalWrap = patch.final;
-    }
-
-    for (const op of ops) {
-      iterator = op.apply(iterator);
-    }
-
-    if (finalWrap) {
-      iterator = finalWrap(iterator);
-    }
-
     const abortController = new AbortController();
     const signal = abortController.signal;
 
-    const subscription = createSubscription(async () => {
-      abortController.abort();
-      wrapped.complete?.();
+    const subscriptionId = generateSubscriptionId();
+    const baseSource = source[Symbol.asyncIterator]();
+    const iterator = applyPipeStreamHooks({
+      streamId: pipedId,
+      streamName: source.name,
+      subscriptionId,
+      source: baseSource,
+      operators,
     });
 
-    drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(
-      () => {}
-    );
+    const subscription = createSubscription(async () => {
+      return runInMicrotask(async () => {
+        abortController.abort();
+        wrapped.complete?.();
+      });
+    });
+
+    enqueueMicrotask(() => {
+      drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(
+        () => {}
+      );
+    });
 
     return subscription;
   }
+
+  const pipedStream: Stream<any> = {
+    name: `${source.name}Sink`,
+    id: pipedId,
+    type: "stream",
+    pipe: (...nextOps: Operator<any, any>[]) => pipeSourceThrough(source, [...operators, ...nextOps]),
+    subscribe: (cb) => registerReceiver(createReceiver(cb)),
+    query: () => firstValueFrom(pipedStream),
+    [Symbol.asyncIterator]: () => {
+      const subscriptionId = generateSubscriptionId();
+      const baseSource = source[Symbol.asyncIterator]();
+      return applyPipeStreamHooks({
+        streamId: pipedId,
+        streamName: source.name,
+        subscriptionId,
+        source: baseSource,
+        operators,
+      });
+    },
+  };
 
   return pipedStream;
 }

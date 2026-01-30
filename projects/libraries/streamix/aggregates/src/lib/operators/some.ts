@@ -1,4 +1,4 @@
-import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromiseLike } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Creates a stream operator that tests if at least one value from the source stream satisfies a predicate.
@@ -12,6 +12,7 @@ import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromise
  *
  * This is a "pull-based" equivalent of `Array.prototype.some` and is useful for validating
  * data streams. The operator will emit only a single boolean value before it completes.
+ * Streams that never satisfy the predicate emit `false` (including empty sources).
  *
  * @template T The type of the values in the source stream.
  * @param predicate The function to test each value. It receives the value and its index.
