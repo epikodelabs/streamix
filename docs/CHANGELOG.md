@@ -3,7 +3,9 @@
 
 ### 2.0.30
 
-Subjects were tightened again around async-iterator backpressure, the `takeUntil`/`skipUntil`/`delayUntil` operators now mirror the iterator-first lifecycle so cancellation and cleanup behave predictably. The scheduler was removed in favor of direct task coordination.
+Aggregate operators were moved into a dedicated `aggregates` entrypoint (average/count/every/max/min/mode/none/some/sum/unique) to keep the core surface lean; coroutine stream `seize` was renamed to `hire`; and a few operators were removed (`elementAt`, `elementNth`, `recurse`).
+
+Subjects/streams were tightened around async-iterator backpressure (less re-entrancy, more predictable cancellation/cleanup), microtask scheduling helpers were introduced, and new operators landed (`share`, `exhaustMap`, `bufferUntil`, `bufferWhile`, `delayWhile`).
 
 ### 2.0.29
 
