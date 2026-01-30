@@ -163,16 +163,15 @@ export function createScheduler(): Scheduler {
         }
 
         /**
-         * Yield between tasks.
+         * Yield between tasks (only if more work is already queued).
          *
-         * This allows:
-         * - promise continuations to enqueue new tasks
-         * - fair interleaving of async work
-         * - avoidance of deep synchronous recursion
-         *
-         * FIFO order is still preserved.
+         * IMPORTANT: yielding when the queue becomes empty leaves `pumping=true`
+         * until the next microtask, which can delay tasks enqueued later in the
+         * same call stack and cause ordering races in async-subject pipelines.
          */
-        await Promise.resolve();
+        if (tasks.length > 0) {
+          await Promise.resolve();
+        }
       }
     } finally {
       pumping = false;

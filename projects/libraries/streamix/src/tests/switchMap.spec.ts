@@ -8,11 +8,10 @@ import {
   isWrappedPrimitive,
   nextEmissionStamp,
   of,
-  scheduler,
   setIteratorEmissionStamp,
   setIteratorMeta,
   switchMap,
-  unwrapPrimitive,
+  unwrapPrimitive
 } from '@epikodelabs/streamix';
 
 describe('switchMap', () => {
@@ -488,12 +487,6 @@ describe('switchMap', () => {
     // Switch to inner2 so inner1 becomes stale
     source.next(2);
 
-    // switchMap processes source emissions via scheduled subject commits.
-    // Flush the scheduler so the operator has subscribed to the new inner.
-    await scheduler.flush();
-
-    // switchMap processes source emissions asynchronously (via scheduled subject commits),
-    // so give it a tick to subscribe to the new inner before emitting.
     // inner1 completion should be ignored (it's stale)
     inner1.complete();
     expect(completed).toBeFalse();

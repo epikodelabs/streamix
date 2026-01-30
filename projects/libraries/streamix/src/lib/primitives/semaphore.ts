@@ -1,4 +1,4 @@
-import { scheduler } from "../abstractions/scheduler";
+import { enqueueMicrotask } from "../abstractions";
 import type { ReleaseFn } from "./lock";
 
 /**
@@ -47,10 +47,12 @@ export const createSemaphore = (initialCount: number): Semaphore => {
 
   const release = () => {
     if (queue.length > 0) {
-      // Don't call the resolver immediately - schedule it as a microtask
-      // to maintain the expected order of execution
+      // Don't call the resolver immediately.
+      // Use a macrotask to make wakeups robust across environments where
+      // `queueMicrotask` and Promise reaction ordering can interleave in a way
+      // that resolves multiple waiters before an `await` continuation runs.
       const nextResolver = queue.shift()!;
-      scheduler.enqueue(nextResolver);
+      enqueueMicrotask(nextResolver);
     } else {
       count++;
     }

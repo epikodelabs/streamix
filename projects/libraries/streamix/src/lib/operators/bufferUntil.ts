@@ -77,11 +77,12 @@ export const bufferUntil = <T = any>(notifier: Stream<any>) =>
       let notifierDone = false;
       let sourceDone = false;
 
-      let sourcePending: Promise<StampedEvent> | null = nextEvent(source, "source");
-      let notifierPending: Promise<StampedEvent> | null = nextEvent(
-        notifierIterator,
-        "notifier"
-      );
+      // IMPORTANT: do NOT eagerly call `it.next()` when `__tryNext` exists.
+      // Eager `next()` would consume the first buffered item, and then a
+      // subsequent `__tryNext()` drain would start from the *second* item,
+      // causing output reordering like [2,1].
+      let sourcePending: Promise<StampedEvent> | null = null;
+      let notifierPending: Promise<StampedEvent> | null = null;
 
       let sourceSlot: StampedEvent | null = null;
       let notifierSlot: StampedEvent | null = null;
@@ -90,26 +91,30 @@ export const bufferUntil = <T = any>(notifier: Stream<any>) =>
         | undefined
         | (() => IteratorResult<T> | null);
 
-      const drainTryNext = () => {
-        if (typeof tryNext !== "function") return;
+      const notifierTryNext = (notifierIterator as any).__tryNext as
+        | undefined
+        | (() => IteratorResult<any> | null);
 
-        while (true) {
-          const r = tryNext.call(source);
-          if (!r) break;
+      const takeSourceSync = (): StampedEvent | null => {
+        if (typeof tryNext !== "function") return null;
+        const r = tryNext.call(source);
+        if (!r) return null;
+        return {
+          kind: "source",
+          result: r,
+          stamp: getIteratorEmissionStamp(source) ?? Number.POSITIVE_INFINITY,
+        };
+      };
 
-          if (r.done) {
-            sourceDone = true;
-            break;
-          }
-
-          // ✅ READ META FROM THE ITERATOR THAT YIELDED
-          const meta = getIteratorMeta(source);
-
-          buffer.push({
-            value: r.value,
-            meta,
-          });
-        }
+      const takeNotifierSync = (): StampedEvent | null => {
+        if (typeof notifierTryNext !== "function") return null;
+        const r = notifierTryNext.call(notifierIterator);
+        if (!r) return null;
+        return {
+          kind: "notifier",
+          result: r,
+          stamp: getIteratorEmissionStamp(notifierIterator) ?? Number.POSITIVE_INFINITY,
+        };
       };
 
       const pushSourceEvent = (event: StampedEvent) => {
@@ -143,45 +148,48 @@ export const bufferUntil = <T = any>(notifier: Stream<any>) =>
       const MICROTASK_BUDGET = 12;
 
       const catchUpSourceToStamp = async (stampLimit: number) => {
-        drainTryNext();
-
         while (!sourceDone) {
-          if (sourceSlot) {
-            if (sourceSlot.stamp <= stampLimit) {
-              const e = sourceSlot;
-              sourceSlot = null;
-              pushSourceEvent(e);
-              drainTryNext();
-              continue;
+          if (!sourceSlot) {
+            // If we have an in-flight `next()` promise, do NOT consult `__tryNext()`.
+            // `__tryNext()` can see later terminal events (DONE) that were queued
+            // after the pending pull was satisfied, which would cause us to
+            // complete before processing the pending value.
+            const sync = !sourcePending ? takeSourceSync() : null;
+            if (sync) {
+              sourceSlot = sync;
+            } else {
+              if (!sourcePending) sourcePending = nextEvent(source, "source");
+              const raced = await withMicrotaskBudget(sourcePending, MICROTASK_BUDGET);
+              if (typeof raced === "symbol") return;
+              sourcePending = null;
+              sourceSlot = raced as StampedEvent;
             }
-            break;
           }
 
-          if (!sourcePending) sourcePending = nextEvent(source, "source");
+          if (!sourceSlot) return;
+          if (sourceSlot.stamp > stampLimit) return;
 
-          // Give the source a small bounded microtask window to resolve.
-          // This covers cases where the upstream value is already buffered but
-          // an async-wrapper operator (e.g. `async next() { await ... }`) delays
-          // the resolution by a few microtasks.
-          const raced = await withMicrotaskBudget(sourcePending, MICROTASK_BUDGET);
-          if (typeof raced === "symbol") break;
-          const maybe = raced as StampedEvent;
-          sourcePending = null;
-
-          if (maybe.stamp <= stampLimit) {
-            pushSourceEvent(maybe);
-            drainTryNext();
-            continue;
+          const e = sourceSlot;
+          sourceSlot = null;
+          if (e.result.done) {
+            sourceDone = true;
+            return;
           }
-
-          sourceSlot = maybe;
-          break;
+          pushSourceEvent(e);
         }
       };
 
       try {
         while (true) {
-          drainTryNext();
+          // Fill slots from synchronous buffers first.
+          if (!sourceSlot && !sourceDone) {
+            const sync = !sourcePending ? takeSourceSync() : null;
+            if (sync) sourceSlot = sync;
+          }
+          if (!notifierSlot && !notifierDone) {
+            const sync = !notifierPending ? takeNotifierSync() : null;
+            if (sync) notifierSlot = sync;
+          }
 
           if (sourceDone) {
             const flushed = flushBuffer();
