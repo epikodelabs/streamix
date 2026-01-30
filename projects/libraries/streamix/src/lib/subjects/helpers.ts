@@ -10,7 +10,6 @@ import {
   type StrictReceiver,
   type Subscription
 } from "../abstractions";
-import { scheduler } from "../abstractions/scheduler";
 
 /* ------------------------------------------------------------------------- */
 /* Shared helpers for subjects                                                */
@@ -31,8 +30,7 @@ export function createTryCommit<T>(opts: {
    * Optional hook used by Subjects to ensure commit continuation runs on the
    * subject's scheduler. When omitted, continuations call `tryCommit()` directly.
    */
-  scheduleCommit?: (commitFn: () => void) => void;
-  ownerId?: string;
+  scheduleCommit?: () => void;
 }) {
   const { receivers, ready, queue, setLatestValue, scheduleCommit } = opts;
   let isCommitting = false;
@@ -80,46 +78,45 @@ export function createTryCommit<T>(opts: {
                 result.finally(() => {
                   if (!r.completed && receivers.has(r)) {
                     ready.add(r);
-                        if (typeof scheduleCommit === "function") {
-                          scheduleCommit(tryCommit);
-                        } else {
-                          // Default to global scheduler if no custom one provided
-                          scheduler.enqueue(tryCommit);
-                        }
-                      }
-                    });
+                    if (typeof scheduleCommit === "function") {
+                      scheduleCommit();
+                    } else {
+                      tryCommit();
+                    }
                   }
-                }
-              });
-
-              if (pendingAsync > 0) break;
-            } else {
-              queue.shift();
-              withEmissionStamp(item.stamp, () => {
-                for (const r of eligible) {
-                  if (item.kind === "complete") r.complete();
-                  else {
-                    r.error(item.error);
-                  }
-                }
-              });
-              receivers.clear();
-              ready.clear();
-              return;
+                });
+              }
             }
-          }
-        } finally {
-          isCommitting = false;
-          if (pendingCommit) {
-            pendingCommit = false;
-            // Schedule via global scheduler instead of direct recursion
-            scheduler.enqueue(tryCommit);
-          }
+          });
+
+          if (pendingAsync > 0) break;
+        } else {
+          queue.shift();
+          withEmissionStamp(item.stamp, () => {
+            for (const r of eligible) {
+              if (item.kind === "complete") r.complete();
+              else {
+                r.error(item.error);
+              }
+            }
+          });
+          receivers.clear();
+          ready.clear();
+          return;
         }
-      };
-    
-      return tryCommit;
+      }
+    } finally {
+      isCommitting = false;
+      if (pendingCommit) {
+        pendingCommit = false;
+        tryCommit();
+      }
     }
+  };
+
+  return tryCommit;
+}
+
 export function createRegister<T>(opts: {
   receivers: Set<StrictReceiver<T>>;
   ready: Set<StrictReceiver<T>>;
