@@ -15,6 +15,13 @@ import {
 import { firstValueFrom } from "../converters";
 import { createAsyncIterator } from "./helpers";
 
+/**
+ * BehaviorSubject holds a current value and emits it immediately to new
+ * subscribers. It exposes imperative `next`/`complete`/`error` methods and
+ * guarantees `value` is always available.
+ *
+ * @template T
+ */
 export type BehaviorSubject<T = any> = Stream<T> & {
   next(value: T): void;
   complete(): void;
@@ -23,6 +30,13 @@ export type BehaviorSubject<T = any> = Stream<T> & {
   get value(): T; // BehaviorSubject always has a value
 };
 
+/**
+ * Create a `BehaviorSubject` seeded with `initialValue`.
+ *
+ * @template T
+ * @param {T} initialValue - initial value held by the subject
+ * @returns {BehaviorSubject<T>} a new behavior subject
+ */
 export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
   const id = generateStreamId();
   let latestValue: T = initialValue;
@@ -78,6 +92,13 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     receivers.clear();
   };
 
+  /**
+   * Register a receiver to receive emissions from the BehaviorSubject.
+   * Handles replaying the current value and terminal state if needed.
+   *
+   * @param receiver The receiver to register.
+   * @returns {Subscription} Subscription object for unsubscription.
+   */
   const register = (receiver: Receiver<T>): Subscription => {
     const r = receiver as StrictReceiver<T>;
 
@@ -134,6 +155,11 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     return wrappedSub;
   };
 
+  /**
+   * The BehaviorSubject instance returned to consumers.
+   *
+   * @returns {BehaviorSubject<T>} The subject instance with imperative and stream methods.
+   */
   return {
     type: "subject",
     name: "behaviorSubject",

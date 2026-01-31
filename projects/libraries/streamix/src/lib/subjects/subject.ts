@@ -12,6 +12,14 @@ import {
 import { firstValueFrom } from "../converters";
 import { createAsyncIterator, createRegister, createTryCommit, type QueueItem } from "./helpers";
 
+/**
+ * Subject is a hot, multicast stream that allows imperatively pushing values
+ * with `next`, signalling completion with `complete`, or errors with
+ * `error`. It implements `Stream<T>` and exposes the current value via
+ * the `value` getter when available.
+ *
+ * @template T
+ */
 export type Subject<T = any> = Stream<T> & {
   next(value: T): void;
   complete(): void;
@@ -20,6 +28,14 @@ export type Subject<T = any> = Stream<T> & {
   get value(): T | undefined;
 };
 
+/**
+ * Create a plain `Subject` which buffers emissions and delivers them to
+ * current subscribers. The returned subject can be used as an async
+ * iterable and as an imperative emitter via `next`/`complete`/`error`.
+ *
+ * @template T
+ * @returns {Subject<T>} A new subject instance.
+ */
 export function createSubject<T = any>(): Subject<T> {
   const id = generateStreamId();
   let latestValue: T | undefined;
@@ -34,6 +50,13 @@ export function createSubject<T = any>(): Subject<T> {
 
   const tryCommit = createTryCommit<T>({ receivers, ready, queue, setLatestValue });
 
+  /**
+   * Register a receiver to receive emissions from the Subject.
+   * Handles replaying the current value and terminal state if needed.
+   *
+   * @param receiver The receiver to register.
+   * @returns {Subscription} Subscription object for unsubscription.
+   */
   const register = createRegister<T>({
     receivers,
     ready,

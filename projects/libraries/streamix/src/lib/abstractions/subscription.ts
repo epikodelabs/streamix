@@ -65,7 +65,7 @@ export type Subscription = {
  * - Consistent error handling during teardown
  *
  * @param onUnsubscribe Optional cleanup callback executed on first unsubscribe
- * @returns A new `Subscription` object
+ * @returns {Subscription} A new Subscription object
  */
 export function createSubscription(
   onUnsubscribe?: () => MaybePromise
