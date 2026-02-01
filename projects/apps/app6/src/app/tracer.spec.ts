@@ -1,11 +1,11 @@
 import {
-    buffer,
-    createOperator,
-    createStream,
-    filter,
-    map,
-    mergeMap,
-    setValueMeta
+  buffer,
+  createOperator,
+  createStream,
+  filter,
+  map,
+  mergeMap,
+  setValueMeta
 } from "@epikodelabs/streamix";
 
 const scheduler = {
@@ -13,15 +13,15 @@ const scheduler = {
 };
 
 import {
-    disableTracing,
-    enableTracing,
-    generateValueId,
-    getGlobalTracer,
-    getValueId,
-    isTracedValue,
-    unwrapTracedValue,
-    wrapTracedValue,
-    type ValueTrace
+  disableTracing,
+  enableTracing,
+  generateValueId,
+  getGlobalTracer,
+  getValueId,
+  isTracedValue,
+  unwrapTracedValue,
+  wrapTracedValue,
+  type ValueTrace
 } from "@epikodelabs/streamix/tracing";
 import { createValueTracer, ExtendedValueTracer } from "./tracer";
 
@@ -429,6 +429,14 @@ describe("valueTracer", () => {
 });
 
 describe("tracerEdge", () => {
+  beforeEach(() => {
+    disableTracing();
+  });
+
+  afterEach(() => {
+    disableTracing();
+  });
+
   it("trims oldest traces when exceeding maxTraces", () => {
     const tracer = createValueTracer({ maxTraces: 1 });
 
@@ -474,6 +482,12 @@ describe("tracerMismatch", () => {
 
   beforeEach(() => {
     tracer = createValueTracer();
+    enableTracing(tracer);
+  });
+
+  afterEach(() => {
+    disableTracing();
+    tracer.clear();
   });
 
   it("records delivered traces for stream values", async () => {
@@ -619,6 +633,10 @@ describe("tracerMismatch", () => {
   });
 });
 describe("tracerUtils", () => {
+  beforeEach(() => {
+    disableTracing();
+  });
+
   afterEach(() => {
     disableTracing();
   });
