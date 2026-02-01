@@ -2,16 +2,13 @@ import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
- * Combines multiple streams by emitting an array of values (a tuple),
- * only when all streams have a value ready (one-by-one, synchronized).
+ * Combine multiple streams into a single stream that emits arrays of the latest values
+ * from each input stream whenever any input emits. Emission occurs only when all inputs
+ * have emitted at least once.
  *
- * It waits for the next value from all streams to form the next tuple.
- * The stream completes when any of the input streams complete.
- * Errors from any stream propagate immediately.
- *
- * @template T - A tuple type representing the combined values from the streams.
- * @param sources Streams or values (including promises) to combine.
- * @returns {Stream<T>} A new stream that emits a synchronized tuple of values.
+ * @template T
+ * @param {...Stream<T[number]>[]} sources - The input streams to zip.
+ * @returns {Stream<T>} A stream emitting arrays of values from each input.
  */
 export function zip<T extends readonly unknown[] = any[]>(
   ...sources: Array<Stream<T[number]> | MaybePromise<T[number]>>

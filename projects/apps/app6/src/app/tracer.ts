@@ -1,114 +1,44 @@
 /**
- * Streamix tracing utilities.
+ * Full-fidelity value tracer implementation.
  *
- * This module provides a lightweight tracing layer for Streamix pipelines. It records how values
- * move through operators and exposes that information as `ValueTrace` snapshots and event callbacks.
+ * This tracer records complete operator steps, durations, and state transitions.
+ * Intended for development, debugging, and inspection tools.
  *
- * Common use cases:
- * - Debugging operator chains and value lifecycles
- * - Collecting diagnostics/metrics in development tools
- * - Inspecting delivered vs terminal (filtered/collapsed/dropped) outcomes
+ * Usage:
+ * ```ts
+ * import { createValueTracer } from './streamix-tracer';
+ * import { enableTracing } from './streamix-trace-core';
+ *
+ * const tracer = createValueTracer({
+ *   maxTraces: 10_000,
+ *   onTraceUpdate: (trace, step) => {
+ *     console.log('Trace updated:', trace.valueId, trace.state);
+ *   }
+ * });
+ *
+ * enableTracing(tracer);
+ *
+ * // Subscribe to events
+ * tracer.subscribe({
+ *   delivered: (trace) => console.log('Value delivered:', trace.valueId),
+ *   filtered: (trace) => console.log('Value filtered:', trace.valueId),
+ * });
+ * ```
  */
+import { unwrapPrimitive } from "@epikodelabs/streamix";
 import {
-  createOperator,
-  getValueMeta,
-  registerRuntimeHooks,
-  setIteratorMeta,
-  unwrapPrimitive,
-} from "@epikodelabs/streamix";
+    OperatorOutcome,
+    TerminalReason,
+    ValueState,
+    ValueTrace,
+    ValueTracer,
+    generateValueId,
+    unwrapTracedValue,
+} from "@epikodelabs/streamix/tracing";
 
 /* ============================================================================ */
 /* PUBLIC TYPES */
 /* ============================================================================ */
-
-/**
- * High-level lifecycle state of a traced value.
- *
- * This is the public view (`ValueTrace.state`) derived from internal status + terminal reason.
- */
-export type ValueState =
-  | "emitted"
-  | "transformed"
-  | "filtered"
-  | "collapsed"
-  | "expanded"
-  | "errored"
-  | "delivered"
-  | "dropped";
-
-/**
- * The outcome recorded for a single operator pass over an input value.
- *
- * This is used to annotate `OperatorStep`s and to decide whether a trace should become terminal.
- */
-export type OperatorOutcome =
-  | "transformed"
-  | "filtered"
-  | "expanded"
-  | "collapsed"
-  | "errored";
-
-/** One operator invocation within a value's lifecycle. */
-export interface OperatorStep {
-  operatorIndex: number;
-  operatorName: string;
-  enteredAt: number;
-  exitedAt?: number;
-  outcome?: OperatorOutcome;
-  inputValue: any;
-  outputValue?: any;
-  error?: Error;
-}
-
-/**
- * Why a value's trace ended without being delivered downstream.
- *
- * - `filtered`: explicitly removed by some operator
- * - `collapsed`: merged into another value (see `collapsedInto`)
- * - `errored`: operator threw while processing the value
- * - `late`: trace started/continued after the subscription was completed
- */
-export type TerminalReason = "filtered" | "collapsed" | "errored" | "late";
-
-/**
- * Public snapshot of a value's trace at a moment in time.
- *
- * Notes:
- * - `state` is a derived view over the internal state machine.
- * - `operatorSteps` may be empty when using `createTerminalTracer()`.
- * - `operatorDurations` aggregates time per operator key `${operatorIndex}:${operatorName}`.
- */
-export interface ValueTrace {
-  valueId: string;
-  parentTraceId?: string;
-  streamId: string;
-  streamName?: string;
-  subscriptionId: string;
-  emittedAt: number;
-  deliveredAt?: number;
-  state: ValueState;
-  sourceValue: any;
-  finalValue?: any;
-  operatorSteps: OperatorStep[];
-  droppedReason?: {
-    operatorIndex: number;
-    operatorName: string;
-    reason: TerminalReason;
-    error?: Error;
-  };
-  collapsedInto?: {
-    operatorIndex: number;
-    operatorName: string;
-    targetValueId: string;
-  };
-  expandedFrom?: {
-    operatorIndex: number;
-    operatorName: string;
-    baseValueId: string;
-  };
-  totalDuration?: number;
-  operatorDurations: Map<string, number>;
-}
 
 export type TracerEventHandlers = {
   /** Invoked when a trace is marked as delivered. */
@@ -136,41 +66,18 @@ export interface ValueTracerOptions {
    * Called on every trace update. When `includeSteps` is enabled, `step` is the last updated operator step.
    * This callback is also invoked for terminal/delivered transitions (in addition to event handlers).
    */
-  onTraceUpdate?: (trace: ValueTrace, step?: OperatorStep) => void;
+  onTraceUpdate?: (trace: ValueTrace, step?: ValueTrace["operatorSteps"][number]) => void;
 }
 
 /**
- * Tracer interface used by the runtime hooks to record value lifecycles.
- *
- * Most users should:
- * - Create a tracer (`createValueTracer` or `createTerminalTracer`)
- * - Install it globally via `enableTracing()`
- * - Subscribe to updates via `subscribe()` / `observeSubscription()`
+ * Extended tracer interface that includes subscription and utility methods.
+ * This extends the base ValueTracer interface with implementation-specific features.
  */
-export interface ValueTracer {
+export interface ExtendedValueTracer extends ValueTracer {
   /** Subscribes to value-level events across all subscriptions. Returns an unsubscribe function. */
   subscribe: (handlers: TracerEventHandlers) => () => void;
   /** Subscribes to value-level events for a specific subscription id. Returns an unsubscribe function. */
   observeSubscription: (subId: string, handlers: TracerSubscriptionEventHandlers) => () => void;
-  /** Marks the subscription as completed and notifies any per-subscription observers. */
-  completeSubscription: (subId: string) => void;
-  /** Begins a new trace record for a value id. */
-  startTrace: (vId: string, sId: string, sName: string | undefined, subId: string, val: any) => ValueTrace;
-  /** Creates a new trace id that is treated as expanded from `baseId`. */
-  createExpandedTrace: (baseId: string, opIdx: number, opName: string, val: any) => string;
-  /** Records entering an operator (only when step recording is enabled). */
-  enterOperator: (vId: string, opIdx: number, opName: string, val: any) => void;
-  /**
-   * Records an operator exit and (optionally) marks the trace terminal when filtered/errored.
-   * Returns the value id on success, or `null` when no update was applied.
-   */
-  exitOperator: (vId: string, opIdx: number, val: any, filtered?: boolean, outcome?: OperatorOutcome) => string | null;
-  /** Marks a value as collapsed into another value id and terminalizes it as `collapsed`. */
-  collapseValue: (vId: string, opIdx: number, opName: string, targetId: string, val?: any) => void;
-  /** Marks a value as errored in an operator and terminalizes it as `errored`. */
-  errorInOperator: (vId: string, opIdx: number, error: Error) => void;
-  /** Marks a value trace as delivered (unless already terminal). */
-  markDelivered: (vId: string) => void;
   /** Returns the current in-memory traces (subject to LRU eviction). */
   getAllTraces: () => ValueTrace[];
   /** Returns basic tracer stats. */
@@ -178,54 +85,6 @@ export interface ValueTracer {
   /** Clears all in-memory traces and subscription observers. */
   clear: () => void;
 }
-
-/* ============================================================================ */
-/* RUNTIME WRAPPER HELPERS */
-/* ============================================================================ */
-
-const tracedValueBrand = Symbol("__streamix_traced__");
-const TRACER_KEY = "__STREAMIX_GLOBAL_TRACER__";
-
-export interface TracedWrapper<T> {
-  [tracedValueBrand]: true;
-  value: T;
-  meta: { valueId: string; streamId: string; subscriptionId: string };
-}
-
-/** Wraps a value with tracing metadata for internal runtime propagation. */
-export const wrapTracedValue = <T>(value: T, meta: TracedWrapper<T>["meta"]): TracedWrapper<T> =>
-  ({ [tracedValueBrand]: true, value, meta });
-
-/** Unwraps a traced wrapper back to the raw value (or returns the input if it's not traced). */
-export const unwrapTracedValue = <T>(v: any): T => (v?.[tracedValueBrand]) ? v.value : v;
-
-/** Type guard for `TracedWrapper`. */
-export const isTracedValue = (v: any): v is TracedWrapper<any> => Boolean(v?.[tracedValueBrand]);
-
-/** Extracts the `valueId` from a traced wrapper (if present). */
-export const getValueId = (v: any): string | undefined => isTracedValue(v) ? v.meta.valueId : undefined;
-
-/** Returns the currently enabled global tracer, if any. */
-export const getGlobalTracer = (): ValueTracer | null => (globalThis as any)[TRACER_KEY] ?? null;
-
-/** Installs the tracer into `globalThis` so the Streamix runtime hooks can record traces. */
-export function enableTracing(t: ValueTracer): void { (globalThis as any)[TRACER_KEY] = t; }
-
-/** Disables tracing by clearing the global tracer reference. */
-export function disableTracing(): void { (globalThis as any)[TRACER_KEY] = null; }
-
-/* ============================================================================ */
-/* ID GENERATION */
-/* ============================================================================ */
-
-const IDS_KEY = "__STREAMIX_TRACE_IDS__";
-const getIds = (): { value: number } => {
-  const g = globalThis as any;
-  return g[IDS_KEY] ??= { value: 0 };
-};
-
-/** Generates a unique value id for the current JS realm (stored on `globalThis`). */
-export const generateValueId = (): string => `val_${++getIds().value}`;
 
 /* ============================================================================ */
 /* INTERNAL MODEL & STATE MACHINE */
@@ -617,7 +476,7 @@ const exportTrace = (t: TraceRecord): ValueTrace => ({
 const defaultOpName = (opIdx: number): string => `op${opIdx}`;
 
 /* ============================================================================ */
-/* TRACER FACTORY */
+/* TRACER IMPLEMENTATION */
 /* ============================================================================ */
 
 interface TracerConfig {
@@ -628,7 +487,7 @@ interface TracerConfig {
 const createTracerImpl = (
   config: TracerConfig,
   options: ValueTracerOptions = {}
-): ValueTracer => {
+): ExtendedValueTracer => {
   const { maxTraces = 10_000, onTraceUpdate } = options;
   const { includeSteps, policy } = config;
 
@@ -681,7 +540,7 @@ const createTracerImpl = (
   };
 
   return {
-    subscribe(handlers) {
+    subscribe(handlers: TracerEventHandlers): () => void {
       subscribers.push(handlers);
       return () => {
         const idx = subscribers.indexOf(handlers);
@@ -689,7 +548,7 @@ const createTracerImpl = (
       };
     },
 
-    observeSubscription(subId, handlers) {
+    observeSubscription(subId: string, handlers: TracerSubscriptionEventHandlers): () => void {
       if (!subscriptionSubscribers.has(subId)) {
         subscriptionSubscribers.set(subId, new Set());
       }
@@ -697,7 +556,7 @@ const createTracerImpl = (
       return () => subscriptionSubscribers.get(subId)?.delete(handlers);
     },
 
-    completeSubscription(subId) {
+    completeSubscription(subId: string): void {
       if (subscriptionStates.get(subId) === "completed") return;
       subscriptionStates.set(subId, "completed");
       const handlers = subscriptionSubscribers.get(subId);
@@ -709,7 +568,7 @@ const createTracerImpl = (
       }
     },
 
-    startTrace(valueId, streamId, streamName, subId, value) {
+    startTrace(valueId: string, streamId: string, streamName: string | undefined, subId: string, value: any): ValueTrace {
       if (!subscriptionStates.has(subId)) {
         subscriptionStates.set(subId, "active");
       }
@@ -744,7 +603,7 @@ const createTracerImpl = (
       return exported;
     },
 
-    createExpandedTrace(baseId, opIdx, opName, value) {
+    createExpandedTrace(baseId: string, opIdx: number, opName: string, value: any): string {
       const now = Date.now();
       const base = traces.get(baseId);
       const valueId = generateValueId();
@@ -796,7 +655,7 @@ const createTracerImpl = (
       return valueId;
     },
 
-    enterOperator(vId, opIdx, opName, val) {
+    enterOperator(vId: string, opIdx: number, opName: string, val: any): void {
       if (!includeSteps) return;
 
       const trace = traces.get(vId);
@@ -811,7 +670,7 @@ const createTracerImpl = (
       processEvents(vId, result);
     },
 
-    exitOperator(vId, opIdx, val, filtered = false, outcome = "transformed") {
+    exitOperator(vId: string, opIdx: number, val: any, filtered: boolean = false, outcome: OperatorOutcome = "transformed"): string | null {
       const trace = traces.get(vId);
       if (!trace) return null;
 
@@ -860,7 +719,7 @@ const createTracerImpl = (
       return vId;
     },
 
-    collapseValue(vId, opIdx, opName, targetId) {
+    collapseValue(vId: string, opIdx: number, opName: string, targetId: string, _val?: any): void {
       const trace = traces.get(vId);
       if (!trace || isCompleted(trace.subscriptionId)) {
         if (trace && isCompleted(trace.subscriptionId)) {
@@ -888,7 +747,7 @@ const createTracerImpl = (
       processEvents(vId, result);
     },
 
-    errorInOperator(vId, opIdx, error) {
+    errorInOperator(vId: string, opIdx: number, error: Error): void {
       const trace = traces.get(vId);
       if (!trace) return;
 
@@ -903,7 +762,7 @@ const createTracerImpl = (
       processEvents(vId, result);
     },
 
-    markDelivered(vId) {
+    markDelivered(vId: string): void {
       const trace = traces.get(vId);
       if (!trace || isCompleted(trace.subscriptionId)) return;
 
@@ -911,17 +770,17 @@ const createTracerImpl = (
       processEvents(vId, result);
     },
 
-    getAllTraces() {
+    getAllTraces(): ValueTrace[] {
       return Array.from(traces.values()).map((t) =>
         includeSteps ? exportTrace(t) : { ...exportTrace(t), operatorSteps: [] }
       );
     },
 
-    getStats() {
+    getStats(): { total: number } {
       return { total: traces.size };
     },
 
-    clear() {
+    clear(): void {
       traces.clear();
       subscriptionSubscribers.clear();
       subscriptionStates.clear();
@@ -939,7 +798,7 @@ const createTracerImpl = (
  * - Records operator steps (`operatorSteps`) and durations (`operatorDurations`).
  * - Exports step data to `onTraceUpdate` and `getAllTraces`.
  */
-export const createValueTracer = (options?: ValueTracerOptions): ValueTracer =>
+export const createValueTracer = (options?: ValueTracerOptions): ExtendedValueTracer =>
   createTracerImpl(
     {
       includeSteps: true,
@@ -954,7 +813,7 @@ export const createValueTracer = (options?: ValueTracerOptions): ValueTracer =>
  * Differences vs `createValueTracer()`:
  * - Does not retain `operatorSteps` (they are exported as an empty array).
  */
-export const createTerminalTracer = (options?: ValueTracerOptions): ValueTracer =>
+export const createTerminalTracer = (options?: ValueTracerOptions): ExtendedValueTracer =>
   createTracerImpl(
     {
       includeSteps: false,
@@ -962,327 +821,3 @@ export const createTerminalTracer = (options?: ValueTracerOptions): ValueTracer 
     },
     options
   );
-
-/* ============================================================================ */
-/* RUNTIME HOOKS */
-/* ============================================================================ */
-
-registerRuntimeHooks({
-  onPipeStream({ streamId, streamName, subscriptionId, parentValueId, source, operators }) {
-    const tracer = getGlobalTracer();
-    if (!tracer) return;
-
-    return {
-      source: {
-        async next() {
-          const r = await source.next();
-          if (r.done) return r;
-
-          let valueId: string;
-          let value: any;
-
-          if (isTracedValue(r.value)) {
-            const wrapped = r.value as TracedWrapper<any>;
-            valueId = wrapped.meta.valueId;
-            value = wrapped.value;
-          } else {
-            value = r.value;
-            valueId = parentValueId || generateValueId();
-            if (!parentValueId) {
-              tracer.startTrace(valueId, streamId, streamName, subscriptionId, value);
-            }
-          }
-
-          return {
-            done: false,
-            value: wrapTracedValue(value, { valueId, streamId, subscriptionId }),
-          };
-        },
-        return: source.return?.bind(source),
-        throw: source.throw?.bind(source),
-      },
-
-      operators: operators.map((op, i) => {
-        const opName = op.name ?? `op${i}`;
-
-        return createOperator(`traced_${opName}`, (src) => {
-          const inputQueue: TracedWrapper<any>[] = [];
-          const metaByValueId = new Map<string, TracedWrapper<any>["meta"]>();
-          let lastSeenMeta: TracedWrapper<any>["meta"] | null = null;
-          let lastOutputMeta: TracedWrapper<any>["meta"] | null = null;
-
-          let activeRequestBatch: TracedWrapper<any>[] | null = null;
-          const outputCountByBaseKey = new Map<string, number>();
-
-          const removeFromQueue = (valueId: string): void => {
-            const idx = inputQueue.findIndex((w) => w.meta.valueId === valueId);
-            if (idx >= 0) inputQueue.splice(idx, 1);
-          };
-
-          const exitAndRemove = (valueId: string, value: any, filtered: boolean, outcome: OperatorOutcome = "transformed"): void => {
-            removeFromQueue(valueId);
-            tracer.exitOperator(valueId, i, value, filtered, outcome);
-          };
-
-          const handleCollapse = (inputIds: string[], targetId: string, emittedValue: any): { done: false; value: TracedWrapper<any> } | null => {
-            if (!metaByValueId.has(targetId)) return null;
-            
-            const targetMeta = metaByValueId.get(targetId)!;
-            
-            for (const id of inputIds) {
-              if (id === targetId) continue;
-              if (!metaByValueId.has(id)) continue;
-              removeFromQueue(id);
-              tracer.collapseValue(id, i, opName, targetId, emittedValue);
-            }
-            
-            exitAndRemove(targetId, emittedValue, false, "collapsed");
-            return wrapOutput(targetMeta, emittedValue);
-          };
-
-          const filterBatch = (batch: TracedWrapper<any>[], selectedId: string): void => {
-            for (const item of batch) {
-              if (item.meta.valueId !== selectedId) {
-                exitAndRemove(item.meta.valueId, item.value, true);
-              }
-            }
-          };
-
-          const handleExpansion = (baseValueId: string, baseMeta: TracedWrapper<any>["meta"], emittedValue: any): { done: false; value: TracedWrapper<any> } => {
-            const key = `${baseValueId}:${i}`;
-            const count = outputCountByBaseKey.get(key) ?? 0;
-            outputCountByBaseKey.set(key, count + 1);
-
-            if (count === 0) {
-              exitAndRemove(baseValueId, emittedValue, false, "expanded");
-              lastOutputMeta = baseMeta;
-              return { done: false, value: wrapTracedValue(emittedValue, baseMeta) };
-            }
-
-            const expandedId = tracer.createExpandedTrace(baseValueId, i, opName, emittedValue);
-            lastOutputMeta = baseMeta;
-            return { done: false, value: wrapTracedValue(emittedValue, { ...baseMeta, valueId: expandedId }) };
-          };
-
-          const wrapOutput = (meta: TracedWrapper<any>["meta"], value: any): { done: false; value: TracedWrapper<any> } => {
-            lastOutputMeta = meta;
-            return { done: false, value: wrapTracedValue(value, meta) };
-          };
-
-          const isCollapseMetadata = (meta: any, value: any): meta is { kind: "collapse"; inputValueIds: string[]; valueId?: string } =>
-            Array.isArray(value) &&
-            meta?.kind === "collapse" &&
-            Array.isArray(meta.inputValueIds) &&
-            meta.inputValueIds.length > 0;
-
-          const resolveTargetId = (meta: any): string | null => {
-            const targetId = (typeof meta.valueId === "string" && meta.valueId) || meta.inputValueIds[meta.inputValueIds.length - 1];
-            return typeof targetId === "string" ? targetId : null;
-          };
-
-          const rawSource: AsyncIterator<any> = {
-            async next() {
-              const r = await src.next();
-              if (r.done) return r;
-
-              const wrapped = isTracedValue(r.value)
-                ? (r.value as TracedWrapper<any>)
-                : wrapTracedValue(r.value, { valueId: generateValueId(), streamId, subscriptionId });
-
-              inputQueue.push(wrapped);
-              metaByValueId.set(wrapped.meta.valueId, wrapped.meta);
-              lastSeenMeta = wrapped.meta;
-              activeRequestBatch?.push(wrapped);
-
-              setIteratorMeta(rawSource, wrapped.meta, i, opName);
-              tracer.enterOperator(wrapped.meta.valueId, i, opName, wrapped.value);
-
-              return { done: false, value: wrapped.value };
-            },
-            return: src.return?.bind(src),
-            throw: src.throw?.bind(src),
-          };
-
-          const inner = op.apply(rawSource);
-
-          return {
-            async next() {
-              try {
-                const requestBatch: TracedWrapper<any>[] = [];
-                activeRequestBatch = requestBatch;
-
-                let out: IteratorResult<any>;
-                try {
-                  out = await inner.next();
-                } finally {
-                  activeRequestBatch = null;
-                }
-
-                if (out.done) {
-                  // Mark all pending values as filtered
-                  inputQueue.forEach(w => tracer.exitOperator(w.meta.valueId, i, w.value, true));
-                  inputQueue.length = 0;
-                  return out;
-                }
-
-                // Per-value metadata (attached by operators like debounce/throttle/audit/bufferCount/etc.)
-                // Note: when metadata is attached to a primitive, it may come in via a wrapped value.
-                // Always read metadata before unwrapping.
-                const perValueMeta = getValueMeta(out.value);
-                const emittedValue = unwrapPrimitive(out.value);
-
-                // Array collapse: multiple inputs → array output
-                if (isCollapseMetadata(perValueMeta, emittedValue) && perValueMeta.inputValueIds.length > 1) {
-                  const targetId = resolveTargetId(perValueMeta);
-                  if (targetId) {
-                    const result = handleCollapse(perValueMeta.inputValueIds, targetId, emittedValue);
-                    if (result) return result;
-                  }
-                }
-
-                // Runtime-provided output with expansion/filtering
-                if (perValueMeta?.kind === "expand" && perValueMeta.valueId && metaByValueId.has(perValueMeta.valueId)) {
-                  const baseValueId = perValueMeta.valueId as string;
-                  const baseMeta = metaByValueId.get(baseValueId)!;
-
-                  // Filter detection: pass-through from one of multiple requests
-                  if (requestBatch.length > 1) {
-                    const baseRequested = requestBatch.find((w) => w.meta.valueId === baseValueId);
-                    if (baseRequested && Object.is(emittedValue, baseRequested.value)) {
-                      filterBatch(requestBatch, baseValueId);
-                    }
-                  }
-
-                  return handleExpansion(baseValueId, baseMeta, emittedValue);
-                }
-
-                // Expansion: outputs without new input
-                if (requestBatch.length === 0) {
-                  // Timer-based operators (debounce/throttle/audit/sample/etc.) can emit while downstream isn't
-                  // actively awaiting `next()`. Those outputs are buffered and later observed with an empty
-                  // `requestBatch`. In that case, attribute the output to pending inputs already pulled from `src`.
-                  if (inputQueue.length > 0) {
-                    // Prefer explicit per-value meta for collapse operators (buffer/bufferCount/toArray/etc.).
-                    if (isCollapseMetadata(perValueMeta, emittedValue)) {
-                      const targetId = resolveTargetId(perValueMeta);
-                      if (targetId) {
-                        const result = handleCollapse(perValueMeta.inputValueIds, targetId, emittedValue);
-                        if (result) return result;
-                      }
-                    }
-
-                    const preferredId = perValueMeta?.valueId;
-                    const chosen =
-                      (preferredId ? inputQueue.find((w) => w.meta.valueId === preferredId) : undefined) ??
-                      // For pass-through operators, match by value if possible.
-                      [...inputQueue].reverse().find((w) => Object.is(w.value, emittedValue)) ??
-                      inputQueue[inputQueue.length - 1];
-
-                    // Mark non-emitted values as filtered
-                    for (const pending of [...inputQueue]) {
-                      if (pending.meta.valueId === chosen.meta.valueId) continue;
-                      exitAndRemove(pending.meta.valueId, pending.value, true);
-                    }
-
-                    exitAndRemove(chosen.meta.valueId, emittedValue, false, "transformed");
-                    return wrapOutput(chosen.meta, emittedValue);
-                  }
-
-                  const baseValueId = perValueMeta?.valueId ?? lastOutputMeta?.valueId ?? lastSeenMeta?.valueId;
-                  const baseMeta = baseValueId ? (metaByValueId.get(baseValueId) ?? lastOutputMeta ?? lastSeenMeta) : null;
-                  
-                  if (baseMeta) {
-                    lastOutputMeta = baseMeta;
-                    return handleExpansion(baseValueId!, baseMeta, emittedValue);
-                  }
-                }
-
-                // Multiple inputs, one output
-                if (requestBatch.length > 1) {
-                  const outputValueId = perValueMeta?.valueId ?? requestBatch[requestBatch.length - 1].meta.valueId;
-                  const outputEntry = requestBatch.find((w) => w.meta.valueId === outputValueId) ?? requestBatch[requestBatch.length - 1];
-
-                  // Detect if this is a collapse (multiple inputs combined/transformed)
-                  // or a filter (one input selected unchanged)
-                  const isPassThrough = requestBatch.some((w) => Object.is(w.value, emittedValue));
-                  
-                  if (isPassThrough) {
-                    // Filter case: one input passed through, others filtered out
-                    filterBatch(requestBatch, outputEntry.meta.valueId);
-                    exitAndRemove(outputEntry.meta.valueId, emittedValue, false, "transformed");
-                  } else {
-                    // Collapse case: multiple inputs merged into new value
-                    for (const item of requestBatch) {
-                      if (item.meta.valueId !== outputEntry.meta.valueId) {
-                        removeFromQueue(item.meta.valueId);
-                        tracer.collapseValue(item.meta.valueId, i, opName, outputEntry.meta.valueId, emittedValue);
-                      }
-                    }
-                    exitAndRemove(outputEntry.meta.valueId, emittedValue, false, "collapsed");
-                  }
-                  
-                  return wrapOutput(outputEntry.meta, emittedValue);
-                }
-
-                // 1:1 transformation
-                if (requestBatch.length === 1) {
-                  const wrapped = requestBatch[0];
-                  exitAndRemove(wrapped.meta.valueId, emittedValue, false, "transformed");
-                  return wrapOutput(wrapped.meta, emittedValue);
-                }
-
-                // Fallback: reuse last known metadata
-                const fallbackMeta = lastOutputMeta ?? lastSeenMeta;
-                if (fallbackMeta) return wrapOutput(fallbackMeta, emittedValue);
-
-                // Last resort: unwrapped value (metadata tracking lost)
-                return { done: false, value: emittedValue };
-              } catch (err) {
-                // Report error on first pending input
-                if (inputQueue.length > 0) {
-                  tracer.errorInOperator(inputQueue[0].meta.valueId, i, err as Error);
-                }
-                throw err;
-              }
-            },
-            return: inner.return?.bind(inner),
-            throw: inner.throw?.bind(inner),
-            [Symbol.asyncIterator]() { return this; },
-          };
-        });
-      }),
-
-      final: (it) => ({
-        async next() {
-          const r = await it.next();
-          if (!r.done) {
-            if (isTracedValue(r.value)) {
-              const wrapped = r.value as TracedWrapper<any>;
-              tracer.markDelivered(wrapped.meta.valueId);
-              return { done: false, value: unwrapPrimitive(wrapped.value) };
-            }
-
-            // Best-effort fallback for values not wrapped by the tracing runtime.
-            const valueMeta = getValueMeta(r.value);
-            if (valueMeta?.valueId) tracer.markDelivered(valueMeta.valueId);
-
-            return { done: false, value: unwrapPrimitive(r.value) };
-          }
-          if (r.done) {
-            tracer.completeSubscription(subscriptionId);
-          }
-          return r;
-        },
-        return: async (v) => {
-          tracer.completeSubscription(subscriptionId);
-          return it.return ? await it.return(v) : { done: true, value: v };
-        },
-        throw: async (e) => {
-          tracer.completeSubscription(subscriptionId);
-          if (it.throw) return await it.throw(e);
-          throw e;
-        },
-      }),
-    };
-  },
-});

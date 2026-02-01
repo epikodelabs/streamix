@@ -63,6 +63,8 @@ export function registerRuntimeHooks(hooks: StreamRuntimeHooks): void {
 
 /**
  * Returns the currently-registered runtime hooks, if any.
+ *
+ * @returns {StreamRuntimeHooks | null} The registered hooks or null.
  */
 export function getRuntimeHooks(): StreamRuntimeHooks | null {
   return ((globalThis as any)[HOOKS_KEY] ?? null) as StreamRuntimeHooks | null;
