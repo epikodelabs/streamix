@@ -10,7 +10,17 @@ import {
   wrapTracedValue,
 } from "@epikodelabs/streamix/tracing";
 
-import { filter, from, map, mergeMap, reduce } from "@epikodelabs/streamix";
+import {
+  applyPipeStreamHooks,
+  createOperator,
+  filter,
+  from,
+  getIteratorMeta,
+  map,
+  mergeMap,
+  reduce,
+  setValueMeta,
+} from "@epikodelabs/streamix";
 
 /* ========================================================================== */
 /* TEST TRACER */
@@ -107,6 +117,138 @@ describe("Streamix tracing core", () => {
   /* ------------------------------------------------------------------------ */
   /* RUNTIME INTEGRATION */
   /* ------------------------------------------------------------------------ */
+
+  it("does not trace when no global tracer is enabled", async () => {
+    const { calls } = createTestTracer();
+
+    const out: number[] = [];
+    for await (const v of from([1, 2]).pipe(map((x) => x + 1))) {
+      out.push(v);
+    }
+
+    expect(out).toEqual([2, 3]);
+    expect(calls.length).toBe(0);
+  });
+
+  it("does not retroactively trace if tracing is enabled after hooks are applied", async () => {
+    const { tracer, calls } = createTestTracer();
+
+    // Build the iterator while tracing is disabled; hooks short-circuit at pipe time.
+    const it = applyPipeStreamHooks({
+      streamId: "s_late_enable",
+      streamName: "lateEnable",
+      subscriptionId: "sub_late_enable",
+      source: from([1]).pipe(map((x) => x + 1))[Symbol.asyncIterator](),
+      operators: [],
+    });
+
+    enableTracing(tracer);
+
+    const out: number[] = [];
+    for await (const v of it as any) {
+      out.push(v);
+    }
+
+    expect(out).toEqual([2]);
+    expect(calls.length).toBe(0);
+  });
+
+  it("marks delivered using value metadata when a value escapes without traced wrapper", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    const metaValueId = "val_meta_deliver";
+    const emitNoInput = createOperator("emitNoInput", () => {
+      let emitted = false;
+      return {
+        async next() {
+          if (emitted) return { done: true, value: undefined } as any;
+          emitted = true;
+
+          const value = { n: 123 };
+          const tagged = setValueMeta(value, { valueId: metaValueId }, 0, "emitNoInput");
+          return { done: false, value: tagged } as const;
+        },
+      } as any;
+    });
+
+    // This operator emits without consuming input, so the tracing operator wrapper
+    // loses metadata correlation and returns an unwrapped value.
+    const out: any[] = [];
+    for await (const v of from([1]).pipe(emitNoInput)) {
+      out.push(v);
+    }
+
+    expect(out.length).toBe(1);
+    expect(out[0]).toEqual({ n: 123 });
+
+    expect(calls.some((c) => c.type === "markDelivered" && c.vId === metaValueId)).toBeTrue();
+    expect(calls.some((c) => c.type === "completeSubscription")).toBeTrue();
+  });
+
+  it("respects parentValueId (does not call startTrace)", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    const source: AsyncIterator<number> = {
+      idx: 0,
+      async next(this: any) {
+        this.idx += 1;
+        if (this.idx === 1) return { done: false, value: 123 } as const;
+        return { done: true, value: undefined } as any;
+      },
+    } as any;
+
+    const it = applyPipeStreamHooks({
+      streamId: "s_parent",
+      streamName: "parent",
+      subscriptionId: "sub_parent",
+      parentValueId: "val_parent",
+      source,
+      operators: [],
+    });
+
+    const r1 = await it.next();
+    expect(r1.done).toBeFalse();
+    expect(r1.value).toBe(123);
+    const r2 = await it.next();
+    expect(r2.done).toBeTrue();
+
+    expect(calls.some((c) => c.type === "startTrace")).toBeFalse();
+    expect(calls.some((c) => c.type === "markDelivered" && c.vId === "val_parent")).toBeTrue();
+  });
+
+  it("passes through already traced values from upstream sources", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    const source: AsyncIterator<any> = {
+      done: false,
+      async next(this: any) {
+        if (this.done) return { done: true, value: undefined } as any;
+        this.done = true;
+        return {
+          done: false,
+          value: wrapTracedValue(7, { valueId: "v_up", streamId: "s_up", subscriptionId: "sub_up" }),
+        } as const;
+      },
+    } as any;
+
+    const it = applyPipeStreamHooks({
+      streamId: "s_pass",
+      streamName: "pass",
+      subscriptionId: "sub_pass",
+      source,
+      operators: [],
+    });
+
+    const r1 = await it.next();
+    expect(r1).toEqual({ done: false, value: 7 });
+    await it.next();
+
+    expect(calls.some((c) => c.type === "startTrace")).toBeFalse();
+    expect(calls.some((c) => c.type === "markDelivered" && c.vId === "v_up")).toBeTrue();
+  });
 
   it("traces a simple map transformation", async () => {
     const { tracer, calls } = createTestTracer();
@@ -205,6 +347,192 @@ describe("Streamix tracing core", () => {
 
     const error = calls.find(c => c.type === "errorInOperator");
     expect(error).toBeDefined();
+  });
+
+  it("marks pending inputs as filtered when an operator completes early", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    const drainAndComplete = createOperator<number, number>("drainAndComplete", (source) => ({
+      async next() {
+        const r = await source.next();
+        if (r.done) return r;
+        // Consume a value but signal completion without emitting it.
+        return { done: true, value: undefined } as IteratorResult<number>;
+      },
+    }));
+
+    const out: number[] = [];
+    for await (const v of from([1]).pipe(drainAndComplete)) {
+      out.push(v);
+    }
+
+    expect(out).toEqual([]);
+    expect(calls.some((c) => c.type === "exitOperator" && c.filtered === true)).toBeTrue();
+  });
+
+  it("handles multiple inputs producing a new output (collapse case)", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    const sumTwo = createOperator<number, number>("sumTwo", (source) => ({
+      async next() {
+        const a = await source.next();
+        if (a.done) return a;
+        const b = await source.next();
+        if (b.done) return b;
+        return { done: false, value: (a.value as number) + (b.value as number) };
+      },
+      [Symbol.asyncIterator]() { return this; },
+    }));
+
+    const out: number[] = [];
+    for await (const v of from([1, 2]).pipe(sumTwo)) {
+      out.push(v);
+    }
+
+    expect(out).toEqual([3]);
+    expect(calls.some((c) => c.type === "collapseValue")).toBeTrue();
+    expect(calls.some((c) => c.type === "exitOperator" && c.outcome === "collapsed")).toBeTrue();
+  });
+
+  it("handles multiple inputs where one is passed through (filters others)", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    const takeSecond = createOperator<number, number>("takeSecond", (source) => ({
+      async next() {
+        const a = await source.next();
+        if (a.done) return a;
+        const b = await source.next();
+        if (b.done) return b;
+        return { done: false, value: b.value };
+      },
+      [Symbol.asyncIterator]() { return this; },
+    }));
+
+    const out: number[] = [];
+    for await (const v of from([1, 2]).pipe(takeSecond)) {
+      out.push(v);
+    }
+
+    expect(out).toEqual([2]);
+    expect(calls.some((c) => c.type === "exitOperator" && c.filtered === true)).toBeTrue();
+  });
+
+  it("supports runtime expand metadata for buffered 1→many outputs", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    const emitTwice = createOperator<number, number>("emitTwice", (source) => {
+      let buffered: number | null = null;
+      let baseValueId: string | null = null;
+
+      return {
+        async next() {
+          if (buffered !== null && baseValueId) {
+            const v = buffered;
+            buffered = null;
+            return {
+              done: false,
+              value: setValueMeta(v, { valueId: baseValueId, kind: "expand" }, 0, "emitTwice"),
+            };
+          }
+
+          const r = await source.next();
+          if (r.done) return r;
+
+          const meta = getIteratorMeta(source);
+          baseValueId = meta?.valueId ?? null;
+          buffered = (r.value as number) + 1;
+
+          return {
+            done: false,
+            value: setValueMeta(r.value, { valueId: baseValueId!, kind: "expand" }, 0, "emitTwice"),
+          };
+        },
+        return: source.return?.bind(source),
+        throw: source.throw?.bind(source),
+        [Symbol.asyncIterator]() { return this; },
+      };
+    });
+
+    const out: number[] = [];
+    for await (const v of from([10]).pipe(emitTwice)) {
+      out.push(v);
+    }
+
+    expect(out).toEqual([10, 11]);
+    expect(calls.some((c) => c.type === "exitOperator" && c.outcome === "expanded")).toBeTrue();
+    expect(calls.some((c) => c.type === "createExpandedTrace")).toBeTrue();
+  });
+
+  it("supports runtime collapse metadata with explicit inputValueIds", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    const collapseToArray = createOperator<number, number[]>("collapseToArray", (source) => {
+      return {
+        async next() {
+          const a = await source.next();
+          if (a.done) return a as any;
+          const metaA = getIteratorMeta(source);
+
+          const b = await source.next();
+          if (b.done) return b as any;
+          const metaB = getIteratorMeta(source);
+
+          const arr = [a.value as number, b.value as number];
+          return {
+            done: false,
+            value: setValueMeta(
+              arr,
+              {
+                kind: "collapse",
+                inputValueIds: [metaA!.valueId, metaB!.valueId],
+                valueId: metaB!.valueId,
+              },
+              0,
+              "collapseToArray"
+            ),
+          };
+        },
+        [Symbol.asyncIterator]() { return this; },
+      };
+    });
+
+    const out: number[][] = [];
+    for await (const v of from([1, 2]).pipe(collapseToArray)) {
+      out.push(v);
+    }
+
+    expect(out).toEqual([[1, 2]]);
+    expect(calls.some((c) => c.type === "collapseValue")).toBeTrue();
+    expect(calls.some((c) => c.type === "exitOperator" && c.outcome === "collapsed")).toBeTrue();
+  });
+
+  it("final wrapper calls completeSubscription on iterator return/throw", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    const it = from([1, 2]).pipe(map((x) => x))[Symbol.asyncIterator]();
+    await it.next();
+
+    if (it.return) {
+      await it.return(undefined as any);
+    }
+
+    let threw = false;
+    try {
+      if (it.throw) {
+        await it.throw(new Error("boom"));
+      }
+    } catch {
+      threw = true;
+    }
+
+    expect(threw).toBeTrue();
+    expect(calls.some((c) => c.type === "completeSubscription")).toBeTrue();
   });
 
 });
