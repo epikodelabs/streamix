@@ -345,8 +345,18 @@ describe("Streamix tracing core", () => {
 
     expect(thrown).toBeTruthy();
 
-    const error = calls.find(c => c.type === "errorInOperator");
+    const start = calls.find((c) => c.type === "startTrace");
+    expect(start).toBeDefined();
+
+    const error = calls.find((c) => c.type === "errorInOperator");
     expect(error).toBeDefined();
+    expect(error.args[0]).toBe(start.vId);
+    expect(error.args[1]).toBe(0);
+    expect(error.args[2]).toEqual(jasmine.any(Error));
+    expect((error.args[2] as Error).message).toBe("boom");
+
+    expect(calls.some((c) => c.type === "markDelivered")).toBeFalse();
+    expect(calls.some((c) => c.type === "completeSubscription")).toBeFalse();
   });
 
   it("marks pending inputs as filtered when an operator completes early", async () => {
@@ -368,7 +378,36 @@ describe("Streamix tracing core", () => {
     }
 
     expect(out).toEqual([]);
-    expect(calls.some((c) => c.type === "exitOperator" && c.filtered === true)).toBeTrue();
+    expect(calls.some((c) => c.type === "exitOperator" && c.filtered === true && c.opIdx === 0)).toBeTrue();
+    expect(calls.some((c) => c.type === "markDelivered")).toBeFalse();
+    expect(calls.some((c) => c.type === "completeSubscription")).toBeTrue();
+  });
+
+  it("filters all pending inputs when an operator pulls multiple values then completes", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    const drainTwoAndComplete = createOperator<number, number>("drainTwoAndComplete", (source) => ({
+      async next() {
+        const a = await source.next();
+        if (a.done) return a;
+        const b = await source.next();
+        if (b.done) return b;
+        return { done: true, value: undefined } as IteratorResult<number>;
+      },
+      [Symbol.asyncIterator]() { return this; },
+    }));
+
+    const out: number[] = [];
+    for await (const v of from([1, 2, 3]).pipe(drainTwoAndComplete)) {
+      out.push(v);
+    }
+
+    expect(out).toEqual([]);
+
+    const filteredExits = calls.filter((c) => c.type === "exitOperator" && c.filtered === true && c.opIdx === 0);
+    expect(filteredExits.length).toBe(2);
+    expect(calls.some((c) => c.type === "completeSubscription")).toBeTrue();
   });
 
   it("handles multiple inputs producing a new output (collapse case)", async () => {
