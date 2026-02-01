@@ -17,6 +17,11 @@ import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
 import { createSubscription, type Subscription } from "./subscription";
 
+/**
+ * A Stream is an async iterable with additional methods for piping, subscribing, and querying values.
+ *
+ * @template T The type of values emitted by the stream.
+ */
 export type Stream<T = any> = AsyncIterable<T> & {
   type: "stream" | "subject";
   name?: string;
@@ -29,6 +34,13 @@ export type Stream<T = any> = AsyncIterable<T> & {
   [Symbol.asyncIterator](): AsyncIterator<T>;
 };
 
+/**
+ * Type guard to check if a value is stream-like (has type and async iterator).
+ *
+ * @template T
+ * @param value The value to check.
+ * @returns {boolean} True if the value is a Stream.
+ */
 export const isStreamLike = <T = unknown>(
   value: unknown
 ): value is Stream<T> => {
@@ -293,22 +305,21 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
     const abortController = new AbortController();
     const signal = abortController.signal;
 
-    const subscriptionId = generateSubscriptionId();
-    const baseSource = source[Symbol.asyncIterator]();
-    const iterator = applyPipeStreamHooks({
-      streamId: pipedId,
-      streamName: source.name,
-      subscriptionId,
-      source: baseSource,
-      operators,
-    });
-
-    const subscription = createSubscription(async () => {
-      return runInMicrotask(async () => {
-        abortController.abort();
-        wrapped.complete?.();
+      const subscription = createSubscription(async () => {
+        return runInMicrotask(async () => {
+          abortController.abort();
+          wrapped.complete?.();
+        });
       });
-    });
+      const subscriptionId = subscription.id;
+      const baseSource = source[Symbol.asyncIterator]();
+      const iterator = applyPipeStreamHooks({
+        streamId: pipedId,
+        streamName: source.name,
+        subscriptionId,
+        source: baseSource,
+        operators,
+      });
 
     enqueueMicrotask(() => {
       drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(

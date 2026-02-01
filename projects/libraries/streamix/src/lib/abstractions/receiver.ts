@@ -3,14 +3,31 @@ import { getCurrentEmissionStamp } from "./emission";
 import { unwrapPrimitive } from "./hooks";
 import { isPromiseLike, type MaybePromise } from "./operator";
 
+/**
+ * A receiver is a set of callbacks for handling next, error, and complete notifications from a stream or subject.
+ *
+ * @template T The type of values received.
+ */
 export type Receiver<T = any> = {
   next?: (value: T) => MaybePromise;
   error?: (err: any) => MaybePromise;
   complete?: () => MaybePromise;
 };
 
+/**
+ * A strict receiver is a receiver with all callbacks required and a completed flag.
+ *
+ * @template T The type of values received.
+ */
 export type StrictReceiver<T = any> = Required<Receiver<T>> & { readonly completed: boolean; };
 
+/**
+ * Create a strict receiver from a callback or receiver object.
+ *
+ * @template T The type of values received.
+ * @param {((value: T) => MaybePromise) | Receiver<T>} [callbackOrReceiver] - Callback or receiver object.
+ * @returns {StrictReceiver<T>} A strict receiver instance.
+ */
 export function createReceiver<T = any>(
   callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
 ): StrictReceiver<T> {

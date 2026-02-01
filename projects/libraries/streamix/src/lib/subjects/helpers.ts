@@ -15,12 +15,27 @@ import {
 /* Shared helpers for subjects                                                */
 /* ------------------------------------------------------------------------- */
 
+/**
+ * QueueItem represents an enqueued subject operation used for ordered
+ * delivery. Items may be `next` (with a value), `complete`, or `error`.
+ *
+ * @template T
+ */
 export type QueueItem<T> =
   | { kind: "next"; value: T; stamp: number }
   | { kind: "complete"; stamp: number }
   | { kind: "error"; error: Error; stamp: number };
 
 
+/**
+ * Create the commit function which drains the subject `queue` and delivers
+ * items to eligible receivers, honoring backpressure, delivery ordering,
+ * and terminal semantics.
+ *
+ * @template T
+ * @param opts - options object (see signature)
+ * @returns {() => void} a function to attempt committing queued items
+ */
 export function createTryCommit<T>(opts: {
   receivers: Set<StrictReceiver<T>>;
   ready: Set<StrictReceiver<T>>;

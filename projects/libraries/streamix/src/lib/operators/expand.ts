@@ -12,6 +12,12 @@ import {
 } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 
+/**
+ * Options for the expand operator.
+ *
+ * @property {'depth' | 'breadth'} [traversal] - Traversal strategy: 'depth' (default) or 'breadth'.
+ * @property {number} [maxDepth] - Maximum recursion depth.
+ */
 export type ExpandOptions = {
   traversal?: 'depth' | 'breadth';
   maxDepth?: number;

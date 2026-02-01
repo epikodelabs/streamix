@@ -23,7 +23,21 @@ import type { Subject } from "./subject";
 
 type ReplayItem<T> = { value: T; stamp: number };
 
+/**
+ * ReplaySubject replays a bounded history of values to late subscribers.
+ * It buffers up to `capacity` items and delivers them before continuing
+ * with live emissions.
+ *
+ * @template T
+ */
 export type ReplaySubject<T = any> = Subject<T>;
+/**
+ * Create a `ReplaySubject` with an optional capacity of buffered items.
+ *
+ * @template T
+ * @param {number} [capacity=Infinity] - max number of values to retain
+ * @returns {ReplaySubject<T>} a new replay subject
+ */
 export function createReplaySubject<T = any>(
   capacity: number = Infinity
 ): ReplaySubject<T> {
@@ -122,6 +136,13 @@ export function createReplaySubject<T = any>(
     onDone?.();
   };
 
+  /**
+   * Register a receiver to receive emissions from the ReplaySubject, including replayed values.
+   * Handles replaying buffered values and terminal state if needed.
+   *
+   * @param r The receiver to register.
+   * @returns {Subscription} Subscription object for unsubscription.
+   */
   const registerWithReplay = (r: StrictReceiver<T>): Subscription => {
     const snapshot = replay.slice();
     const terminal = terminalRef.current;
