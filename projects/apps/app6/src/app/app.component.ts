@@ -11,7 +11,6 @@ import {
   ViewChildren,
 } from '@angular/core';
 import {
-  createValueTracer,
   disableTracing,
   enableTracing,
   type ValueState,
@@ -19,6 +18,7 @@ import {
 } from '@epikodelabs/streamix/tracing';
 import { runDemoStream } from './demo-stream';
 import { drawingWorker, type DrawingCircle, type DrawingInput, type DrawingOutput } from './drawing.worker.js';
+import { createValueTracer } from './tracer';
 
 type CanvasCircle = DrawingCircle;
 
