@@ -27,13 +27,13 @@
  */
 import { unwrapPrimitive } from "@epikodelabs/streamix";
 import {
-    OperatorOutcome,
-    TerminalReason,
-    ValueState,
-    ValueTrace,
-    ValueTracer,
-    generateValueId,
-    unwrapTracedValue,
+  OperatorOutcome,
+  TerminalReason,
+  ValueState,
+  ValueTrace,
+  ValueTracer,
+  generateValueId,
+  unwrapTracedValue,
 } from "@epikodelabs/streamix/tracing";
 
 /* ============================================================================ */
@@ -41,6 +41,8 @@ import {
 /* ============================================================================ */
 
 export type TracerEventHandlers = {
+  /** Invoked when a new value is emitted from a stream (before any operators). */
+  emitted?: (trace: ValueTrace) => void;
   /** Invoked when a trace is marked as delivered. */
   delivered?: (trace: ValueTrace) => void;
   /** Invoked when a trace becomes terminal due to filtering. */
@@ -141,7 +143,7 @@ type TraceEvent =
   | { type: "TERMINALIZE"; reason: TerminalReason; opIndex: number; opName: string; now: number; error?: Error }
   | { type: "DELIVER"; now: number };
 
-type EmitEvent = "delivered" | "filtered" | "collapsed" | "dropped" | "trace";
+type EmitEvent = "emitted" | "delivered" | "filtered" | "collapsed" | "dropped" | "trace";
 
 interface TracerPolicy {
   readonly deliverExpandedChildren: boolean;
@@ -600,6 +602,7 @@ const createTracerImpl = (
 
       const exported = includeSteps ? exportTrace(record) : { ...exportTrace(record), operatorSteps: [] };
       onTraceUpdate?.(exported);
+      notify("emitted", exported);
       return exported;
     },
 
@@ -610,47 +613,48 @@ const createTracerImpl = (
 
       const record: TraceRecord = base
         ? {
-            valueId,
-            parentTraceId: baseId,
-            streamId: base.streamId,
-            streamName: base.streamName,
-            subscriptionId: base.subscriptionId,
-            emittedAt: base.emittedAt,
-            status: "active",
-            sourceValue: base.sourceValue,
-            finalValue: value,
-            operatorSteps: includeSteps ? base.operatorSteps.map((s) => ({ ...s })) : [],
-            operatorDurations: new Map(),
-            expandedFrom: { operatorIndex: opIdx, operatorName: opName, baseValueId: baseId },
-          }
+          valueId,
+          parentTraceId: baseId,
+          streamId: base.streamId,
+          streamName: base.streamName,
+          subscriptionId: base.subscriptionId,
+          emittedAt: base.emittedAt,
+          status: "active",
+          sourceValue: base.sourceValue,
+          finalValue: value,
+          operatorSteps: includeSteps ? base.operatorSteps.map((s) => ({ ...s })) : [],
+          operatorDurations: new Map(),
+          expandedFrom: { operatorIndex: opIdx, operatorName: opName, baseValueId: baseId },
+        }
         : {
-            valueId,
-            parentTraceId: baseId,
-            streamId: "unknown",
-            subscriptionId: "unknown",
-            emittedAt: now,
-            status: "active",
-            sourceValue: value,
-            finalValue: value,
-            operatorSteps: includeSteps
-              ? [
-                  {
-                    operatorIndex: opIdx,
-                    operatorName: opName,
-                    enteredAt: now,
-                    exitedAt: now,
-                    outcome: "expanded" as const,
-                    inputValue: undefined,
-                    outputValue: value,
-                  },
-                ]
-              : [],
-            operatorDurations: new Map(),
-            expandedFrom: { operatorIndex: opIdx, operatorName: opName, baseValueId: baseId },
-          };
+          valueId,
+          parentTraceId: baseId,
+          streamId: "unknown",
+          subscriptionId: "unknown",
+          emittedAt: now,
+          status: "active",
+          sourceValue: value,
+          finalValue: value,
+          operatorSteps: includeSteps
+            ? [
+              {
+                operatorIndex: opIdx,
+                operatorName: opName,
+                enteredAt: now,
+                exitedAt: now,
+                outcome: "expanded" as const,
+                inputValue: undefined,
+                outputValue: value,
+              },
+            ]
+            : [],
+          operatorDurations: new Map(),
+          expandedFrom: { operatorIndex: opIdx, operatorName: opName, baseValueId: baseId },
+        };
 
       retainTrace(valueId, record);
       const exported = includeSteps ? exportTrace(record) : { ...exportTrace(record), operatorSteps: [] };
+      notify("emitted", exported);
       onTraceUpdate?.(exported);
       return valueId;
     },
