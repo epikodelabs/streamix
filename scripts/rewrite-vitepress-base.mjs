@@ -6,8 +6,8 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const distRoot = path.join(process.cwd(), 'docs/.vitepress/dist');
-const basePath = '/actionstack/';
+const distRoot = path.join(process.cwd(), 'dist/.vitepress/dist');
+const basePath = '/streamix/';
 
 function processDirectory(dir) {
   const files = fs.readdirSync(dir, { withFileTypes: true });
