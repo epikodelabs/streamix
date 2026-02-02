@@ -1,4 +1,4 @@
-import { createOperator, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, setValueMeta, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -24,7 +24,14 @@ export function share<T = any>() {
         while (true) {
           const result = await source.next();
           if (result.done) break;
-          shared!.next(result.value);
+
+          const meta = getIteratorMeta(source);
+          let value: any = result.value;
+          if (meta) {
+            value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+          }
+
+          shared!.next(value);
         }
       } catch (err) {
         shared!.error(err);

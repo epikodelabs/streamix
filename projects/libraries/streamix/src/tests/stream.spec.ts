@@ -59,6 +59,29 @@ describe('stream', () => {
     });
   });
 
+  it('is TDZ-safe to unsubscribe inside next using const subscription', (done) => {
+    const stream = from([1, 2, 3]);
+    let completeCalls = 0;
+
+    const subscription = stream.subscribe({
+      next: () => {
+        try {
+          subscription.unsubscribe();
+        } catch (e) {
+          done.fail(e as any);
+        }
+      },
+      complete: () => {
+        completeCalls++;
+      },
+    });
+
+    setTimeout(() => {
+      expect(completeCalls).toBe(1);
+      done();
+    }, 0);
+  });
+
   it('calls complete after error for cleanup', (done) => {
     const stream = createStream('error-stream', async function* () {
       throw new Error('boom');

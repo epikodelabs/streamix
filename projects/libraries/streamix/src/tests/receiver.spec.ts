@@ -1,4 +1,4 @@
-import { createReceiver } from '@epikodelabs/streamix';
+import { createReceiver, nextEmissionStamp, withEmissionStamp } from '@epikodelabs/streamix';
 
 const flushMicrotasks = async () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -19,6 +19,38 @@ describe('createReceiver', () => {
 
     expect(nextSpy).toHaveBeenCalledWith(42);
     expect(receiver.completed).toBeFalse();
+  });
+
+  it('schedules next via microtask when not in an emission context', async () => {
+    const events: string[] = [];
+    const receiver = createReceiver<number>(() => {
+      events.push('next');
+    });
+
+    const p = receiver.next(1);
+    events.push('sync');
+
+    expect(events).toEqual(['sync']);
+
+    await flushMicrotasks();
+    await p;
+
+    expect(events).toEqual(['sync', 'next']);
+  });
+
+  it('runs next inline when called inside an emission context', async () => {
+    const events: string[] = [];
+    const receiver = createReceiver<number>(() => {
+      events.push('next');
+    });
+
+    withEmissionStamp(nextEmissionStamp(), () => {
+      events.push('before');
+      void receiver.next(1);
+      events.push('after');
+    });
+
+    expect(events).toEqual(['before', 'next', 'after']);
   });
 
   it('should create a receiver from an object', async () => {
