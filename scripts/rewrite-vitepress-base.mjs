@@ -1,34 +1,13 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const repoRoot = process.cwd();
-const distRoot = path.join(repoRoot, 'dist', '.vitepress', 'dist');
+// Get current file directory for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-function normalizeBase(value) {
-  let base = (value ?? '').trim();
-  if (!base) {
-    return '/streamix/';
-  }
-  if (!base.startsWith('/')) {
-    base = `/${base}`;
-  }
-  if (!base.endsWith('/')) {
-    base = `${base}/`;
-  }
-  return base;
-}
-
-function detectBaseFromVitepressConfig() {
-  const configPath = path.join(repoRoot, 'vitepress.config.ts');
-  if (!fs.existsSync(configPath)) {
-    return undefined;
-  }
-  const content = fs.readFileSync(configPath, 'utf8');
-  const match = content.match(/\bbase\s*:\s*(['"])(.*?)\1/);
-  return match?.[2];
-}
-
-const basePath = normalizeBase(process.env.VITEPRESS_BASE ?? detectBaseFromVitepressConfig());
+const distRoot = path.join(process.cwd(), 'docs/.vitepress/dist');
+const basePath = '/actionstack/';
 
 function processDirectory(dir) {
   const files = fs.readdirSync(dir, { withFileTypes: true });
@@ -66,8 +45,7 @@ function processDirectory(dir) {
               return match;
             }
             // Skip if it's already been processed
-            const baseNoLeadingSlash = basePath.replace(/^\/+/, '');
-            if (rest.startsWith(baseNoLeadingSlash)) {
+            if (rest.startsWith('actionstack/')) {
               return match;
             }
             return `${prefix}${basePath}${rest}`;

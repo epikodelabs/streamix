@@ -145,6 +145,38 @@ async function drainIterator<T>(
       }
     };
 
+
+  /**
+   * Creates a multicast {@link Stream} from an async generator factory.
+   *
+   * The returned Stream starts producing values on the first subscription and
+   * delivers each yielded value to *all* active subscribers.
+   *
+   * - When the last subscriber unsubscribes, the underlying generator is aborted
+   *   via an {@link AbortSignal}.
+   * - When the generator completes, subscribers are completed and internal
+   *   receiver references are cleared to avoid memory growth in long-running
+   *   processes/tests.
+   * - A new subscription after completion starts a fresh generator run.
+   *
+   * Receiver callbacks are executed in a microtask when there is no active
+   * emission context, which helps keep delivery ordering consistent and avoids
+   * surprising re-entrancy.
+   *
+   * @template T Value type emitted by the stream.
+   * @param name Human-friendly name (used for debugging/tracing).
+   * @param generatorFn Async generator factory. Receives an optional AbortSignal
+   * that is aborted when the stream is torn down.
+   * @returns A Stream that can be piped, subscribed to, or iterated.
+   *
+   * @example
+   * const s = createStream('ticks', async function* (signal) {
+   *   while (!signal?.aborted) {
+   *     yield Date.now();
+   *     await new Promise(r => setTimeout(r, 1000));
+   *   }
+   * });
+   */
     withEmissionStamp(stamp, forward);
     return false;
   };
@@ -205,6 +237,37 @@ async function drainIterator<T>(
   }
 }
 
+/**
+ * Creates a multicast {@link Stream} from an async generator factory.
+ *
+ * The returned Stream starts producing values on the first subscription and
+ * delivers each yielded value to *all* active subscribers.
+ *
+ * - When the last subscriber unsubscribes, the underlying generator is aborted
+ *   via an {@link AbortSignal}.
+ * - When the generator completes, subscribers are completed and internal
+ *   receiver references are cleared to avoid memory growth in long-running
+ *   processes/tests.
+ * - A new subscription after completion starts a fresh generator run.
+ *
+ * Receiver callbacks are executed in a microtask when there is no active
+ * emission context, which helps keep delivery ordering consistent and avoids
+ * surprising re-entrancy.
+ *
+ * @template T Value type emitted by the stream.
+ * @param name Human-friendly name (used for debugging/tracing).
+ * @param generatorFn Async generator factory. Receives an optional AbortSignal
+ * that is aborted when the stream is torn down.
+ * @returns A Stream that can be piped, subscribed to, or iterated.
+ *
+ * @example
+ * const s = createStream('ticks', async function* (signal) {
+ *   while (!signal?.aborted) {
+ *     yield Date.now();
+ *     await new Promise(r => setTimeout(r, 1000));
+ *   }
+ * });
+ */
 export function createStream<T>(
   name: string,
   generatorFn: (signal?: AbortSignal) => AsyncGenerator<T, void, unknown>
@@ -294,6 +357,18 @@ export function createStream<T>(
   return self;
 }
 
+/**
+ * Applies a list of operators to a source stream and returns the resulting stream.
+ *
+ * This is the implementation behind `stream.pipe(...)`. It creates a new stream
+ * identity (stream id) for the piped stream and ensures runtime hooks are
+ * invoked consistently for both `subscribe()` and direct async iteration.
+ *
+ * @template TIn Source value type.
+ * @param source Source stream.
+ * @param operators Operators to apply, in order.
+ * @returns A new Stream that emits the transformed values.
+ */
 export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
   source: Stream<TIn>,
   operators: [...Ops]
@@ -305,22 +380,21 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
     const abortController = new AbortController();
     const signal = abortController.signal;
 
-    const subscriptionId = generateSubscriptionId();
-    const baseSource = source[Symbol.asyncIterator]();
-    const iterator = applyPipeStreamHooks({
-      streamId: pipedId,
-      streamName: source.name,
-      subscriptionId,
-      source: baseSource,
-      operators,
-    });
-
-    const subscription = createSubscription(async () => {
-      return runInMicrotask(async () => {
-        abortController.abort();
-        wrapped.complete?.();
+      const subscription = createSubscription(async () => {
+        return runInMicrotask(async () => {
+          abortController.abort();
+          wrapped.complete?.();
+        });
       });
-    });
+      const subscriptionId = subscription.id;
+      const baseSource = source[Symbol.asyncIterator]();
+      const iterator = applyPipeStreamHooks({
+        streamId: pipedId,
+        streamName: source.name,
+        subscriptionId,
+        source: baseSource,
+        operators,
+      });
 
     enqueueMicrotask(() => {
       drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(

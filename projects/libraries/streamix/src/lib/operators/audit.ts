@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -21,6 +21,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
     const outputIterator = eachValueFrom(output);
 
     let bufferedResult: IteratorResult<T> | undefined;
+    let bufferedMeta: ReturnType<typeof getIteratorMeta> | undefined;
 
     let timerId: ReturnType<typeof setTimeout> | undefined;
     let resolvedDuration: number | undefined;
@@ -29,11 +30,18 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
     const flush = () => {
       if (!bufferedResult) return;
 
-      const value = bufferedResult.value!;
-      // Emit value directly - tracer tracks it via inputQueue
+      let value = bufferedResult.value!;
+
+      if (bufferedMeta) {
+        setIteratorMeta(outputIterator, { valueId: bufferedMeta.valueId }, bufferedMeta.operatorIndex, bufferedMeta.operatorName);
+        value = setValueMeta(value, { valueId: bufferedMeta.valueId }, bufferedMeta.operatorIndex, bufferedMeta.operatorName);
+      }
+
+      // Emit value directly - tracer correlates it via valueId / inputQueue
       output.next(value);
 
       bufferedResult = undefined;
+      bufferedMeta = undefined;
       timerId = undefined;
 
       if (completed) {
@@ -61,7 +69,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
             break;
           }
 
-          getIteratorMeta(source);
+          bufferedMeta = getIteratorMeta(source);
 
           // ⚠️ Replace buffered value → mark previous as filtered
           bufferedResult = result;

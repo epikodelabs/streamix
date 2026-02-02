@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from "../abstractions";
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { createSubject, type Subject } from "../subjects";
 
@@ -27,7 +27,7 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
     const flush = () => {
       if (!latestResult) return;
 
-      const value = latestResult.value!;
+      let value = latestResult.value!;
       
       if (latestResult.meta) {
         setIteratorMeta(
@@ -36,9 +36,16 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
           latestResult.meta.operatorIndex,
           latestResult.meta.operatorName
         );
+
+        value = setValueMeta(
+          value,
+          { valueId: latestResult.meta.valueId },
+          latestResult.meta.operatorIndex,
+          latestResult.meta.operatorName
+        );
       }
 
-      // Emit value directly - tracer tracks it via inputQueue
+      // Emit value directly - tracer correlates it via valueId / inputQueue
       output.next(value);
 
       latestResult = undefined;

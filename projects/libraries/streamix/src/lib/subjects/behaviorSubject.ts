@@ -131,7 +131,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       }
     } catch (_) {}
 
-    const baseSub = createSubscription(() => {
+    return createSubscription(() => {
       // Synchronous completion
       if (!r.completed) {
         const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
@@ -139,20 +139,6 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       }
       receivers.delete(trackedReceiver);
     });
-
-    const wrappedSub: Subscription = {
-      get unsubscribed() {
-        return baseSub.unsubscribed;
-      },
-      unsubscribe() {
-        // Remove receiver synchronously to prevent further deliveries
-        receivers.delete(trackedReceiver);
-        return baseSub.unsubscribe();
-      },
-      onUnsubscribe: baseSub.onUnsubscribe,
-    };
-
-    return wrappedSub;
   };
 
   /**

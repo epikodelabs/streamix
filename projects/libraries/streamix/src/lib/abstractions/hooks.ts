@@ -267,38 +267,6 @@ export function applyPipeStreamHooks(
 }
 
 /* ============================================================================
- * Until-gate (shared synchronization primitive)
- * ========================================================================== */
-
-/**
- * Gate used by "until" style operators (e.g. `takeUntil`, `skipUntil`).
- *
- * Populated at emission time and used by operators to determine whether a
- * source value should be forwarded or whether the notifier already fired.
- */
-export type UntilGate = {
-  /** First notifier emission stamp */
-  openStamp: number | null;
-
-  /** Notifier terminal stamp if completed before open */
-  closeStamp: number | null;
-
-  /** Notifier error, if any */
-  error: any | null;
-};
-
-/**
- * Create a fresh `UntilGate`. Each notifier must use its own gate instance.
- */
-export function createUntilGate(): UntilGate {
-  return {
-    openStamp: null,
-    closeStamp: null,
-    error: null,
-  };
-}
-
-/* ============================================================================
  * Stream & subscription identity
  * ========================================================================== */
 

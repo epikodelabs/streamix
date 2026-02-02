@@ -20,6 +20,9 @@ Small bundle, pull-based execution, and a familiar operator API.
   <a href="https://github.com/epikodelabs/streamix">
     <img src="https://raw.githubusercontent.com/epikodelabs/streamix/main/projects/libraries/streamix/bundle-size.svg" alt="Bundle Size">
   </a>
+  <a href="https://codecov.io/github/epikodelabs/streamix" >
+    <img src="https://codecov.io/github/epikodelabs/streamix/graph/badge.svg?token=ITHDU7JVOI" alt="Code Coverage"/>
+  </a>
 </p>
 
 
