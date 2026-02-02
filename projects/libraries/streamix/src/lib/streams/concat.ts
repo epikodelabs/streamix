@@ -2,21 +2,30 @@ import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
- * Creates a stream that subscribes to multiple streams in sequence.
+ * Input accepted by {@link concat}.
  *
- * This operator will subscribe to the first stream and yield all of its
- * values. Once the first stream completes, it will then subscribe to the
- * second stream, and so on, until all streams have completed. The resulting
- * stream will complete only after the last source stream has completed.
- *
- * If any of the source streams errors, the concatenated stream will also error and
- * stop processing the remaining streams.
- *
- * @template T The type of the values in the streams.
- * @param sources Streams or values (including promises) to concatenate.
- * @returns {Stream<T>} A new stream that emits values from all input streams in sequence.
+ * Values (including promises) are converted to a Stream via `fromAny(...)`.
  */
 type ConcatSource<T> = Stream<T> | MaybePromise<T>;
+
+/**
+ * Concatenates sources sequentially.
+ *
+ * `concat(a, b, c)` subscribes to `a`, yields all its values, waits for it to
+ * complete, then moves to `b`, then `c`.
+ *
+ * - If any source errors, the concatenated stream errors and remaining sources
+ *   are not processed.
+ * - Sources may be Streams, raw values, arrays/iterables, or Promises of those.
+ *
+ * @template T Value type.
+ * @param sources Streams or values (including promises) to concatenate.
+ * @returns A new stream that emits values from all input sources in order.
+ *
+ * @example
+ * const s = concat(from([1, 2]), from([3]), 4);
+ * // emits: 1, 2, 3, 4
+ */
 
 export function concat<T = any>(...sources: ConcatSource<T>[]): Stream<T> {
   async function* generator() {
