@@ -71,7 +71,7 @@ installTracingHooks();
 /* SPECS */
 /* ========================================================================== */
 
-describe("Streamix tracing core", () => {
+describe("tracingCore", () => {
 
   afterEach(() => disableTracing());
 
