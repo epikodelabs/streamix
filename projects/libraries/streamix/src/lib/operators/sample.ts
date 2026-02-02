@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -19,6 +19,7 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
     const outputIterator = eachValueFrom(output);
 
     let lastResult: IteratorResult<T> | undefined;
+    let lastMeta: ReturnType<typeof getIteratorMeta> | undefined;
     let skipped = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
     let resolvedPeriod: number | undefined = undefined;
@@ -31,8 +32,12 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
         if (!lastResult) return;
 
         if (!skipped) {
-          const value = lastResult.value!;
-          // Emit value directly - tracer tracks it via inputQueue
+          let value = lastResult.value!;
+          if (lastMeta) {
+            setIteratorMeta(outputIterator, { valueId: lastMeta.valueId }, lastMeta.operatorIndex, lastMeta.operatorName);
+            value = setValueMeta(value, { valueId: lastMeta.valueId }, lastMeta.operatorIndex, lastMeta.operatorName);
+          }
+          // Emit value directly - tracer correlates it via valueId / inputQueue
           output.next(value);
         }
 
@@ -55,15 +60,21 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
           const result: IteratorResult<T> = await source.next();
           if (result.done) break;
 
-          getIteratorMeta(source);
+          lastMeta = getIteratorMeta(source);
           lastResult = result;
           skipped = false;
         }
 
         // Emit final value
-        if (lastResult) {
-          const value = lastResult.value!;
-          // Emit value directly - tracer tracks it via inputQueue
+        // Guard against a race where the interval emits after the final source value
+        // but before we exit the loop; in that case `skipped` is already true.
+        if (lastResult && !skipped) {
+          let value = lastResult.value!;
+          if (lastMeta) {
+            setIteratorMeta(outputIterator, { valueId: lastMeta.valueId }, lastMeta.operatorIndex, lastMeta.operatorName);
+            value = setValueMeta(value, { valueId: lastMeta.valueId }, lastMeta.operatorIndex, lastMeta.operatorName);
+          }
+          // Emit value directly - tracer correlates it via valueId / inputQueue
           output.next(value);
         }
       } catch (err) {

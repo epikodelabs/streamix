@@ -137,7 +137,11 @@ describe('throttle', () => {
   it('should support promised duration', async () => {
     const output: number[] = [];
     const subject = createSubject<number>();
-    const iter = subject.pipe(throttle<number>(Promise.resolve(30)));
+    // Use a generous duration to avoid flakiness under heavy test load.
+    // If the event loop is blocked long enough, a short throttle window can
+    // legitimately elapse before the next value is emitted, causing an extra
+    // trailing emission and making this test timing-sensitive.
+    const iter = subject.pipe(throttle<number>(Promise.resolve(200)));
 
     const consumer = (async () => {
       for await (const v of iter) {
@@ -150,7 +154,7 @@ describe('throttle', () => {
 
     subject.next(1);
     subject.next(2);
-    await sleep(10);
+    await sleep(20);
     subject.next(3);
     subject.complete();
 

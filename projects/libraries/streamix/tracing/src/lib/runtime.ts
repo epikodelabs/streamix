@@ -1,18 +1,18 @@
 import {
-    createOperator,
-    getValueMeta,
-    registerRuntimeHooks,
-    setIteratorMeta,
-    unwrapPrimitive,
+  createOperator,
+  getValueMeta,
+  registerRuntimeHooks,
+  setIteratorMeta,
+  unwrapPrimitive,
 } from "@epikodelabs/streamix";
 
 import {
-    generateValueId,
-    getGlobalTracer,
-    isTracedValue,
-    type OperatorOutcome,
-    type TracedWrapper,
-    wrapTracedValue,
+  generateValueId,
+  getGlobalTracer,
+  isTracedValue,
+  type OperatorOutcome,
+  type TracedWrapper,
+  wrapTracedValue,
 } from "./core";
 
 /**
@@ -68,6 +68,12 @@ export function installTracingHooks(): void {
             let activeRequestBatch: TracedWrapper<any>[] | null = null;
             const outputCountByBaseKey = new Map<string, number>();
 
+            const recordOutputFor = (valueId: string): void => {
+              const key = `${valueId}:${i}`;
+              const count = outputCountByBaseKey.get(key) ?? 0;
+              outputCountByBaseKey.set(key, count + 1);
+            };
+
             const removeFromQueue = (valueId: string): void => {
               const idx = inputQueue.findIndex((w) => w.meta.valueId === valueId);
               if (idx >= 0) inputQueue.splice(idx, 1);
@@ -91,6 +97,7 @@ export function installTracingHooks(): void {
               }
 
               exitAndRemove(targetId, emittedValue, false, "collapsed");
+              recordOutputFor(targetId);
               return wrapOutput(targetMeta, emittedValue);
             };
 
@@ -225,6 +232,7 @@ export function installTracingHooks(): void {
                       }
 
                       exitAndRemove(chosen.meta.valueId, emittedValue, false, "transformed");
+                      recordOutputFor(chosen.meta.valueId);
                       return wrapOutput(chosen.meta, emittedValue);
                     }
 
@@ -246,6 +254,7 @@ export function installTracingHooks(): void {
                     if (isPassThrough) {
                       filterBatch(requestBatch, outputEntry.meta.valueId);
                       exitAndRemove(outputEntry.meta.valueId, emittedValue, false, "transformed");
+                      recordOutputFor(outputEntry.meta.valueId);
                     } else {
                       for (const item of requestBatch) {
                         if (item.meta.valueId !== outputEntry.meta.valueId) {
@@ -254,6 +263,7 @@ export function installTracingHooks(): void {
                         }
                       }
                       exitAndRemove(outputEntry.meta.valueId, emittedValue, false, "collapsed");
+                      recordOutputFor(outputEntry.meta.valueId);
                     }
 
                     return wrapOutput(outputEntry.meta, emittedValue);
@@ -262,6 +272,7 @@ export function installTracingHooks(): void {
                   if (requestBatch.length === 1) {
                     const wrapped = requestBatch[0];
                     exitAndRemove(wrapped.meta.valueId, emittedValue, false, "transformed");
+                    recordOutputFor(wrapped.meta.valueId);
                     return wrapOutput(wrapped.meta, emittedValue);
                   }
 

@@ -4,6 +4,7 @@ import {
   generateValueId,
   getGlobalTracer,
   getValueId,
+  installTracingHooks,
   isTracedValue,
   unwrapTracedValue,
   ValueTracer,
@@ -63,6 +64,8 @@ function createTestTracer() {
 
   return { tracer, calls };
 }
+
+installTracingHooks();
 
 /* ========================================================================== */
 /* SPECS */

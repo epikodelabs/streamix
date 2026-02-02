@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -25,7 +25,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
 
     const flushPending = () => {
       if (pendingResult !== undefined) {
-        const value = pendingResult.value!;
+        let value = pendingResult.value!;
         
         if (pendingResult.meta) {
           setIteratorMeta(
@@ -34,9 +34,16 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
             pendingResult.meta.operatorIndex,
             pendingResult.meta.operatorName
           );
+
+          value = setValueMeta(
+            value,
+            { valueId: pendingResult.meta.valueId },
+            pendingResult.meta.operatorIndex,
+            pendingResult.meta.operatorName
+          );
         }
 
-        // Emit value directly - tracer tracks it via inputQueue
+        // Emit value directly - tracer correlates it via valueId / inputQueue
         output.next(value);
         pendingResult = undefined;
       }
@@ -63,13 +70,12 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
              if (meta) {
                (pendingResult as any).meta = meta;
              }
-            getIteratorMeta(source);
             continue;
           }
 
           if (now - lastEmit >= resolvedDuration) {
             // Emit immediately (Leading edge)
-            const value = result.value;
+            let value = result.value;
             const meta = getIteratorMeta(source);
 
             if (meta) {
@@ -79,9 +85,11 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
                 meta.operatorIndex,
                 meta.operatorName
               );
+
+              value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
             }
             
-            // Emit value directly - tracer tracks it via inputQueue
+            // Emit value directly - tracer correlates it via valueId / inputQueue
             output.next(value);
             lastEmit = now;
           } else {

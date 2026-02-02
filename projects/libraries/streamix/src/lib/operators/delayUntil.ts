@@ -1,7 +1,10 @@
 import {
   createOperator,
   getIteratorEmissionStamp,
+  getIteratorMeta,
   setIteratorEmissionStamp,
+  setIteratorMeta,
+  setValueMeta,
   type Operator,
   type Stream,
 } from "../abstractions";
@@ -43,7 +46,7 @@ export function delayUntil<T = any, R = any>(
     const outputIt = output[Symbol.asyncIterator]();
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
 
-    const buffer: Array<{ value: T; stamp: number }> = [];
+    const buffer: Array<{ value: T; stamp: number; meta?: ReturnType<typeof getIteratorMeta> }> = [];
     let gateOpened = false;
     let cancelled = false;
     let resolveSourceLoop: (() => void) | null = null;
@@ -52,8 +55,15 @@ export function delayUntil<T = any, R = any>(
     const flushBuffer = () => {
       if (buffer.length === 0) return;
 
-      for (const { value, stamp } of buffer) {
+      for (const { value: bufferedValue, stamp, meta } of buffer) {
         setIteratorEmissionStamp(outputIt as any, stamp);
+
+        let value: any = bufferedValue;
+        if (meta) {
+          setIteratorMeta(outputIt as any, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+          value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+        }
+
         output.next(value);
       }
       buffer.length = 0;
@@ -93,14 +103,22 @@ export function delayUntil<T = any, R = any>(
           if (r.done || cancelled) break;
 
           const stamp = getIteratorEmissionStamp(source) ?? 0;
+          const meta = getIteratorMeta(source);
 
           if (gateOpened) {
             // Gate is open, forward immediately
             setIteratorEmissionStamp(outputIt as any, stamp);
-            output.next(r.value);
+
+            let value: any = r.value;
+            if (meta) {
+              setIteratorMeta(outputIt as any, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+              value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+            }
+
+            output.next(value);
           } else {
             // Gate is closed, buffer the value
-            buffer.push({ value: r.value, stamp });
+            buffer.push({ value: r.value, stamp, meta });
           }
         }
 
