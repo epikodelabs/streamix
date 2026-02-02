@@ -132,6 +132,25 @@ export function createTryCommit<T>(opts: {
   return tryCommit;
 }
 
+/**
+ * Creates a `register(receiver)` function for Subjects.
+ *
+ * The returned function:
+ * - Adds a receiver to the subject's delivery sets.
+ * - Ensures new subscriptions do not receive already-queued emissions by
+ *   tracking a `subscribedAt` stamp.
+ * - Integrates with the subject's terminal state so late subscribers are
+ *   immediately completed/errored.
+ * - Ensures `unsubscribe()` stops future deliveries synchronously, while the
+ *   receiver completion is still scheduled via the subscription hook.
+ *
+ * This is an internal building block used by different Subject variants to keep
+ * subscription semantics consistent.
+ *
+ * @template T Value type.
+ * @param opts Shared subject state and helpers.
+ * @returns A registration function that returns a Subscription.
+ */
 export function createRegister<T>(opts: {
   receivers: Set<StrictReceiver<T>>;
   ready: Set<StrictReceiver<T>>;
@@ -193,6 +212,22 @@ export function createRegister<T>(opts: {
   };
 }
 
+/**
+ * Creates a factory for async iterators backed by a Subject/Stream subscription.
+ *
+ * The iterator buffers `next` notifications until the consumer calls `next()`.
+ * It also participates in subject backpressure by returning a Promise from the
+ * receiver's `next(...)` that resolves when the consumer pulls the buffered
+ * value.
+ *
+ * When `lazy: true`, registration is deferred until the consumer actually pulls
+ * (either `next()` or `__tryNext()`), which avoids hidden subscriptions for
+ * iterators that are constructed but never consumed.
+ *
+ * @template T Value type.
+ * @param opts Registration function and lazy mode.
+ * @returns A function that creates a fresh AsyncIterator per call.
+ */
 export function createAsyncIterator<T>(opts: {
   register: (receiver: Receiver<T>) => Subscription;
   /**

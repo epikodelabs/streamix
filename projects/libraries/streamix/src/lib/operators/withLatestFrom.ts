@@ -24,9 +24,25 @@ import { createSubject } from "../subjects";
 export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
   ...streams: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
 ): Operator<T, [T, ...R]>;
+
+/**
+ * Overload that accepts an array/tuple of auxiliary sources.
+ *
+ * @template T
+ * @template R
+ * @param streams Tuple/array of auxiliary sources.
+ * @returns An operator that emits `[sourceValue, ...latestAuxValues]`.
+ */
 export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
   streams: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
 ): Operator<T, [T, ...R]>;
+
+/**
+ * Implementation signature.
+ *
+ * @internalRemarks
+ * Supports both `withLatestFrom(a, b, c)` and `withLatestFrom([a, b, c])`.
+ */
 export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
   ...streams: any[]
 ) {
