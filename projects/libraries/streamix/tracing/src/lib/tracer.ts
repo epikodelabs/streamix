@@ -123,3 +123,54 @@ export const createTracerSubscriptions = () => {
     clearSubscriptions,
   };
 };
+
+/* ============================================================================ */
+/* COMMON TRACER UTILITIES */
+/* ============================================================================ */
+
+import { unwrapPrimitive } from "@epikodelabs/streamix";
+import type { TerminalReason, ValueState } from "./core";
+import { unwrapTracedValue } from "./core";
+
+/**
+ * Generates a default operator name from its index.
+ */
+export const defaultOpName = (opIdx: number): string => `op${opIdx}`;
+
+/**
+ * Unwraps traced values and primitives for export.
+ */
+export const unwrapForExport = (value: any): any => unwrapPrimitive(unwrapTracedValue(value));
+
+/**
+ * Converts trace status and terminal reason into a ValueState.
+ */
+export const toValueState = (params: {
+  status: "active" | "delivered" | "terminal";
+  terminalReason?: TerminalReason;
+  parentTraceId?: string;
+  hasOperatorSteps?: boolean;
+  hasFinalValue?: boolean;
+  expandedFrom?: any;
+  expandedInto?: any;
+}): ValueState => {
+  if (params.status === "delivered") return "delivered";
+
+  if (params.status === "terminal") {
+    switch (params.terminalReason!) {
+      case "filtered": return "filtered";
+      case "collapsed": return "collapsed";
+      case "errored": return "errored";
+      case "late": return "dropped";
+      default: return "dropped";
+    }
+  }
+
+  // Active state - check for expanded traces
+  if (params.expandedFrom) return "expanded";
+  if (params.expandedInto && (Array.isArray(params.expandedInto) ? params.expandedInto.length > 0 : true)) return "expanded";
+  if (params.parentTraceId) return "expanded";
+  if (params.hasOperatorSteps) return "transformed";
+  if (params.hasFinalValue) return "transformed";
+  return "emitted";
+};

@@ -25,16 +25,16 @@
  * });
  * ```
  */
-import { unwrapPrimitive } from "@epikodelabs/streamix";
 import {
   OperatorOutcome,
   TerminalReason,
-  ValueState,
   ValueTrace,
   createTraceStore,
   createTracerSubscriptions,
+  defaultOpName,
   generateValueId,
-  unwrapTracedValue,
+  toValueState,
+  unwrapForExport,
   type ExtendedValueTracer,
 } from "@epikodelabs/streamix/tracing";
 
@@ -395,27 +395,6 @@ const reduceTrace = (trace: TraceRecord, event: TraceEvent, policy: TracerPolicy
   }
 };
 
-const toValueState = (t: TraceRecord): ValueState => {
-  if (t.status === "delivered") return "delivered";
-
-  if (t.status === "terminal") {
-    switch (t.terminalReason!) {
-      case "filtered": return "filtered";
-      case "collapsed": return "collapsed";
-      case "errored": return "errored";
-      case "late": return "dropped";
-      default: return "dropped";
-    }
-  }
-
-  // Active state
-  if (t.parentTraceId) return "expanded";
-  if (t.operatorSteps.length > 0) return "transformed";
-  return "emitted";
-};
-
-const unwrapForExport = (value: any): any => unwrapPrimitive(unwrapTracedValue(value));
-
 const exportTrace = (t: TraceRecord): ValueTrace => ({
   valueId: t.valueId,
   parentTraceId: t.parentTraceId,
@@ -424,7 +403,13 @@ const exportTrace = (t: TraceRecord): ValueTrace => ({
   subscriptionId: t.subscriptionId,
   emittedAt: t.emittedAt,
   deliveredAt: t.deliveredAt,
-  state: toValueState(t),
+  state: toValueState({
+    status: t.status,
+    terminalReason: t.terminalReason,
+    parentTraceId: t.parentTraceId,
+    hasOperatorSteps: t.operatorSteps.length > 0,
+    hasFinalValue: t.finalValue !== undefined,
+  }),
   sourceValue: unwrapForExport(t.sourceValue),
   finalValue: t.finalValue !== undefined ? unwrapForExport(t.finalValue) : undefined,
   operatorSteps: t.operatorSteps.map((s) => ({
@@ -438,8 +423,6 @@ const exportTrace = (t: TraceRecord): ValueTrace => ({
   totalDuration: t.totalDuration,
   operatorDurations: new Map(t.operatorDurations),
 });
-
-const defaultOpName = (opIdx: number): string => `op${opIdx}`;
 
 /* ============================================================================ */
 /* TRACER IMPLEMENTATION */
