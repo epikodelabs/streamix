@@ -8,7 +8,8 @@ import {
   getValueMeta,
   registerRuntimeHooks,
   setIteratorMeta,
-  unwrapPrimitive,
+  unregisterRuntimeHooks,
+  unwrapPrimitive
 } from "@epikodelabs/streamix";
 import {
   generateValueId,
@@ -308,7 +309,14 @@ export function installTracingHooks(): void {
 
         final: (it) => ({
           async next() {
-            const r = await it.next();
+            let r;
+            try {
+              r = await it.next();
+            } catch (err) {
+              tracer.completeSubscription(subscriptionId);
+              throw err;
+            }
+
             if (!r.done) {
               if (isTracedValue(r.value)) {
                 const wrapped = r.value as TracedWrapper<any>;
@@ -340,4 +348,13 @@ export function installTracingHooks(): void {
       };
     },
   });
+}
+
+/**
+ * Uninstalls tracing runtime hooks.
+ * 
+ * This effectively disables tracing integration with the runtime.
+ */
+export function uninstallTracingHooks(): void {
+  unregisterRuntimeHooks();
 }
