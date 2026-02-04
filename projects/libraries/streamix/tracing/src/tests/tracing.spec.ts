@@ -6,14 +6,13 @@ import {
   getValueId,
   installTracingHooks,
   isTracedValue,
+  uninstallTracingHooks,
   unwrapTracedValue,
   ValueTracer,
-  wrapTracedValue,
+  wrapTracedValue
 } from "@epikodelabs/streamix/tracing";
 
 import { filter, from, map, mergeMap, reduce } from "@epikodelabs/streamix";
-
-installTracingHooks();
 
 /* ========================================================================== */
 /* TEST TRACER */
@@ -62,8 +61,16 @@ function createTestTracer() {
 /* ========================================================================== */
 
 describe("Streamix tracing core", () => {
+  let { tracer } = createTestTracer();
+  beforeEach(() => {
+    installTracingHooks();
+    enableTracing(tracer);
+  });
 
-  afterEach(() => disableTracing());
+  afterEach(() => {
+    disableTracing();
+    uninstallTracingHooks();
+  });
 
   /* ------------------------------------------------------------------------ */
   /* UTILITIES */
@@ -208,6 +215,41 @@ describe("Streamix tracing core", () => {
 
     const error = calls.find(c => c.type === "errorInOperator");
     expect(error).toBeDefined();
+  });
+
+  it("traces subscription completion on early exit (break)", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    for await (const _v of from([1, 2, 3]).pipe(map(x => x))) {
+      break;
+    }
+
+    const complete = calls.find(c => c.type === "completeSubscription");
+    expect(complete).toBeDefined();
+  });
+
+  it("traces subscription completion on iterator throw", async () => {
+    const { tracer, calls } = createTestTracer();
+    enableTracing(tracer);
+
+    const stream = from([1]).pipe(map(x => x));
+    const iter = stream[Symbol.asyncIterator]();
+
+    // Start it
+    await iter.next();
+
+    // Throw into it
+    try {
+      if (iter.throw) {
+        await iter.throw(new Error("Manual throw"));
+      }
+    } catch (e) {
+      // expected
+    }
+
+    const complete = calls.find(c => c.type === "completeSubscription");
+    expect(complete).toBeDefined();
   });
 
 });

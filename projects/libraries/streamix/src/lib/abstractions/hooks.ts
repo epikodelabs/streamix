@@ -62,6 +62,13 @@ export function registerRuntimeHooks(hooks: StreamRuntimeHooks): void {
 }
 
 /**
+ * Unregisters the current runtime hooks, if any.
+ */
+export function unregisterRuntimeHooks(): void {
+  delete (globalThis as any)[HOOKS_KEY];
+}
+
+/**
  * Returns the currently-registered runtime hooks, if any.
  *
  * @returns {StreamRuntimeHooks | null} The registered hooks or null.
