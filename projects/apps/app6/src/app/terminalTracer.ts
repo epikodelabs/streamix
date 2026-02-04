@@ -13,32 +13,16 @@ import {
   TerminalReason,
   ValueState,
   ValueTrace,
-  ValueTracer,
+  createTraceStore,
+  createTracerSubscriptions,
   generateValueId,
   unwrapTracedValue,
+  type ExtendedValueTracer,
 } from "@epikodelabs/streamix/tracing";
 
 /* ============================================================================ */
 /* PUBLIC TYPES */
 /* ============================================================================ */
-
-export type TracerEventHandlers = {
-  /** Invoked when a trace is created/emitted. */
-  emitted?: (trace: ValueTrace) => void;
-  /** Invoked when a trace is marked as delivered. */
-  delivered?: (trace: ValueTrace) => void;
-  /** Invoked when a trace becomes terminal due to filtering. */
-  filtered?: (trace: ValueTrace) => void;
-  /** Invoked when a trace becomes terminal due to collapsing. */
-  collapsed?: (trace: ValueTrace) => void;
-  /** Invoked when a trace becomes terminal for reasons other than filtering/collapsing. */
-  dropped?: (trace: ValueTrace) => void;
-};
-
-export type TracerSubscriptionEventHandlers = TracerEventHandlers & {
-  /** Invoked when a subscription is completed (via `final` iterator completion/return/throw). */
-  complete?: () => void;
-};
 
 /** Configuration for terminal tracer creation. */
 export interface TerminalTracerOptions {
@@ -55,25 +39,11 @@ export interface TerminalTracerOptions {
 /**
  * Extended tracer interface that includes subscription and utility methods.
  */
-export interface ExtendedValueTracer extends ValueTracer {
-  /** Subscribes to value-level events across all subscriptions. Returns an unsubscribe function. */
-  subscribe: (handlers: TracerEventHandlers) => () => void;
-  /** Subscribes to value-level events for a specific subscription id. Returns an unsubscribe function. */
-  observeSubscription: (subId: string, handlers: TracerSubscriptionEventHandlers) => () => void;
-  /** Returns the current in-memory traces (subject to LRU eviction). */
-  getAllTraces: () => ValueTrace[];
-  /** Returns basic tracer stats. */
-  getStats: () => { total: number };
-  /** Clears all in-memory traces and subscription observers. */
-  clear: () => void;
-}
-
 /* ============================================================================ */
 /* INTERNAL MODEL */
 /* ============================================================================ */
 
 type TraceStatus = "active" | "delivered" | "terminal";
-type SubscriptionState = "active" | "completed";
 
 /**
  * Minimal trace record - no operator steps, just terminal states.
@@ -176,68 +146,24 @@ export const createTerminalTracer = (
 ): ExtendedValueTracer => {
   const { maxTraces = 5_000, onTraceUpdate } = options;
 
-  const traces = new Map<string, MinimalTraceRecord>();
-  const subscribers: TracerEventHandlers[] = [];
-  const subscriptionSubscribers = new Map<string, Set<TracerSubscriptionEventHandlers>>();
-  const subscriptionStates = new Map<string, SubscriptionState>();
-
-  // LRU eviction for memory management
-  const retainTrace = (valueId: string, trace: MinimalTraceRecord): void => {
-    traces.set(valueId, trace);
-    if (traces.size > maxTraces) {
-      const firstKey = traces.keys().next().value;
-      if (firstKey) traces.delete(firstKey);
-    }
-  };
-
-  const isCompleted = (subId: string): boolean =>
-    subscriptionStates.get(subId) === "completed";
-
-  const notify = (event: keyof TracerEventHandlers, trace: ValueTrace): void => {
-    for (const sub of subscribers) {
-      sub[event]?.(trace);
-    }
-    const subHandlers = subscriptionSubscribers.get(trace.subscriptionId);
-    if (subHandlers) {
-      for (const handler of subHandlers) {
-        handler[event]?.(trace);
-      }
-    }
-  };
+  const { traces, retainTrace, clearTraces } = createTraceStore<MinimalTraceRecord>(maxTraces);
+  const {
+    subscribe,
+    observeSubscription,
+    completeSubscription,
+    ensureActive,
+    isCompleted,
+    notify,
+    clearSubscriptions,
+  } = createTracerSubscriptions();
 
   return {
-    subscribe(handlers: TracerEventHandlers): () => void {
-      subscribers.push(handlers);
-      return () => {
-        const idx = subscribers.indexOf(handlers);
-        if (idx >= 0) subscribers.splice(idx, 1);
-      };
-    },
-
-    observeSubscription(subId: string, handlers: TracerSubscriptionEventHandlers): () => void {
-      if (!subscriptionSubscribers.has(subId)) {
-        subscriptionSubscribers.set(subId, new Set());
-      }
-      subscriptionSubscribers.get(subId)!.add(handlers);
-      return () => subscriptionSubscribers.get(subId)?.delete(handlers);
-    },
-
-    completeSubscription(subId: string): void {
-      if (subscriptionStates.get(subId) === "completed") return;
-      subscriptionStates.set(subId, "completed");
-      const handlers = subscriptionSubscribers.get(subId);
-      if (handlers) {
-        for (const h of handlers) {
-          h.complete?.();
-        }
-        subscriptionSubscribers.delete(subId);
-      }
-    },
+    subscribe,
+    observeSubscription,
+    completeSubscription,
 
     startTrace(valueId: string, streamId: string, streamName: string | undefined, subId: string, value: any): ValueTrace {
-      if (!subscriptionStates.has(subId)) {
-        subscriptionStates.set(subId, "active");
-      }
+      ensureActive(subId);
 
       const now = Date.now();
       const record: MinimalTraceRecord = {
@@ -507,9 +433,8 @@ export const createTerminalTracer = (
     },
 
     clear(): void {
-      traces.clear();
-      subscriptionSubscribers.clear();
-      subscriptionStates.clear();
+      clearTraces();
+      clearSubscriptions();
     },
   };
 };

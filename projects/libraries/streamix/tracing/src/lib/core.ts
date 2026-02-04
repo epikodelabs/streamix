@@ -1,11 +1,8 @@
 /**
- * Streamix tracing core primitives.
+ * Streamix tracing core abstractions.
  *
- * These types and helpers support capturing detailed per-value execution traces
- * as values flow through a pipe (operators) and are delivered to subscribers.
- *
- * Tracing is opt-in: enable it by calling {@link enableTracing} with a
- * {@link ValueTracer} implementation.
+ * This module defines the tracer contract, trace model, and helper utilities.
+ * It is framework/runtime-agnostic and does not wire into Streamix execution.
  */
 
 /* ============================================================================ */
@@ -13,7 +10,7 @@
 /* ============================================================================ */
 
 /**
- * High-level lifecycle states for a value in a trace.
+ * High-level lifecycle state of a traced value.
  */
 export type ValueState =
   | "emitted"
@@ -26,7 +23,7 @@ export type ValueState =
   | "dropped";
 
 /**
- * Outcome classification for a single operator step.
+ * The outcome recorded for a single operator pass over an input value.
  */
 export type OperatorOutcome =
   | "transformed"
@@ -35,9 +32,7 @@ export type OperatorOutcome =
   | "collapsed"
   | "errored";
 
-/**
- * Trace entry for a single operator execution.
- */
+/** One operator invocation within a value's lifecycle. */
 export interface OperatorStep {
   operatorIndex: number;
   operatorName: string;
@@ -50,12 +45,12 @@ export interface OperatorStep {
 }
 
 /**
- * Reason why a value became terminal without being delivered to a subscriber.
+ * Why a value's trace ended without being delivered downstream.
  */
 export type TerminalReason = "filtered" | "collapsed" | "errored" | "late";
 
 /**
- * Full trace for a single emitted value.
+ * Public snapshot of a value's trace at a moment in time.
  */
 export interface ValueTrace {
   valueId: string;
@@ -90,19 +85,105 @@ export interface ValueTrace {
 }
 
 /**
- * Contract implemented by tracing backends.
+ * Normalized events emitted by the tracing runtime for tracer implementations.
+ */
+export type TraceEvent =
+  | {
+      type: "emitted";
+      valueId: string;
+      streamId: string;
+      streamName?: string;
+      subscriptionId: string;
+      timestamp: number;
+      sourceValue: any;
+      parentTraceId?: string;
+    }
+  | {
+      type: "transformed";
+      valueId: string;
+      operatorIndex: number;
+      operatorName: string;
+      inputValue: any;
+      outputValue: any;
+      timestamp: number;
+      duration?: number;
+    }
+  | {
+      type: "expanded";
+      valueId: string;
+      baseValueId: string;
+      operatorIndex: number;
+      operatorName: string;
+      streamId: string;
+      streamName?: string;
+      subscriptionId: string;
+      timestamp: number;
+      sourceValue: any;
+      expandedValue: any;
+    }
+  | {
+      type: "collapsed";
+      valueId: string;
+      operatorIndex: number;
+      operatorName: string;
+      targetValueId: string;
+      timestamp: number;
+    }
+  | {
+      type: "filtered";
+      valueId: string;
+      operatorIndex: number;
+      operatorName: string;
+      timestamp: number;
+      sourceValue: any;
+      filteredValue: any;
+    }
+  | {
+      type: "errored";
+      valueId: string;
+      operatorIndex: number;
+      operatorName: string;
+      timestamp: number;
+      error: Error;
+    }
+  | {
+      type: "delivered";
+      valueId: string;
+      timestamp: number;
+      deliveredValue: any;
+    }
+  | {
+      type: "dropped";
+      valueId: string;
+      timestamp: number;
+      reason: TerminalReason;
+    };
+
+/**
+ * Tracer interface used by the runtime hooks to record value lifecycles.
  *
- * A tracer receives events during pipe execution and may store them in memory,
- * log them, visualize them, or forward them to external tooling.
+ * Implementations can choose to track full operator steps, minimal terminal states,
+ * or anything in between.
  */
 export interface ValueTracer {
+  /** Begins a new trace record for a value id. */
   startTrace: (vId: string, sId: string, sName: string | undefined, subId: string, val: any) => ValueTrace;
+  /** Creates a new trace id that is treated as expanded from `baseId`. */
   createExpandedTrace: (baseId: string, opIdx: number, opName: string, val: any) => string;
+  /** Records entering an operator (tracer can choose to ignore if not tracking steps). */
   enterOperator: (vId: string, opIdx: number, opName: string, val: any) => void;
+  /**
+   * Records an operator exit and (optionally) marks the trace terminal when filtered/errored.
+   * Returns the value id on success, or `null` when no update was applied.
+   */
   exitOperator: (vId: string, opIdx: number, val: any, filtered?: boolean, outcome?: OperatorOutcome) => string | null;
+  /** Marks a value as collapsed into another value id and terminalizes it as `collapsed`. */
   collapseValue: (vId: string, opIdx: number, opName: string, targetId: string, val?: any) => void;
+  /** Marks a value as errored in an operator and terminalizes it as `errored`. */
   errorInOperator: (vId: string, opIdx: number, error: Error) => void;
+  /** Marks a value trace as delivered (unless already terminal). */
   markDelivered: (vId: string) => void;
+  /** Marks the subscription as completed and notifies any per-subscription observers. */
   completeSubscription: (subId: string) => void;
 }
 
@@ -112,37 +193,23 @@ export interface ValueTracer {
 
 const tracedValueBrand = Symbol("__streamix_traced__");
 
-/**
- * Wrapper object used to carry tracing metadata alongside a value.
- *
- * The wrapper is intentionally lightweight and uses a symbol brand to avoid
- * collisions with user objects.
- */
 export interface TracedWrapper<T> {
   [tracedValueBrand]: true;
   value: T;
   meta: { valueId: string; streamId: string; subscriptionId: string };
 }
 
-/**
- * Wraps a value with tracing metadata.
- */
+/** Wraps a value with tracing metadata for internal runtime propagation. */
 export const wrapTracedValue = <T>(value: T, meta: TracedWrapper<T>["meta"]): TracedWrapper<T> =>
   ({ [tracedValueBrand]: true, value, meta });
 
-/**
- * Unwraps a traced value (if wrapped) and returns the underlying user value.
- */
+/** Unwraps a traced wrapper back to the raw value (or returns the input if it's not traced). */
 export const unwrapTracedValue = <T>(v: any): T => (v?.[tracedValueBrand]) ? v.value : v;
 
-/**
- * Type guard for {@link TracedWrapper}.
- */
+/** Type guard for `TracedWrapper`. */
 export const isTracedValue = (v: any): v is TracedWrapper<any> => Boolean(v?.[tracedValueBrand]);
 
-/**
- * Extracts a trace id from a traced value.
- */
+/** Extracts the `valueId` from a traced wrapper (if present). */
 export const getValueId = (v: any): string | undefined => isTracedValue(v) ? v.meta.valueId : undefined;
 
 /* ============================================================================ */
@@ -151,22 +218,13 @@ export const getValueId = (v: any): string | undefined => isTracedValue(v) ? v.m
 
 const TRACER_KEY = "__STREAMIX_GLOBAL_TRACER__";
 
-/**
- * Returns the currently enabled global tracer, if any.
- */
+/** Returns the currently enabled global tracer, if any. */
 export const getGlobalTracer = (): ValueTracer | null => (globalThis as any)[TRACER_KEY] ?? null;
 
-/**
- * Enables tracing by installing a global tracer.
- *
- * Tracing hooks are typically installed separately (see `installTracingHooks()`)
- * and consult this global tracer at runtime.
- */
+/** Installs the tracer into `globalThis` so the Streamix runtime hooks can record traces. */
 export function enableTracing(t: ValueTracer): void { (globalThis as any)[TRACER_KEY] = t; }
 
-/**
- * Disables tracing by clearing the global tracer.
- */
+/** Disables tracing by clearing the global tracer reference. */
 export function disableTracing(): void { (globalThis as any)[TRACER_KEY] = null; }
 
 /* ============================================================================ */
@@ -174,15 +232,10 @@ export function disableTracing(): void { (globalThis as any)[TRACER_KEY] = null;
 /* ============================================================================ */
 
 const IDS_KEY = "__STREAMIX_TRACE_IDS__";
-
 const getIds = (): { value: number } => {
   const g = globalThis as any;
   return g[IDS_KEY] ??= { value: 0 };
 };
 
-/**
- * Generates a new unique trace id for a value.
- *
- * The id is process-local and monotonically increasing.
- */
+/** Generates a unique value id for the current JS realm (stored on `globalThis`). */
 export const generateValueId = (): string => `val_${++getIds().value}`;

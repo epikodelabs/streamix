@@ -1,24 +1,34 @@
+/**
+ * Streamix tracing runtime integration.
+ *
+ * Hooks are only active when a global tracer is enabled via enableTracing(...).
+ */
 import {
   createOperator,
   getValueMeta,
   registerRuntimeHooks,
   setIteratorMeta,
-  unwrapPrimitive,
+  unregisterRuntimeHooks,
+  unwrapPrimitive
 } from "@epikodelabs/streamix";
-
 import {
   generateValueId,
   getGlobalTracer,
   isTracedValue,
-  type OperatorOutcome,
-  type TracedWrapper,
+  TracedWrapper,
   wrapTracedValue,
+  type OperatorOutcome,
 } from "./core";
+
+/* ============================================================================ */
+/* RUNTIME HOOKS */
+/* ============================================================================ */
 
 /**
  * Registers runtime hooks that integrate tracing with Streamix's pipe execution.
  *
- * Hooks are only active when a global tracer is enabled via enableTracing(...).
+ * This should be called once when the tracing module is imported. The hooks will
+ * automatically wrap values and operator chains when a global tracer is enabled.
  */
 export function installTracingHooks(): void {
   registerRuntimeHooks({
@@ -68,12 +78,6 @@ export function installTracingHooks(): void {
             let activeRequestBatch: TracedWrapper<any>[] | null = null;
             const outputCountByBaseKey = new Map<string, number>();
 
-            const recordOutputFor = (valueId: string): void => {
-              const key = `${valueId}:${i}`;
-              const count = outputCountByBaseKey.get(key) ?? 0;
-              outputCountByBaseKey.set(key, count + 1);
-            };
-
             const removeFromQueue = (valueId: string): void => {
               const idx = inputQueue.findIndex((w) => w.meta.valueId === valueId);
               if (idx >= 0) inputQueue.splice(idx, 1);
@@ -97,7 +101,6 @@ export function installTracingHooks(): void {
               }
 
               exitAndRemove(targetId, emittedValue, false, "collapsed");
-              recordOutputFor(targetId);
               return wrapOutput(targetMeta, emittedValue);
             };
 
@@ -180,6 +183,7 @@ export function installTracingHooks(): void {
                   }
 
                   if (out.done) {
+                    // Mark all pending values as filtered
                     inputQueue.forEach(w => tracer.exitOperator(w.meta.valueId, i, w.value, true));
                     inputQueue.length = 0;
                     return out;
@@ -188,6 +192,7 @@ export function installTracingHooks(): void {
                   const perValueMeta = getValueMeta(out.value);
                   const emittedValue = unwrapPrimitive(out.value);
 
+                  // Array collapse: multiple inputs → array output
                   if (isCollapseMetadata(perValueMeta, emittedValue) && perValueMeta.inputValueIds.length > 1) {
                     const targetId = resolveTargetId(perValueMeta);
                     if (targetId) {
@@ -196,10 +201,12 @@ export function installTracingHooks(): void {
                     }
                   }
 
+                  // Runtime-provided output with expansion/filtering
                   if (perValueMeta?.kind === "expand" && perValueMeta.valueId && metaByValueId.has(perValueMeta.valueId)) {
                     const baseValueId = perValueMeta.valueId as string;
                     const baseMeta = metaByValueId.get(baseValueId)!;
 
+                    // Filter detection: pass-through from one of multiple requests
                     if (requestBatch.length > 1) {
                       const baseRequested = requestBatch.find((w) => w.meta.valueId === baseValueId);
                       if (baseRequested && Object.is(emittedValue, baseRequested.value)) {
@@ -210,8 +217,10 @@ export function installTracingHooks(): void {
                     return handleExpansion(baseValueId, baseMeta, emittedValue);
                   }
 
+                  // Expansion: outputs without new input
                   if (requestBatch.length === 0) {
                     if (inputQueue.length > 0) {
+                      // Prefer explicit per-value meta for collapse operators
                       if (isCollapseMetadata(perValueMeta, emittedValue)) {
                         const targetId = resolveTargetId(perValueMeta);
                         if (targetId) {
@@ -226,13 +235,13 @@ export function installTracingHooks(): void {
                         [...inputQueue].reverse().find((w) => Object.is(w.value, emittedValue)) ??
                         inputQueue[inputQueue.length - 1];
 
+                      // Mark non-emitted values as filtered
                       for (const pending of [...inputQueue]) {
                         if (pending.meta.valueId === chosen.meta.valueId) continue;
                         exitAndRemove(pending.meta.valueId, pending.value, true);
                       }
 
                       exitAndRemove(chosen.meta.valueId, emittedValue, false, "transformed");
-                      recordOutputFor(chosen.meta.valueId);
                       return wrapOutput(chosen.meta, emittedValue);
                     }
 
@@ -245,6 +254,7 @@ export function installTracingHooks(): void {
                     }
                   }
 
+                  // Multiple inputs, one output
                   if (requestBatch.length > 1) {
                     const outputValueId = perValueMeta?.valueId ?? requestBatch[requestBatch.length - 1].meta.valueId;
                     const outputEntry = requestBatch.find((w) => w.meta.valueId === outputValueId) ?? requestBatch[requestBatch.length - 1];
@@ -252,10 +262,11 @@ export function installTracingHooks(): void {
                     const isPassThrough = requestBatch.some((w) => Object.is(w.value, emittedValue));
 
                     if (isPassThrough) {
+                      // Filter case: one input passed through, others filtered out
                       filterBatch(requestBatch, outputEntry.meta.valueId);
                       exitAndRemove(outputEntry.meta.valueId, emittedValue, false, "transformed");
-                      recordOutputFor(outputEntry.meta.valueId);
                     } else {
+                      // Collapse case: multiple inputs merged into new value
                       for (const item of requestBatch) {
                         if (item.meta.valueId !== outputEntry.meta.valueId) {
                           removeFromQueue(item.meta.valueId);
@@ -263,24 +274,26 @@ export function installTracingHooks(): void {
                         }
                       }
                       exitAndRemove(outputEntry.meta.valueId, emittedValue, false, "collapsed");
-                      recordOutputFor(outputEntry.meta.valueId);
                     }
 
                     return wrapOutput(outputEntry.meta, emittedValue);
                   }
 
+                  // 1:1 transformation
                   if (requestBatch.length === 1) {
                     const wrapped = requestBatch[0];
                     exitAndRemove(wrapped.meta.valueId, emittedValue, false, "transformed");
-                    recordOutputFor(wrapped.meta.valueId);
                     return wrapOutput(wrapped.meta, emittedValue);
                   }
 
+                  // Fallback: reuse last known metadata
                   const fallbackMeta = lastOutputMeta ?? lastSeenMeta;
                   if (fallbackMeta) return wrapOutput(fallbackMeta, emittedValue);
 
+                  // Last resort: unwrapped value (metadata tracking lost)
                   return { done: false, value: emittedValue };
                 } catch (err) {
+                  // Report error on first pending input
                   if (inputQueue.length > 0) {
                     tracer.errorInOperator(inputQueue[0].meta.valueId, i, err as Error);
                   }
@@ -296,7 +309,14 @@ export function installTracingHooks(): void {
 
         final: (it) => ({
           async next() {
-            const r = await it.next();
+            let r;
+            try {
+              r = await it.next();
+            } catch (err) {
+              tracer.completeSubscription(subscriptionId);
+              throw err;
+            }
+
             if (!r.done) {
               if (isTracedValue(r.value)) {
                 const wrapped = r.value as TracedWrapper<any>;
@@ -304,6 +324,7 @@ export function installTracingHooks(): void {
                 return { done: false, value: unwrapPrimitive(wrapped.value) };
               }
 
+              // Best-effort fallback for values not wrapped by the tracing runtime.
               const valueMeta = getValueMeta(r.value);
               if (valueMeta?.valueId) tracer.markDelivered(valueMeta.valueId);
 
@@ -327,4 +348,13 @@ export function installTracingHooks(): void {
       };
     },
   });
+}
+
+/**
+ * Uninstalls tracing runtime hooks.
+ * 
+ * This effectively disables tracing integration with the runtime.
+ */
+export function uninstallTracingHooks(): void {
+  unregisterRuntimeHooks();
 }
