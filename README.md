@@ -20,9 +20,6 @@ Small bundle, pull-based execution, and a familiar operator API.
   <a href="https://github.com/epikodelabs/streamix">
     <img src="https://raw.githubusercontent.com/epikodelabs/streamix/main/projects/libraries/streamix/bundle-size.svg" alt="Bundle Size">
   </a>
-  <a href="https://codecov.io/github/epikodelabs/streamix" >
-    <img src="https://codecov.io/github/epikodelabs/streamix/graph/badge.svg?token=ITHDU7JVOI" alt="Code Coverage"/>
-  </a>
 </p>
 
 
@@ -59,6 +56,17 @@ yarn add @epikodelabs/streamix
 pnpm add @epikodelabs/streamix
 ```
 
+## 📁 Monorepo Structure
+
+```
+projects/libraries/streamix/
+├── src/                        # Core library (abstractions, operators/streams)
+├── aggregates/                 # Aggregate operators (average, min/max, etc.)
+├── coroutines/                 # Web Worker background processing
+├── dom/                        # DOM observation utilities (onResize, etc.)
+├── networking/                 # HTTP client, WebSocket, JSONP
+└── tracing/                    # Stream lifecycle tracing/debugging
+```
 
 ## ⚡️ Quick start
 
