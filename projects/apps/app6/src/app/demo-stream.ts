@@ -7,6 +7,7 @@ import {
   filter,
   map,
   mergeMap,
+  reduce,
   scan,
   throttle
 } from '@epikodelabs/streamix';
@@ -114,7 +115,8 @@ export const runDemoStream = (hooks?: { onOut?: (value: number) => void; onDone?
     distinctUntilChanged(),
     map((sum) => sum % 1000),
     throttle(30),
-    debounce(15)
+    debounce(15),
+    reduce((acc, x) => acc + x, 0)
   )
   .subscribe({
     next: (value) => {
