@@ -91,18 +91,19 @@ function SearchComponent() {
         filter(query => query.length >= 3),
         debounce(300),
         tap(() => setLoading(true)),
-        switchMap(async query => {
-          const response = await fetch(`/api/search?q=${query}`);
-          return response.json();
-        }),
+        switchMap(query => 
+          fetch(`/api/search?q=${query}`).then(r => r.json())
+        ),
         tap(() => setLoading(false))
       );
 
-    (async () => {
-      for await (const data of stream) {
-        setResults(data);
-      }
-    })();
+    const subscription = stream.subscribe(data => {
+      setResults(data);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []); // One dependency. Done.
 
   return (
@@ -151,11 +152,13 @@ function MetricsDashboard() {
         })
       );
 
-    (async () => {
-      for await (const data of stream) {
-        setMetrics(data);
-      }
-    })();
+    const subscription = stream.subscribe(data => {
+      setMetrics(data);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   return <MetricsGrid data={metrics} />;
@@ -183,18 +186,19 @@ function UsernameInput() {
         filter(name => name.length >= 3),
         debounce(500),
         tap(() => setChecking(true)),
-        switchMap(async name => {
-          const response = await fetch(`/api/check-username?name=${name}`);
-          return response.json();
-        }),
+        switchMap(name => 
+          fetch(`/api/check-username?name=${name}`).then(r => r.json())
+        ),
         tap(() => setChecking(false))
       );
 
-    (async () => {
-      for await (const result of stream) {
-        setAvailable(result.available);
-      }
-    })();
+    const subscription = stream.subscribe(result => {
+      setAvailable(result.available);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   return (
@@ -229,18 +233,19 @@ function InfiniteList() {
         debounce(200),
         map(() => page),
         distinctUntilChanged(), // Only when page actually changes
-        switchMap(async currentPage => {
-          const response = await fetch(`/api/items?page=${currentPage}`);
-          return response.json();
-        })
+        switchMap(currentPage => 
+          fetch(`/api/items?page=${currentPage}`).then(r => r.json())
+        )
       );
 
-    (async () => {
-      for await (const newItems of stream) {
-        setItems(prev => [...prev, ...newItems]);
-        setPage(p => p + 1);
-      }
-    })();
+    const subscription = stream.subscribe(newItems => {
+      setItems(prev => [...prev, ...newItems]);
+      setPage(p => p + 1);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [page]);
 
   return <ItemGrid items={items} />;
@@ -256,28 +261,21 @@ function LiveChat() {
   const [messages, setMessages] = useState([]);
 
   useEffect(() => {
-    const stream = createStream('chat', signal => {
-      const ws = new WebSocket('wss://chat.example.com');
-      
-      signal.addEventListener('abort', () => ws.close());
-      
-      return async function* () {
-        try {
-          for await (const event of fromEvent(ws, 'message')) {
-            if (signal.aborted) break;
-            yield JSON.parse(event.data);
-          }
-        } finally {
-          ws.close();
-        }
-      }();
+    const ws = new WebSocket('wss://chat.example.com');
+    
+    const stream = fromEvent(ws, 'message')
+      .pipe(
+        map(event => JSON.parse(event.data))
+      );
+
+    const subscription = stream.subscribe(message => {
+      setMessages(prev => [...prev, message]);
     });
 
-    (async () => {
-      for await (const message of stream) {
-        setMessages(prev => [...prev, message]);
-      }
-    })();
+    return () => {
+      subscription.unsubscribe();
+      ws.close();
+    };
   }, []);
 
   return <MessageList messages={messages} />;
