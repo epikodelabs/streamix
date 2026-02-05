@@ -1,6 +1,10 @@
 # Changelog
 
 
+### 2.0.31
+
+Refactored tracing module architecture for better separation of concerns: split into `core` (abstractions), `runtime` (hooks integration), and `tracer` (implementation). Added `unregisterRuntimeHooks()` for cleanup, new `emitted` event for value emission tracking, and improved trace correlation in sampling/debouncing operators (`audit`, `debounce`, `sample`, `throttle`, `delayWhile`, `delayUntil`, `share`, `shareReplay`). Fixed subscription cleanup in React docs examples. Updated README with monorepo structure documentation.
+
 ### 2.0.30
 
 Subjects were tightened again around async-iterator backpressure, the `takeUntil`/`skipUntil`/`delayUntil` operators now mirror the iterator-first lifecycle so cancellation and cleanup behave predictably. The scheduler was removed in favor of direct task coordination.

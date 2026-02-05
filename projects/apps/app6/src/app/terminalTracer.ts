@@ -7,24 +7,22 @@
  *
  * MODIFIED: Added 'emitted' event support for counter-based tracking.
  */
+import { unwrapPrimitive } from "@epikodelabs/streamix";
 import {
   OperatorOutcome,
   TerminalReason,
+  ValueState,
   ValueTrace,
   createTraceStore,
   createTracerSubscriptions,
-  defaultOpName,
   generateValueId,
-  toValueState,
-  unwrapForExport,
+  unwrapTracedValue,
   type ExtendedValueTracer,
 } from "@epikodelabs/streamix/tracing";
 
 /* ============================================================================ */
 /* PUBLIC TYPES */
 /* ============================================================================ */
-
-export type { ExtendedValueTracer, TracerEventHandlers, TracerSubscriptionEventHandlers } from "@epikodelabs/streamix/tracing";
 
 /** Configuration for terminal tracer creation. */
 export interface TerminalTracerOptions {
@@ -38,6 +36,9 @@ export interface TerminalTracerOptions {
   onTraceUpdate?: (trace: ValueTrace) => void;
 }
 
+/**
+ * Extended tracer interface that includes subscription and utility methods.
+ */
 /* ============================================================================ */
 /* INTERNAL MODEL */
 /* ============================================================================ */
@@ -83,6 +84,29 @@ interface MinimalTraceRecord {
 /* HELPER FUNCTIONS */
 /* ============================================================================ */
 
+const toValueState = (t: MinimalTraceRecord): ValueState => {
+  if (t.status === "delivered") return "delivered";
+
+  if (t.status === "terminal") {
+    switch (t.terminalReason!) {
+      case "filtered": return "filtered";
+      case "collapsed": return "collapsed";
+      case "errored": return "errored";
+      case "late": return "dropped";
+      default: return "dropped";
+    }
+  }
+
+  // Active state - check for expanded traces first
+  if (t.expandedFrom) return "expanded";
+  if (t.expandedInto && t.expandedInto.length > 0) return "expanded";
+  
+  if (t.finalValue !== undefined) return "transformed";
+  return "emitted";
+};
+
+const unwrapForExport = (value: any): any => unwrapPrimitive(unwrapTracedValue(value));
+
 const exportTrace = (t: MinimalTraceRecord): ValueTrace => ({
   valueId: t.valueId,
   parentTraceId: t.parentTraceId,
@@ -91,14 +115,7 @@ const exportTrace = (t: MinimalTraceRecord): ValueTrace => ({
   subscriptionId: t.subscriptionId,
   emittedAt: t.emittedAt,
   deliveredAt: t.deliveredAt,
-  state: toValueState({
-    status: t.status,
-    terminalReason: t.terminalReason,
-    parentTraceId: t.parentTraceId,
-    expandedFrom: t.expandedFrom,
-    expandedInto: t.expandedInto,
-    hasFinalValue: t.finalValue !== undefined,
-  }),
+  state: toValueState(t),
   sourceValue: unwrapForExport(t.sourceValue),
   finalValue: t.finalValue !== undefined ? unwrapForExport(t.finalValue) : undefined,
   operatorSteps: [], // Terminal tracer doesn't track steps
@@ -108,6 +125,8 @@ const exportTrace = (t: MinimalTraceRecord): ValueTrace => ({
   totalDuration: t.totalDuration,
   operatorDurations: new Map(), // Terminal tracer doesn't track durations
 });
+
+const defaultOpName = (opIdx: number): string => `op${opIdx}`;
 
 /* ============================================================================ */
 /* TERMINAL TRACER IMPLEMENTATION */
