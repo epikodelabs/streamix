@@ -60,7 +60,7 @@ function createTestTracer() {
 /* SPECS */
 /* ========================================================================== */
 
-describe("Streamix tracing core", () => {
+describe("tracingCore", () => {
   let { tracer } = createTestTracer();
   beforeEach(() => {
     installTracingHooks();
