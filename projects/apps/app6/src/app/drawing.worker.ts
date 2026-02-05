@@ -135,25 +135,89 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
 
   const collapseLinks: Array<{ from: Point; to: Point }> = [];
   const expansionLinks: Array<{ from: Point; to: Point }> = [];
-  const curveCommands: Array<{ from: Point; to: Point; state: ValueState }> = [];
-  const dottedLineCommands: Array<{ from: Point; to: Point; state: ValueState }> = [];
-  const terminalSymbolCommands: Array<{ x: number; y: number; state: ValueState }> = [];
-  const deliveredSymbolCommands: Array<{ from: Point; to: Point; y: number }> = [];
 
-  const addCurve = (from: Point, to: Point, state: ValueState) => {
-    curveCommands.push({ from, to, state });
+  const drawCurve = (from: Point, to: Point, state: ValueState) => {
+    const accent = STATE_COLORS[state]?.accent ?? STATE_COLORS.emitted.accent;
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.setLineDash([]);
+
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+
+    if (Math.abs(from.y - to.y) < 2) {
+      ctx.lineTo(to.x, to.y);
+    } else {
+      const midX = (from.x + to.x) / 2;
+      ctx.bezierCurveTo(midX, from.y, midX, to.y, to.x, to.y);
+    }
+
+    ctx.stroke();
   };
 
-  const addDottedHalfLine = (from: Point, to: Point, state: ValueState) => {
-    dottedLineCommands.push({ from, to, state });
+  const drawDottedHalfLine = (from: Point, to: Point, state: ValueState) => {
+    const accent = STATE_COLORS[state]?.accent ?? STATE_COLORS.emitted.accent;
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.setLineDash([4, 4]);
+
+    const midX = from.x + (to.x - from.x) * 0.5;
+    const midY = from.y + (to.y - from.y) * 0.5;
+
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(midX, midY);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
   };
 
-  const addTerminalSymbol = (x: number, y: number, state: ValueState) => {
-    terminalSymbolCommands.push({ x, y, state });
+  const drawTerminalSymbol = (x: number, y: number, state: ValueState) => {
+    const accent = STATE_COLORS[state]?.accent ?? STATE_COLORS.emitted.accent;
+
+    ctx.beginPath();
+    ctx.arc(x, y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = accent;
+    ctx.fill();
+
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+
+    if (state === 'filtered' || state === 'errored') {
+      ctx.moveTo(x - 4, y - 4);
+      ctx.lineTo(x + 4, y + 4);
+      ctx.moveTo(x + 4, y - 4);
+      ctx.lineTo(x - 4, y + 4);
+    } else if (state === 'dropped') {
+      ctx.moveTo(x, y - 4);
+      ctx.lineTo(x, y + 2);
+      ctx.moveTo(x - 3, y - 1);
+      ctx.lineTo(x, y + 2);
+      ctx.lineTo(x + 3, y - 1);
+    }
+
+    ctx.stroke();
   };
 
-  const addDeliveredSymbol = (from: Point, to: Point, y: number) => {
-    deliveredSymbolCommands.push({ from, to, y });
+  const drawDeliveredSymbol = (from: Point, to: Point, y: number) => {
+    const accent = STATE_COLORS.delivered.accent;
+    const midX = from.x + (to.x - from.x) * 0.5;
+
+    ctx.beginPath();
+    ctx.arc(midX, y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = accent;
+    ctx.fill();
+
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(midX - 3, y);
+    ctx.lineTo(midX - 1, y + 3);
+    ctx.lineTo(midX + 4, y - 2);
+    ctx.stroke();
   };
 
   const getChronologicalSequence = (trace: ValueTrace, operatorIndex: number | null, label: 'emit' | 'output'): number => {
@@ -185,7 +249,7 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
       isTerminal: boolean;
     }
   ): DrawingCircle => {
-    const effectiveState: ValueState = cfg.isTerminal && cfg.label === 'output' && Boolean(trace.deliveredAt) ? 'delivered' : state;
+    const effectiveState: ValueState = cfg.label === 'output' && Boolean(trace.deliveredAt) ? 'delivered' : state;
     const id = `${subscriptionId}:${circleCounter++}`;
     const sequence = getChronologicalSequence(trace, cfg.operatorIndex, cfg.label);
 
@@ -223,7 +287,6 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
       | undefined;
 
     let lastPoint: Point | undefined;
-    let lastState: ValueState = 'emitted';
     let stopped = false;
 
     if (expandedFrom) {
@@ -249,7 +312,6 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
       );
 
       lastPoint = { x: startX, y };
-      lastState = 'expanded';
 
       for (let opIndex = startOpIndex + 1; opIndex < operatorCount; opIndex += 1) {
         const step = stepsByIndex.get(opIndex);
@@ -266,13 +328,11 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
           break;
         }
 
-        let state = (step.outcome ?? 'expanded') as ValueState;
-        // Mark as collapsed if this position is a collapse target, but preserve expanded state
+        let state = (step.outcome ?? 'transformed') as ValueState;
         if (
           state !== 'filtered' &&
           state !== 'errored' &&
           state !== 'dropped' &&
-          state !== 'expanded' &&
           collapsedTargetsByStroke.has(`${trace.valueId}:${opIndex + 1}`)
         ) {
           state = 'collapsed';
@@ -283,11 +343,11 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
 
         if (lastPoint) {
           if (isTerminal) {
-            addDottedHalfLine(lastPoint, { x: outX, y }, state);
+            drawDottedHalfLine(lastPoint, { x: outX, y }, state);
             const midX = lastPoint.x + (outX - lastPoint.x) * 0.5;
-            addTerminalSymbol(midX, y, state);
+            drawTerminalSymbol(midX, y, state);
           } else {
-            addCurve(lastPoint, { x: outX, y }, state);
+            drawCurve(lastPoint, { x: outX, y }, state);
           }
         }
 
@@ -312,7 +372,6 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
         }
 
         lastPoint = { x: outX, y };
-        lastState = state;
         if (isTerminal) {
           stopped = true;
           break;
@@ -337,7 +396,6 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
       );
 
       lastPoint = { x: emitX, y };
-      lastState = 'emitted';
 
       for (let opIndex = 0; opIndex < operatorCount; opIndex += 1) {
         const step = stepsByIndex.get(opIndex);
@@ -355,12 +413,10 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
         }
 
         let state = (step.outcome ?? 'transformed') as ValueState;
-        // Mark as collapsed if this position is a collapse target, but preserve expanded state
         if (
           state !== 'filtered' &&
           state !== 'errored' &&
           state !== 'dropped' &&
-          state !== 'expanded' &&
           collapsedTargetsByStroke.has(`${trace.valueId}:${opIndex + 1}`)
         ) {
           state = 'collapsed';
@@ -371,11 +427,11 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
 
         if (lastPoint) {
           if (isTerminal) {
-            addDottedHalfLine(lastPoint, { x: outX, y }, state);
+            drawDottedHalfLine(lastPoint, { x: outX, y }, state);
             const midX = lastPoint.x + (outX - lastPoint.x) * 0.5;
-            addTerminalSymbol(midX, y, state);
+            drawTerminalSymbol(midX, y, state);
           } else {
-            addCurve(lastPoint, { x: outX, y }, state);
+            drawCurve(lastPoint, { x: outX, y }, state);
           }
         }
 
@@ -400,7 +456,6 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
         }
 
         lastPoint = { x: outX, y };
-        lastState = state;
         if (isTerminal) {
           stopped = true;
           break;
@@ -411,11 +466,11 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
     if (!stopped && trace.deliveredAt && lastPoint) {
       const deliverX = getStrokeX(axisLabels.length - 1);
       const deliverPoint = { x: deliverX, y };
-      addCurve(lastPoint, deliverPoint, 'delivered');
-      addDeliveredSymbol(lastPoint, deliverPoint, y);
+      drawCurve(lastPoint, deliverPoint, 'delivered');
+      drawDeliveredSymbol(lastPoint, deliverPoint, y);
 
       circles.push(
-        makeCircle(trace, lastState, {
+        makeCircle(trace, 'delivered', {
           x: deliverX,
           y,
           row,
@@ -452,96 +507,8 @@ export const drawingWorker = coroutine(async function renderDiagram(input: Drawi
     });
   });
 
-  collapseLinks.forEach(({ from, to }) => addCurve(from, to, 'collapsed'));
-  expansionLinks.forEach(({ from, to }) => addCurve(from, to, 'expanded'));
-
-  // Draw all lines first
-  curveCommands.forEach(({ from, to, state }) => {
-    const accent = STATE_COLORS[state]?.accent ?? STATE_COLORS.emitted.accent;
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = 'round';
-    ctx.setLineDash([]);
-
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-
-    if (Math.abs(from.y - to.y) < 2) {
-      ctx.lineTo(to.x, to.y);
-    } else {
-      const midX = (from.x + to.x) / 2;
-      ctx.bezierCurveTo(midX, from.y, midX, to.y, to.x, to.y);
-    }
-
-    ctx.stroke();
-  });
-
-  dottedLineCommands.forEach(({ from, to, state }) => {
-    const accent = STATE_COLORS[state]?.accent ?? STATE_COLORS.emitted.accent;
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = 'round';
-    ctx.setLineDash([4, 4]);
-
-    const midX = from.x + (to.x - from.x) * 0.5;
-    const midY = from.y + (to.y - from.y) * 0.5;
-
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(midX, midY);
-    ctx.stroke();
-
-    ctx.setLineDash([]);
-  });
-
-  terminalSymbolCommands.forEach(({ x, y, state }) => {
-    const accent = STATE_COLORS[state]?.accent ?? STATE_COLORS.emitted.accent;
-
-    ctx.beginPath();
-    ctx.arc(x, y, 8, 0, Math.PI * 2);
-    ctx.fillStyle = accent;
-    ctx.fill();
-
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-
-    if (state === 'filtered' || state === 'errored') {
-      ctx.moveTo(x - 4, y - 4);
-      ctx.lineTo(x + 4, y + 4);
-      ctx.moveTo(x + 4, y - 4);
-      ctx.lineTo(x - 4, y + 4);
-    } else if (state === 'dropped') {
-      ctx.moveTo(x, y - 4);
-      ctx.lineTo(x, y + 2);
-      ctx.moveTo(x - 3, y - 1);
-      ctx.lineTo(x, y + 2);
-      ctx.lineTo(x + 3, y - 1);
-    }
-
-    ctx.stroke();
-  });
-
-  deliveredSymbolCommands.forEach(({ from, to, y }) => {
-    const accent = STATE_COLORS.delivered.accent;
-    const midX = from.x + (to.x - from.x) * 0.5;
-
-    ctx.beginPath();
-    ctx.arc(midX, y, 8, 0, Math.PI * 2);
-    ctx.fillStyle = accent;
-    ctx.fill();
-
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(midX - 3, y);
-    ctx.lineTo(midX - 1, y + 3);
-    ctx.lineTo(midX + 4, y - 2);
-    ctx.stroke();
-  });
-
-  // Sort circles by column (left to right) so right circles are drawn on top
-  circles.sort((a, b) => a.column - b.column);
+  collapseLinks.forEach(({ from, to }) => drawCurve(from, to, 'collapsed'));
+  expansionLinks.forEach(({ from, to }) => drawCurve(from, to, 'expanded'));
 
   // Batch circle drawing by state for better performance
   // Group circles by their rendering style to minimize context state changes
