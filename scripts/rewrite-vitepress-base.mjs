@@ -45,7 +45,7 @@ function processDirectory(dir) {
               return match;
             }
             // Skip if it's already been processed
-            if (rest.startsWith('actionstack/')) {
+            if (rest.startsWith('streamix/')) {
               return match;
             }
             return `${prefix}${basePath}${rest}`;
