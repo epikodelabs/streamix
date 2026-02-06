@@ -13,7 +13,7 @@ describe('reduce', () => {
     const accumulatedStream = source.pipe(reduce((acc, value) => acc + value, 0));  // Sum values
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of accumulatedStream) {
         results.push(value);
       }
@@ -32,7 +32,7 @@ describe('reduce', () => {
     const accumulatedStream = source.pipe(reduce((acc, value) => acc + value, 0));  // Sum values
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of accumulatedStream) {
         results.push(value);
       }
@@ -48,7 +48,7 @@ describe('reduce', () => {
     const accumulatedStream = source.pipe(reduce((acc, value) => acc + value, 0));  // Sum values
     let error: any = null;
 
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of accumulatedStream) {
           void _;
@@ -68,7 +68,7 @@ describe('reduce', () => {
     const accumulatedStream = source.pipe(reduce((acc, value) => acc * value, 1));  // Product of values
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of accumulatedStream) {
         results.push(value);
       }
@@ -88,7 +88,7 @@ describe('reduce', () => {
     const accumulatedStream = subject.pipe(reduce((acc, value) => acc + value, ''));  // Concatenate strings
     const results: string[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of accumulatedStream) {
         results.push(value);
       }
@@ -108,7 +108,7 @@ describe('reduce', () => {
     const accumulatedStream = subject.pipe(reduce(() => 'constant', 'initial'));  // Always return 'constant'
     const results: string[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of accumulatedStream) {
         results.push(value);
       }
@@ -131,7 +131,7 @@ describe('reduce', () => {
     );
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of accumulatedStream) {
         results.push(value);
       }
@@ -157,7 +157,7 @@ describe('reduce', () => {
 
     let caught: Error | null = null;
 
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of accumulatedStream) {
           void _;

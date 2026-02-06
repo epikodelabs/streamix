@@ -283,7 +283,7 @@ describe('retry', () => {
     });
 
     const result: number[] = [];
-    const consumePromise = (async () => {
+    void (async () => {
       for await (const value of retry(factory, 1, delayPromise)) {
         result.push(value);
       }
@@ -299,7 +299,7 @@ describe('retry', () => {
     delayResolve(0);
 
     // Wait for the retry and completion
-    await consumePromise;
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(factory).toHaveBeenCalledTimes(2);
     expect(result).toEqual([2]); // Only value from successful attempt

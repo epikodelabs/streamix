@@ -16,7 +16,7 @@ describe('average', () => {
     const averageStream = source.pipe(average());
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of averageStream) {
         results.push(value);
       }
@@ -37,7 +37,7 @@ describe('average', () => {
     );
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of averageStream) {
         results.push(value);
       }
@@ -55,7 +55,7 @@ describe('average', () => {
     const averageStream = source.pipe(average());
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of averageStream) {
         results.push(value);
       }

@@ -16,7 +16,7 @@ describe('max', () => {
     const maxStream = source.pipe(max());
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of maxStream) {
         results.push(value);
       }
@@ -35,7 +35,7 @@ describe('max', () => {
     const maxStream = source.pipe(max());
     let error: any = null;
 
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of maxStream) {
           void _;

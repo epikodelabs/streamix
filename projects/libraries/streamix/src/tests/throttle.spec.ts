@@ -8,7 +8,7 @@ describe('throttle', () => {
     const subject = createSubject<number>();
     const iter = subject.pipe(throttle<number>(50));
 
-    (async () => {
+    void (async () => {
       for await (const v of iter) {
         output.push(v);
       }
@@ -37,7 +37,7 @@ describe('throttle', () => {
     const iter = subject.pipe(throttle<number>(50));
 
     let completed = false;
-    (async () => {
+    void (async () => {
       for await (const _ of iter) { void _; }
       completed = true;
     })();
@@ -56,7 +56,7 @@ describe('throttle', () => {
     const iter = subject.pipe(throttle<number>(50));
 
     let caught: any = null;
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of iter) { void _; }
       } catch (err) {
@@ -77,7 +77,7 @@ describe('throttle', () => {
     const subject = createSubject<number>();
     const iter = subject.pipe(throttle<number>(50));
 
-    const consumer = (async () => {
+    void (async () => {
       for await (const v of iter) {
         output.push(v);
       }
@@ -87,7 +87,7 @@ describe('throttle', () => {
     subject.next(2);
     subject.complete();
 
-    await consumer;
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(output).toEqual([1, 2]);
   });
@@ -119,7 +119,7 @@ describe('throttle', () => {
     const subject = createSubject<number>();
     const iter = subject.pipe(throttle<number>(0));
 
-    const consumer = (async () => {
+    void (async () => {
       for await (const v of iter) {
         output.push(v);
       }
@@ -130,7 +130,8 @@ describe('throttle', () => {
     subject.next(3);
     subject.complete();
 
-    await consumer;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     expect(output).toEqual([1, 2, 3]);
   });
 
@@ -143,14 +144,11 @@ describe('throttle', () => {
     // trailing emission and making this test timing-sensitive.
     const iter = subject.pipe(throttle<number>(Promise.resolve(200)));
 
-    const consumer = (async () => {
+    void (async () => {
       for await (const v of iter) {
         output.push(v);
       }
     })();
-
-    // Allow the operator to resolve the duration and start consuming.
-    await Promise.resolve();
 
     subject.next(1);
     subject.next(2);
@@ -158,7 +156,8 @@ describe('throttle', () => {
     subject.next(3);
     subject.complete();
 
-    await consumer;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
 
     expect(output[0]).toBe(1);
     expect(output).toContain(3);

@@ -1,12 +1,12 @@
 import {
-  createOperator,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
-  setIteratorEmissionStamp,
-  setIteratorMeta,
-  setValueMeta,
-  type Operator,
-  type Stream,
+    createOperator,
+    getIteratorEmissionStamp,
+    getIteratorMeta,
+    setIteratorEmissionStamp,
+    setIteratorMeta,
+    setValueMeta,
+    type Operator,
+    type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createSubject } from "../subjects";
@@ -70,7 +70,7 @@ export function delayUntil<T = any, R = any>(
     };
 
     // Notifier observer - wait for first emission to open gate
-    (async () => {
+    void (async () => {
       try {
         const result = await notifierIt.next();
         if (!result.done && !cancelled) {
@@ -96,7 +96,7 @@ export function delayUntil<T = any, R = any>(
     })();
 
     // Source producer
-    (async () => {
+    void (async () => {
       try {
         while (!cancelled) {
           const r = await source.next();

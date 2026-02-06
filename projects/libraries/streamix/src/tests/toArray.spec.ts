@@ -21,7 +21,7 @@ describe('toArray', () => {
     const toArrayStream = source.pipe(toArray());
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of toArrayStream) {
         results.push(value);
       }
@@ -40,7 +40,7 @@ describe('toArray', () => {
     const toArrayStream = source.pipe(toArray());
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of toArrayStream) {
         results.push(value);
       }
@@ -56,7 +56,7 @@ describe('toArray', () => {
     const toArrayStream = source.pipe(toArray());
     let error: any = null;
 
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of toArrayStream) {
           void _;
@@ -76,7 +76,7 @@ describe('toArray', () => {
     const toArrayStream = source.pipe(toArray());
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of toArrayStream) {
         results.push(value);
       }
@@ -95,7 +95,7 @@ describe('toArray', () => {
     const toArrayStream = source.pipe(toArray());
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of toArrayStream) {
         results.push(value);
       }

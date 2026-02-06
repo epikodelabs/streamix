@@ -16,7 +16,7 @@ describe('mode', () => {
     const modeStream = source.pipe(mode());
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of modeStream) {
         results.push(value);
       }
@@ -36,7 +36,7 @@ describe('mode', () => {
     const modeStream = source.pipe(mode());
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of modeStream) {
         results.push(value);
       }
@@ -58,7 +58,7 @@ describe('mode', () => {
     const modeStream = itemSource.pipe(mode((item) => item.group));
     const results: { group: string; value: string }[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of modeStream) {
         results.push(value);
       }
@@ -83,7 +83,7 @@ describe('mode', () => {
     const modeStream = source.pipe(mode());
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of modeStream) {
         results.push(value);
       }

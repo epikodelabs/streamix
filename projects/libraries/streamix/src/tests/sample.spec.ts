@@ -12,7 +12,7 @@ describe("sample", () => {
     const sampled = subject.pipe(sample(period));
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of sampled) {
         results.push(value);
       }
@@ -35,7 +35,7 @@ describe("sample", () => {
     const sampled = subject.pipe(sample(period));
     let completed = false;
 
-    (async () => {
+    void (async () => {
       for await (const _ of sampled) {
         void _;
       }
@@ -54,7 +54,7 @@ describe("sample", () => {
     const sampled = subject.pipe(sample(period));
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of sampled) {
         results.push(value);
       }
@@ -70,7 +70,7 @@ describe("sample", () => {
     const sampled = subject.pipe(sample(period));
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of sampled) {
         results.push(value);
       }
@@ -89,7 +89,7 @@ describe("sample", () => {
     const sampled = subject.pipe(sample(periodPromise));
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of sampled) {
         results.push(value);
       }

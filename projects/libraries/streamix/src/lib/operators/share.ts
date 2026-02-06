@@ -19,7 +19,7 @@ export function share<T = any>() {
 
   const connect = (source: AsyncIterator<T>) => {
     isConnected = true;
-    (async () => {
+    void (async () => {
       try {
         while (true) {
           const result = await source.next();

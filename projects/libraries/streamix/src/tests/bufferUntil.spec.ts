@@ -16,13 +16,11 @@ describe("bufferUntil", () => {
     const results: number[][] = [];
     const buffered = source.pipe(bufferUntil(notifier));
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
     })();
-
-    await waitTick();
     
     source.next(1);
     source.next(2);
@@ -49,7 +47,7 @@ describe("bufferUntil", () => {
     const results: number[][] = [];
     const buffered = source.pipe(bufferUntil(notifier));
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -70,7 +68,7 @@ describe("bufferUntil", () => {
     const results: number[][] = [];
     const buffered = source.pipe(bufferUntil(notifier));
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -95,7 +93,7 @@ describe("bufferUntil", () => {
     const buffered = source.pipe(bufferUntil(notifier));
 
     let error: any;
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of buffered) {
           void _;
@@ -133,7 +131,7 @@ describe("bufferUntil", () => {
     const buffered = source.pipe(bufferUntil(notifier));
 
     let error: any;
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of buffered) {
           void _;
@@ -179,15 +177,13 @@ describe("bufferUntil", () => {
     const results: number[][] = [];
 
     // Start consuming in background
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
     })();
 
     // Let the consumer start
-    await waitTick();
-
     source.next(1);
     source.next(2);
     notifier.next();

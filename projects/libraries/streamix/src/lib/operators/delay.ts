@@ -19,7 +19,7 @@ export function delay<T = any>(ms: MaybePromise<number>) {
     const outputIterator = eachValueFrom(output);
     let resolvedMs: number | undefined;
 
-    (async () => {
+    void (async () => {
       try {
         resolvedMs = isPromiseLike(ms) ? await ms : ms;
 

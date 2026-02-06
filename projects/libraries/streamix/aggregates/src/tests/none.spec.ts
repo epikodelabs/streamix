@@ -17,7 +17,7 @@ describe('none', () => {
     const noneStream = source.pipe(none(predicate));
     const results: boolean[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of noneStream) {
         results.push(value);
       }
@@ -36,7 +36,7 @@ describe('none', () => {
     const noneStream = source.pipe(none(predicate));
     const results: boolean[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of noneStream) {
         results.push(value);
       }
@@ -56,7 +56,7 @@ describe('none', () => {
     const noneStream = source.pipe(none(predicate));
     const results: boolean[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of noneStream) {
         results.push(value);
       }

@@ -14,7 +14,7 @@ describe('unique', () => {
     const uniqueStream = source.pipe(unique());
     const results: any[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of uniqueStream) {
         results.push(value);
       }
@@ -35,7 +35,7 @@ describe('unique', () => {
     const uniqueStream = source.pipe(unique(value => value.key));
     const results: any[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of uniqueStream) {
         results.push(value);
       }
@@ -59,7 +59,7 @@ describe('unique', () => {
     const uniqueStream = source.pipe(unique());
     const results: any[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of uniqueStream) {
         results.push(value);
       }
@@ -84,7 +84,7 @@ describe('unique', () => {
     const uniqueStream = source.pipe(unique());
     const results: any[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of uniqueStream) {
         results.push(value);
       }
@@ -100,7 +100,7 @@ describe('unique', () => {
     const uniqueStream = source.pipe(unique());
     let error: any = null;
 
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of uniqueStream) {
           void _;
@@ -120,7 +120,7 @@ describe('unique', () => {
     const uniqueStream = source.pipe(unique(value => value.id));
     const results: any[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of uniqueStream) {
         results.push(value);
       }

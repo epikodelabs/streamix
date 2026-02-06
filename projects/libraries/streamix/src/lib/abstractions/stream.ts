@@ -285,7 +285,7 @@ export function createStream<T>(
     isRunning = true;
     abortController = new AbortController();
 
-    (async () => {
+    void (async () => {
       const signal = abortController.signal;
       const iterator = generatorFn(signal)[Symbol.asyncIterator]();
       try {

@@ -32,7 +32,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
   
   const connectSource = (source: AsyncIterator<T>) => {
     isConnected = true;
-    (async () => {
+    void (async () => {
       try {
         while (true) {
           const result = await source.next();

@@ -99,7 +99,7 @@ export function buffer<T = any>(period: MaybePromise<number>) {
       requestIntervalUnsubscribe();
     }
 
-    (async () => {
+    void (async () => {
       try {
         while (true) {
           const result = await source.next();

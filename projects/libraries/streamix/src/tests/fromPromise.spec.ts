@@ -213,7 +213,7 @@ describe('fromPromise', () => {
     const stream = fromPromise(123);
     const values: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of stream) {
         values.push(value as number);
       }
@@ -227,7 +227,7 @@ describe('fromPromise', () => {
     const stream = fromPromise(() => 'sync-factory');
     const values: string[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of stream) {
         values.push(value as string);
       }

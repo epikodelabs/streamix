@@ -1,14 +1,14 @@
 import {
-  createOperator,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
-  isPromiseLike,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  setIteratorMeta,
-  setValueMeta,
-  type MaybePromise,
-  type Operator,
+    createOperator,
+    getIteratorEmissionStamp,
+    getIteratorMeta,
+    isPromiseLike,
+    nextEmissionStamp,
+    setIteratorEmissionStamp,
+    setIteratorMeta,
+    setValueMeta,
+    type MaybePromise,
+    type Operator,
 } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
@@ -52,7 +52,7 @@ export const delayWhile = <T = any>(
       queue.length = 0;
     };
 
-    (async () => {
+    void (async () => {
       try {
         while (true) {
           const result = await source.next();
