@@ -200,7 +200,7 @@ describe('switchMap', () => {
     const testStream = from([1, 2, 3]);
     const project = (value: number) => value * 10;
 
-    const switchedStream = testStream.pipe(switchMap(project));
+    const switchedStream = testStream.pipe(delay(10), switchMap(project));
 
     const results: number[] = [];
     switchedStream.subscribe({
