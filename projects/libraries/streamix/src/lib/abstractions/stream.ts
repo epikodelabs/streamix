@@ -2,7 +2,6 @@ import { firstValueFrom } from "../converters";
 import { enqueueMicrotask, runInMicrotask } from "../primitives/scheduling";
 import { createAsyncIterator } from "../subjects/helpers";
 import {
-  getCurrentEmissionStamp,
   getIteratorEmissionStamp,
   nextEmissionStamp,
   withEmissionStamp
@@ -69,17 +68,17 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
 function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
   const wrapped: Receiver<T> = {};
 
+  // Always schedule receiver callbacks in a microtask to avoid surprising
+  // synchronous re-entrancy from arbitrary callers. This forces delivery to
+  // run after the current call stack completes.
   const execute = (cb: () => MaybePromise) => {
-    const stamp = getCurrentEmissionStamp();
-    if (stamp !== null) {
+    return runInMicrotask(() => {
       try {
         return cb();
       } catch (err) {
         return Promise.reject(err);
       }
-    }
-
-    return runInMicrotask(cb).then(() => void 0);
+    }).then(() => void 0);
   };
 
   if (receiver.next) {
