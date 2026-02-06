@@ -1,152 +1,292 @@
 import {
-  createOperator,
-  DONE,
-  getIteratorMeta,
-  NEXT,
-  setIteratorMeta,
-  setValueMeta,
-  type Operator,
-  type Stream
+    createOperator,
+    DONE,
+    getIteratorEmissionStamp,
+    getIteratorMeta,
+    NEXT,
+    nextEmissionStamp,
+    setIteratorMeta,
+    setValueMeta,
+    type Operator,
+    type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
 type BufferRecord<T> = {
-  result: IteratorResult<T>;
-  meta?: { valueId: string; operatorIndex: number; operatorName: string };
+  value: T;
+  meta?: {
+    valueId: string;
+    operatorIndex: number;
+    operatorName: string;
+  };
 };
 
-/**
- * Buffers values until the notifier emits once, then flushes the collected values.
- *
- * Every notifier emission triggers a flush of the current buffer; values are released
- * as a collapsed array, preserving metadata for PipeContext tracing. When the source
- * completes, any remaining buffered values are emitted.
- *
- * @template T Source value type.
- * @param notifier Stream or Promise whose emissions cause buffer flushes.
- */
 export const bufferUntil = <T = any>(notifier: Stream<any>) =>
   createOperator<T, T[]>("bufferUntil", function (this: Operator, source) {
     const output = createSubject<T[]>();
-    const buffer: BufferRecord<T>[] = [];
-    const notifierIterator = fromAny(notifier)[Symbol.asyncIterator]();
-    let cancelled = false;
-
-    // Create the output iterator once so metadata sticks
     const outputIt = output[Symbol.asyncIterator]();
 
-    const flushBuffer = () => {
+    const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
+
+    let buffer: BufferRecord<T>[] = [];
+    let cancelled = false;
+
+    const flush = () => {
       if (buffer.length === 0) return;
 
-      const records = buffer.splice(0);
+      const records = buffer;
+      buffer = [];
+
       const metas = records
-        .map((record) => record.meta)
+        .map(r => r.meta)
         .filter(Boolean) as {
-        valueId: string;
-        operatorIndex: number;
-        operatorName: string;
-      }[];
+          valueId: string;
+          operatorIndex: number;
+          operatorName: string;
+        }[];
 
-      const lastMeta = metas[metas.length - 1];
-      let values = records.map((record) => record.result.value!);
+      let values = records.map(r => r.value);
 
-      if (lastMeta) {
+      if (metas.length) {
+        const last = metas[metas.length - 1];
+
+        const collapse = {
+          valueId: last.valueId,
+          kind: "collapse" as const,
+          inputValueIds: metas.map(m => m.valueId),
+        };
+
         setIteratorMeta(
           iterator,
-          {
-            valueId: lastMeta.valueId,
-            kind: "collapse",
-            inputValueIds: metas.map((meta) => meta.valueId),
-          },
-          lastMeta.operatorIndex,
-          lastMeta.operatorName
+          collapse,
+          last.operatorIndex,
+          last.operatorName
         );
+
         values = setValueMeta(
           values,
-          {
-            valueId: lastMeta.valueId,
-            kind: "collapse",
-            inputValueIds: metas.map((meta) => meta.valueId),
-          },
-          lastMeta.operatorIndex,
-          lastMeta.operatorName
+          collapse,
+          last.operatorIndex,
+          last.operatorName
         );
       }
 
       output.next(values);
     };
 
-    // Notifier loop - flush on each emission
-    (async () => {
-      try {
-        while (!cancelled) {
-          const result = await notifierIterator.next();
-          if (result.done || cancelled) break;
-          queueMicrotask(() => flushBuffer());
-        }
-      } catch (err) {
-        if (!cancelled) {
-          output.error(err);
-        }
-      }
-    })();
+    /* ---------- synchronous pull helpers ---------- */
 
-    // Source loop - buffer values
-    (async () => {
-      try {
-        while (!cancelled) {
-          const result = await source.next();
-          if (result.done || cancelled) break;
-          buffer.push({
-            result,
-            meta: getIteratorMeta(source),
-          });
-        }
+    const sourceTryNext = (source as any).__tryNext as
+      | undefined
+      | (() => IteratorResult<T> | null);
 
-        if (!cancelled) {
-          flushBuffer();
-          output.complete();
+    const notifierTryNext = (notifierIt as any).__tryNext as
+      | undefined
+      | (() => IteratorResult<any> | null);
+
+    const push = (value: T) => {
+      buffer.push({
+        value,
+        meta: getIteratorMeta(source),
+      });
+    };
+
+    const canUseSyncPull = typeof sourceTryNext === "function" && typeof notifierTryNext === "function";
+
+    /* ---------- sync pull mode (both have __tryNext) ---------- */
+
+    if (canUseSyncPull) {
+      let pendingSourceResult: IteratorResult<T> | null = null;
+      let pendingNotifierResult: IteratorResult<any> | null = null;
+
+      const drainBoth = () => {
+        while (!cancelled) {
+          // First, try to get pending or new results
+          if (!pendingSourceResult) {
+            try {
+              pendingSourceResult = sourceTryNext!.call(source);
+            } catch (err) {
+              cancelled = true;
+              try { notifierIt.return?.(); } catch {}
+              output.error(err);
+              return;
+            }
+          }
+
+          if (!pendingNotifierResult) {
+            try {
+              pendingNotifierResult = notifierTryNext!.call(notifierIt);
+            } catch (err) {
+              cancelled = true;
+              try { source.return?.(); } catch {}
+              output.error(err);
+              return;
+            }
+          }
+
+          // If both are null, we're caught up - wait for more data
+          if (!pendingSourceResult && !pendingNotifierResult) {
+            return;
+          }
+
+          // If only source has data, process it
+          if (pendingSourceResult && !pendingNotifierResult) {
+            if (pendingSourceResult.done) {
+              cancelled = true;
+              flush();
+              output.complete();
+              return;
+            }
+            push(pendingSourceResult.value);
+            pendingSourceResult = null;
+            continue;
+          }
+
+          // If only notifier has data, process it
+          if (pendingNotifierResult && !pendingSourceResult) {
+            if (pendingNotifierResult.done) {
+              cancelled = true;
+              try { source.return?.(); } catch {}
+              output.complete();
+              return;
+            }
+            flush();
+            pendingNotifierResult = null;
+            continue;
+          }
+
+          // Both have data - compare timestamps to decide order
+          if (pendingSourceResult && pendingNotifierResult) {
+            const sourceStamp = getIteratorEmissionStamp(source) ?? nextEmissionStamp();
+            const notifierStamp = getIteratorEmissionStamp(notifierIt) ?? nextEmissionStamp();
+
+            if (sourceStamp <= notifierStamp) {
+              // Process source first
+              if (pendingSourceResult.done) {
+                cancelled = true;
+                flush();
+                output.complete();
+                return;
+              }
+              push(pendingSourceResult.value);
+              pendingSourceResult = null;
+              // Leave pendingNotifierResult for next iteration
+            } else {
+              // Process notifier first
+              if (pendingNotifierResult.done) {
+                cancelled = true;
+                try { source.return?.(); } catch {}
+                output.complete();
+                return;
+              }
+              flush();
+              pendingNotifierResult = null;
+              // Leave pendingSourceResult for next iteration
+            }
+          }
         }
-      } catch (err) {
-        if (!cancelled) {
-          output.error(err);
+      };
+
+      // Set up push callbacks for both iterators
+      (source as any).__onPush = drainBoth;
+      (notifierIt as any).__onPush = drainBoth;
+      
+      // Initial drain
+      drainBoth();
+    }
+    /* ---------- async mode (fallback) ---------- */
+    else {
+      /* ---------- notifier loop ---------- */
+
+      (async () => {
+        try {
+          while (!cancelled) {
+            const r = await notifierIt.next();
+            if (r.done || cancelled) break;
+            flush();
+          }
+        } catch (err) {
+          if (!cancelled) {
+            cancelled = true;
+            try { await source.return?.(); } catch {}
+            output.error(err);
+          }
         }
-      } finally {
-        if (!cancelled) {
+      })();
+
+      /* ---------- source handling ---------- */
+
+      if (typeof sourceTryNext === "function") {
+        const drain = () => {
+          while (!cancelled) {
+            let r: IteratorResult<T> | null;
+            try {
+              r = sourceTryNext.call(source);
+            } catch (err) {
+              cancelled = true;
+              try { notifierIt.return?.(); } catch {}
+              output.error(err);
+              return;
+            }
+
+            if (!r) return;
+
+            if (r.done) {
+              cancelled = true;
+              flush();
+              output.complete();
+              return;
+            }
+
+            push(r.value);
+          }
+        };
+
+        (source as any).__onPush = drain;
+        drain();
+      } else {
+        (async () => {
           try {
-            await notifierIterator.return?.();
-          } catch {}
-        }
-      }
-    })();
+            while (!cancelled) {
+              const r = await source.next();
+              if (r.done || cancelled) break;
+              push(r.value);
+            }
 
-    // Custom iterator with cleanup
+            if (!cancelled) {
+              cancelled = true;
+              flush();
+              output.complete();
+            }
+          } catch (err) {
+            if (!cancelled) {
+              cancelled = true;
+              try { await notifierIt.return?.(); } catch {}
+              output.error(err);
+            }
+          }
+        })();
+      }
+    }
+
+    /* ---------- iterator facade ---------- */
+
     const iterator: AsyncIterator<T[]> = {
       next: () => outputIt.next(),
+
       return: async (value?: any) => {
         cancelled = true;
-
-        // Cleanup source iterator
-        try {
-          await source.return?.();
-        } catch {}
-
-        // Cleanup notifier iterator
-        try {
-          await notifierIterator.return?.();
-        } catch {}
-
+        try { await source.return?.(); } catch {}
+        try { await notifierIt.return?.(); } catch {}
         output.complete();
-        if (value !== undefined) {
-          return NEXT(value);
-        }
-        return DONE;
+        return value !== undefined ? NEXT(value) : DONE;
       },
-      throw: async (error?: any) => {
+
+      throw: async (err?: any) => {
         cancelled = true;
-        output.error(error);
-        return outputIt.throw?.(error) ?? Promise.reject(error);
+        output.error(err);
+        return outputIt.throw?.(err) ?? Promise.reject(err);
       },
     };
 
