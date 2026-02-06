@@ -83,7 +83,7 @@ export function mergeMap<T = any, R = any>(
       }
     };
 
-    (async () => {
+    void (async () => {
       try {
         while (!stopped) {
           const result = await source.next();

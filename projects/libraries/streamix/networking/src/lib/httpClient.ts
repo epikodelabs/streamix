@@ -565,7 +565,7 @@ export const createHttpClient = (): HttpClient => {
 
       const data = createReplaySubject();
 
-      (async () => {
+      void (async () => {
         try {
           for await (const item of parser(response)) {
             data.next(item);

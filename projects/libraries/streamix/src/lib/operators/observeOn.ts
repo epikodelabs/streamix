@@ -45,7 +45,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
     const outputIterator = eachValueFrom(output);
     const scheduledPromises: Promise<void>[] = [];
 
-    (async () => {
+    void (async () => {
       try {
         const contextValue = isPromiseLike(context) ? await context : context;
         const schedule = contextValue === 'microtask'

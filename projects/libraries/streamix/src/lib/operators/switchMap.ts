@@ -5,10 +5,10 @@ import {
   getIteratorMeta,
   isPromiseLike,
   nextEmissionStamp,
-  withEmissionStamp,
   setIteratorEmissionStamp,
   setIteratorMeta,
-  setValueMeta
+  setValueMeta,
+  withEmissionStamp
 } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
@@ -160,7 +160,7 @@ export function switchMap<T = any, R = any>(
       (source as any).__onPush = drain;
       drain();
     } else {
-      (async () => {
+      void (async () => {
         try {
           while (!stopped) {
             const result = await source.next();

@@ -1,10 +1,10 @@
 import {
-  bufferWhile,
-  createOperator,
-  createSubject,
-  getIteratorMeta,
-  getValueMeta,
-  setIteratorMeta,
+    bufferWhile,
+    createOperator,
+    createSubject,
+    getIteratorMeta,
+    getValueMeta,
+    setIteratorMeta,
 } from "@epikodelabs/streamix";
 
 const waitTick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -15,7 +15,7 @@ describe("bufferWhile", () => {
     const results: number[][] = [];
     const buffered = subject.pipe(bufferWhile((_value, _index, buffer) => buffer.length < 3));
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -39,7 +39,7 @@ describe("bufferWhile", () => {
     const results: number[][] = [];
     const buffered = subject.pipe(bufferWhile(() => false));
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -63,7 +63,7 @@ describe("bufferWhile", () => {
       })
     );
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -89,7 +89,7 @@ describe("bufferWhile", () => {
       bufferWhile((_value, index) => index < 2) // Flush after 2 values
     );
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -113,7 +113,7 @@ describe("bufferWhile", () => {
       bufferWhile((_value, _index, buffer) => Promise.resolve(buffer.length < 2))
     );
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -135,7 +135,7 @@ describe("bufferWhile", () => {
     const results: number[][] = [];
     const buffered = subject.pipe(bufferWhile(() => true));
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }

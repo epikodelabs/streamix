@@ -1,5 +1,4 @@
-import { createStream, createSubject } from '@epikodelabs/streamix';
-import { share } from '@epikodelabs/streamix';
+import { createStream, createSubject, share } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 

@@ -15,7 +15,7 @@ describe('some', () => {
     const someStream = source.pipe(some(predicate));
     const results: boolean[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of someStream) {
         results.push(value);
       }
@@ -35,7 +35,7 @@ describe('some', () => {
     const someStream = source.pipe(some(predicate));
     const results: boolean[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of someStream) {
         results.push(value);
       }
@@ -54,7 +54,7 @@ describe('some', () => {
     const someStream = source.pipe(some(predicate));
     const results: boolean[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of someStream) {
         results.push(value);
       }
@@ -71,7 +71,7 @@ describe('some', () => {
     const someStream = source.pipe(some(predicate));
     let error: any = null;
 
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of someStream) {}
       } catch (err) {
@@ -90,7 +90,7 @@ describe('some', () => {
     const someStream = source.pipe(some(predicate));
     let completed = false;
 
-    (async () => {
+    void (async () => {
       for await (const _ of someStream) {
         completed = true;
       }
@@ -109,7 +109,7 @@ describe('some', () => {
     const someStream = source.pipe(some(predicate));
     let completed = false;
 
-    (async () => {
+    void (async () => {
       for await (const _ of someStream) {
         completed = true;
       }

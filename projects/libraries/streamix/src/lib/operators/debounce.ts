@@ -56,7 +56,7 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
       }
     };
 
-    (async () => {
+    void (async () => {
       try {
         resolvedDuration = isPromiseLike(duration)
           ? await duration

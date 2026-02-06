@@ -50,7 +50,7 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
       intervalId = null;
     };
 
-    (async () => {
+    void (async () => {
       try {
         resolvedPeriod = isPromiseLike(period) ? await period : period;
 

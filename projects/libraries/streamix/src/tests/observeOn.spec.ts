@@ -32,7 +32,7 @@ describe('observeOn', () => {
 
     const observeOnStream = stream.pipe(observeOn('microtask'));
     
-    const consumePromise = (async () => {
+    void (async () => {
       for await (const value of observeOnStream) {
         emissionOrder.push(`value-${value}`);
         values.push(value);
@@ -41,7 +41,8 @@ describe('observeOn', () => {
     })();
 
     emissionOrder.push('sync-after-subscribe');
-    await consumePromise;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
 
     expect(values).toEqual([1, 2, 3]);
     expect(emissionOrder[0]).toBe('sync-after-subscribe');

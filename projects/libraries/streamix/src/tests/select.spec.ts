@@ -15,7 +15,7 @@ describe('select', () => {
     const results: any[] = [];
 
     // Create a promise that resolves when consumption is complete
-    const consumptionPromise = (async () => {
+    void (async () => {
       for await (const value of selectStream) {
         results.push(value);
       }
@@ -29,7 +29,7 @@ describe('select', () => {
     subject.complete();
 
     // Wait for the consumption to finish
-    await consumptionPromise;
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([1, 3, 5]); // Only values at indexes 0, 2, 4 should be emitted
   });
@@ -39,7 +39,7 @@ describe('select', () => {
     const selectStream = source.pipe(select(indexes[Symbol.iterator]()));
     const results: any[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of selectStream) {
         results.push(value);
       }
@@ -48,7 +48,7 @@ describe('select', () => {
     subject.next(1);
     subject.next(2);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([]); // No values should be emitted
   });
@@ -58,7 +58,7 @@ describe('select', () => {
     const selectStream = source.pipe(select(indexes[Symbol.iterator]()));
     const results: any[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of selectStream) {
         results.push(value);
       }
@@ -67,7 +67,7 @@ describe('select', () => {
     subject.next(1);
     subject.next(2);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([]); // No values should be emitted
   });
@@ -77,7 +77,7 @@ describe('select', () => {
     const selectStream = source.pipe(select(indexes[Symbol.iterator]()));
     const results: any[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of selectStream) {
         results.push(value);
       }
@@ -87,7 +87,7 @@ describe('select', () => {
     subject.next(2);
     subject.next(3);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([1, 3]); // Only values at indexes 0 and 2 should be emitted
   });

@@ -16,7 +16,7 @@ describe('min', () => {
     const minStream = source.pipe(min());
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of minStream) {
         results.push(value);
       }
@@ -35,7 +35,7 @@ describe('min', () => {
     const minStream = source.pipe(min());
     let error: any = null;
 
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of minStream) {
           void _;

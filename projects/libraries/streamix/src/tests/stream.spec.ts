@@ -26,7 +26,7 @@ describe('stream', () => {
     const subject = createSubject<number>();
     const received: number[] = [];
 
-    const iterate = (async () => {
+    void (async () => {
       for await (const value of subject) {
         received.push(value);
       }
@@ -36,7 +36,7 @@ describe('stream', () => {
     subject.next(2);
     subject.complete();
 
-    await iterate;
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(received).toEqual([1, 2]);
   });
 
@@ -138,7 +138,7 @@ describe('stream', () => {
       }
     });
 
-    (async () => {
+    void (async () => {
       const it = s[Symbol.asyncIterator]();
       const first = await it.next();
       expect(first.done).toBeFalse();

@@ -14,7 +14,7 @@ describe("buffer", () => {
     const buffered = source.pipe(buffer(duration));
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -39,7 +39,7 @@ describe("buffer", () => {
     const buffered = source.pipe(buffer(duration));
     let completed = false;
 
-    (async () => {
+    void (async () => {
       for await (const _ of buffered) {
         void _;
       }
@@ -59,7 +59,7 @@ describe("buffer", () => {
     const buffered = source.pipe(buffer(duration));
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -81,7 +81,7 @@ describe("buffer", () => {
     let error: any = null;
     let started = false;
 
-    const consumer = (async () => {
+    void (async () => {
       try {
         for await (const _ of buffered) {
           started = true;
@@ -102,7 +102,8 @@ describe("buffer", () => {
     subject.error(new Error("Test error"));
 
     // Wait for consumer to catch error
-    await consumer;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
 
     // Assert
     expect(error?.message).toBe("Test error");
@@ -113,7 +114,7 @@ describe("buffer", () => {
     const buffered = source.pipe(buffer(duration));
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }

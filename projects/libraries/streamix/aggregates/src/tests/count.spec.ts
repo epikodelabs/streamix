@@ -16,7 +16,7 @@ describe('count', () => {
     const countStream = source.pipe(count());
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of countStream) {
         results.push(value);
       }
@@ -35,7 +35,7 @@ describe('count', () => {
     const countStream = source.pipe(count());
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of countStream) {
         results.push(value);
       }
@@ -51,7 +51,7 @@ describe('count', () => {
     const countStream = source.pipe(count());
     let error: any = null;
 
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of countStream) {
           void _;

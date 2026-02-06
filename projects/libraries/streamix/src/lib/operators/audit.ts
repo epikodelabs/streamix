@@ -54,7 +54,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
       timerId = setTimeout(flush, resolvedDuration);
     };
 
-    (async () => {
+    void (async () => {
       try {
         resolvedDuration = isPromiseLike(duration)
           ? await duration

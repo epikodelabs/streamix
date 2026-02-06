@@ -1,10 +1,10 @@
 import {
-  createOperator,
-  getIteratorEmissionStamp,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  type Operator,
-  type Stream,
+    createOperator,
+    getIteratorEmissionStamp,
+    nextEmissionStamp,
+    setIteratorEmissionStamp,
+    type Operator,
+    type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 
@@ -50,7 +50,7 @@ export function skipUntil<T = any, R = any>(
     };
 
     // Observe notifier exactly once
-    (async () => {
+    void (async () => {
       try {
         const r = await notifierIt.next();
         const stamp = stampOf(notifierIt);

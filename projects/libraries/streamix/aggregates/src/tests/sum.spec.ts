@@ -16,7 +16,7 @@ describe('sum', () => {
     const sumStream = source.pipe(sum());
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of sumStream) {
         results.push(value);
       }
@@ -37,7 +37,7 @@ describe('sum', () => {
     );
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of sumStream) {
         results.push(value);
       }
@@ -56,7 +56,7 @@ describe('sum', () => {
     const sumStream = source.pipe(sum());
     const results: number[] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of sumStream) {
         results.push(value);
       }

@@ -51,7 +51,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
       lastEmit = Date.now();
     };
 
-    (async () => {
+    void (async () => {
       try {
         resolvedDuration = isPromiseLike(duration) ? await duration : duration;
 

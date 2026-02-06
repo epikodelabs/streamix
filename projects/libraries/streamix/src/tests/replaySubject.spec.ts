@@ -375,26 +375,27 @@ describe('createReplaySubject', () => {
     iteratorSubject.next(1);
     iteratorSubject.next(2);
     const iteratorValues: number[] = [];
-    const iteratorRunner = (async () => {
+    void (async () => {
       for await (const value of iteratorSubject) {
         iteratorValues.push(value);
         if (iteratorValues.length === 3) break;
       }
     })();
     iteratorSubject.next(3);
-    await iteratorRunner;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     expect(iteratorValues).toEqual([1, 2, 3]);
 
     const iteratorCompleteSubject = createReplaySubject<number>(2);
     const iteratorCompleteValues: number[] = [];
-    const iteratorRunner2 = (async () => {
+    void (async () => {
       for await (const value of iteratorCompleteSubject) {
         iteratorCompleteValues.push(value);
       }
     })();
     iteratorCompleteSubject.next(1);
     iteratorCompleteSubject.complete();
-    await iteratorRunner2;
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(iteratorCompleteValues).toEqual([1]);
 
     const observerEvents: string[] = [];

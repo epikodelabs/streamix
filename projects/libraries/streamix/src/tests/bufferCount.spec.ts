@@ -21,7 +21,7 @@ describe("bufferCount", () => {
     const buffered = source.pipe(bufferCount(3));
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -34,7 +34,7 @@ describe("bufferCount", () => {
     subject.next(5);
     subject.next(6); // Emits [4, 5, 6]
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[1, 2, 3], [4, 5, 6]]);
   });
@@ -43,7 +43,7 @@ describe("bufferCount", () => {
     const buffered = source.pipe(bufferCount(3));
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -52,7 +52,7 @@ describe("bufferCount", () => {
     subject.next(1);
     subject.next(2);
     subject.complete(); // Emits [1, 2]
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[1, 2]]);
   });
@@ -61,7 +61,7 @@ describe("bufferCount", () => {
     const buffered = source.pipe(bufferCount(3));
     let error: any = null;
 
-    (async () => {
+    void (async () => {
       try {
         for await (const _ of buffered) {
           void _;
@@ -72,7 +72,7 @@ describe("bufferCount", () => {
     })();
 
     subject.error(new Error("Test error"));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(error.message).toBe("Test error");
   });
@@ -81,14 +81,14 @@ describe("bufferCount", () => {
     const buffered = source.pipe(bufferCount(3));
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
     })();
 
     subject.complete(); // Should not emit anything
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([]);
   });
@@ -102,7 +102,7 @@ describe("bufferCount", () => {
     const buffered = source.pipe(bufferCount(promisedSize));
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -116,7 +116,7 @@ describe("bufferCount", () => {
     subject.next(4);
     subject.complete();
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 200));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[1, 2], [3, 4]]);
   });
@@ -125,7 +125,7 @@ describe("bufferCount", () => {
     const buffered = source.pipe(bufferCount(1));
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -134,7 +134,7 @@ describe("bufferCount", () => {
     subject.next(1);
     subject.next(2);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[1], [2]]);
   });
@@ -161,7 +161,7 @@ describe("bufferCount", () => {
     const results: number[][] = [];
     let error: any = null;
 
-    (async () => {
+    void (async () => {
       try {
         for await (const value of buffered) {
           results.push(value);
@@ -174,7 +174,7 @@ describe("bufferCount", () => {
     subject.next(1);
     subject.next(2);
     subject.error(new Error("Error during buffering"));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([]);
     expect(error.message).toBe("Error during buffering");
@@ -185,7 +185,7 @@ describe("bufferCount", () => {
     const buffered = objectSubject.pipe(bufferCount(2));
     const results: { id: number; name: string }[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -195,7 +195,7 @@ describe("bufferCount", () => {
     objectSubject.next({ id: 2, name: "Bob" });
     objectSubject.next({ id: 3, name: "Charlie" });
     objectSubject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([
       [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }],
@@ -208,7 +208,7 @@ describe("bufferCount", () => {
     const buffered = nullableSubject.pipe(bufferCount(3));
     const results: (number | null | undefined)[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -219,7 +219,7 @@ describe("bufferCount", () => {
     nullableSubject.next(undefined);
     nullableSubject.next(2);
     nullableSubject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[1, null, undefined], [2]]);
   });
@@ -228,7 +228,7 @@ describe("bufferCount", () => {
     const buffered = source.pipe(bufferCount(2.7));
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -239,7 +239,7 @@ describe("bufferCount", () => {
     subject.next(3);
     subject.next(4);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[1, 2, 3], [4]]);
   });
@@ -248,7 +248,7 @@ describe("bufferCount", () => {
     const buffered = source.pipe(bufferCount(2));
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -258,7 +258,7 @@ describe("bufferCount", () => {
     subject.next(2);
     subject.next(3);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[1, 2], [3]]);
   });
@@ -267,7 +267,7 @@ describe("bufferCount", () => {
     const buffered = source.pipe(bufferCount(3));
     const results: number[][] = [];
 
-    (async () => {
+    void (async () => {
       for await (const value of buffered) {
         results.push(value);
       }
@@ -277,7 +277,7 @@ describe("bufferCount", () => {
       subject.next(i);
     }
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([[1, 2, 3], [4, 5, 6], [7, 8]]);
   });
