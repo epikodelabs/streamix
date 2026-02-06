@@ -22,6 +22,8 @@ describe("bufferUntil", () => {
       }
     })();
 
+    await waitTick();
+    
     source.next(1);
     source.next(2);
     notifier.next();
