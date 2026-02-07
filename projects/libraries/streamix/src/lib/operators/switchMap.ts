@@ -1,14 +1,15 @@
 import type { MaybePromise, Operator, Stream } from "../abstractions";
 import {
-    createOperator,
-    getIteratorEmissionStamp,
-    getIteratorMeta,
-    isPromiseLike,
-    nextEmissionStamp,
-    setIteratorEmissionStamp,
-    setIteratorMeta,
-    setValueMeta,
-    withEmissionStamp
+  createOperator,
+  DONE,
+  getIteratorEmissionStamp,
+  getIteratorMeta,
+  isPromiseLike,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  setIteratorMeta,
+  setValueMeta,
+  withEmissionStamp
 } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
