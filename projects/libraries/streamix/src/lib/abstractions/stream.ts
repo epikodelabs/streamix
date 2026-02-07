@@ -1,16 +1,15 @@
 import { firstValueFrom } from "../converters";
-import { enqueueMicrotask, runInMicrotask } from "../primitives/scheduling";
 import { createAsyncIterator } from "../subjects/helpers";
 import {
-    getIteratorEmissionStamp,
-    nextEmissionStamp,
-    withEmissionStamp
+  getIteratorEmissionStamp,
+  nextEmissionStamp,
+  withEmissionStamp
 } from "./emission";
 import {
-    applyPipeStreamHooks,
-    generateStreamId,
-    generateSubscriptionId,
-    getRuntimeHooks
+  applyPipeStreamHooks,
+  generateStreamId,
+  generateSubscriptionId,
+  getRuntimeHooks
 } from "./hooks";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
@@ -215,7 +214,8 @@ export function createStream<T>(
 ): Stream<T> {
   const id = generateStreamId();
 
-  getRuntimeHooks()?.onCreateStream?.({ id, name });
+  const hooks = getRuntimeHooks();
+  if (hooks?.onCreateStream) hooks.onCreateStream({ id, name });
 
   let activeSubscriptions: SubscriberEntry<T>[] = [];
   let isRunning = false;
@@ -246,19 +246,23 @@ export function createStream<T>(
     let subscription!: Subscription;
 
     subscription = createSubscription(async () => {
-      return runInMicrotask(async () => {
-        const entry = activeSubscriptions.find(
-          (s) => s.subscription === subscription
-        );
+      return new Promise<void>((resolve, reject) => {
+        queueMicrotask(() => {
+          Promise.resolve().then(async () => {
+            const entry = activeSubscriptions.find(
+              (s) => s.subscription === subscription
+            );
 
-        if (entry) {
-          activeSubscriptions = activeSubscriptions.filter((s) => s !== entry);
-          entry.receiver.complete?.();
-        }
+            if (entry) {
+              activeSubscriptions = activeSubscriptions.filter((s) => s !== entry);
+              await entry.receiver.complete?.();
+            }
 
-        if (activeSubscriptions.length === 0) {
-          abortController.abort();
-        }
+            if (activeSubscriptions.length === 0) {
+              abortController.abort();
+            }
+          }).then(resolve, reject);
+        });
       });
     });
 
@@ -319,23 +323,22 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
     const abortController = new AbortController();
     const signal = abortController.signal;
 
-      const subscription = createSubscription(async () => {
-        return runInMicrotask(async () => {
-          abortController.abort();
-          receiver.complete?.();
-        });
-      });
-      const subscriptionId = subscription.id;
-      const baseSource = source[Symbol.asyncIterator]();
-      const iterator = applyPipeStreamHooks({
-        streamId: pipedId,
-        streamName: source.name,
-        subscriptionId,
-        source: baseSource,
-        operators,
-      });
+    const subscription = createSubscription(async () => {
+      abortController.abort();
+      receiver.complete?.();
+    });
 
-    enqueueMicrotask(() => {
+    const subscriptionId = subscription.id;
+    const baseSource = source[Symbol.asyncIterator]();
+    const iterator = applyPipeStreamHooks({
+      streamId: pipedId,
+      streamName: source.name,
+      subscriptionId,
+      source: baseSource,
+      operators,
+    });
+
+    queueMicrotask(() => {
       drainIterator(iterator, () => [{ receiver, subscription }], signal).catch(
         () => {}
       );

@@ -1,5 +1,4 @@
 import type { ReleaseFn } from "./lock";
-import { enqueueMicrotask } from "./scheduling";
 
 /**
  * An interface for a semaphore, a synchronization primitive for controlling
@@ -50,7 +49,7 @@ export const createSemaphore = (initialCount: number): Semaphore => {
       // Don't call the resolver immediately - schedule it as a microtask
       // to maintain the expected order of execution
       const nextResolver = queue.shift()!;
-      enqueueMicrotask(nextResolver);
+      queueMicrotask(nextResolver);
     } else {
       count++;
     }
