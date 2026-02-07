@@ -2,15 +2,15 @@ import { firstValueFrom } from "../converters";
 import { enqueueMicrotask, runInMicrotask } from "../primitives/scheduling";
 import { createAsyncIterator } from "../subjects/helpers";
 import {
-  getIteratorEmissionStamp,
-  nextEmissionStamp,
-  withEmissionStamp
+    getIteratorEmissionStamp,
+    nextEmissionStamp,
+    withEmissionStamp
 } from "./emission";
 import {
-  applyPipeStreamHooks,
-  generateStreamId,
-  generateSubscriptionId,
-  getRuntimeHooks
+    applyPipeStreamHooks,
+    generateStreamId,
+    generateSubscriptionId,
+    getRuntimeHooks
 } from "./hooks";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
