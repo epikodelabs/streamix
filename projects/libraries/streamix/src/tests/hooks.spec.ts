@@ -1,6 +1,7 @@
 import {
   applyPipeStreamHooks,
   createOperator,
+  DONE,
   generateStreamId,
   generateSubscriptionId,
   getIteratorMeta,
@@ -45,7 +46,7 @@ describe("hooksUtilities", () => {
   it("stores iterator metadata", () => {
     const iterator: AsyncIterator<any> = {
       async next() {
-        return { done: true, value: undefined };
+        return DONE;
       },
     };
 

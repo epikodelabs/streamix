@@ -2,6 +2,7 @@ import {
   buffer,
   createOperator,
   createStream,
+  DONE,
   filter,
   map,
   mergeMap,
@@ -313,7 +314,7 @@ describe("valueTracer", () => {
         async next() {
           const r = await source.next();
           if (r.done) return r;
-          return { done: true, value: undefined } as IteratorResult<number>;
+          return DONE as IteratorResult<number>;
         },
       })
     );

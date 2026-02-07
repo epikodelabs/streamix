@@ -3,7 +3,8 @@ import {
   createAsyncIterator,
   createRegister,
   createSubscription,
-  createTryCommit
+  createTryCommit,
+  DONE
 } from '@epikodelabs/streamix';
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -234,10 +235,10 @@ describe('helpers', () => {
 
       const donePull = iterator.next();
       firstReceiver.complete();
-      expect(await donePull).toEqual({ done: true, value: undefined });
+      expect(await donePull).toEqual(DONE);
 
       const returned = await iterator.return?.();
-      expect(returned).toEqual({ done: true, value: undefined });
+      expect(returned).toEqual(DONE);
     });
 
     it('rejects throw() when iterator is active', async () => {

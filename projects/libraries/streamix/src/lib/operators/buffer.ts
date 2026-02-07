@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from "../abstractions";
+import { createOperator, DONE, getIteratorMeta, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from "../abstractions";
 import { eachValueFrom } from "../converters";
 import { timer } from "../streams";
 import { createSubject } from "../subjects";
@@ -116,6 +116,30 @@ export function buffer<T = any>(period: MaybePromise<number>) {
         flushAndComplete();
       }
     })();
+
+    const baseReturn = outputIterator.return?.bind(outputIterator);
+    const baseThrow = outputIterator.throw?.bind(outputIterator);
+
+    (outputIterator as any).return = async (value?: any) => {
+      cleanup();
+      try {
+        await source.return?.();
+      } catch {}
+      buffer = [];
+      if (!output.completed()) output.complete();
+      return baseReturn ? baseReturn(value) : DONE;
+    };
+
+    (outputIterator as any).throw = async (err: any) => {
+      cleanup();
+      try {
+        await source.return?.();
+      } catch {}
+      buffer = [];
+      if (!output.completed()) output.error(err);
+      if (baseThrow) return baseThrow(err);
+      throw err;
+    };
 
     return outputIterator;
   });

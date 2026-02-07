@@ -1,14 +1,14 @@
 import type { MaybePromise, Operator, Stream } from "../abstractions";
 import {
-  createOperator,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
-  isPromiseLike,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  setIteratorMeta,
-  setValueMeta,
-  withEmissionStamp
+    createOperator,
+    getIteratorEmissionStamp,
+    getIteratorMeta,
+    isPromiseLike,
+    nextEmissionStamp,
+    setIteratorEmissionStamp,
+    setIteratorMeta,
+    setValueMeta,
+    withEmissionStamp
 } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
@@ -188,7 +188,7 @@ export function switchMap<T = any, R = any>(
       } finally {
         currentInner = null;
       }
-      return baseReturn ? baseReturn(undefined as any) : { done: true, value: undefined };
+      return baseReturn ? baseReturn(undefined as any) : DONE;
     };
 
     (outputIterator as any).throw = async (err: any) => {

@@ -1,5 +1,5 @@
 import type { Stream } from '@epikodelabs/streamix';
-import { concat, createStream, createSubscription, from } from '@epikodelabs/streamix';
+import { concat, createStream, createSubscription, DONE, from } from '@epikodelabs/streamix';
 
 
 describe('concat', () => {
@@ -125,7 +125,7 @@ function createBareIteratorStream(): Stream<string> {
 
     return {
       async next() {
-        if (emitted) return { done: true, value: undefined };
+        if (emitted) return DONE;
         emitted = true;
         return { done: false, value: 'bare' };
       },

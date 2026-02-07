@@ -1,10 +1,12 @@
 import {
-    createOperator,
-    getIteratorEmissionStamp,
-    nextEmissionStamp,
-    setIteratorEmissionStamp,
-    type Operator,
-    type Stream,
+  createOperator,
+  DONE,
+  getIteratorEmissionStamp,
+  NEXT,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  type Operator,
+  type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 
@@ -79,7 +81,7 @@ export function skipUntil<T = any, R = any>(
 
           if (r.done) {
             if (notifierError) throw notifierError;
-            return { done: true, value: undefined };
+            return DONE;
           }
 
           // Gate closed: drop values until notifier emits.
@@ -93,7 +95,7 @@ export function skipUntil<T = any, R = any>(
           }
 
           setIteratorEmissionStamp(iterator as any, stamp);
-          return { done: false, value: r.value };
+          return NEXT(r.value);
         }
       },
 
@@ -104,7 +106,7 @@ export function skipUntil<T = any, R = any>(
         try {
           await notifierIt.return?.();
         } catch {}
-        return { done: true, value: undefined };
+        return DONE;
       },
 
       async throw(err) {

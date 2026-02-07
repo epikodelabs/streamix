@@ -1,4 +1,4 @@
-import { createAsyncIterator, createStream, createSubject, createSubscription, from, isStreamLike, map } from '@epikodelabs/streamix';
+import { createAsyncIterator, createStream, createSubject, createSubscription, DONE, from, isStreamLike, map } from '@epikodelabs/streamix';
 
 describe('stream', () => {
   it('allows base streams to be consumed with for-await', async () => {
@@ -181,7 +181,7 @@ describe('stream', () => {
     expect(r2).toEqual({ done: false, value: 7 });
 
     const r3 = await it.next();
-    expect(r3).toEqual({ done: true, value: undefined });
+    expect(r3).toEqual(DONE);
   });
 
   it('iterator exposes __tryNext for synchronous pulls', async () => {

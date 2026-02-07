@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -84,6 +84,28 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
         if (!output.completed()) output.complete();
       }
     })();
+
+    const baseReturn = outputIterator.return?.bind(outputIterator);
+    const baseThrow = outputIterator.throw?.bind(outputIterator);
+
+    (outputIterator as any).return = async (value?: any) => {
+      stopSampling();
+      try {
+        await source.return?.();
+      } catch {}
+      if (!output.completed()) output.complete();
+      return baseReturn ? baseReturn(value) : DONE;
+    };
+
+    (outputIterator as any).throw = async (err: any) => {
+      stopSampling();
+      try {
+        await source.return?.();
+      } catch {}
+      if (!output.completed()) output.error(err);
+      if (baseThrow) return baseThrow(err);
+      throw err;
+    };
 
     return outputIterator;
   });

@@ -125,6 +125,22 @@ export const expand = <T = any>(
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
       },
+
+      async return(value?: any) {
+        queue.length = 0;
+        try {
+          await source.return?.(value);
+        } catch {}
+        return DONE;
+      },
+
+      async throw(err: any) {
+        queue.length = 0;
+        try {
+          await source.return?.();
+        } catch {}
+        throw err;
+      }
     };
 
     return iterator;
