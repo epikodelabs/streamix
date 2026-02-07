@@ -38,7 +38,7 @@ describe('createReceiver', () => {
     expect(events).toEqual(['sync', 'next']);
   });
 
-  it('runs next inline when called inside an emission context', async () => {
+  it('schedules next via microtask even inside an emission context', async () => {
     const events: string[] = [];
     const receiver = createReceiver<number>(() => {
       events.push('next');
@@ -50,7 +50,11 @@ describe('createReceiver', () => {
       events.push('after');
     });
 
-    expect(events).toEqual(['before', 'next', 'after']);
+    expect(events).toEqual(['before', 'after']);
+
+    await flushMicrotasks();
+
+    expect(events).toEqual(['before', 'after', 'next']);
   });
 
   it('should create a receiver from an object', async () => {

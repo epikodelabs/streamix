@@ -1,5 +1,3 @@
-import { enqueueMicrotask } from "../primitives/scheduling";
-import { getCurrentEmissionStamp } from "./emission";
 import { unwrapPrimitive } from "./hooks";
 import { isPromiseLike, type MaybePromise } from "./operator";
 
@@ -33,8 +31,9 @@ export function createReceiver<T = any>(
 ): StrictReceiver<T> {
   let _completed = false;
   let _completedScheduled = false;
-  let _active = 0;
-  const _idleResolvers: Array<() => void> = [];
+  let _pendingCount = 0;
+  let _idlePromise: Promise<void> = Promise.resolve();
+  let _resolveIdle: (() => void) | null = null;
 
   // Normalize input to a receiver object
   const target = (typeof callbackOrReceiver === 'function'
@@ -42,6 +41,28 @@ export function createReceiver<T = any>(
     : callbackOrReceiver || {}) as Receiver<T>;
 
   const wantsRaw = (target as any).__wantsRawValues === true;
+
+  const waitForIdle = () => {
+    if (_pendingCount === 0) return Promise.resolve();
+    return _idlePromise;
+  };
+
+  const incrementPending = () => {
+    if (_pendingCount === 0) {
+      _idlePromise = new Promise<void>((resolve) => {
+        _resolveIdle = resolve;
+      });
+    }
+    _pendingCount++;
+  };
+
+  const decrementPending = () => {
+    _pendingCount--;
+    if (_pendingCount === 0 && _resolveIdle) {
+      _resolveIdle();
+      _resolveIdle = null;
+    }
+  };
 
   // Helper to safely execute a user-provided handler within the scheduler
   const runAction = (handler?: (...args: any[]) => MaybePromise, ...args: any[]): Promise<void> => {
@@ -51,7 +72,7 @@ export function createReceiver<T = any>(
       // Re-check completed status inside the scheduled task
       if (_completed) return;
 
-      _active++;
+      incrementPending();
       try {
         const result = handler.apply(target, args);
         if (isPromiseLike(result)) await result;
@@ -63,23 +84,12 @@ export function createReceiver<T = any>(
           console.error("Unhandled error in Receiver:", err);
         }
       } finally {
-        _active--;
-        if (_active === 0) {
-          const resolvers = _idleResolvers.splice(0);
-          for (const r of resolvers) r();
-        }
+        decrementPending();
       }
     };
 
-    // If we're already in an emission context (i.e. called from a Subject/Stream
-    // delivery loop), execute inline to preserve sync semantics.
-    const stamp = getCurrentEmissionStamp();
-    if (stamp !== null) {
-      return action();
-    }
-
     return new Promise<void>((resolve, reject) => {
-      enqueueMicrotask(() => void action().then(resolve, reject));
+      queueMicrotask(() => void action().then(resolve, reject));
     });
   };
 
@@ -98,32 +108,24 @@ export function createReceiver<T = any>(
       const action = async () => {
         if (_completed) return;
 
-        // Wait until any active handlers finish before delivering terminal
-        if (_active > 0) {
-          await new Promise<void>((resolve) => _idleResolvers.push(resolve));
-        }
+        // Wait for pending actions to complete
+        await waitForIdle();
 
+        _completed = true;
+        try {
+          const result = target.error?.(normalizedError);
+          if (isPromiseLike(result)) await result;
+        } catch (err) {
           try {
-            const result = target.error?.(normalizedError);
-            if (isPromiseLike(result)) await result;
-          } catch (err) {
-            try {
-              console.error('Unhandled error in error handler:', err);
-            } catch (_) {
-              /* ignore logging failures */
-            }
-          } finally {
-            _completed = true;
+            console.error('Unhandled error in error handler:', err);
+          } catch (_) {
+            /* ignore logging failures */
           }
+        }
       };
 
-      const stamp = getCurrentEmissionStamp();
-      if (stamp !== null) {
-        return action();
-      }
-
       return new Promise<void>((resolve, reject) => {
-        enqueueMicrotask(() => void action().then(resolve, reject));
+        queueMicrotask(() => void action().then(resolve, reject));
       });
     },
 
@@ -134,10 +136,8 @@ export function createReceiver<T = any>(
       const action = async () => {
         if (_completed) return;
 
-        // Wait until any active handlers finish before delivering terminal
-        if (_active > 0) {
-          await new Promise<void>((resolve) => _idleResolvers.push(resolve));
-        }
+        // Wait for pending actions to complete
+        await waitForIdle();
 
         _completed = true;
         try {
@@ -152,13 +152,8 @@ export function createReceiver<T = any>(
         }
       };
 
-      const stamp = getCurrentEmissionStamp();
-      if (stamp !== null) {
-        return action();
-      }
-
       return new Promise<void>((resolve, reject) => {
-        enqueueMicrotask(() => void action().then(resolve, reject));
+        queueMicrotask(() => void action().then(resolve, reject));
       });
     },
 

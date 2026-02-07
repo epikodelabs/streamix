@@ -26,7 +26,7 @@ function createSpyTracer() {
   return { tracer, calls };
 }
 
-describe("tracingRuntime", () => {
+describe("runtime", () => {
     let { tracer } = createSpyTracer();
     beforeEach(() => {
         installTracingHooks();
