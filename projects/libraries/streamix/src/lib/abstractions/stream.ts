@@ -65,64 +65,6 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
   );
 }
 
-function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
-  const wrapped: Receiver<T> = {};
-
-  // Always schedule receiver callbacks in a microtask to avoid surprising
-  // synchronous re-entrancy from arbitrary callers. This forces delivery to
-  // run after the current call stack completes.
-  const execute = (cb: () => MaybePromise) => {
-    return runInMicrotask(() => {
-      try {
-        return cb();
-      } catch (err) {
-        return Promise.reject(err);
-      }
-    }).then(() => void 0);
-  };
-
-  if (receiver.next) {
-    wrapped.next = (value: T) =>
-      execute(async () => {
-        try {
-          await receiver.next!(value);
-        } catch (err) {
-          const error = err instanceof Error ? err : new Error(String(err));
-          if (receiver.error) {
-            try {
-              await receiver.error!(error);
-            } catch {
-            }
-          }
-        }
-      });
-  }
-
-  if (receiver.error) {
-    wrapped.error = (err: any) => {
-      const error = err instanceof Error ? err : new Error(String(err));
-      return execute(() => {
-        try {
-          return receiver.error!(error);
-        } catch {
-        }
-      });
-    };
-  }
-
-  if (receiver.complete) {
-    wrapped.complete = () =>
-      execute(() => {
-        try {
-          return receiver.complete!();
-        } catch {
-        }
-      });
-  }
-
-  return wrapped;
-}
-
 async function drainIterator<T>(
   iterator: AsyncIterator<T> & { __tryNext?: () => IteratorResult<T> | null },
   getReceivers: () => Array<SubscriberEntry<T>>,
@@ -301,7 +243,6 @@ export function createStream<T>(
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
-    const wrapped = wrapReceiver(receiver);
     let subscription!: Subscription;
 
     subscription = createSubscription(async () => {
@@ -323,8 +264,8 @@ export function createStream<T>(
 
     // IMPORTANT: register synchronously so operators like switchMap can
     // subscribe/unsubscribe inner streams in the same tick without racing the
-    // microtask-delivery loop. Receiver callbacks are still scheduled by `wrapReceiver`.
-    activeSubscriptions = [...activeSubscriptions, { receiver: wrapped, subscription }];
+    // microtask-delivery loop. Receiver callbacks are scheduled by createReceiver().
+    activeSubscriptions = [...activeSubscriptions, { receiver, subscription }];
 
     if (!isRunning) {
       startMulticastLoop();
@@ -375,14 +316,13 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
   const pipedId = generateStreamId();
 
   function registerReceiver(receiver: Receiver<any>): Subscription {
-    const wrapped = wrapReceiver(receiver);
     const abortController = new AbortController();
     const signal = abortController.signal;
 
       const subscription = createSubscription(async () => {
         return runInMicrotask(async () => {
           abortController.abort();
-          wrapped.complete?.();
+          receiver.complete?.();
         });
       });
       const subscriptionId = subscription.id;
@@ -396,7 +336,7 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
       });
 
     enqueueMicrotask(() => {
-      drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(
+      drainIterator(iterator, () => [{ receiver, subscription }], signal).catch(
         () => {}
       );
     });
