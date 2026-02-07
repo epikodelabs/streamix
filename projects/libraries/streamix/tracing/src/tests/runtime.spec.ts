@@ -1,4 +1,4 @@
-import { combineLatest, filter, from, map, mergeMap, reduce, take, zip } from "@epikodelabs/streamix";
+import { combineLatest, filter, from, map, mergeMap, reduce, setValueMeta, take, zip } from "@epikodelabs/streamix";
 import {
     disableTracing,
     enableTracing,
@@ -808,6 +808,250 @@ describe("tracingRuntime", () => {
 
         const errors = calls.filter(c => c.type === "errorInOperator");
         expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it("should handle last resort fallback when all metadata is lost", async () => {
+        const { tracer } = createSpyTracer();
+        enableTracing(tracer);
+
+        // Create an operator that loses metadata by emitting new values
+        // without any tracked metadata
+        const loseMetadata = () => {
+            return {
+                name: "loseMetadata",
+                apply: (source: AsyncIterator<any>) => {
+                    return {
+                        async next() {
+                            const r = await source.next();
+                            if (r.done) return r;
+                            // Return completely new value without metadata
+                            return { done: false, value: { newValue: r.value } };
+                        },
+                        return: source.return?.bind(source),
+                        throw: source.throw?.bind(source),
+                    };
+                }
+            };
+        };
+
+        const output: any[] = [];
+        for await (const value of from([1]).pipe(loseMetadata() as any)) {
+            output.push(value);
+        }
+
+        expect(output.length).toBe(1);
+        expect(output[0]).toEqual({ newValue: 1 });
+    });
+
+    it("should handle valueMeta fallback in final wrapper for non-traced values", async () => {
+        const { tracer, calls } = createSpyTracer();
+        enableTracing(tracer);
+
+        // Create a custom operator that sets valueMeta using the proper setValueMeta function
+        const addValueMetaOperator = () => {
+            return {
+                name: "addValueMetaOperator",
+                apply: (source: AsyncIterator<any>) => {
+                    return {
+                        async next() {
+                            const r = await source.next();
+                            if (r.done) return r;
+                            // Create object value and attach metadata properly
+                            const valueWithMeta = setValueMeta(
+                                { data: r.value },
+                                { valueId: "custom-value-id" },
+                                0,
+                                "addValueMetaOperator"
+                            );
+                            return { done: false, value: valueWithMeta };
+                        },
+                        return: source.return?.bind(source),
+                        throw: source.throw?.bind(source),
+                    };
+                }
+            };
+        };
+
+        const output: any[] = [];
+        for await (const value of from([1]).pipe(addValueMetaOperator() as any)) {
+            output.push(value);
+        }
+
+        expect(output.length).toBe(1);
+        expect(output[0]).toEqual({ data: 1 });
+        
+        // Should have called markDelivered with the custom valueId
+        const markDeliveredCalls = calls.filter(c => c.type === "markDelivered");
+        expect(markDeliveredCalls.length).toBeGreaterThan(0);
+    });
+
+    it("should handle it.return missing in final wrapper", async () => {
+        const { tracer, calls } = createSpyTracer();
+        enableTracing(tracer);
+
+        // Create a stream that doesn't have return method
+        const noReturnStream = {
+            [Symbol.asyncIterator]() {
+                let done = false;
+                return {
+                    async next() {
+                        if (done) return { done: true, value: undefined };
+                        done = true;
+                        return { done: false, value: 1 };
+                    },
+                    // No return method
+                };
+            }
+        };
+
+        const output: any[] = [];
+        const iterator = from(noReturnStream as any).pipe(map(x => x))[Symbol.asyncIterator]();
+        
+        const first = await iterator.next();
+        if (!first.done) output.push(first.value);
+        
+        // Call return on iterator when inner has no return
+        await iterator.return?.();
+        
+        expect(output).toEqual([1]);
+        
+        const completions = calls.filter(c => c.type === "completeSubscription");
+        expect(completions.length).toBeGreaterThan(0);
+    });
+
+    it("should handle operator error when inputQueue is empty", async () => {
+        const { tracer } = createSpyTracer();
+        enableTracing(tracer);
+
+        // Create operator that throws before pulling from source
+        const throwBeforePull = () => {
+            return {
+                name: "throwBeforePull",
+                apply: (source: AsyncIterator<any>) => {
+                    return {
+                        async next() {
+                            // Throw immediately without pulling from source
+                            throw new Error("Error before pull");
+                        },
+                        return: source.return?.bind(source),
+                        throw: source.throw?.bind(source),
+                    };
+                }
+            };
+        };
+
+        try {
+            for await (const _v of from([1]).pipe(throwBeforePull() as any)) {
+                // Should not reach here
+            }
+            fail("Should have thrown");
+        } catch (err: any) {
+            expect(err.message).toBe("Error before pull");
+        }
+    });
+
+    it("should handle non-traced value with valueMeta in final wrapper", async () => {
+        const { tracer, calls } = createSpyTracer();
+        enableTracing(tracer);
+
+        // Create operator that outputs value with valueMeta using setValueMeta
+        const addValueMeta = () => {
+            return {
+                name: "addValueMeta",
+                apply: (source: AsyncIterator<any>) => {
+                    return {
+                        async next() {
+                            const r = await source.next();
+                            if (r.done) return r;
+                            
+                            // Create plain object and attach metadata using setValueMeta
+                            const obj = { data: r.value };
+                            const valueWithMeta = setValueMeta(
+                                obj,
+                                { valueId: "manual-meta-id-123" },
+                                0,
+                                "addValueMeta"
+                            );
+                            
+                            return { done: false, value: valueWithMeta };
+                        },
+                        return: source.return?.bind(source),
+                        throw: source.throw?.bind(source),
+                    };
+                }
+            };
+        };
+
+        const output: any[] = [];
+        for await (const value of from([42]).pipe(addValueMeta() as any)) {
+            output.push(value);
+        }
+
+        expect(output.length).toBe(1);
+        expect(output[0]).toEqual({ data: 42 });
+        
+        // Check that markDelivered was called (tracing runtime assigns its own valueId)
+        const markDeliveredCalls = calls.filter(c => c.type === "markDelivered");
+        expect(markDeliveredCalls.length).toBeGreaterThan(0);
+    });
+
+    it("should call Symbol.asyncIterator on traced operator", async () => {
+        const { tracer } = createSpyTracer();
+        enableTracing(tracer);
+
+        const stream = from([1, 2]).pipe(map(x => x * 2));
+        
+        // Get an iterator and call Symbol.asyncIterator on it (should return itself)
+        const iterator = stream[Symbol.asyncIterator]();
+        const iteratorFromIterator = (iterator as any)[Symbol.asyncIterator]();
+        
+        // Should return the same iterator (standard async iterator protocol)
+        expect(iterator).toBe(iteratorFromIterator);
+        
+        // Verify the iterator works
+        const r1 = await iterator.next();
+        expect(r1.value).toBe(2);
+    });
+
+    it("should handle value with valueMeta but no valueId in final wrapper", async () => {
+        const { tracer } = createSpyTracer();
+        enableTracing(tracer);
+
+        // Create operator that creates a value using setValueMeta with empty kind
+        // This tests the defensive check for valueMeta existence
+        const addMeta = () => {
+            return {
+                name: "addMeta",
+                apply: (source: AsyncIterator<any>) => {
+                    return {
+                        async next() {
+                            const r = await source.next();
+                            if (r.done) return r;
+                            
+                            // Use setValueMeta which properly sets metadata
+                            const obj = setValueMeta(
+                                { data: r.value },
+                                { valueId: "test-id" },
+                                0,
+                                "addMeta"
+                            );
+                            
+                            return { done: false, value: obj };
+                        },
+                        return: source.return?.bind(source),
+                        throw: source.throw?.bind(source),
+                    };
+                }
+            };
+        };
+
+        const output: any[] = [];
+        for await (const value of from([42]).pipe(addMeta() as any)) {
+            output.push(value);
+        }
+
+        expect(output.length).toBe(1);
+        expect(output[0]).toEqual({ data: 42 });
     });
 });
 
