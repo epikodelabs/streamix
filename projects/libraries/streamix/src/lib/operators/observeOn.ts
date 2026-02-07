@@ -92,7 +92,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
 
     let completed = false;
 
-    return {
+    const iterator: AsyncIterator<T> = {
       async next() {
         while (true) {
           if (completed) return DONE;
@@ -104,7 +104,27 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
           }
           return { type: 'next', value: result.value };
         }
+      },
+
+      async return(value?: any) {
+        completed = true;
+        try {
+          await source.return?.(value);
+        } catch {}
+        if (!output.completed()) output.complete();
+        return DONE;
+      },
+
+      async throw(err: any) {
+        completed = true;
+        try {
+          await source.return?.();
+        } catch {}
+        if (!output.completed()) output.error(err);
+        throw err;
       }
     };
+
+    return iterator;
   });
 };

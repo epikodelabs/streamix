@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -71,7 +71,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
 
           bufferedMeta = getIteratorMeta(source);
 
-          // ⚠️ Replace buffered value → mark previous as filtered
+          // Replace buffered value → mark previous as filtered
           bufferedResult = result;
 
           // Timer starts only once per window
@@ -87,6 +87,34 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
         if (!output.completed()) output.complete();
       }
     })();
+
+    const baseReturn = outputIterator.return?.bind(outputIterator);
+    const baseThrow = outputIterator.throw?.bind(outputIterator);
+
+    (outputIterator as any).return = async (value?: any) => {
+      if (timerId) {
+        clearTimeout(timerId);
+        timerId = undefined;
+      }
+      try {
+        await source.return?.();
+      } catch {}
+      if (!output.completed()) output.complete();
+      return baseReturn ? baseReturn(value) : DONE;
+    };
+
+    (outputIterator as any).throw = async (err: any) => {
+      if (timerId) {
+        clearTimeout(timerId);
+        timerId = undefined;
+      }
+      try {
+        await source.return?.();
+      } catch {}
+      if (!output.completed()) output.error(err);
+      if (baseThrow) return baseThrow(err);
+      throw err;
+    };
 
     return outputIterator;
   });

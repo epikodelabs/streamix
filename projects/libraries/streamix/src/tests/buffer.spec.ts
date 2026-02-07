@@ -126,6 +126,64 @@ describe("buffer", () => {
 
     expect(results).toEqual([]);
   });
+
+  it("should cleanup when iterator is closed early via return()", async () => {
+    const duration = 100;
+    const buffered = source.pipe(buffer(duration));
+    const results: number[][] = [];
+    let iteratorReturned = false;
+
+    const iterator = buffered[Symbol.asyncIterator]();
+    
+    subject.next(1);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    
+    const firstResult = await iterator.next();
+    if (!firstResult.done) {
+      results.push(firstResult.value);
+    }
+    
+    // Call return() to cleanup early
+    await iterator.return?.();
+    iteratorReturned = true;
+    
+    // These values should not be processed
+    subject.next(2);
+    subject.next(3);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    
+    const nextResult = await iterator.next();
+    
+    expect(iteratorReturned).toBe(true);
+    expect(nextResult.done).toBe(true);
+    expect(results.length).toBe(1);
+  });
+
+  it("should cleanup when iterator receives throw()", async () => {
+    const duration = 100;
+    const buffered = source.pipe(buffer(duration));
+    let caughtError: any = null;
+
+    const iterator = buffered[Symbol.asyncIterator]();
+    
+    subject.next(1);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    
+    await iterator.next();
+    
+    // Call throw() to cleanup with error
+    try {
+      await iterator.throw?.(new Error("Forced error"));
+    } catch (err) {
+      caughtError = err;
+    }
+    
+    expect(caughtError?.message).toBe("Forced error");
+    
+    // Iterator should be done
+    const nextResult = await iterator.next();
+    expect(nextResult.done).toBe(true);
+  });
 });
 
 

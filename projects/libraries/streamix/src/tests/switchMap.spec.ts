@@ -1,6 +1,7 @@
 import {
   createSubject,
   delay,
+  DONE,
   EMPTY,
   from,
   getIteratorEmissionStamp,
@@ -508,7 +509,7 @@ describe('switchMap', () => {
     const sourceIterator: any = {
       __tryNext() {
         if (buffer.length > 0) return { done: false, value: buffer.shift()! };
-        if (done) return { done: true, value: undefined };
+        if (done) return DONE;
         return null;
       },
       next: async () => {
@@ -527,7 +528,7 @@ describe('switchMap', () => {
           },
           return: async () => {
             innerClosed++;
-            return { done: true, value: undefined };
+            return DONE;
           }
         };
         return { type: "stream", id: "inner-break", [Symbol.asyncIterator]: () => innerIterator } as any;
@@ -550,7 +551,7 @@ describe('switchMap', () => {
     const sourceIterator: any = {
       __tryNext() {
         if (buffer.length > 0) return { done: false, value: buffer.shift()! };
-        if (done) return { done: true, value: undefined };
+        if (done) return DONE;
         return null;
       },
       next: async () => {
@@ -569,7 +570,7 @@ describe('switchMap', () => {
           },
           return: async () => {
             innerClosed++;
-            return { done: true, value: undefined };
+            return DONE;
           }
         };
         return { type: "stream", id: "inner-throw", [Symbol.asyncIterator]: () => innerIterator } as any;
@@ -606,7 +607,7 @@ describe('switchMap', () => {
     const sourceIterator: any = {
       __tryNext() {
         if (buffer.length > 0) return { done: false, value: buffer.shift()! };
-        if (done) return { done: true, value: undefined };
+        if (done) return DONE;
         return null;
       },
       next: async () => {
@@ -618,7 +619,7 @@ describe('switchMap', () => {
       let done = false;
       const iterator: AsyncIterator<number> = {
         next: async () => {
-          if (done) return { done: true, value: undefined };
+          if (done) return DONE;
           done = true;
           expectedStamp = nextEmissionStamp();
           setIteratorEmissionStamp(iterator as any, expectedStamp);
@@ -648,7 +649,7 @@ describe('switchMap', () => {
           return { done: false, value: buffer.shift()! };
         }
         if (done) {
-          return { done: true, value: undefined };
+          return DONE;
         }
         return null;
       },
@@ -743,7 +744,7 @@ describe('switchMap', () => {
           let emitted = false;
           return {
             next: async () => {
-              if (emitted) return { done: true, value: undefined };
+              if (emitted) return DONE;
               emitted = true;
               await wait(ms);
               return { done: false, value };

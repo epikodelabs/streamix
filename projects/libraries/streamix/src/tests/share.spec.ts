@@ -107,4 +107,48 @@ describe('share', () => {
     expect(firstError?.message).toBe('boom');
     expect(secondError?.message).toBe('boom');
   });
+
+  it('should handle iterator.throw() call', async () => {
+    const subject = createSubject<number>();
+    const shared = subject.pipe(share());
+    let caughtError: any = null;
+
+    const iterator = shared[Symbol.asyncIterator]();
+    
+    subject.next(1);
+    const firstResult = await iterator.next();
+    expect(firstResult.value).toBe(1);
+    
+    // Call throw() on the iterator
+    try {
+      await iterator.throw?.(new Error('iterator thrown'));
+    } catch (err) {
+      caughtError = err;
+    }
+    
+    expect(caughtError?.message).toBe('iterator thrown');
+    
+    // Iterator should be done
+    const nextResult = await iterator.next();
+    expect(nextResult.done).toBe(true);
+  });
+
+  it('should handle iterator.return() call', async () => {
+    const subject = createSubject<number>();
+    const shared = subject.pipe(share());
+
+    const iterator = shared[Symbol.asyncIterator]();
+    
+    subject.next(1);
+    const firstResult = await iterator.next();
+    expect(firstResult.value).toBe(1);
+    
+    // Call return() to cleanup early
+    const returnResult = await iterator.return?.();
+    expect(returnResult?.done).toBe(true);
+    
+    // Iterator should be done
+    const nextResult = await iterator.next();
+    expect(nextResult.done).toBe(true);
+  });
 });

@@ -123,7 +123,7 @@ export function mergeMap<T = any, R = any>(
         }
         activeInnerIterators.clear();
       } finally {
-        return baseReturn ? baseReturn(undefined as any) : { done: true, value: undefined };
+        return baseReturn ? baseReturn(undefined as any) : DONE;
       }
     };
 

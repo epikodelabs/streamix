@@ -758,5 +758,56 @@ describe("tracingRuntime", () => {
         expect(calls.some(c => c.type === "exitOperator")).toBe(true);
         expect(calls.some(c => c.type === "markDelivered")).toBe(true);
     });
+
+    it("should handle error during next() in final wrapper", async () => {
+        const { tracer, calls } = createSpyTracer();
+        enableTracing(tracer);
+
+        const errorStream = {
+            [Symbol.asyncIterator]() {
+                return {
+                    async next() {
+                        throw new Error("Iterator error");
+                    },
+                    async return() {
+                        return { done: true, value: undefined };
+                    }
+                };
+            }
+        };
+
+        try {
+            for await (const _v of from(errorStream as any).pipe(map(x => x))) {
+                // Should not reach here
+            }
+        } catch (err: any) {
+            expect(err.message).toBe("Iterator error");
+        }
+
+        // Should have called completeSubscription on error
+        const completions = calls.filter(c => c.type === "completeSubscription");
+        expect(completions.length).toBeGreaterThan(0);
+    });
+
+    it("should handle operator error when inputQueue is present", async () => {
+        const { tracer, calls } = createSpyTracer();
+        enableTracing(tracer);
+
+        try {
+            for await (const _v of from([1, 2]).pipe(
+                map(x => {
+                    if (x === 2) throw new Error("Operator error");
+                    return x;
+                })
+            )) {
+                // First value succeeds, second throws
+            }
+        } catch (err: any) {
+            expect(err.message).toBe("Operator error");
+        }
+
+        const errors = calls.filter(c => c.type === "errorInOperator");
+        expect(errors.length).toBeGreaterThan(0);
+    });
 });
 

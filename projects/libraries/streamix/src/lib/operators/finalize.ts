@@ -72,7 +72,7 @@ export const finalize = <T = any>(callback: () => MaybePromise<T>) => {
           return source.return(value);
         }
 
-        return { done: true, value: undefined };
+        return DONE;
       },
       async throw(error?: unknown) {
         await doFinalize();

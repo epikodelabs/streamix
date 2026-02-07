@@ -76,6 +76,28 @@ export const concatMap = <T = any, R = T>(
           return NEXT(value);
         }
       },
+
+      async return(value?: any) {
+        try {
+          await innerIterator?.return?.(value);
+        } catch {}
+        try {
+          await source.return?.();
+        } catch {}
+        innerIterator = null;
+        return DONE;
+      },
+
+      async throw(err: any) {
+        try {
+          await innerIterator?.return?.();
+        } catch {}
+        try {
+          await source.return?.();
+        } catch {}
+        innerIterator = null;
+        throw err;
+      }
     };
 
     return iterator;
