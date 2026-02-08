@@ -1,4 +1,5 @@
-import { createOperator, DONE, getIteratorMeta, NEXT, setIteratorMeta, setValueMeta, type Operator } from "../abstractions";
+import { createOperator, DONE, getIteratorMeta, NEXT, type Operator } from "../abstractions";
+import { tagValue } from "./helpers";
 
 /**
  * Collects all emitted values from the source stream into an array
@@ -31,21 +32,10 @@ export const toArray = <T = any>() =>
                 emitted = true;
                 const metas = collectedMeta.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
                 const lastMeta = metas[metas.length - 1];
-                let values = collected.map((r) => r.value!);
-                if (lastMeta) {
-                  setIteratorMeta(
-                    this as any,
-                    { valueId: lastMeta.valueId, kind: "collapse", inputValueIds: metas.map((m) => m.valueId) },
-                    lastMeta.operatorIndex,
-                    lastMeta.operatorName
-                  );
-                  values = setValueMeta(
-                    values,
-                    { valueId: lastMeta.valueId, kind: "collapse", inputValueIds: metas.map((m) => m.valueId) },
-                    lastMeta.operatorIndex,
-                    lastMeta.operatorName
-                  );
-                }
+                const values = tagValue(this as any, collected.map((r) => r.value!), lastMeta, {
+                  kind: "collapse",
+                  inputValueIds: metas.map((m) => m.valueId),
+                });
                 // Emit the final array of values
                 return NEXT(values);
               }

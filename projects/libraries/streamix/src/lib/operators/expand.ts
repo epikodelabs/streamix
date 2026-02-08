@@ -1,15 +1,14 @@
 import {
-  createOperator,
-  DONE,
-  getIteratorMeta,
-  isPromiseLike,
-  NEXT,
-  setIteratorMeta,
-  setValueMeta,
-  type MaybePromise,
-  type Operator,
-  type Stream,
-} from '../abstractions';
+    createOperator,
+    DONE,
+    getIteratorMeta,
+    isPromiseLike,
+    NEXT,
+    type MaybePromise,
+    type Operator,
+    type Stream,
+} from "../abstractions";
+import { tagValue } from "./helpers";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -93,27 +92,7 @@ export const expand = <T = any>(
               options.traversal === 'breadth' ? queue.shift()! : queue.pop()!;
             await enqueueChildren(item.value, item.depth, item.meta);
 
-            let value = item.value;
-            if (item.meta) {
-              value = setValueMeta(
-                value,
-                {
-                  valueId: item.meta.valueId,
-                  ...(item.depth > 0 ? { kind: 'expand' as const } : {}),
-                },
-                item.meta.operatorIndex,
-                item.meta.operatorName
-              );
-              setIteratorMeta(
-                iterator,
-                {
-                  valueId: item.meta.valueId,
-                  ...(item.depth > 0 ? { kind: 'expand' as const } : {}),
-                },
-                item.meta.operatorIndex,
-                item.meta.operatorName
-              );
-            }
+            const value = tagValue(iterator, item.value, item.meta, item.depth > 0 ? { kind: 'expand' } : undefined);
 
             return NEXT(value);
           }

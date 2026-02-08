@@ -1,14 +1,13 @@
 import {
-  createOperator,
-  DONE,
-  getIteratorMeta,
-  isPromiseLike,
-  NEXT,
-  setIteratorMeta,
-  setValueMeta,
-  type MaybePromise,
-  type Operator
+    createOperator,
+    DONE,
+    getIteratorMeta,
+    isPromiseLike,
+    NEXT,
+    type MaybePromise,
+    type Operator
 } from "../abstractions";
+import { tagValue } from "./helpers";
 
 type BufferRecord<T> = {
   result: IteratorResult<T>;
@@ -47,26 +46,10 @@ export const bufferWhile = <T = any>(
             .map((record) => record.meta)
             .filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
           const lastMeta = metas[metas.length - 1];
-          let values = records.map((record) => record.result.value!);
-
-          if (lastMeta) {
-            setIteratorMeta(
-              iterator as any,
-              {
-                valueId: lastMeta.valueId,
-                kind: "collapse",
-                inputValueIds: metas.map((e) => e.valueId),
-              },
-              lastMeta.operatorIndex,
-              lastMeta.operatorName
-            );
-            values = setValueMeta(
-              values,
-              { valueId: lastMeta.valueId, kind: "collapse", inputValueIds: metas.map((e) => e.valueId) },
-              lastMeta.operatorIndex,
-              lastMeta.operatorName
-            );
-          }
+          const values = tagValue(iterator as any, records.map((record) => record.result.value!), lastMeta, {
+            kind: "collapse",
+            inputValueIds: metas.map((e) => e.valueId),
+          });
 
           return NEXT(values);
         };

@@ -1,54 +1,33 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
-import { eachValueFrom } from '../converters';
-import { createSubject, type Subject } from '../subjects';
+import { getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
+import { createAsyncOperator } from './helpers';
 
 /**
- * Creates a stream operator that delays the emission of each value from the source stream
- * while tracking pending and phantom states.
+ * Creates a stream operator that delays the emission of each value from the source stream.
  *
- * Each value received from the source is added to `context.pendingResults` and is only
- * resolved once the delay has elapsed and the value is emitted downstream.
+ * Each value received from the source is held for the specified duration before
+ * being emitted downstream.
  *
  * @template T The type of the values in the source and output streams.
  * @param ms The time in milliseconds to delay each value.
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
 export function delay<T = any>(ms: MaybePromise<number>) {
-  return createOperator<T, T>('delay', function (this: Operator, source) {
-    const output: Subject<T> = createSubject<T>();
-    const outputIterator = eachValueFrom(output);
-    let resolvedMs: number | undefined;
-
+  return createAsyncOperator<T>('delay', (source, output) => {
     void (async () => {
       try {
-        resolvedMs = isPromiseLike(ms) ? await ms : ms;
+        const resolvedMs = isPromiseLike(ms) ? await ms : ms;
 
         while (true) {
-          const result: IteratorResult<T> = await source.next();
+          const result = await source.next();
           if (result.done) break;
 
-          // Capture tracing metadata immediately
           const meta = getIteratorMeta(source);
 
           if (resolvedMs !== undefined) {
             await new Promise((resolve) => setTimeout(resolve, resolvedMs));
           }
 
-          // Restore tracing metadata before emission
-          if (meta) {
-            setIteratorMeta(
-              outputIterator,
-              { valueId: meta.valueId },
-              meta.operatorIndex,
-              meta.operatorName
-            );
-          }
-
-          let value = result.value!;
-          if (meta) {
-            value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-          }
-          output.next(value);
+          output.emit(result.value!, meta);
         }
       } catch (err) {
         output.error(err);
@@ -56,27 +35,5 @@ export function delay<T = any>(ms: MaybePromise<number>) {
         if (!output.completed()) output.complete();
       }
     })();
-
-    const baseReturn = outputIterator.return?.bind(outputIterator);
-    const baseThrow = outputIterator.throw?.bind(outputIterator);
-
-    (outputIterator as any).return = async (value?: any) => {
-      try {
-        await source.return?.();
-      } catch {}
-      if (!output.completed()) output.complete();
-      return baseReturn ? baseReturn(value) : DONE;
-    };
-
-    (outputIterator as any).throw = async (err: any) => {
-      try {
-        await source.return?.();
-      } catch {}
-      if (!output.completed()) output.error(err);
-      if (baseThrow) return baseThrow(err);
-      throw err;
-    };
-
-    return outputIterator;
   });
 }

@@ -42,14 +42,9 @@ export const last = <T = any>(
           const matches = predicate ? (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) : predicateResult;
 
           if (matches) {
-            if (hasMatch) {
-              lastValue = value;
-              continue;
-            } else {
-              lastValue = value;
-              hasMatch = true;
-              continue;
-            }
+            lastValue = value;
+            hasMatch = true;
+            continue;
           }
         }
       },

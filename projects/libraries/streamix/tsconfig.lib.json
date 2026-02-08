@@ -1,12 +1,14 @@
 /* To learn more about Typescript configuration file: https://www.typescriptlang.org/docs/handbook/tsconfig-json.html. */
 /* To learn more about Angular compiler options: https://angular.dev/reference/configs/angular-compiler-options. */
 {
-  "extends": "../../../tsconfig.json",
+  "extends": "../../../node_modules/ng-packagr/lib/ts/conf/tsconfig.ngc.json",
   "compilerOptions": {
     "outDir": "../../../dist/streamix",
     "declaration": true,
     "declarationMap": true,
     "inlineSources": true,
+    "lib": ["dom", "es2022"],
+    "paths": {},
     "types": []
   },
   "files": ["src/public-api.ts"],

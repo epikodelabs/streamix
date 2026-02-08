@@ -1,87 +1,48 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from "../abstractions";
-import { eachValueFrom } from "../converters";
-import { createSubject, type Subject } from "../subjects";
+import { getIteratorMeta, isPromiseLike, type MaybePromise } from "../abstractions";
+import { createAsyncOperator } from "./helpers";
 
 /**
  * Creates a stream operator that emits the most recent value from the source stream
  * only after a specified duration has passed without another new value.
- *
- * This version tracks pending results in the PipeContext and marks
- * superseded values as phantoms.
  *
  * @template T The type of the values in the source and output streams.
  * @param duration The debounce duration in milliseconds.
  * @returns An Operator instance for use in a stream pipeline.
  */
 export function debounce<T = any>(duration: MaybePromise<number>) {
-  return createOperator<T, T>("debounce", function (this: Operator, source) {
-    const output: Subject<T> = createSubject<T>();
-    const outputIterator = eachValueFrom(output);
-
+  return createAsyncOperator<T>("debounce", (source, output) => {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let latestResult: (IteratorResult<T> & { meta?: ReturnType<typeof getIteratorMeta> }) | undefined;
-
     let resolvedDuration: number | undefined;
     let completed = false;
 
     const flush = () => {
       if (!latestResult) return;
 
-      let value = latestResult.value!;
-      
-      if (latestResult.meta) {
-        setIteratorMeta(
-          outputIterator,
-          latestResult.meta,
-          latestResult.meta.operatorIndex,
-          latestResult.meta.operatorName
-        );
-
-        value = setValueMeta(
-          value,
-          { valueId: latestResult.meta.valueId },
-          latestResult.meta.operatorIndex,
-          latestResult.meta.operatorName
-        );
-      }
-
-      // Emit value directly - tracer correlates it via valueId / inputQueue
-      output.next(value);
+      output.emit(latestResult.value!, latestResult.meta);
 
       latestResult = undefined;
       timeoutId = undefined;
 
-      if (completed) {
-        output.complete();
-      }
+      if (completed) output.complete();
     };
 
     void (async () => {
       try {
-        resolvedDuration = isPromiseLike(duration)
-          ? await duration
-          : duration;
+        resolvedDuration = isPromiseLike(duration) ? await duration : duration;
 
         while (true) {
           const result = await source.next();
 
           if (result.done) {
             completed = true;
-
-            if (latestResult && timeoutId === undefined) {
-              flush();
-            }
+            if (latestResult && timeoutId === undefined) flush();
             break;
           }
 
-          // 🔍 Extract tracing metadata of incoming value
           const meta = getIteratorMeta(source);
-
-          // ⚠️ Supersede previous pending value
           latestResult = result;
-          if (meta) {
-            (latestResult as any).meta = meta;
-          }
+          if (meta) (latestResult as any).meta = meta;
 
           if (timeoutId) clearTimeout(timeoutId);
           if (resolvedDuration !== undefined) {
@@ -92,41 +53,15 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
         output.error(err);
       } finally {
         completed = true;
-
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-          timeoutId = undefined;
-        }
-
+        if (timeoutId) { clearTimeout(timeoutId); timeoutId = undefined; }
         if (latestResult) flush();
         if (!output.completed()) output.complete();
       }
     })();
 
-    const baseReturn = outputIterator.return?.bind(outputIterator);
-    const baseThrow = outputIterator.throw?.bind(outputIterator);
-
-    (outputIterator as any).return = async (value?: any) => {
+    return () => {
       if (timeoutId) clearTimeout(timeoutId);
       timeoutId = undefined;
-      try {
-        await source.return?.();
-      } catch {}
-      if (!output.completed()) output.complete();
-      return baseReturn ? baseReturn(value) : DONE;
     };
-
-    (outputIterator as any).throw = async (err: any) => {
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = undefined;
-      try {
-        await source.return?.();
-      } catch {}
-      if (!output.completed()) output.error(err);
-      if (baseThrow) return baseThrow(err);
-      throw err;
-    };
-
-    return outputIterator;
   });
 }

@@ -1,4 +1,5 @@
-import { createOperator, DONE, getIteratorMeta, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream } from '../abstractions';
+import { createOperator, DONE, getIteratorMeta, type MaybePromise, type Operator, type Stream } from '../abstractions';
+import { tagValue } from './helpers';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -52,22 +53,7 @@ export function mergeMap<T = any, R = any>(
           if (r.done) break;
           if (stopped || errorOccurred) break;
 
-          let value = r.value;
-          if (parentMeta) {
-            setIteratorMeta(
-              outputIterator,
-              { valueId: parentMeta.valueId, kind: "expand" },
-              parentMeta.operatorIndex,
-              parentMeta.operatorName
-            );
-            value = setValueMeta(
-              value,
-              { valueId: parentMeta.valueId, kind: "expand" },
-              parentMeta.operatorIndex,
-              parentMeta.operatorName
-            );
-          }
-          output.next(value);
+          output.next(tagValue(outputIterator, r.value, parentMeta, { kind: "expand" }));
         }
       } catch (err) {
         if (!errorOccurred) {
