@@ -1,7 +1,6 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, tagValue, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
-import { tagValue } from './helpers';
 
 /**
  * Creates a stream operator that schedules the emission of each value from the source

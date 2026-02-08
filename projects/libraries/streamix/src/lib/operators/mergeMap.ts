@@ -1,7 +1,6 @@
-import { createOperator, DONE, getIteratorMeta, type MaybePromise, type Operator, type Stream } from '../abstractions';
+import { createOperator, DONE, getIteratorMeta, tagValue, type MaybePromise, type Operator, type Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject, type Subject } from '../subjects';
-import { tagValue } from './helpers';
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream

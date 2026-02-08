@@ -1,6 +1,5 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, type MaybePromise, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, tagValue, type MaybePromise, type Operator, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
-import { tagValue } from "./helpers";
 
 /**
  * Represents a conditional branch for the `fork` operator.

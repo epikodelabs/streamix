@@ -4,12 +4,12 @@ import {
     getIteratorMeta,
     isPromiseLike,
     NEXT,
+    tagValue,
     type MaybePromise,
     type Operator,
     type Stream,
 } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
-import { tagValue } from "./helpers";
 
 /**
  * Options for the expand operator.

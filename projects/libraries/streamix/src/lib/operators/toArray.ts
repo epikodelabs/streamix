@@ -1,5 +1,4 @@
-import { createOperator, DONE, getIteratorMeta, NEXT, type Operator } from "../abstractions";
-import { tagValue } from "./helpers";
+import { createOperator, DONE, getIteratorMeta, NEXT, tagValue, type Operator } from "../abstractions";
 
 /**
  * Collects all emitted values from the source stream into an array
