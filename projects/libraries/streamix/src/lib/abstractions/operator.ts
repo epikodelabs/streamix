@@ -1,4 +1,4 @@
-import { AsyncPushable, createAsyncPushable } from './pushable';
+import { AsyncPushable, createAsyncPushable } from "./pushable";
 import type { Stream } from "./stream";
 
 /**
@@ -85,6 +85,52 @@ export function createOperator<T = any, R = T>(
     type: 'operator',
     apply: transformFn
   };
+}
+
+/**
+ * Creates a push operator where `setup` receives the source iterator and a pre-created output.
+ * `setup` may return an optional cleanup callback that is invoked when the downstream cancels
+ * iteration (`return()` / `throw()`).
+ */
+export function createPushOperator<T, R = T>(
+  name: string,
+  setup: (source: AsyncIterator<T>, output: AsyncPushable<R>) => () => MaybePromise<void>
+): Operator<T, R> {
+  return createOperator<T, R>(name, function (this: Operator, source) {
+    const output = createAsyncPushable<R>();
+    const cleanup = setup(source, output);
+
+    let cleanupCalled = false;
+    const runCleanup = async () => {
+      if (cleanupCalled) return;
+      cleanupCalled = true;
+      if (!cleanup) return;
+      try {
+        await cleanup();
+      } catch {
+      }
+    };
+
+    const baseReturn = output.return?.bind(output);
+    const baseThrow = output.throw?.bind(output);
+
+    (output as any).return = async (value?: any) => {
+      await runCleanup();
+      try { await source.return?.(); } catch {}
+      if (!output.completed()) output.complete();
+      return baseReturn ? baseReturn(value) : DONE;
+    };
+
+    (output as any).throw = async (err: any) => {
+      await runCleanup();
+      try { await source.return?.(); } catch {}
+      if (!output.completed()) output.error(err);
+      if (baseThrow) return baseThrow(err);
+      throw err;
+    };
+
+    return output;
+  });
 }
 
 /**
@@ -260,50 +306,3 @@ export interface OperatorChain<T> {
 
   (...operators: Operator<any, any>[]): Stream<any>;
 };
-
-
-/**
- * Creates an async operator where `setup` receives the source iterator and a pre-created output.
- * `setup` may return an optional cleanup callback that is invoked when the downstream cancels
- * iteration (`return()` / `throw()`).
- */
-export function createAsyncOperator<T, R = T>(
-  name: string,
-  setup: (source: AsyncIterator<T>, output: AsyncPushable<R>) => () => MaybePromise<void>
-): Operator<T, R> {
-  return createOperator<T, R>(name, function (this: Operator, source) {
-    const output = createAsyncPushable<R>();
-    const cleanup = setup(source, output);
-
-    let cleanupCalled = false;
-    const runCleanup = async () => {
-      if (cleanupCalled) return;
-      cleanupCalled = true;
-      if (!cleanup) return;
-      try {
-        await cleanup();
-      } catch {
-      }
-    };
-
-    const baseReturn = output.return?.bind(output);
-    const baseThrow = output.throw?.bind(output);
-
-    (output as any).return = async (value?: any) => {
-      await runCleanup();
-      try { await source.return?.(); } catch {}
-      if (!output.completed()) output.complete();
-      return baseReturn ? baseReturn(value) : DONE;
-    };
-
-    (output as any).throw = async (err: any) => {
-      await runCleanup();
-      try { await source.return?.(); } catch {}
-      if (!output.completed()) output.error(err);
-      if (baseThrow) return baseThrow(err);
-      throw err;
-    };
-
-    return output;
-  });
-}

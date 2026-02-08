@@ -1,4 +1,4 @@
-import { createAsyncOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
+import { createPushOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
  * Creates a throttle operator that emits the first value immediately, then ignores subsequent
@@ -10,7 +10,7 @@ import { createAsyncOperator, getIteratorMeta, isPromiseLike, type MaybePromise 
  * @returns An Operator instance that applies throttling to the source stream.
  */
 export const throttle = <T = any>(duration: MaybePromise<number>) =>
-  createAsyncOperator<T>('throttle', (source, output) => {
+  createPushOperator<T>('throttle', (source, output) => {
     let lastEmit = 0;
     let pendingResult: (IteratorResult<T> & { meta?: ReturnType<typeof getIteratorMeta> }) | undefined;
     let timer: ReturnType<typeof setTimeout> | null = null;

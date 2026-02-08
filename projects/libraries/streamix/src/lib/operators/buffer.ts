@@ -1,4 +1,4 @@
-import { createAsyncOperator, getIteratorMeta, type MaybePromise } from "../abstractions";
+import { createPushOperator, getIteratorMeta, type MaybePromise } from "../abstractions";
 import { timer } from "../streams";
 
 /**
@@ -9,7 +9,7 @@ import { timer } from "../streams";
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
 export function buffer<T = any>(period: MaybePromise<number>) {
-  return createAsyncOperator<T, T[]>("buffer", (source, output) => {
+  return createPushOperator<T, T[]>("buffer", (source, output) => {
     let buf: {
       result: IteratorResult<T>;
       meta?: { valueId: string; operatorIndex: number; operatorName: string };
