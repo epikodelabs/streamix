@@ -1,5 +1,4 @@
-import { createOperator, createReceiver, DONE, getIteratorMeta, isPromiseLike, Receiver, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
-import { tagValue } from "./helpers";
+import { createOperator, createReceiver, DONE, getIteratorMeta, isPromiseLike, Receiver, tagValue, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
 

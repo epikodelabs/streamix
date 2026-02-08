@@ -1,13 +1,13 @@
 import {
-    createOperator,
-    DONE,
-    getIteratorMeta,
-    isPromiseLike,
-    NEXT,
-    type MaybePromise,
-    type Operator
+  createOperator,
+  DONE,
+  getIteratorMeta,
+  isPromiseLike,
+  NEXT,
+  tagValue,
+  type MaybePromise,
+  type Operator
 } from "../abstractions";
-import { tagValue } from "./helpers";
 
 type BufferRecord<T> = {
   result: IteratorResult<T>;

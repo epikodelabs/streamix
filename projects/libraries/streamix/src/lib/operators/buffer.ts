@@ -1,6 +1,5 @@
-import { getIteratorMeta, type MaybePromise } from "../abstractions";
+import { createAsyncOperator, getIteratorMeta, type MaybePromise } from "../abstractions";
 import { timer } from "../streams";
-import { createAsyncOperator } from './helpers';
 
 /**
  * Buffers values from the source stream and emits them as arrays every `period` milliseconds.

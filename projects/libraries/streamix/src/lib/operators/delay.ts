@@ -1,5 +1,4 @@
-import { getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
-import { createAsyncOperator } from './helpers';
+import { createAsyncOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
  * Creates a stream operator that delays the emission of each value from the source stream.
@@ -35,5 +34,7 @@ export function delay<T = any>(ms: MaybePromise<number>) {
         if (!output.completed()) output.complete();
       }
     })();
+
+    return () => {};
   });
 }
