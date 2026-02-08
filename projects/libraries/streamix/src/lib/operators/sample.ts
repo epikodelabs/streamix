@@ -22,7 +22,7 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
       intervalId = setInterval(() => {
         if (!lastResult) return;
         if (!skipped) {
-          output.emit(lastResult.value!, lastMeta);
+          output.push(lastResult.value!, lastMeta);
         }
         skipped = true;
       }, resolvedPeriod);
@@ -48,7 +48,7 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
         }
 
         if (lastResult && !skipped) {
-          output.emit(lastResult.value!, lastMeta);
+          output.push(lastResult.value!, lastMeta);
         }
       } catch (err) {
         output.error(err);

@@ -19,7 +19,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
 
     const flushPending = () => {
       if (pendingResult !== undefined) {
-        output.emit(pendingResult.value!, pendingResult.meta);
+        output.push(pendingResult.value!, pendingResult.meta);
         pendingResult = undefined;
       }
       timer = null;
@@ -44,7 +44,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
           }
 
           if (now - lastEmit >= resolvedDuration) {
-            output.emit(result.value, meta);
+            output.push(result.value, meta);
             lastEmit = now;
           } else {
             pendingResult = result;

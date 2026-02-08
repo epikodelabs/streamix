@@ -27,7 +27,7 @@ export function delay<T = any>(ms: MaybePromise<number>) {
             await new Promise((resolve) => setTimeout(resolve, resolvedMs));
           }
 
-          output.emit(result.value!, meta);
+          output.push(result.value!, meta);
         }
       } catch (err) {
         output.error(err);

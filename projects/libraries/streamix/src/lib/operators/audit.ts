@@ -25,7 +25,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
     const flush = () => {
       if (!bufferedResult) return;
 
-      output.emit(bufferedResult.value!, bufferedMeta);
+      output.push(bufferedResult.value!, bufferedMeta);
 
       bufferedResult = undefined;
       bufferedMeta = undefined;

@@ -1,10 +1,10 @@
 import {
-    getIteratorEmissionStamp,
-    getIteratorMeta,
-    isPromiseLike,
-    nextEmissionStamp,
-    setIteratorEmissionStamp,
-    type MaybePromise,
+  getIteratorEmissionStamp,
+  getIteratorMeta,
+  isPromiseLike,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  type MaybePromise,
 } from '../abstractions';
 import { createAsyncOperator } from './helpers';
 
@@ -33,7 +33,7 @@ export const delayWhile = <T = any>(
     const flushQueue = () => {
       for (const item of queue) {
         setIteratorEmissionStamp(output, item.stamp);
-        output.emit(item.value as T, item.meta);
+        output.push(item.value as T, item.meta);
       }
       queue.length = 0;
     };
@@ -61,7 +61,7 @@ export const delayWhile = <T = any>(
           if (queue.length > 0) flushQueue();
 
           setIteratorEmissionStamp(output, stamp);
-          output.emit(result.value, meta);
+          output.push(result.value, meta);
         }
 
         if (queue.length > 0) flushQueue();

@@ -1,6 +1,6 @@
-import { createOperator, DONE, setIteratorMeta, setValueMeta, type IteratorMetaKind, type Operator } from '../abstractions';
+import { createOperator, DONE, MaybePromise, setIteratorMeta, setValueMeta, type IteratorMetaKind, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
-import { createSubject, type Subject } from '../subjects';
+import { createSubject } from '../subjects';
 
 /**
  * Attaches tracing metadata to both an iterator and a value in a single call.
@@ -25,56 +25,74 @@ export function tagValue<T>(
   return setValueMeta(value, metaTag, meta.operatorIndex, meta.operatorName);
 }
 
-/** Async iterator augmented with push methods, passed to operator setup callbacks. */
-export type AsyncOutput<R> = AsyncIterator<R> & {
-  /** Emit a value downstream, optionally attaching trace metadata. */
-  emit(value: R, meta?: { valueId: string; operatorIndex: number; operatorName: string }, tag?: { kind?: IteratorMetaKind; inputValueIds?: string[] }): void;
+/**
+ * Async iterator augmented with push methods, passed to operator setup callbacks.
+ */
+export type AsyncPushable<R> = AsyncIterator<R> & {
+  push(
+    value: R,
+    meta?: { valueId: string; operatorIndex: number; operatorName: string },
+    tag?: { kind?: IteratorMetaKind; inputValueIds?: string[] }
+  ): void;
   error(err: any): void;
   complete(): void;
   completed(): boolean;
 };
 
 /**
- * Creates an operator backed by an internal Subject for asynchronous decoupling.
- *
- * The `setup` callback receives `source` and an `output` iterator.
- * `output` is both an `AsyncIterator` (returned to downstream) and has push
- * methods (`emit`, `error`, `complete`, `completed`) for producing values.
- *
- * @template T Input value type.
- * @template R Output value type (defaults to T).
- * @param name Operator name for debugging/tracing.
- * @param setup Initialization function. May return a cleanup callback.
+ * Creates an `AsyncPushable` backed by an internal `Subject`.
+ */
+export function createAsyncPushable<R>(): AsyncPushable<R> {
+  const subject = createSubject<R>();
+
+  const output = Object.assign(eachValueFrom(subject), {
+    push: (value: R, meta?: any, tag?: any) => subject.next(tagValue(output, value, meta, tag)),
+    error: (err: any) => subject.error(err),
+    complete: () => subject.complete(),
+    completed: () => subject.completed(),
+  }) as AsyncPushable<R>;
+
+  return output;
+}
+
+/**
+ * Creates an async operator where `setup` receives the source iterator and a pre-created output.
+ * `setup` may return an optional cleanup callback that is invoked when the downstream cancels
+ * iteration (`return()` / `throw()`).
  */
 export function createAsyncOperator<T, R = T>(
   name: string,
-  setup: (source: AsyncIterator<T>, output: AsyncOutput<R>) => void | (() => void | Promise<void>)
+  setup: (source: AsyncIterator<T>, output: AsyncPushable<R>) => (this: Operator) => MaybePromise<void>
 ): Operator<T, R> {
   return createOperator<T, R>(name, function (this: Operator, source) {
-    const subject: Subject<R> = createSubject<R>();
-    const output = Object.assign(eachValueFrom(subject), {
-      emit: (value: R, meta?: any, tag?: any) => subject.next(tagValue(output, value, meta, tag)),
-      error: (err: any) => subject.error(err),
-      complete: () => subject.complete(),
-      completed: () => subject.completed(),
-    }) as AsyncOutput<R>;
-
+    const output = createAsyncPushable<R>();
     const cleanup = setup(source, output);
+
+    let cleanupCalled = false;
+    const runCleanup = async () => {
+      if (cleanupCalled) return;
+      cleanupCalled = true;
+      if (!cleanup) return;
+      try {
+        await cleanup.call(this);
+      } catch {
+      }
+    };
 
     const baseReturn = output.return?.bind(output);
     const baseThrow = output.throw?.bind(output);
 
     (output as any).return = async (value?: any) => {
-      if (cleanup) await cleanup();
+      await runCleanup();
       try { await source.return?.(); } catch {}
-      if (!subject.completed()) subject.complete();
+      if (!output.completed()) output.complete();
       return baseReturn ? baseReturn(value) : DONE;
     };
 
     (output as any).throw = async (err: any) => {
-      if (cleanup) await cleanup();
+      await runCleanup();
       try { await source.return?.(); } catch {}
-      if (!subject.completed()) subject.error(err);
+      if (!output.completed()) output.error(err);
       if (baseThrow) return baseThrow(err);
       throw err;
     };
