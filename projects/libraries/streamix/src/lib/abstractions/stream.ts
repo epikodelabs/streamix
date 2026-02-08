@@ -1,5 +1,5 @@
 import { firstValueFrom } from "../converters";
-import { createAsyncIterator } from "../subjects";
+import { createSubject } from "../subjects";
 import {
   getIteratorEmissionStamp,
   nextEmissionStamp,
@@ -11,6 +11,7 @@ import {
   generateSubscriptionId,
   getRuntimeHooks
 } from "./hooks";
+import { createAsyncIterator } from "./iterator";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
 import { createSubscription, type Subscription } from "./subscription";
@@ -51,11 +52,6 @@ export const isStreamLike = <T = unknown>(
   );
 };
 
-type SubscriberEntry<T> = {
-  receiver: Receiver<T>;
-  subscription: Subscription;
-};
-
 function waitForAbort(signal: AbortSignal): Promise<void> {
 
   if (signal.aborted) return Promise.resolve();
@@ -63,6 +59,11 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
     signal.addEventListener("abort", resolve as any, { once: true })
   );
 }
+
+type SubscriberEntry<T> = {
+  receiver: Receiver<T>;
+  subscription: Subscription;
+};
 
 async function drainIterator<T>(
   iterator: AsyncIterator<T> & { __tryNext?: () => IteratorResult<T> | null },
@@ -85,38 +86,6 @@ async function drainIterator<T>(
       }
     };
 
-
-  /**
-   * Creates a multicast {@link Stream} from an async generator factory.
-   *
-   * The returned Stream starts producing values on the first subscription and
-   * delivers each yielded value to *all* active subscribers.
-   *
-   * - When the last subscriber unsubscribes, the underlying generator is aborted
-   *   via an {@link AbortSignal}.
-   * - When the generator completes, subscribers are completed and internal
-   *   receiver references are cleared to avoid memory growth in long-running
-   *   processes/tests.
-   * - A new subscription after completion starts a fresh generator run.
-   *
-   * Receiver callbacks are executed in a microtask when there is no active
-   * emission context, which helps keep delivery ordering consistent and avoids
-   * surprising re-entrancy.
-   *
-   * @template T Value type emitted by the stream.
-   * @param name Human-friendly name (used for debugging/tracing).
-   * @param generatorFn Async generator factory. Receives an optional AbortSignal
-   * that is aborted when the stream is torn down.
-   * @returns A Stream that can be piped, subscribed to, or iterated.
-   *
-   * @example
-   * const s = createStream('ticks', async function* (signal) {
-   *   while (!signal?.aborted) {
-   *     yield Date.now();
-   *     await new Promise(r => setTimeout(r, 1000));
-   *   }
-   * });
-   */
     withEmissionStamp(stamp, forward);
     return false;
   };
@@ -169,10 +138,6 @@ async function drainIterator<T>(
       }
     }
 
-    // Streams created with `createStream` keep subscribers in an array until they
-    // explicitly unsubscribe. Most consumers/tests do not call `unsubscribe()`
-    // after natural completion, so we drop references here to prevent receiver
-    // growth across long test runs.
     entries.length = 0;
   }
 }
@@ -217,65 +182,100 @@ export function createStream<T>(
   const hooks = getRuntimeHooks();
   if (hooks?.onCreateStream) hooks.onCreateStream({ id, name });
 
-  let activeSubscriptions: SubscriberEntry<T>[] = [];
-  let isRunning = false;
-  let abortController = new AbortController();
+  interface ActiveRun {
+    subject: Stream<T> & { next: (v: T) => void; error: (e: any) => void; complete: () => void; };
+    abortController: AbortController;
+  }
 
-  const getActiveReceivers = () => activeSubscriptions;
+  let activeRun: ActiveRun | null = null;
+  let subscriberCount = 0;
 
-  const startMulticastLoop = () => {
-    isRunning = true;
-    abortController = new AbortController();
+  const startNewRun = (): ActiveRun => {
+    // Create new run state
+    const abortController = new AbortController();
+    const subject = createSubject<T>();
+    const run: ActiveRun = { subject, abortController };
+    
+    // activeRun = run; // Caller handles this
 
     void (async () => {
       const signal = abortController.signal;
-      const iterator = generatorFn(signal)[Symbol.asyncIterator]();
+      const gen = generatorFn(signal)[Symbol.asyncIterator]() as AsyncIterator<T> & { __tryNext?: () => IteratorResult<T> | null };
+
       try {
-        await drainIterator(iterator, getActiveReceivers, signal);
+        while (!signal.aborted) {
+          if (gen.__tryNext) {
+            while (true) {
+              const result = gen.__tryNext();
+              if (!result) break;
+              if (result.done) {
+                run.subject.complete();
+                return;
+              }
+              const stamp = getIteratorEmissionStamp(gen) ?? nextEmissionStamp();
+              withEmissionStamp(stamp, () => run.subject.next(result.value));
+            }
+          }
+
+          const result = await Promise.race([
+            waitForAbort(signal).then(() => ({ aborted: true } as const)),
+            gen.next().then((r) => ({ result: r })),
+          ]);
+
+          if ("aborted" in result || signal.aborted) break;
+
+          if (result.result.done) {
+            run.subject.complete();
+            break;
+          }
+
+          const stamp = getIteratorEmissionStamp(gen) ?? nextEmissionStamp();
+          withEmissionStamp(stamp, () => run.subject.next(result.result.value));
+        }
+      } catch (err) {
+        if (!signal.aborted) {
+          run.subject.error(err instanceof Error ? err : new Error(String(err)));
+        }
       } finally {
-        isRunning = false;
-        // Once the generator terminates, all current subscribers are terminal.
-        // Clear references so future subscriptions restart cleanly and we don't
-        // retain completed receivers between runs.
-        activeSubscriptions = [];
+        if (gen.return) {
+          try {
+            await gen.return();
+          } catch {}
+        }
+        // If this was the active run, clear it.
+        // Note: It might have been replaced already if we restarted.
+        if (activeRun === run) {
+           activeRun = null;
+        }
       }
     })();
+
+    return run;
   };
 
-  const registerReceiver = (receiver: Receiver<T>): Subscription => {
-    let subscription!: Subscription;
-
-    subscription = createSubscription(async () => {
-      return new Promise<void>((resolve, reject) => {
-        queueMicrotask(() => {
-          Promise.resolve().then(async () => {
-            const entry = activeSubscriptions.find(
-              (s) => s.subscription === subscription
-            );
-
-            if (entry) {
-              activeSubscriptions = activeSubscriptions.filter((s) => s !== entry);
-              await entry.receiver.complete?.();
-            }
-
-            if (activeSubscriptions.length === 0) {
-              abortController.abort();
-            }
-          }).then(resolve, reject);
-        });
-      });
-    });
-
-    // IMPORTANT: register synchronously so operators like switchMap can
-    // subscribe/unsubscribe inner streams in the same tick without racing the
-    // microtask-delivery loop. Receiver callbacks are scheduled by createReceiver().
-    activeSubscriptions = [...activeSubscriptions, { receiver, subscription }];
-
-    if (!isRunning) {
-      startMulticastLoop();
+  /**
+   * Wrapper to track subscriber count and manage generator lifecycle.
+   */
+  const wrappedSubscribe = (cb?: ((value: T) => MaybePromise) | Receiver<T>): Subscription => {
+    if (!activeRun || activeRun.abortController.signal.aborted) {
+      activeRun = startNewRun();
     }
+    
+    subscriberCount++;
+    const sub = activeRun.subject.subscribe(cb);
 
-    return subscription;
+    const originalUnsubscribe = sub.unsubscribe.bind(sub);
+    sub.unsubscribe = async () => {
+      await originalUnsubscribe();
+      subscriberCount--;
+      if (subscriberCount === 0) {
+        if (activeRun && !activeRun.abortController.signal.aborted) {
+          activeRun.abortController.abort();
+        }
+      }
+    };
+
+    return sub;
   };
 
   let self!: Stream<T>;
@@ -288,13 +288,17 @@ export function createStream<T>(
     name,
     id,
     pipe,
-    subscribe: (cb) => registerReceiver(createReceiver(cb)),
+    subscribe: wrappedSubscribe,
     query: () => firstValueFrom(self),
     [Symbol.asyncIterator]: () => {
-      const factory = createAsyncIterator({ register: registerReceiver, lazy: true });
+      // Use lazy=true to defer subscription (and generator start) until next()
+      const factory = createAsyncIterator({ 
+        register: (receiver) => wrappedSubscribe(receiver), 
+        lazy: true 
+      });
       const it = factory();
       (it as any).__streamix_streamId = id;
-      return it;
+      return it as AsyncIterator<T>;
     },
   };
 
