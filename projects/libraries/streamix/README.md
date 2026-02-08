@@ -77,33 +77,65 @@ The quick start below shows how to lift generators or ranged sequences into oper
 ```typescript
 import { range, map, filter, take } from '@epikodelabs/streamix';
 
-const stream = range(1, 100)
+const potionRecipe = range(1, 20)
   .pipe(
-    map(x => x * 2),
-    filter(x => x % 3 === 0),
+    map(ingredient => ({
+      name: ['Dragon Scale', 'Phoenix Tear', 'Unicorn Hair', 'Mermaid Kelp'][ingredient % 4],
+      power: ingredient * 10,
+      rarity: ingredient % 3 === 0 ? 'legendary' : 'common'
+    })),
+    filter(item => item.rarity === 'legendary'),
+    map(item => `✨ ${item.name} (${item.power} power)`),
     take(5)
   );
 
-for await (const value of stream) {
-  console.log(value); // 6, 12, 18, 24, 30
+for await (const ingredient of potionRecipe) {
+  console.log('Adding to cauldron:', ingredient);
 }
+// → Adding to cauldron: ✨ Dragon Scale (30 power)
+// → Adding to cauldron: ✨ Dragon Scale (60 power)
+// → Adding to cauldron: ✨ Dragon Scale (90 power)
+// → Adding to cauldron: ✨ Dragon Scale (120 power)
+// → Adding to cauldron: ✨ Dragon Scale (150 power)
 ```
 
 ### Handling user events
 
 ```typescript
-import { fromEvent, debounce, map, filter } from '@epikodelabs/streamix';
+import {
+  fromEvent,
+  debounce,
+  filter,
+  switchMap,
+  map,
+  startWith
+} from '@epikodelabs/streamix';
 
-const searchInput = document.getElementById('search');
-const searchStream = fromEvent(searchInput, 'input')
+const searchInput = document.getElementById('search') as HTMLInputElement;
+const jokesDiv = document.getElementById('jokes');
+
+const jokeStream = fromEvent(searchInput, 'input')
   .pipe(
-    map(event => event.target.value),
-    debounce(300),
-    filter(text => text.length > 2)
+    map(e => (e.target as HTMLInputElement).value.trim()),
+    debounce(400),
+    filter(term => term.length > 1),
+    switchMap(term =>
+      fromPromise(
+        fetch(`https://icanhazdadjoke.com/search?term=${encodeURIComponent(term)}`, {
+          headers: { Accept: 'application/json' }
+        })
+          .then(r => r.json())
+          .then(data => data.results.slice(0, 5))
+          .catch(() => [{ joke: 'No jokes found... that’s not funny 😢' }])
+      )
+    ),
+    startWith([])
   );
 
-for await (const searchTerm of searchStream) {
-  console.log('Searching for:', searchTerm);
+for await (const jokes of jokeStream) {
+  jokesDiv.innerHTML = jokes.length
+    ? jokes.map((j: any) => `<div class="joke">😂 ${j.joke}</div>`).join('')
+    : '<p>Type something like "cat" or "pizza"...</p>';
 }
 ```
 
@@ -116,14 +148,23 @@ Streams are sequences of values over time, implemented as async generators:
 ```typescript
 import { createStream } from '@epikodelabs/streamix';
 
-async function* numberStream() {
-  for (let i = 0; i < 10; i++) {
-    yield i;
-    await new Promise(resolve => setTimeout(resolve, 100));
+async function* countdown() {
+  for (let i = 10; i > 0; i--) {
+    yield `T-${i}...`;
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
+  yield '🚀 Launch!';
 }
 
-const stream = createStream('numbers', numberStream);
+const launchStream = createStream('countdown', countdown);
+
+for await (const msg of launchStream) {
+  console.log(msg);
+}
+// → T-10...
+// → T-9...
+// ... 
+// → 🚀 Launch!
 ```
 
 ### 🏭 Available factories
@@ -165,14 +206,13 @@ stream.pipe(
 Operators handle sync and async callbacks transparently:
 
 ```typescript
-const magicShow = from(storyBook)
+const magicShow = from(storyPages)
   .pipe(
-    map(page => page.length),
-    map(async length => {
-      await thinkAboutIt(1000);
-      return length * 2;
+    map(async page => {
+      await dramaticPause(1000);
+      return page.toUpperCase() + '!!!';
     }),
-    filter(num => num > 10)
+    filter(text => text.length > 20)
   );
 ```
 
@@ -185,14 +225,20 @@ Every built-in operator you already know is just a wrapper around `createOperato
 ```typescript
 import { createOperator, DONE, NEXT } from '@epikodelabs/streamix';
 
-const evenOnly = () =>
-  createOperator<number, number>('evenOnly', function (source) {
+const onlyPrime = () =>
+  createOperator<number, number>('onlyPrime', function (source) {
+    const isPrime = (n: number) => {
+      if (n <= 1) return false;
+      for (let i = 2; i <= Math.sqrt(n); i++) if (n % i === 0) return false;
+      return true;
+    };
+
     return {
       async next() {
         while (true) {
           const result = await source.next();
           if (result.done) return DONE;
-          if (result.value % 2 === 0) return NEXT(result.value);
+          if (isPrime(result.value)) return NEXT(result.value);
         }
       },
       return: source.return?.bind(source),
@@ -201,10 +247,10 @@ const evenOnly = () =>
   });
 ```
 
-Now you can mix `evenOnly()` into any pipeline just like the built-ins:
+Now you can mix `onlyPrime()` into any pipeline just like the built-ins:
 
 ```typescript
-const stream = from([1, 2, 3, 4]).pipe(evenOnly(), map(n => n * 10));
+const stream = from([1, 2, 3, 4]).pipe(onlyPrime(), map(n => n * 10));
 ```
 
 Because `createOperator` works directly with async iterators, you get the same pull-based backpressure behavior that powers the rest of the library and can freely interleave async callbacks, metadata, and cancellation hooks.
@@ -218,15 +264,15 @@ Manually control stream emissions:
 ```typescript
 import { createSubject } from '@epikodelabs/streamix';
 
-const subject = createSubject<string>();
+const chat = createSubject<string>();
 
-for await (const value of subject) {
-  console.log('Received:', value);
+for await (const msg of chat) {
+  console.log('New message:', msg);
 }
 
-subject.next('Hello');
-subject.next('World');
-subject.complete();
+chat.next('Hey! 👋');
+chat.next('Anyone here?');
+chat.complete();
 ```
 
 ### Query the first value
@@ -234,18 +280,8 @@ subject.complete();
 `query()` retrieves the actual emitted value as a promise, then automatically unsubscribes.
 
 ```typescript
-import { interval, take, map } from '@epikodelabs/streamix';
-
-const stream = interval(1000).pipe(take(1));
-const first = await stream.query();
-console.log('first:', first);
-
-const transformed = interval(500).pipe(
-  map(value => value * 10),
-  take(1)
-);
-const result = await transformed.query();
-console.log('result:', result);
+const firstLaunch = await interval(1000).pipe(take(1)).query();
+console.log('First tick:', firstLaunch); // → 0
 ```
 
 
@@ -263,19 +299,17 @@ import {
   useTimeout
 } from '@epikodelabs/streamix/networking';
 
-const client = createHttpClient().withDefaults(
-  useBase("https://api.example.com"),
+const api = createHttpClient().withDefaults(
+  useBase("https://api.github.com"),
   useLogger(),
   useTimeout(5000)
 );
 
-const dataStream = retry(() => client.get("/users", readJson), 3)
-  .pipe(
-    map(users => users.filter(user => user.active))
-  );
+const starsStream = retry(() => api.get("/repos/epikodelabs/streamix", readJson), 3)
+  .pipe(map(repo => repo.stargazers_count));
 
-for await (const activeUsers of dataStream) {
-  console.log('Active users:', activeUsers);
+for await (const stars of starsStream) {
+  console.log(`⭐ Current stars: ${stars}`);
 }
 ```
 
@@ -286,38 +320,85 @@ Live search with API calls and basic error handling:
 ```typescript
 import {
   fromEvent,
-  fromPromise,
   debounce,
-  map,
   filter,
   switchMap,
-  startWith
+  map,
+  startWith,
+  catchError
 } from '@epikodelabs/streamix';
+import { fromPromise } from '@epikodelabs/streamix';
 
-const searchInput = document.getElementById('search');
-const resultsDiv = document.getElementById('results');
+const searchInput = document.getElementById('pokemon-search') as HTMLInputElement;
+const resultDiv = document.getElementById('pokemon-result');
+const loadingEl = document.getElementById('loading');
+const errorEl = document.getElementById('error');
 
-const searchResults = fromEvent(searchInput, 'input')
+interface PokemonData {
+  name: string;
+  sprites: { front_default: string };
+  types: { type: { name: string } }[];
+  flavor_text_entries: { flavor_text: string; language: { name: string } }[];
+}
+
+const pokemonStream = fromEvent(searchInput, 'input')
   .pipe(
-    map(e => e.target.value.trim()),
-    debounce(300),
-    filter(query => query.length > 2),
-    switchMap(query => fromPromise(
-      fetch(`/api/search?q=${query}`)
-        .then(r => r.json())
-        .catch(() => ({ error: 'Search failed', query }))
-    )),
-    startWith({ results: [], query: '' })
+    map(e => (e.target as HTMLInputElement).value.trim().toLowerCase()),
+    debounce(400),
+    filter(query => query.length > 0),
+    switchMap(query =>
+      fromPromise(
+        fetch(`https://pokeapi.co/api/v2/pokemon/${query}`)
+          .then(r => {
+            if (!r.ok) throw new Error('Not found');
+            return r.json();
+          })
+          .then((data: PokemonData) => ({
+            name: data.name.charAt(0).toUpperCase() + data.name.slice(1),
+            sprite: data.sprites.front_default,
+            types: data.types.map(t => t.type.name).join(', '),
+          }))
+          .then(async details => {
+            // Bonus: fetch species for flavor text
+            const speciesRes = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${query}`);
+            if (speciesRes.ok) {
+              const species = await speciesRes.json();
+              const enText = species.flavor_text_entries
+                .find((entry: any) => entry.language.name === 'en');
+              details.flavor = enText ? enText.flavor_text.replace(/\f/g, ' ') : '';
+            }
+            return details;
+          })
+          .catch(() => ({ error: `No Pokémon found for "${query}" 😢` }))
+      )
+    ),
+    startWith({ loading: true })
   );
 
-for await (const result of searchResults) {
-  if (result.error) {
-    resultsDiv.innerHTML = `<p class="error">${result.error}</p>`;
-  } else {
-    resultsDiv.innerHTML = result.results
-      .map(item => `<div class="result">${item.title}</div>`)
-      .join('');
+for await (const result of pokemonStream) {
+  if (result.loading) {
+    resultDiv!.innerHTML = '';
+    loadingEl!.style.display = 'block';
+    errorEl!.style.display = 'none';
+    continue;
   }
+
+  loadingEl!.style.display = 'none';
+
+  if (result.error) {
+    errorEl!.textContent = result.error;
+    errorEl!.style.display = 'block';
+    resultDiv!.innerHTML = '';
+    continue;
+  }
+
+  errorEl!.style.display = 'none';
+  resultDiv!.innerHTML = `
+    <h2>${result.name}</h2>
+    <img src="${result.sprite}" alt="${result.name}" style="image-rendering: pixelated; width: 200px;">
+    <p><strong>Types:</strong> ${result.types}</p>
+    ${result.flavor ? `<p><em>"${result.flavor}"</em></p>` : ''}
+  `;
 }
 ```
 
@@ -335,14 +416,23 @@ Unlike push-based streams, streamix uses pull-based async generators:
 ```typescript
 import { createStream, take } from '@epikodelabs/streamix';
 
-async function* expensiveStream() {
-  for (let i = 0; i < 1000000; i++) {
-    yield expensiveComputation(i);
+async function* expensivePrimes() {
+  let n = 2;
+  while (true) {
+    console.log('🔥 Computing next prime...');
+    while (!isPrime(n)) n++;
+    yield n++;
+    // Artificial heavy work
+    for (let i = 0; i < 1e8; i++);
   }
 }
 
-const stream = createStream('calculations', expensiveStream)
-  .pipe(take(10));
+const primes = createStream('primes', expensivePrimes).pipe(take(5));
+
+for await (const p of primes) {
+  console.log('Prime:', p);
+}
+// Only 5 "Computing..." logs appear—no wasted work!
 ```
 
 This enables:
