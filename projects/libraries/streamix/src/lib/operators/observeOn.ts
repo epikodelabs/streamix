@@ -1,5 +1,4 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
-import { tagValue } from './helpers';
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, tagValue, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
 

@@ -1,14 +1,14 @@
 import {
-    createOperator,
-    DONE,
-    getIteratorMeta,
-    isPromiseLike,
-    NEXT,
-    type MaybePromise,
-    type Operator,
-    type Stream,
+  createOperator,
+  DONE,
+  getIteratorMeta,
+  isPromiseLike,
+  NEXT,
+  tagValue,
+  type MaybePromise,
+  type Operator,
+  type Stream,
 } from "../abstractions";
-import { tagValue } from "./helpers";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**

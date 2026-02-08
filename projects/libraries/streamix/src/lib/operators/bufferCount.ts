@@ -1,5 +1,4 @@
-import { DONE, type MaybePromise, NEXT, type Operator, createOperator, getIteratorMeta, isPromiseLike } from "../abstractions";
-import { tagValue } from "./helpers";
+import { DONE, type MaybePromise, NEXT, type Operator, createOperator, getIteratorMeta, isPromiseLike, tagValue } from "../abstractions";
 
 /**
  * Buffers a fixed number of values from the source stream and emits them as arrays,
