@@ -329,76 +329,67 @@ import {
 } from '@epikodelabs/streamix';
 import { fromPromise } from '@epikodelabs/streamix';
 
-const searchInput = document.getElementById('pokemon-search') as HTMLInputElement;
-const resultDiv = document.getElementById('pokemon-result');
+const searchInput = document.getElementById('chuck-search') as HTMLInputElement;
+const jokesDiv = document.getElementById('chuck-jokes');
 const loadingEl = document.getElementById('loading');
-const errorEl = document.getElementById('error');
+const emptyEl = document.getElementById('empty');
 
-interface PokemonData {
-  name: string;
-  sprites: { front_default: string };
-  types: { type: { name: string } }[];
-  flavor_text_entries: { flavor_text: string; language: { name: string } }[];
+interface ChuckJoke {
+  id: string;
+  value: string;
 }
 
-const pokemonStream = fromEvent(searchInput, 'input')
+const chuckStream = fromEvent(searchInput, 'input')
   .pipe(
-    map(e => (e.target as HTMLInputElement).value.trim().toLowerCase()),
+    map(e => (e.target as HTMLInputElement).value.trim()),
     debounce(400),
     filter(query => query.length > 0),
     switchMap(query =>
       fromPromise(
-        fetch(`https://pokeapi.co/api/v2/pokemon/${query}`)
+        fetch(`https://api.chucknorris.io/jokes/search?query=${encodeURIComponent(query)}`)
           .then(r => {
-            if (!r.ok) throw new Error('Not found');
+            if (!r.ok) throw new Error('API error');
             return r.json();
           })
-          .then((data: PokemonData) => ({
-            name: data.name.charAt(0).toUpperCase() + data.name.slice(1),
-            sprite: data.sprites.front_default,
-            types: data.types.map(t => t.type.name).join(', '),
-          }))
-          .then(async details => {
-            // Bonus: fetch species for flavor text
-            const speciesRes = await fetch(`https://pokeapi.co/api/v2/pokemon-species/${query}`);
-            if (speciesRes.ok) {
-              const species = await speciesRes.json();
-              const enText = species.flavor_text_entries
-                .find((entry: any) => entry.language.name === 'en');
-              details.flavor = enText ? enText.flavor_text.replace(/\f/g, ' ') : '';
-            }
-            return details;
-          })
-          .catch(() => ({ error: `No Pokémon found for "${query}" 😢` }))
+          .then(data => data.result as ChuckJoke[])
+          .then(jokes => jokes.slice(0, 8)) // Limit to avoid flooding
+          .catch(() => [] as ChuckJoke[])
       )
     ),
-    startWith({ loading: true })
+    map(jokes => ({
+      jokes,
+      message: jokes.length === 0 
+        ? `No Chuck Norris jokes found for "${searchInput.value}". Even Chuck is disappointed. 😔`
+        : null
+    })),
+    startWith({ jokes: [], loading: true })
   );
 
-for await (const result of pokemonStream) {
+for await (const result of chuckStream) {
   if (result.loading) {
-    resultDiv!.innerHTML = '';
+    jokesDiv!.innerHTML = '';
     loadingEl!.style.display = 'block';
-    errorEl!.style.display = 'none';
+    emptyEl!.style.display = 'none';
     continue;
   }
 
   loadingEl!.style.display = 'none';
 
-  if (result.error) {
-    errorEl!.textContent = result.error;
-    errorEl!.style.display = 'block';
-    resultDiv!.innerHTML = '';
+  if (result.jokes.length === 0) {
+    emptyEl!.textContent = result.message || 'Type something Chuck Norris would approve of...';
+    emptyEl!.style.display = 'block';
+    jokesDiv!.innerHTML = '';
     continue;
   }
 
-  errorEl!.style.display = 'none';
-  resultDiv!.innerHTML = `
-    <h2>${result.name}</h2>
-    <img src="${result.sprite}" alt="${result.name}" style="image-rendering: pixelated; width: 200px;">
-    <p><strong>Types:</strong> ${result.types}</p>
-    ${result.flavor ? `<p><em>"${result.flavor}"</em></p>` : ''}
-  `;
+  emptyEl!.style.display = 'none';
+  jokesDiv!.innerHTML = result.jokes
+    .map((joke: ChuckJoke) => `
+      <div class="joke-card">
+        <p><strong>💪</strong> ${joke.value}</p>
+      </div>
+    `)
+    .join('');
 }
 ```
 
