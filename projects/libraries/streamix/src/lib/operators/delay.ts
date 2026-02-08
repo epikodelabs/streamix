@@ -1,4 +1,4 @@
-import { createAsyncOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
+import { createPushOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
  * Creates a stream operator that delays the emission of each value from the source stream.
@@ -11,7 +11,7 @@ import { createAsyncOperator, getIteratorMeta, isPromiseLike, type MaybePromise 
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
 export function delay<T = any>(ms: MaybePromise<number>) {
-  return createAsyncOperator<T>('delay', (source, output) => {
+  return createPushOperator<T>('delay', (source, output) => {
     void (async () => {
       try {
         const resolvedMs = isPromiseLike(ms) ? await ms : ms;

@@ -1,12 +1,12 @@
 import {
-    createOperator,
-    DONE,
-    getIteratorMeta,
-    isPromiseLike,
-    NEXT,
-    tagValue,
-    type MaybePromise,
-    type Operator
+  createOperator,
+  DONE,
+  getIteratorMeta,
+  isPromiseLike,
+  NEXT,
+  tagValue,
+  type MaybePromise,
+  type Operator
 } from "../abstractions";
 
 type BufferRecord<T> = {

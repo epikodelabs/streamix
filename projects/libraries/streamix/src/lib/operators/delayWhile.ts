@@ -1,5 +1,5 @@
 import {
-  createAsyncOperator,
+  createPushOperator,
   getIteratorEmissionStamp,
   getIteratorMeta,
   isPromiseLike,
@@ -26,7 +26,7 @@ import {
 export const delayWhile = <T = any>(
   predicate: (value: T, index: number) => MaybePromise<boolean>
 ) =>
-  createAsyncOperator<T>('delayWhile', (source, output) => {
+  createPushOperator<T>('delayWhile', (source, output) => {
     const queue: Array<{ value: T; stamp: number; meta?: ReturnType<typeof getIteratorMeta> }> = [];
     let index = 0;
 

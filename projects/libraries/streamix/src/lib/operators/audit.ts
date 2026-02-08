@@ -1,4 +1,4 @@
-import { createAsyncOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
+import { createPushOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
  * Creates a stream operator that emits the latest value from the source stream
@@ -14,7 +14,7 @@ import { createAsyncOperator, getIteratorMeta, isPromiseLike, type MaybePromise 
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const audit = <T = any>(duration: MaybePromise<number>) =>
-  createAsyncOperator<T>('audit', (source, output) => {
+  createPushOperator<T>('audit', (source, output) => {
     let bufferedResult: IteratorResult<T> | undefined;
     let bufferedMeta: ReturnType<typeof getIteratorMeta> | undefined;
     let timerId: ReturnType<typeof setTimeout> | undefined;
