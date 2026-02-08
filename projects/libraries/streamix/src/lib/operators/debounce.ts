@@ -1,5 +1,5 @@
 import { getIteratorMeta, isPromiseLike, type MaybePromise } from "../abstractions";
-import { createAsyncOperator } from "./helpers";
+import { createAsyncOperator } from './helpers';
 
 /**
  * Creates a stream operator that emits the most recent value from the source stream
@@ -19,7 +19,7 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
     const flush = () => {
       if (!latestResult) return;
 
-      output.emit(latestResult.value!, latestResult.meta);
+      output.push(latestResult.value!, latestResult.meta);
 
       latestResult = undefined;
       timeoutId = undefined;

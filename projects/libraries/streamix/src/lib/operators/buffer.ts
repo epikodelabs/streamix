@@ -1,6 +1,6 @@
 import { getIteratorMeta, type MaybePromise } from "../abstractions";
 import { timer } from "../streams";
-import { createAsyncOperator } from "./helpers";
+import { createAsyncOperator } from './helpers';
 
 /**
  * Buffers values from the source stream and emits them as arrays every `period` milliseconds.
@@ -25,7 +25,7 @@ export function buffer<T = any>(period: MaybePromise<number>) {
       const inputValueIds = buf.map((e) => e.meta?.valueId).filter(Boolean) as string[];
 
       const values = buf.map((e) => e.result.value!);
-      output.emit(values, targetMeta, {
+      output.push(values, targetMeta, {
         kind: "collapse",
         inputValueIds: inputValueIds.length > 0 ? inputValueIds : undefined,
       });
