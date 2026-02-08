@@ -1,18 +1,12 @@
 import {
-  createOperator,
-  DONE,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
-  isPromiseLike,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  setIteratorMeta,
-  setValueMeta,
-  type MaybePromise,
-  type Operator,
+    getIteratorEmissionStamp,
+    getIteratorMeta,
+    isPromiseLike,
+    nextEmissionStamp,
+    setIteratorEmissionStamp,
+    type MaybePromise,
 } from '../abstractions';
-import { eachValueFrom } from '../converters';
-import { createSubject } from '../subjects';
+import { createAsyncOperator } from './helpers';
 
 /**
  * Buffers values while a predicate returns `true` and releases them once the predicate flips to `false`.
@@ -32,23 +26,14 @@ import { createSubject } from '../subjects';
 export const delayWhile = <T = any>(
   predicate: (value: T, index: number) => MaybePromise<boolean>
 ) =>
-  createOperator<T, T>('delayWhile', function (this: Operator, source) {
-    const output = createSubject<T>();
-    const outputIterator = eachValueFrom(output);
+  createAsyncOperator<T>('delayWhile', (source, output) => {
     const queue: Array<{ value: T; stamp: number; meta?: ReturnType<typeof getIteratorMeta> }> = [];
     let index = 0;
 
     const flushQueue = () => {
       for (const item of queue) {
-        setIteratorEmissionStamp(outputIterator as AsyncIterator<T>, item.stamp);
-
-        let value: any = item.value;
-        if (item.meta) {
-          setIteratorMeta(outputIterator as AsyncIterator<T>, { valueId: item.meta.valueId }, item.meta.operatorIndex, item.meta.operatorName);
-          value = setValueMeta(value, { valueId: item.meta.valueId }, item.meta.operatorIndex, item.meta.operatorName);
-        }
-
-        output.next(value);
+        setIteratorEmissionStamp(output, item.stamp);
+        output.emit(item.value as T, item.meta);
       }
       queue.length = 0;
     };
@@ -59,9 +44,7 @@ export const delayWhile = <T = any>(
           const result = await source.next();
           const stamp = getIteratorEmissionStamp(source) ?? nextEmissionStamp();
 
-          if (result.done) {
-            break;
-          }
+          if (result.done) break;
 
           const meta = getIteratorMeta(source);
 
@@ -75,53 +58,19 @@ export const delayWhile = <T = any>(
             continue;
           }
 
-          if (queue.length > 0) {
-            flushQueue();
-          }
+          if (queue.length > 0) flushQueue();
 
-          setIteratorEmissionStamp(outputIterator as AsyncIterator<T>, stamp);
-
-          let value: any = result.value;
-          if (meta) {
-            setIteratorMeta(outputIterator as AsyncIterator<T>, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-            value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-          }
-
-          output.next(value);
+          setIteratorEmissionStamp(output, stamp);
+          output.emit(result.value, meta);
         }
 
-        if (queue.length > 0) {
-          flushQueue();
-        }
+        if (queue.length > 0) flushQueue();
       } catch (err) {
         output.error(err);
-        return;
       } finally {
         if (!output.completed()) output.complete();
       }
     })();
 
-    const baseReturn = outputIterator.return?.bind(outputIterator);
-    const baseThrow = outputIterator.throw?.bind(outputIterator);
-
-    (outputIterator as any).return = async (value?: any) => {
-      try {
-        await source.return?.();
-      } catch {}
-      queue.length = 0;
-      if (!output.completed()) output.complete();
-      return baseReturn ? baseReturn(value) : DONE;
-    };
-
-    (outputIterator as any).throw = async (err: any) => {
-      try {
-        await source.return?.();
-      } catch {}
-      queue.length = 0;
-      if (!output.completed()) output.error(err);
-      if (baseThrow) return baseThrow(err);
-      throw err;
-    };
-
-    return outputIterator;
+    return () => { queue.length = 0; };
   });

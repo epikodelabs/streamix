@@ -1,4 +1,5 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, type MaybePromise, type Operator, type Stream } from "../abstractions";
+import { tagValue } from "./helpers";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
@@ -55,25 +56,7 @@ export const concatMap = <T = any, R = T>(
             continue;
           }
 
-          let value = innerResult.value;
-          if (currentMeta) {
-            // Attach per-value metadata so tracers can attribute outputs even when emitted asynchronously.
-            value = setValueMeta(
-              value,
-              { valueId: currentMeta.valueId, kind: "expand" },
-              currentMeta.operatorIndex,
-              currentMeta.operatorName
-            );
-            setIteratorMeta(
-              iterator,
-              { valueId: currentMeta.valueId, kind: "expand" },
-              currentMeta.operatorIndex,
-              currentMeta.operatorName
-            );
-          }
-
-          // Mark that inner stream produced a value
-          return NEXT(value);
+          return NEXT(tagValue(iterator, innerResult.value, currentMeta, { kind: "expand" }));
         }
       },
 

@@ -1,5 +1,5 @@
 import { firstValueFrom } from "../converters";
-import { createAsyncIterator } from "../subjects/helpers";
+import { createAsyncIterator } from "../subjects";
 import {
   getIteratorEmissionStamp,
   nextEmissionStamp,
