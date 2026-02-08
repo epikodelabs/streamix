@@ -19,11 +19,8 @@ export const throwError = <T = any>(message: MaybePromise<string>) =>
 
     return {
       next: async () => {
-        while (true) {
-          const result = await source.next();
-          if (result.done) return DONE as any;
-          break;
-        }
+        const result = await source.next();
+        if (result.done) return DONE as any;
         throw new Error(isPromiseLike(message) ? await message : message);
       }
     };

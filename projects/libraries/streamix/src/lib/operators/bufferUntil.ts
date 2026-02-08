@@ -1,152 +1,279 @@
 import {
-  createOperator,
-  DONE,
-  getIteratorMeta,
-  NEXT,
-  setIteratorMeta,
-  setValueMeta,
-  type Operator,
-  type Stream
+    createOperator,
+    DONE,
+    getIteratorEmissionStamp,
+    getIteratorMeta,
+    NEXT,
+    setIteratorMeta,
+    setValueMeta,
+    type Operator,
+    type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createSubject } from "../subjects";
 
 type BufferRecord<T> = {
-  result: IteratorResult<T>;
-  meta?: { valueId: string; operatorIndex: number; operatorName: string };
+  value: T;
+  stamp: number;
+  meta?: {
+    valueId: string;
+    operatorIndex: number;
+    operatorName: string;
+  };
 };
 
-/**
- * Buffers values until the notifier emits once, then flushes the collected values.
- *
- * Every notifier emission triggers a flush of the current buffer; values are released
- * as a collapsed array, preserving metadata for PipeContext tracing. When the source
- * completes, any remaining buffered values are emitted.
- *
- * @template T Source value type.
- * @param notifier Stream or Promise whose emissions cause buffer flushes.
- */
 export const bufferUntil = <T = any>(notifier: Stream<any>) =>
   createOperator<T, T[]>("bufferUntil", function (this: Operator, source) {
     const output = createSubject<T[]>();
-    const buffer: BufferRecord<T>[] = [];
-    const notifierIterator = fromAny(notifier)[Symbol.asyncIterator]();
-    let cancelled = false;
-
-    // Create the output iterator once so metadata sticks
     const outputIt = output[Symbol.asyncIterator]();
 
-    const flushBuffer = () => {
-      if (buffer.length === 0) return;
+    const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
 
-      const records = buffer.splice(0);
-      const metas = records
-        .map((record) => record.meta)
+    let buffer: BufferRecord<T>[] = [];
+    let cancelled = false;
+
+    /**
+     * Flush all buffered values with stamp < cutoffStamp.
+     * Used when notifier emits to partition batches by emission order.
+     */
+    const flushBefore = (cutoffStamp: number) => {
+      const matching = buffer.filter(r => r.stamp < cutoffStamp);
+      buffer = buffer.filter(r => r.stamp >= cutoffStamp);
+
+      if (matching.length === 0) return;
+
+      const metas = matching
+        .map(r => r.meta)
         .filter(Boolean) as {
-        valueId: string;
-        operatorIndex: number;
-        operatorName: string;
-      }[];
+          valueId: string;
+          operatorIndex: number;
+          operatorName: string;
+        }[];
 
-      const lastMeta = metas[metas.length - 1];
-      let values = records.map((record) => record.result.value!);
+      let values = matching.map(r => r.value);
 
-      if (lastMeta) {
+      if (metas.length) {
+        const last = metas[metas.length - 1];
+
+        const collapse = {
+          valueId: last.valueId,
+          kind: "collapse" as const,
+          inputValueIds: metas.map(m => m.valueId),
+        };
+
         setIteratorMeta(
           iterator,
-          {
-            valueId: lastMeta.valueId,
-            kind: "collapse",
-            inputValueIds: metas.map((meta) => meta.valueId),
-          },
-          lastMeta.operatorIndex,
-          lastMeta.operatorName
+          collapse,
+          last.operatorIndex,
+          last.operatorName
         );
+
         values = setValueMeta(
           values,
-          {
-            valueId: lastMeta.valueId,
-            kind: "collapse",
-            inputValueIds: metas.map((meta) => meta.valueId),
-          },
-          lastMeta.operatorIndex,
-          lastMeta.operatorName
+          collapse,
+          last.operatorIndex,
+          last.operatorName
         );
       }
 
       output.next(values);
     };
 
-    // Notifier loop - flush on each emission
-    (async () => {
-      try {
-        while (!cancelled) {
-          const result = await notifierIterator.next();
-          if (result.done || cancelled) break;
-          queueMicrotask(() => flushBuffer());
-        }
-      } catch (err) {
-        if (!cancelled) {
-          output.error(err);
-        }
+    /**
+     * Flush all remaining buffered values.
+     * Used when source completes.
+     */
+    const flushAll = () => {
+      if (buffer.length === 0) return;
+
+      const matching = buffer;
+      buffer = [];
+
+      const metas = matching
+        .map(r => r.meta)
+        .filter(Boolean) as {
+          valueId: string;
+          operatorIndex: number;
+          operatorName: string;
+        }[];
+
+      let values = matching.map(r => r.value);
+
+      if (metas.length) {
+        const last = metas[metas.length - 1];
+
+        const collapse = {
+          valueId: last.valueId,
+          kind: "collapse" as const,
+          inputValueIds: metas.map(m => m.valueId),
+        };
+
+        setIteratorMeta(
+          iterator,
+          collapse,
+          last.operatorIndex,
+          last.operatorName
+        );
+
+        values = setValueMeta(
+          values,
+          collapse,
+          last.operatorIndex,
+          last.operatorName
+        );
       }
-    })();
 
-    // Source loop - buffer values
-    (async () => {
-      try {
+      output.next(values);
+    };
+
+    const sourceTryNext = (source as any).__tryNext as
+      | undefined
+      | (() => IteratorResult<T> | null);
+
+    const notifierTryNext = (notifierIt as any).__tryNext as
+      | undefined
+      | (() => IteratorResult<any> | null);
+
+    const pushSourceValue = (value: T, stamp: number) => {
+      buffer.push({
+        value,
+        stamp,
+        meta: getIteratorMeta(source),
+      });
+    };
+
+    const canUseSyncPull = typeof sourceTryNext === "function" && typeof notifierTryNext === "function";
+
+    /* ---------- sync pull mode (both source and notifier have __tryNext) ---------- */
+
+    if (canUseSyncPull) {
+      const drainBoth = () => {
         while (!cancelled) {
-          const result = await source.next();
-          if (result.done || cancelled) break;
-          buffer.push({
-            result,
-            meta: getIteratorMeta(source),
-          });
-        }
+          let sourceResult: IteratorResult<T> | null = null;
+          let notifierResult: IteratorResult<any> | null = null;
 
-        if (!cancelled) {
-          flushBuffer();
-          output.complete();
-        }
-      } catch (err) {
-        if (!cancelled) {
-          output.error(err);
-        }
-      } finally {
-        if (!cancelled) {
+          // Try to pull from both
           try {
-            await notifierIterator.return?.();
-          } catch {}
-        }
-      }
-    })();
+            sourceResult = sourceTryNext!.call(source);
+          } catch (err) {
+            cancelled = true;
+            try { notifierIt.return?.(); } catch {}
+            output.error(err);
+            return;
+          }
 
-    // Custom iterator with cleanup
+          try {
+            notifierResult = notifierTryNext!.call(notifierIt);
+          } catch (err) {
+            cancelled = true;
+            try { source.return?.(); } catch {}
+            output.error(err);
+            return;
+          }
+
+          // If nothing available, we're caught up
+          if (!sourceResult && !notifierResult) {
+            return;
+          }
+
+          // Process source value
+          if (sourceResult) {
+            if (sourceResult.done) {
+              cancelled = true;
+              flushAll();
+              output.complete();
+              return;
+            }
+            const sourceStamp = getIteratorEmissionStamp(source);
+            pushSourceValue(sourceResult.value, sourceStamp ?? 0);
+          }
+
+          // Process notifier emission
+          if (notifierResult) {
+            if (notifierResult.done) {
+              cancelled = true;
+              try { source.return?.(); } catch {}
+              output.complete();
+              return;
+            }
+            // Flush all values emitted before this notifier emission
+            const notifierStamp = getIteratorEmissionStamp(notifierIt) ?? 0;
+            flushBefore(notifierStamp);
+          }
+        }
+      };
+
+      // Both iterators call drain when they receive pushed values
+      (source as any).__onPush = drainBoth;
+      (notifierIt as any).__onPush = drainBoth;
+      
+      // Initial drain to process any immediately available values
+      drainBoth();
+    }
+    /* ---------- async mode (fallback when __tryNext not available) ---------- */
+    else {
+      /* ---------- notifier async loop ---------- */
+
+      void void (async () => {
+        try {
+          while (!cancelled) {
+            const r = await notifierIt.next();
+            if (r.done || cancelled) break;
+            // In async mode, flush on every notifier emission
+            flushAll();
+          }
+        } catch (err) {
+          if (!cancelled) {
+            cancelled = true;
+            try { await source.return?.(); } catch {}
+            output.error(err);
+          }
+        }
+      })();
+
+      /* ---------- source async loop ---------- */
+
+      void void (async () => {
+        try {
+          while (!cancelled) {
+            const r = await source.next();
+            if (r.done || cancelled) break;
+            const sourceStamp = getIteratorEmissionStamp(source) ?? 0;
+            pushSourceValue(r.value, sourceStamp);
+          }
+
+          if (!cancelled) {
+            cancelled = true;
+            flushAll();
+            output.complete();
+          }
+        } catch (err) {
+          if (!cancelled) {
+            cancelled = true;
+            try { await notifierIt.return?.(); } catch {}
+            output.error(err);
+          }
+        }
+      })();
+    }
+
+    /* ---------- iterator facade ---------- */
+
     const iterator: AsyncIterator<T[]> = {
       next: () => outputIt.next(),
+
       return: async (value?: any) => {
         cancelled = true;
-
-        // Cleanup source iterator
-        try {
-          await source.return?.();
-        } catch {}
-
-        // Cleanup notifier iterator
-        try {
-          await notifierIterator.return?.();
-        } catch {}
-
+        try { await source.return?.(); } catch {}
+        try { await notifierIt.return?.(); } catch {}
         output.complete();
-        if (value !== undefined) {
-          return NEXT(value);
-        }
-        return DONE;
+        return value !== undefined ? NEXT(value) : DONE;
       },
-      throw: async (error?: any) => {
+
+      throw: async (err?: any) => {
         cancelled = true;
-        output.error(error);
-        return outputIt.throw?.(error) ?? Promise.reject(error);
+        output.error(err);
+        return outputIt.throw?.(err) ?? Promise.reject(err);
       },
     };
 

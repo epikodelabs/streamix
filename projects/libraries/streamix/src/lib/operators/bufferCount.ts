@@ -1,4 +1,5 @@
-import { DONE, type MaybePromise, NEXT, type Operator, createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta } from "../abstractions";
+import { DONE, type MaybePromise, NEXT, type Operator, createOperator, getIteratorMeta, isPromiseLike } from "../abstractions";
+import { tagValue } from "./helpers";
 
 /**
  * Buffers a fixed number of values from the source stream and emits them as arrays,
@@ -30,25 +31,10 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
             if (buffer.length > 0) {
               const metas = metaByIndex.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
               const lastMeta = metas[metas.length - 1];
-              let values = buffer.map((r) => r.value!);
-              if (lastMeta) {
-                setIteratorMeta(
-                  iterator as any,
-                  {
-                    valueId: lastMeta.valueId,
-                    kind: "collapse",
-                    inputValueIds: metas.map((m) => m.valueId),
-                  },
-                  lastMeta.operatorIndex,
-                  lastMeta.operatorName
-                );
-                values = setValueMeta(
-                  values,
-                  { valueId: lastMeta.valueId, kind: "collapse", inputValueIds: metas.map((m) => m.valueId) },
-                  lastMeta.operatorIndex,
-                  lastMeta.operatorName
-                );
-              }
+              const values = tagValue(iterator as any, buffer.map((r) => r.value!), lastMeta, {
+                kind: "collapse",
+                inputValueIds: metas.map((m) => m.valueId),
+              });
               return NEXT(values);
             }
 
@@ -61,25 +47,10 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
 
         const metas = metaByIndex.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
         const lastMeta = metas[metas.length - 1];
-        let values = buffer.map((r) => r.value!);
-        if (lastMeta) {
-          setIteratorMeta(
-            iterator as any,
-            {
-              valueId: lastMeta.valueId,
-              kind: "collapse",
-              inputValueIds: metas.map((m) => m.valueId),
-            },
-            lastMeta.operatorIndex,
-            lastMeta.operatorName
-          );
-          values = setValueMeta(
-            values,
-            { valueId: lastMeta.valueId, kind: "collapse", inputValueIds: metas.map((m) => m.valueId) },
-            lastMeta.operatorIndex,
-            lastMeta.operatorName
-          );
-        }
+        const values = tagValue(iterator as any, buffer.map((r) => r.value!), lastMeta, {
+          kind: "collapse",
+          inputValueIds: metas.map((m) => m.valueId),
+        });
         return NEXT(values);
       },
     };

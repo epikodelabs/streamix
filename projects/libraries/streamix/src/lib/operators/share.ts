@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, setValueMeta, type Operator } from '../abstractions';
+import { createOperator, DONE, getIteratorMeta, setValueMeta, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
@@ -19,7 +19,7 @@ export function share<T = any>() {
 
   const connect = (source: AsyncIterator<T>) => {
     isConnected = true;
-    (async () => {
+    void (async () => {
       try {
         while (true) {
           const result = await source.next();
@@ -53,6 +53,27 @@ export function share<T = any>() {
       Promise.resolve(source.return()).catch(() => {});
     }
 
-    return eachValueFrom(shared);
+    const outputIterator = eachValueFrom(shared);
+    const baseReturn = outputIterator.return?.bind(outputIterator);
+    const baseThrow = outputIterator.throw?.bind(outputIterator);
+
+    (outputIterator as any).return = async (value?: any) => {
+      try {
+        await source.return?.();
+      } catch {}
+      if (shared && !shared.completed()) shared.complete();
+      return baseReturn ? baseReturn(value) : DONE;
+    };
+
+    (outputIterator as any).throw = async (err: any) => {
+      try {
+        await source.return?.();
+      } catch {}
+      if (shared && !shared.completed()) shared.error(err);
+      if (baseThrow) return baseThrow(err);
+      throw err;
+    };
+
+    return outputIterator;
   });
 }

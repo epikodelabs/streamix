@@ -241,14 +241,13 @@ export function unwrapPrimitive(value: any): any {
 export function applyPipeStreamHooks(
   ctx: PipeStreamHookContext
 ): AsyncIterator<any> {
-  const hooks = getRuntimeHooks();
-
   let iterator: AsyncIterator<any> = ctx.source;
   let operators = ctx.operators;
   let finalWrap:
     | ((it: AsyncIterator<any>) => AsyncIterator<any>)
     | undefined;
 
+  const hooks = getRuntimeHooks();
   if (hooks?.onPipeStream) {
     const patch = hooks.onPipeStream(ctx);
     if (patch && typeof patch === 'object') {

@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that catches errors from the source stream and handles them.
@@ -41,7 +41,7 @@ export const catchError = <T = any>(
               return DONE;
             }
 
-            return result; // Emit value from source
+            return NEXT(result.value); // Emit value from source
           } catch (error) {
             // An error occurred from the source
             if (!errorCaughtAndHandled) { // Only handle the first error
@@ -58,5 +58,21 @@ export const catchError = <T = any>(
           }
         }
       },
+
+      async return(value?: any) {
+        completed = true;
+        try {
+          await source.return?.(value);
+        } catch {}
+        return DONE;
+      },
+
+      async throw(err: any) {
+        completed = true;
+        try {
+          await source.return?.();
+        } catch {}
+        throw err;
+      }
     };
   });

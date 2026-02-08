@@ -14,7 +14,6 @@ import { createOperator, DONE, type MaybePromise, type Operator } from "../abstr
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const finalize = <T = any>(callback: () => MaybePromise<T>) => {
-  // Shared state across all subscriptions - moved outside createOperator
   let finalized = false;
   let completed = false;
   let finalizationPromise: Promise<void> | null = null;
@@ -23,8 +22,7 @@ export const finalize = <T = any>(callback: () => MaybePromise<T>) => {
     if (!finalized) {
       finalized = true;
       completed = true;
-      
-      // Create finalization promise if it doesn't exist
+
       if (!finalizationPromise) {
         finalizationPromise = (async () => {
           try {
@@ -34,10 +32,9 @@ export const finalize = <T = any>(callback: () => MaybePromise<T>) => {
           }
         })();
       }
-      
+
       await finalizationPromise;
     } else if (finalizationPromise) {
-      // Wait for existing finalization to complete
       await finalizationPromise;
     }
   };
@@ -72,7 +69,7 @@ export const finalize = <T = any>(callback: () => MaybePromise<T>) => {
           return source.return(value);
         }
 
-        return { done: true, value: undefined };
+        return DONE;
       },
       async throw(error?: unknown) {
         await doFinalize();

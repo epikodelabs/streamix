@@ -1,5 +1,6 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, type MaybePromise, type Operator, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
+import { tagValue } from "./helpers";
 
 /**
  * Creates a stream operator that maps each value from the source stream to a new
@@ -55,27 +56,31 @@ export const concatMap = <T = any, R = T>(
             continue;
           }
 
-          let value = innerResult.value;
-          if (currentMeta) {
-            // Attach per-value metadata so tracers can attribute outputs even when emitted asynchronously.
-            value = setValueMeta(
-              value,
-              { valueId: currentMeta.valueId, kind: "expand" },
-              currentMeta.operatorIndex,
-              currentMeta.operatorName
-            );
-            setIteratorMeta(
-              iterator,
-              { valueId: currentMeta.valueId, kind: "expand" },
-              currentMeta.operatorIndex,
-              currentMeta.operatorName
-            );
-          }
-
-          // Mark that inner stream produced a value
-          return NEXT(value);
+          return NEXT(tagValue(iterator, innerResult.value, currentMeta, { kind: "expand" }));
         }
       },
+
+      async return(value?: any) {
+        try {
+          await innerIterator?.return?.(value);
+        } catch {}
+        try {
+          await source.return?.();
+        } catch {}
+        innerIterator = null;
+        return DONE;
+      },
+
+      async throw(err: any) {
+        try {
+          await innerIterator?.return?.();
+        } catch {}
+        try {
+          await source.return?.();
+        } catch {}
+        innerIterator = null;
+        throw err;
+      }
     };
 
     return iterator;

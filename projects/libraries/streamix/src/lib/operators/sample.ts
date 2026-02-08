@@ -1,23 +1,15 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
-import { eachValueFrom } from '../converters';
-import { createSubject, type Subject } from '../subjects';
+import { createAsyncOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
  * Creates a stream operator that emits the most recent value from the source stream
- * at a fixed periodic interval while tracking pending and phantom states.
- *
- * Values that arrive faster than the period are considered phantoms if skipped,
- * and pending results are tracked in PipeContext until resolved or emitted.
+ * at a fixed periodic interval.
  *
  * @template T The type of the values in the source and output streams.
  * @param period The time in milliseconds between each emission.
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
 export const sample = <T = any>(period: MaybePromise<number>) =>
-  createOperator<T, T>('sample', function (this: Operator, source) {
-    const output: Subject<T> = createSubject<T>();
-    const outputIterator = eachValueFrom(output);
-
+  createAsyncOperator<T>('sample', (source, output) => {
     let lastResult: IteratorResult<T> | undefined;
     let lastMeta: ReturnType<typeof getIteratorMeta> | undefined;
     let skipped = false;
@@ -25,22 +17,12 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
     let resolvedPeriod: number | undefined = undefined;
 
     const startSampling = () => {
-      if (resolvedPeriod === undefined) {
-        return;
-      }
-      intervalId = setInterval(async () => {
+      if (resolvedPeriod === undefined) return;
+      intervalId = setInterval(() => {
         if (!lastResult) return;
-
         if (!skipped) {
-          let value = lastResult.value!;
-          if (lastMeta) {
-            setIteratorMeta(outputIterator, { valueId: lastMeta.valueId }, lastMeta.operatorIndex, lastMeta.operatorName);
-            value = setValueMeta(value, { valueId: lastMeta.valueId }, lastMeta.operatorIndex, lastMeta.operatorName);
-          }
-          // Emit value directly - tracer correlates it via valueId / inputQueue
-          output.next(value);
+          output.push(lastResult.value!, lastMeta);
         }
-
         skipped = true;
       }, resolvedPeriod);
     };
@@ -50,14 +32,13 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
       intervalId = null;
     };
 
-    (async () => {
+    void (async () => {
       try {
         resolvedPeriod = isPromiseLike(period) ? await period : period;
-
         startSampling();
 
         while (true) {
-          const result: IteratorResult<T> = await source.next();
+          const result = await source.next();
           if (result.done) break;
 
           lastMeta = getIteratorMeta(source);
@@ -65,17 +46,8 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
           skipped = false;
         }
 
-        // Emit final value
-        // Guard against a race where the interval emits after the final source value
-        // but before we exit the loop; in that case `skipped` is already true.
         if (lastResult && !skipped) {
-          let value = lastResult.value!;
-          if (lastMeta) {
-            setIteratorMeta(outputIterator, { valueId: lastMeta.valueId }, lastMeta.operatorIndex, lastMeta.operatorName);
-            value = setValueMeta(value, { valueId: lastMeta.valueId }, lastMeta.operatorIndex, lastMeta.operatorName);
-          }
-          // Emit value directly - tracer correlates it via valueId / inputQueue
-          output.next(value);
+          output.push(lastResult.value!, lastMeta);
         }
       } catch (err) {
         output.error(err);
@@ -85,5 +57,5 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
       }
     })();
 
-    return outputIterator;
+    return stopSampling;
   });

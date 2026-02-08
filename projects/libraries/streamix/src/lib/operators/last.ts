@@ -1,4 +1,4 @@
-import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromiseLike } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits only the last value from the source stream
@@ -42,16 +42,27 @@ export const last = <T = any>(
           const matches = predicate ? (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) : predicateResult;
 
           if (matches) {
-            if (hasMatch) {
-              lastValue = value;
-              continue;
-            } else {
-              lastValue = value;
-              hasMatch = true;
-              continue;
-            }
+            lastValue = value;
+            hasMatch = true;
+            continue;
           }
         }
+      },
+
+      async return(value?: any) {
+        finished = true;
+        try {
+          await source.return?.(value);
+        } catch {}
+        return DONE;
+      },
+
+      async throw(err: any) {
+        finished = true;
+        try {
+          await source.return?.();
+        } catch {}
+        throw err;
       }
     };
   });

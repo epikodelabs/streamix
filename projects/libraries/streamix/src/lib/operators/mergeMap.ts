@@ -1,6 +1,7 @@
-import { createOperator, getIteratorMeta, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream } from '../abstractions';
+import { createOperator, DONE, getIteratorMeta, type MaybePromise, type Operator, type Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject, type Subject } from '../subjects';
+import { tagValue } from './helpers';
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream
@@ -52,22 +53,7 @@ export function mergeMap<T = any, R = any>(
           if (r.done) break;
           if (stopped || errorOccurred) break;
 
-          let value = r.value;
-          if (parentMeta) {
-            setIteratorMeta(
-              outputIterator,
-              { valueId: parentMeta.valueId, kind: "expand" },
-              parentMeta.operatorIndex,
-              parentMeta.operatorName
-            );
-            value = setValueMeta(
-              value,
-              { valueId: parentMeta.valueId, kind: "expand" },
-              parentMeta.operatorIndex,
-              parentMeta.operatorName
-            );
-          }
-          output.next(value);
+          output.next(tagValue(outputIterator, r.value, parentMeta, { kind: "expand" }));
         }
       } catch (err) {
         if (!errorOccurred) {
@@ -83,7 +69,7 @@ export function mergeMap<T = any, R = any>(
       }
     };
 
-    (async () => {
+    void (async () => {
       try {
         while (!stopped) {
           const result = await source.next();
@@ -123,7 +109,7 @@ export function mergeMap<T = any, R = any>(
         }
         activeInnerIterators.clear();
       } finally {
-        return baseReturn ? baseReturn(undefined as any) : { done: true, value: undefined };
+        return baseReturn ? baseReturn(undefined as any) : DONE;
       }
     };
 

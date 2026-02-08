@@ -1,6 +1,8 @@
 import {
   createOperator,
+  DONE,
   getIteratorEmissionStamp,
+  NEXT,
   nextEmissionStamp,
   setIteratorEmissionStamp,
   type Operator,
@@ -50,7 +52,7 @@ export function skipUntil<T = any, R = any>(
     };
 
     // Observe notifier exactly once
-    (async () => {
+    void (async () => {
       try {
         const r = await notifierIt.next();
         const stamp = stampOf(notifierIt);
@@ -79,7 +81,7 @@ export function skipUntil<T = any, R = any>(
 
           if (r.done) {
             if (notifierError) throw notifierError;
-            return { done: true, value: undefined };
+            return DONE;
           }
 
           // Gate closed: drop values until notifier emits.
@@ -93,7 +95,7 @@ export function skipUntil<T = any, R = any>(
           }
 
           setIteratorEmissionStamp(iterator as any, stamp);
-          return { done: false, value: r.value };
+          return NEXT(r.value);
         }
       },
 
@@ -104,7 +106,7 @@ export function skipUntil<T = any, R = any>(
         try {
           await notifierIt.return?.();
         } catch {}
-        return { done: true, value: undefined };
+        return DONE;
       },
 
       async throw(err) {

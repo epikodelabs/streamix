@@ -1,25 +1,7 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
-
-/**
- * Creates a stream operator that schedules the emission of each value from the source
- * stream on a specified JavaScript task queue.
- *
- * This operator is a scheduler. It decouples the timing of value production from
- * its consumption, allowing you to control when values are emitted to downstream
- * operators. This is essential for preventing long-running synchronous operations
- * from blocking the main thread and for prioritizing different types of work.
- *
- * The operator supports three contexts:
- * - `"microtask"`: Emits the value at the end of the current task using `queueMicrotask`.
- * - `"macrotask"`: Emits the value in the next event loop cycle using `setTimeout(0)`.
- * - `"idle"`: Emits the value when the browser is idle using `requestIdleCallback`.
- *
- * @template T The type of the values in the source and output streams.
- * @param context The JavaScript task queue context to schedule emissions on.
- * @returns An `Operator` instance that can be used in a stream's `pipe` method.
- */
+import { tagValue } from './helpers';
 
 /**
  * Creates a stream operator that schedules the emission of each value from the source
@@ -45,7 +27,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
     const outputIterator = eachValueFrom(output);
     const scheduledPromises: Promise<void>[] = [];
 
-    (async () => {
+    void (async () => {
       try {
         const contextValue = isPromiseLike(context) ? await context : context;
         const schedule = contextValue === 'microtask'
@@ -62,17 +44,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
           const p = new Promise<void>((resolve) => {
             schedule(() => {
               try {
-                let value = result.value;
-                if (meta) {
-                  setIteratorMeta(
-                    outputIterator,
-                    { valueId: meta.valueId },
-                    meta.operatorIndex,
-                    meta.operatorName
-                  );
-                  value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-                }
-                output.next(value);
+                output.next(tagValue(outputIterator, result.value, meta));
               } finally {
                 resolve();
               }
@@ -92,7 +64,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
 
     let completed = false;
 
-    return {
+    const iterator: AsyncIterator<T> = {
       async next() {
         while (true) {
           if (completed) return DONE;
@@ -102,9 +74,29 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
             completed = true;
             return DONE;
           }
-          return { type: 'next', value: result.value };
+          return { done: false as const, value: result.value };
         }
+      },
+
+      async return(value?: any) {
+        completed = true;
+        try {
+          await source.return?.(value);
+        } catch {}
+        if (!output.completed()) output.complete();
+        return DONE;
+      },
+
+      async throw(err: any) {
+        completed = true;
+        try {
+          await source.return?.();
+        } catch {}
+        if (!output.completed()) output.error(err);
+        throw err;
       }
     };
+
+    return iterator;
   });
 };

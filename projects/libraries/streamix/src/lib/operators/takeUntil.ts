@@ -1,6 +1,8 @@
 import {
   createOperator,
+  DONE,
   getIteratorEmissionStamp,
+  NEXT,
   nextEmissionStamp,
   setIteratorEmissionStamp,
   type Operator,
@@ -55,7 +57,7 @@ export function takeUntil<T = any>(
     };
 
     // Observe notifier exactly once
-    (async () => {
+    void (async () => {
       try {
         const r = await notifierIt.next();
         const stamp = stampOf(notifierIt);
@@ -94,7 +96,7 @@ export function takeUntil<T = any>(
             const { value, stamp } = pending;
             pending = null;
             setIteratorEmissionStamp(iterator as any, stamp);
-            return { done: false, value };
+            return NEXT(value);
           }
 
           // 2) notifier ERROR: flush buffered source values that happened
@@ -105,7 +107,7 @@ export function takeUntil<T = any>(
               const stamp = stampOf(sourceIt);
               if (notifierErrorStamp === null || stamp < notifierErrorStamp) {
                 setIteratorEmissionStamp(iterator as any, stamp);
-                return { done: false, value: buffered.value };
+                return NEXT(buffered.value);
               }
             }
             throw notifierError;
@@ -117,12 +119,12 @@ export function takeUntil<T = any>(
 
           if (r.done) {
             if (notifierError) throw notifierError;
-            return { done: true, value: undefined };
+            return DONE;
           }
 
           // 4) gate ONLY on notifier emit
           if (gateStamp !== null && stamp >= gateStamp) {
-            return { done: true, value: undefined };
+            return DONE;
           }
 
           // 5) notifier errored AFTER pull → yield value, then error
@@ -136,7 +138,7 @@ export function takeUntil<T = any>(
 
           // 6) normal path
           setIteratorEmissionStamp(iterator as any, stamp);
-          return { done: false, value: r.value };
+          return NEXT(r.value);
         }
       },
 
@@ -144,7 +146,7 @@ export function takeUntil<T = any>(
         try { await sourceIt.return?.(); } catch {}
         try { await notifierIt.return?.(); } catch {}
         pending = null;
-        return { done: true, value: undefined };
+        return DONE;
       },
 
       async throw(err) {

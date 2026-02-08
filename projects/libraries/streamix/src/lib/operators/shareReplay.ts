@@ -1,4 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, getIteratorMeta, isPromiseLike, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createReplaySubject, type ReplaySubject } from '../subjects';
 
@@ -32,7 +32,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
   
   const connectSource = (source: AsyncIterator<T>) => {
     isConnected = true;
-    (async () => {
+    void (async () => {
       try {
         while (true) {
           const result = await source.next();
@@ -62,7 +62,28 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       else if (typeof source.return === "function") {
         Promise.resolve(source.return()).catch(() => {});
       }
-      return eachValueFrom(output);
+      const outputIterator = eachValueFrom(output);
+      const baseReturn = outputIterator.return?.bind(outputIterator);
+      const baseThrow = outputIterator.throw?.bind(outputIterator);
+
+      (outputIterator as any).return = async (value?: any) => {
+        try {
+          await source.return?.();
+        } catch {}
+        if (output && !output.completed()) output.complete();
+        return baseReturn ? baseReturn(value) : DONE;
+      };
+
+      (outputIterator as any).throw = async (err: any) => {
+        try {
+          await source.return?.();
+        } catch {}
+        if (output && !output.completed()) output.error(err);
+        if (baseThrow) return baseThrow(err);
+        throw err;
+      };
+
+      return outputIterator;
     }
 
     // Long path: Promise, wrap in async generator

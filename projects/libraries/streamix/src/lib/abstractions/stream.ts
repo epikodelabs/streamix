@@ -1,8 +1,6 @@
 import { firstValueFrom } from "../converters";
-import { enqueueMicrotask, runInMicrotask } from "../primitives/scheduling";
-import { createAsyncIterator } from "../subjects/helpers";
+import { createAsyncIterator } from "../subjects";
 import {
-  getCurrentEmissionStamp,
   getIteratorEmissionStamp,
   nextEmissionStamp,
   withEmissionStamp
@@ -64,64 +62,6 @@ function waitForAbort(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) =>
     signal.addEventListener("abort", resolve as any, { once: true })
   );
-}
-
-function wrapReceiver<T>(receiver: Receiver<T>): Receiver<T> {
-  const wrapped: Receiver<T> = {};
-
-  const execute = (cb: () => MaybePromise) => {
-    const stamp = getCurrentEmissionStamp();
-    if (stamp !== null) {
-      try {
-        return cb();
-      } catch (err) {
-        return Promise.reject(err);
-      }
-    }
-
-    return runInMicrotask(cb).then(() => void 0);
-  };
-
-  if (receiver.next) {
-    wrapped.next = (value: T) =>
-      execute(async () => {
-        try {
-          await receiver.next!(value);
-        } catch (err) {
-          const error = err instanceof Error ? err : new Error(String(err));
-          if (receiver.error) {
-            try {
-              await receiver.error!(error);
-            } catch {
-            }
-          }
-        }
-      });
-  }
-
-  if (receiver.error) {
-    wrapped.error = (err: any) => {
-      const error = err instanceof Error ? err : new Error(String(err));
-      return execute(() => {
-        try {
-          return receiver.error!(error);
-        } catch {
-        }
-      });
-    };
-  }
-
-  if (receiver.complete) {
-    wrapped.complete = () =>
-      execute(() => {
-        try {
-          return receiver.complete!();
-        } catch {
-        }
-      });
-  }
-
-  return wrapped;
 }
 
 async function drainIterator<T>(
@@ -274,7 +214,8 @@ export function createStream<T>(
 ): Stream<T> {
   const id = generateStreamId();
 
-  getRuntimeHooks()?.onCreateStream?.({ id, name });
+  const hooks = getRuntimeHooks();
+  if (hooks?.onCreateStream) hooks.onCreateStream({ id, name });
 
   let activeSubscriptions: SubscriberEntry<T>[] = [];
   let isRunning = false;
@@ -286,7 +227,7 @@ export function createStream<T>(
     isRunning = true;
     abortController = new AbortController();
 
-    (async () => {
+    void (async () => {
       const signal = abortController.signal;
       const iterator = generatorFn(signal)[Symbol.asyncIterator]();
       try {
@@ -302,30 +243,33 @@ export function createStream<T>(
   };
 
   const registerReceiver = (receiver: Receiver<T>): Subscription => {
-    const wrapped = wrapReceiver(receiver);
     let subscription!: Subscription;
 
     subscription = createSubscription(async () => {
-      return runInMicrotask(async () => {
-        const entry = activeSubscriptions.find(
-          (s) => s.subscription === subscription
-        );
+      return new Promise<void>((resolve, reject) => {
+        queueMicrotask(() => {
+          Promise.resolve().then(async () => {
+            const entry = activeSubscriptions.find(
+              (s) => s.subscription === subscription
+            );
 
-        if (entry) {
-          activeSubscriptions = activeSubscriptions.filter((s) => s !== entry);
-          entry.receiver.complete?.();
-        }
+            if (entry) {
+              activeSubscriptions = activeSubscriptions.filter((s) => s !== entry);
+              await entry.receiver.complete?.();
+            }
 
-        if (activeSubscriptions.length === 0) {
-          abortController.abort();
-        }
+            if (activeSubscriptions.length === 0) {
+              abortController.abort();
+            }
+          }).then(resolve, reject);
+        });
       });
     });
 
     // IMPORTANT: register synchronously so operators like switchMap can
     // subscribe/unsubscribe inner streams in the same tick without racing the
-    // microtask-delivery loop. Receiver callbacks are still scheduled by `wrapReceiver`.
-    activeSubscriptions = [...activeSubscriptions, { receiver: wrapped, subscription }];
+    // microtask-delivery loop. Receiver callbacks are scheduled by createReceiver().
+    activeSubscriptions = [...activeSubscriptions, { receiver, subscription }];
 
     if (!isRunning) {
       startMulticastLoop();
@@ -376,28 +320,26 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
   const pipedId = generateStreamId();
 
   function registerReceiver(receiver: Receiver<any>): Subscription {
-    const wrapped = wrapReceiver(receiver);
     const abortController = new AbortController();
     const signal = abortController.signal;
 
-      const subscription = createSubscription(async () => {
-        return runInMicrotask(async () => {
-          abortController.abort();
-          wrapped.complete?.();
-        });
-      });
-      const subscriptionId = subscription.id;
-      const baseSource = source[Symbol.asyncIterator]();
-      const iterator = applyPipeStreamHooks({
-        streamId: pipedId,
-        streamName: source.name,
-        subscriptionId,
-        source: baseSource,
-        operators,
-      });
+    const subscription = createSubscription(async () => {
+      abortController.abort();
+      receiver.complete?.();
+    });
 
-    enqueueMicrotask(() => {
-      drainIterator(iterator, () => [{ receiver: wrapped, subscription }], signal).catch(
+    const subscriptionId = subscription.id;
+    const baseSource = source[Symbol.asyncIterator]();
+    const iterator = applyPipeStreamHooks({
+      streamId: pipedId,
+      streamName: source.name,
+      subscriptionId,
+      source: baseSource,
+      operators,
+    });
+
+    queueMicrotask(() => {
+      drainIterator(iterator, () => [{ receiver, subscription }], signal).catch(
         () => {}
       );
     });

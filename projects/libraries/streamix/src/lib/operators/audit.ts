@@ -1,6 +1,4 @@
-import { createOperator, getIteratorMeta, isPromiseLike, setIteratorMeta, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
-import { eachValueFrom } from '../converters';
-import { createSubject } from '../subjects';
+import { createAsyncOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
  * Creates a stream operator that emits the latest value from the source stream
@@ -12,17 +10,13 @@ import { createSubject } from '../subjects';
  *
  * @template T The type of the values in the stream.
  * @param duration The time in milliseconds (or a promise resolving to it) to wait
- * before emitting the latest value. The duration is resolved once when the operator starts.
+ * before emitting the latest value.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const audit = <T = any>(duration: MaybePromise<number>) =>
-  createOperator<T, T>('audit', function (this: Operator, source) {
-    const output = createSubject<T>();
-    const outputIterator = eachValueFrom(output);
-
+  createAsyncOperator<T>('audit', (source, output) => {
     let bufferedResult: IteratorResult<T> | undefined;
     let bufferedMeta: ReturnType<typeof getIteratorMeta> | undefined;
-
     let timerId: ReturnType<typeof setTimeout> | undefined;
     let resolvedDuration: number | undefined;
     let completed = false;
@@ -30,23 +24,13 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
     const flush = () => {
       if (!bufferedResult) return;
 
-      let value = bufferedResult.value!;
-
-      if (bufferedMeta) {
-        setIteratorMeta(outputIterator, { valueId: bufferedMeta.valueId }, bufferedMeta.operatorIndex, bufferedMeta.operatorName);
-        value = setValueMeta(value, { valueId: bufferedMeta.valueId }, bufferedMeta.operatorIndex, bufferedMeta.operatorName);
-      }
-
-      // Emit value directly - tracer correlates it via valueId / inputQueue
-      output.next(value);
+      output.push(bufferedResult.value!, bufferedMeta);
 
       bufferedResult = undefined;
       bufferedMeta = undefined;
       timerId = undefined;
 
-      if (completed) {
-        output.complete();
-      }
+      if (completed) output.complete();
     };
 
     const startTimer = () => {
@@ -54,11 +38,9 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
       timerId = setTimeout(flush, resolvedDuration);
     };
 
-    (async () => {
+    void (async () => {
       try {
-        resolvedDuration = isPromiseLike(duration)
-          ? await duration
-          : duration;
+        resolvedDuration = isPromiseLike(duration) ? await duration : duration;
 
         while (true) {
           const result = await source.next();
@@ -70,23 +52,18 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
           }
 
           bufferedMeta = getIteratorMeta(source);
-
-          // ⚠️ Replace buffered value → mark previous as filtered
           bufferedResult = result;
-
-          // Timer starts only once per window
           startTimer();
         }
       } catch (err) {
         output.error(err);
       } finally {
-        if (timerId) {
-          clearTimeout(timerId);
-          timerId = undefined;
-        }
+        if (timerId) { clearTimeout(timerId); timerId = undefined; }
         if (!output.completed()) output.complete();
       }
     })();
 
-    return outputIterator;
+    return () => {
+      if (timerId) { clearTimeout(timerId); timerId = undefined; }
+    };
   });

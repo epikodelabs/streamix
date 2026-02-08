@@ -1,6 +1,7 @@
-import { createOperator, createReceiver, getIteratorMeta, isPromiseLike, Receiver, setIteratorMeta, setValueMeta, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
+import { createOperator, createReceiver, DONE, getIteratorMeta, isPromiseLike, Receiver, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
+import { tagValue } from "./helpers";
 
 /**
  * Creates a stream operator that combines the source stream with the latest values
@@ -90,11 +91,11 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
       }
     };
 
-    const cleanup = () => {
+    const cleanup = async () => {
       subscriptions.forEach(sub => sub.unsubscribe());
-      if (typeof source.return === "function") {
-        source.return().catch(() => {});
-      }
+      try {
+        await source.return?.();
+      } catch {}
     };
 
     // Main iteration function
@@ -154,16 +155,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
 
           // Gate check: Only emit if ALL auxiliary streams have emitted a value
           if (hasValue.length > 0 && hasValue.every(Boolean)) {
-            let combined = [result.value, ...latestValues] as [T, ...R];
-            if (meta) {
-              setIteratorMeta(
-                outputIterator,
-                { valueId: meta.valueId },
-                meta.operatorIndex,
-                meta.operatorName
-              );
-              combined = setValueMeta(combined, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-            }
+            const combined = tagValue(outputIterator, [result.value, ...latestValues] as [T, ...R], meta);
             output.next(combined);
           }
         }
@@ -205,6 +197,24 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
       };
 
       return subscription;
+    };
+
+    const baseReturn = outputIterator.return?.bind(outputIterator);
+    const baseThrow = outputIterator.throw?.bind(outputIterator);
+
+    (outputIterator as any).return = async (value?: any) => {
+      abortController.abort();
+      await cleanup();
+      if (!output.completed()) output.complete();
+      return baseReturn ? baseReturn(value) : DONE;
+    };
+
+    (outputIterator as any).throw = async (err: any) => {
+      abortController.abort();
+      await cleanup();
+      if (!output.completed()) output.error(err);
+      if (baseThrow) return baseThrow(err);
+      throw err;
     };
 
     return outputIterator;
