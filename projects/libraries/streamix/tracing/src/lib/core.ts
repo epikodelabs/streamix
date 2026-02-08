@@ -193,6 +193,17 @@ export interface ValueTracer {
 
 const tracedValueBrand = Symbol("__streamix_traced__");
 
+/**
+ * Wrapper type for values that carry tracing metadata through the Streamix runtime.
+ *
+ * Used internally to associate a value with its unique `valueId`, stream, and subscription
+ * context. This enables detailed tracing of value lifecycles, operator steps, and terminal
+ * states. The wrapper is a branded object and is recognized by runtime hooks and tracer utilities.
+ *
+ * @template T The underlying value type being traced.
+ * @property value The actual value being traced.
+ * @property meta Tracing metadata including valueId, streamId, and subscriptionId.
+ */
 export interface TracedWrapper<T> {
   [tracedValueBrand]: true;
   value: T;

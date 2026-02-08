@@ -1,5 +1,18 @@
 import type { ValueTrace, ValueTracer } from "./core";
 
+/**
+ * Event handler map for value-level lifecycle events emitted by the tracer.
+ *
+ * These handlers allow consumers to observe when values are emitted, delivered,
+ * filtered, collapsed, or dropped (terminal). Each handler receives the full
+ * trace object for the value, including metadata and operator history.
+ *
+ * @property emitted Called when a value is emitted from a stream (before operators).
+ * @property delivered Called when a value is delivered downstream.
+ * @property filtered Called when a value is filtered out by an operator.
+ * @property collapsed Called when a value is collapsed into another value.
+ * @property dropped Called when a value becomes terminal for other reasons.
+ */
 export type TracerEventHandlers = {
   /** Invoked when a new value is emitted from a stream (before any operators). */
   emitted?: (trace: ValueTrace) => void;
@@ -13,6 +26,14 @@ export type TracerEventHandlers = {
   dropped?: (trace: ValueTrace) => void;
 };
 
+/**
+ * Event handler map for subscription-scoped tracer events.
+ *
+ * Extends `TracerEventHandlers` with a `complete` handler that is called when
+ * a subscription completes (via iterator completion, return, or throw).
+ *
+ * @property complete Called when the subscription is completed.
+ */
 export type TracerSubscriptionEventHandlers = TracerEventHandlers & {
   /** Invoked when a subscription is completed (via `final` iterator completion/return/throw). */
   complete?: () => void;
@@ -36,6 +57,15 @@ export interface ExtendedValueTracer extends ValueTracer {
 
 type SubscriptionState = "active" | "completed";
 
+/**
+ * Creates an in-memory trace store for value traces with max-size LRU eviction.
+ *
+ * The store retains up to `maxTraces` value traces, evicting the oldest when the limit
+ * is exceeded. Provides methods to retain new traces and clear all traces.
+ *
+ * @param maxTraces Maximum number of traces to retain.
+ * @returns Object with `traces`, `retainTrace`, and `clearTraces` methods.
+ */
 export const createTraceStore = <T>(maxTraces: number) => {
   const traces = new Map<string, T>();
 
@@ -54,6 +84,15 @@ export const createTraceStore = <T>(maxTraces: number) => {
   return { traces, retainTrace, clearTraces };
 };
 
+/**
+ * Creates a subscription hub for broadcasting tracer events to observers.
+ *
+ * Manages global and per-subscription event handlers for value lifecycle events.
+ * Provides methods to subscribe, observe subscriptions, complete subscriptions,
+ * and clear all observers. Used internally by the Streamix tracing runtime.
+ *
+ * @returns Object with subscribe, observeSubscription, completeSubscription, etc.
+ */
 export const createTracerSubscriptions = () => {
   const subscribers: TracerEventHandlers[] = [];
   const subscriptionSubscribers = new Map<string, Set<TracerSubscriptionEventHandlers>>();

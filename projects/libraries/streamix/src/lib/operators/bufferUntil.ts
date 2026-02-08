@@ -22,6 +22,24 @@ type BufferRecord<T> = {
   };
 };
 
+/**
+ * Emits arrays of buffered source values whenever the `notifier` stream emits.
+ *
+ * This operator collects values from the source stream into a buffer. When the
+ * `notifier` emits, all buffered values up to that point are flushed as a single
+ * array downstream. The buffer is then cleared and begins collecting new values
+ * until the next notifier emission. If the source completes, any remaining buffered
+ * values are flushed as a final array.
+ *
+ * Metadata is attached to the output array to track collapse operations and value
+ * lineage for tracing.
+ *
+ * @param notifier Stream whose emissions trigger buffer flushes.
+ * @returns Operator that emits arrays of buffered values.
+ *
+ * @example
+ * from([1,2,3]).pipe(bufferUntil(timer(1000))) // emits [1,2,3] after 1s
+ */
 export const bufferUntil = <T = any>(notifier: Stream<any>) =>
   createOperator<T, T[]>("bufferUntil", function (this: Operator, source) {
     const output = createSubject<T[]>();
