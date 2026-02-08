@@ -1,224 +1,44 @@
-import {
-  DONE,
-  getCurrentEmissionStamp,
-  isPromiseLike,
-  MaybePromise,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  withEmissionStamp,
-  type Receiver,
-  type StrictReceiver,
-  type Subscription
-} from "../abstractions";
-
-/* ------------------------------------------------------------------------- */
-/* Shared helpers for subjects                                                */
-/* ------------------------------------------------------------------------- */
+import { getCurrentEmissionStamp, nextEmissionStamp, setIteratorEmissionStamp } from "./emission";
+import { IteratorMetaKind, setIteratorMeta, setValueMeta } from "./hooks";
+import { DONE, isPromiseLike } from "./operator";
+import type { Receiver, StrictReceiver } from "./receiver";
+import type { Subscription } from "./subscription";
 
 /**
- * QueueItem represents an enqueued subject operation used for ordered
- * delivery. Items may be `next` (with a value), `complete`, or `error`.
+ * Attaches tracing metadata to both an iterator and a value in a single call.
  *
- * @template T
- */
-export type QueueItem<T> =
-  | { kind: "next"; value: T; stamp: number }
-  | { kind: "complete"; stamp: number }
-  | { kind: "error"; error: Error; stamp: number };
-
-
-/**
- * Create the commit function which drains the subject `queue` and delivers
- * items to eligible receivers, honoring backpressure, delivery ordering,
- * and terminal semantics.
+ * Consolidates the common `setIteratorMeta` + `setValueMeta` pattern.
+ * Returns the (possibly wrapped) value.
  *
- * @template T
- * @param opts - options object (see signature)
- * @returns {() => void} a function to attempt committing queued items
+ * @param iterator The async iterator to tag.
+ * @param value The value to tag.
+ * @param meta Metadata from `getIteratorMeta(source)`. If `undefined`, the value is returned unchanged.
+ * @param tag Optional additional tag fields (kind, inputValueIds).
  */
-export function createTryCommit<T>(opts: {
-  receivers: Set<StrictReceiver<T>>;
-  ready: Set<StrictReceiver<T>>;
-  queue: QueueItem<T>[];
-  setLatestValue: (v: T) => void;
-  /**
-   * Optional hook used by Subjects to ensure commit continuation runs on the
-   * subject's scheduler. When omitted, continuations call `tryCommit()` directly.
-   */
-  scheduleCommit?: () => void;
-}) {
-  const { receivers, ready, queue, setLatestValue, scheduleCommit } = opts;
-  let isCommitting = false;
-  let pendingCommit = false;
-
-  const tryCommit = () => {
-    if (isCommitting) {
-      pendingCommit = true;
-      return;
-    }
-
-    isCommitting = true;
-    try {
-      while (queue.length > 0) {
-        if (receivers.size === 0) {
-          const ctx = getCurrentEmissionStamp();
-          if (ctx !== null && ctx !== undefined) break;
-        }
-        
-        const item = queue[0];
-        const eligible = Array.from(receivers).filter((r) => {
-          const s = (r as any).subscribedAt;
-          const subscribedAt =
-            typeof s === "number" ? s : Number.NEGATIVE_INFINITY;
-          return subscribedAt <= item.stamp;
-        });
-
-        if (item.kind === "next") {
-          // Backpressure: if there are eligible receivers and any is not ready,
-          // pause committing to preserve ordering and avoid drops.
-          if (eligible.length > 0 && eligible.some((r) => !ready.has(r))) {
-            break;
-          }
-
-          queue.shift();
-          let pendingAsync = 0;
-
-          withEmissionStamp(item.stamp, () => {
-            setLatestValue(item.value);
-            for (const r of eligible) {
-              const result = r.next(item.value);
-              if (isPromiseLike(result)) {
-                pendingAsync++;
-                ready.delete(r);
-                result.finally(() => {
-                  if (!r.completed && receivers.has(r)) {
-                    ready.add(r);
-                    if (typeof scheduleCommit === "function") {
-                      scheduleCommit();
-                    } else {
-                      tryCommit();
-                    }
-                  }
-                });
-              }
-            }
-          });
-
-          if (pendingAsync > 0) break;
-        } else {
-          queue.shift();
-          withEmissionStamp(item.stamp, () => {
-            for (const r of eligible) {
-              if (item.kind === "complete") r.complete();
-              else {
-                r.error(item.error);
-              }
-            }
-          });
-          receivers.clear();
-          ready.clear();
-          return;
-        }
-      }
-    } finally {
-      isCommitting = false;
-      if (pendingCommit) {
-        pendingCommit = false;
-        tryCommit();
-      }
-    }
-  };
-
-  return tryCommit;
+export function tagValue<T>(
+  iterator: AsyncIterator<any>,
+  value: T,
+  meta: { valueId: string; operatorIndex: number; operatorName: string } | undefined,
+  tag?: { kind?: IteratorMetaKind; inputValueIds?: string[] }
+): T {
+  if (!meta) return value;
+  const metaTag = { valueId: meta.valueId, ...tag };
+  setIteratorMeta(iterator, metaTag, meta.operatorIndex, meta.operatorName);
+  return setValueMeta(value, metaTag, meta.operatorIndex, meta.operatorName);
 }
 
 /**
- * Creates a `register(receiver)` function for Subjects.
+ * Creates a factory that produces fresh `AsyncIterator` instances backed by
+ * an internal queue with producer-backpressure.
  *
- * The returned function:
- * - Adds a receiver to the subject's delivery sets.
- * - Ensures new subscriptions do not receive already-queued emissions by
- *   tracking a `subscribedAt` stamp.
- * - Integrates with the subject's terminal state so late subscribers are
- *   immediately completed/errored.
- * - Ensures `unsubscribe()` stops future deliveries synchronously, while the
- *   receiver completion is still scheduled via the subscription hook.
+ * The `register` callback receives a `Receiver<T>` whose `next()`/`complete()`/
+ * `error()` methods push into the iterator's queue. `next()` returns a
+ * `Promise<void>` (or `void`) – the promise acts as a backpressure signal
+ * from the consumer: it resolves only when the consumer pulls the value with
+ * `next()` or `__tryNext()`.
  *
- * This is an internal building block used by different Subject variants to keep
- * subscription semantics consistent.
- *
- * @template T Value type.
- * @param opts Shared subject state and helpers.
- * @returns A registration function that returns a Subscription.
- */
-export function createRegister<T>(opts: {
-  receivers: Set<StrictReceiver<T>>;
-  ready: Set<StrictReceiver<T>>;
-  terminalRef: { current: QueueItem<T> | null };
-  createSubscription: (onUnsubscribe?: () => MaybePromise<void>) => Subscription;
-  tryCommit: () => void;
-}) {
-  const { receivers, ready, terminalRef, createSubscription, tryCommit } = opts;
-
-  return function register(receiver: Receiver<T>, paused = false) : Subscription {
-    const r = receiver as StrictReceiver<T>;
-
-    const item = terminalRef.current;
-    if (item) {
-      if (item.kind === "complete") {
-        withEmissionStamp(item.stamp, () => r.complete());
-      } else if (item.kind === "error") {
-        const err = item.error;
-        withEmissionStamp(item.stamp, () => {
-          r.error(err);
-        });
-      }
-      return createSubscription();
-    }
-
-    // Record registration stamp so this receiver does not receive
-    // previously queued emissions.
-    // IMPORTANT: always use a fresh stamp (even inside an emission context)
-    // so a subscription created while an emission is in-flight does not
-    // receive that same emission.
-    (r as any).subscribedAt = nextEmissionStamp();
-
-    receivers.add(r);
-    if (!paused) ready.add(r);
-    tryCommit();
-
-    // Schedule receiver completion via the subscription's onUnsubscribe, but
-    // remove the receiver from the delivery sets synchronously so that values
-    // pushed after `unsubscribe()` are not delivered.
-    const baseSub = createSubscription(() => {
-      const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-      withEmissionStamp(stamp, () => r.complete());
-      tryCommit();
-    });
-
-    const baseUnsubscribe = baseSub.unsubscribe.bind(baseSub);
-    let removed = false;
-
-    baseSub.unsubscribe = () => {
-      if (!removed) {
-        removed = true;
-        receivers.delete(r);
-        ready.delete(r);
-      }
-      return baseUnsubscribe();
-    };
-
-    return baseSub;
-  };
-}
-
-/**
- * Creates a factory for async iterators backed by a Subject/Stream subscription.
- *
- * The iterator buffers `next` notifications until the consumer calls `next()`.
- * It also participates in subject backpressure by returning a Promise from the
- * receiver's `next(...)` that resolves when the consumer pulls the buffered
- * value.
+ * Each call of the returned factory function creates an independent iterator
+ * with its own buffer and subscription.
  *
  * When `lazy: true`, registration is deferred until the consumer actually pulls
  * (either `next()` or `__tryNext()`), which avoids hidden subscriptions for
@@ -275,13 +95,8 @@ export function createAsyncIterator<T>(opts: {
       next() {
         ensureSubscribed();
 
-        if (pendingError) {
-          const { err, stamp } = pendingError;
-          pendingError = null;
-          setIteratorEmissionStamp(iterator, stamp);
-          return Promise.reject(err);
-        }
-
+        // Drain buffered values before checking pending errors so that
+        // values pushed before an error are delivered first.
         if (queue.length > 0) {
           const { result, stamp } = queue.shift()!;
           setIteratorEmissionStamp(iterator, stamp);
@@ -295,6 +110,13 @@ export function createAsyncIterator<T>(opts: {
             }
           }
           return Promise.resolve(result);
+        }
+
+        if (pendingError) {
+          const { err, stamp } = pendingError;
+          pendingError = null;
+          setIteratorEmissionStamp(iterator, stamp);
+          return Promise.reject(err);
         }
 
         if (completed) {
@@ -363,13 +185,8 @@ export function createAsyncIterator<T>(opts: {
     iterator.__tryNext = () => {
       ensureSubscribed();
 
-      if (pendingError) {
-        const { err, stamp } = pendingError;
-        pendingError = null;
-        setIteratorEmissionStamp(iterator, stamp);
-        throw err;
-      }
-
+      // Drain buffered values before checking pending errors so that
+      // values pushed before an error are delivered first.
       if (queue.length > 0) {
         const { result, stamp } = queue.shift()!;
         setIteratorEmissionStamp(iterator, stamp);
@@ -382,6 +199,13 @@ export function createAsyncIterator<T>(opts: {
           }
         }
         return result;
+      }
+
+      if (pendingError) {
+        const { err, stamp } = pendingError;
+        pendingError = null;
+        setIteratorEmissionStamp(iterator, stamp);
+        throw err;
       }
 
       if (completed) {

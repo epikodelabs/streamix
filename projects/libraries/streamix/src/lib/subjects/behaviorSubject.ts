@@ -1,19 +1,17 @@
 import {
+  createAsyncPushable,
   createReceiver,
   createSubscription,
   generateStreamId,
-  getCurrentEmissionStamp,
-  nextEmissionStamp,
+  isPromiseLike,
   pipeSourceThrough,
-  withEmissionStamp,
+  type AsyncPushable,
+  type MaybePromise,
   type Operator,
   type Receiver,
   type Stream,
-  type StrictReceiver,
-  type Subscription
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { createAsyncIterator } from "./helpers";
 
 /**
  * BehaviorSubject holds a current value and emits it immediately to new
@@ -41,129 +39,157 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
   const id = generateStreamId();
   let latestValue: T = initialValue;
   let isCompleted = false;
-  let terminalItem: { kind: "complete" | "error"; error?: any; stamp: number } | null = null;
+  let completionInfo: { kind: 'error'; error: any } | null = null;
 
-  type TrackedReceiver = StrictReceiver<T> & { subscribedAt: number };
-  const receivers = new Set<TrackedReceiver>();
+  const listeners = new Set<AsyncPushable<T>>();
 
   const next = (value: T) => {
     if (isCompleted) return;
     latestValue = value;
-    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-
-    // Synchronous delivery
-    const targets = Array.from(receivers).filter((r) => stamp > r.subscribedAt);
-    withEmissionStamp(stamp, () => {
-      for (const r of targets) {
-        r.next(value);
-      }
-    });
+    for (const listener of listeners) {
+      listener.push(value);
+    }
   };
 
   const complete = () => {
     if (isCompleted) return;
     isCompleted = true;
-    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    terminalItem = { kind: "complete", stamp };
-
-    // Synchronous delivery
-    const targets = Array.from(receivers);
-    withEmissionStamp(stamp, () => {
-      for (const r of targets) {
-        r.complete();
-      }
-    });
-    receivers.clear();
+    for (const listener of listeners) {
+      listener.complete();
+    }
+    listeners.clear();
   };
 
   const error = (err: any) => {
     if (isCompleted) return;
     isCompleted = true;
-    const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    terminalItem = { kind: "error", error: err, stamp };
-
-    // Synchronous delivery
-    const targets = Array.from(receivers);
-    withEmissionStamp(stamp, () => {
-      for (const r of targets) {
-        r.error(err);
-      }
-    });
-    receivers.clear();
+    completionInfo = { kind: 'error', error: err };
+    for (const listener of listeners) {
+      listener.error(err);
+    }
+    listeners.clear();
   };
 
-  /**
-   * Register a receiver to receive emissions from the BehaviorSubject.
-   * Handles replaying the current value and terminal state if needed.
-   *
-   * @param receiver The receiver to register.
-   * @returns {Subscription} Subscription object for unsubscription.
-   */
-  const register = (receiver: Receiver<T>): Subscription => {
-    const r = receiver as StrictReceiver<T>;
+  const subscribe = (cb?: Receiver<T> | ((v: T) => MaybePromise)) => {
+    const listener = createAsyncPushable<T>();
+    listeners.add(listener);
 
-    if (terminalItem) {
-      const term = terminalItem;
-      withEmissionStamp(term.stamp, () => {
-        if (term.kind === "complete") r.complete();
-        else if (term.kind === "error") r.error(term.error);
-      });
-      return createSubscription();
+    const receiver = createReceiver(cb);
+    let isProcessing = false;
+    let stopped = false;
+
+    const drain = () => {
+      if (isProcessing) return;
+      isProcessing = true;
+      try {
+        while (true) {
+          let result;
+          try {
+            result = (listener as any).__tryNext();
+          } catch (e) {
+            receiver.error?.(e);
+            listeners.delete(listener);
+            return;
+          }
+
+          if (!result) break;
+
+          if (result.done) {
+            receiver.complete?.();
+            listeners.delete(listener);
+            return;
+          }
+
+          // Skip next values after unsubscribe, but keep draining
+          // so the terminal signal (DONE) can still be delivered.
+          if (stopped) continue;
+
+          if (receiver.next) {
+            const ret = receiver.next(result.value);
+            if (isPromiseLike(ret)) {
+              ret.then(() => {
+                isProcessing = false;
+                drain();
+              }, () => {
+                isProcessing = false;
+              });
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        receiver.error?.(err);
+      }
+      isProcessing = false;
+    };
+
+    (listener as any).__onPush = drain;
+
+    // Replay current value only if the subject is still alive.
+    // After completion/error, late subscribers receive only the terminal signal.
+    if (!isCompleted) {
+      listener.push(latestValue);
     }
 
-    // Capture the value and stamp at the EXACT moment of registration
-    const replayValue = latestValue;
-    const replayStamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-    
-    // Use the emission stamp as the subscription marker so delivery logic
-    // (which compares emission stamps) remains consistent across helpers.
-    // Mutate the receiver to attach `subscribedAt` so helpers that expect
-    // the property on the original receiver work correctly.
-    (r as any).subscribedAt = replayStamp;
-    const trackedReceiver = r as TrackedReceiver;
-    receivers.add(trackedReceiver);
+    if (isCompleted) {
+      if (completionInfo?.kind === 'error') listener.error(completionInfo.error);
+      else listener.complete();
+    }
 
-    // Replay the current state to the new subscriber immediately so
-    // async iterators see the value before returning.
-    try {
-      if (!r.completed && receivers.has(trackedReceiver)) {
-        withEmissionStamp(replayStamp, () => r.next(replayValue));
-      }
-    } catch (_) {}
+    // Initial drain
+    drain();
 
-    return createSubscription(() => {
-      // Synchronous completion
-      if (!r.completed) {
-        const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-        withEmissionStamp(stamp, () => r.complete());
-      }
-      receivers.delete(trackedReceiver);
+    const sub = createSubscription(async () => {
+      listeners.delete(listener);
+      listener.complete();
     });
+
+    const origUnsub = sub.unsubscribe.bind(sub);
+    sub.unsubscribe = () => {
+      stopped = true;
+      return origUnsub();
+    };
+
+    return sub;
   };
 
-  /**
-   * The BehaviorSubject instance returned to consumers.
-   *
-   * @returns {BehaviorSubject<T>} The subject instance with imperative and stream methods.
-   */
-  return {
+  const self: BehaviorSubject<T> = {
     type: "subject",
     name: "behaviorSubject",
     id,
-    get value() {
-      return latestValue;
-    },
-    pipe(...steps: Operator<any, any>[]): Stream<any> {
-      return pipeSourceThrough(this, steps);
-    },
-    subscribe: (cb) => register(createReceiver(cb)),
-    async query(): Promise<T> {
-      return firstValueFrom(this);
-    },
+    get value() { return latestValue; },
     next,
     complete,
     error,
     completed: () => isCompleted,
-    [Symbol.asyncIterator]: createAsyncIterator({ register })
-  } as BehaviorSubject<T>;
+    pipe: (...steps: Operator<any, any>[]): Stream<any> => {
+      return pipeSourceThrough(self, steps);
+    },
+    subscribe,
+    query: () => firstValueFrom(self),
+    [Symbol.asyncIterator]: () => {
+      const listener = createAsyncPushable<T>();
+      listeners.add(listener);
+
+      // Replay current value only if the subject is still alive.
+      if (!isCompleted) {
+        listener.push(latestValue);
+      }
+
+      if (isCompleted) {
+        if (completionInfo?.kind === 'error') listener.error(completionInfo.error);
+        else listener.complete();
+      }
+
+      const originalReturn = listener.return;
+      (listener as any).return = (v?: any) => {
+        listeners.delete(listener);
+        return originalReturn ? originalReturn.call(listener, v) : Promise.resolve({ done: true, value: v });
+      };
+
+      return listener;
+    }
+  };
+
+  return self;
 }
