@@ -1,7 +1,6 @@
-import { createOperator, createReceiver, DONE, getIteratorMeta, isPromiseLike, Receiver, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
+import { createOperator, createReceiver, DONE, getIteratorMeta, isPromiseLike, Receiver, tagValue, type MaybePromise, type Operator, type Stream, type Subscription } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
-import { tagValue } from "./helpers";
 
 /**
  * Creates a stream operator that combines the source stream with the latest values
