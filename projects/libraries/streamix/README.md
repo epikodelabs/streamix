@@ -469,7 +469,7 @@ MIT License
 
 <p align="center">
   <strong>Get started</strong><br>
-  <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> -
-  <a href="https://github.com/epikodelabs/streamix">View on GitHub</a> -
+  <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> •
+  <a href="https://github.com/epikodelabs/streamix">View on GitHub</a> •
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
