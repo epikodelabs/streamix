@@ -326,23 +326,25 @@ export function createMultiSourceRunner(
   type QueueItem = {
     result: IteratorResult<RunnerEvent<any>>;
     stamp: number;
+    sourceIndex: number;
   };
 
   const queue: QueueItem[] = [];
   const completed = new Array(sources.length).fill(false);
   const pulling = new Array(sources.length).fill(false);
+  const pendingPulls = new Array(sources.length).fill(false);
 
   let waitingResolve: ((v: any) => void) | null = null;
+  let isDraining = false;
+  let nextStamp = 1;
 
   const allDone = () => completed.every(Boolean);
 
-  function pushEvent(
-    event: RunnerEvent<any>,
-    stamp: number
-  ) {
+  function pushEvent(event: RunnerEvent<any>, stamp: number, sourceIndex: number) {
     insertOrdered(queue, {
       result: { done: false, value: event },
-      stamp
+      stamp,
+      sourceIndex
     });
   }
 
@@ -355,10 +357,7 @@ export function createMultiSourceRunner(
       waitingResolve = null;
       setIteratorEmissionStamp(iterator, item.stamp);
       res(item.result);
-      return;
-    }
-
-    if (allDone()) {
+    } else if (allDone()) {
       const res = waitingResolve;
       waitingResolve = null;
       res(DONE);
@@ -366,122 +365,106 @@ export function createMultiSourceRunner(
   }
 
   function pullAsync(i: number) {
+    // CRITICAL: Don't start a new pull if already pulling or completed
     if (completed[i] || pulling[i]) return;
-
+    
     pulling[i] = true;
+    pendingPulls[i] = false;
     const src: any = sources[i];
-
-    let sync = true;
-    const p = src.next();
-
-    p.then(
+    
+    src.next().then(
       (r: IteratorResult<any>) => {
         pulling[i] = false;
+        
+        // Don't process if source was completed during the async wait
+        if (completed[i]) return;
 
-        const stamp =
-          getIteratorEmissionStamp(src) ??
-          nextEmissionStamp();
+        const stamp = getIteratorEmissionStamp(src) ?? nextStamp++;
 
         if (r.done) {
           completed[i] = true;
-          pushEvent(
-            { type: "complete", sourceIndex: i },
-            stamp
-          );
+          pushEvent({ type: "complete", sourceIndex: i }, stamp, i);
         } else {
-          pushEvent(
-            { type: "value", value: r.value, sourceIndex: i },
-            stamp
-          );
+          pushEvent({ type: "value", value: r.value, sourceIndex: i }, stamp, i);
         }
 
-        if (waitingResolve) notify();
-        else if (!sync) scheduleDrain();
+        notify();
+        
+        // CRITICAL: Only schedule next pull if there are more values AND not already pulling
+        // AND not completed AND there's a pending pull request
+        if (!completed[i] && !pulling[i] && pendingPulls[i]) {
+          pendingPulls[i] = false;
+          Promise.resolve().then(() => pullAsync(i));
+        }
       },
       (err: any) => {
         pulling[i] = false;
+        if (completed[i]) return;
+        
         completed[i] = true;
-
-        const stamp =
-          getIteratorEmissionStamp(src) ??
-          nextEmissionStamp();
-
-        pushEvent(
-          { type: "error", error: err, sourceIndex: i },
-          stamp
-        );
-
+        const stamp = getIteratorEmissionStamp(src) ?? nextStamp++;
+        pushEvent({ type: "error", error: err, sourceIndex: i }, stamp, i);
         notify();
       }
     );
-
-    sync = false;
   }
 
   function drainSources() {
-    for (let i = 0; i < sources.length; i++) {
-      if (completed[i]) continue;
+    // CRITICAL: Prevent recursive drains
+    if (isDraining) return;
+    isDraining = true;
 
-      const src: any = sources[i];
+    try {
+      for (let i = 0; i < sources.length; i++) {
+        if (completed[i]) continue;
 
-      // sync source
-      if (src.__tryNext) {
-        try {
-          const r = src.__tryNext();
-          if (!r) continue;
+        const src: any = sources[i];
 
-          const stamp =
-            getIteratorEmissionStamp(src) ??
-            nextEmissionStamp();
+        // Sync sources - DRAIN ALL VALUES
+        if (src.__tryNext) {
+          try {
+            let r;
+            while ((r = src.__tryNext())) {
+              const stamp = getIteratorEmissionStamp(src) ?? nextStamp++;
 
-          if (r.done) {
+              if (r.done) {
+                completed[i] = true;
+                pushEvent({ type: "complete", sourceIndex: i }, stamp, i);
+                break;
+              } else {
+                pushEvent({ type: "value", value: r.value, sourceIndex: i }, stamp, i);
+              }
+            }
+          } catch (err) {
             completed[i] = true;
-            pushEvent(
-              { type: "complete", sourceIndex: i },
-              stamp
-            );
-          } else {
-            pushEvent(
-              { type: "value", value: r.value, sourceIndex: i },
-              stamp
-            );
+            const stamp = getIteratorEmissionStamp(src) ?? nextStamp++;
+            pushEvent({ type: "error", error: err, sourceIndex: i }, stamp, i);
           }
-        } catch (err) {
-          completed[i] = true;
-          const stamp =
-            getIteratorEmissionStamp(src) ??
-            nextEmissionStamp();
-
-          pushEvent(
-            { type: "error", error: err, sourceIndex: i },
-            stamp
-          );
+        } 
+        // Async sources
+        else {
+          // CRITICAL: Mark that we need a pull, but don't start it if already pulling
+          pendingPulls[i] = true;
+          if (!pulling[i] && !completed[i]) {
+            pendingPulls[i] = false;
+            pullAsync(i);
+          }
         }
       }
-      else {
-        pullAsync(i);
-      }
+    } finally {
+      isDraining = false;
     }
 
     notify();
   }
 
-  let drainScheduled = false;
-  function scheduleDrain() {
-    if (drainScheduled) return;
-    drainScheduled = true;
-    Promise.resolve().then(() => {
-      drainScheduled = false;
-      drainSources();
-    });
-  }
-
-  // push notification hook
+  // Wire up push notifications
   for (const src of sources as any[]) {
     const orig = src.__onPush;
     src.__onPush = () => {
       orig?.();
-      scheduleDrain();
+      // Schedule drain in next microtask to prevent recursion
+      Promise.resolve().then(() => drainSources());
     };
   }
 
@@ -497,7 +480,7 @@ export function createMultiSourceRunner(
 
       if (allDone()) return Promise.resolve(DONE);
 
-      return new Promise((res) => {
+      return new Promise(res => {
         waitingResolve = res;
       });
     },
@@ -519,7 +502,12 @@ export function createMultiSourceRunner(
     },
 
     async return() {
-      completed.fill(true);
+      // Mark all as completed immediately
+      for (let i = 0; i < completed.length; i++) {
+        completed[i] = true;
+        pulling[i] = false;
+        pendingPulls[i] = false;
+      }
 
       const safe = (s: any) => {
         if (!s?.return) return Promise.resolve();
@@ -531,9 +519,18 @@ export function createMultiSourceRunner(
       };
 
       await Promise.all(sources.map(safe));
+      
+      if (waitingResolve) {
+        waitingResolve(DONE);
+        waitingResolve = null;
+      }
+      
       return DONE;
     }
   };
+
+  // Initial drain - schedule to prevent blocking
+  Promise.resolve().then(() => drainSources());
 
   return iterator;
 }
