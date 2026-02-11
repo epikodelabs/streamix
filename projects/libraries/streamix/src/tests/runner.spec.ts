@@ -3,7 +3,7 @@ import {
     setIteratorEmissionStamp
 } from "@epikodelabs/streamix";
 
-describe("createMultiSourceRunner", () => {
+describe("runner", () => {
     // Helper to create a standard async generator
     async function* delayedSource<T>(items: T[], delayMs: number) {
         for (const item of items) {

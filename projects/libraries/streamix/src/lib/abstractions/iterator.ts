@@ -360,14 +360,14 @@ type RunnerEvent<T> = SourceValueEvent<T> | SourceCompletionEvent | SourceErrorE
  * - sync draining support
  * - no starvation
  */
-export function createMultiSourceRunner<T>(
-  sources: AsyncIterator<T>[]
-): AsyncIterator<RunnerEvent<T>> & {
-  __tryNext?: () => IteratorResult<RunnerEvent<T>> | null;
+export function createMultiSourceRunner(
+  sources: AsyncIterator<any>[]
+): AsyncIterator<RunnerEvent<any>> & {
+  __tryNext?: () => IteratorResult<RunnerEvent<any>> | null;
   __hasBufferedValues?: () => boolean;
 } {
   type QueueItem = {
-    result: IteratorResult<RunnerEvent<T>>;
+    result: IteratorResult<RunnerEvent<any>>;
     stamp: number;
   };
   
@@ -399,7 +399,7 @@ export function createMultiSourceRunner<T>(
               insertOrdered(queue, {
                 result: {
                   done: false,
-                  value: { type: 'complete', sourceIndex: i } as RunnerEvent<T>
+                  value: { type: 'complete', sourceIndex: i } as RunnerEvent<any>
                 },
                 stamp
               });
@@ -409,7 +409,7 @@ export function createMultiSourceRunner<T>(
               insertOrdered(queue, {
                 result: {
                   done: false,
-                  value: { type: 'value', value: r.value, sourceIndex: i } as RunnerEvent<T>
+                  value: { type: 'value', value: r.value, sourceIndex: i } as RunnerEvent<any>
                 },
                 stamp
               });
@@ -424,7 +424,7 @@ export function createMultiSourceRunner<T>(
           insertOrdered(queue, {
             result: {
               done: false,
-              value: { type: 'error', error: err, sourceIndex: i } as RunnerEvent<T>
+              value: { type: 'error', error: err, sourceIndex: i } as RunnerEvent<any>
             },
             stamp
           });
@@ -435,7 +435,7 @@ export function createMultiSourceRunner<T>(
       else {
         pendingPulls[i] = true;
         src.next().then(
-          (r: IteratorResult<T>) => {
+          (r: IteratorResult<any>) => {
             pendingPulls[i] = false;
             const stamp = getIteratorEmissionStamp(src) ?? nextEmissionStamp();
             
@@ -444,7 +444,7 @@ export function createMultiSourceRunner<T>(
               insertOrdered(queue, {
                 result: {
                   done: false,
-                  value: { type: 'complete', sourceIndex: i } as RunnerEvent<T>
+                  value: { type: 'complete', sourceIndex: i } as RunnerEvent<any>
                 },
                 stamp
               });
@@ -452,7 +452,7 @@ export function createMultiSourceRunner<T>(
               insertOrdered(queue, {
                 result: {
                   done: false,
-                  value: { type: 'value', value: r.value, sourceIndex: i } as RunnerEvent<T>
+                  value: { type: 'value', value: r.value, sourceIndex: i } as RunnerEvent<any>
                 },
                 stamp
               });
@@ -467,7 +467,7 @@ export function createMultiSourceRunner<T>(
             insertOrdered(queue, {
               result: {
                 done: false,
-                value: { type: 'error', error: err, sourceIndex: i } as RunnerEvent<T>
+                value: { type: 'error', error: err, sourceIndex: i } as RunnerEvent<any>
               },
               stamp
             });
