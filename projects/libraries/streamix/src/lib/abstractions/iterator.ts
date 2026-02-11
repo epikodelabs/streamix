@@ -1,6 +1,14 @@
-import { getCurrentEmissionStamp, nextEmissionStamp, setIteratorEmissionStamp } from "./emission";
+import {
+  getIteratorEmissionStamp,
+  nextEmissionStamp,
+  setIteratorEmissionStamp
+} from "./emission";
+
+import { DONE } from "./operator";
+
+import { getCurrentEmissionStamp } from "./emission";
 import { IteratorMetaKind, setIteratorMeta, setValueMeta } from "./hooks";
-import { DONE, isPromiseLike } from "./operator";
+import { isPromiseLike } from "./operator";
 import type { Receiver, StrictReceiver } from "./receiver";
 import type { Subscription } from "./subscription";
 
@@ -41,7 +49,7 @@ export function tagValue<T>(
  * with its own buffer and subscription.
  *
  * When `lazy: true`, registration is deferred until the consumer actually pulls
- * (either `next()` or `__tryNext()`), which avoids hidden subscriptions for
+ * (either `next()` or `__tryNext>`), which avoids hidden subscriptions for
  * iterators that are constructed but never consumed.
  *
  * @template T Value type.
@@ -296,4 +304,260 @@ export function createAsyncIterator<T>(opts: {
 
     return iterator;
   };
+}
+
+/**
+ * Insert into queue preserving ascending stamp order.
+ * Faster than sorting entire queue each time.
+ */
+function insertOrdered<T>(queue: Array<{ result: IteratorResult<T>; stamp: number }>, item: { result: IteratorResult<T>; stamp: number }) {
+  let i = queue.length;
+  while (i > 0 && queue[i - 1].stamp > item.stamp) i--;
+  queue.splice(i, 0, item);
+}
+
+// Types for different event kinds
+type SourceValueEvent<T> = {
+  type: 'value';
+  value: T;
+  sourceIndex: number;
+};
+
+type SourceCompletionEvent = {
+  type: 'complete';
+  sourceIndex: number;
+};
+
+type SourceErrorEvent = {
+  type: 'error';
+  error: any;
+  sourceIndex: number;
+};
+
+type RunnerEvent<T> = SourceValueEvent<T> | SourceCompletionEvent | SourceErrorEvent;
+
+/**
+ * Generalized multi-stream runner.
+ *
+ * This replaces SyncIterator and should be used by ALL
+ * multi-source operators (combineLatest, merge, zip, race, etc).
+ *
+ * Guarantees:
+ * - deterministic ordering
+ * - push-driven scheduling
+ * - sync draining support
+ * - no starvation
+ */
+/**
+ * Generalized multi-stream runner.
+ *
+ * This replaces SyncIterator and should be used by ALL
+ * multi-source operators (combineLatest, merge, zip, race, etc).
+ *
+ * Guarantees:
+ * - deterministic ordering
+ * - push-driven scheduling
+ * - sync draining support
+ * - no starvation
+ */
+export function createMultiSourceRunner<T>(
+  sources: AsyncIterator<T>[]
+): AsyncIterator<RunnerEvent<T>> & {
+  __tryNext?: () => IteratorResult<RunnerEvent<T>> | null;
+  __hasBufferedValues?: () => boolean;
+} {
+  type QueueItem = {
+    result: IteratorResult<RunnerEvent<T>>;
+    stamp: number;
+  };
+  
+  const queue: QueueItem[] = [];
+  const completed = new Array(sources.length).fill(false);
+  const pendingPulls = new Array(sources.length).fill(false);
+
+  let waitingResolve: ((v: any) => void) | null = null;
+  let waitingReject: ((e: any) => void) | null = null;
+  let pendingError: { err: any; stamp: number } | null = null;
+
+  const allDone = () => completed.every(Boolean);
+
+  const drainSources = () => {
+    for (let i = 0; i < sources.length; i++) {
+      if (completed[i] || pendingPulls[i]) continue;
+
+      const src = sources[i] as any;
+
+      // 1. Sync Pull (Optimized)
+      if (src.__tryNext) {
+        try {
+          let r;
+          while ((r = src.__tryNext())) {
+            const stamp = getIteratorEmissionStamp(src) ?? nextEmissionStamp();
+            if (r.done) { 
+              completed[i] = true; 
+              // Push completion event
+              insertOrdered(queue, {
+                result: {
+                  done: false,
+                  value: { type: 'complete', sourceIndex: i } as RunnerEvent<T>
+                },
+                stamp
+              });
+              break;  // Exit on completion
+            } else {
+              // Push value event
+              insertOrdered(queue, {
+                result: {
+                  done: false,
+                  value: { type: 'value', value: r.value, sourceIndex: i } as RunnerEvent<T>
+                },
+                stamp
+              });
+            }
+          }
+        } catch (err) {
+          completed[i] = true;
+          const stamp = getIteratorEmissionStamp(src) ?? nextEmissionStamp();
+          // Store as pending error instead of pushing to queue immediately?
+          // We need to decide: queue error or store as pendingError?
+          // For consistency with async path, let's push to queue
+          insertOrdered(queue, {
+            result: {
+              done: false,
+              value: { type: 'error', error: err, sourceIndex: i } as RunnerEvent<T>
+            },
+            stamp
+          });
+        }
+      } 
+      
+      // 2. Async Pull (Standard Iterators)
+      else {
+        pendingPulls[i] = true;
+        src.next().then(
+          (r: IteratorResult<T>) => {
+            pendingPulls[i] = false;
+            const stamp = getIteratorEmissionStamp(src) ?? nextEmissionStamp();
+            
+            if (r.done) {
+              completed[i] = true;
+              insertOrdered(queue, {
+                result: {
+                  done: false,
+                  value: { type: 'complete', sourceIndex: i } as RunnerEvent<T>
+                },
+                stamp
+              });
+            } else {
+              insertOrdered(queue, {
+                result: {
+                  done: false,
+                  value: { type: 'value', value: r.value, sourceIndex: i } as RunnerEvent<T>
+                },
+                stamp
+              });
+            }
+            drainSources(); // Try to satisfy consumer with new data
+            notifyConsumer();
+          },
+          (err: any) => {
+            pendingPulls[i] = false;
+            completed[i] = true;
+            const stamp = getIteratorEmissionStamp(src) ?? nextEmissionStamp();
+            insertOrdered(queue, {
+              result: {
+                done: false,
+                value: { type: 'error', error: err, sourceIndex: i } as RunnerEvent<T>
+              },
+              stamp
+            });
+            notifyConsumer();
+          }
+        );
+      }
+    }
+    notifyConsumer();
+  };
+
+  const notifyConsumer = () => {
+    if (!waitingResolve) return;
+
+    if (queue.length > 0) {
+      const item = queue.shift()!;
+      const res = waitingResolve;
+      waitingResolve = waitingReject = null;
+      setIteratorEmissionStamp(iterator, item.stamp);
+      res(item.result);
+    } else if (pendingError) {
+      const rej = waitingReject!;
+      const { err, stamp } = pendingError;
+      pendingError = null;
+      waitingResolve = waitingReject = null;
+      setIteratorEmissionStamp(iterator, stamp);
+      rej(err);
+    } else if (allDone()) {
+      const res = waitingResolve;
+      waitingResolve = waitingReject = null;
+      res(DONE);
+    }
+  };
+
+  // Wire up push notifications
+  for (const src of sources as any[]) {
+    const orig = src.__onPush;
+    src.__onPush = () => {
+      orig?.();
+      drainSources();
+    };
+  }
+
+  const iterator: any = {
+    next() {
+      drainSources();
+      if (queue.length > 0) {
+        const item = queue.shift()!;
+        setIteratorEmissionStamp(iterator, item.stamp);
+        return Promise.resolve(item.result);
+      }
+      if (pendingError) {
+        const { err, stamp } = pendingError;
+        pendingError = null;
+        setIteratorEmissionStamp(iterator, stamp);
+        return Promise.reject(err);
+      }
+      if (allDone() && queue.length === 0) return Promise.resolve(DONE);
+      
+      return new Promise((res, rej) => {
+        waitingResolve = res;
+        waitingReject = rej;
+      });
+    },
+
+    __tryNext() {
+      drainSources(); // Attempt to fill queue
+      if (queue.length > 0) {
+        const item = queue.shift()!;
+        setIteratorEmissionStamp(iterator, item.stamp);
+        return item.result;
+      }
+      if (pendingError) {
+        const { err, stamp } = pendingError;
+        pendingError = null;
+        setIteratorEmissionStamp(iterator, stamp);
+        throw err;
+      }
+      return allDone() ? DONE : null;
+    },
+
+    __hasBufferedValues: () => queue.length > 0 || pendingError !== null || allDone(),
+
+    async return() {
+      completed.fill(true);
+      pendingError = null;
+      await Promise.all(sources.map(s => s.return?.().catch(() => {})));
+      return DONE;
+    }
+  };
+
+  return iterator;
 }
