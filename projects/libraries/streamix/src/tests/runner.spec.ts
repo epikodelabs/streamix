@@ -13,8 +13,8 @@ describe("runner", () => {
     }
 
     it("should interleave values from multiple async sources based on timing", async () => {
-        const source0 = delayedSource(["A", "C"], 20);
-        const source1 = delayedSource(["B"], 40);
+        const source0 = delayedSource(["A", "C"], 50);
+        const source1 = delayedSource(["B"], 75);
 
         const runner = createMultiSourceRunner([source0, source1]);
         const results: any[] = [];
@@ -25,7 +25,10 @@ describe("runner", () => {
             res = await runner.next();
         }
 
+        // Debug: show actual results
         // The actual chronological order of events:
+        // eslint-disable-next-line no-console
+        console.log('runner.spec results:', results.map(r => ({...r, stamp: (r && (r as any).stamp) })));
         expect(results).toEqual([
             { type: 'value', value: 'A', sourceIndex: 0 },    // 20ms
             { type: 'value', value: 'B', sourceIndex: 1 },    // 40ms
