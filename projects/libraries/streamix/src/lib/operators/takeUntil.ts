@@ -1,14 +1,14 @@
 import {
-  createMultiSourceRunner,
-  createOperator,
-  DONE,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  tagValue,
-  type Operator,
-  type Stream
+    createAsyncCoordinator,
+    createOperator,
+    DONE,
+    getIteratorEmissionStamp,
+    getIteratorMeta,
+    nextEmissionStamp,
+    setIteratorEmissionStamp,
+    tagValue,
+    type Operator,
+    type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
 
@@ -33,7 +33,7 @@ export function takeUntil<T = any>(
 ): Operator<T, T> {
   return createOperator<T, T>("takeUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
-    const runner = createMultiSourceRunner([source, notifierIt]);
+    const runner = createAsyncCoordinator([source, notifierIt]);
 
     let isDone = false;
 

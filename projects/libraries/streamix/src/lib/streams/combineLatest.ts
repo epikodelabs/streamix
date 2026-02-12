@@ -1,4 +1,4 @@
-import { createMultiSourceRunner, createStream, type MaybePromise, type Stream } from "../abstractions";
+import { createAsyncCoordinator, createStream, type MaybePromise, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 
 /**
@@ -21,7 +21,7 @@ export function combineLatest<T extends unknown[] = any[]>(
     if (sources.length === 0) return;
 
     const iterators = sources.map((s) => fromAny(s)[Symbol.asyncIterator]());
-    const runner = createMultiSourceRunner(iterators);
+    const runner = createAsyncCoordinator(iterators);
 
     const latestValues = new Array(sources.length).fill(undefined);
     const hasEmitted = new Set<number>();

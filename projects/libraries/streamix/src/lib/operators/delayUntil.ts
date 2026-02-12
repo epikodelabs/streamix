@@ -1,14 +1,14 @@
 import {
-  createMultiSourceRunner,
-  createOperator,
-  DONE,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  tagValue,
-  type Operator,
-  type Stream
+    createAsyncCoordinator,
+    createOperator,
+    DONE,
+    getIteratorEmissionStamp,
+    getIteratorMeta,
+    nextEmissionStamp,
+    setIteratorEmissionStamp,
+    tagValue,
+    type Operator,
+    type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
 
@@ -44,7 +44,7 @@ export function delayUntil<T = any, R = any>(
 ): Operator<T, T> {
   return createOperator<T, T>("delayUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
-    const runner = createMultiSourceRunner([source, notifierIt]);
+    const runner = createAsyncCoordinator([source, notifierIt]);
 
     const buffer: Array<{ value: T; stamp: number; meta?: any }> = [];
     let gateOpened = false;

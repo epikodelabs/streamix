@@ -1,4 +1,4 @@
-import { createMultiSourceRunner, createStream, type MaybePromise, type Stream } from "../abstractions";
+import { createAsyncCoordinator, createStream, type MaybePromise, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 
 /**
@@ -24,7 +24,7 @@ export function race<T extends readonly unknown[] = any[]>(
     if (streams.length === 0) return;
 
     const iterators = streams.map(s => fromAny(s)[Symbol.asyncIterator]());
-    const runner = createMultiSourceRunner(iterators);
+    const runner = createAsyncCoordinator(iterators);
     
     let winnerIndex: number | null = null;
 

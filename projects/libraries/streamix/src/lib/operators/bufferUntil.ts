@@ -1,15 +1,15 @@
 import {
-  createMultiSourceRunner,
-  createOperator,
-  DONE,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  setIteratorMeta,
-  setValueMeta,
-  type Operator,
-  type Stream,
+    createAsyncCoordinator,
+    createOperator,
+    DONE,
+    getIteratorEmissionStamp,
+    getIteratorMeta,
+    nextEmissionStamp,
+    setIteratorEmissionStamp,
+    setIteratorMeta,
+    setValueMeta,
+    type Operator,
+    type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 
@@ -28,7 +28,7 @@ import { fromAny } from "../converters";
 export const bufferUntil = <T = any>(notifier: Stream<any>) =>
   createOperator<T, T[]>("bufferUntil", function (this: Operator, source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
-    const runner = createMultiSourceRunner([source, notifierIt]);
+    const runner = createAsyncCoordinator([source, notifierIt]);
 
     // Buffered source values
     let buffer: T[] = [];
