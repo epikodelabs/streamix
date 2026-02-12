@@ -1,13 +1,12 @@
 import {
-  createAsyncCoordinator,
   createOperator,
-  createSubject,
-  eachValueFrom,
-  fromAny,
   getIteratorMeta,
   isPromiseLike,
   setValueMeta
-} from '@epikodelabs/streamix';
+} from '../abstractions';
+import { eachValueFrom, fromAny } from '../converters';
+import { createSubject } from '../subjects';
+import { createAsyncCoordinator } from '../utils';
 
 export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
   ...args: any[]

@@ -1,17 +1,17 @@
 import {
-    createAsyncCoordinator,
-    createOperator,
-    DONE,
-    getIteratorEmissionStamp,
-    getIteratorMeta,
-    nextEmissionStamp,
-    setIteratorEmissionStamp,
-    setIteratorMeta,
-    setValueMeta,
-    type Operator,
-    type Stream,
+  createOperator,
+  DONE,
+  getIteratorEmissionStamp,
+  getIteratorMeta,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  setIteratorMeta,
+  setValueMeta,
+  type Operator,
+  type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
+import { createAsyncCoordinator } from "../utils";
 
 /**
  * Buffers values from the source iterator until the notifier emits.

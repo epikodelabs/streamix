@@ -1,5 +1,6 @@
-import { createAsyncCoordinator, createStream, type MaybePromise, type Stream } from "../abstractions";
+import { createStream, type MaybePromise, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
+import { createAsyncCoordinator } from "../utils";
 
 /**
  * Combines multiple streams and emits a tuple containing the latest values

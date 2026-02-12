@@ -1,38 +1,12 @@
 import {
   nextEmissionStamp,
   setIteratorEmissionStamp
-} from "./emission";
+} from "../abstractions";
 
-import { DONE } from "./operator";
+import { DONE } from "../abstractions";
 
-import { getCurrentEmissionStamp } from "./emission";
-import { IteratorMetaKind, setIteratorMeta, setValueMeta } from "./hooks";
-import { isPromiseLike } from "./operator";
-import type { Receiver, StrictReceiver } from "./receiver";
-import type { Subscription } from "./subscription";
-
-/**
- * Attaches tracing metadata to both an iterator and a value in a single call.
- *
- * Consolidates the common `setIteratorMeta` + `setValueMeta` pattern.
- * Returns the (possibly wrapped) value.
- *
- * @param iterator The async iterator to tag.
- * @param value The value to tag.
- * @param meta Metadata from `getIteratorMeta(source)`. If `undefined`, the value is returned unchanged.
- * @param tag Optional additional tag fields (kind, inputValueIds).
- */
-export function tagValue<T>(
-  iterator: AsyncIterator<any>,
-  value: T,
-  meta: { valueId: string; operatorIndex: number; operatorName: string } | undefined,
-  tag?: { kind?: IteratorMetaKind; inputValueIds?: string[] }
-): T {
-  if (!meta) return value;
-  const metaTag = { valueId: meta.valueId, ...tag };
-  setIteratorMeta(iterator, metaTag, meta.operatorIndex, meta.operatorName);
-  return setValueMeta(value, metaTag, meta.operatorIndex, meta.operatorName);
-}
+import type { Receiver, StrictReceiver, Subscription } from "../abstractions";
+import { getCurrentEmissionStamp, isPromiseLike } from "../abstractions";
 
 /**
  * Creates a factory that produces fresh `AsyncIterator` instances backed by

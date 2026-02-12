@@ -1,4 +1,4 @@
-import { AsyncPushable, createAsyncPushable } from "./pushable";
+import { AsyncPushable, createAsyncPushable } from "../utils/pushable";
 import type { Stream } from "./stream";
 
 /**

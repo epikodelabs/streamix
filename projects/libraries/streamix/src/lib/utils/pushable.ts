@@ -1,11 +1,11 @@
 import {
+  DONE,
   getCurrentEmissionStamp,
   nextEmissionStamp,
-  setIteratorEmissionStamp
-} from "./emission";
-import { IteratorMetaKind, setIteratorMeta, setValueMeta } from "./hooks";
-import { DONE } from "./operator";
-import { StrictReceiver } from "./receiver";
+  setIteratorEmissionStamp,
+  StrictReceiver
+} from "../abstractions";
+import { IteratorMetaKind, setIteratorMeta, setValueMeta } from "../abstractions/hooks";
 
 
 /**

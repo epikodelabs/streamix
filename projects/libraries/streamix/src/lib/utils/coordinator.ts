@@ -1,5 +1,4 @@
-import { getIteratorEmissionStamp, setIteratorEmissionStamp } from "./emission";
-import { DONE } from "./operator";
+import { DONE, getIteratorEmissionStamp, setIteratorEmissionStamp } from "../abstractions";
 
 type RunnerEvent<T> =
   | { type: "value"; value: T; sourceIndex: number }
