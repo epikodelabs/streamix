@@ -291,10 +291,8 @@ export function createStream<T>(
     subscribe: wrappedSubscribe,
     query: () => firstValueFrom(self),
     [Symbol.asyncIterator]: () => {
-      // Use lazy=true to defer subscription (and generator start) until next()
       const factory = createAsyncIterator({ 
-        register: (receiver) => wrappedSubscribe(receiver), 
-        lazy: true 
+        register: (receiver) => wrappedSubscribe(receiver) 
       });
       const it = factory();
       (it as any).__streamix_streamId = id;

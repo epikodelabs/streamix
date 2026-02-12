@@ -58,23 +58,10 @@ export function tagValue<T>(
  */
 export function createAsyncIterator<T>(opts: {
   register: (receiver: Receiver<T>) => Subscription;
-  /**
-   * When `true`, the iterator does not register with the source until the
-   * consumer actually pulls (`next()`/`__tryNext()`).
-   *
-   * Streams should generally use `lazy: true` to avoid creating hidden
-   * subscriptions when an iterator is constructed but never consumed.
-   *
-   * Subjects should generally use `lazy: false` so operators that eagerly
-   * emit into an internal Subject can buffer values for downstream consumers.
-   */
-  lazy?: boolean;
 }) {
-  const { register, lazy = false } = opts;
+  const { register } = opts;
 
-  // IMPORTANT: return a *fresh* iterator per call. The old implementation
-  // registered a receiver eagerly during subject creation, which could
-  // deadlock subjects by introducing backpressure even when nobody is iterating.
+  // Lazy: only subscribe when consumer pulls
   return () => {
     let pullResolve: ((v: IteratorResult<T>) => void) | null = null;
     let pullReject: ((e: any) => void) | null = null;
@@ -83,32 +70,104 @@ export function createAsyncIterator<T>(opts: {
     let pendingError: { err: any; stamp: number } | null = null;
     let completed = false;
     let sub: Subscription | null = null;
+    let receiver: StrictReceiver<T> | null = null;
 
-    let iteratorReceiver!: StrictReceiver<T>;
+    // Store pending pushes before subscription
+    const pendingPushes: Array<{
+      type: 'next' | 'complete' | 'error';
+      value?: T;
+      err?: any;
+      stamp: number;
+    }> = [];
 
     const ensureSubscribed = () => {
       if (completed) return;
-      if (!sub) sub = register(iteratorReceiver);
+      if (!sub && !receiver) {
+        // Create receiver that will process both pending and future pushes
+        const _receiver: StrictReceiver<T> = {
+          next(value: T) {
+            if (completed) return;
+            const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+            const result: IteratorResult<T> = { done: false, value };
+            if (pullResolve) {
+              const r = pullResolve;
+              pullResolve = pullReject = null;
+              setIteratorEmissionStamp(iterator, stamp);
+              r(result);
+              iterator.__onPush?.();
+              return;
+            }
+            queue.push({ result, stamp });
+            if (typeof iterator.__onPush === "function") {
+              iterator.__onPush();
+              return;
+            }
+            return new Promise<void>((resolve) => backpressureQueue.push(resolve));
+          },
+          complete() {
+            if (completed) return;
+            completed = true;
+            const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+            if (pullResolve) {
+              const r = pullResolve;
+              pullResolve = pullReject = null;
+              setIteratorEmissionStamp(iterator, stamp);
+              r(DONE);
+              return;
+            }
+            queue.push({ result: DONE, stamp });
+            iterator.__onPush?.();
+          },
+          error(err: any) {
+            if (completed) return;
+            completed = true;
+            const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
+            if (pullReject) {
+              const r = pullReject;
+              pullResolve = pullReject = null;
+              setIteratorEmissionStamp(iterator, stamp);
+              r(err);
+              return;
+            }
+            pendingError = { err, stamp };
+            iterator.__onPush?.();
+          },
+          get completed() {
+            return completed;
+          }
+        };
+
+        receiver = _receiver;
+        sub = register(_receiver);
+
+        // Replay any pending pushes
+        for (const push of pendingPushes) {
+          if (push.type === 'next') {
+            _receiver.next(push.value!);
+          } else if (push.type === 'complete') {
+            _receiver.complete();
+          } else if (push.type === 'error') {
+            _receiver.error(push.err);
+          }
+        }
+        pendingPushes.length = 0;
+      }
+      return receiver;
     };
 
     const iterator: AsyncIterator<T> & {
-      // Non-standard helpers used by internal Stream piping/tests.
       __tryNext?: () => IteratorResult<T> | null;
       __hasBufferedValues?: () => boolean;
-      // Internal hook: some operators (e.g. switchMap) may attach this to
-      // synchronously drain buffered values when a producer pushes while the
-      // consumer is not currently awaiting `next()`.
       __onPush?: () => void;
+      __pushNext?: (value: T, stamp: number) => void;
+      __pushComplete?: (stamp: number) => void;
+      __pushError?: (err: any, stamp: number) => void;
     } = {
       next() {
         ensureSubscribed();
-
-        // Drain buffered values before checking pending errors so that
-        // values pushed before an error are delivered first.
         if (queue.length > 0) {
           const { result, stamp } = queue.shift()!;
           setIteratorEmissionStamp(iterator, stamp);
-          // Resolves the backpressure promise returned by receiver.next().
           backpressureQueue.shift()?.();
           if (result.done) {
             const unsubscribePromise = sub?.unsubscribe();
@@ -119,66 +178,53 @@ export function createAsyncIterator<T>(opts: {
           }
           return Promise.resolve(result);
         }
-
         if (pendingError) {
           const { err, stamp } = pendingError;
           pendingError = null;
           setIteratorEmissionStamp(iterator, stamp);
           return Promise.reject(err);
         }
-
         if (completed) {
           const unsubscribePromise = sub?.unsubscribe();
           sub = null;
-          // Ensure teardown has a chance to run, but don't block iteration.
           if (unsubscribePromise && isPromiseLike(unsubscribePromise)) {
             unsubscribePromise.catch(() => {});
           }
           return Promise.resolve(DONE);
         }
-
         return new Promise((res, rej) => {
           pullResolve = res;
           pullReject = rej;
         });
       },
-
       async return() {
         completed = true;
         const unsubscribePromise = sub?.unsubscribe();
         sub = null;
-
         if (pullResolve) {
           const r = pullResolve;
           pullResolve = pullReject = null;
           r(DONE);
         }
-
-        // Release any pending producer backpressure.
         for (const resolve of backpressureQueue) resolve();
         backpressureQueue.length = 0;
-
         try {
           await unsubscribePromise;
         } catch {
         }
         return Promise.resolve(DONE);
       },
-
       async throw(err) {
         completed = true;
         const unsubscribePromise = sub?.unsubscribe();
         sub = null;
-
         if (pullReject) {
           const r = pullReject;
           pullResolve = pullReject = null;
           r(err);
         }
-
         for (const resolve of backpressureQueue) resolve();
         backpressureQueue.length = 0;
-
         try {
           await unsubscribePromise;
         } catch {
@@ -188,13 +234,10 @@ export function createAsyncIterator<T>(opts: {
     };
 
     iterator.__hasBufferedValues = () =>
-      queue.length > 0 || pendingError != null || completed;
+      queue.length > 0 || pendingError != null || completed || pendingPushes.length > 0;
 
     iterator.__tryNext = () => {
       ensureSubscribed();
-
-      // Drain buffered values before checking pending errors so that
-      // values pushed before an error are delivered first.
       if (queue.length > 0) {
         const { result, stamp } = queue.shift()!;
         setIteratorEmissionStamp(iterator, stamp);
@@ -208,14 +251,12 @@ export function createAsyncIterator<T>(opts: {
         }
         return result;
       }
-
       if (pendingError) {
         const { err, stamp } = pendingError;
         pendingError = null;
         setIteratorEmissionStamp(iterator, stamp);
         throw err;
       }
-
       if (completed) {
         const unsubscribePromise = sub?.unsubscribe();
         sub = null;
@@ -224,83 +265,33 @@ export function createAsyncIterator<T>(opts: {
         }
         return DONE;
       }
-
       return null;
     };
 
-    const _iteratorReceiver: StrictReceiver<T> = {
-      next(value: T) {
-        if (completed) return;
-        const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-        const result: IteratorResult<T> = { done: false, value };
-
-        if (pullResolve) {
-          const r = pullResolve;
-          pullResolve = pullReject = null;
-          setIteratorEmissionStamp(iterator, stamp);
-          r(result);
-          iterator.__onPush?.();
-          return;
-        }
-
-        queue.push({ result, stamp });
-        // Give consumers a chance to drain synchronously from the buffer.
-        if (typeof iterator.__onPush === "function") {
-          iterator.__onPush();
-          return;
-        }
-
-        // Producer backpressure: block the producer until the consumer pulls.
-        return new Promise<void>((resolve) => backpressureQueue.push(resolve));
-      },
-
-      complete() {
-        if (completed) return;
-        completed = true;
-        const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-
-        if (pullResolve) {
-          const r = pullResolve;
-          pullResolve = pullReject = null;
-          setIteratorEmissionStamp(iterator, stamp);
-          r(DONE);
-          return;
-        }
-
-        queue.push({ result: DONE, stamp });
-        iterator.__onPush?.();
-      },
-
-      error(err) {
-        if (completed) return;
-        completed = true;
-        const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-
-        if (pullReject) {
-          const r = pullReject;
-          pullResolve = pullReject = null;
-          setIteratorEmissionStamp(iterator, stamp);
-          r(err);
-          return;
-        }
-
-        pendingError = { err, stamp };
-        iterator.__onPush?.();
-      },
-
-      get completed() {
-        return completed;
+    // Methods to push values before subscription
+    iterator.__pushNext = (value: T, stamp: number) => {
+      if (receiver) {
+        receiver.next(value);
+      } else {
+        pendingPushes.push({ type: 'next', value, stamp });
       }
     };
 
-    iteratorReceiver = _iteratorReceiver;
+    iterator.__pushComplete = (stamp: number) => {
+      if (receiver) {
+        receiver.complete();
+      } else {
+        pendingPushes.push({ type: 'complete', stamp });
+      }
+    };
 
-    // Subjects rely on buffering: many operators push into an internal Subject
-    // immediately during `apply()`, before the downstream consumer starts
-    // awaiting `next()`. Eager registration ensures those pushes are buffered.
-    if (!lazy) {
-      ensureSubscribed();
-    }
+    iterator.__pushError = (err: any, stamp: number) => {
+      if (receiver) {
+        receiver.error(err);
+      } else {
+        pendingPushes.push({ type: 'error', err, stamp });
+      }
+    };
 
     return iterator;
   };
