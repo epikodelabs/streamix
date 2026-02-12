@@ -1,5 +1,6 @@
 import { firstValueFrom } from "../converters";
 import { createSubject } from "../subjects";
+import { createAsyncIterator } from "../utils/iterator";
 import {
   getIteratorEmissionStamp,
   nextEmissionStamp,
@@ -11,7 +12,6 @@ import {
   generateSubscriptionId,
   getRuntimeHooks
 } from "./hooks";
-import { createAsyncIterator } from "./iterator";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
 import { createSubscription, type Subscription } from "./subscription";
