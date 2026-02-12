@@ -1,5 +1,5 @@
 import {
-  createMultiSourceRunner,
+  createAsyncCoordinator,
   createOperator,
   createSubject,
   eachValueFrom,
@@ -34,7 +34,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
         const allIterators = [...auxIterators, source];
         
         const sourceIndex = allIterators.length - 1;
-        const runner = createMultiSourceRunner(allIterators);
+        const runner = createAsyncCoordinator(allIterators);
         
         const latestValues = new Array(auxIterators.length).fill(undefined);
         const hasValue = new Array(auxIterators.length).fill(false);

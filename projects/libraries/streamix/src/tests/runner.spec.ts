@@ -1,5 +1,5 @@
 import {
-    createMultiSourceRunner, DONE, getIteratorEmissionStamp,
+    createAsyncCoordinator, DONE, getIteratorEmissionStamp,
     setIteratorEmissionStamp
 } from "@epikodelabs/streamix";
 
@@ -16,7 +16,7 @@ describe("runner", () => {
         const source0 = delayedSource(["A", "C"], 50);
         const source1 = delayedSource(["B"], 75);
 
-        const runner = createMultiSourceRunner([source0, source1]);
+        const runner = createAsyncCoordinator([source0, source1]);
         const results: any[] = [];
 
         let res = await runner.next();
@@ -51,7 +51,7 @@ describe("runner", () => {
             __onPush: null
         };
 
-        const runner = createMultiSourceRunner([source0]);
+        const runner = createAsyncCoordinator([source0]);
 
         // Test synchronous behavior
         const res = runner.__tryNext?.();
@@ -69,7 +69,7 @@ describe("runner", () => {
             throw new Error("fail");
         }
 
-        const runner = createMultiSourceRunner([errorSource()]);
+        const runner = createAsyncCoordinator([errorSource()]);
         const res = await runner.next();
 
         expect(res.value).toEqual(jasmine.objectContaining({
@@ -92,7 +92,7 @@ describe("runner", () => {
             return: () => { source1Returned = true; return Promise.resolve(DONE); }
         };
 
-        const runner = createMultiSourceRunner([source0, source1]);
+        const runner = createAsyncCoordinator([source0, source1]);
         await runner.return?.();
 
         expect(source0Returned).toBe(true);
@@ -108,7 +108,7 @@ describe("runner", () => {
             }
         };
 
-        const runner = createMultiSourceRunner([source0]);
+        const runner = createAsyncCoordinator([source0]);
         await runner.next();
 
         expect(getIteratorEmissionStamp(runner)).toBe(12345);

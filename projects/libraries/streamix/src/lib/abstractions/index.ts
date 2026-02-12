@@ -1,3 +1,4 @@
+export * from './coordinator';
 export * from './emission';
 export * from './hooks';
 export * from './iterator';
