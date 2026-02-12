@@ -102,20 +102,26 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
       try {
         // --- 1. Setup Auxiliary Streams ---
         const hasPromises = normalizedInputs.some(isPromiseLike);
-        
+        let resolvedInputs = normalizedInputs;
         if (hasPromises) {
-          const resolvedInputs = await Promise.all(
+          resolvedInputs = await Promise.all(
             normalizedInputs.map(async (stream) => (isPromiseLike(stream) ? await stream : stream))
           );
-          
-          if (signal.aborted) {
-            cleanup();
-            return;
-          }
-          
-          setupAuxiliary(resolvedInputs);
-        } else {
-          setupAuxiliary(normalizedInputs);
+        }
+
+        if (signal.aborted) {
+          cleanup();
+          return;
+        }
+
+        setupAuxiliary(resolvedInputs);
+
+        // Wait one event loop tick to allow auxiliary streams to emit their initial values.
+        // This is necessary because streams like from([...]) emit asynchronously even when
+        // the data is immediately available. Without this wait, a fast source stream could
+        // complete before auxiliary streams have had a chance to emit.
+        if (resolvedInputs.length > 0) {
+          await new Promise(resolve => setTimeout(resolve, 0));
         }
 
         // Check for auxiliary errors that occurred during setup
@@ -175,8 +181,8 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
       }
     };
 
-    // Start iteration
-    iterate();
+    // Start iteration only after all auxiliary streams are resolved and subscribed
+    (async () => { await iterate(); })();
 
     // --- Custom Subscription Handling ---
     const originalSubscribe = output.subscribe;
