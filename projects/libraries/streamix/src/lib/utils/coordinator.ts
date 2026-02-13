@@ -1,31 +1,65 @@
 import { DONE, getIteratorEmissionStamp, setIteratorEmissionStamp } from "../abstractions";
 import { insertOrdered, type QueueItem } from "./helpers";
 
-type RunnerEvent<T> =
+export type RunnerEvent<T> =
   | { type: "value"; value: T; sourceIndex: number }
   | { type: "complete"; sourceIndex: number }
   | { type: "error"; error: any; sourceIndex: number };
 
-export function createAsyncCoordinator(
-  sources: AsyncIterator<any>[]
-): AsyncIterator<RunnerEvent<any>> & {
-  __tryNext?: () => IteratorResult<RunnerEvent<any>> | null;
+export interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
+  __tryNext?: () => IteratorResult<RunnerEvent<T>> | null;
   __hasBufferedValues?: () => boolean;
-} {
+  
+  // Dynamic source management
+  addSource(source: AsyncIterator<T>): number;
+  removeSource(index: number): Promise<void>;
+  getActiveSourceCount(): number;
+  isSourceComplete(index: number): boolean;
+}
+
+/**
+ * Creates an async coordinator that merges multiple async iterators while preserving
+ * timestamp-based ordering. Supports dynamically adding and removing sources during iteration.
+ *
+ * Features:
+ * - Timestamp-ordered emission across all sources
+ * - Sync source draining (via __tryNext)
+ * - Async source concurrent pulling
+ * - Push notification support
+ * - Dynamic source addition/removal
+ * - Automatic cleanup and error handling
+ *
+ * @param sources Initial array of async iterators (can be empty)
+ * @returns AsyncCoordinator with dynamic source management capabilities
+ */
+export function createAsyncCoordinator(
+  sources: AsyncIterator<any>[] = []
+): AsyncCoordinator<any> {
   type CoordinatorQueueItem = QueueItem<RunnerEvent<any>> & {
     sourceIndex: number;
   };
 
   const queue: CoordinatorQueueItem[] = [];
-  const completed = new Array(sources.length).fill(false);
-  const pulling = new Array(sources.length).fill(false);
-  const pendingPulls = new Array(sources.length).fill(false);
+  
+  // Use sparse arrays to support dynamic indices
+  const sourceList: (AsyncIterator<any> | null)[] = [...sources];
+  const completed: boolean[] = sources.map(() => false);
+  const pulling: boolean[] = sources.map(() => false);
+  const pendingPulls: boolean[] = sources.map(() => false);
 
   let waitingResolve: ((v: any) => void) | null = null;
   let isDraining = false;
   let nextStamp = 1;
+  let iteratorReturned = false;
 
-  const allDone = () => completed.every(Boolean);
+  const allDone = () => {
+    for (let i = 0; i < sourceList.length; i++) {
+      if (sourceList[i] !== null && !completed[i]) {
+        return false;
+      }
+    }
+    return true;
+  };
 
   function pushEvent(event: RunnerEvent<any>, stamp: number, sourceIndex: number) {
     insertOrdered(queue, {
@@ -52,19 +86,19 @@ export function createAsyncCoordinator(
   }
 
   function pullAsync(i: number) {
-    // CRITICAL: Don't start a new pull if already pulling or completed
-    if (completed[i] || pulling[i]) return;
+    // CRITICAL: Don't start a new pull if already pulling, completed, removed, or returned
+    if (!sourceList[i] || completed[i] || pulling[i] || iteratorReturned) return;
     
     pulling[i] = true;
     pendingPulls[i] = false;
-    const src: any = sources[i];
+    const src: any = sourceList[i];
     
     src.next().then(
       (r: IteratorResult<any>) => {
         pulling[i] = false;
         
-        // Don't process if source was completed during the async wait
-        if (completed[i]) return;
+        // Don't process if source was completed/removed during the async wait
+        if (!sourceList[i] || completed[i] || iteratorReturned) return;
 
         const stamp = getIteratorEmissionStamp(src) ?? nextStamp++;
 
@@ -79,14 +113,14 @@ export function createAsyncCoordinator(
         
         // CRITICAL: Only schedule next pull if there are more values AND not already pulling
         // AND not completed AND there's a pending pull request
-        if (!completed[i] && !pulling[i] && pendingPulls[i]) {
+        if (sourceList[i] && !completed[i] && !pulling[i] && pendingPulls[i]) {
           pendingPulls[i] = false;
           Promise.resolve().then(() => pullAsync(i));
         }
       },
       (err: any) => {
         pulling[i] = false;
-        if (completed[i]) return;
+        if (!sourceList[i] || completed[i] || iteratorReturned) return;
         
         completed[i] = true;
         const stamp = getIteratorEmissionStamp(src) ?? nextStamp++;
@@ -98,14 +132,14 @@ export function createAsyncCoordinator(
 
   function drainSources() {
     // CRITICAL: Prevent recursive drains
-    if (isDraining) return;
+    if (isDraining || iteratorReturned) return;
     isDraining = true;
 
     try {
-      for (let i = 0; i < sources.length; i++) {
-        if (completed[i]) continue;
+      for (let i = 0; i < sourceList.length; i++) {
+        if (!sourceList[i] || completed[i]) continue;
 
-        const src: any = sources[i];
+        const src: any = sourceList[i];
 
         // Sync sources - DRAIN ALL VALUES
         if (src.__tryNext) {
@@ -145,8 +179,8 @@ export function createAsyncCoordinator(
     notify();
   }
 
-  // Wire up push notifications
-  for (const src of sources as any[]) {
+  // Wire up push notifications for a source
+  function wireSource(src: any) {
     const orig = src.__onPush;
     src.__onPush = () => {
       orig?.();
@@ -155,8 +189,15 @@ export function createAsyncCoordinator(
     };
   }
 
+  // Wire up initial sources
+  for (const src of sources as any[]) {
+    wireSource(src);
+  }
+
   const iterator: any = {
     next() {
+      if (iteratorReturned) return Promise.resolve(DONE);
+      
       drainSources();
 
       if (queue.length > 0) {
@@ -173,6 +214,8 @@ export function createAsyncCoordinator(
     },
 
     __tryNext() {
+      if (iteratorReturned) return DONE;
+      
       drainSources();
 
       if (queue.length > 0) {
@@ -189,6 +232,8 @@ export function createAsyncCoordinator(
     },
 
     async return() {
+      iteratorReturned = true;
+      
       // Mark all as completed immediately
       for (let i = 0; i < completed.length; i++) {
         completed[i] = true;
@@ -205,7 +250,7 @@ export function createAsyncCoordinator(
         }
       };
 
-      await Promise.all(sources.map(safe));
+      await Promise.all(sourceList.filter(s => s !== null).map(safe));
       
       if (waitingResolve) {
         waitingResolve(DONE);
@@ -213,11 +258,99 @@ export function createAsyncCoordinator(
       }
       
       return DONE;
+    },
+
+    // ============================================
+    // Dynamic Source Management API
+    // ============================================
+
+    /**
+     * Add a new source dynamically during iteration.
+     * The source will be immediately wired for push notifications and drained.
+     * 
+     * @param source AsyncIterator to add
+     * @returns The index assigned to this source (for tracking)
+     */
+    addSource(source: AsyncIterator<any>): number {
+      if (iteratorReturned) {
+        throw new Error('Cannot add source to returned coordinator');
+      }
+
+      const index = sourceList.length;
+      sourceList.push(source);
+      completed.push(false);
+      pulling.push(false);
+      pendingPulls.push(false);
+
+      // Wire up push notification
+      wireSource(source);
+
+      // Trigger immediate drain for new source
+      Promise.resolve().then(() => drainSources());
+
+      return index;
+    },
+
+    /**
+     * Remove a source from the coordinator and clean it up.
+     * The source will be marked as completed and its return() method called.
+     * 
+     * @param index Index of the source to remove
+     */
+    async removeSource(index: number): Promise<void> {
+      if (index < 0 || index >= sourceList.length) return;
+
+      const source = sourceList[index];
+      if (!source) return;
+
+      // Mark as completed and clear the slot
+      completed[index] = true;
+      pulling[index] = false;
+      pendingPulls[index] = false;
+      sourceList[index] = null;
+
+      // Call return on the source
+      try {
+        await source.return?.();
+      } catch {
+        // Ignore cleanup errors
+      }
+
+      // Notify in case we're waiting and all sources are now done
+      notify();
+    },
+
+    /**
+     * Get the count of currently active (non-completed, non-removed) sources.
+     * 
+     * @returns Number of active sources
+     */
+    getActiveSourceCount(): number {
+      let count = 0;
+      for (let i = 0; i < sourceList.length; i++) {
+        if (sourceList[i] !== null && !completed[i]) {
+          count++;
+        }
+      }
+      return count;
+    },
+
+    /**
+     * Check if a specific source is completed.
+     * 
+     * @param index Source index to check
+     * @returns true if source is completed or removed, false otherwise
+     */
+    isSourceComplete(index: number): boolean {
+      if (index < 0 || index >= sourceList.length) return true;
+      return sourceList[index] === null || completed[index];
     }
   };
 
   // Initial drain - schedule to prevent blocking
-  Promise.resolve().then(() => drainSources());
+  if (sources.length > 0) {
+    Promise.resolve().then(() => drainSources());
+  }
 
-  return iterator;
+  return iterator as AsyncCoordinator<any>;
 }
