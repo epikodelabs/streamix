@@ -1,6 +1,13 @@
-import { createOperator, DONE, getIteratorMeta, tagValue, type MaybePromise, type Operator, type Stream } from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
-import { createSubject, type Subject } from '../subjects';
+import {
+  createOperator,
+  getIteratorMeta,
+  tagValue,
+  type MaybePromise,
+  type Operator,
+  type Stream
+} from '../abstractions';
+import { fromAny } from '../converters';
+import { createAsyncCoordinator, type RunnerEvent } from '../utils';
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream
@@ -11,10 +18,10 @@ import { createSubject, type Subject } from '../subjects';
  * 2. The returned value is normalized into a stream using {@link fromAny}.
  * 3. The inner stream is consumed concurrently with all other active inner streams.
  * 4. Emitted values from all inner streams are interleaved into the output stream
- *    in the order they are produced, without waiting for other inner streams to complete.
+ *    in timestamp order, preserving causality across all concurrent operations.
  *
  * This operator is useful for performing parallel asynchronous operations while
- * preserving all emitted values in a merged output.
+ * preserving all emitted values in a merged output with correct temporal ordering.
  *
  * @template T The type of values in the source stream.
  * @template R The type of values emitted by the inner and output streams.
@@ -22,110 +29,133 @@ import { createSubject, type Subject } from '../subjects';
  *   - a {@link Stream<R>},
  *   - a {@link MaybePromise<R>} (value or promise),
  *   - or an array of `R`.
+ * @param concurrent Maximum number of concurrent inner streams (default: Infinity).
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
+ *
+ * @example
+ * ```typescript
+ * // Process HTTP requests with max 3 concurrent
+ * stream(urls).pipe(
+ *   mergeMap(url => fetch(url), 3)
+ * )
+ * ```
  */
 export function mergeMap<T = any, R = any>(
   project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>,
+  concurrent: number = Infinity
 ) {
   return createOperator<T, R>('mergeMap', function (this: Operator, source) {
-    const output: Subject<R> = createSubject<R>();
-    const outputIterator = eachValueFrom(output);
+    // Create the generator and store reference for tagValue
+    let outputIterator: AsyncGenerator<R, void, unknown>;
+    
+    const generator = async function* () {
+      // Source is at index 0, inner streams start at index 1+
+      const SOURCE_INDEX = 0;
+      
+      // Create coordinator with just the source initially
+      const coordinator = createAsyncCoordinator([source]);
+      
+      // Track metadata for each inner stream
+      const innerMetas = new Map<number, { valueId: string; operatorIndex: number; operatorName: string } | undefined>();
+      
+      let projectIndex = 0;
+      let sourceCompleted = false;
+      let pendingInners = 0;
 
-    let index = 0;
-    let activeInner = 0;
-    let outerCompleted = false;
-    let errorOccurred = false;
-    let stopped = false;
-
-    const activeInnerIterators = new Set<AsyncIterator<R>>();
-
-    // Process each inner stream concurrently.
-    const processInner = async (
-      innerStream: Stream<R>,
-      parentMeta?: { valueId: string; operatorIndex: number; operatorName: string }
-    ) => {
-      const innerIt = innerStream[Symbol.asyncIterator]();
-      activeInnerIterators.add(innerIt);
-      try {
-        while (!stopped) {
-          const r = await innerIt.next();
-          if (r.done) break;
-          if (stopped || errorOccurred) break;
-
-          output.next(tagValue(outputIterator, r.value, parentMeta, { kind: "expand" }));
+      /**
+       * Process events while waiting for a concurrency slot to free up.
+       * Yields values from inner streams and tracks their completion.
+       */
+      const processWhileWaiting = async function* () {
+        while (pendingInners >= concurrent) {
+          const nextEvent = await coordinator.next();
+          if (nextEvent.done) break;
+          
+          const event = nextEvent.value as RunnerEvent<R>;
+          
+          // Only process inner stream events (not source events)
+          if (event.sourceIndex !== SOURCE_INDEX) {
+            if (event.type === 'value') {
+              const parentMeta = innerMetas.get(event.sourceIndex);
+              yield tagValue(outputIterator, event.value, parentMeta, { kind: "expand" });
+            } 
+            else if (event.type === 'complete') {
+              pendingInners--;
+              innerMetas.delete(event.sourceIndex);
+              break; // Free slot available
+            }
+            else if (event.type === 'error') {
+              throw event.error;
+            }
+          }
         }
-      } catch (err) {
-        if (!errorOccurred) {
-          errorOccurred = true;
-          output.error(err);
+      };
+
+      try {
+        while (true) {
+          const nextEvent = await coordinator.next();
+          if (nextEvent.done) break;
+
+          const event = nextEvent.value as RunnerEvent<R>;
+
+          // ============================================
+          // Source Stream Events (index 0)
+          // ============================================
+          if (event.sourceIndex === SOURCE_INDEX) {
+            if (event.type === 'value') {
+              // Wait for a concurrency slot if needed
+              if (pendingInners >= concurrent) {
+          yield* processWhileWaiting();
+              }
+
+              // Project the source value to an inner stream
+              const projected = project(event.value as any, projectIndex++);
+              const inner = fromAny(projected as any);
+              const parentMeta = getIteratorMeta(source);
+
+              // Add the inner stream to the coordinator
+              const innerIndex = coordinator.addSource(inner[Symbol.asyncIterator]());
+              innerMetas.set(innerIndex, parentMeta);
+              pendingInners++;
+            }
+            else if (event.type === 'complete') {
+              // Source completed - continue until all inners complete
+              sourceCompleted = true;
+            }
+            else if (event.type === 'error') {
+              throw event.error;
+            }
+          }
+          // ============================================
+          // Inner Stream Events (index > 0)
+          // ============================================
+          else {
+            if (event.type === 'value') {
+              const parentMeta = innerMetas.get(event.sourceIndex);
+              yield tagValue(outputIterator, event.value, parentMeta, { kind: "expand" });
+            }
+            else if (event.type === 'complete') {
+              pendingInners--;
+              innerMetas.delete(event.sourceIndex);
+
+              // If source is complete and no more inners, we're done
+              if (sourceCompleted && pendingInners === 0) {
+          break;
+              }
+            }
+            else if (event.type === 'error') {
+              throw event.error;
+            }
+          }
         }
       } finally {
-        activeInnerIterators.delete(innerIt);
-        activeInner--;
-        if (outerCompleted && activeInner === 0 && !errorOccurred) {
-          output.complete();
-        }
+        // Coordinator cleanup handles all sources (including inners)
+        await coordinator.return?.();
       }
     };
 
-    void (async () => {
-      try {
-        while (!stopped) {
-          const result = await source.next();
-          if (result.done) break;
-          if (errorOccurred) break;
-
-          const projected = project(result.value, index++);
-          // IMPORTANT: do NOT await promises here; each projected value/promise/stream
-          // should start concurrently.
-          const inner = fromAny(projected as any);
-          const parentMeta = getIteratorMeta(source);
-          activeInner++;
-          processInner(inner, parentMeta);
-        }
-
-        outerCompleted = true;
-        if (activeInner === 0 && !errorOccurred) {
-          output.complete();
-        }
-      } catch (err) {
-        if (!errorOccurred) {
-          errorOccurred = true;
-          output.error(err);
-        }
-      }
-    })();
-
-    const baseReturn = outputIterator.return?.bind(outputIterator);
-    const baseThrow = outputIterator.throw?.bind(outputIterator);
-
-    (outputIterator as any).return = async () => {
-      stopped = true;
-      try {
-        try { await source.return?.(); } catch {}
-        for (const it of activeInnerIterators) {
-          try { await it.return?.(); } catch {}
-        }
-        activeInnerIterators.clear();
-      } finally {
-        return baseReturn ? baseReturn(undefined as any) : DONE;
-      }
-    };
-
-    (outputIterator as any).throw = async (err: any) => {
-      stopped = true;
-      try {
-        try { await source.return?.(); } catch {}
-        for (const it of activeInnerIterators) {
-          try { await it.return?.(); } catch {}
-        }
-        activeInnerIterators.clear();
-      } finally {
-        if (baseThrow) return baseThrow(err);
-      }
-      throw err;
-    };
-
+    // Store reference and return
+    outputIterator = generator();
     return outputIterator;
   });
 }
