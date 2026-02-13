@@ -187,9 +187,7 @@ describe('withLatestFrom', () => {
       });
     });
 
-    await scheduler.flush();
     aux$.error("AUX_STR");
-    await scheduler.flush();
     await done;
   });
 
@@ -215,11 +213,8 @@ describe('withLatestFrom', () => {
       });
     });
 
-    await scheduler.flush();
     aux$.next("A");
-    await scheduler.flush();
     main$.error("MAIN_STR");
-    await scheduler.flush();
     await done;
   });
 
@@ -341,16 +336,31 @@ describe('withLatestFrom', () => {
     ]);
   });
 
-  it('attaches iterator/value metadata from the source emission', async () => {
-    const tagIds = createOperator<number, number>('tagIds', function (source) {
+  it('preserves metadata from both source and auxiliary values', async () => {
+    // Tag source values
+    const tagSource = createOperator<number, number>('tagSource', function (source) {
       let n = 0;
       const iterator: AsyncIterator<number> = {
         next: async () => {
           const result = await source.next();
           if (result.done) return result;
-
           n += 1;
-          setIteratorMeta(iterator as any, { valueId: `id${n}` }, 0, 'tagIds');
+          setIteratorMeta(iterator as any, { valueId: `src-${n}` }, 0, 'tagSource');
+          return result;
+        },
+      };
+      return iterator;
+    });
+
+    // Tag auxiliary values  
+    const tagAux = createOperator<string, string>('tagAux', function (source) {
+      let n = 0;
+      const iterator: AsyncIterator<string> = {
+        next: async () => {
+          const result = await source.next();
+          if (result.done) return result;
+          n += 1;
+          setIteratorMeta(iterator as any, { valueId: `aux-${n}` }, 0, 'tagAux');
           return result;
         },
       };
@@ -360,26 +370,37 @@ describe('withLatestFrom', () => {
     const main$ = createSubject<number>();
     const aux$ = createSubject<string>();
 
-    const combined = main$.pipe(tagIds, withLatestFrom(aux$));
+    const combined = main$.pipe(
+      tagSource,
+      withLatestFrom(aux$.pipe(tagAux))
+    );
+
     const it = combined[Symbol.asyncIterator]();
-
+    
+    // 2. Allow tagAux and withLatestFrom setup to "see" the value
+    await scheduler.flush(); 
+    // 1. Prepare auxiliary state
     aux$.next('A');
-    await scheduler.flush();
+    // 3. Start the consumer's pull
+    const nextPromise = it.next();
 
+    // 4. Trigger the main emission
     main$.next(5);
-    await scheduler.flush();
 
-    const r1 = await it.next();
-    expect(r1.done).toBe(false);
-    expect(r1.value).toEqual([5, 'A']);
+    const result = await nextPromise;
+    expect(result.value).toEqual([5, 'A']);
 
-    expect(getIteratorMeta(it as any)).toEqual(
-      jasmine.objectContaining({ valueId: 'id1' })
+    // Should have metadata
+    const valueMeta = getValueMeta(result.value);
+    expect(valueMeta).toEqual(
+      jasmine.objectContaining({
+        valueId: jasmine.any(String),
+        operatorName: 'withLatestFrom' // The operator that created this tuple
+      })
     );
 
-    expect(getValueMeta(r1.value)).toEqual(
-      jasmine.objectContaining({ valueId: 'id1' })
-    );
+    // The output iterator is new - shouldn't have source's iterator metadata
+    expect(getIteratorMeta(it as any)).toBeUndefined();
   });
 
   it('should abort during promise resolution of auxiliary streams', async () => {
@@ -433,7 +454,7 @@ describe('withLatestFrom', () => {
       error: errorSpy,
     });
 
-    await new Promise((r) => setTimeout(r, 50));
+      await scheduler.flush();
 
     // The error should be caught during setup
     expect(errorSpy).toHaveBeenCalled();

@@ -2,13 +2,13 @@ import {
   createOperator,
   DONE,
   getIteratorEmissionStamp,
-  NEXT,
   nextEmissionStamp,
   setIteratorEmissionStamp,
   type Operator,
-  type Stream,
+  type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
+import { createAsyncCoordinator } from "../utils";
 
 /**
  * Skip source values until a notifier emits.
@@ -40,84 +40,90 @@ import { fromAny } from "../converters";
 export function skipUntil<T = any, R = any>(
   notifier: Stream<R> | Promise<R>
 ): Operator<T, T> {
-  return createOperator<T, T>("skipUntil", (sourceIt) => {
+  return createOperator<T, T>("skipUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
+    const runner = createAsyncCoordinator([source, notifierIt]);
 
+    let gateOpened = false;
     let gateStamp: number | null = null;
-    let notifierError: any = null;
+    let isDone = false;
 
-    const stampOf = (it: any) => {
-      const s = getIteratorEmissionStamp(it);
-      return typeof s === "number" ? s : nextEmissionStamp();
-    };
+    const handleEvent = (event: any, target: any): IteratorResult<T> | null => {
+      if (event.type === 'error') {
+        isDone = true;
+        throw event.error;
+      }
 
-    // Observe notifier exactly once
-    void (async () => {
-      try {
-        const r = await notifierIt.next();
-        const stamp = stampOf(notifierIt);
-        if (!r.done) {
+      if (event.type === 'complete') {
+        if (event.sourceIndex === 0) {
+          isDone = true;
+          return DONE;
+        }
+        // Notifier completing without emission is handled by gateOpened remaining false
+        return null;
+      }
+
+      const stamp = getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp();
+
+      if (event.sourceIndex === 1) {
+        // Notifier emitted: open the gate and record the stamp
+        if (!gateOpened) {
+          gateOpened = true;
           gateStamp = stamp;
         }
-      } catch (err) {
-        notifierError = err;
-        try {
-          await sourceIt.return?.();
-        } catch {}
-      } finally {
-        try {
-          await notifierIt.return?.();
-        } catch {}
+        return null;
       }
-    })();
 
-    const iterator: AsyncIterator<T> = {
+      // Source value (sourceIndex === 0)
+      if (gateOpened && gateStamp !== null && stamp > gateStamp) {
+        setIteratorEmissionStamp(target, stamp);
+        return { done: false, value: event.value };
+      }
+
+      return null; // Skip/drop value
+    };
+
+    const iterator: AsyncIterator<T> & {
+      __tryNext?: () => IteratorResult<T> | null;
+      __hasBufferedValues?: () => boolean;
+    } = {
       async next() {
+        if (isDone) return DONE;
+
         while (true) {
-          if (notifierError) throw notifierError;
+          // 1. Try sync drain
+          const sync = this.__tryNext?.();
+          if (sync) return sync;
 
-          const r = await sourceIt.next();
-          const stamp = stampOf(sourceIt);
+          // 2. Wait for runner
+          const result = await runner.next();
+          if (result.done) return DONE;
 
-          if (r.done) {
-            if (notifierError) throw notifierError;
-            return DONE;
-          }
-
-          // Gate closed: drop values until notifier emits.
-          if (gateStamp === null) {
-            continue;
-          }
-
-          // Only forward values strictly after the gate-opening stamp.
-          if (stamp <= gateStamp) {
-            continue;
-          }
-
-          setIteratorEmissionStamp(iterator as any, stamp);
-          return NEXT(r.value);
+          const out = handleEvent(result.value, iterator);
+          if (out) return out;
         }
       },
 
-      async return() {
-        try {
-          await sourceIt.return?.();
-        } catch {}
-        try {
-          await notifierIt.return?.();
-        } catch {}
-        return DONE;
+      __tryNext() {
+        if (isDone) return DONE;
+
+        while (runner.__hasBufferedValues?.()) {
+          const res = runner.__tryNext?.();
+          if (!res || res.done) break;
+
+          const out = handleEvent(res.value, iterator);
+          if (out) return out;
+        }
+        return isDone ? DONE : null;
       },
 
-      async throw(err) {
-        try {
-          await sourceIt.return?.();
-        } catch {}
-        try {
-          await notifierIt.return?.();
-        } catch {}
-        throw err;
-      },
+      __hasBufferedValues: () => runner.__hasBufferedValues?.() ?? false,
+
+      async return(value) {
+        isDone = true;
+        await runner.return?.();
+        return value !== undefined ? { value, done: true } : DONE;
+      }
     };
 
     return iterator;

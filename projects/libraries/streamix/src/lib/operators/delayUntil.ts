@@ -1,15 +1,16 @@
 import {
-    createOperator,
-    getIteratorEmissionStamp,
-    getIteratorMeta,
-    setIteratorEmissionStamp,
-    setIteratorMeta,
-    setValueMeta,
-    type Operator,
-    type Stream,
+  createOperator,
+  DONE,
+  getIteratorEmissionStamp,
+  getIteratorMeta,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  tagValue,
+  type Operator,
+  type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
-import { createSubject } from "../subjects";
+import { createAsyncCoordinator } from "../utils";
 
 /**
  * Delay values from the source until a notifier emits.
@@ -41,132 +42,165 @@ import { createSubject } from "../subjects";
 export function delayUntil<T = any, R = any>(
   notifier: Stream<R> | Promise<R>
 ): Operator<T, T> {
-  return createOperator<T, T>("delayUntil", (source) => {
-    const output = createSubject<T>();
-    const outputIt = output[Symbol.asyncIterator]();
+  return createOperator<T, T>("delayUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
+    const runner = createAsyncCoordinator([source, notifierIt]);
 
-    const buffer: Array<{ value: T; stamp: number; meta?: ReturnType<typeof getIteratorMeta> }> = [];
+    const buffer: Array<{ value: T; stamp: number; meta?: any }> = [];
     let gateOpened = false;
-    let cancelled = false;
-    let resolveSourceLoop: (() => void) | null = null;
+    let isDone = false;
+    let sourceCompleted = false;
 
-    // Flush buffered values when gate opens
-    const flushBuffer = () => {
-      if (buffer.length === 0) return;
-
-      for (const { value: bufferedValue, stamp, meta } of buffer) {
-        setIteratorEmissionStamp(outputIt as any, stamp);
-
-        let value: any = bufferedValue;
-        if (meta) {
-          setIteratorMeta(outputIt as any, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-          value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-        }
-
-        output.next(value);
+    /**
+     * Internal logic to handle events from the runner.
+     * Returns a result if we should emit, null if we should keep pulling.
+     */
+    const handleEvent = (event: any, target: any): IteratorResult<T> | null => {
+      if (event.type === 'error') {
+        isDone = true;
+        throw event.error;
       }
-      buffer.length = 0;
+
+      if (event.type === 'complete') {
+        if (event.sourceIndex === 0) {
+          // Source completed
+          sourceCompleted = true;
+          if (gateOpened) {
+            // If gate is open, flush remaining buffer on next iteration
+            return null;
+          }
+          // Gate never opened, discard buffer and complete
+          buffer.length = 0;
+          isDone = true;
+          return DONE;
+        } else {
+          // Notifier completed without ever emitting - discard buffer
+          if (!gateOpened) {
+            buffer.length = 0;
+          }
+          return null;
+        }
+      }
+
+      if (event.sourceIndex === 0) {
+        // Source value
+        const stamp = getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp();
+        const meta = getIteratorMeta(runner as any);
+        
+        if (gateOpened) {
+          // Gate is open - forward immediately
+          setIteratorEmissionStamp(target, stamp);
+          return { done: false, value: tagValue(target, event.value, meta) };
+        } else {
+          // Gate is closed - buffer
+          buffer.push({ value: event.value, stamp, meta });
+        }
+      } else {
+        // Notifier emitted - open the gate (even if it's the first and only emission)
+        if (!gateOpened) {
+          gateOpened = true;
+          // Immediately try to flush one buffered value
+          return iterator.flushOne!();
+        }
+      }
+      return null;
     };
 
-    // Notifier observer - wait for first emission to open gate
-    void (async () => {
-      try {
-        const result = await notifierIt.next();
-        if (!result.done && !cancelled) {
-          gateOpened = true;
-          // Flush synchronously so buffered values come before new source values
-          flushBuffer();
-          // Wake up the source loop if it was waiting
-          if (resolveSourceLoop) {
-            const resolve = resolveSourceLoop as any;
-            resolveSourceLoop = null;
-            resolve();
-          }
-        }
-        // Close notifier iterator after first emission or completion
-        try {
-          await notifierIt.return?.();
-        } catch {}
-      } catch (err) {
-        if (!cancelled) {
-          output.error(err);
-        }
-      }
-    })();
+    const iterator: AsyncIterator<T> & {
+      __tryNext?: () => IteratorResult<T> | null;
+      __hasBufferedValues?: () => boolean;
+      flushOne?: () => IteratorResult<T> | null;
+    } = {
+      async next() {
+        if (isDone) return DONE;
+        if (sourceCompleted && !gateOpened) return DONE;
 
-    // Source producer
-    void (async () => {
-      try {
-        while (!cancelled) {
-          const r = await source.next();
-          if (r.done || cancelled) break;
-
-          const stamp = getIteratorEmissionStamp(source) ?? 0;
-          const meta = getIteratorMeta(source);
-
+        while (true) {
+          // 1. Always check the buffer first if the gate is open
           if (gateOpened) {
-            // Gate is open, forward immediately
-            setIteratorEmissionStamp(outputIt as any, stamp);
+            const flushed = this.flushOne!();
+            if (flushed) return flushed;
+          }
 
-            let value: any = r.value;
-            if (meta) {
-              setIteratorMeta(outputIt as any, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-              value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
+          // 2. If source completed and gate opened, but buffer is empty, we're done
+          if (sourceCompleted && gateOpened && buffer.length === 0) {
+            isDone = true;
+            return DONE;
+          }
+
+          // 3. Pull from runner
+          const result = await runner.next();
+          if (result.done) {
+            // Runner completed - this means both sources are done
+            isDone = true;
+            // Flush any remaining buffered values if gate was opened
+            if (gateOpened && buffer.length > 0) {
+              const flushed = this.flushOne!();
+              if (flushed) return flushed;
             }
+            return DONE;
+          }
 
-            output.next(value);
-          } else {
-            // Gate is closed, buffer the value
-            buffer.push({ value: r.value, stamp, meta });
+          const out = handleEvent(result.value, iterator);
+          if (out) return out;
+        }
+      },
+
+      __tryNext: () => {
+        if (isDone) return DONE;
+        if (sourceCompleted && !gateOpened) return DONE;
+
+        // 1. Try flushing buffer if gate is open
+        if (gateOpened) {
+          const flushed = iterator.flushOne!();
+          if (flushed) return flushed;
+        }
+
+        // 2. If source completed and gate opened, but buffer is empty
+        if (sourceCompleted && gateOpened && buffer.length === 0) {
+          isDone = true;
+          return DONE;
+        }
+
+        // 3. Try draining sync events from runner
+        while (runner.__hasBufferedValues?.()) {
+          const res = runner.__tryNext?.();
+          if (!res || res.done) break;
+
+          const out = handleEvent(res.value, iterator);
+          if (out) return out;
+          
+          // After handling an event, check buffer again
+          if (gateOpened) {
+            const flushed = iterator.flushOne!();
+            if (flushed) return flushed;
           }
         }
 
-        // Source completed - flush if gate is open, otherwise discard buffer
-        if (!cancelled && gateOpened) {
-          flushBuffer();
-        }
+        return isDone ? DONE : null;
+      },
 
-        if (!cancelled) {
-          output.complete();
-        }
-      } catch (err) {
-        if (!cancelled) {
-          output.error(err);
-        }
-      } finally {
-        if (!cancelled) {
-          try {
-            await notifierIt.return?.();
-          } catch {}
-        }
+      flushOne() {
+        if (!gateOpened || buffer.length === 0) return null;
+        const { value, stamp, meta } = buffer.shift()!;
+        setIteratorEmissionStamp(iterator, stamp);
+        return { done: false, value: tagValue(iterator, value, meta) };
+      },
+
+      __hasBufferedValues: () => 
+        (gateOpened && buffer.length > 0) || (runner.__hasBufferedValues?.() ?? false),
+
+      async return(value) {
+        isDone = true;
+        await runner.return?.();
+        return value !== undefined ? { value, done: true } : DONE;
+      },
+
+      async throw(err) {
+        isDone = true;
+        await runner.throw?.(err);
+        return Promise.reject(err);
       }
-    })();
-
-    // Custom iterator with cleanup
-    const iterator: AsyncIterator<T> = {
-      next: () => outputIt.next(),
-      return: async (value?: any) => {
-        cancelled = true;
-
-        // Cleanup source iterator
-        try {
-          await source.return?.();
-        } catch {}
-
-        // Cleanup notifier iterator
-        try {
-          await notifierIt.return?.();
-        } catch {}
-
-        output.complete();
-        return outputIt.return?.(value) ?? { done: true as const, value };
-      },
-      throw: async (error?: any) => {
-        cancelled = true;
-        output.error(error);
-        return outputIt.throw?.(error) ?? Promise.reject(error);
-      },
     };
 
     return iterator;

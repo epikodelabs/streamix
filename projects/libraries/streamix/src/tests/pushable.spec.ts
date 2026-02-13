@@ -7,8 +7,6 @@ import {
   type IteratorMetaKind,
 } from '@epikodelabs/streamix';
 
-const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-
 describe('createAsyncPushable', () => {
   it('is an AsyncIterable (Symbol.asyncIterator returns self)', async () => {
     const pushable = createAsyncPushable<number>();
@@ -39,25 +37,14 @@ describe('createAsyncPushable', () => {
     expect(await pushable.next()).toEqual(DONE);
   });
 
-  it('buffers pushes before the first pull and applies backpressure', async () => {
+  it('buffers pushes before the first pull', async () => {
     const pushable = createAsyncPushable<number>();
 
-    const backpressure = pushable.push(123);
-    expect(backpressure).toEqual(jasmine.any(Promise));
-
-    let resolved = false;
-    (backpressure as Promise<void>).then(() => {
-      resolved = true;
-    });
-
-    await flush();
-    expect(resolved).toBeFalse();
+    // push is sync, returns void
+    const result = pushable.push(123);
+    expect(result).toBeUndefined();
 
     expect(await pushable.next()).toEqual({ done: false, value: 123 });
-    await backpressure;
-
-    await flush();
-    expect(resolved).toBeTrue();
 
     pushable.complete();
     expect(await pushable.next()).toEqual(DONE);

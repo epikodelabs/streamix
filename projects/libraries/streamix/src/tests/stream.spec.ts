@@ -1,4 +1,4 @@
-import { createAsyncIterator, createStream, createSubject, createSubscription, DONE, from, isStreamLike, map } from '@epikodelabs/streamix';
+import { createAsyncIterator, createStream, createSubject, createSubscription, DONE, from, isStreamLike, map, nextEmissionStamp } from '@epikodelabs/streamix';
 
 describe('stream', () => {
   it('allows base streams to be consumed with for-await', async () => {
@@ -191,11 +191,14 @@ describe('stream', () => {
       return createSubscription();
     };
 
-    const it: any = createAsyncIterator<number>({ register })();
+    const factory = createAsyncIterator<number>({ register });
+    const it: any = factory();
 
-    // queue values by sending via receiver
-    registered[0]?.next?.(1);
-    registered[0]?.next?.(2);
+    // Use the push methods instead of accessing registered[0]
+    const stamp1 = nextEmissionStamp();
+    const stamp2 = nextEmissionStamp();
+    it.__pushNext?.(1, stamp1);
+    it.__pushNext?.(2, stamp2);
 
     // __tryNext should return the first buffered value synchronously
     const maybe = it.__tryNext?.();
