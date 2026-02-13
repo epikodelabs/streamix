@@ -2,159 +2,167 @@ import {
   createOperator,
   DONE,
   getIteratorEmissionStamp,
-  NEXT,
+  getIteratorMeta,
   nextEmissionStamp,
   setIteratorEmissionStamp,
+  tagValue,
   type Operator,
-  type Stream,
+  type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
+import { createAsyncCoordinator } from "../utils";
 
 /**
- * Complete the output when a notifier emits.
+ * Take values from the source until a notifier emits.
  *
- * `takeUntil` subscribes to the provided `notifier` (a `Stream` or `Promise`) and
- * completes the output iterator as soon as the notifier produces its first
- * emission. Ordering between notifier and source values is managed using
- * emission stamps so that values from the source that are stamped at or after
- * the notifier emission will not be forwarded.
+ * This operator forwards values from the source stream until the notifier
+ * emits its first value or completes. Once the notifier emits, the operator
+ * completes immediately and unsubscribes from the source.
  *
- * Semantics and edge cases:
- * - Notifier emits: the operator records the notifier's emission stamp and
- *   cancels the source. Any source value whose stamp is greater than or equal
- *   to the notifier stamp is considered after the notifier and will not be
- *   emitted.
- * - Notifier errors: if the notifier throws before the next source value is
- *   emitted, the error is propagated immediately. If the notifier errors after
- *   a source value has been pulled, the operator will yield that pulled value
- *   first and then throw the notifier error on the subsequent pull.
- * - Notifier completes without emitting: the operator keeps forwarding source
- *   values normally (i.e. it stays open).
- *
- * Use-cases:
- * - Stop processing a stream when an external cancellation/timeout signal fires.
+ * Important semantics:
+ * - If notifier emits before any source values, no source values are emitted
+ * - If source completes before notifier emits, operator completes normally
+ * - Errors from either source or notifier are propagated
  *
  * @template T Source/output value type.
- * @param notifier A `Stream<any>` or `Promise<any>` whose first emission
- *        triggers completion of the output.
- * @returns An `Operator<T, T>` that completes when the notifier emits.
+ * @param notifier A `Stream<any>` that signals when to stop taking.
+ * @returns An `Operator<T, T>` that can be used in a stream pipeline.
  */
 export function takeUntil<T = any>(
   notifier: Stream<any> | Promise<any>
 ): Operator<T, T> {
-  return createOperator<T, T>("takeUntil", (sourceIt) => {
+  return createOperator<T, T>("takeUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
+    const runner = createAsyncCoordinator([source, notifierIt]);
 
-    let gateStamp: number | null = null;   // ONLY for notifier emit
-    let notifierError: any = null;
-    let notifierErrorStamp: number | null = null;
+    let isDone = false;
 
-    let pending: { value: T; stamp: number } | null = null;
-
-    const stampOf = (it: any) => {
-      const s = getIteratorEmissionStamp(it);
-      return typeof s === "number" ? s : nextEmissionStamp();
-    };
-
-    // Observe notifier exactly once
-    void (async () => {
-      try {
-        const r = await notifierIt.next();
-        const stamp = stampOf(notifierIt);
-
-        if (!r.done) {
-          // notifier EMIT → gate + cancel source
-          gateStamp = stamp;
-          try { await sourceIt.return?.(); } catch {}
-        }
-      } catch (err) {
-        // notifier ERROR → NO source cancellation
-        notifierError = err;
-        notifierErrorStamp = stampOf(notifierIt);
-      } finally {
-        try { await notifierIt.return?.(); } catch {}
-      }
-    })();
-
-    const tryDrainBufferedValue = (): IteratorResult<T> | null => {
-      const tryNext = (sourceIt as any).__tryNext;
-      if (typeof tryNext === "function") {
-        try {
-          return tryNext.call(sourceIt);
-        } catch {
-          return null;
-        }
-      }
-      return null;
-    };
-
-    const iterator: AsyncIterator<T> = {
+    const iterator: AsyncIterator<T> & {
+      __tryNext?: () => IteratorResult<T> | null;
+      __hasBufferedValues?: () => boolean;
+    } = {
       async next() {
+        if (isDone) return DONE;
+
         while (true) {
-          // 1) deliver buffered value
-          if (pending) {
-            const { value, stamp } = pending;
-            pending = null;
-            setIteratorEmissionStamp(iterator as any, stamp);
-            return NEXT(value);
+          const result = await runner.next();
+          
+          if (result.done) {
+            // Both sources completed - this means notifier never emitted and source is done
+            isDone = true;
+            return DONE;
           }
 
-          // 2) notifier ERROR: flush buffered source values that happened
-          // before the notifier error stamp, then throw.
-          if (notifierError) {
-            const buffered = tryDrainBufferedValue();
-            if (buffered && !buffered.done) {
-              const stamp = stampOf(sourceIt);
-              if (notifierErrorStamp === null || stamp < notifierErrorStamp) {
-                setIteratorEmissionStamp(iterator as any, stamp);
-                return NEXT(buffered.value);
+          const event = result.value;
+          
+          switch (event.type) {
+            case 'value':
+              if (event.sourceIndex === 0) {
+                // Source value - forward it
+                const stamp = getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp();
+                const meta = getIteratorMeta(runner as any);
+                setIteratorEmissionStamp(iterator, stamp);
+                return { 
+                  done: false, 
+                  value: tagValue(iterator, event.value, meta) 
+                };
+              } else {
+                // Notifier emitted - stop immediately
+                isDone = true;
+                
+                // Clean up notifier iterator
+                await notifierIt.return?.();
+                
+                // Signal completion
+                return DONE;
               }
-            }
-            throw notifierError;
+              
+            case 'complete':
+              if (event.sourceIndex === 0) {
+                // Source completed normally - we're done
+                isDone = true;
+                return DONE;
+              } else {
+                // Notifier completed without emitting - ignore, keep taking from source
+                // Just continue
+              }
+              break;
+              
+            case 'error':
+              isDone = true;
+              throw event.error;
           }
-
-          // 3) pull source
-          const r = await sourceIt.next();
-          const stamp = stampOf(sourceIt);
-
-          if (r.done) {
-            if (notifierError) throw notifierError;
-            return DONE;
-          }
-
-          // 4) gate ONLY on notifier emit
-          if (gateStamp !== null && stamp >= gateStamp) {
-            return DONE;
-          }
-
-          // 5) notifier errored AFTER pull → yield value, then error
-          if (notifierError) {
-            if (notifierErrorStamp === null || stamp < notifierErrorStamp) {
-              pending = { value: r.value, stamp };
-              continue;
-            }
-            throw notifierError;
-          }
-
-          // 6) normal path
-          setIteratorEmissionStamp(iterator as any, stamp);
-          return NEXT(r.value);
         }
       },
 
-      async return() {
-        try { await sourceIt.return?.(); } catch {}
-        try { await notifierIt.return?.(); } catch {}
-        pending = null;
-        return DONE;
+      __tryNext: () => {
+        if (isDone) return DONE;
+        if (!runner.__tryNext) return null;
+
+        while (true) {
+          const result = runner.__tryNext();
+          if (!result || result.done) break;
+
+          const event = result.value;
+          
+          switch (event.type) {
+            case 'value':
+              if (event.sourceIndex === 0) {
+                const stamp = getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp();
+                const meta = getIteratorMeta(runner as any);
+                setIteratorEmissionStamp(iterator, stamp);
+                return { 
+                  done: false, 
+                  value: tagValue(iterator, event.value, meta) 
+                };
+              } else {
+                isDone = true;
+                // Can't await in sync method, but we can schedule cleanup
+                notifierIt.return?.().catch(() => {});
+                return DONE;
+              }
+              
+            case 'complete':
+              if (event.sourceIndex === 0) {
+                isDone = true;
+                return DONE;
+              }
+              // Ignore notifier completion
+              break;
+              
+            case 'error':
+              isDone = true;
+              throw event.error;
+          }
+        }
+        
+        return isDone ? DONE : null;
       },
 
-      async throw(err) {
-        try { await sourceIt.return?.(); } catch {}
-        try { await notifierIt.return?.(); } catch {}
-        pending = null;
-        throw err;
+      __hasBufferedValues: () => {
+        return runner.__hasBufferedValues?.() ?? false;
       },
+
+      async return(value?: any) {
+        if (isDone) return value !== undefined ? { value, done: true } : DONE;
+        isDone = true;
+        
+        // Clean up both iterators
+        await runner.return?.();
+        await notifierIt.return?.();
+        
+        return value !== undefined ? { value, done: true } : DONE;
+      },
+
+      async throw(err?: any) {
+        if (isDone) return Promise.reject(err);
+        isDone = true;
+        
+        await runner.throw?.(err);
+        await notifierIt.return?.();
+        
+        return Promise.reject(err);
+      }
     };
 
     return iterator;

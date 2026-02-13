@@ -1,4 +1,4 @@
-import { type Operator } from "./operator";
+import { type Operator } from ".";
 
 /* ============================================================================
  * Pipe / Runtime hook types
@@ -209,6 +209,29 @@ export function getValueMeta(value: any) {
     return VALUE_META.get(value);
   }
   return undefined;
+}
+
+/**
+ * Attaches tracing metadata to both an iterator and a value in a single call.
+ *
+ * Consolidates the common `setIteratorMeta` + `setValueMeta` pattern.
+ * Returns the (possibly wrapped) value.
+ *
+ * @param iterator The async iterator to tag.
+ * @param value The value to tag.
+ * @param meta Metadata from `getIteratorMeta(source)`. If `undefined`, the value is returned unchanged.
+ * @param tag Optional additional tag fields (kind, inputValueIds).
+ */
+export function tagValue<T>(
+  iterator: AsyncIterator<any>,
+  value: T,
+  meta: { valueId: string; operatorIndex: number; operatorName: string } | undefined,
+  tag?: { kind?: IteratorMetaKind; inputValueIds?: string[] }
+): T {
+  if (!meta) return value;
+  const metaTag = { valueId: meta.valueId, ...tag };
+  setIteratorMeta(iterator, metaTag, meta.operatorIndex, meta.operatorName);
+  return setValueMeta(value, metaTag, meta.operatorIndex, meta.operatorName);
 }
 
 /**

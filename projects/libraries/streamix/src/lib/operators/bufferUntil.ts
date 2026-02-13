@@ -1,298 +1,250 @@
 import {
-    createOperator,
-    DONE,
-    getIteratorEmissionStamp,
-    getIteratorMeta,
-    NEXT,
-    setIteratorMeta,
-    setValueMeta,
-    type Operator,
-    type Stream,
+  createOperator,
+  DONE,
+  getIteratorEmissionStamp,
+  getIteratorMeta,
+  nextEmissionStamp,
+  setIteratorEmissionStamp,
+  setIteratorMeta,
+  setValueMeta,
+  type Operator,
+  type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
-import { createSubject } from "../subjects";
-
-type BufferRecord<T> = {
-  value: T;
-  stamp: number;
-  meta?: {
-    valueId: string;
-    operatorIndex: number;
-    operatorName: string;
-  };
-};
+import { createAsyncCoordinator } from "../utils";
 
 /**
- * Emits arrays of buffered source values whenever the `notifier` stream emits.
+ * Buffers values from the source iterator until the notifier emits.
+ * Once the notifier emits, the buffered values are flushed as an array.
  *
- * This operator collects values from the source stream into a buffer. When the
- * `notifier` emits, all buffered values up to that point are flushed as a single
- * array downstream. The buffer is then cleared and begins collecting new values
- * until the next notifier emission. If the source completes, any remaining buffered
- * values are flushed as a final array.
+ * Preserves metadata (`valueId`, `operatorIndex`, `operatorName`) from
+ * upstream iterators and attaches collapse metadata to the emitted array.
  *
- * Metadata is attached to the output array to track collapse operations and value
- * lineage for tracing.
- *
- * @param notifier Stream whose emissions trigger buffer flushes.
- * @returns Operator that emits arrays of buffered values.
- *
- * @example
- * from([1,2,3]).pipe(bufferUntil(timer(1000))) // emits [1,2,3] after 1s
+ * @template T Type of values emitted by the source iterator.
+ * @param {Stream<any>} notifier - Stream whose emissions trigger buffer flush.
+ * @returns {Operator<T, T[]>} A Streamix operator that collects values into arrays
+ *   and emits them whenever the notifier emits or the source completes.
  */
 export const bufferUntil = <T = any>(notifier: Stream<any>) =>
-  createOperator<T, T[]>("bufferUntil", function (this: Operator, source) {
-    const output = createSubject<T[]>();
-    const outputIt = output[Symbol.asyncIterator]();
-
+  createOperator<T, T[]>("bufferUntil", function (this: Operator, source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
+    const runner = createAsyncCoordinator([source, notifierIt]);
 
-    let buffer: BufferRecord<T>[] = [];
+    // Buffered source values
+    let buffer: T[] = [];
+
+    // Corresponding metadata for buffered values
+    let bufferMetas: Array<{
+      valueId: string;
+      operatorIndex: number;
+      operatorName: string;
+      stamp: number;
+    }> = [];
+
+    // Whether the iterator has been cancelled (return/throw)
     let cancelled = false;
 
     /**
-     * Flush all buffered values with stamp < cutoffStamp.
-     * Used when notifier emits to partition batches by emission order.
+     * Flushes the current buffer.
+     *
+     * - Emits a copy of the buffered values.
+     * - Attaches collapse metadata if upstream values have metadata.
+     * - Updates iterator emission stamp.
+     *
+     * @returns {IteratorResult<T[]>} IteratorResult with flushed values or DONE.
      */
-    const flushBefore = (cutoffStamp: number) => {
-      const matching = buffer.filter(r => r.stamp < cutoffStamp);
-      buffer = buffer.filter(r => r.stamp >= cutoffStamp);
+    const flushBuffer = (): IteratorResult<T[]> => {
+      if (buffer.length === 0) return DONE;
 
-      if (matching.length === 0) return;
+      const values = [...buffer];
+      const metas = [...bufferMetas];
+      buffer = [];
+      bufferMetas = [];
 
-      const metas = matching
-        .map(r => r.meta)
-        .filter(Boolean) as {
-          valueId: string;
-          operatorIndex: number;
-          operatorName: string;
-        }[];
-
-      let values = matching.map(r => r.value);
-
-      if (metas.length) {
-        const last = metas[metas.length - 1];
-
-        const collapse = {
-          valueId: last.valueId,
+      if (metas.length > 0) {
+        const lastMeta = metas[metas.length - 1];
+        const collapseMeta = {
+          valueId: lastMeta.valueId,
           kind: "collapse" as const,
           inputValueIds: metas.map(m => m.valueId),
         };
 
-        setIteratorMeta(
-          iterator,
-          collapse,
-          last.operatorIndex,
-          last.operatorName
-        );
+        // Attach metadata to iterator and values
+        setIteratorMeta(iterator as any, collapseMeta, lastMeta.operatorIndex, lastMeta.operatorName);
+        const taggedValues = setValueMeta(values, collapseMeta, lastMeta.operatorIndex, lastMeta.operatorName);
 
-        values = setValueMeta(
-          values,
-          collapse,
-          last.operatorIndex,
-          last.operatorName
-        );
+        // Set iterator emission stamp to last buffered item
+        setIteratorEmissionStamp(iterator as any, lastMeta.stamp);
+
+        return { value: taggedValues, done: false };
+      } else {
+        const lastStamp = getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp();
+        setIteratorEmissionStamp(iterator as any, lastStamp);
+        return { value: values, done: false };
       }
-
-      output.next(values);
     };
 
     /**
-     * Flush all remaining buffered values.
-     * Used when source completes.
+     * The AsyncIterator returned by the operator.
+     *
+     * Supports the standard AsyncIterator protocol:
+     * - `next()`
+     * - `return()`
+     * - `throw()`
+     *
+     * And two internal helpers for Streamix internals:
+     * - `__tryNext()` — synchronous try-pull for testing and internal operators.
+     * - `__hasBufferedValues()` — checks if buffer or runner has pending values.
      */
-    const flushAll = () => {
-      if (buffer.length === 0) return;
+    const iterator: AsyncIterator<T[]> & {
+      __tryNext?: () => IteratorResult<T[]> | null;
+      __hasBufferedValues?: () => boolean;
+    } = {
+      /**
+       * Pulls the next buffered array of values.
+       *
+       * - Buffers source values.
+       * - Flushes buffer on notifier emission.
+       * - Flushes buffer when source completes.
+       *
+       * @returns {Promise<IteratorResult<T[]>>} Next buffered array or DONE.
+       */
+      async next() {
+        while (true) {
+          if (cancelled) return DONE;
 
-      const matching = buffer;
-      buffer = [];
+          const runnerResult = await runner.next();
 
-      const metas = matching
-        .map(r => r.meta)
-        .filter(Boolean) as {
-          valueId: string;
-          operatorIndex: number;
-          operatorName: string;
-        }[];
-
-      let values = matching.map(r => r.value);
-
-      if (metas.length) {
-        const last = metas[metas.length - 1];
-
-        const collapse = {
-          valueId: last.valueId,
-          kind: "collapse" as const,
-          inputValueIds: metas.map(m => m.valueId),
-        };
-
-        setIteratorMeta(
-          iterator,
-          collapse,
-          last.operatorIndex,
-          last.operatorName
-        );
-
-        values = setValueMeta(
-          values,
-          collapse,
-          last.operatorIndex,
-          last.operatorName
-        );
-      }
-
-      output.next(values);
-    };
-
-    const sourceTryNext = (source as any).__tryNext as
-      | undefined
-      | (() => IteratorResult<T> | null);
-
-    const notifierTryNext = (notifierIt as any).__tryNext as
-      | undefined
-      | (() => IteratorResult<any> | null);
-
-    const pushSourceValue = (value: T, stamp: number) => {
-      buffer.push({
-        value,
-        stamp,
-        meta: getIteratorMeta(source),
-      });
-    };
-
-    const canUseSyncPull = typeof sourceTryNext === "function" && typeof notifierTryNext === "function";
-
-    /* ---------- sync pull mode (both source and notifier have __tryNext) ---------- */
-
-    if (canUseSyncPull) {
-      const drainBoth = () => {
-        while (!cancelled) {
-          let sourceResult: IteratorResult<T> | null = null;
-          let notifierResult: IteratorResult<any> | null = null;
-
-          // Try to pull from both
-          try {
-            sourceResult = sourceTryNext!.call(source);
-          } catch (err) {
-            cancelled = true;
-            try { notifierIt.return?.(); } catch {}
-            output.error(err);
-            return;
+          if (runnerResult.done) {
+            // Flush any remaining buffered values when runner completes
+            return flushBuffer();
           }
 
-          try {
-            notifierResult = notifierTryNext!.call(notifierIt);
-          } catch (err) {
-            cancelled = true;
-            try { source.return?.(); } catch {}
-            output.error(err);
-            return;
-          }
+          const event = runnerResult.value;
 
-          // If nothing available, we're caught up
-          if (!sourceResult && !notifierResult) {
-            return;
-          }
+          switch (event.type) {
+            case "value":
+              if (event.sourceIndex === 0) {
+                // Source value: buffer it
+                buffer.push(event.value as T);
 
-          // Process source value
-          if (sourceResult) {
-            if (sourceResult.done) {
+                // Capture metadata if available
+                const meta = getIteratorMeta(runner as any);
+                if (meta) {
+                  bufferMetas.push({
+                    valueId: meta.valueId,
+                    operatorIndex: meta.operatorIndex,
+                    operatorName: meta.operatorName,
+                    stamp: getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp(),
+                  });
+                }
+              } else {
+                // Notifier value: flush buffer
+                if (buffer.length > 0) return flushBuffer();
+              }
+              break;
+
+            case "complete":
+              // Source completed: flush buffer if any
+              if (event.sourceIndex === 0 && buffer.length > 0) return flushBuffer();
+              break;
+
+            case "error":
+              // Propagate error and cancel iterator
               cancelled = true;
-              flushAll();
-              output.complete();
-              return;
-            }
-            const sourceStamp = getIteratorEmissionStamp(source);
-            pushSourceValue(sourceResult.value, sourceStamp ?? 0);
-          }
-
-          // Process notifier emission
-          if (notifierResult) {
-            if (notifierResult.done) {
-              cancelled = true;
-              try { source.return?.(); } catch {}
-              output.complete();
-              return;
-            }
-            // Flush all values emitted before this notifier emission
-            const notifierStamp = getIteratorEmissionStamp(notifierIt) ?? 0;
-            flushBefore(notifierStamp);
+              try {
+                await notifierIt.return?.();
+              } catch {}
+              throw event.error;
           }
         }
-      };
-
-      // Both iterators call drain when they receive pushed values
-      (source as any).__onPush = drainBoth;
-      (notifierIt as any).__onPush = drainBoth;
-      
-      // Initial drain to process any immediately available values
-      drainBoth();
-    }
-    /* ---------- async mode (fallback when __tryNext not available) ---------- */
-    else {
-      /* ---------- notifier async loop ---------- */
-
-      void void (async () => {
-        try {
-          while (!cancelled) {
-            const r = await notifierIt.next();
-            if (r.done || cancelled) break;
-            // In async mode, flush on every notifier emission
-            flushAll();
-          }
-        } catch (err) {
-          if (!cancelled) {
-            cancelled = true;
-            try { await source.return?.(); } catch {}
-            output.error(err);
-          }
-        }
-      })();
-
-      /* ---------- source async loop ---------- */
-
-      void void (async () => {
-        try {
-          while (!cancelled) {
-            const r = await source.next();
-            if (r.done || cancelled) break;
-            const sourceStamp = getIteratorEmissionStamp(source) ?? 0;
-            pushSourceValue(r.value, sourceStamp);
-          }
-
-          if (!cancelled) {
-            cancelled = true;
-            flushAll();
-            output.complete();
-          }
-        } catch (err) {
-          if (!cancelled) {
-            cancelled = true;
-            try { await notifierIt.return?.(); } catch {}
-            output.error(err);
-          }
-        }
-      })();
-    }
-
-    /* ---------- iterator facade ---------- */
-
-    const iterator: AsyncIterator<T[]> = {
-      next: () => outputIt.next(),
-
-      return: async (value?: any) => {
-        cancelled = true;
-        try { await source.return?.(); } catch {}
-        try { await notifierIt.return?.(); } catch {}
-        output.complete();
-        return value !== undefined ? NEXT(value) : DONE;
       },
 
-      throw: async (err?: any) => {
+      /**
+       * Cancels the iterator and flushes/cleans upstream sources.
+       *
+       * @param value Optional value to return
+       * @returns {Promise<IteratorResult<T[]>>} DONE or returned value
+       */
+      async return(value?: any) {
+        if (cancelled) return value !== undefined ? { value, done: true } : DONE;
         cancelled = true;
-        output.error(err);
-        return outputIt.throw?.(err) ?? Promise.reject(err);
+        try {
+          await runner.return?.();
+          await notifierIt.return?.();
+        } catch {}
+        return value !== undefined ? { value, done: true } : DONE;
       },
+
+      /**
+       * Throws an error into the iterator and cancels upstream sources.
+       *
+       * @param err Error to propagate
+       * @returns {Promise<never>} Rejected promise with the error
+       */
+      async throw(err?: any) {
+        if (cancelled) return Promise.reject(err);
+        cancelled = true;
+        try {
+          await runner.throw?.(err).catch(() => {});
+          await notifierIt.return?.();
+        } catch {}
+        return Promise.reject(err);
+      },
+
+      /**
+       * Internal synchronous try-pull (used by Streamix for tests/operators).
+       *
+       * @returns {IteratorResult<T[]> | null} Next buffered array or null if no sync value
+       */
+      __tryNext: () => {
+        if (cancelled) return DONE;
+        if (!runner.__tryNext) return null;
+
+        while (true) {
+          const runnerResult = runner.__tryNext();
+          if (!runnerResult) return null;
+
+          if (runnerResult.done) return flushBuffer();
+
+          const event = runnerResult.value;
+
+          switch (event.type) {
+            case "value":
+              if (event.sourceIndex === 0) {
+                buffer.push(event.value as T);
+                const meta = getIteratorMeta(runner as any);
+                if (meta) {
+                  bufferMetas.push({
+                    valueId: meta.valueId,
+                    operatorIndex: meta.operatorIndex,
+                    operatorName: meta.operatorName,
+                    stamp: getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp(),
+                  });
+                }
+              } else if (buffer.length > 0) {
+                return flushBuffer();
+              }
+              break;
+
+            case "complete":
+              if (event.sourceIndex === 0 && buffer.length > 0) return flushBuffer();
+              break;
+
+            case "error":
+              cancelled = true;
+              notifierIt.return?.().catch(() => {});
+              throw event.error;
+          }
+        }
+      },
+
+      /**
+       * Checks whether the operator has buffered values (including runner pending items)
+       *
+       * @returns {boolean} True if buffer or runner has pending values
+       */
+      __hasBufferedValues: () => buffer.length > 0 || (runner.__hasBufferedValues ? runner.__hasBufferedValues() : false),
     };
 
     return iterator;

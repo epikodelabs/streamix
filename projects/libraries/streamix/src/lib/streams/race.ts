@@ -1,5 +1,6 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
+import { createStream, type MaybePromise, type Stream } from "../abstractions";
+import { fromAny } from "../converters";
+import { createAsyncCoordinator } from "../utils";
 
 /**
  * Returns a stream that races multiple input streams.
@@ -23,48 +24,48 @@ export function race<T extends readonly unknown[] = any[]>(
   return createStream<T[number]>('race', async function* () {
     if (streams.length === 0) return;
 
-    const resolvedStreams: Array<Stream<T[number]> | Array<T[number]> | T[number]> = [];
-    for (const stream of streams) {
-      resolvedStreams.push(isPromiseLike(stream) ? await stream : stream);
-    }
-
-    const iterators = resolvedStreams.map((s) => eachValueFrom(fromAny(s)));
+    const iterators = streams.map(s => fromAny(s)[Symbol.asyncIterator]());
+    const runner = createAsyncCoordinator(iterators);
+    
     let winnerIndex: number | null = null;
 
     try {
-      const first = await Promise.race(
-        iterators.map((it, index) =>
-          it.next().then(result => ({ ...result, index }))
-        )
-      );
-
-      winnerIndex = first.index;
-
-      // Cancel all losing streams as soon as the winner is known.
-      await Promise.all(
-        iterators.map((it, index) =>
-          index !== winnerIndex && it.return
-            ? it.return(undefined).catch(() => {})
-            : Promise.resolve()
-        )
-      );
-
-      if (first.done) return;
-
-      yield first.value;
-
-      const winner = iterators[winnerIndex];
       while (true) {
-        const result = await winner.next();
+        const result = await runner.next();
         if (result.done) break;
-        yield result.value;
+
+        const event = result.value;
+
+        // 1. Handle errors immediately regardless of winner
+        if (event.type === 'error') {
+          throw event.error;
+        }
+
+        // 2. Identify the winner from the first value or completion
+        if (winnerIndex === null) {
+          winnerIndex = event.sourceIndex;
+          
+          // Once we have a winner, we can tell the runner to stop 
+          // polling the others. We do this by calling return on the losers.
+          iterators.forEach((it, idx) => {
+            if (idx !== winnerIndex) {
+              it.return?.();
+            }
+          });
+        }
+
+        // 3. Only process events from the winner
+        if (event.sourceIndex === winnerIndex) {
+          if (event.type === 'value') {
+            yield event.value;
+          } else if (event.type === 'complete') {
+            break;
+          }
+        }
       }
     } finally {
-      await Promise.all(
-        iterators.map((it) =>
-          it.return ? it.return(undefined).catch(() => {}) : Promise.resolve()
-        )
-      );
+      // Clean up the runner and all underlying iterators
+      await runner.return?.();
     }
   });
 }
