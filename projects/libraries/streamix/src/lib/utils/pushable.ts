@@ -2,11 +2,17 @@ import {
   DONE,
   getCurrentEmissionStamp,
   nextEmissionStamp,
-  setIteratorEmissionStamp,
   StrictReceiver
 } from "../abstractions";
 import { IteratorMetaKind, setIteratorMeta, setValueMeta } from "../abstractions/hooks";
-
+import {
+  AsyncIteratorState,
+  asyncPull,
+  pushComplete,
+  pushError,
+  pushValue,
+  syncPull
+} from "./helpers";
 
 /**
  * Async iterator augmented with push methods, passed to operator setup callbacks.
@@ -42,79 +48,27 @@ function tagValue<T>(
  * push values into with backpressure.
  */
 export function createAsyncPushable<R>(): AsyncPushable<R> {
-  // Core state
-  let pullResolve: ((v: IteratorResult<R>) => void) | null = null;
-  let pullReject: ((e: any) => void) | null = null;
-  const queue: Array<{ result: IteratorResult<R>; stamp: number }> = [];
-  const backpressureQueue: Array<() => void> = [];
-  let pendingError: { err: any; stamp: number } | null = null;
-  let completed = false;
+  const state = new AsyncIteratorState<R>();
 
   // Create the receiver that will handle pushes
   const receiver: StrictReceiver<R> = {
     next(value: R) {
-      if (completed) return;
-      
       const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-      const result: IteratorResult<R> = { done: false, value };
-      
-      if (pullResolve) {
-        const r = pullResolve;
-        pullResolve = pullReject = null;
-        setIteratorEmissionStamp(iterator, stamp);
-        r(result);
-        iterator.__onPush?.();
-        return;
-      }
-      
-      queue.push({ result, stamp });
-      
-      if (typeof iterator.__onPush === "function") {
-        iterator.__onPush();
-        return;
-      }
-      
-      return new Promise<void>((resolve) => backpressureQueue.push(resolve));
+      return pushValue(state, iterator, value, stamp, iterator.__onPush);
     },
     
     complete() {
-      if (completed) return;
-      completed = true;
-      
       const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-      
-      if (pullResolve) {
-        const r = pullResolve;
-        pullResolve = pullReject = null;
-        setIteratorEmissionStamp(iterator, stamp);
-        r(DONE);
-        return;
-      }
-      
-      queue.push({ result: DONE, stamp });
-      iterator.__onPush?.();
+      pushComplete(state, iterator, stamp, iterator.__onPush);
     },
     
     error(err: any) {
-      if (completed) return;
-      completed = true;
-      
       const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-      
-      if (pullReject) {
-        const r = pullReject;
-        pullResolve = pullReject = null;
-        setIteratorEmissionStamp(iterator, stamp);
-        r(err);
-        return;
-      }
-      
-      pendingError = { err, stamp };
-      iterator.__onPush?.();
+      pushError(state, iterator, err, stamp, iterator.__onPush);
     },
     
     get completed() {
-      return completed;
+      return state.completed;
     }
   };
 
@@ -130,92 +84,31 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
     completed?: any;
   } = {
     next() {
-      
-      // Sync path: values already queued
-      if (queue.length > 0) {
-        const { result, stamp } = queue.shift()!;
-        setIteratorEmissionStamp(iterator, stamp);
-        backpressureQueue.shift()?.();
-        return Promise.resolve(result);
-      }
-      
-      // Sync path: pending error
-      if (pendingError) {
-        const { err, stamp } = pendingError;
-        pendingError = null;
-        setIteratorEmissionStamp(iterator, stamp);
-        return Promise.reject(err);
-      }
-      
-      // Sync path: already completed
-      if (completed) {
-        return Promise.resolve(DONE);
-      }
-      
-      // Async path: wait for push
-      return new Promise((res, rej) => {
-        pullResolve = res;
-        pullReject = rej;
-      });
+      return asyncPull(state, iterator);
     },
     
     async return() {
-      completed = true;
-      
-      if (pullResolve) {
-        const r = pullResolve;
-        pullResolve = pullReject = null;
-        r(DONE);
-      }
-      
-      // Resolve any pending backpressure promises
-      for (const resolve of backpressureQueue) resolve();
-      backpressureQueue.length = 0;
-      
+      state.markCompleted();
       return Promise.resolve(DONE);
     },
     
     async throw(err) {
-      completed = true;
-      if (pullReject) {
-        const r = pullReject;
-        pullResolve = pullReject = null;
+      state.completed = true;
+      if (state.pullReject) {
+        const r = state.pullReject;
+        state.pullResolve = state.pullReject = null;
         r(err);
       }
-      
-      // Resolve any pending backpressure promises
-      for (const resolve of backpressureQueue) resolve();
-      backpressureQueue.length = 0;
-      
+      state.clear();
       return Promise.reject(err);
     },
     
-    // Sync pull (non-standard)
     __tryNext() {
-      if (queue.length > 0) {
-        const { result, stamp } = queue.shift()!;
-        setIteratorEmissionStamp(iterator, stamp);
-        backpressureQueue.shift()?.();
-        return result;
-      }
-      
-      if (pendingError) {
-        const { err, stamp } = pendingError;
-        pendingError = null;
-        setIteratorEmissionStamp(iterator, stamp);
-        throw err;
-      }
-      
-      if (completed) {
-        return DONE;
-      }
-      
-      return null;
+      return syncPull(state, iterator);
     },
     
-    // Check if there are buffered values (non-standard)
     __hasBufferedValues() {
-      return queue.length > 0 || pendingError != null || completed;
+      return state.hasBufferedValues();
     }
   };
 

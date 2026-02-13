@@ -1,15 +1,10 @@
 import { DONE, getIteratorEmissionStamp, setIteratorEmissionStamp } from "../abstractions";
+import { insertOrdered, type QueueItem } from "./helpers";
 
 type RunnerEvent<T> =
   | { type: "value"; value: T; sourceIndex: number }
   | { type: "complete"; sourceIndex: number }
   | { type: "error"; error: any; sourceIndex: number };
-
-function insertOrdered(arr: { stamp: number }[], item: any) {
-  let i = arr.length;
-  while (i > 0 && arr[i - 1].stamp > item.stamp) i--;
-  arr.splice(i, 0, item);
-}
 
 export function createAsyncCoordinator(
   sources: AsyncIterator<any>[]
@@ -17,13 +12,11 @@ export function createAsyncCoordinator(
   __tryNext?: () => IteratorResult<RunnerEvent<any>> | null;
   __hasBufferedValues?: () => boolean;
 } {
-  type QueueItem = {
-    result: IteratorResult<RunnerEvent<any>>;
-    stamp: number;
+  type CoordinatorQueueItem = QueueItem<RunnerEvent<any>> & {
     sourceIndex: number;
   };
 
-  const queue: QueueItem[] = [];
+  const queue: CoordinatorQueueItem[] = [];
   const completed = new Array(sources.length).fill(false);
   const pulling = new Array(sources.length).fill(false);
   const pendingPulls = new Array(sources.length).fill(false);
@@ -228,5 +221,3 @@ export function createAsyncCoordinator(
 
   return iterator;
 }
-
-
