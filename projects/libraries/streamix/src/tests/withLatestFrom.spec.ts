@@ -187,9 +187,7 @@ describe('withLatestFrom', () => {
       });
     });
 
-    await scheduler.flush();
     aux$.error("AUX_STR");
-    await scheduler.flush();
     await done;
   });
 
@@ -215,11 +213,8 @@ describe('withLatestFrom', () => {
       });
     });
 
-    await scheduler.flush();
     aux$.next("A");
-    await scheduler.flush();
     main$.error("MAIN_STR");
-    await scheduler.flush();
     await done;
   });
 
@@ -459,7 +454,7 @@ describe('withLatestFrom', () => {
       error: errorSpy,
     });
 
-    await new Promise((r) => setTimeout(r, 50));
+      await scheduler.flush();
 
     // The error should be caught during setup
     expect(errorSpy).toHaveBeenCalled();
