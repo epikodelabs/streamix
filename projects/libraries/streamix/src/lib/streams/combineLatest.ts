@@ -1,5 +1,6 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
+import { createStream, type MaybePromise, type Stream } from "../abstractions";
+import { fromAny } from "../converters";
+import { createAsyncCoordinator } from "../utils";
 
 /**
  * Combines multiple streams and emits a tuple containing the latest values
@@ -17,74 +18,46 @@ import { eachValueFrom, fromAny } from "../converters";
 export function combineLatest<T extends unknown[] = any[]>(
   ...sources: Array<Stream<T[number]> | MaybePromise<T[number]>>
 ): Stream<T> {
-  async function* generator() {
+  return createStream<T>("combineLatest", async function* () {
     if (sources.length === 0) return;
 
-    const resolvedStreams: Array<Stream<T[number]> | Array<T[number]> | T[number]> = [];
-    for (const source of sources) {
-      resolvedStreams.push(isPromiseLike(source) ? await source : source);
-    }
+    const iterators = sources.map((s) => fromAny(s)[Symbol.asyncIterator]());
+    const runner = createAsyncCoordinator(iterators);
 
-    const latestValues: Partial<T>[] = [];
-    const hasEmitted = new Array(resolvedStreams.length).fill(false);
-    let completedStreams = 0;
-
-    const iterators = resolvedStreams.map((stream) =>
-      eachValueFrom(fromAny(stream))
-    );
-
-    const promisesByIndex: Array<Promise<any> | null> = new Array(resolvedStreams.length).fill(null);
-
-    const createPromise = (index: number) => {
-      const promise = iterators[index]
-        .next()
-        .then((result) => ({
-          index,
-          value: result.value,
-          done: result.done,
-        }));
-      promisesByIndex[index] = promise;
-      return promise;
-    };
-
-    // Initialize
-    for (let i = 0; i < resolvedStreams.length; i++) {
-      createPromise(i);
-    }
+    const latestValues = new Array(sources.length).fill(undefined);
+    const hasEmitted = new Set<number>();
+    let completedCount = 0;
 
     try {
-      while (completedStreams < resolvedStreams.length) {
-        const result = await Promise.race(
-          promisesByIndex.filter((p): p is Promise<any> => p !== null)
-        );
+      while (completedCount < sources.length) {
+        const result = await runner.next();
+        
+        if (result.done) break;
 
-        if (result.done) {
-          completedStreams++;
-          promisesByIndex[result.index] = null;
-          continue;
+        const event = result.value;
+
+        switch (event.type) {
+          case "value":
+            latestValues[event.sourceIndex] = event.value;
+            hasEmitted.add(event.sourceIndex);
+
+            // Only emit if all sources have provided at least one value
+            if (hasEmitted.size === sources.length) {
+              yield [...latestValues] as T;
+            }
+            break;
+
+          case "complete":
+            completedCount++;
+            break;
+
+          case "error":
+            throw event.error;
         }
-
-        latestValues[result.index] = result.value;
-        hasEmitted[result.index] = true;
-
-        if (hasEmitted.every(Boolean)) {
-          yield [...latestValues] as T;
-        }
-
-        createPromise(result.index);
       }
     } finally {
-      for (const iterator of iterators) {
-        if (iterator.return) {
-          try {
-            await iterator.return(undefined);
-          } catch {
-            // Ignore cleanup errors
-          }
-        }
-      }
+      // Ensure all upstream iterators are closed
+      await runner.return?.();
     }
-  }
-
-  return createStream<T>("combineLatest", generator);
+  });
 }
