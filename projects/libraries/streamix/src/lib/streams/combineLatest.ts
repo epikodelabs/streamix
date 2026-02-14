@@ -1,4 +1,4 @@
-import { createStream, type MaybePromise, type Stream } from "../abstractions";
+import { createStream, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
 
@@ -16,7 +16,7 @@ import { createAsyncCoordinator } from "../utils";
  * @returns {Stream<T>} A new stream that emits a tuple of the latest values from all source streams.
  */
 export function combineLatest<T extends unknown[] = any[]>(
-  ...sources: Array<Stream<T[number]> | MaybePromise<T[number]>>
+  ...sources: Array<Stream<T[number]> | Promise<T[number]>>
 ): Stream<T> {
   return createStream<T>("combineLatest", async function* () {
     if (sources.length === 0) return;

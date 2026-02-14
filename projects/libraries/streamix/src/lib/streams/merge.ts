@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
+import { createStream, isPromiseLike, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
 
@@ -32,7 +32,7 @@ import { createAsyncCoordinator } from "../utils";
  * merge(fast, slow, instant).forEach(console.log);
  * ```
  */
-export function merge<T = any>(...sources: (Stream<T> | MaybePromise<T>)[]): Stream<T> {
+export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T> {
   return createStream<T>('merge', async function* () {
     if (sources.length === 0) return;
 

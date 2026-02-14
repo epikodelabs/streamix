@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
+import { createStream, isPromiseLike, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
@@ -23,7 +23,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * // emits: [2, 10]
  */
 export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
-  ...sources: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
+  ...sources: { [K in keyof R]: Stream<R[K]> | Promise<R[K]> }
 ): Stream<T[]>;
 
 /**
@@ -35,7 +35,7 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
  * @returns A stream that emits a single array of last values.
  */
 export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
-  sources: { [K in keyof R]: Stream<R[K]> | MaybePromise<R[K]> }
+  sources: { [K in keyof R]: Stream<R[K]> | Promise<R[K]> }
 ): Stream<T[]>;
 
 /**

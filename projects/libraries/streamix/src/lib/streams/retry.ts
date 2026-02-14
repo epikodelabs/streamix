@@ -12,13 +12,13 @@ import { eachValueFrom, fromAny } from "../converters";
  * If all retry attempts fail, the final error is propagated.
  *
  * @template T The type of values emitted by the stream.
- * @param {() => (Stream<T> | MaybePromise<T>)} factory A function that returns a new stream or value for each attempt.
+ * @param {() => (Stream<T> | Promise<T>)} factory A function that returns a new stream or value for each attempt.
  * @param {MaybePromise<number>} [maxRetries=3] The maximum number of times to retry the stream. A value of 0 means no retries.
  * @param {MaybePromise<number>} [delay=1000] The time in milliseconds to wait before each retry attempt.
  * @returns {Stream<T>} A new stream that applies the retry logic.
  */
 export function retry<T = any>(
-  factory: () => Stream<T> | MaybePromise<T>,
+  factory: () => Stream<T> | Promise<T>,
   maxRetries: MaybePromise<number> = 3,
   delay: MaybePromise<number> = 1000
 ): Stream<T> {
@@ -50,7 +50,7 @@ export function retry<T = any>(
         }
 
         // Wrap factory call in try-catch to handle factory errors
-        let produced: Stream<T> | MaybePromise<T>;
+        let produced: Stream<T> | Promise<T>;
         try {
           produced = factory();
         } catch (factoryError) {
