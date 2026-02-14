@@ -3,7 +3,7 @@ import path from 'node:path';
 import ts from 'typescript';
 
 const repoRoot = path.resolve(process.cwd());
-const streamixRoot = path.join(repoRoot, 'projects', 'libraries', 'streamix');
+const libraryRoot = path.join(repoRoot, 'projects', 'libraries', 'streamix');
 
 const EXCLUDE_DIRS = new Set(['node_modules', 'dist', 'coverage']);
 const EXCLUDE_FILE_RE = /(?:\.spec\.ts$|\.test\.ts$|\.d\.ts$)/i;
@@ -145,7 +145,7 @@ function isProbablyBarrelFile(filePath) {
 
 async function main() {
   const files = [];
-  for await (const f of walk(streamixRoot)) files.push(f);
+  for await (const f of walk(libraryRoot)) files.push(f);
 
   /** @type {{file: string, line: number, kind: string, name: string}[]} */
   const missing = [];
