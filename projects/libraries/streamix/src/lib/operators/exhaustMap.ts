@@ -24,7 +24,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * @template T The type of values emitted by the source stream.
  * @template R The type of values emitted by the produced inner streams.
  * @param project A function that transforms a source value into a {@link Stream}, 
- * a {@link Promise}, or an array. It receives the source value and a 
+ * a promise of `R`, or an array. It receives the source value and a 
  * zero-based index of the emission.
  * @returns An {@link Operator} that performs the "exhaust" transformation.
  */

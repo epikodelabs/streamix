@@ -26,7 +26,7 @@ import { createAsyncCoordinator, type RunnerEvent } from '../utils';
  * @template R The type of values emitted by the inner and output streams.
  * @param project A function that maps a source value and its index to either:
  *   - a {@link Stream<R>},
- *   - a {@link Promise<R>} (value or promise),
+ *   - a promise of `R`,
  *   - or an array of `R`.
  * @param concurrent Maximum number of concurrent inner streams (default: Infinity).
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.

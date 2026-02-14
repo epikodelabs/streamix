@@ -41,7 +41,6 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
 /**
  * Implementation signature.
  *
- * @internalRemarks
  * This implementation supports both `forkJoin(a, b, c)` and `forkJoin([a, b, c])`.
  */
 export function forkJoin<T = any, R extends readonly unknown[] = any[]>(

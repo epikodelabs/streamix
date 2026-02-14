@@ -26,7 +26,7 @@ export interface ForkOption<T = any, R = any> {
    *
    * Can return:
    * - a {@link Stream<R>}
-   * - a {@link Promise<R>} (value or promise)
+   * - a promise of `R`
    * - an array of `R`
    *
    * @param value The source value that matched the predicate.

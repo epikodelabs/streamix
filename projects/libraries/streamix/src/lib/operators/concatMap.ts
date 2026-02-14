@@ -17,7 +17,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * @param project A function that takes a value from the source stream and its index,
  * and returns either:
  *   - a {@link Stream<R>},
- *   - a {@link Promise<R>} (value or promise),
+ *   - a promise of `R`,
  *   - or an array of `R`.
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
