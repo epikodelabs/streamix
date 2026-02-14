@@ -34,7 +34,7 @@
     "@angular-devkit/build-angular": "^21.1.3",
     "@angular/cli": "^21.1.3",
     "@angular/compiler-cli": "^21.1.3",
-    "@epikodelabs/testify": "^1.0.19",
+    "@epikodelabs/testify": "^1.0.20",
     "@epikodelabs/typegen": "^1.0.13",
     "@types/jasmine": "^6.0.0",
     "@types/markdown-it": "^14.1.2",
