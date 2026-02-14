@@ -1,12 +1,5 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
+import { createStream, isPromiseLike, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
-
-/**
- * Input accepted by {@link concat}.
- *
- * Values (including promises) are converted to a Stream via `fromAny(...)`.
- */
-type ConcatSource<T> = Stream<T> | MaybePromise<T>;
 
 /**
  * Concatenates sources sequentially.
@@ -27,9 +20,9 @@ type ConcatSource<T> = Stream<T> | MaybePromise<T>;
  * // emits: 1, 2, 3, 4
  */
 
-export function concat<T = any>(...sources: ConcatSource<T>[]): Stream<T> {
+export function concat<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T> {
   async function* generator() {
-    const isPromiseSource = (value: ConcatSource<T>): value is Promise<any> =>
+    const isPromiseSource = (value: Stream<T> | Promise<T>): value is Promise<any> =>
       isPromiseLike(value);
     const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
     for (const source of sources) {

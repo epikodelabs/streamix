@@ -2,14 +2,36 @@ import {
   createOperator,
   getIteratorMeta,
   isPromiseLike,
-  setValueMeta
+  setValueMeta,
+  Stream
 } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 import { createSubject } from '../subjects';
 import { createAsyncCoordinator } from '../utils';
 
+
+/**
+ * Combines the source stream with the latest values from one or more auxiliary streams or promises.
+ *
+ * When the source stream emits a value, emits a tuple containing the source value and the most recent values
+ * from each auxiliary stream or promise. No value is emitted until all auxiliary streams have emitted at least once.
+ *
+ * If any auxiliary stream or promise errors, the output stream errors. If the source completes, the output completes.
+ *
+ * @typeParam T - The type of values emitted by the source stream.
+ * @typeParam R - The tuple of types emitted by the auxiliary streams.
+ * @param args - One or more streams or promises whose latest values will be combined with the source value.
+ * @returns An operator function that emits a tuple of the source value and the latest values from each auxiliary input.
+ *
+ * @example
+ * ```ts
+ * // Combine clicks with the latest mouse position
+ * clicks.pipe(withLatestFrom(mouseMoves))
+ * // Emits: [clickEvent, latestMousePosition]
+ * ```
+ */
 export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
-  ...args: any[]
+  ...args: (Stream<T> | Promise<T>)[]
 ) {
   const normalizedInputs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
 

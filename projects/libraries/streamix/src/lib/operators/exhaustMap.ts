@@ -5,7 +5,6 @@ import {
   isPromiseLike,
   NEXT,
   nextEmissionStamp,
-  type MaybePromise,
   type Operator,
   type Stream
 } from "../abstractions";
@@ -25,12 +24,12 @@ import { eachValueFrom, fromAny } from "../converters";
  * @template T The type of values emitted by the source stream.
  * @template R The type of values emitted by the produced inner streams.
  * @param project A function that transforms a source value into a {@link Stream}, 
- * a {@link MaybePromise}, or an array. It receives the source value and a 
+ * a {@link Promise}, or an array. It receives the source value and a 
  * zero-based index of the emission.
  * @returns An {@link Operator} that performs the "exhaust" transformation.
  */
 export const exhaustMap = <T = any, R = T>(
-  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => Stream<R> | Promise<R> | Array<R>
 ) =>
   createOperator<T, R>("exhaustMap", function (this: Operator, source) {
     let outerIndex = 0;

@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
+import { createStream, isPromiseLike, type Stream } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -11,7 +11,7 @@ import { eachValueFrom, fromAny } from '../converters';
  * @returns {Stream<T>} A stream emitting arrays of values from each input.
  */
 export function zip<T extends readonly unknown[] = any[]>(
-  ...sources: Array<Stream<T[number]> | MaybePromise<T[number]>>
+  ...sources: Array<Stream<T[number]> | Promise<T[number]>>
 ): Stream<T> {
 
   return createStream<T>('zip', async function* (): AsyncGenerator<T, void, unknown> {
