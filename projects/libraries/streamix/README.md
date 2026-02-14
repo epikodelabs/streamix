@@ -7,7 +7,10 @@ Small bundle, pull-based execution, and a familiar operator API.
   <img src="https://github.com/epikodelabs/streamix/blob/main/LOGO.png?raw=true" alt="streamix Logo" width="500">
 </p>
 
-<p align="center">
+<div
+  align="center"
+  style="display:flex; justify-content:center; gap:0.5rem; flex-wrap:wrap;"
+>
   <a href="https://github.com/epikodelabs/streamix/actions/workflows/build.yml">
     <img src="https://github.com/epikodelabs/streamix/actions/workflows/build.yml/badge.svg?branch=main" alt="Build Status">
   </a>
@@ -20,7 +23,7 @@ Small bundle, pull-based execution, and a familiar operator API.
   <a href="https://github.com/epikodelabs/streamix">
     <img src="https://raw.githubusercontent.com/epikodelabs/streamix/main/projects/libraries/streamix/bundle-size.svg" alt="Bundle Size">
   </a>
-</p>
+</div>
 
 
 ## Give a Star on GitHub
