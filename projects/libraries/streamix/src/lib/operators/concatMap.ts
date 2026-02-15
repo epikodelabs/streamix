@@ -21,7 +21,7 @@ import { eachValueFrom, fromAny } from "../converters";
  *   - or an array of `R`.
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
-export const concatMap = <T = any, R = T>(
+export const concatMap = <T = any, R = any>(
   project: (value: T, index: number) => Stream<R> | Promise<R> | Array<R>
 ) =>
   createOperator<T, R>("concatMap", function (this : Operator, source) {

@@ -28,7 +28,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * zero-based index of the emission.
  * @returns An {@link Operator} that performs the "exhaust" transformation.
  */
-export const exhaustMap = <T = any, R = T>(
+export const exhaustMap = <T = any, R = any>(
   project: (value: T, index: number) => Stream<R> | Promise<R> | Array<R>
 ) =>
   createOperator<T, R>("exhaustMap", function (this: Operator, source) {
