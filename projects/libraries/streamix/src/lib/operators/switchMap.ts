@@ -1,4 +1,4 @@
-import type { Operator, Stream } from "../abstractions";
+import type { MaybePromise, Operator, Stream } from "../abstractions";
 import {
   createOperator,
   DONE,
@@ -20,7 +20,7 @@ import { createSubject } from "../subjects";
  *
  * When a new value is emitted from the source, the previous inner stream (if any) is cancelled
  * and unsubscribed, and a new inner stream is created using the `project` function. Only values
- * from the latest inner stream are emitted to the output. If the projected value is a promise or array,
+ * from the latest inner stream are emitted to the output. If the projected value is a {@link MaybePromise<R>} or array,
  * it is normalized to a stream.
  *
  * If the source completes and there is no active inner stream, the output completes. If an error occurs
@@ -28,7 +28,7 @@ import { createSubject } from "../subjects";
  *
  * @typeParam T - The type of values emitted by the source stream.
  * @typeParam R - The type of values emitted by the projected inner streams.
- * @param project - A function that receives each value and index from the source stream and returns a stream, promise, or array of values to be emitted.
+ * @param project - A function that receives each value and index from the source stream and returns a stream, a {@link MaybePromise<R>}, or array of values to be emitted.
  * @returns An operator function that can be applied to a stream, emitting values from the most recent inner stream created by the projection function.
  *
  * @example
@@ -38,7 +38,7 @@ import { createSubject } from "../subjects";
  * ```
  */
 export function switchMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | Promise<R> | Array<R>
+  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source) {
     const output = createSubject<R>();

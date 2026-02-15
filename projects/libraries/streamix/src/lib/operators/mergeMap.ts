@@ -1,6 +1,7 @@
 import {
   createOperator,
   getIteratorMeta,
+  MaybePromise,
   tagValue,
   type Operator,
   type Stream
@@ -26,7 +27,7 @@ import { createAsyncCoordinator, type RunnerEvent } from '../utils';
  * @template R The type of values emitted by the inner and output streams.
  * @param project A function that maps a source value and its index to either:
  *   - a {@link Stream<R>},
- *   - a promise of `R`,
+ *   - a {@link MaybePromise<R>},
  *   - or an array of `R`.
  * @param concurrent Maximum number of concurrent inner streams (default: Infinity).
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
@@ -40,7 +41,7 @@ import { createAsyncCoordinator, type RunnerEvent } from '../utils';
  * ```
  */
 export function mergeMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | Promise<R> | Array<R>,
+  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>,
   concurrent: number = Infinity
 ) {
   return createOperator<T, R>('mergeMap', function (this: Operator, source) {

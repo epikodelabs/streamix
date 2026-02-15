@@ -26,13 +26,13 @@ export interface ForkOption<T = any, R = any> {
    *
    * Can return:
    * - a {@link Stream<R>}
-   * - a promise of `R`
+   * - a {@link MaybePromise<R>}
    * - an array of `R`
    *
    * @param value The source value that matched the predicate.
    * @returns A stream, value, promise, or array to be flattened and emitted.
    */
-  handler: (value: T) => (Stream<R> | Promise<R> | Array<R>);
+  handler: (value: T) => (Stream<R> | MaybePromise<R> | Array<R>);
 }
 
 /**
