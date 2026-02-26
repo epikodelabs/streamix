@@ -1,5 +1,8 @@
 # Changelog
 
+### 2.0.32
+
+Removed tracing package/module and related runtime/tracer code. Cleaned core stream internals from metadata, timestamps, counters, ids, temporary shims, and legacy hook-based compatibility paths. Reworked operator internals to coordinator-based flow.
 
 ### 2.0.31
 
