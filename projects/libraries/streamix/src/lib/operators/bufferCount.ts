@@ -1,4 +1,4 @@
-import { DONE, type MaybePromise, NEXT, type Operator, createOperator, getIteratorMeta, isPromiseLike, tagValue } from "../abstractions";
+import { DONE, type MaybePromise, NEXT, type Operator, createOperator, isPromiseLike } from "../abstractions";
 
 /**
  * Buffers a fixed number of values from the source stream and emits them as arrays,
@@ -17,8 +17,6 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
         if (completed) return DONE;
 
         const buffer: IteratorResult<T>[] = [];
-        const metaByIndex: ({ valueId: string; operatorIndex: number; operatorName: string } | undefined)[] = [];
-        
         const size = isPromiseLike(bufferSize) ? await bufferSize : bufferSize;
         while (buffer.length < size) {
           const result = await source.next();
@@ -28,29 +26,16 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
 
             // Flush any remaining buffered values
             if (buffer.length > 0) {
-              const metas = metaByIndex.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
-              const lastMeta = metas[metas.length - 1];
-              const values = tagValue(iterator as any, buffer.map((r) => r.value!), lastMeta, {
-                kind: "collapse",
-                inputValueIds: metas.map((m) => m.valueId),
-              });
-              return NEXT(values);
+              return NEXT(buffer.map((r) => r.value!));
             }
 
             return DONE;
           }
 
           buffer.push(result);
-          metaByIndex.push(getIteratorMeta(source));
         }
 
-        const metas = metaByIndex.filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
-        const lastMeta = metas[metas.length - 1];
-        const values = tagValue(iterator as any, buffer.map((r) => r.value!), lastMeta, {
-          kind: "collapse",
-          inputValueIds: metas.map((m) => m.valueId),
-        });
-        return NEXT(values);
+        return NEXT(buffer.map((r) => r.value!));
       },
     };
 

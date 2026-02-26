@@ -1,7 +1,6 @@
 import {
   createReceiver,
   createSubscription,
-  generateStreamId,
   isPromiseLike,
   pipeSourceThrough,
   type MaybePromise,
@@ -35,7 +34,6 @@ export type BehaviorSubject<T = any> = Stream<T> & {
  * @returns {BehaviorSubject<T>} a new behavior subject
  */
 export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
-  const id = generateStreamId();
   let latestValue: T = initialValue;
   let isCompleted = false;
   let completionInfo: { kind: 'error'; error: any } | null = null;
@@ -155,7 +153,6 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
   const self: BehaviorSubject<T> = {
     type: "subject",
     name: "behaviorSubject",
-    id,
     get value() { return latestValue; },
     next,
     complete,

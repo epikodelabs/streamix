@@ -1,4 +1,4 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, setValueMeta, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createReplaySubject, type ReplaySubject } from '../subjects';
 
@@ -38,13 +38,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
           const result = await source.next();
           if (result.done) break;
 
-          const meta = getIteratorMeta(source);
-          let value: any = result.value;
-          if (meta) {
-            value = setValueMeta(value, { valueId: meta.valueId }, meta.operatorIndex, meta.operatorName);
-          }
-
-          output!.next(value);
+          output!.next(result.value);
         }
       } catch (err) {
         output!.error(err);

@@ -1,8 +1,6 @@
 import {
   createOperator,
-  getIteratorMeta,
   MaybePromise,
-  tagValue,
   type Operator,
   type Stream
 } from '../abstractions';
@@ -17,8 +15,7 @@ import { createAsyncCoordinator, type RunnerEvent } from '../utils';
  * 1. The `project` function is called with the value and its index.
  * 2. The returned value is normalized into a stream using {@link fromAny}.
  * 3. The inner stream is consumed concurrently with all other active inner streams.
- * 4. Emitted values from all inner streams are interleaved into the output stream
- *    in timestamp order, preserving causality across all concurrent operations.
+ * 4. Emitted values from all inner streams are interleaved into the output stream.
  *
  * This operator is useful for performing parallel asynchronous operations while
  * preserving all emitted values in a merged output with correct temporal ordering.
@@ -45,7 +42,6 @@ export function mergeMap<T = any, R = any>(
   concurrent: number = Infinity
 ) {
   return createOperator<T, R>('mergeMap', function (this: Operator, source) {
-    // Create the generator and store reference for tagValue
     let outputIterator: AsyncGenerator<R, void, unknown>;
     
     const generator = async function* () {
@@ -54,9 +50,6 @@ export function mergeMap<T = any, R = any>(
       
       // Create coordinator with just the source initially
       const coordinator = createAsyncCoordinator([source]);
-      
-      // Track metadata for each inner stream
-      const innerMetas = new Map<number, { valueId: string; operatorIndex: number; operatorName: string } | undefined>();
       
       let projectIndex = 0;
       let sourceCompleted = false;
@@ -76,12 +69,10 @@ export function mergeMap<T = any, R = any>(
           // Only process inner stream events (not source events)
           if (event.sourceIndex !== SOURCE_INDEX) {
             if (event.type === 'value') {
-              const parentMeta = innerMetas.get(event.sourceIndex);
-              yield tagValue(outputIterator, event.value, parentMeta, { kind: "expand" });
+              yield event.value;
             } 
             else if (event.type === 'complete') {
               pendingInners--;
-              innerMetas.delete(event.sourceIndex);
               break; // Free slot available
             }
             else if (event.type === 'error') {
@@ -111,11 +102,9 @@ export function mergeMap<T = any, R = any>(
               // Project the source value to an inner stream
               const projected = project(event.value as any, projectIndex++);
               const inner = fromAny(projected as any);
-              const parentMeta = getIteratorMeta(source);
-
               // Add the inner stream to the coordinator
               const innerIndex = coordinator.addSource(inner[Symbol.asyncIterator]());
-              innerMetas.set(innerIndex, parentMeta);
+              void innerIndex;
               pendingInners++;
             }
             else if (event.type === 'complete') {
@@ -131,12 +120,10 @@ export function mergeMap<T = any, R = any>(
           // ============================================
           else {
             if (event.type === 'value') {
-              const parentMeta = innerMetas.get(event.sourceIndex);
-              yield tagValue(outputIterator, event.value, parentMeta, { kind: "expand" });
+              yield event.value;
             }
             else if (event.type === 'complete') {
               pendingInners--;
-              innerMetas.delete(event.sourceIndex);
 
               // If source is complete and no more inners, we're done
               if (sourceCompleted && pendingInners === 0) {

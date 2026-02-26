@@ -1,10 +1,8 @@
 import {
   createOperator,
   DONE,
-  getIteratorMeta,
   isPromiseLike,
   NEXT,
-  tagValue,
   type MaybePromise,
   type Operator,
   type Stream,
@@ -48,15 +46,13 @@ export const expand = <T = any>(
     type QueueItem = {
       value: T;
       depth: number;
-      meta?: { valueId: string; operatorIndex: number; operatorName: string };
     };
     const queue: QueueItem[] = [];
     let sourceDone = false;
 
     const enqueueChildren = async (
       value: T,
-      depth: number,
-      meta?: QueueItem['meta']
+      depth: number
     ) => {
       if (options.maxDepth !== undefined && depth >= options.maxDepth) return;
 
@@ -64,7 +60,7 @@ export const expand = <T = any>(
       const normalized = isPromiseLike(projected) ? await projected : projected;
 
       for await (const child of eachValueFrom(fromAny(normalized))) {
-        const item = { value: child, depth: depth + 1, meta };
+        const item = { value: child, depth: depth + 1 };
         if (options.traversal === 'breadth') {
           queue.push(item);
         } else {
@@ -83,18 +79,14 @@ export const expand = <T = any>(
               break;
             }
 
-            const meta = getIteratorMeta(source);
-            queue.push({ value: result.value, depth: 0, meta });
+            queue.push({ value: result.value, depth: 0 });
           }
 
           if (queue.length > 0) {
             const item =
               options.traversal === 'breadth' ? queue.shift()! : queue.pop()!;
-            await enqueueChildren(item.value, item.depth, item.meta);
-
-            const value = tagValue(iterator, item.value, item.meta, item.depth > 0 ? { kind: 'expand' } : undefined);
-
-            return NEXT(value);
+            await enqueueChildren(item.value, item.depth);
+            return NEXT(item.value);
           }
 
           if (sourceDone && queue.length === 0) {

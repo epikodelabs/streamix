@@ -1,4 +1,4 @@
-import { createPushOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
+import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
  * Creates a throttle operator that emits the first value immediately, then ignores subsequent
@@ -12,13 +12,13 @@ import { createPushOperator, getIteratorMeta, isPromiseLike, type MaybePromise }
 export const throttle = <T = any>(duration: MaybePromise<number>) =>
   createPushOperator<T>('throttle', (source, output) => {
     let lastEmit = 0;
-    let pendingResult: (IteratorResult<T> & { meta?: ReturnType<typeof getIteratorMeta> }) | undefined;
+    let pendingResult: IteratorResult<T> | undefined;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let resolvedDuration: number | undefined = undefined;
 
     const flushPending = () => {
       if (pendingResult !== undefined) {
-        output.push(pendingResult.value!, pendingResult.meta);
+        output.push(pendingResult.value!);
         pendingResult = undefined;
       }
       timer = null;
@@ -34,20 +34,16 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
           if (result.done) break;
 
           const now = Date.now();
-          const meta = getIteratorMeta(source);
-
           if (resolvedDuration === undefined) {
             pendingResult = result;
-            if (meta) (pendingResult as any).meta = meta;
             continue;
           }
 
           if (now - lastEmit >= resolvedDuration) {
-            output.push(result.value, meta);
+            output.push(result.value);
             lastEmit = now;
           } else {
             pendingResult = result;
-            if (meta) (pendingResult as any).meta = meta;
             if (!timer) {
               const delay = resolvedDuration - (now - lastEmit);
               timer = setTimeout(flushPending, delay);

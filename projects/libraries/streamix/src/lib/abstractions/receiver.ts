@@ -1,4 +1,3 @@
-import { unwrapPrimitive } from "./hooks";
 import { isPromiseLike, type MaybePromise } from "./operator";
 
 /**
@@ -39,8 +38,6 @@ export function createReceiver<T = any>(
   const target = (typeof callbackOrReceiver === 'function'
     ? { next: callbackOrReceiver }
     : callbackOrReceiver || {}) as Receiver<T>;
-
-  const wantsRaw = (target as any).__wantsRawValues === true;
 
   const waitForIdle = () => {
     if (_pendingCount === 0) return Promise.resolve();
@@ -96,8 +93,7 @@ export function createReceiver<T = any>(
   const wrapped: StrictReceiver<T> = {
     next: (value: T) => {
       if (_completed) return Promise.resolve();
-      const payload = wantsRaw ? value : unwrapPrimitive(value);
-      return runAction(target.next, payload);
+      return runAction(target.next, value);
     },
 
     error: (err: any) => {

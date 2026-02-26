@@ -5,7 +5,6 @@ import { createAsyncCoordinator } from "../utils";
 /**
  * Merges multiple source streams into a single stream, emitting values as they arrive from any source.
  *
- * Values are emitted in timestamp order to preserve causality across sources.
  * This is useful for combining data from multiple independent sources into a single,
  * unified stream of events. Unlike `zip`, it does not wait for a value from every
  * stream before emitting; it emits values as they become available.
@@ -16,11 +15,10 @@ import { createAsyncCoordinator } from "../utils";
  * **Performance characteristics:**
  * - Synchronous sources with buffered values are drained immediately
  * - Asynchronous sources are pulled concurrently
- * - Timestamp-based ordering ensures temporal causality
  *
  * @template T The type of the values in the streams.
  * @param sources Streams or values (including promises) to merge.
- * @returns {Stream<T>} A new stream that emits values from all input streams in timestamp order.
+ * @returns {Stream<T>} A new stream that emits values from all input streams.
  *
  * @example
  * ```typescript
@@ -28,7 +26,7 @@ import { createAsyncCoordinator } from "../utils";
  * const slow = interval(100);
  * const instant = from([1, 2, 3]);
  *
- * // All values emitted in timestamp order
+ * // Values emitted as they arrive
  * merge(fast, slow, instant).forEach(console.log);
  * ```
  */
@@ -47,7 +45,7 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
       eachValueFrom(fromAny<T>(source))
     );
 
-    // Use coordinator to handle multi-source coordination with timestamp ordering
+    // Use coordinator to handle multi-source coordination
     const coordinator = createAsyncCoordinator(iterators);
 
     try {

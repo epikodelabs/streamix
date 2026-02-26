@@ -1,11 +1,6 @@
 import {
   createOperator,
   DONE,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  tagValue,
   type Operator,
   type Stream
 } from "../abstractions";
@@ -46,7 +41,7 @@ export function delayUntil<T = any, R = any>(
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
     const runner = createAsyncCoordinator([source, notifierIt]);
 
-    const buffer: Array<{ value: T; stamp: number; meta?: any }> = [];
+    const buffer: T[] = [];
     let gateOpened = false;
     let isDone = false;
     let sourceCompleted = false;
@@ -55,7 +50,7 @@ export function delayUntil<T = any, R = any>(
      * Internal logic to handle events from the runner.
      * Returns a result if we should emit, null if we should keep pulling.
      */
-    const handleEvent = (event: any, target: any): IteratorResult<T> | null => {
+    const handleEvent = (event: any): IteratorResult<T> | null => {
       if (event.type === 'error') {
         isDone = true;
         throw event.error;
@@ -83,17 +78,12 @@ export function delayUntil<T = any, R = any>(
       }
 
       if (event.sourceIndex === 0) {
-        // Source value
-        const stamp = getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp();
-        const meta = getIteratorMeta(runner as any);
-        
         if (gateOpened) {
           // Gate is open - forward immediately
-          setIteratorEmissionStamp(target, stamp);
-          return { done: false, value: tagValue(target, event.value, meta) };
+          return { done: false, value: event.value };
         } else {
           // Gate is closed - buffer
-          buffer.push({ value: event.value, stamp, meta });
+          buffer.push(event.value);
         }
       } else {
         // Notifier emitted - open the gate (even if it's the first and only emission)
@@ -141,7 +131,7 @@ export function delayUntil<T = any, R = any>(
             return DONE;
           }
 
-          const out = handleEvent(result.value, iterator);
+          const out = handleEvent(result.value);
           if (out) return out;
         }
       },
@@ -167,7 +157,7 @@ export function delayUntil<T = any, R = any>(
           const res = runner.__tryNext?.();
           if (!res || res.done) break;
 
-          const out = handleEvent(res.value, iterator);
+          const out = handleEvent(res.value);
           if (out) return out;
           
           // After handling an event, check buffer again
@@ -182,9 +172,8 @@ export function delayUntil<T = any, R = any>(
 
       flushOne() {
         if (!gateOpened || buffer.length === 0) return null;
-        const { value, stamp, meta } = buffer.shift()!;
-        setIteratorEmissionStamp(iterator, stamp);
-        return { done: false, value: tagValue(iterator, value, meta) };
+        const value = buffer.shift()!;
+        return { done: false, value };
       },
 
       __hasBufferedValues: () => 

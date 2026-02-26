@@ -1,10 +1,6 @@
 import {
   createPushOperator,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
   isPromiseLike,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
   type MaybePromise,
 } from '../abstractions';
 
@@ -27,13 +23,12 @@ export const delayWhile = <T = any>(
   predicate: (value: T, index: number) => MaybePromise<boolean>
 ) =>
   createPushOperator<T>('delayWhile', (source, output) => {
-    const queue: Array<{ value: T; stamp: number; meta?: ReturnType<typeof getIteratorMeta> }> = [];
+    const queue: T[] = [];
     let index = 0;
 
     const flushQueue = () => {
       for (const item of queue) {
-        setIteratorEmissionStamp(output, item.stamp);
-        output.push(item.value as T, item.meta);
+        output.push(item as T);
       }
       queue.length = 0;
     };
@@ -42,11 +37,7 @@ export const delayWhile = <T = any>(
       try {
         while (true) {
           const result = await source.next();
-          const stamp = getIteratorEmissionStamp(source) ?? nextEmissionStamp();
-
           if (result.done) break;
-
-          const meta = getIteratorMeta(source);
 
           const predicateResult = predicate(result.value, index++);
           const shouldDelay = isPromiseLike(predicateResult)
@@ -54,14 +45,13 @@ export const delayWhile = <T = any>(
             : predicateResult;
 
           if (shouldDelay) {
-            queue.push({ value: result.value, stamp, meta });
+            queue.push(result.value);
             continue;
           }
 
           if (queue.length > 0) flushQueue();
 
-          setIteratorEmissionStamp(output, stamp);
-          output.push(result.value, meta);
+          output.push(result.value);
         }
 
         if (queue.length > 0) flushQueue();

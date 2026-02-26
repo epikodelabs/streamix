@@ -1,7 +1,6 @@
 import {
   createReceiver,
   createSubscription,
-  generateStreamId,
   isPromiseLike,
   pipeSourceThrough,
   type MaybePromise,
@@ -37,7 +36,6 @@ export type Subject<T = any> = Stream<T> & {
  * @returns {Subject<T>} A new subject instance.
  */
 export function createSubject<T = any>(): Subject<T> {
-  const id = generateStreamId();
   let latestValue: T | undefined;
   let isCompleted = false;
   let completionInfo: { kind: 'error', error: any } | null = null;
@@ -152,7 +150,6 @@ export function createSubject<T = any>(): Subject<T> {
   const self: Subject<T> = {
     type: "subject",
     name: "subject",
-    id,
     get value() { return latestValue; },
     next,
     complete,

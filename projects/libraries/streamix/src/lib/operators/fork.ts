@@ -1,4 +1,4 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, NEXT, tagValue, type MaybePromise, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from '../converters';
 
 /**
@@ -63,7 +63,6 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
     let outerIndex = 0;
     let innerIterator: AsyncIterator<R> | null = null;
     let outerValue: T | undefined;
-    let currentMeta: { valueId: string; operatorIndex: number; operatorName: string } | undefined;
 
     const iterator: AsyncIterator<R> = {
       next: async () => {
@@ -75,7 +74,6 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
               return DONE;
             }
 
-            currentMeta = getIteratorMeta(source);
             let matched: typeof resolvedOptions[number] | undefined;
             outerValue = result.value;
             const currentIndex = outerIndex++;
@@ -102,7 +100,7 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
             continue;
           }
 
-          return NEXT(tagValue(iterator, innerResult.value, currentMeta, { kind: "expand" }));
+          return NEXT(innerResult.value);
         }
       },
 

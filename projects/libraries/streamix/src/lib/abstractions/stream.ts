@@ -1,17 +1,6 @@
 import { firstValueFrom } from "../converters";
 import { createSubject } from "../subjects";
 import { createAsyncIterator } from "../utils/iterator";
-import {
-  getIteratorEmissionStamp,
-  nextEmissionStamp,
-  withEmissionStamp
-} from "./emission";
-import {
-  applyPipeStreamHooks,
-  generateStreamId,
-  generateSubscriptionId,
-  getRuntimeHooks
-} from "./hooks";
 import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
 import { createSubscription, type Subscription } from "./subscription";
@@ -24,7 +13,6 @@ import { createSubscription, type Subscription } from "./subscription";
 export type Stream<T = any> = AsyncIterable<T> & {
   type: "stream" | "subject";
   name?: string;
-  id: string;
   pipe: OperatorChain<T>;
   subscribe: (
     callback?: ((value: T) => MaybePromise) | Receiver<T>
@@ -75,18 +63,12 @@ async function drainIterator<T>(
   const processResult = (result: IteratorResult<T>) => {
     if (result.done) return true;
 
-    const stamp = getIteratorEmissionStamp(iterator) ?? nextEmissionStamp();
     const receivers = getReceivers();
-
-    const forward = () => {
-      for (const { receiver, subscription } of receivers) {
-        if (!subscription.unsubscribed) {
-          receiver.next?.(result.value);
-        }
+    for (const { receiver, subscription } of receivers) {
+      if (!subscription.unsubscribed) {
+        receiver.next?.(result.value);
       }
-    };
-
-    withEmissionStamp(stamp, forward);
+    }
     return false;
   };
 
@@ -177,11 +159,6 @@ export function createStream<T>(
   name: string,
   generatorFn: (signal?: AbortSignal) => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
-  const id = generateStreamId();
-
-  const hooks = getRuntimeHooks();
-  if (hooks?.onCreateStream) hooks.onCreateStream({ id, name });
-
   interface ActiveRun {
     subject: Stream<T> & { next: (v: T) => void; error: (e: any) => void; complete: () => void; };
     abortController: AbortController;
@@ -212,8 +189,7 @@ export function createStream<T>(
                 run.subject.complete();
                 return;
               }
-              const stamp = getIteratorEmissionStamp(gen) ?? nextEmissionStamp();
-              withEmissionStamp(stamp, () => run.subject.next(result.value));
+              run.subject.next(result.value);
             }
           }
 
@@ -229,8 +205,7 @@ export function createStream<T>(
             break;
           }
 
-          const stamp = getIteratorEmissionStamp(gen) ?? nextEmissionStamp();
-          withEmissionStamp(stamp, () => run.subject.next(result.result.value));
+          run.subject.next(result.result.value);
         }
       } catch (err) {
         if (!signal.aborted) {
@@ -286,7 +261,6 @@ export function createStream<T>(
   self = {
     type: "stream",
     name,
-    id,
     pipe,
     subscribe: wrappedSubscribe,
     query: () => firstValueFrom(self),
@@ -294,9 +268,7 @@ export function createStream<T>(
       const factory = createAsyncIterator({ 
         register: (receiver) => wrappedSubscribe(receiver) 
       });
-      const it = factory();
-      (it as any).__streamix_streamId = id;
-      return it as AsyncIterator<T>;
+      return factory() as AsyncIterator<T>;
     },
   };
 
@@ -306,9 +278,7 @@ export function createStream<T>(
 /**
  * Applies a list of operators to a source stream and returns the resulting stream.
  *
- * This is the implementation behind `stream.pipe(...)`. It creates a new stream
- * identity (stream id) for the piped stream and ensures runtime hooks are
- * invoked consistently for both `subscribe()` and direct async iteration.
+ * This is the implementation behind `stream.pipe(...)`.
  *
  * @template TIn Source value type.
  * @param source Source stream.
@@ -319,7 +289,16 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
   source: Stream<TIn>,
   operators: [...Ops]
 ): Stream<any> {
-  const pipedId = generateStreamId();
+  const applyOperators = (baseSource: AsyncIterator<any>) => {
+    let iterator: AsyncIterator<any> = baseSource;
+    for (const op of operators) {
+      iterator = op.apply(iterator);
+    }
+    if (typeof (iterator as any)[Symbol.asyncIterator] !== "function") {
+      (iterator as any)[Symbol.asyncIterator] = () => iterator;
+    }
+    return iterator;
+  };
 
   function registerReceiver(receiver: Receiver<any>): Subscription {
     const abortController = new AbortController();
@@ -330,15 +309,8 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
       receiver.complete?.();
     });
 
-    const subscriptionId = subscription.id;
     const baseSource = source[Symbol.asyncIterator]();
-    const iterator = applyPipeStreamHooks({
-      streamId: pipedId,
-      streamName: source.name,
-      subscriptionId,
-      source: baseSource,
-      operators,
-    });
+    const iterator = applyOperators(baseSource);
 
     queueMicrotask(() => {
       drainIterator(iterator, () => [{ receiver, subscription }], signal).catch(
@@ -351,21 +323,13 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
 
   const pipedStream: Stream<any> = {
     name: `${source.name}Sink`,
-    id: pipedId,
     type: "stream",
     pipe: (...nextOps: Operator<any, any>[]) => pipeSourceThrough(source, [...operators, ...nextOps]),
     subscribe: (cb) => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(pipedStream),
     [Symbol.asyncIterator]: () => {
-      const subscriptionId = generateSubscriptionId();
       const baseSource = source[Symbol.asyncIterator]();
-      return applyPipeStreamHooks({
-        streamId: pipedId,
-        streamName: source.name,
-        subscriptionId,
-        source: baseSource,
-        operators,
-      });
+      return applyOperators(baseSource);
     },
   };
 

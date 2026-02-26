@@ -1,14 +1,13 @@
 
 /**
- * Coordinator utilities for merging and managing multiple async iterators with timestamp-based ordering.
+ * Coordinator utilities for merging and managing multiple async iterators.
  *
  * Provides the {@link createAsyncCoordinator} function, which enables dynamic addition and removal of sources,
- * push notification support, and correct emission ordering for both sync and async sources.
+ * push notification support and correct emission ordering for both sync and async sources.
  *
  * @module coordinator
  */
-import { DONE, getIteratorEmissionStamp, setIteratorEmissionStamp } from "../abstractions";
-import { insertOrdered, type QueueItem } from "./helpers";
+import { DONE } from "../abstractions";
 
 
 /**
@@ -27,7 +26,7 @@ export type RunnerEvent<T> =
 
 
 /**
- * An async iterator that coordinates multiple sources, emitting timestamp-ordered events.
+ * An async iterator that coordinates multiple sources.
  *
  * Supports dynamic source management and both sync and async draining.
  *
@@ -73,10 +72,9 @@ export interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
 }
 
 /**
- * Creates an async coordinator that merges multiple async iterators while preserving timestamp-based ordering.
+ * Creates an async coordinator that merges multiple async iterators.
  *
  * The coordinator supports:
- * - Timestamp-ordered emission across all sources (sync and async)
  * - Synchronous draining for sources that support it (via `__tryNext`)
  * - Concurrent async pulling for async sources
  * - Push notification support for sources with `__onPush`
@@ -104,7 +102,8 @@ export interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
 export function createAsyncCoordinator(
   sources: AsyncIterator<any>[] = []
 ): AsyncCoordinator<any> {
-  type CoordinatorQueueItem = QueueItem<RunnerEvent<any>> & {
+  type CoordinatorQueueItem = {
+    result: IteratorResult<RunnerEvent<any>>;
     sourceIndex: number;
   };
 
@@ -118,7 +117,6 @@ export function createAsyncCoordinator(
 
   let waitingResolve: ((v: any) => void) | null = null;
   let isDraining = false;
-  let nextStamp = 1;
   let iteratorReturned = false;
 
   const allDone = () => {
@@ -130,10 +128,9 @@ export function createAsyncCoordinator(
     return true;
   };
 
-  function pushEvent(event: RunnerEvent<any>, stamp: number, sourceIndex: number) {
-    insertOrdered(queue, {
+  function pushEvent(event: RunnerEvent<any>, sourceIndex: number) {
+    queue.push({
       result: { done: false, value: event },
-      stamp,
       sourceIndex
     });
   }
@@ -145,7 +142,6 @@ export function createAsyncCoordinator(
       const item = queue.shift()!;
       const res = waitingResolve;
       waitingResolve = null;
-      setIteratorEmissionStamp(iterator, item.stamp);
       res(item.result);
     } else if (allDone()) {
       const res = waitingResolve;
@@ -169,13 +165,11 @@ export function createAsyncCoordinator(
         // Don't process if source was completed/removed during the async wait
         if (!sourceList[i] || completed[i] || iteratorReturned) return;
 
-        const stamp = getIteratorEmissionStamp(src) ?? nextStamp++;
-
         if (r.done) {
           completed[i] = true;
-          pushEvent({ type: "complete", sourceIndex: i }, stamp, i);
+          pushEvent({ type: "complete", sourceIndex: i }, i);
         } else {
-          pushEvent({ type: "value", value: r.value, sourceIndex: i }, stamp, i);
+          pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
         }
 
         notify();
@@ -192,8 +186,7 @@ export function createAsyncCoordinator(
         if (!sourceList[i] || completed[i] || iteratorReturned) return;
         
         completed[i] = true;
-        const stamp = getIteratorEmissionStamp(src) ?? nextStamp++;
-        pushEvent({ type: "error", error: err, sourceIndex: i }, stamp, i);
+        pushEvent({ type: "error", error: err, sourceIndex: i }, i);
         notify();
       }
     );
@@ -215,20 +208,17 @@ export function createAsyncCoordinator(
           try {
             let r;
             while ((r = src.__tryNext())) {
-              const stamp = getIteratorEmissionStamp(src) ?? nextStamp++;
-
               if (r.done) {
                 completed[i] = true;
-                pushEvent({ type: "complete", sourceIndex: i }, stamp, i);
+                pushEvent({ type: "complete", sourceIndex: i }, i);
                 break;
               } else {
-                pushEvent({ type: "value", value: r.value, sourceIndex: i }, stamp, i);
+                pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
               }
             }
           } catch (err) {
             completed[i] = true;
-            const stamp = getIteratorEmissionStamp(src) ?? nextStamp++;
-            pushEvent({ type: "error", error: err, sourceIndex: i }, stamp, i);
+            pushEvent({ type: "error", error: err, sourceIndex: i }, i);
           }
         } 
         // Async sources
@@ -271,7 +261,6 @@ export function createAsyncCoordinator(
 
       if (queue.length > 0) {
         const item = queue.shift()!;
-        setIteratorEmissionStamp(iterator, item.stamp);
         return Promise.resolve(item.result);
       }
 
@@ -289,7 +278,6 @@ export function createAsyncCoordinator(
 
       if (queue.length > 0) {
         const item = queue.shift()!;
-        setIteratorEmissionStamp(iterator, item.stamp);
         return item.result;
       }
 

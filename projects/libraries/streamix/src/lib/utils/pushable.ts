@@ -1,10 +1,7 @@
 import {
   DONE,
-  getCurrentEmissionStamp,
-  nextEmissionStamp,
   StrictReceiver
 } from "../abstractions";
-import { IteratorMetaKind, setIteratorMeta, setValueMeta } from "../abstractions/hooks";
 import {
   AsyncIteratorState,
   asyncPull,
@@ -18,30 +15,11 @@ import {
  * Async iterator augmented with push methods, passed to operator setup callbacks.
  */
 export type AsyncPushable<R> = AsyncIterator<R> & AsyncIterable<R> & {
-  push(
-    value: R,
-    meta?: { valueId: string; operatorIndex: number; operatorName: string },
-    tag?: { kind?: IteratorMetaKind; inputValueIds?: string[] }
-  ): void;
+  push(value: R): void | Promise<void>;
   error(err: any): void;
   complete(): void;
   completed(): boolean;
 };
-
-/**
- * Tags a value with iterator metadata.
- */
-function tagValue<T>(
-  iterator: AsyncIterator<any>,
-  value: T,
-  meta: { valueId: string; operatorIndex: number; operatorName: string } | undefined,
-  tag?: { kind?: IteratorMetaKind; inputValueIds?: string[] }
-): T {
-  if (!meta) return value;
-  const metaTag = { valueId: meta.valueId, ...tag };
-  setIteratorMeta(iterator, metaTag, meta.operatorIndex, meta.operatorName);
-  return setValueMeta(value, metaTag, meta.operatorIndex, meta.operatorName);
-}
 
 /**
  * Creates an `AsyncPushable` - an async iterator that you can manually
@@ -53,18 +31,15 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
   // Create the receiver that will handle pushes
   const receiver: StrictReceiver<R> = {
     next(value: R) {
-      const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-      return pushValue(state, iterator, value, stamp, iterator.__onPush);
+      return pushValue(state, iterator, value, iterator.__onPush);
     },
     
     complete() {
-      const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-      pushComplete(state, iterator, stamp, iterator.__onPush);
+      pushComplete(state, iterator, iterator.__onPush);
     },
     
     error(err: any) {
-      const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-      pushError(state, iterator, err, stamp, iterator.__onPush);
+      pushError(state, iterator, err, iterator.__onPush);
     },
     
     get completed() {
@@ -118,13 +93,8 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
   };
 
   // Augment with push API
-  iterator.push = function(
-    value: R,
-    meta?: { valueId: string; operatorIndex: number; operatorName: string },
-    tag?: { kind?: IteratorMetaKind; inputValueIds?: string[] }
-  ): void | Promise<void> {
-    const v = tagValue(iterator, value, meta, tag);
-    return receiver.next(v);
+  iterator.push = function(value: R): void | Promise<void> {
+    return receiver.next(value);
   };
 
   iterator.error = function(err: any) {

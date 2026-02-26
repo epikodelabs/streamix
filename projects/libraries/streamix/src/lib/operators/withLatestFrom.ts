@@ -1,8 +1,6 @@
 import {
   createOperator,
-  getIteratorMeta,
   isPromiseLike,
-  setValueMeta,
   Stream
 } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
@@ -71,23 +69,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
               if (hasValue.length > 0 && hasValue.every(Boolean)) {
                 const combinedValue = [ev.value, ...latestValues] as [T, ...R];
                 
-                const triggerMeta = getIteratorMeta(source) || {
-                  valueId: 'unknown',
-                  operatorIndex: 0,
-                  operatorName: 'source'
-                };
-
-                const nextIndex = triggerMeta.operatorIndex + 1;
-
-                // Tag the tuple value with metadata
-                const taggedValue = setValueMeta(
-                  combinedValue, 
-                  { valueId: triggerMeta.valueId }, 
-                  nextIndex, 
-                  'withLatestFrom'
-                );
-                
-                output.next(taggedValue);
+                output.next(combinedValue);
               }
             } else {
               // Auxiliary Update
