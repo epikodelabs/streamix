@@ -1,9 +1,6 @@
 import {
   createOperator,
   DONE,
-  getIteratorEmissionStamp,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
   type Operator,
   type Stream
 } from "../abstractions";
@@ -15,14 +12,9 @@ import { createAsyncCoordinator } from "../utils";
  *
  * `skipUntil` suppresses (drops) source values until the provided `notifier`
  * produces its first emission. After the notifier emits, subsequent source
- * values are forwarded normally. Uses stamp-based filtering to ensure correct
- * ordering between notifier and source events.
+ * values are forwarded normally.
  *
  * Important details:
- * - Ordering and stamps: when the gate opens (notifier emits) only source
- *   values whose stamp is strictly greater than the gate-opening stamp will be
- *   forwarded. This prevents forwarding values that were logically emitted
- *   before or concurrently with the notifier signal.
  * - Notifier completion without emission: if the notifier completes without
  *   emitting, the operator remains closed and continues to drop source values.
  * - Error propagation: errors from either the notifier or source are propagated
@@ -44,7 +36,6 @@ export function skipUntil<T = any>(
     const runner = createAsyncCoordinator([source, notifierIt]);
 
     let gateOpened = false;
-    let gateStamp: number | null = null;
     let isDone = false;
 
     const handleEvent = (event: any, target: any): IteratorResult<T> | null => {
@@ -62,20 +53,16 @@ export function skipUntil<T = any>(
         return null;
       }
 
-      const stamp = getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp();
-
       if (event.sourceIndex === 1) {
-        // Notifier emitted: open the gate and record the stamp
+        // Notifier emitted: open the gate
         if (!gateOpened) {
           gateOpened = true;
-          gateStamp = stamp;
         }
         return null;
       }
 
       // Source value (sourceIndex === 0)
-      if (gateOpened && gateStamp !== null && stamp > gateStamp) {
-        setIteratorEmissionStamp(target, stamp);
+      if (gateOpened) {
         return { done: false, value: event.value };
       }
 

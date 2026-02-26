@@ -1,22 +1,17 @@
-import {
-    DONE,
-    setIteratorEmissionStamp,
-} from "../abstractions";
+import { DONE } from "../abstractions";
 
 /**
  * Shared queue item structure used across all async iterator implementations
  */
 export interface QueueItem<T> {
   result: IteratorResult<T>;
-  stamp: number;
 }
 
 /**
- * Pending error with timestamp
+ * Pending error state
  */
 export interface PendingError {
   err: any;
-  stamp: number;
 }
 
 /**
@@ -64,20 +59,18 @@ export class AsyncIteratorState<T> {
   /**
    * Enqueue a value
    */
-  enqueueValue(value: T, stamp: number): void {
+  enqueueValue(value: T): void {
     this.queue.push({ 
-      result: { done: false, value }, 
-      stamp 
+      result: { done: false, value }
     });
   }
 
   /**
    * Enqueue completion
    */
-  enqueueCompletion(stamp: number): void {
+  enqueueCompletion(): void {
     this.queue.push({ 
-      result: DONE, 
-      stamp 
+      result: DONE
     });
   }
 }
@@ -92,8 +85,7 @@ export function syncPull<T>(
 ): IteratorResult<T> | null {
   // Check queue first
   if (state.queue.length > 0) {
-    const { result, stamp } = state.queue.shift()!;
-    setIteratorEmissionStamp(iterator, stamp);
+    const { result } = state.queue.shift()!;
     state.backpressureQueue.shift()?.();
     
     if (result.done) {
@@ -105,9 +97,8 @@ export function syncPull<T>(
 
   // Check pending error
   if (state.pendingError) {
-    const { err, stamp } = state.pendingError;
+    const { err } = state.pendingError;
     state.pendingError = null;
-    setIteratorEmissionStamp(iterator, stamp);
     throw err;
   }
 
@@ -130,8 +121,7 @@ export async function asyncPull<T>(
 ): Promise<IteratorResult<T>> {
   // Sync path: values already queued
   if (state.queue.length > 0) {
-    const { result, stamp } = state.queue.shift()!;
-    setIteratorEmissionStamp(iterator, stamp);
+    const { result } = state.queue.shift()!;
     state.backpressureQueue.shift()?.();
     
     if (result.done) {
@@ -143,9 +133,8 @@ export async function asyncPull<T>(
 
   // Sync path: pending error
   if (state.pendingError) {
-    const { err, stamp } = state.pendingError;
+    const { err } = state.pendingError;
     state.pendingError = null;
-    setIteratorEmissionStamp(iterator, stamp);
     throw err;
   }
 
@@ -167,9 +156,8 @@ export async function asyncPull<T>(
  */
 export function pushValue<T>(
   state: AsyncIteratorState<T>,
-  iterator: any,
+  _iterator: any,
   value: T,
-  stamp: number,
   onPush?: () => void
 ): void | Promise<void> {
   if (state.completed) return;
@@ -180,14 +168,13 @@ export function pushValue<T>(
   if (state.pullResolve) {
     const r = state.pullResolve;
     state.pullResolve = state.pullReject = null;
-    setIteratorEmissionStamp(iterator, stamp);
     r(result);
     onPush?.();
     return;
   }
 
   // Otherwise queue it
-  state.enqueueValue(value, stamp);
+  state.enqueueValue(value);
 
   // If there's a push handler, call it (no backpressure)
   if (onPush) {
@@ -204,8 +191,7 @@ export function pushValue<T>(
  */
 export function pushComplete<T>(
   state: AsyncIteratorState<T>,
-  iterator: any,
-  stamp: number,
+  _iterator: any,
   onPush?: () => void
 ): void {
   if (state.completed) return;
@@ -215,13 +201,12 @@ export function pushComplete<T>(
   if (state.pullResolve) {
     const r = state.pullResolve;
     state.pullResolve = state.pullReject = null;
-    setIteratorEmissionStamp(iterator, stamp);
     r(DONE);
     return;
   }
 
   // Otherwise queue it
-  state.enqueueCompletion(stamp);
+  state.enqueueCompletion();
   onPush?.();
 }
 
@@ -230,9 +215,8 @@ export function pushComplete<T>(
  */
 export function pushError<T>(
   state: AsyncIteratorState<T>,
-  iterator: any,
+  _iterator: any,
   err: any,
-  stamp: number,
   onPush?: () => void
 ): void {
   if (state.completed) return;
@@ -242,24 +226,11 @@ export function pushError<T>(
   if (state.pullReject) {
     const r = state.pullReject;
     state.pullResolve = state.pullReject = null;
-    setIteratorEmissionStamp(iterator, stamp);
     r(err);
     return;
   }
 
   // Otherwise store it
-  state.pendingError = { err, stamp };
+  state.pendingError = { err };
   onPush?.();
-}
-
-/**
- * Helper to insert items in order by stamp
- */
-export function insertOrdered<T extends { stamp: number }>(
-  arr: T[],
-  item: T
-): void {
-  let i = arr.length;
-  while (i > 0 && arr[i - 1].stamp > item.stamp) i--;
-  arr.splice(i, 0, item);
 }

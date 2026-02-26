@@ -1,17 +1,14 @@
 import {
   createOperator,
   DONE,
-  getIteratorMeta,
   isPromiseLike,
   NEXT,
-  tagValue,
   type MaybePromise,
   type Operator
 } from "../abstractions";
 
 type BufferRecord<T> = {
   result: IteratorResult<T>;
-  meta?: { valueId: string; operatorIndex: number; operatorName: string };
 };
 
 /**
@@ -42,16 +39,7 @@ export const bufferWhile = <T = any>(
           const records = buffer.splice(0);
           if (records.length === 0) return NEXT([]);
 
-          const metas = records
-            .map((record) => record.meta)
-            .filter(Boolean) as { valueId: string; operatorIndex: number; operatorName: string }[];
-          const lastMeta = metas[metas.length - 1];
-          const values = tagValue(iterator as any, records.map((record) => record.result.value!), lastMeta, {
-            kind: "collapse",
-            inputValueIds: metas.map((e) => e.valueId),
-          });
-
-          return NEXT(values);
+          return NEXT(records.map((record) => record.result.value!));
         };
 
         if (completed) {
@@ -71,7 +59,7 @@ export const bufferWhile = <T = any>(
             return DONE;
           }
 
-          const record = { result, meta: getIteratorMeta(source) };
+          const record = { result };
 
           const values = buffer.map((item) => item.result.value!);
           const predicateResult = predicate(result.value, index++, values);

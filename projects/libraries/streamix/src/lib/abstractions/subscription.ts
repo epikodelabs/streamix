@@ -1,4 +1,3 @@
-import { generateSubscriptionId } from "./hooks";
 import type { MaybePromise } from "./operator";
 
 /**
@@ -13,8 +12,6 @@ import type { MaybePromise } from "./operator";
  * - Optionally executes cleanup logic on unsubscribe
  */
 export type Subscription = {
-  /** Unique id for this subscription (correlates with subscriptionId) */
-  readonly id: string;
   /**
    * Indicates whether the subscription has been terminated.
    *
@@ -76,10 +73,7 @@ export function createSubscription(
   /** Internal mutable subscription state */
   let _unsubscribed = false;
 
-  const id = generateSubscriptionId();
-
   return {
-    id,
     /**
    * - `true`  - subscription has been unsubscribed and is inactive
      */

@@ -1,4 +1,4 @@
-import { createPushOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
+import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
  * Creates a stream operator that emits the most recent value from the source stream
@@ -11,7 +11,6 @@ import { createPushOperator, getIteratorMeta, isPromiseLike, type MaybePromise }
 export const sample = <T = any>(period: MaybePromise<number>) =>
   createPushOperator<T>('sample', (source, output) => {
     let lastResult: IteratorResult<T> | undefined;
-    let lastMeta: ReturnType<typeof getIteratorMeta> | undefined;
     let skipped = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
     let resolvedPeriod: number | undefined = undefined;
@@ -21,7 +20,7 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
       intervalId = setInterval(() => {
         if (!lastResult) return;
         if (!skipped) {
-          output.push(lastResult.value!, lastMeta);
+          output.push(lastResult.value!);
         }
         skipped = true;
       }, resolvedPeriod);
@@ -41,13 +40,12 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
           const result = await source.next();
           if (result.done) break;
 
-          lastMeta = getIteratorMeta(source);
           lastResult = result;
           skipped = false;
         }
 
         if (lastResult && !skipped) {
-          output.push(lastResult.value!, lastMeta);
+          output.push(lastResult.value!);
         }
       } catch (err) {
         output.error(err);

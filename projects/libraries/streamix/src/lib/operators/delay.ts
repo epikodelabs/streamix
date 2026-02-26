@@ -1,4 +1,4 @@
-import { createPushOperator, getIteratorMeta, isPromiseLike, type MaybePromise } from '../abstractions';
+import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
  * Creates a stream operator that delays the emission of each value from the source stream.
@@ -20,13 +20,11 @@ export function delay<T = any>(ms: MaybePromise<number>) {
           const result = await source.next();
           if (result.done) break;
 
-          const meta = getIteratorMeta(source);
-
           if (resolvedMs !== undefined) {
             await new Promise((resolve) => setTimeout(resolve, resolvedMs));
           }
 
-          output.push(result.value!, meta);
+          output.push(result.value!);
         }
       } catch (err) {
         output.error(err);

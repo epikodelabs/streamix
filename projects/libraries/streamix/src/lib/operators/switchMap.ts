@@ -2,14 +2,7 @@ import type { MaybePromise, Operator, Stream } from "../abstractions";
 import {
   createOperator,
   DONE,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
   isPromiseLike,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  setIteratorMeta,
-  setValueMeta,
-  withEmissionStamp
 } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
@@ -44,9 +37,9 @@ export function switchMap<T = any, R = any>(
     const output = createSubject<R>();
     const outputIterator = eachValueFrom(output);
 
-    let currentInner: { id: number; it: AsyncIterator<R> } | null = null;
+    let currentInner: { token: object; it: AsyncIterator<R> } | null = null;
     let inputCompleted = false;
-    let currentInnerStreamId = 0;
+    let currentInnerToken: object | null = null;
     let index = 0;
     let stopped = false;
 
@@ -62,8 +55,7 @@ export function switchMap<T = any, R = any>(
 
     const subscribeToInner = (
       innerStream: Stream<R>,
-      streamId: number,
-      parentMeta?: any
+      token: object
     ) => {
       // Cancel the previous inner immediately so sync inner streams can't
       // interleave emissions out-of-order via re-entrant scheduler execution.
@@ -75,48 +67,23 @@ export function switchMap<T = any, R = any>(
       }
 
       const it = innerStream[Symbol.asyncIterator]();
-      currentInner = { id: streamId, it };
+      currentInner = { token, it };
 
       void (async () => {
         try {
-          while (!stopped && streamId === currentInnerStreamId) {
+          while (!stopped && token === currentInnerToken) {
             const r = await it.next();
-            const stamp = getIteratorEmissionStamp(it) ?? nextEmissionStamp();
 
             if (r.done) break;
-            if (stopped || streamId !== currentInnerStreamId) break;
-
-            const operatorIndex = (this as any).index ?? 0;
-            const operatorName = "switchMap";
-            let outputValue: any = r.value;
-
-            if (parentMeta) {
-              setIteratorMeta(
-                outputIterator,
-                { valueId: parentMeta.valueId, kind: "expand" },
-                operatorIndex,
-                operatorName
-              );
-              outputValue = setValueMeta(
-                outputValue,
-                { valueId: parentMeta.valueId, kind: "expand" },
-                operatorIndex,
-                operatorName
-              );
-            }
-
-            // Ensure downstream subject emissions carry the inner iterator stamp.
-            withEmissionStamp(stamp, () => {
-              setIteratorEmissionStamp(outputIterator as any, stamp);
-              output.next(outputValue);
-            });
+            if (stopped || token !== currentInnerToken) break;
+            output.next(r.value);
           }
         } catch (err) {
-          if (!stopped && streamId === currentInnerStreamId) {
+          if (!stopped && token === currentInnerToken) {
             output.error(err);
           }
         } finally {
-          if (currentInner?.id === streamId) {
+          if (currentInner?.token === token) {
             currentInner = null;
           }
           checkComplete();
@@ -125,8 +92,8 @@ export function switchMap<T = any, R = any>(
     };
 
     const processOuterValue = (value: T) => {
-      const streamId = ++currentInnerStreamId;
-      const parentMeta = getIteratorMeta(source);
+      const token = {};
+      currentInnerToken = token;
 
       let projected: any;
       try {
@@ -137,19 +104,19 @@ export function switchMap<T = any, R = any>(
       }
 
       if (isPromiseLike(projected)) {
-        const capturedId = streamId;
+        const capturedToken = token;
         Promise.resolve(projected).then(
           (normalized) => {
-            if (stopped || capturedId !== currentInnerStreamId) return;
-            subscribeToInner(fromAny<R>(normalized as any), capturedId, parentMeta);
+            if (stopped || capturedToken !== currentInnerToken) return;
+            subscribeToInner(fromAny<R>(normalized as any), capturedToken);
           },
           (err) => {
-            if (stopped || capturedId !== currentInnerStreamId) return;
+            if (stopped || capturedToken !== currentInnerToken) return;
             output.error(err);
           }
         );
       } else {
-        subscribeToInner(fromAny<R>(projected as any), streamId, parentMeta);
+        subscribeToInner(fromAny<R>(projected as any), token);
       }
     };
 

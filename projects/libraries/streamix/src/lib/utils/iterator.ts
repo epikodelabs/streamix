@@ -1,11 +1,7 @@
-import {
-  nextEmissionStamp
-} from "../abstractions";
-
 import { DONE } from "../abstractions";
 
 import type { Receiver, StrictReceiver, Subscription } from "../abstractions";
-import { getCurrentEmissionStamp, isPromiseLike } from "../abstractions";
+import { isPromiseLike } from "../abstractions";
 import {
   AsyncIteratorState,
   asyncPull,
@@ -52,7 +48,6 @@ export function createAsyncIterator<T>(opts: {
       type: 'next' | 'complete' | 'error';
       value?: T;
       err?: any;
-      stamp: number;
     }> = [];
 
     const ensureSubscribed = () => {
@@ -61,16 +56,13 @@ export function createAsyncIterator<T>(opts: {
         // Create receiver that will process both pending and future pushes
         const _receiver: StrictReceiver<T> = {
           next(value: T) {
-            const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-            return pushValue(state, iterator, value, stamp, iterator.__onPush);
+            return pushValue(state, iterator, value, iterator.__onPush);
           },
           complete() {
-            const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-            pushComplete(state, iterator, stamp, iterator.__onPush);
+            pushComplete(state, iterator, iterator.__onPush);
           },
           error(err: any) {
-            const stamp = getCurrentEmissionStamp() ?? nextEmissionStamp();
-            pushError(state, iterator, err, stamp, iterator.__onPush);
+            pushError(state, iterator, err, iterator.__onPush);
           },
           get completed() {
             return state.completed;
@@ -107,9 +99,9 @@ export function createAsyncIterator<T>(opts: {
       __tryNext?: () => IteratorResult<T> | null;
       __hasBufferedValues?: () => boolean;
       __onPush?: () => void;
-      __pushNext?: (value: T, stamp: number) => void;
-      __pushComplete?: (stamp: number) => void;
-      __pushError?: (err: any, stamp: number) => void;
+      __pushNext?: (value: T) => void;
+      __pushComplete?: () => void;
+      __pushError?: (err: any) => void;
     } = {
       next() {
         ensureSubscribed();
@@ -152,27 +144,27 @@ export function createAsyncIterator<T>(opts: {
     };
 
     // Methods to push values before subscription
-    iterator.__pushNext = (value: T, stamp: number) => {
+    iterator.__pushNext = (value: T) => {
       if (receiver) {
         receiver.next(value);
       } else {
-        pendingPushes.push({ type: 'next', value, stamp });
+        pendingPushes.push({ type: 'next', value });
       }
     };
 
-    iterator.__pushComplete = (stamp: number) => {
+    iterator.__pushComplete = () => {
       if (receiver) {
         receiver.complete();
       } else {
-        pendingPushes.push({ type: 'complete', stamp });
+        pendingPushes.push({ type: 'complete' });
       }
     };
 
-    iterator.__pushError = (err: any, stamp: number) => {
+    iterator.__pushError = (err: any) => {
       if (receiver) {
         receiver.error(err);
       } else {
-        pendingPushes.push({ type: 'error', err, stamp });
+        pendingPushes.push({ type: 'error', err });
       }
     };
 

@@ -1,4 +1,4 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, MaybePromise, NEXT, tagValue, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator, type Stream } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
 /**
@@ -28,7 +28,6 @@ export const concatMap = <T = any, R = any>(
     let outerIndex = 0;
     let innerIterator: AsyncIterator<R> | null = null;
     let result: IteratorResult<T> | null = null;
-    let currentMeta: { valueId: string; operatorIndex: number; operatorName: string } | undefined;
 
     const iterator: AsyncIterator<R> = {
       next: async () => {
@@ -39,7 +38,6 @@ export const concatMap = <T = any, R = any>(
 
             if (result.done) return DONE;
 
-            currentMeta = getIteratorMeta(source);
             const projected = project(result.value, outerIndex++);
             const normalized = isPromiseLike(projected) ? await projected : projected;
             innerIterator = eachValueFrom(fromAny<R>(normalized));
@@ -55,7 +53,7 @@ export const concatMap = <T = any, R = any>(
             continue;
           }
 
-          return NEXT(tagValue(iterator, innerResult.value, currentMeta, { kind: "expand" }));
+          return NEXT(innerResult.value);
         }
       },
 

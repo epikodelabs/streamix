@@ -1,11 +1,9 @@
 import {
   createOperator,
   DONE,
-  getIteratorEmissionStamp,
   isPromiseLike,
   MaybePromise,
   NEXT,
-  nextEmissionStamp,
   type Operator,
   type Stream
 } from "../abstractions";
@@ -37,18 +35,6 @@ export const exhaustMap = <T = any, R = any>(
     let innerIterator: AsyncIterator<R> | null = null;
     let isSourceDone = false;
 
-    // Drop source emissions that happened while an inner was active.
-    // We implement this by recording an emission stamp window for the inner:
-    // (ignoreStartStamp, ignoreEndStamp]. Any source value with a stamp inside
-    // that window is skipped.
-    let ignoreStartStamp: number | null = null;
-    let ignoreEndStamp: number | null = null;
-
-    const stampOf = (it: any) => {
-      const s = getIteratorEmissionStamp(it);
-      return typeof s === "number" ? s : nextEmissionStamp();
-    };
-
     return {
       async next() {
         while (true) {
@@ -58,9 +44,6 @@ export const exhaustMap = <T = any, R = any>(
             if (!result.done) return NEXT(result.value);
             
             innerIterator = null;
-            if (ignoreStartStamp !== null && ignoreEndStamp === null) {
-              ignoreEndStamp = nextEmissionStamp();
-            }
             if (isSourceDone) return DONE;
             continue;
           }
@@ -71,19 +54,7 @@ export const exhaustMap = <T = any, R = any>(
             return DONE;
           }
 
-          // Ignore values that arrived while the previous inner was active.
-          if (ignoreStartStamp !== null && ignoreEndStamp !== null) {
-            const stamp = stampOf(source);
-            if (stamp > ignoreStartStamp && stamp <= ignoreEndStamp) {
-              continue;
-            }
-          }
-
           const projected = project(result.value, outerIndex++);
-
-          // Mark the start of a new active-inner window.
-          ignoreStartStamp = nextEmissionStamp();
-          ignoreEndStamp = null;
 
           if (isPromiseLike(projected)) {
             const normalized = await projected;

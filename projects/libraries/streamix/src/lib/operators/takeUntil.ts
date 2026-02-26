@@ -1,11 +1,6 @@
 import {
   createOperator,
   DONE,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  tagValue,
   type Operator,
   type Stream
 } from "../abstractions";
@@ -59,13 +54,7 @@ export function takeUntil<T = any>(
             case 'value':
               if (event.sourceIndex === 0) {
                 // Source value - forward it
-                const stamp = getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp();
-                const meta = getIteratorMeta(runner as any);
-                setIteratorEmissionStamp(iterator, stamp);
-                return { 
-                  done: false, 
-                  value: tagValue(iterator, event.value, meta) 
-                };
+                return { done: false, value: event.value };
               } else {
                 // Notifier emitted - stop immediately
                 isDone = true;
@@ -108,13 +97,7 @@ export function takeUntil<T = any>(
           switch (event.type) {
             case 'value':
               if (event.sourceIndex === 0) {
-                const stamp = getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp();
-                const meta = getIteratorMeta(runner as any);
-                setIteratorEmissionStamp(iterator, stamp);
-                return { 
-                  done: false, 
-                  value: tagValue(iterator, event.value, meta) 
-                };
+                return { done: false, value: event.value };
               } else {
                 isDone = true;
                 // Can't await in sync method, but we can schedule cleanup

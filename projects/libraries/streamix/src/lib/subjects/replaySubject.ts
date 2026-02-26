@@ -1,7 +1,6 @@
 import {
   createReceiver,
   createSubscription,
-  generateStreamId,
   isPromiseLike,
   pipeSourceThrough,
   type MaybePromise,
@@ -32,7 +31,6 @@ export type ReplaySubject<T = any> = Subject<T>;
 export function createReplaySubject<T = any>(
   capacity: number = Infinity
 ): ReplaySubject<T> {
-  const id = generateStreamId();
   let latestValue: T | undefined;
   let isCompleted = false;
   let completionInfo: { kind: 'error'; error: any } | null = null;
@@ -154,7 +152,6 @@ export function createReplaySubject<T = any>(
   const self: ReplaySubject<T> = {
     type: "subject",
     name: "replaySubject",
-    id,
     get value() { return latestValue; },
     next,
     complete,

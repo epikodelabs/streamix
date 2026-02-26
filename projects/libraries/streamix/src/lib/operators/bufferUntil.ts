@@ -1,12 +1,6 @@
 import {
   createOperator,
   DONE,
-  getIteratorEmissionStamp,
-  getIteratorMeta,
-  nextEmissionStamp,
-  setIteratorEmissionStamp,
-  setIteratorMeta,
-  setValueMeta,
   type Operator,
   type Stream,
 } from "../abstractions";
@@ -16,9 +10,6 @@ import { createAsyncCoordinator } from "../utils";
 /**
  * Buffers values from the source iterator until the notifier emits.
  * Once the notifier emits, the buffered values are flushed as an array.
- *
- * Preserves metadata (`valueId`, `operatorIndex`, `operatorName`) from
- * upstream iterators and attaches collapse metadata to the emitted array.
  *
  * @template T Type of values emitted by the source iterator.
  * @param {Stream<any>} notifier - Stream whose emissions trigger buffer flush.
@@ -33,14 +24,6 @@ export const bufferUntil = <T = any>(notifier: Stream<any>) =>
     // Buffered source values
     let buffer: T[] = [];
 
-    // Corresponding metadata for buffered values
-    let bufferMetas: Array<{
-      valueId: string;
-      operatorIndex: number;
-      operatorName: string;
-      stamp: number;
-    }> = [];
-
     // Whether the iterator has been cancelled (return/throw)
     let cancelled = false;
 
@@ -48,8 +31,6 @@ export const bufferUntil = <T = any>(notifier: Stream<any>) =>
      * Flushes the current buffer.
      *
      * - Emits a copy of the buffered values.
-     * - Attaches collapse metadata if upstream values have metadata.
-     * - Updates iterator emission stamp.
      *
      * @returns {IteratorResult<T[]>} IteratorResult with flushed values or DONE.
      */
@@ -57,31 +38,8 @@ export const bufferUntil = <T = any>(notifier: Stream<any>) =>
       if (buffer.length === 0) return DONE;
 
       const values = [...buffer];
-      const metas = [...bufferMetas];
       buffer = [];
-      bufferMetas = [];
-
-      if (metas.length > 0) {
-        const lastMeta = metas[metas.length - 1];
-        const collapseMeta = {
-          valueId: lastMeta.valueId,
-          kind: "collapse" as const,
-          inputValueIds: metas.map(m => m.valueId),
-        };
-
-        // Attach metadata to iterator and values
-        setIteratorMeta(iterator as any, collapseMeta, lastMeta.operatorIndex, lastMeta.operatorName);
-        const taggedValues = setValueMeta(values, collapseMeta, lastMeta.operatorIndex, lastMeta.operatorName);
-
-        // Set iterator emission stamp to last buffered item
-        setIteratorEmissionStamp(iterator as any, lastMeta.stamp);
-
-        return { value: taggedValues, done: false };
-      } else {
-        const lastStamp = getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp();
-        setIteratorEmissionStamp(iterator as any, lastStamp);
-        return { value: values, done: false };
-      }
+      return { value: values, done: false };
     };
 
     /**
@@ -127,17 +85,6 @@ export const bufferUntil = <T = any>(notifier: Stream<any>) =>
               if (event.sourceIndex === 0) {
                 // Source value: buffer it
                 buffer.push(event.value as T);
-
-                // Capture metadata if available
-                const meta = getIteratorMeta(runner as any);
-                if (meta) {
-                  bufferMetas.push({
-                    valueId: meta.valueId,
-                    operatorIndex: meta.operatorIndex,
-                    operatorName: meta.operatorName,
-                    stamp: getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp(),
-                  });
-                }
               } else {
                 // Notifier value: flush buffer
                 if (buffer.length > 0) return flushBuffer();
@@ -213,15 +160,6 @@ export const bufferUntil = <T = any>(notifier: Stream<any>) =>
             case "value":
               if (event.sourceIndex === 0) {
                 buffer.push(event.value as T);
-                const meta = getIteratorMeta(runner as any);
-                if (meta) {
-                  bufferMetas.push({
-                    valueId: meta.valueId,
-                    operatorIndex: meta.operatorIndex,
-                    operatorName: meta.operatorName,
-                    stamp: getIteratorEmissionStamp(runner as any) ?? nextEmissionStamp(),
-                  });
-                }
               } else if (buffer.length > 0) {
                 return flushBuffer();
               }

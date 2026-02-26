@@ -13,19 +13,19 @@ import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromise
  */
 export const skip = <T = any>(count: MaybePromise<number>) =>
   createOperator<T, T>('skip', function (this: Operator, source) {
-    let counter: number | undefined;
-    const getCounter = (): MaybePromise<number> => {
-      if (counter !== undefined) {
-        return counter;
+    let remaining: number | undefined;
+    const getRemaining = (): MaybePromise<number> => {
+      if (remaining !== undefined) {
+        return remaining;
       }
       if (isPromiseLike(count)) {
         return count.then((val) => {
-          counter = val;
+          remaining = val;
           return val;
         });
       }
-      counter = count;
-      return counter;
+      remaining = count;
+      return remaining;
     };
 
     return {
@@ -34,10 +34,10 @@ export const skip = <T = any>(count: MaybePromise<number>) =>
           const result = await source.next();
           if (result.done) return DONE;
 
-          const counterOrPromise = getCounter();
-          const currentCounter = isPromiseLike(counterOrPromise) ? await counterOrPromise : counterOrPromise;
-          if (currentCounter > 0) {
-            counter = currentCounter - 1;
+          const remainingOrPromise = getRemaining();
+          const currentRemaining = isPromiseLike(remainingOrPromise) ? await remainingOrPromise : remainingOrPromise;
+          if (currentRemaining > 0) {
+            remaining = currentRemaining - 1;
             continue;
           }
 

@@ -1,4 +1,4 @@
-import { createOperator, DONE, getIteratorMeta, isPromiseLike, tagValue, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
 
@@ -38,12 +38,10 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
         while (true) {
           const result = await source.next();
           if (result.done) break;
-          const meta = getIteratorMeta(source);
-
           const p = new Promise<void>((resolve) => {
             schedule(() => {
               try {
-                output.next(tagValue(outputIterator, result.value, meta));
+                output.next(result.value);
               } finally {
                 resolve();
               }

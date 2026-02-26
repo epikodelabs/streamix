@@ -1,4 +1,4 @@
-import { createPushOperator, getIteratorMeta, type MaybePromise } from "../abstractions";
+import { createPushOperator, type MaybePromise } from "../abstractions";
 import { timer } from "../streams";
 
 /**
@@ -10,24 +10,15 @@ import { timer } from "../streams";
  */
 export function buffer<T = any>(period: MaybePromise<number>) {
   return createPushOperator<T, T[]>("buffer", (source, output) => {
-    let buf: {
-      result: IteratorResult<T>;
-      meta?: { valueId: string; operatorIndex: number; operatorName: string };
-    }[] = [];
+    let buf: IteratorResult<T>[] = [];
 
     let completed = false;
 
     const flush = () => {
       if (buf.length === 0) return;
 
-      const targetMeta = buf[buf.length - 1]?.meta;
-      const inputValueIds = buf.map((e) => e.meta?.valueId).filter(Boolean) as string[];
-
-      const values = buf.map((e) => e.result.value!);
-      output.push(values, targetMeta, {
-        kind: "collapse",
-        inputValueIds: inputValueIds.length > 0 ? inputValueIds : undefined,
-      });
+      const values = buf.map((e) => e.value!);
+      output.push(values);
       buf = [];
     };
 
@@ -79,7 +70,7 @@ export function buffer<T = any>(period: MaybePromise<number>) {
           const result = await source.next();
           if (result.done) break;
 
-          buf.push({ result, meta: getIteratorMeta(source) });
+          buf.push(result);
         }
       } catch (err) {
         fail(err);
