@@ -192,6 +192,35 @@ export function createAsyncCoordinator(
     );
   }
 
+  function drainOneSource(i: number) {
+    if (!sourceList[i] || completed[i] || iteratorReturned) return;
+
+    const src: any = sourceList[i];
+
+    if (src.__tryNext) {
+      try {
+        const r = src.__tryNext();
+        if (!r) return;
+        if (r.done) {
+          completed[i] = true;
+          pushEvent({ type: "complete", sourceIndex: i }, i);
+        } else {
+          pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
+        }
+      } catch (err) {
+        completed[i] = true;
+        pushEvent({ type: "error", error: err, sourceIndex: i }, i);
+      }
+      return;
+    }
+
+    pendingPulls[i] = true;
+    if (!pulling[i] && !completed[i]) {
+      pendingPulls[i] = false;
+      pullAsync(i);
+    }
+  }
+
   function drainSources() {
     // CRITICAL: Prevent recursive drains
     if (isDraining || iteratorReturned) return;
@@ -203,35 +232,10 @@ export function createAsyncCoordinator(
 
         const src: any = sourceList[i];
 
-        // Sync sources - fully drain each source in source-order to preserve
-        // deterministic causal ordering for operators that coordinate source
-        // and notifier streams.
-        if (src.__tryNext) {
-          try {
-            while (true) {
-              const r = src.__tryNext();
-              if (!r) break;
-              if (r.done) {
-                completed[i] = true;
-                pushEvent({ type: "complete", sourceIndex: i }, i);
-                break;
-              }
-              pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
-            }
-          } catch (err) {
-            completed[i] = true;
-            pushEvent({ type: "error", error: err, sourceIndex: i }, i);
-          }
-        } 
-        // Async sources
-        else {
-          // CRITICAL: Mark that we need a pull, but don't start it if already pulling
-          pendingPulls[i] = true;
-          if (!pulling[i] && !completed[i]) {
-            pendingPulls[i] = false;
-            pullAsync(i);
-          }
-        }
+        // Drain at most one event per source per pass. For push-based sources,
+        // __onPush triggers this function repeatedly, preserving cross-source
+        // emission ordering without source-local metadata.
+        drainOneSource(i);
       }
     } finally {
       isDraining = false;
@@ -241,18 +245,19 @@ export function createAsyncCoordinator(
   }
 
   // Wire up push notifications for a source
-  function wireSource(src: any) {
+  function wireSource(src: any, index: number) {
     const orig = src.__onPush;
     src.__onPush = () => {
       orig?.();
-      // Schedule drain in next microtask to prevent recursion
-      Promise.resolve().then(() => drainSources());
+      // Drain this source immediately on push to preserve push-time ordering.
+      drainOneSource(index);
+      notify();
     };
   }
 
   // Wire up initial sources
-  for (const src of sources as any[]) {
-    wireSource(src);
+  for (let i = 0; i < sources.length; i++) {
+    wireSource((sources as any[])[i], i);
   }
 
   const iterator: any = {
@@ -342,7 +347,7 @@ export function createAsyncCoordinator(
       pendingPulls.push(false);
 
       // Wire up push notification
-      wireSource(source);
+      wireSource(source, index);
 
       // Trigger immediate drain for new source
       Promise.resolve().then(() => drainSources());
