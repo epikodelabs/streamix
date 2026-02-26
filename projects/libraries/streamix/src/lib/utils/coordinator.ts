@@ -230,8 +230,6 @@ export function createAsyncCoordinator(
       for (let i = 0; i < sourceList.length; i++) {
         if (!sourceList[i] || completed[i]) continue;
 
-        const src: any = sourceList[i];
-
         // Drain at most one event per source per pass. For push-based sources,
         // __onPush triggers this function repeatedly, preserving cross-source
         // emission ordering without source-local metadata.

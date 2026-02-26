@@ -39,7 +39,7 @@ export function skipUntil<T = any>(
     let droppingBacklog = false;
     let isDone = false;
 
-    const handleEvent = (event: any, target: any): IteratorResult<T> | null => {
+    const handleEvent = (event: any): IteratorResult<T> | null => {
       if (event.type === 'error') {
         isDone = true;
         throw event.error;
@@ -93,7 +93,7 @@ export function skipUntil<T = any>(
           const result = await runner.next();
           if (result.done) return DONE;
 
-          const out = handleEvent(result.value, iterator);
+          const out = handleEvent(result.value);
           if (out) return out;
         }
       },
@@ -105,7 +105,7 @@ export function skipUntil<T = any>(
           const res = runner.__tryNext?.();
           if (!res || res.done) break;
 
-          const out = handleEvent(res.value, iterator);
+          const out = handleEvent(res.value);
           if (out) return out;
         }
         return isDone ? DONE : null;

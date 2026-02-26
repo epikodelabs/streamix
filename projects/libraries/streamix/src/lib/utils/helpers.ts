@@ -80,7 +80,7 @@ export class AsyncIteratorState<T> {
  */
 export function syncPull<T>(
   state: AsyncIteratorState<T>,
-  iterator: any,
+  _iterator: any,
   onDone?: () => void
 ): IteratorResult<T> | null {
   // Check queue first
@@ -116,7 +116,7 @@ export function syncPull<T>(
  */
 export async function asyncPull<T>(
   state: AsyncIteratorState<T>,
-  iterator: any,
+  _iterator: any,
   onDone?: () => void
 ): Promise<IteratorResult<T>> {
   // Sync path: values already queued
