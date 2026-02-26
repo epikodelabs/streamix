@@ -35,6 +35,21 @@ export const exhaustMap = <T = any, R = any>(
     let innerIterator: AsyncIterator<R> | null = null;
     let isSourceDone = false;
 
+    const dropBufferedOuterValues = async (): Promise<void> => {
+      const tryNext = (source as any).__tryNext as undefined | (() => IteratorResult<T> | null);
+      if (!tryNext) return;
+
+      while (true) {
+        const r = tryNext.call(source);
+        if (!r) break;
+        if (r.done) {
+          isSourceDone = true;
+          break;
+        }
+        // Drop values that arrived while an inner was active.
+      }
+    };
+
     return {
       async next() {
         while (true) {
@@ -44,6 +59,7 @@ export const exhaustMap = <T = any, R = any>(
             if (!result.done) return NEXT(result.value);
             
             innerIterator = null;
+            await dropBufferedOuterValues();
             if (isSourceDone) return DONE;
             continue;
           }

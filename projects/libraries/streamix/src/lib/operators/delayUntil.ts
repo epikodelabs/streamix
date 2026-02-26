@@ -39,7 +39,7 @@ export function delayUntil<T = any, R = any>(
 ): Operator<T, T> {
   return createOperator<T, T>("delayUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
-    const runner = createAsyncCoordinator([source, notifierIt]);
+    const runner = createAsyncCoordinator([notifierIt, source]);
 
     const buffer: T[] = [];
     let gateOpened = false;
@@ -57,27 +57,27 @@ export function delayUntil<T = any, R = any>(
       }
 
       if (event.type === 'complete') {
-        if (event.sourceIndex === 0) {
+        if (event.sourceIndex === 1) {
           // Source completed
           sourceCompleted = true;
           if (gateOpened) {
             // If gate is open, flush remaining buffer on next iteration
             return null;
           }
-          // Gate never opened, discard buffer and complete
-          buffer.length = 0;
-          isDone = true;
-          return DONE;
+          // Gate closed: keep buffered values and wait for notifier.
+          return null;
         } else {
           // Notifier completed without ever emitting - discard buffer
           if (!gateOpened) {
             buffer.length = 0;
+            isDone = true;
+            return DONE;
           }
           return null;
         }
       }
 
-      if (event.sourceIndex === 0) {
+      if (event.sourceIndex === 1) {
         if (gateOpened) {
           // Gate is open - forward immediately
           return { done: false, value: event.value };
@@ -103,7 +103,6 @@ export function delayUntil<T = any, R = any>(
     } = {
       async next() {
         if (isDone) return DONE;
-        if (sourceCompleted && !gateOpened) return DONE;
 
         while (true) {
           // 1. Always check the buffer first if the gate is open
@@ -138,7 +137,6 @@ export function delayUntil<T = any, R = any>(
 
       __tryNext: () => {
         if (isDone) return DONE;
-        if (sourceCompleted && !gateOpened) return DONE;
 
         // 1. Try flushing buffer if gate is open
         if (gateOpened) {

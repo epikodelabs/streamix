@@ -39,9 +39,6 @@
       "@epikodelabs/streamix/networking": [
         "./projects/libraries/streamix/networking/src/lib/index.ts"
       ],
-      "@epikodelabs/streamix/tracing": [
-        "./projects/libraries/streamix/tracing/src/lib/index.ts"
-      ],
       "@epikodelabs/streamix": [
         "./projects/libraries/streamix/src/lib/index.ts"
       ]

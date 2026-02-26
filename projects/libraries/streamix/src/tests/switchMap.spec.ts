@@ -4,15 +4,8 @@ import {
   DONE,
   EMPTY,
   from,
-  getIteratorEmissionStamp,
-  getValueMeta,
-  isWrappedPrimitive,
-  nextEmissionStamp,
   of,
-  setIteratorEmissionStamp,
-  setIteratorMeta,
   switchMap,
-  unwrapPrimitive,
 } from '@epikodelabs/streamix';
 
 describe('switchMap', () => {
@@ -599,46 +592,6 @@ describe('switchMap', () => {
     await expectAsync(read).toBeRejectedWithError("boom");
   });
 
-  it('coverage: should use inner emission stamp when present', async () => {
-    const buffer: number[] = [1];
-    let done = false;
-    let expectedStamp = 0;
-
-    const sourceIterator: any = {
-      __tryNext() {
-        if (buffer.length > 0) return { done: false, value: buffer.shift()! };
-        if (done) return DONE;
-        return null;
-      },
-      next: async () => {
-        throw new Error("next() should not be used when __tryNext is present");
-      }
-    };
-
-    const inner = (() => {
-      let done = false;
-      const iterator: AsyncIterator<number> = {
-        next: async () => {
-          if (done) return DONE;
-          done = true;
-          expectedStamp = nextEmissionStamp();
-          setIteratorEmissionStamp(iterator as any, expectedStamp);
-          return { done: false, value: 1 };
-        },
-      };
-      return { type: "stream", id: "inner-stamp", [Symbol.asyncIterator]: () => iterator } as any;
-    })();
-
-    const iterator = switchMap<number, number>(() => inner).apply(sourceIterator as any);
-
-    expect(await iterator.next()).toEqual({ done: false, value: 1 });
-    expect(getIteratorEmissionStamp(iterator as any)).toBe(expectedStamp);
-
-    await iterator.return?.();
-    done = true;
-    sourceIterator.__onPush?.();
-  });
-
   it('coverage: should support push-based sources via __tryNext/__onPush', async () => {
     const buffer: number[] = [1];
     let done = false;
@@ -815,34 +768,6 @@ describe('switchMap', () => {
     })();
 
     await expectAsync(run).toBeRejectedWithError("tryNext boom");
-  });
-
-  it('coverage: should carry parent iterator metadata to inner emissions', async () => {
-    const source = createSubject<number>();
-    const sourceIterator = source[Symbol.asyncIterator]();
-
-    setIteratorMeta(sourceIterator as any, { valueId: "parent" }, 0, "test");
-
-    const iterator = switchMap<number, any>(() => from([123])).apply(sourceIterator as any);
-    const iterable = { [Symbol.asyncIterator]: () => iterator } as AsyncIterable<any>;
-
-    const valuesPromise = (async () => {
-      const values: any[] = [];
-      for await (const value of iterable) {
-        values.push(value);
-      }
-      return values;
-    })();
-
-    source.next(1);
-    source.complete();
-
-    const values = await valuesPromise;
-    expect(values.length).toBe(1);
-    expect(isWrappedPrimitive(values[0])).toBeTrue();
-    expect(unwrapPrimitive(values[0])).toBe(123);
-    expect(getValueMeta(values[0])?.valueId).toBe("parent");
-    expect(getValueMeta(values[0])?.kind).toBe("expand");
   });
 
   it('coverage: should propagate promise rejections from project', async () => {

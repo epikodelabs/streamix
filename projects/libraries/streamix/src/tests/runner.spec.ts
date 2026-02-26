@@ -1,6 +1,5 @@
 import {
-    createAsyncCoordinator, DONE, getIteratorEmissionStamp,
-    setIteratorEmissionStamp
+    createAsyncCoordinator, DONE
 } from "@epikodelabs/streamix";
 
 describe("runner", () => {
@@ -99,18 +98,4 @@ describe("runner", () => {
         expect(source1Returned).toBe(true);
     });
 
-    it("should preserve emission stamps from sources", async () => {
-        const source0: any = {
-            next: () => {
-                const res = { done: false, value: "stamped" };
-                setIteratorEmissionStamp(source0, 12345);
-                return Promise.resolve(res);
-            }
-        };
-
-        const runner = createAsyncCoordinator([source0]);
-        await runner.next();
-
-        expect(getIteratorEmissionStamp(runner)).toBe(12345);
-    });
 });

@@ -1,10 +1,6 @@
 import {
   createAsyncPushable,
   DONE,
-  getIteratorMeta,
-  getValueMeta,
-  unwrapPrimitive,
-  type IteratorMetaKind,
 } from '@epikodelabs/streamix';
 
 describe('createAsyncPushable', () => {
@@ -60,41 +56,4 @@ describe('createAsyncPushable', () => {
     expect(pushable.completed()).toBeTrue();
   });
 
-  it('tags iterator/value metadata when push() is provided meta/tag', async () => {
-    const pushable = createAsyncPushable<number>();
-
-    const meta = { valueId: 'v1', operatorIndex: 7, operatorName: 'testOp' };
-    const tag: { kind?: IteratorMetaKind; inputValueIds?: string[] } = {
-      kind: 'transform',
-      inputValueIds: ['a', 'b'],
-    };
-
-    const pull = pushable.next();
-    await pushable.push(5, meta, tag);
-
-    const result = await pull;
-    expect(result.done).toBeFalse();
-
-    const pushedValue = (result as any).value;
-    expect(unwrapPrimitive(pushedValue)).toBe(5);
-
-    expect(getIteratorMeta(pushable as any)).toEqual({
-      valueId: 'v1',
-      operatorIndex: 7,
-      operatorName: 'testOp',
-      kind: 'transform',
-      inputValueIds: ['a', 'b'],
-    });
-
-    expect(getValueMeta(pushedValue)).toEqual({
-      valueId: 'v1',
-      operatorIndex: 7,
-      operatorName: 'testOp',
-      kind: 'transform',
-      inputValueIds: ['a', 'b'],
-    });
-
-    pushable.complete();
-    expect(await pushable.next()).toEqual(DONE);
-  });
 });

@@ -1,10 +1,6 @@
 import {
   bufferCount,
-  createOperator,
   createSubject,
-  getIteratorMeta,
-  getValueMeta,
-  setIteratorMeta,
   type Stream,
 } from "@epikodelabs/streamix";
 
@@ -301,100 +297,6 @@ describe("bufferCount", () => {
     expect(result3.done).toBe(true);
   });
 
-  it("should attach collapse metadata when upstream iterator has meta (full buffers)", async () => {
-    const tagIds = createOperator<number, number>("tagIds", function (source) {
-      let n = 0;
-      const iterator: AsyncIterator<number> = {
-        next: async () => {
-          const result = await source.next();
-          if (result.done) return result;
-
-          n += 1;
-          setIteratorMeta(iterator as any, { valueId: `id${n}` }, 0, "tagIds");
-          return result;
-        },
-      };
-      return iterator;
-    });
-
-    const buffered = source.pipe(tagIds, bufferCount(2));
-    const it = buffered[Symbol.asyncIterator]();
-
-    subject.next(10);
-    subject.next(20);
-
-    const result = await it.next();
-    expect(result.done).toBe(false);
-    expect(result.value).toEqual([10, 20]);
-
-    const iteratorMeta = getIteratorMeta(it as any);
-    expect(iteratorMeta).toEqual(
-      jasmine.objectContaining({
-        valueId: "id2",
-        kind: "collapse",
-        inputValueIds: ["id1", "id2"],
-      })
-    );
-
-    const valueMeta = getValueMeta(result.value);
-    expect(valueMeta).toEqual(
-      jasmine.objectContaining({
-        valueId: "id2",
-        kind: "collapse",
-        inputValueIds: ["id1", "id2"],
-      })
-    );
-  });
-
-  it("should attach collapse metadata when flushing partial buffer on completion", async () => {
-    const tagIds = createOperator<number, number>("tagIds", function (source) {
-      let n = 0;
-      const iterator: AsyncIterator<number> = {
-        next: async () => {
-          const result = await source.next();
-          if (result.done) return result;
-
-          n += 1;
-          setIteratorMeta(iterator as any, { valueId: `id${n}` }, 0, "tagIds");
-          return result;
-        },
-      };
-      return iterator;
-    });
-
-    const buffered = source.pipe(tagIds, bufferCount(2));
-    const it = buffered[Symbol.asyncIterator]();
-
-    subject.next(1);
-    subject.next(2);
-    subject.next(3);
-    subject.complete();
-
-    const result1 = await it.next();
-    expect(result1.done).toBe(false);
-    expect(result1.value).toEqual([1, 2]);
-    expect(getValueMeta(result1.value)).toEqual(
-      jasmine.objectContaining({
-        valueId: "id2",
-        kind: "collapse",
-        inputValueIds: ["id1", "id2"],
-      })
-    );
-
-    const result2 = await it.next();
-    expect(result2.done).toBe(false);
-    expect(result2.value).toEqual([3]);
-    expect(getValueMeta(result2.value)).toEqual(
-      jasmine.objectContaining({
-        valueId: "id3",
-        kind: "collapse",
-        inputValueIds: ["id3"],
-      })
-    );
-
-    const done = await it.next();
-    expect(done.done).toBe(true);
-  });
 });
 
 
