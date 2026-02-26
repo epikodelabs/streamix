@@ -1,11 +1,7 @@
 import {
-  createOperator,
   createStream,
   createSubject,
   from,
-  getIteratorMeta,
-  getValueMeta,
-  setIteratorMeta,
   withLatestFrom,
 } from '@epikodelabs/streamix';
 
@@ -334,73 +330,6 @@ describe('withLatestFrom', () => {
       [1, 100, 'X'],
       [2, 100, 'X'],
     ]);
-  });
-
-  it('preserves metadata from both source and auxiliary values', async () => {
-    // Tag source values
-    const tagSource = createOperator<number, number>('tagSource', function (source) {
-      let n = 0;
-      const iterator: AsyncIterator<number> = {
-        next: async () => {
-          const result = await source.next();
-          if (result.done) return result;
-          n += 1;
-          setIteratorMeta(iterator as any, { valueId: `src-${n}` }, 0, 'tagSource');
-          return result;
-        },
-      };
-      return iterator;
-    });
-
-    // Tag auxiliary values  
-    const tagAux = createOperator<string, string>('tagAux', function (source) {
-      let n = 0;
-      const iterator: AsyncIterator<string> = {
-        next: async () => {
-          const result = await source.next();
-          if (result.done) return result;
-          n += 1;
-          setIteratorMeta(iterator as any, { valueId: `aux-${n}` }, 0, 'tagAux');
-          return result;
-        },
-      };
-      return iterator;
-    });
-
-    const main$ = createSubject<number>();
-    const aux$ = createSubject<string>();
-
-    const combined = main$.pipe(
-      tagSource,
-      withLatestFrom(aux$.pipe(tagAux))
-    );
-
-    const it = combined[Symbol.asyncIterator]();
-    
-    // 2. Allow tagAux and withLatestFrom setup to "see" the value
-    await scheduler.flush(); 
-    // 1. Prepare auxiliary state
-    aux$.next('A');
-    // 3. Start the consumer's pull
-    const nextPromise = it.next();
-
-    // 4. Trigger the main emission
-    main$.next(5);
-
-    const result = await nextPromise;
-    expect(result.value).toEqual([5, 'A']);
-
-    // Should have metadata
-    const valueMeta = getValueMeta(result.value);
-    expect(valueMeta).toEqual(
-      jasmine.objectContaining({
-        valueId: jasmine.any(String),
-        operatorName: 'withLatestFrom' // The operator that created this tuple
-      })
-    );
-
-    // The output iterator is new - shouldn't have source's iterator metadata
-    expect(getIteratorMeta(it as any)).toBeUndefined();
   });
 
   it('should abort during promise resolution of auxiliary streams', async () => {

@@ -55,16 +55,11 @@ export function takeUntil<T = any>(
               if (event.sourceIndex === 0) {
                 // Source value - forward it
                 return { done: false, value: event.value };
-              } else {
-                // Notifier emitted - stop immediately
-                isDone = true;
-                
-                // Clean up notifier iterator
-                await notifierIt.return?.();
-                
-                // Signal completion
-                return DONE;
               }
+              // Notifier emitted - stop immediately
+              isDone = true;
+              await notifierIt.return?.();
+              return DONE;
               
             case 'complete':
               if (event.sourceIndex === 0) {
@@ -98,12 +93,11 @@ export function takeUntil<T = any>(
             case 'value':
               if (event.sourceIndex === 0) {
                 return { done: false, value: event.value };
-              } else {
-                isDone = true;
-                // Can't await in sync method, but we can schedule cleanup
-                notifierIt.return?.().catch(() => {});
-                return DONE;
               }
+              isDone = true;
+              // Can't await in sync method, but we can schedule cleanup
+              notifierIt.return?.().catch(() => {});
+              return DONE;
               
             case 'complete':
               if (event.sourceIndex === 0) {

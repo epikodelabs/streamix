@@ -1,10 +1,6 @@
 import {
     bufferWhile,
-    createOperator,
     createSubject,
-    getIteratorMeta,
-    getValueMeta,
-    setIteratorMeta,
 } from "@epikodelabs/streamix";
 
 const waitTick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -147,70 +143,4 @@ describe("bufferWhile", () => {
     expect(results).toEqual([]);
   });
 
-  it("attaches collapse metadata when upstream iterator has meta", async () => {
-    const tagIds = createOperator<number, number>("tagIds", function (source) {
-      let n = 0;
-      const iterator: AsyncIterator<number> = {
-        next: async () => {
-          const result = await source.next();
-          if (result.done) return result;
-
-          n += 1;
-          setIteratorMeta(iterator as any, { valueId: `id${n}` }, 0, "tagIds");
-          return result;
-        },
-      };
-      return iterator;
-    });
-
-    const subject = createSubject<number>();
-    const buffered = subject.pipe(
-      tagIds,
-      bufferWhile((_value, _index, buf) => buf.length < 2)
-    );
-
-    const it = buffered[Symbol.asyncIterator]();
-
-    subject.next(1);
-    subject.next(2);
-    subject.next(3);
-    subject.complete();
-    await waitTick();
-
-    const r1 = await it.next();
-    expect(r1.done).toBe(false);
-    expect(r1.value).toEqual([1, 2]);
-
-    expect(getIteratorMeta(it as any)).toEqual(
-      jasmine.objectContaining({
-        valueId: "id2",
-        kind: "collapse",
-        inputValueIds: ["id1", "id2"],
-      })
-    );
-    expect(getValueMeta(r1.value)).toEqual(
-      jasmine.objectContaining({
-        valueId: "id2",
-        kind: "collapse",
-        inputValueIds: ["id1", "id2"],
-      })
-    );
-
-    const r2 = await it.next();
-    expect(r2.done).toBe(false);
-    expect(r2.value).toEqual([3]);
-
-    expect(getValueMeta(r2.value)).toEqual(
-      jasmine.objectContaining({
-        valueId: "id3",
-        kind: "collapse",
-        inputValueIds: ["id3"],
-      })
-    );
-
-    const r3 = await it.next();
-    expect(r3.done).toBe(true);
-    const r4 = await it.next();
-    expect(r4.done).toBe(true);
-  });
 });

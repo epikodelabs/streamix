@@ -203,18 +203,20 @@ export function createAsyncCoordinator(
 
         const src: any = sourceList[i];
 
-        // Sync sources - DRAIN ALL VALUES
+        // Sync sources - fully drain each source in source-order to preserve
+        // deterministic causal ordering for operators that coordinate source
+        // and notifier streams.
         if (src.__tryNext) {
           try {
-            let r;
-            while ((r = src.__tryNext())) {
+            while (true) {
+              const r = src.__tryNext();
+              if (!r) break;
               if (r.done) {
                 completed[i] = true;
                 pushEvent({ type: "complete", sourceIndex: i }, i);
                 break;
-              } else {
-                pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
               }
+              pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
             }
           } catch (err) {
             completed[i] = true;

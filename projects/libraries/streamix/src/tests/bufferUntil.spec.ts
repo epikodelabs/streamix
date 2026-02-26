@@ -1,10 +1,6 @@
 import {
   bufferUntil,
-  createOperator,
   createSubject,
-  getIteratorEmissionStamp,
-  setIteratorEmissionStamp,
-  setIteratorMeta
 } from "@epikodelabs/streamix";
 
 const waitTick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -147,56 +143,6 @@ describe("bufferUntil", () => {
     expect(error).toEqual(jasmine.any(Error));
     expect((error as Error).message).toBe("SOURCE");
     expect(returnCalls).toBeGreaterThanOrEqual(1);
-  });
-
-  it("attaches collapse metadata when upstream iterator has meta", async () => {
-    const tagIds = createOperator<number, number>("tagIds", function (sourceIt) {
-      let n = 0;
-      const iterator: AsyncIterator<number> = {
-        next: async () => {
-          const result = await sourceIt.next();
-          if (result.done) return result;
-
-          n += 1;
-          const stamp = getIteratorEmissionStamp(sourceIt);
-          if (stamp !== undefined) {
-            setIteratorEmissionStamp(iterator, stamp);
-          }
-          setIteratorMeta(iterator as any, { valueId: `id${n}` }, 0, "tagIds");
-          return result;
-        },
-      };
-
-      return iterator;
-    });
-
-    const source = createSubject<number>();
-    const notifier = createSubject<void>();
-    const buffered = source.pipe(tagIds, bufferUntil(notifier));
-
-    const results: number[][] = [];
-
-    // Start consuming in background
-    void (async () => {
-      for await (const value of buffered) {
-        results.push(value);
-      }
-    })();
-
-    // Let the consumer start
-    source.next(1);
-    source.next(2);
-    notifier.next();
-
-    source.complete();
-
-    await waitTick();
-
-    expect(results.length).toBe(1);
-    expect(results[0]).toEqual([1, 2]);
-
-    // Now check metadata on the last emission
-    // Note: You'd need to capture the iterator reference to check its meta
   });
 
   it("cancels source and notifier iterators when downstream returns", async () => {

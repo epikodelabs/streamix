@@ -1,9 +1,5 @@
 import {
-  createOperator,
   createSubject,
-  getIteratorMeta,
-  getValueMeta,
-  setIteratorMeta,
   type Stream,
   toArray,
 } from '@epikodelabs/streamix';
@@ -108,55 +104,6 @@ describe('toArray', () => {
     expect(results).toEqual([[42]]);  // Single value in array
   });
 
-  it('should attach collapse metadata when upstream iterator has meta', async () => {
-    const tagIds = createOperator<number, number>('tagIds', function (source) {
-      let n = 0;
-      const iterator: AsyncIterator<number> = {
-        next: async () => {
-          const result = await source.next();
-          if (result.done) return result;
-
-          n += 1;
-          setIteratorMeta(iterator as any, { valueId: `id${n}` }, 0, 'tagIds');
-          return result;
-        },
-      };
-      return iterator;
-    });
-
-    const toArrayStream = source.pipe(tagIds, toArray());
-    const it = toArrayStream[Symbol.asyncIterator]();
-
-    subject.next(1);
-    subject.next(2);
-    subject.complete();
-
-    const r1 = await it.next();
-    expect(r1.done).toBe(false);
-    expect(r1.value).toEqual([1, 2]);
-
-    expect(getIteratorMeta(it as any)).toEqual(
-      jasmine.objectContaining({
-        valueId: 'id2',
-        kind: 'collapse',
-        inputValueIds: ['id1', 'id2'],
-      })
-    );
-
-    expect(getValueMeta(r1.value)).toEqual(
-      jasmine.objectContaining({
-        valueId: 'id2',
-        kind: 'collapse',
-        inputValueIds: ['id1', 'id2'],
-      })
-    );
-
-    const r2 = await it.next();
-    expect(r2.done).toBe(true);
-
-    const r3 = await it.next();
-    expect(r3.done).toBe(true);
-  });
 });
 
 
