@@ -1,12 +1,12 @@
 import {
-  createReceiver,
-  createSubscription,
-  isPromiseLike,
-  pipeSourceThrough,
-  type MaybePromise,
-  type Operator,
-  type Receiver,
-  type Stream,
+    createReceiver,
+    createSubscription,
+    isPromiseLike,
+    pipeSourceThrough,
+    type MaybePromise,
+    type Operator,
+    type Receiver,
+    type Stream,
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { AsyncPushable, createAsyncPushable } from "../utils";
