@@ -9,11 +9,12 @@ import { createOperator, type MaybePromise, NEXT, type Operator, isPromiseLike }
  * of a single property (`key`).
  *
  * @template T The type of the objects in the stream. Must extend `object`.
+ * @template K The key of the property to check for changes.
  * @param key The name of the property to check for changes.
  * @param comparator An optional function to compare the previous and current values of the `key`.
  * It should return `true` if the values are considered the same. If not provided,
  * strict inequality (`!==`) is used.
- * @returns An `Operator` instance that can be used in a stream's `pipe` method.
+ * @returns An `Operator<T, T>` instance that can be used in a stream's `pipe` method.
  */
 export const distinctUntilKeyChanged = <T extends object = any, K extends keyof T = keyof T>(
   key: MaybePromise<K>,

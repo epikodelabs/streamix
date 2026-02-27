@@ -25,11 +25,12 @@ import { createAsyncCoordinator } from "../utils";
  * - Wait for user interaction before processing inputs.
  *
  * @template T Source/output value type.
- * @param notifier A `Stream<T>` or `Promise<T>` that opens the gate when it emits.
+ * @template N Notifier value type (ignored by this operator).
+ * @param notifier A `Stream<N>` or `Promise<N>` that opens the gate when it emits.
  * @returns An `Operator<T, T>` that drops source values until the notifier emits.
  */
-export function skipUntil<T = any>(
-  notifier: Stream<T> | Promise<T>
+export function skipUntil<T = any, N = any>(
+  notifier: Stream<N> | Promise<N>
 ): Operator<T, T> {
   return createOperator<T, T>("skipUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
