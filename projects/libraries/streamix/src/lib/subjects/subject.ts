@@ -25,6 +25,10 @@ export type Subject<T = any> = Stream<T> & {
   error(err: any): void;
   completed(): boolean;
   get value(): T | undefined;
+  subscribe(callback: (value: T) => MaybePromise): Subscription;
+  subscribe(receiver: Receiver<T>): Subscription;
+  subscribe(): Subscription;
+  subscribe(callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription;
 };
 
 /**
