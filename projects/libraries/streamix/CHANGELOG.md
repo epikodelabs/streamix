@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.35
+
+Refactored `Stream`, `Subject`, `ReplaySubject`, and `BehaviorSubject` to use dual generic parameters for input and output types, enabling robust type inference through operator chains and subscriptions. Updated all `subscribe` and `query` method signatures to reflect the correct output type, ensuring type safety and better developer experience. All stream and subject factory functions and instance methods now preserve and expose accurate types throughout pipelines.
+
 ## 2.0.28
 
 Buffer and subject internals were reworked: synchronization removed in favor of scheduler-queued methods, `ReplaySubject` now uses the scheduler, and `shareReplay` aligns with strict backpressure and async delivery. Lock and semaphore remain for convenience. Added edge-case tests for subjects and buffers, with various type/config/docs corrections and cleanup. Streams/operators now match updated signatures with refreshed JSDocs.
