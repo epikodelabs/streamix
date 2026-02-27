@@ -1,12 +1,13 @@
 import {
-    createReceiver,
-    createSubscription,
-    isPromiseLike,
-    pipeSourceThrough,
-    type MaybePromise,
-    type Operator,
-    type Receiver,
-    type Stream
+  createReceiver,
+  createSubscription,
+  isPromiseLike,
+  pipeSourceThrough,
+  Subscription,
+  type MaybePromise,
+  type Operator,
+  type Receiver,
+  type Stream
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { AsyncPushable, createAsyncPushable } from "../utils";
@@ -19,7 +20,7 @@ import { AsyncPushable, createAsyncPushable } from "../utils";
  *
  * @template T
  */
-export type Subject<T = any> = Stream<T> & {
+export type Subject<T = any> = Stream<T, T> & {
   next(value: T): void;
   complete(): void;
   error(err: any): void;
@@ -159,8 +160,8 @@ export function createSubject<T = any>(): Subject<T> {
     complete,
     error,
     completed: () => isCompleted,
-    pipe: (...steps: Operator<any, any>[]): Stream<any> => {
-      return pipeSourceThrough(self, steps);
+    pipe: <TOut>(...steps: Operator<any, any>[]): Stream<T, TOut> => {
+      return pipeSourceThrough<T, TOut>(self, steps);
     },
     subscribe,
     query: () => firstValueFrom(self),

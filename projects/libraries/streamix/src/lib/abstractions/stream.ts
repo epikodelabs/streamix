@@ -10,28 +10,13 @@ import { createSubscription, type Subscription } from "./subscription";
  *
  * @template T The type of values emitted by the stream.
  */
-export type Stream<T = any> = AsyncIterable<T> & {
+export type Stream<TIn = any, TOut = TIn> = AsyncIterable<TOut> & {
   type: "stream" | "subject";
   name?: string;
-  pipe: OperatorChain<T>;
-  /**
-   * Subscribes to the stream with a value callback.
-   */
-  subscribe(callback: (value: T) => MaybePromise): Subscription;
-  /**
-   * Subscribes to the stream with a Receiver object.
-   */
-  subscribe(receiver: Receiver<T>): Subscription;
-  /**
-   * Subscribes to the stream with no callback (noop).
-   */
-  subscribe(): Subscription;
-  /**
-   * Implementation signature.
-   */
-  subscribe(callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription;
-  query: () => Promise<T>;
-  [Symbol.asyncIterator](): AsyncIterator<T>;
+  pipe: OperatorChain<TOut>;
+  subscribe(callbackOrReceiver?: ((value: TOut) => MaybePromise) | Receiver<TOut>): Subscription;
+  query: () => Promise<TOut>;
+  [Symbol.asyncIterator](): AsyncIterator<TOut>;
 };
 
 /**
@@ -298,10 +283,10 @@ export function createStream<T>(
  * @param operators Operators to apply, in order.
  * @returns A new Stream that emits the transformed values.
  */
-export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
-  source: Stream<TIn>,
+export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any>[] = Operator<any, any>[]>(
+  source: Stream<TIn, any>,
   operators: [...Ops]
-): Stream<any> {
+): Stream<TIn, TOut> {
   const applyOperators = (baseSource: AsyncIterator<any>) => {
     let iterator: AsyncIterator<any> = baseSource;
     for (const op of operators) {
@@ -313,7 +298,7 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
     return iterator;
   };
 
-  function registerReceiver(receiver: Receiver<any>): Subscription {
+  function registerReceiver(receiver: Receiver<TOut>): Subscription {
     const abortController = new AbortController();
     const signal = abortController.signal;
 
@@ -334,10 +319,10 @@ export function pipeSourceThrough<TIn, Ops extends Operator<any, any>[]>(
     return subscription;
   }
 
-  const pipedStream: Stream<any> = {
+  const pipedStream: Stream<TIn, TOut> = {
     name: `${source.name}Sink`,
     type: "stream",
-    pipe: (...nextOps: Operator<any, any>[]) => pipeSourceThrough(source, [...operators, ...nextOps]),
+    pipe: (...nextOps: Operator<any, any>[]) => pipeSourceThrough<TIn, any>(pipedStream, nextOps),
     subscribe: (cb) => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(pipedStream),
     [Symbol.asyncIterator]: () => {

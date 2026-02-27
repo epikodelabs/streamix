@@ -62,7 +62,7 @@ export function fromEvent(target: MaybePromise<EventTarget>, event: MaybePromise
   };
 
   subject.subscribe = (callback?: ((value: Event) => void) | Receiver<Event>) => {
-    const subscription = originalSubscribe.call(subject, callback);
+    const subscription = (originalSubscribe as any).call(subject, callback);
     if (++subscriberCount === 1) {
       void start();
     }

@@ -99,7 +99,7 @@ export function onAnimationFrame(): Stream<number> {
   subject.subscribe = (
     callback?: ((value: number) => void) | Receiver<number>
   ) => {
-    const subscription = originalSubscribe.call(subject, callback);
+    const subscription = (originalSubscribe as any).call(subject, callback);
 
     scheduleStart();
 

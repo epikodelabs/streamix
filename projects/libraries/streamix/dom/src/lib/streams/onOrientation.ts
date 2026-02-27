@@ -85,7 +85,7 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
   subject.subscribe = (
     cb?: ((value: "portrait" | "landscape") => void) | Receiver<"portrait" | "landscape">
   ) => {
-    const sub = originalSubscribe.call(subject, cb);
+    const sub = (originalSubscribe as any).call(subject, cb);
 
     scheduleStart();
 

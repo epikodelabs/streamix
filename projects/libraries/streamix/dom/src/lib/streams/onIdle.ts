@@ -87,7 +87,7 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
   subject.subscribe = (
     callback?: ((value: IdleDeadline) => void) | Receiver<IdleDeadline>
   ) => {
-    const subscription = originalSubscribe.call(subject, callback);
+    const subscription = (originalSubscribe as any).call(subject, callback);
 
     scheduleStart();
 

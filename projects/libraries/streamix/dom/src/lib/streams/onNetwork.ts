@@ -99,7 +99,7 @@ export function onNetwork(): Stream<NetworkState> {
   subject.subscribe = (
     cb?: ((value: NetworkState) => void) | Receiver<NetworkState>
   ) => {
-    const sub = originalSubscribe.call(subject, cb);
+    const sub = (originalSubscribe as any).call(subject, cb);
 
     scheduleStart();
 

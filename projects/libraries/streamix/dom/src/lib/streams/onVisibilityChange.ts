@@ -78,7 +78,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
   subject.subscribe = (
     cb?: ((value: DocumentVisibilityState) => void) | Receiver<DocumentVisibilityState>
   ) => {
-    const sub = originalSubscribe.call(subject, cb);
+    const sub = (originalSubscribe as any).call(subject, cb);
 
     scheduleStart();
 

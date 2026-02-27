@@ -117,7 +117,7 @@ export function onMediaQuery(
   subject.subscribe = (
     cb?: ((value: boolean) => void) | Receiver<boolean>
   ) => {
-    const sub = originalSubscribe.call(subject, cb);
+    const sub = (originalSubscribe as any).call(subject, cb);
 
     scheduleStart();
 

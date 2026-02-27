@@ -21,7 +21,7 @@ import type { Stream } from "../abstractions";
  * @param stream The source stream to listen to.
  * @returns A promise that resolves with the first value from the stream or rejects on error or completion without a value.
  */
-export function firstValueFrom<T = any>(stream: Stream<T>): Promise<T> {
+export function firstValueFrom<T = any>(stream: Stream<any, T>): Promise<T> {
   const iterator = stream[Symbol.asyncIterator]();
 
   return (async () => {

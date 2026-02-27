@@ -1,12 +1,13 @@
 import {
-    createReceiver,
-    createSubscription,
-    isPromiseLike,
-    pipeSourceThrough,
-    type MaybePromise,
-    type Operator,
-    type Receiver,
-    type Stream,
+  createReceiver,
+  createSubscription,
+  isPromiseLike,
+  pipeSourceThrough,
+  Subscription,
+  type MaybePromise,
+  type Operator,
+  type Receiver,
+  type Stream,
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { AsyncPushable, createAsyncPushable } from "../utils";
@@ -24,6 +25,7 @@ export type ReplaySubject<T = any> = Subject<T> & {
   subscribe(receiver: Receiver<T>): Subscription;
   subscribe(): Subscription;
   subscribe(callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription;
+  query: () => Promise<T>;
 };
 
 /**
@@ -162,8 +164,8 @@ export function createReplaySubject<T = any>(
     complete,
     error,
     completed: () => isCompleted,
-    pipe: (...steps: Operator<any, any>[]): Stream<any> => {
-      return pipeSourceThrough(self, steps);
+    pipe: <TOut>(...steps: Operator<any, any>[]): Stream<T, TOut> => {
+      return pipeSourceThrough<T, TOut>(self, steps);
     },
     subscribe,
     query: () => firstValueFrom(self),

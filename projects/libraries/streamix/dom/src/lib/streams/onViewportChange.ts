@@ -112,7 +112,7 @@ export function onViewportChange(): Stream<ViewportState> {
   subject.subscribe = (
     cb?: ((value: ViewportState) => void) | Receiver<ViewportState>
   ) => {
-    const sub = originalSubscribe.call(subject, cb);
+    const sub = (originalSubscribe as any).call(subject, cb);
 
     scheduleStart();
 

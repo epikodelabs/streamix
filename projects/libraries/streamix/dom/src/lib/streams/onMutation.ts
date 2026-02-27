@@ -91,7 +91,7 @@ export function onMutation(
   subject.subscribe = (
     cb?: ((value: MutationRecord[]) => void) | Receiver<MutationRecord[]>
   ) => {
-    const sub = originalSubscribe.call(subject, cb);
+    const sub = (originalSubscribe as any).call(subject, cb);
 
     scheduleStart();
 
