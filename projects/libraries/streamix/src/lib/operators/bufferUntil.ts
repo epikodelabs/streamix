@@ -1,8 +1,8 @@
 import {
-  createOperator,
-  DONE,
-  type Operator,
-  type Stream,
+    createOperator,
+    DONE,
+    type Operator,
+    type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
