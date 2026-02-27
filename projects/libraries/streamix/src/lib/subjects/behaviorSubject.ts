@@ -24,6 +24,10 @@ export type BehaviorSubject<T = any> = Stream<T> & {
   error(err: any): void;
   completed(): boolean;
   get value(): T; // BehaviorSubject always has a value
+  subscribe(callback: (value: T) => MaybePromise): Subscription;
+  subscribe(receiver: Receiver<T>): Subscription;
+  subscribe(): Subscription;
+  subscribe(callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription;
 };
 
 /**

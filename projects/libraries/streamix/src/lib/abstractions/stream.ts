@@ -14,9 +14,22 @@ export type Stream<T = any> = AsyncIterable<T> & {
   type: "stream" | "subject";
   name?: string;
   pipe: OperatorChain<T>;
-  subscribe: (
-    callback?: ((value: T) => MaybePromise) | Receiver<T>
-  ) => Subscription;
+  /**
+   * Subscribes to the stream with a value callback.
+   */
+  subscribe(callback: (value: T) => MaybePromise): Subscription;
+  /**
+   * Subscribes to the stream with a Receiver object.
+   */
+  subscribe(receiver: Receiver<T>): Subscription;
+  /**
+   * Subscribes to the stream with no callback (noop).
+   */
+  subscribe(): Subscription;
+  /**
+   * Implementation signature.
+   */
+  subscribe(callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription;
   query: () => Promise<T>;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 };

@@ -19,7 +19,12 @@ import type { Subject } from "./subject";
  *
  * @template T
  */
-export type ReplaySubject<T = any> = Subject<T>;
+export type ReplaySubject<T = any> = Subject<T> & {
+  subscribe(callback: (value: T) => MaybePromise): Subscription;
+  subscribe(receiver: Receiver<T>): Subscription;
+  subscribe(): Subscription;
+  subscribe(callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription;
+};
 
 /**
  * Create a `ReplaySubject` with an optional capacity of buffered items.
