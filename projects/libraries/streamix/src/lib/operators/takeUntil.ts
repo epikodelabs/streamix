@@ -20,11 +20,12 @@ import { createAsyncCoordinator } from "../utils";
  * - Errors from either source or notifier are propagated
  *
  * @template T Source/output value type.
- * @param notifier A `Stream<T>` or `Promise<T>` that signals when to stop taking.
+ * @template N Notifier value type (ignored by this operator).
+ * @param notifier A `Stream<N>` or `Promise<N>` that signals when to stop taking.
  * @returns An `Operator<T, T>` that can be used in a stream pipeline.
  */
-export function takeUntil<T = any>(
-  notifier: Stream<T> | Promise<T>
+export function takeUntil<T = any, N = any>(
+  notifier: Stream<N> | Promise<N>
 ): Operator<T, T> {
   return createOperator<T, T>("takeUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();

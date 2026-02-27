@@ -12,11 +12,11 @@ import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromise
  * @param comparator An optional function that compares the previous and current values.
  * It should return `true` if they are considered the same, and `false` otherwise.
  * If not provided, a strict equality check (`===`) is used.
- * @returns An `Operator` instance that can be used in a stream's `pipe` method.
+ * @returns An `Operator<T, T>` instance that can be used in a stream's `pipe` method.
  */
 export const distinctUntilChanged = <T = any>(
   comparator?: (prev: T, curr: T) => MaybePromise<boolean>
-) =>
+): Operator<T, T> =>
   createOperator<T, T>('distinctUntilChanged', function (this: Operator, source) {
     // State variables to keep track of the last emitted value.
     let lastValue: T | undefined;

@@ -30,12 +30,12 @@ import { createAsyncCoordinator } from "../utils";
  * - Gate values until user interaction or external readiness signal occurs.
  *
  * @template T Source/output value type.
- * @template R Notifier value type (ignored by this operator).
- * @param notifier A `Stream<R>` or `Promise<R>` that gates the source.
+ * @template N Notifier value type (ignored by this operator).
+ * @param notifier A `Stream<N>` or `Promise<N>` that gates the source.
  * @returns An `Operator<T, T>` that can be used in a stream pipeline.
  */
-export function delayUntil<T = any, R = any>(
-  notifier: Stream<R> | Promise<R>
+export function delayUntil<T = any, N = any>(
+  notifier: Stream<N> | Promise<N>
 ): Operator<T, T> {
   return createOperator<T, T>("delayUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
