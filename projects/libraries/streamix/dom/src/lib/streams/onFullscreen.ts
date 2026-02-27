@@ -84,7 +84,7 @@ export function onFullscreen(): Stream<boolean> {
     cb?: ((v: boolean) => void) | Receiver<boolean>
   ) => {
     // Create subscription first
-    const sub = originalSubscribe.call(subject, cb);
+    const sub = (originalSubscribe as any).call(subject, cb);
 
     // Now if start() emits synchronously, the subscription variable is assigned
     scheduleStart();

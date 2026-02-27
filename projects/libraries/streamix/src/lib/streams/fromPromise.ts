@@ -18,7 +18,7 @@ import { createStream, isPromiseLike, type Stream } from "../abstractions";
  */
 export function fromPromise<T>(
   input: Promise<T> | ((signal: AbortSignal) => Promise<T>)
-): Stream<T> {
+): Stream<any, T> {
   return createStream<T>('fromPromise', async function* (signal?: AbortSignal) {
     const effectiveSignal = signal ?? new AbortController().signal;
     const valueOrPromise =

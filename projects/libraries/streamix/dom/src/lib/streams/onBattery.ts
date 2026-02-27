@@ -98,7 +98,7 @@ export function onBattery(): Stream<BatteryState> {
   subject.subscribe = (
     cb?: ((v: BatteryState) => void) | Receiver<BatteryState>
   ) => {
-    const sub = originalSubscribe.call(subject, cb);
+    const sub = (originalSubscribe as any).call(subject, cb);
 
     scheduleStart();
 

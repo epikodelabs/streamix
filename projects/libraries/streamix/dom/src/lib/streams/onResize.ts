@@ -106,7 +106,7 @@ export function onResize(
     cb?: ((value: { width: number; height: number }) => void) |
       Receiver<{ width: number; height: number }>
   ) => {
-    const sub = originalSubscribe.call(subject, cb);
+    const sub = (originalSubscribe as any).call(subject, cb);
 
     scheduleStart();
 
