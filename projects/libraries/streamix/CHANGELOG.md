@@ -4,9 +4,25 @@
 
 Refactored `Stream`, `Subject`, `ReplaySubject`, and `BehaviorSubject` to use dual generic parameters for input and output types, enabling robust type inference through operator chains and subscriptions. Updated all `subscribe` and `query` method signatures to reflect the correct output type, ensuring type safety and better developer experience. All stream and subject factory functions and instance methods now preserve and expose accurate types throughout pipelines.
 
+### 2.0.32
+
+Removed tracing package/module and related runtime/tracer code. Cleaned core stream internals from metadata, timestamps, counters, ids, temporary shims, and legacy hook-based compatibility paths. Reworked operator internals to coordinator-based flow.
+
+### 2.0.31
+
+Refactored tracing module architecture for better separation of concerns: split into `core` (abstractions), `runtime` (hooks integration), and `tracer` (implementation). Added `unregisterRuntimeHooks()` for cleanup, new `emitted` event for value emission tracking, and improved trace correlation in sampling/debouncing operators (`audit`, `debounce`, `sample`, `throttle`, `delayWhile`, `delayUntil`, `share`, `shareReplay`). Fixed subscription cleanup in React docs examples. Updated README with monorepo structure documentation.
+
+### 2.0.30
+
+Subjects were tightened again around async-iterator backpressure, the `takeUntil`/`skipUntil`/`delayUntil` operators now mirror the iterator-first lifecycle so cancellation and cleanup behave predictably. The scheduler was removed in favor of direct task coordination.
+
+### 2.0.29
+
+Rewrote subjects internals to guard async-iterator backpressure and avoid races; all subjects are sync; deferred iterator processing to avoid notifier/source races. Fixed several unsubscribe and race issues in subject/operator chains that caused flaky tests.
+
 ## 2.0.28
 
-Buffer and subject internals were reworked: synchronization removed in favor of scheduler-queued methods, `ReplaySubject` now uses the scheduler, and `shareReplay` aligns with strict backpressure and async delivery. Lock and semaphore remain for convenience. Added edge-case tests for subjects and buffers, with various type/config/docs corrections and cleanup. Streams/operators now match updated signatures with refreshed JSDocs.
+Buffer and subject internals were reworked: synchronization removed in favor of scheduler-queued methods, `ReplaySubject` now uses the scheduler, and `shareReplay` aligns with strict backpressure and async delivery. Lock and semaphore are deprecated. Added edge-case tests for subjects and buffers, with various type/config/docs corrections and cleanup.
 
 ## 2.0.26
 

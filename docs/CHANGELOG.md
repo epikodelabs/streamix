@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.35
+
+Refactored `Stream`, `Subject`, `ReplaySubject`, and `BehaviorSubject` to use dual generic parameters for input and output types, enabling robust type inference through operator chains and subscriptions. Updated all `subscribe` and `query` method signatures to reflect the correct output type, ensuring type safety and better developer experience. All stream and subject factory functions and instance methods now preserve and expose accurate types throughout pipelines.
+
 ### 2.0.32
 
 Removed tracing package/module and related runtime/tracer code. Cleaned core stream internals from metadata, timestamps, counters, ids, temporary shims, and legacy hook-based compatibility paths. Reworked operator internals to coordinator-based flow.
