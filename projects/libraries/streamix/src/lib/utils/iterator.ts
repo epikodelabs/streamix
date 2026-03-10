@@ -6,10 +6,25 @@ import {
   AsyncIteratorState,
   asyncPull,
   pushComplete,
-  pushError,
+  pushDropped,
+  pushError, // <-- new helper
   pushValue,
   syncPull
 } from "./helpers";
+
+/**
+ * Extended iterator result that carries an optional `dropped` flag.
+ * When `dropped: true`, the emission was suppressed by a filter operator
+ * but the iterator still yields to allow backpressure signalling and
+ * introspection without terminating the stream.
+ */
+export type AsyncIteratorYieldResult<T> =
+  | { value: T; done?: false; dropped?: never }
+  | { value: T; done?: false; dropped: true };
+
+export type AsyncIteratorResult<T> =
+  | AsyncIteratorYieldResult<T>
+  | { value: undefined; done: true };
 
 /**
  * Creates a factory that produces fresh `AsyncIterator` instances backed by
@@ -17,7 +32,7 @@ import {
  *
  * The `register` callback receives a `Receiver<T>` whose `next()`/`complete()`/
  * `error()` methods push into the iterator's queue. `next()` returns a
- * `Promise<void>` (or `void`) â€" the promise acts as a backpressure signal
+ * `Promise<void>` (or `void`) — the promise acts as a backpressure signal
  * from the consumer: it resolves only when the consumer pulls the value with
  * `next()` or `__tryNext()`.
  *
@@ -28,6 +43,10 @@ import {
  * (either `next()` or `__tryNext>`), which avoids hidden subscriptions for
  * iterators that are constructed but never consumed.
  *
+ * `__pushDropped(value)` pushes a value that will be yielded with
+ * `dropped: true` — useful for filter operators that need to release
+ * backpressure without surfacing the value to the consumer as a real emission.
+ *
  * @template T Value type.
  * @param opts Registration function and lazy mode.
  * @returns A function that creates a fresh AsyncIterator per call.
@@ -37,15 +56,13 @@ export function createAsyncIterator<T>(opts: {
 }) {
   const { register } = opts;
 
-  // Lazy: only subscribe when consumer pulls
   return () => {
     const state = new AsyncIteratorState<T>();
     let sub: Subscription | null = null;
     let receiver: StrictReceiver<T> | null = null;
 
-    // Store pending pushes before subscription
     const pendingPushes: Array<{
-      type: 'next' | 'complete' | 'error';
+      type: 'next' | 'complete' | 'error' | 'dropped';
       value?: T;
       err?: any;
     }> = [];
@@ -53,7 +70,6 @@ export function createAsyncIterator<T>(opts: {
     const ensureSubscribed = () => {
       if (state.completed) return;
       if (!sub && !receiver) {
-        // Create receiver that will process both pending and future pushes
         const _receiver: StrictReceiver<T> = {
           next(value: T) {
             return pushValue(state, iterator, value, iterator.__onPush);
@@ -72,10 +88,12 @@ export function createAsyncIterator<T>(opts: {
         receiver = _receiver;
         sub = register(_receiver);
 
-        // Replay any pending pushes
         for (const push of pendingPushes) {
           if (push.type === 'next') {
             _receiver.next(push.value!);
+          } else if (push.type === 'dropped') {
+            // Replay dropped pushes directly — no receiver method needed
+            pushDropped(state, iterator, push.value!, iterator.__onPush);
           } else if (push.type === 'complete') {
             _receiver.complete();
           } else if (push.type === 'error') {
@@ -95,17 +113,18 @@ export function createAsyncIterator<T>(opts: {
       }
     };
 
-    const iterator: AsyncIterator<T> & {
-      __tryNext?: () => IteratorResult<T> | null;
+    const iterator: AsyncIterator<T, undefined, undefined> & {
+      __tryNext?: () => AsyncIteratorResult<T> | null;
       __hasBufferedValues?: () => boolean;
       __onPush?: () => void;
       __pushNext?: (value: T) => void;
+      __pushDropped?: (value: T) => void;  // <-- new
       __pushComplete?: () => void;
       __pushError?: (err: any) => void;
     } = {
-      next() {
+      next(): Promise<AsyncIteratorResult<T>> {
         ensureSubscribed();
-        return asyncPull(state, iterator, handleDone);
+        return asyncPull(state, iterator, handleDone) as Promise<AsyncIteratorResult<T>>;
       },
 
       async return() {
@@ -140,15 +159,25 @@ export function createAsyncIterator<T>(opts: {
 
     iterator.__tryNext = () => {
       ensureSubscribed();
-      return syncPull(state, iterator, handleDone);
+      return syncPull(state, iterator, handleDone) as AsyncIteratorResult<T> | null;
     };
 
-    // Methods to push values before subscription
     iterator.__pushNext = (value: T) => {
       if (receiver) {
         receiver.next(value);
       } else {
         pendingPushes.push({ type: 'next', value });
+      }
+    };
+
+    // Push a value that will be yielded with dropped: true.
+    // Releases backpressure on the producer without surfacing the
+    // value as a real emission to downstream consumers.
+    iterator.__pushDropped = (value: T) => {
+      if (receiver) {
+        pushDropped(state, iterator, value, iterator.__onPush);
+      } else {
+        pendingPushes.push({ type: 'dropped', value });
       }
     };
 

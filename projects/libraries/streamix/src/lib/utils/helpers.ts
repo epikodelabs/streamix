@@ -4,7 +4,7 @@ import { DONE } from "../abstractions";
  * Shared queue item structure used across all async iterator implementations
  */
 export interface QueueItem<T> {
-  result: IteratorResult<T>;
+  result: IteratorResult<T> & { dropped?: true };
 }
 
 /**
@@ -233,4 +233,33 @@ export function pushError<T>(
   // Otherwise store it
   state.pendingError = { err };
   onPush?.();
+}
+
+export function pushDropped<T>(
+  state: AsyncIteratorState<T>,
+  _iterator: any,
+  value: T,
+  onPush?: () => void
+): void | Promise<void> {
+  if (state.completed) return;
+
+  const result = { done: false as const, value, dropped: true as const };
+
+  if (state.pullResolve) {
+    const r = state.pullResolve;
+    state.pullResolve = state.pullReject = null;
+    r(result);
+    onPush?.();
+    return;
+  }
+
+  // Queue it with the dropped flag
+  state.queue.push({ result });
+
+  if (onPush) {
+    onPush();
+    return;
+  }
+
+  return new Promise<void>((resolve) => state.backpressureQueue.push(resolve));
 }
