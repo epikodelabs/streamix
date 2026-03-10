@@ -169,8 +169,8 @@ export function createAsyncCoordinator(
           completed[i] = true;
           pushEvent({ type: "complete", sourceIndex: i }, i);
         } else {
-          const event = (r as any).dropped
-            ? { type: "value", value: r.value, sourceIndex: i, dropped: true as const }
+          const event: RunnerEvent<any> = (r as any).dropped
+            ? { type: "value", value: r.value, sourceIndex: i, dropped: true }
             : { type: "value", value: r.value, sourceIndex: i };
           pushEvent(event, i);
         }
@@ -208,8 +208,8 @@ export function createAsyncCoordinator(
           completed[i] = true;
           pushEvent({ type: "complete", sourceIndex: i }, i);
         } else {
-          const event = (r as any).dropped
-            ? { type: "value", value: r.value, sourceIndex: i, dropped: true as const }
+          const event: RunnerEvent<any> = (r as any).dropped
+            ? { type: "value", value: r.value, sourceIndex: i, dropped: true }
             : { type: "value", value: r.value, sourceIndex: i };
           pushEvent(event, i);
         }
