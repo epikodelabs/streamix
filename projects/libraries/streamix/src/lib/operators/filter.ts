@@ -1,4 +1,4 @@
-import { createOperator, DROPPED, type MaybePromise, NEXT, type Operator, isPromiseLike } from '../abstractions';
+import { createOperator, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that filters values emitted by the source stream.

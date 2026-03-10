@@ -1,4 +1,4 @@
-import { createOperator, DONE, type MaybePromise, NEXT, type Operator, isPromiseLike } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
 
 /**
  * Represents a grouped item with its original value and the associated key.
