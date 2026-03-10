@@ -259,6 +259,10 @@ export function createAsyncCoordinator(
   }
 
   const iterator: any = {
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+
     next() {
       if (iteratorReturned) return Promise.resolve(DONE);
       
