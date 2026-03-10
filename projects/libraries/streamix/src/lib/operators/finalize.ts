@@ -42,24 +42,22 @@ export const finalize = <T = any>(callback: () => MaybePromise<T>) => {
   return createOperator<T, T>("finalize", function (this: Operator, source) {
     const iterator: AsyncIterator<T> = {
       async next() {
-        while (true) {
-          if (completed) {
+        if (completed) {
+          return DONE;
+        }
+
+        try {
+          const result = await source.next();
+
+          if (result.done) {
+            await doFinalize();
             return DONE;
           }
 
-          try {
-            const result = await source.next();
-
-            if (result.done) {
-              await doFinalize();
-              return DONE;
-            }
-
-            return result;
-          } catch (err) {
-            await doFinalize();
-            throw err;
-          }
+          return result;
+        } catch (err) {
+          await doFinalize();
+          throw err;
         }
       },
       async return(value?: unknown) {

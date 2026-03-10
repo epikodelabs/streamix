@@ -1,12 +1,13 @@
-import { createOperator, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
+import { createOperator, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that filters out consecutive values from the source
  * stream if a specified key's value has not changed.
  *
- * This operator is a specialized version of `distinctUntilChanged`. It is designed
- * to work with streams of objects and checks for uniqueness based on the value
- * of a single property (`key`).
+ * This operator is a specialized version of `distinctUntilChanged`. It checks for
+ * uniqueness based on the value of a single property (`key`). Consecutive values
+ * where the key has not changed are yielded with `dropped: true` so that backpressure
+ * is released and downstream operators can observe suppressed emissions.
  *
  * @template T The type of the objects in the stream. Must extend `object`.
  * @template K The key of the property to check for changes.
@@ -34,34 +35,38 @@ export const distinctUntilKeyChanged = <T extends object = any, K extends keyof 
 
     return {
       next: async () => {
-        while (true) {
-          const result = await source.next();
-          if (result.done) return result;
+        const result = await source.next();
+        if (result.done) return result;
 
-          const current = result.value;
-          const currentKey = await getKey();
+        // Propagate dropped results from upstream unchanged.
+        if ((result as any).dropped) return result as any;
 
-          if (isFirst) {
-            isFirst = false;
-            lastValue = current;
-            return NEXT(current);
-          }
+        const current = result.value;
+        const currentKey = await getKey();
 
-          const comparison = comparator
-            ? comparator(lastValue![currentKey], current[currentKey])
-            : lastValue![currentKey] === current[currentKey];
-          const isSame = comparator
-            ? (isPromiseLike(comparison) ? await comparison : comparison)
-            : comparison;
-          const isDistinct = !isSame;
-
+        if (isFirst) {
           isFirst = false;
-
-          if (isDistinct) {
-            lastValue = current;
-            return NEXT(current);
-          }
+          lastValue = current;
+          return NEXT(current);
         }
+
+        const prevKey = lastValue![currentKey];
+        const currKey = current[currentKey];
+        let isSame: boolean;
+        if (comparator) {
+          const comparison = comparator(prevKey, currKey);
+          isSame = isPromiseLike(comparison) ? await comparison : comparison;
+        } else {
+          isSame = prevKey === currKey;
+        }
+
+        if (!isSame) {
+          lastValue = current;
+          return NEXT(current);
+        }
+
+        // Key value unchanged — yield as dropped so backpressure is released.
+        return DROPPED(current);
       }
     };
   });

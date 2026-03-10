@@ -20,7 +20,7 @@ import { DONE } from "../abstractions";
  * @typeParam T - The type of value emitted by the sources.
  */
 export type RunnerEvent<T> =
-  | { type: "value"; value: T; sourceIndex: number }
+  | { type: "value"; value: T; sourceIndex: number; dropped?: true }
   | { type: "complete"; sourceIndex: number }
   | { type: "error"; error: any; sourceIndex: number };
 
@@ -169,7 +169,10 @@ export function createAsyncCoordinator(
           completed[i] = true;
           pushEvent({ type: "complete", sourceIndex: i }, i);
         } else {
-          pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
+          const event = (r as any).dropped
+            ? { type: "value", value: r.value, sourceIndex: i, dropped: true as const }
+            : { type: "value", value: r.value, sourceIndex: i };
+          pushEvent(event, i);
         }
 
         notify();
@@ -205,7 +208,10 @@ export function createAsyncCoordinator(
           completed[i] = true;
           pushEvent({ type: "complete", sourceIndex: i }, i);
         } else {
-          pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
+          const event = (r as any).dropped
+            ? { type: "value", value: r.value, sourceIndex: i, dropped: true as const }
+            : { type: "value", value: r.value, sourceIndex: i };
+          pushEvent(event, i);
         }
       } catch (err) {
         completed[i] = true;

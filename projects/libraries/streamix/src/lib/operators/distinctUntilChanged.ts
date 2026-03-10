@@ -1,12 +1,12 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
+import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that emits values from the source stream only if
  * they are different from the previous value.
  *
- * This operator filters out consecutive duplicate values, ensuring that the
- * output stream only contains values that have changed since the last emission.
- * It's particularly useful for preventing redundant updates in data streams.
+ * Consecutive duplicate values are yielded with `dropped: true` so that
+ * backpressure is released and downstream operators can observe the suppressed
+ * emissions without treating them as real values.
  *
  * @template T The type of the values in the stream.
  * @param comparator An optional function that compares the previous and current values.
@@ -18,40 +18,34 @@ export const distinctUntilChanged = <T = any>(
   comparator?: (prev: T, curr: T) => MaybePromise<boolean>
 ): Operator<T, T> =>
   createOperator<T, T>('distinctUntilChanged', function (this: Operator, source) {
-    // State variables to keep track of the last emitted value.
     let lastValue: T | undefined;
     let hasLast = false;
 
-    // The next() method now contains all the logic for a single value.
     return {
       next: async () => {
-        while (true) {
-          // Await the next value from the source stream.
-          const result = await source.next();
+        const result = await source.next();
 
-          // If the source stream is done, we are also done.
-          if (result.done) return DONE;
+        if (result.done) return DONE;
+        if ((result as any).dropped) return result as any;
 
-          if (!hasLast) {
-            lastValue = result.value;
-            hasLast = true;
-            return NEXT(result.value);
-          }
-
-          // Check if the value is different from the last one.
-          const comparison = comparator ? comparator(lastValue!, result.value) : (lastValue === result.value);
-          const isSame = comparator
-            ? (isPromiseLike(comparison) ? await comparison : comparison)
-            : comparison;
-          const isDistinct = !isSame;
-
-          if (isDistinct) {
-            // If the value is distinct, we update our state and return it as a normal IteratorResult.
-            lastValue = result.value;
-            hasLast = true;
-            return NEXT(result.value);
-          }
+        if (!hasLast) {
+          lastValue = result.value;
+          hasLast = true;
+          return NEXT(result.value);
         }
+
+        const comparison = comparator ? comparator(lastValue!, result.value) : (lastValue === result.value);
+        const isSame = comparator
+          ? (isPromiseLike(comparison) ? await comparison : comparison)
+          : comparison;
+
+        if (!isSame) {
+          lastValue = result.value;
+          hasLast = true;
+          return NEXT(result.value);
+        }
+
+        return DROPPED(result.value);
       },
     };
   });

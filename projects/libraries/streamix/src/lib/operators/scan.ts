@@ -24,26 +24,22 @@ export const scan = <T = any, R = any>(
   createOperator<T, R>("scan", function (this: Operator, source) {
     let acc = seed;
     let index = 0;
-    let completed = false;
 
     return {
       next: async () => {
-        while (true) {
-          if (completed) {
-            return DONE;
-          }
+        const result = await source.next();
 
-          const result = await source.next();
-
-          if (result.done) {
-            completed = true;
-            return DONE;
-          }
-
-          const accumulated = accumulator(acc, result.value, index++);
-          acc = isPromiseLike(accumulated) ? await accumulated : accumulated;
-          return NEXT(acc);
+        if (result.done) {
+          return DONE;
         }
+
+        if ((result as any).dropped) {
+          return result as any;
+        }
+
+        const accumulated = accumulator(acc, result.value, index++);
+        acc = isPromiseLike(accumulated) ? await accumulated : accumulated;
+        return NEXT(acc);
       },
     };
   });

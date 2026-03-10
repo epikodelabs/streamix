@@ -1,6 +1,7 @@
 import {
     createOperator,
     DONE,
+    DROPPED,
     type Operator,
     type Stream
 } from "../abstractions";
@@ -14,15 +15,15 @@ import { createAsyncCoordinator } from "../utils";
  * produces its first emission. After the notifier emits, subsequent source
  * values are forwarded normally.
  *
+ * Values suppressed before the gate opens are yielded with `dropped: true` so
+ * that backpressure is released and downstream operators can observe the
+ * suppressed emissions.
+ *
  * Important details:
  * - Notifier completion without emission: if the notifier completes without
  *   emitting, the operator remains closed and continues to drop source values.
  * - Error propagation: errors from either the notifier or source are propagated
  *   to the output and will terminate the subscription.
- *
- * Common uses:
- * - Ignore initial values until a readiness signal arrives.
- * - Wait for user interaction before processing inputs.
  *
  * @template T Source/output value type.
  * @template N Notifier value type (ignored by this operator).
@@ -68,14 +69,15 @@ export function skipUntil<T = any, N = any>(
       if (gateOpened && droppingBacklog) {
         // Drop values that were already buffered before the gate opened.
         droppingBacklog = !!(source as any).__hasBufferedValues?.();
-        return null;
+        return DROPPED(event.value) as any;
       }
 
       if (gateOpened) {
         return { done: false, value: event.value };
       }
 
-      return null; // Skip/drop value
+      // Gate not yet open — yield as dropped so backpressure is released.
+      return DROPPED(event.value) as any;
     };
 
     const iterator: AsyncIterator<T> & {

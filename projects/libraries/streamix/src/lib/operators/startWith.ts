@@ -19,24 +19,22 @@ export const startWith = <T = any>(initialValue: MaybePromise<T>) =>
 
     return {
       next: async () => {
-        while (true) {
-          if (completed) {
-            return DONE;
-          }
-
-          if (!emittedInitial) {
-            emittedInitial = true;
-            return NEXT(await initialValuePromise);
-          }
-
-          const result = await source.next();
-          if (result.done) {
-            completed = true;
-            return DONE;
-          }
-
-          return result;
+        if (completed) {
+          return DONE;
         }
+
+        if (!emittedInitial) {
+          emittedInitial = true;
+          return NEXT(await initialValuePromise);
+        }
+
+        const result = await source.next();
+        if (result.done) {
+          completed = true;
+          return DONE;
+        }
+
+        return result;
       }
     };
   });

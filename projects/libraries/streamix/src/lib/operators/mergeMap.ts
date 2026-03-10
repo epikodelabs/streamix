@@ -42,43 +42,24 @@ export function mergeMap<T = any, R = any>(
   concurrent: number = Infinity
 ) {
   return createOperator<T, R>('mergeMap', function (this: Operator, source) {
-    let outputIterator: AsyncGenerator<R, void, unknown>;
-    
     const generator = async function* () {
-      // Source is at index 0, inner streams start at index 1+
       const SOURCE_INDEX = 0;
-      
-      // Create coordinator with just the source initially
       const coordinator = createAsyncCoordinator([source]);
-      
       let projectIndex = 0;
       let sourceCompleted = false;
       let pendingInners = 0;
+      const queuedSourceValues: T[] = [];
 
-      /**
-       * Process events while waiting for a concurrency slot to free up.
-       * Yields values from inner streams and tracks their completion.
-       */
-      const processWhileWaiting = async function* () {
-        while (pendingInners >= concurrent) {
-          const nextEvent = await coordinator.next();
-          if (nextEvent.done) break;
-          
-          const event = nextEvent.value as RunnerEvent<R>;
-          
-          // Only process inner stream events (not source events)
-          if (event.sourceIndex !== SOURCE_INDEX) {
-            if (event.type === 'value') {
-              yield event.value;
-            } 
-            else if (event.type === 'complete') {
-              pendingInners--;
-              break; // Free slot available
-            }
-            else if (event.type === 'error') {
-              throw event.error;
-            }
-          }
+      const startInner = (value: T) => {
+        const projected = project(value, projectIndex++);
+        const inner = fromAny(projected as any);
+        coordinator.addSource(inner[Symbol.asyncIterator]());
+        pendingInners++;
+      };
+
+      const drainQueuedSourceValues = () => {
+        while (queuedSourceValues.length > 0 && pendingInners < concurrent) {
+          startInner(queuedSourceValues.shift()!);
         }
       };
 
@@ -89,60 +70,46 @@ export function mergeMap<T = any, R = any>(
 
           const event = nextEvent.value as RunnerEvent<R>;
 
-          // ============================================
-          // Source Stream Events (index 0)
-          // ============================================
           if (event.sourceIndex === SOURCE_INDEX) {
             if (event.type === 'value') {
-              // Wait for a concurrency slot if needed
-              if (pendingInners >= concurrent) {
-          yield* processWhileWaiting();
+              if (event.dropped) {
+                continue;
               }
 
-              // Project the source value to an inner stream
-              const projected = project(event.value as any, projectIndex++);
-              const inner = fromAny(projected as any);
-              // Add the inner stream to the coordinator
-              const innerIndex = coordinator.addSource(inner[Symbol.asyncIterator]());
-              void innerIndex;
-              pendingInners++;
-            }
-            else if (event.type === 'complete') {
-              // Source completed - continue until all inners complete
+              const sourceValue = event.value as unknown as T;
+              if (pendingInners >= concurrent) {
+                queuedSourceValues.push(sourceValue);
+              } else {
+                startInner(sourceValue);
+              }
+            } else if (event.type === 'complete') {
               sourceCompleted = true;
-            }
-            else if (event.type === 'error') {
+              if (pendingInners === 0 && queuedSourceValues.length === 0) {
+                break;
+              }
+            } else if (event.type === 'error') {
               throw event.error;
             }
-          }
-          // ============================================
-          // Inner Stream Events (index > 0)
-          // ============================================
-          else {
+          } else {
             if (event.type === 'value') {
               yield event.value;
-            }
-            else if (event.type === 'complete') {
+            } else if (event.type === 'complete') {
               pendingInners--;
+              drainQueuedSourceValues();
 
-              // If source is complete and no more inners, we're done
-              if (sourceCompleted && pendingInners === 0) {
-          break;
+              if (sourceCompleted && pendingInners === 0 && queuedSourceValues.length === 0) {
+                break;
               }
-            }
-            else if (event.type === 'error') {
+            } else if (event.type === 'error') {
               throw event.error;
             }
           }
         }
       } finally {
-        // Coordinator cleanup handles all sources (including inners)
         await coordinator.return?.();
       }
     };
 
-    // Store reference and return
-    outputIterator = generator();
-    return outputIterator;
+    return generator();
   });
 }

@@ -1,4 +1,4 @@
-import { createOperator, type MaybePromise, NEXT, type Operator, isPromiseLike } from '../abstractions';
+import { createOperator, DROPPED, type MaybePromise, NEXT, type Operator, isPromiseLike } from '../abstractions';
 
 /**
  * Creates a stream operator that filters values emitted by the source stream.
@@ -12,6 +12,9 @@ import { createOperator, type MaybePromise, NEXT, type Operator, isPromiseLike }
  * - A **single value**: Only values that are strictly equal (`===`) to this value are included.
  * - An **array of values**: Only values that are present in this array are included.
  *
+ * Values that do not pass the filter are yielded with `dropped: true` so that
+ * backpressure is released and downstream operators can observe suppressed emissions.
+ *
  * @template T The type of the values in the stream.
  * @param predicateOrValue The filtering criterion. Can be a predicate function, a single value, or an array of values.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
@@ -24,28 +27,29 @@ export const filter = <T = any>(
 
     return {
       next: async () => {
-        while (true) {
-          const result = await source.next();
-          if (result.done) return result;
+        const result = await source.next();
+        if (result.done) return result;
 
-          const value = result.value;
-          let shouldInclude = false;
+        if ((result as any).dropped) return result as any;
 
-          if (typeof predicateOrValue === 'function') {
-            const predicateResult = (predicateOrValue as (value: T, index: number) => MaybePromise<boolean>)(value, index);
-            shouldInclude = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
-          } else if (Array.isArray(predicateOrValue)) {
-            shouldInclude = predicateOrValue.includes(value);
-          } else {
-            shouldInclude = value === predicateOrValue;
-          }
+        const value = result.value;
+        let shouldInclude = false;
 
-          if (shouldInclude) {
-            index++; // Increment index only if included
-            // If the value passes the filter, return it as a normal IteratorResult.
-            return NEXT(value);
-          }
+        if (typeof predicateOrValue === 'function') {
+          const predicateResult = (predicateOrValue as (value: T, index: number) => MaybePromise<boolean>)(value, index);
+          shouldInclude = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
+        } else if (Array.isArray(predicateOrValue)) {
+          shouldInclude = predicateOrValue.includes(value);
+        } else {
+          shouldInclude = value === predicateOrValue;
         }
+
+        if (shouldInclude) {
+          index++;
+          return NEXT(value);
+        }
+
+        return DROPPED(value);
       }
     };
   });

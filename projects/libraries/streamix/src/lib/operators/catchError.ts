@@ -28,34 +28,32 @@ export const catchError = <T = any>(
 
     return {
       next: async () => {
-        while (true) {
-          // If an error was already caught and handled, or we're completed, this operator is done
-          if (errorCaughtAndHandled || completed) {
+        if (errorCaughtAndHandled || completed) {
+          return DONE;
+        }
+
+        try {
+          const result = await source.next();
+          if (result.done) {
+            completed = true;
             return DONE;
           }
 
-          try {
-            const result = await source.next();
-            if (result.done) {
-              completed = true; // Source completed without error
-              return DONE;
-            }
-
-            return NEXT(result.value); // Emit value from source
-          } catch (error) {
-            // An error occurred from the source
-            if (!errorCaughtAndHandled) { // Only handle the first error
-              const handlerResult = handler(error);
-              if (isPromiseLike(handlerResult)) await handlerResult;
-              errorCaughtAndHandled = true; // Mark as handled
-              completed = true;
-              // After handling, this operator completes
-              return DONE;
-            } else {
-              // If subsequent errors occur (shouldn't happen with a proper upstream), re-throw
-              throw error;
-            }
+          if ((result as any).dropped) {
+            return result as any;
           }
+
+          return NEXT(result.value);
+        } catch (error) {
+          if (!errorCaughtAndHandled) {
+            const handlerResult = handler(error);
+            if (isPromiseLike(handlerResult)) await handlerResult;
+            errorCaughtAndHandled = true;
+            completed = true;
+            return DONE;
+          }
+
+          throw error;
         }
       },
 

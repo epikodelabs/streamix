@@ -1,10 +1,9 @@
 import {
-  createOperator,
-  isPromiseLike,
-  Stream
+    createPushOperator,
+    isPromiseLike,
+    Stream
 } from '../abstractions';
 import { eachValueFrom, fromAny } from '../converters';
-import { createSubject } from '../subjects';
 import { createAsyncCoordinator } from '../utils';
 
 
@@ -33,65 +32,95 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
 ) {
   const normalizedInputs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
 
-  return createOperator<T, [T, ...R]>("withLatestFrom", function (this: any, source) {
-    const output = createSubject<[T, ...R]>();
-    const outputIterator = eachValueFrom(output);
+  return createPushOperator<T, [T, ...R]>("withLatestFrom", (source, output) => {
     const abortController = new AbortController();
+    let runner: ReturnType<typeof createAsyncCoordinator> | null = null;
 
-    const iterate = async () => {
+    void (async () => {
       try {
-        const resolvedAux = await Promise.all(
-          normalizedInputs.map(input => (isPromiseLike(input) ? Promise.resolve(input) : input))
-        );
+        const resolvedAux: unknown[] = [];
+        for (const input of normalizedInputs) {
+          resolvedAux.push(isPromiseLike(input) ? await Promise.resolve(input) : input);
+        }
 
         if (abortController.signal.aborted) return;
 
-        // AUXILIARIES FIRST, SOURCE LAST
-        // This ensures that if both emit in the same microtask, 
-        // the auxiliary values are captured before the source trigger is processed.
-        const auxIterators = resolvedAux.map(input => eachValueFrom(fromAny(input)));
-        const allIterators = [...auxIterators, source];
-        
-        const sourceIndex = allIterators.length - 1;
-        const runner = createAsyncCoordinator(allIterators);
-        
+        const auxIterators = resolvedAux.map((input) => eachValueFrom(fromAny(input)));
         const latestValues = new Array(auxIterators.length).fill(undefined);
         const hasValue = new Array(auxIterators.length).fill(false);
 
-        while (true) {
-          const { done, value: ev } = await runner.next();
-          if (done || abortController.signal.aborted) break;
+        const initialAuxValues = await Promise.all(auxIterators.map((iterator) => iterator.next()));
+        for (let index = 0; index < initialAuxValues.length; index++) {
+          const result = initialAuxValues[index];
+          if (result.done) {
+            continue;
+          }
+          latestValues[index] = result.value;
+          hasValue[index] = true;
+        }
 
-          if (ev.type === "value") {
-            if (ev.sourceIndex === sourceIndex) {
-              // Primary Trigger
-              // FIX: Must have at least one auxiliary stream and all must have values.
-              if (hasValue.length > 0 && hasValue.every(Boolean)) {
-                const combinedValue = [ev.value, ...latestValues] as [T, ...R];
-                
-                output.next(combinedValue);
-              }
-            } else {
-              // Auxiliary Update
-              // ev.sourceIndex corresponds to the position in auxIterators
-              latestValues[ev.sourceIndex] = ev.value;
-              hasValue[ev.sourceIndex] = true;
+        const sourceWithSyncPull = source as AsyncIterator<T> & { __tryNext?: () => IteratorResult<T> | null };
+        if (hasValue.length > 0 && sourceWithSyncPull.__tryNext) {
+          while (true) {
+            let buffered: IteratorResult<T> | null;
+            try {
+              buffered = sourceWithSyncPull.__tryNext();
+            } catch (err) {
+              output.error(err instanceof Error ? err : new Error(String(err)));
+              return;
             }
-          } else if (ev.type === "error") {
+
+            if (!buffered || buffered.done) {
+              break;
+            }
+          }
+        }
+
+        runner = createAsyncCoordinator([...auxIterators, source]);
+
+        const sourceIndex = auxIterators.length;
+
+        while (!abortController.signal.aborted) {
+          const nextEvent = await runner.next();
+          if (nextEvent.done) break;
+
+          const ev = nextEvent.value;
+          if (ev.type === 'error') {
             output.error(ev.error instanceof Error ? ev.error : new Error(String(ev.error)));
             return;
           }
+
+          if (ev.type !== 'value') {
+            continue;
+          }
+
+          if (ev.dropped) {
+            continue;
+          }
+
+          if (ev.sourceIndex === sourceIndex) {
+            if (hasValue.length > 0 && hasValue.every(Boolean)) {
+              output.push([ev.value, ...latestValues] as [T, ...R]);
+            }
+            continue;
+          }
+
+          latestValues[ev.sourceIndex] = ev.value;
+          hasValue[ev.sourceIndex] = true;
         }
+
         if (!output.completed()) output.complete();
       } catch (err) {
-        if (!output.completed()) output.error(err instanceof Error ? err : new Error(String(err)));
+        output.error(err instanceof Error ? err : new Error(String(err)));
       } finally {
         abortController.abort();
-        source.return?.();
+        await runner?.return?.();
       }
-    };
+    })();
 
-    iterate();
-    return outputIterator;
+    return async () => {
+      abortController.abort();
+      await runner?.return?.();
+    };
   });
 }

@@ -39,6 +39,22 @@ export const DONE: { readonly done: true; readonly value: undefined; } = Object.
 export const NEXT = <R = any>(value: R): { readonly done: false; readonly value: R; } => ({ done: false, value }) as const;
 
 /**
+ * Factory function to create a dropped stream result.
+ *
+ * A dropped result signals that a value was suppressed by the operator (e.g. by
+ * `filter`, `skip`, `debounce`, etc.) but the iterator still yields to allow
+ * backpressure to be released and to enable introspection without terminating
+ * the stream. Downstream operators that receive a dropped result must propagate
+ * it unchanged rather than treating it as a real emission.
+ *
+ * @template R The type of the suppressed value.
+ * @param value The value that was suppressed.
+ * @returns An `IteratorResult<R>` object with `{ done: false, value, dropped: true }`.
+ */
+export const DROPPED = <R = any>(value: R): { readonly done: false; readonly value: R; readonly dropped: true } =>
+  ({ done: false, value, dropped: true }) as const;
+
+/**
  * A stream operator that transforms a value from an input stream to an output stream.
  *
  * Operators are the fundamental building blocks for composing stream transformations.

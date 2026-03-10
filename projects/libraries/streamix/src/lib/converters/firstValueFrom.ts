@@ -3,19 +3,12 @@ import type { Stream } from "../abstractions";
 /**
  * Returns a promise that resolves with the first emitted value from a `Stream`.
  *
- * This utility function bridges the gap between the stream's push-based system and
- * JavaScript's standard promise-based asynchronous programming model. It's designed
- * for scenarios where you only care about the very first value a stream produces,
- * treating the stream like a single-value asynchronous source.
+ * Dropped results (internal backpressure signals from filter/skip/debounce etc.)
+ * are skipped transparently — the promise resolves with the first *real* emission.
  *
- * The function's behavior is as follows:
  * - If the stream emits a value, the promise resolves with that value.
  * - If the stream emits an error, the promise rejects with that error.
  * - If the stream completes without ever emitting a value, the promise rejects with an `Error`.
- *
- * Once the promise is either resolved or rejected, the subscription to the stream is
- * automatically terminated, preventing any further resource consumption. This makes it
- * an efficient way to "query" a stream for a single result.
  *
  * @template T The type of the value that the promise will resolve with.
  * @param stream The source stream to listen to.
@@ -26,11 +19,15 @@ export function firstValueFrom<T = any>(stream: Stream<any, T>): Promise<T> {
 
   return (async () => {
     try {
-      const first = await iterator.next();
-      if (first.done) {
-        throw new Error("Stream completed without emitting a value");
+      while (true) {
+        const result = await iterator.next();
+        if (result.done) {
+          throw new Error("Stream completed without emitting a value");
+        }
+        // Skip dropped results — they are internal backpressure signals.
+        if ((result as any).dropped) continue;
+        return result.value;
       }
-      return first.value;
     } finally {
       try {
         await iterator.return?.();
