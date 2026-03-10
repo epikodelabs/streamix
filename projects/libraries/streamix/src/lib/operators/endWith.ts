@@ -19,30 +19,27 @@ export const endWith = <T = any>(finalValue: MaybePromise<T>) =>
 
     return {
       next: async () => {
-        while (true) {
-          if (completed) {
-            return DONE;
-          }
-
-          if (!sourceDone) {
-            const result = await source.next();
-
-            if (!result.done) {
-              return result;
-            }
-
-            sourceDone = true;
-          }
-
-
-          if (!finalEmitted) {
-            finalEmitted = true;
-            return NEXT(await finalValuePromise);
-          }
-
-          completed = true;
+        if (completed) {
           return DONE;
         }
+
+        if (!sourceDone) {
+          const result = await source.next();
+
+          if (!result.done) {
+            return result;
+          }
+
+          sourceDone = true;
+        }
+
+        if (!finalEmitted) {
+          finalEmitted = true;
+          return NEXT(await finalValuePromise);
+        }
+
+        completed = true;
+        return DONE;
       }
     };
   });

@@ -5,6 +5,8 @@ import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
 import { createSubscription, type Subscription } from "./subscription";
 
+const RAW_ASYNC_ITERATOR = Symbol.for("streamix.rawAsyncIterator");
+
 /**
  * A Stream is an async iterable with additional methods for piping, subscribing, and querying values.
  *
@@ -60,6 +62,10 @@ async function drainIterator<T>(
 
   const processResult = (result: IteratorResult<T>) => {
     if (result.done) return true;
+
+    // Do not forward dropped results to subscribers — they are internal
+    // backpressure signals emitted by filter/skip/debounce etc.
+    if ((result as any).dropped) return false;
 
     const receivers = getReceivers();
     for (const { receiver, subscription } of receivers) {
@@ -187,6 +193,8 @@ export function createStream<T>(
                 run.subject.complete();
                 return;
               }
+              // Do not forward dropped results — they are internal backpressure signals.
+              if ((result as any).dropped) continue;
               run.subject.next(result.value);
             }
           }
@@ -202,6 +210,9 @@ export function createStream<T>(
             run.subject.complete();
             break;
           }
+
+          // Do not forward dropped results — they are internal backpressure signals.
+          if ((result.result as any).dropped) continue;
 
           run.subject.next(result.result.value);
         }
@@ -287,6 +298,11 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
   source: Stream<TIn, any>,
   operators: [...Ops]
 ): Stream<TIn, TOut> {
+  const getRawIterator = (stream: any) => {
+    const factory = stream[RAW_ASYNC_ITERATOR] ?? stream[Symbol.asyncIterator];
+    return factory.call(stream);
+  };
+
   const applyOperators = (baseSource: AsyncIterator<any>) => {
     let iterator: AsyncIterator<any> = baseSource;
     for (const op of operators) {
@@ -307,7 +323,7 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
       receiver.complete?.();
     });
 
-    const baseSource = source[Symbol.asyncIterator]();
+    const baseSource = getRawIterator(source);
     const iterator = applyOperators(baseSource);
 
     queueMicrotask(() => {
@@ -326,10 +342,35 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
     subscribe: (cb) => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(pipedStream),
     [Symbol.asyncIterator]: () => {
-      const baseSource = source[Symbol.asyncIterator]();
-      return applyOperators(baseSource);
+      const iterator = applyOperators(getRawIterator(source));
+      const publicIterator: AsyncIterator<TOut> = {
+        async next() {
+          while (true) {
+            const result = await iterator.next();
+            if (result.done) return result;
+            if ((result as any).dropped) continue;
+            return result;
+          }
+        },
+        async return(value?: any) {
+          if (iterator.return) {
+            return iterator.return(value);
+          }
+          return { done: true, value };
+        },
+        async throw(err?: any) {
+          if (iterator.throw) {
+            return iterator.throw(err);
+          }
+          throw err;
+        },
+      };
+      (publicIterator as any)[Symbol.asyncIterator] = () => publicIterator;
+      return publicIterator;
     },
   };
+
+  (pipedStream as any)[RAW_ASYNC_ITERATOR] = () => applyOperators(getRawIterator(source));
 
   return pipedStream;
 }

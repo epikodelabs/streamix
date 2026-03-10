@@ -19,30 +19,25 @@ export const defaultIfEmpty = <T = any>(defaultValue: MaybePromise<T>) =>
 
     return {
       next: async () => {
-        while (true) {
-          if (completed) {
-            return DONE;
-          }
-
-          const result = await source.next();
-
-          if (!result.done) {
-            emitted = true;
-            return result;
-          }
-
-          // Source completed
-          if (!emitted) {
-            // Source was empty, emit default value
-            completed = true;
-            const value = isPromiseLike(defaultValue) ? await defaultValue : defaultValue;
-            return NEXT(value);
-          }
-
-          // Source had values, just complete
-          completed = true;
+        if (completed) {
           return DONE;
         }
+
+        const result = await source.next();
+
+        if (!result.done) {
+          emitted = true;
+          return result;
+        }
+
+        if (!emitted) {
+          completed = true;
+          const value = isPromiseLike(defaultValue) ? await defaultValue : defaultValue;
+          return NEXT(value);
+        }
+
+        completed = true;
+        return DONE;
       }
     };
   });

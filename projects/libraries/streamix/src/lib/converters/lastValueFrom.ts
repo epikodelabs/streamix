@@ -3,18 +3,14 @@ import type { Stream } from "../abstractions";
 /**
  * Returns a promise that resolves with the last emitted value from a `Stream`.
  *
- * This function subscribes to the provided stream and buffers the last value
- * received. The returned promise is only settled once the stream completes or
- * errors.
+ * Dropped results (internal backpressure signals from filter/skip/debounce etc.)
+ * are skipped transparently — only real emissions are considered.
  *
- * - **Successful resolution:** The promise resolves with the last value emitted
- * by the stream, but only after the stream has completed.
- * - **Rejection on error:** If the stream emits an error, the promise is rejected with that error.
- * - **Rejection on no value:** If the stream completes without emitting any values,
- * the promise is rejected with a specific error message.
- *
- * The subscription is automatically and immediately unsubscribed upon completion or
- * on error, ensuring proper resource cleanup.
+ * - **Successful resolution:** The promise resolves with the last *real* value
+ *   emitted by the stream, after the stream has completed.
+ * - **Rejection on error:** If the stream emits an error, the promise is rejected.
+ * - **Rejection on no value:** If the stream completes without emitting any real
+ *   values, the promise is rejected with a specific error message.
  *
  * @template T The type of the value expected from the stream.
  * @param stream The source stream to listen to for the final value.
@@ -31,6 +27,8 @@ export function lastValueFrom<T = any>(stream: Stream<any, T>): Promise<T> {
       while (true) {
         const next = await iterator.next();
         if (next.done) break;
+        // Skip dropped results — they are internal backpressure signals.
+        if ((next as any).dropped) continue;
         hasValue = true;
         lastValue = next.value;
       }

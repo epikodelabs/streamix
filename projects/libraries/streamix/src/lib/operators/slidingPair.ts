@@ -19,27 +19,23 @@ export const slidingPair = <T = any>() =>
   createOperator<T, [T | undefined, T]>('slidingPair', function (this: Operator, source) {
     let prev: T | undefined = undefined;
     let first = true;
-    let completed = false;
 
     return {
       next: async () => {
-        while (true) {
-          if (completed) {
-            return DONE;
-          }
+        const result = await source.next();
 
-          const result = await source.next();
-
-          if (result.done) {
-            completed = true;
-            return DONE;
-          }
-
-          const value: [T | undefined, T] = [first ? undefined : prev, result.value];
-          prev = result.value;
-          first = false;
-          return NEXT(value);
+        if (result.done) {
+          return DONE;
         }
+
+        if ((result as any).dropped) {
+          return result as any;
+        }
+
+        const value: [T | undefined, T] = [first ? undefined : prev, result.value];
+        prev = result.value;
+        first = false;
+        return NEXT(value);
       }
     };
   });

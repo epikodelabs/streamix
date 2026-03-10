@@ -40,28 +40,47 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
       resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
 
-    // Convert all sources to iterators
-    const iterators = resolvedSources.map((source) =>
-      eachValueFrom(fromAny<T>(source))
-    );
+    const iterators = resolvedSources.map((source) => eachValueFrom(fromAny<T>(source)));
+    const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));
 
-    // Use coordinator to handle multi-source coordination
-    const coordinator = createAsyncCoordinator(iterators);
+    const bufferedValues: T[] = [];
+    const activeIterators: AsyncIterator<T>[] = [];
+
+    for (let i = 0; i < initialResults.length; i++) {
+      const settled = initialResults[i];
+      if (settled.status === 'rejected') {
+        throw settled.reason;
+      }
+
+      const result = settled.value;
+      if (result.done) {
+        continue;
+      }
+
+      bufferedValues.push(result.value);
+      activeIterators.push(iterators[i]);
+    }
+
+    for (const value of bufferedValues) {
+      yield value;
+    }
+
+    const coordinator = createAsyncCoordinator(activeIterators);
 
     try {
       while (true) {
         const result = await coordinator.next();
         if (result.done) break;
+
         const event = result.value;
-        if (event.type === 'value') {
-          yield event.value;
-        } else if (event.type === 'error') {
+        if (event.type === 'error') {
           throw event.error;
         }
-        // 'complete' events are tracked internally by the coordinator
+        if (event.type === 'value') {
+          yield event.value;
+        }
       }
     } finally {
-      // Coordinator cleanup handles calling return() on all source iterators
       await coordinator.return?.();
     }
   });

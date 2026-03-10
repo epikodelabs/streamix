@@ -5,8 +5,9 @@ import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstrac
  * at most once per specified duration.
  *
  * Each incoming value is stored as the "latest"; a timer emits that latest value
- * when the duration elapses. If the source completes before emission, the last
- * buffered value is flushed before completing.
+ * when the duration elapses. All values that arrive between timer ticks and are
+ * ultimately superseded are forwarded with `dropped: true` so that backpressure
+ * is released without surfacing them as real emissions.
  *
  * @template T The type of the values in the stream.
  * @param duration The time in milliseconds (or a promise resolving to it) to wait
@@ -16,12 +17,19 @@ import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstrac
 export const audit = <T = any>(duration: MaybePromise<number>) =>
   createPushOperator<T>('audit', (source, output) => {
     let bufferedResult: IteratorResult<T> | undefined;
+    let supersededValues: T[] = [];
     let timerId: ReturnType<typeof setTimeout> | undefined;
     let resolvedDuration: number | undefined;
     let completed = false;
 
     const flush = () => {
       if (!bufferedResult) return;
+
+      // Drop all values that were superseded during the audit window.
+      for (const v of supersededValues) {
+        output.drop(v);
+      }
+      supersededValues = [];
 
       output.push(bufferedResult.value!);
 
@@ -47,6 +55,11 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
             completed = true;
             if (bufferedResult) flush();
             break;
+          }
+
+          // The previous buffered value (if any) is superseded — record for drop.
+          if (bufferedResult) {
+            supersededValues.push(bufferedResult.value!);
           }
 
           bufferedResult = result;

@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits only the last value from the source stream
@@ -26,27 +26,30 @@ export const last = <T = any>(
 
     return {
       next: async () => {
-        while (true) {
-          if (finished) return DONE;
+        if (finished) return DONE;
 
-          const result = await source.next();
+        const result = await source.next();
 
-          if (result.done) {
-            finished = true;
-            if (!hasMatch) throw new Error("No elements in sequence");
-            return NEXT(lastValue!);
-          }
-
-          const value = result.value;
-          const predicateResult = predicate ? predicate(value) : true;
-          const matches = predicate ? (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) : predicateResult;
-
-          if (matches) {
-            lastValue = value;
-            hasMatch = true;
-            continue;
-          }
+        if (result.done) {
+          finished = true;
+          if (!hasMatch) throw new Error("No elements in sequence");
+          return NEXT(lastValue!);
         }
+
+        if ((result as any).dropped) {
+          return result as any;
+        }
+
+        const value = result.value;
+        const predicateResult = predicate ? predicate(value) : true;
+        const matches = predicate ? (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) : predicateResult;
+
+        if (matches) {
+          lastValue = value;
+          hasMatch = true;
+        }
+
+        return DROPPED(value);
       },
 
       async return(value?: any) {

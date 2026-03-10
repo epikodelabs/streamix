@@ -32,25 +32,19 @@ export const groupBy = <T = any, K = any>(
   keySelector: (value: T) => MaybePromise<K>
 ) =>
   createOperator<T, GroupItem<T, K>>("groupBy", function (this: Operator, source) {
-    let completed = false;
-
     return {
       next: async () => {
-        while (true) {
-          if (completed) {
-            return DONE;
-          }
-
-          const result = await source.next();
-          if (result.done) {
-            completed = true;
-            return DONE;
-          }
-
-          const keyResult = keySelector(result.value);
-          const key = isPromiseLike(keyResult) ? await keyResult : keyResult;
-          return NEXT({ key, value: result.value });
+        const result = await source.next();
+        if (result.done) {
+          return DONE;
         }
+        if ((result as any).dropped) {
+          return result as any;
+        }
+
+        const keyResult = keySelector(result.value);
+        const key = isPromiseLike(keyResult) ? await keyResult : keyResult;
+        return NEXT({ key, value: result.value });
       }
     };
   });
