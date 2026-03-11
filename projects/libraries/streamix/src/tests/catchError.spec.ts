@@ -48,6 +48,36 @@ describe('catchError', () => {
     subject.next(1);
     subject.complete();
   });
+
+  it('should return a dropped result from the raw iterator for the first caught error and then complete', async () => {
+    const error = new Error('Unhandled exception.');
+    subject = createSubject<number>();
+    const streamWithCatchError = subject.pipe(
+      map((value) => {
+        if (value === 2) {
+          throw error;
+        }
+
+        return value;
+      }),
+      catchError(handlerMock)
+    );
+    const streamIterator = (streamWithCatchError as any)[Symbol.for('streamix.rawAsyncIterator')]();
+
+    subject.next(1);
+    expect(await streamIterator.next()).toEqual({ done: false, value: 1 });
+
+    subject.next(2);
+    const dropped = await streamIterator.next();
+
+    expect(dropped.done).toBeFalse();
+    expect((dropped as any).dropped).toBeTrue();
+    expect(dropped.value).toBe(error);
+    expect(handlerMock).toHaveBeenCalledTimes(1);
+    expect(handlerMock).toHaveBeenCalledWith(error);
+
+    expect(await streamIterator.next()).toEqual({ done: true, value: undefined });
+  });
 });
 
 

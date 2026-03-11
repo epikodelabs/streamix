@@ -1,15 +1,18 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
+import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that catches errors from the source stream and handles them.
  *
  * This operator listens for errors from the upstream source. When the first error is
- * caught, it invokes a provided `handler` callback and then immediately completes
- * the stream, preventing the error from propagating further down the pipeline.
+ * caught, it invokes a provided `handler` callback, yields a single dropped result
+ * for that error, and then completes on the following pull, preventing the error
+ * from propagating further down the pipeline.
  *
  * - **Error Handling:** The `handler` is executed only for the first error encountered.
- * - **Completion:** After an error is caught and handled, the operator completes,
- * terminating the stream's flow.
+ * - **Dropped Signal:** The first handled error is yielded with `dropped: true` so
+ * backpressure is released and downstream operators can observe the suppressed error.
+ * - **Completion:** After that dropped signal, the operator completes, terminating
+ * the stream's flow.
  * - **Subsequent Errors:** Any errors after the first will be re-thrown.
  *
  * This is useful for error-handling strategies where you want to perform a specific
@@ -50,7 +53,7 @@ export const catchError = <T = any>(
             if (isPromiseLike(handlerResult)) await handlerResult;
             errorCaughtAndHandled = true;
             completed = true;
-            return DONE;
+            return DROPPED(error as T);
           }
 
           throw error;
