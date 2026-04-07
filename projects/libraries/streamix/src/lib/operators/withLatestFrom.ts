@@ -28,7 +28,7 @@ import { createAsyncCoordinator } from '../utils';
  * ```
  */
 export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
-  ...args: (Stream<any, T> | Promise<T>)[]
+  ...args: (Stream<T> | Promise<T>)[]
 ) {
   const normalizedInputs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
 

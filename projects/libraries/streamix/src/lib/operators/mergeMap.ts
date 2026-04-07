@@ -38,7 +38,7 @@ import { createAsyncCoordinator, type RunnerEvent } from '../utils';
  * ```
  */
 export function mergeMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<any, R> | MaybePromise<R> | Array<R>,
+  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>,
   concurrent: number = Infinity
 ) {
   return createOperator<T, R>('mergeMap', function (this: Operator, source) {

@@ -18,7 +18,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * @returns {Stream<T>} A new stream that applies the retry logic.
  */
 export function retry<T = any>(
-  factory: () => Stream<any, T> | Promise<T>,
+  factory: () => Stream<T> | Promise<T>,
   maxRetries: MaybePromise<number> = 3,
   delay: MaybePromise<number> = 1000
 ): Stream<T> {
@@ -50,7 +50,7 @@ export function retry<T = any>(
         }
 
         // Wrap factory call in try-catch to handle factory errors
-        let produced: Stream<any, T> | Promise<T>;
+        let produced: Stream<T> | Promise<T>;
         try {
           produced = factory();
         } catch (factoryError) {

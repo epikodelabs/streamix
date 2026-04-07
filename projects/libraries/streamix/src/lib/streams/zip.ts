@@ -11,13 +11,13 @@ import { eachValueFrom, fromAny } from '../converters';
  * @returns {Stream<T>} A stream emitting arrays of values from each input.
  */
 export function zip<T extends readonly unknown[] = any[]>(
-  ...sources: Array<Stream<any, T[number]> | Promise<T[number]>>
+  ...sources: Array<Stream<T[number]> | Promise<T[number]>>
 ): Stream<T> {
 
   return createStream<T>('zip', async function* (): AsyncGenerator<T, void, unknown> {
     if (sources.length === 0) return;
 
-    const resolvedSources: Array<Stream<any, T[number]> | Array<T[number]> | T[number]> = [];
+    const resolvedSources: Array<Stream<T[number]> | Array<T[number]> | T[number]> = [];
     for (const source of sources) {
       resolvedSources.push(isPromiseLike(source) ? await source : source);
     }

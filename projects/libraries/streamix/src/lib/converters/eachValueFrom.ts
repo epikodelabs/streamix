@@ -16,7 +16,7 @@ import type { Stream } from "../abstractions";
  * @param stream The source stream to convert.
  * @returns An async generator that yields the non-dropped values from the stream.
  */
-export function eachValueFrom<T = any>(stream: Stream<any, T>): AsyncGenerator<T> {
+export function eachValueFrom<T = any>(stream: Stream<T>): AsyncGenerator<T> {
   const iterator = stream[Symbol.asyncIterator]();
 
   async function* generate(): AsyncGenerator<T> {

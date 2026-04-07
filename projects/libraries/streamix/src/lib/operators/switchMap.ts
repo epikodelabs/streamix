@@ -31,7 +31,7 @@ import { createSubject } from "../subjects";
  * ```
  */
 export function switchMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<any, R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source) {
     const output = createSubject<R>();
@@ -54,7 +54,7 @@ export function switchMap<T = any, R = any>(
     };
 
     const subscribeToInner = (
-      innerStream: Stream<any, R>,
+      innerStream: Stream<R>,
       token: object
     ) => {
       // Cancel the previous inner immediately so sync inner streams can't

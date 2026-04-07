@@ -22,7 +22,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
 export const concatMap = <T = any, R = any>(
-  project: (value: T, index: number) => Stream<any, R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
 ) =>
   createOperator<T, R>("concatMap", function (this : Operator, source) {
     let outerIndex = 0;
