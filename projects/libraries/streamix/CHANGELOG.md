@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.38
+
+This is the first official release of Streamix. The 2.x line now serves as the stable public baseline for pull-based reactive streams built on async iterators, with strong type inference across operators and subjects plus the companion coroutines, DOM, and networking packages.
+
 ## 2.0.37
 
 Added support for `Dropped` iterator results: public iteration skips them, while operator chains continue to propagate them internally.
