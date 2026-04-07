@@ -19,8 +19,8 @@ import { createStream, isPromiseLike, isStreamLike, MaybePromise, type Stream } 
  * @returns A {@link Stream<R>} that emits the normalized values.
  */
 export function fromAny<R = any>(
-  value: Stream<any, R> | MaybePromise<R> | Array<R> 
-): Stream<any, R> {
+  value: Stream<R> | MaybePromise<R> | Array<R> 
+): Stream<R> {
   // Step 1: If it's already a stream, return as-is
   if (isStreamLike<R>(value)) {
     return value;

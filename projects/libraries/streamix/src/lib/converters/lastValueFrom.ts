@@ -16,7 +16,7 @@ import type { Stream } from "../abstractions";
  * @param stream The source stream to listen to for the final value.
  * @returns A promise that resolves with the last value from the stream or rejects on completion without a value or on error.
  */
-export function lastValueFrom<T = any>(stream: Stream<any, T>): Promise<T> {
+export function lastValueFrom<T = any>(stream: Stream<T>): Promise<T> {
   const iterator = stream[Symbol.asyncIterator]();
 
   return (async () => {

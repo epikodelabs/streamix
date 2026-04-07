@@ -20,11 +20,11 @@ import { eachValueFrom, fromAny } from "../converters";
  * // emits: 1, 2, 3, 4
  */
 
-export function concat<T = any>(...sources: (Stream<any, T> | Promise<T>)[]): Stream<T> {
+export function concat<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T> {
   async function* generator() {
-    const isPromiseSource = (value: Stream<any, T> | Promise<T>): value is Promise<any> =>
+    const isPromiseSource = (value: Stream<T> | Promise<T>): value is Promise<any> =>
       isPromiseLike(value);
-    const resolvedSources: Array<Stream<any, T> | Array<T> | T> = [];
+    const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
     for (const source of sources) {
       resolvedSources.push(isPromiseSource(source) ? await source : source);
     }

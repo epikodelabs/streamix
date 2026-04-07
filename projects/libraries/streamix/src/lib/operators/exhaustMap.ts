@@ -28,7 +28,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * @returns An {@link Operator} that performs the "exhaust" transformation.
  */
 export const exhaustMap = <T = any, R = any>(
-  project: (value: T, index: number) => Stream<any, R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
 ) =>
   createOperator<T, R>("exhaustMap", function (this: Operator, source) {
     let outerIndex = 0;

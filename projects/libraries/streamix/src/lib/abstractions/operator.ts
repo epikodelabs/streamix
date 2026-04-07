@@ -162,20 +162,20 @@ export function createPushOperator<T, R = T>(
  */
 export interface OperatorChain<T> {
   // Base case (0 operators)
-  (): Stream<T, T>;
+  (): Stream<T>;
 
   // 1-16 operators with proper type propagation
-  <A>(op1: Operator<T, A>): Stream<T, A>;
-  <A, B>(op1: Operator<T, A>, op2: Operator<A, B>): Stream<T, B>;
-  <A, B, C>(op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>): Stream<T, C>;
-  <A, B, C, D>(op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>): Stream<T, D>;
+  <A>(op1: Operator<T, A>): Stream<A>;
+  <A, B>(op1: Operator<T, A>, op2: Operator<A, B>): Stream<B>;
+  <A, B, C>(op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>): Stream<C>;
+  <A, B, C, D>(op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>): Stream<D>;
   <A, B, C, D, E>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
     op3: Operator<B, C>,
     op4: Operator<C, D>,
     op5: Operator<D, E>
-  ): Stream<T, E>;
+  ): Stream<E>;
   <A, B, C, D, E, F>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
@@ -183,7 +183,7 @@ export interface OperatorChain<T> {
     op4: Operator<C, D>,
     op5: Operator<D, E>,
     op6: Operator<E, F>
-  ): Stream<T, F>;
+  ): Stream<F>;
   <A, B, C, D, E, F, G>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
@@ -192,7 +192,7 @@ export interface OperatorChain<T> {
     op5: Operator<D, E>,
     op6: Operator<E, F>,
     op7: Operator<F, G>
-  ): Stream<T, G>;
+  ): Stream<G>;
   <A, B, C, D, E, F, G, H>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
@@ -202,7 +202,7 @@ export interface OperatorChain<T> {
     op6: Operator<E, F>,
     op7: Operator<F, G>,
     op8: Operator<G, H>
-  ): Stream<T, H>;
+  ): Stream<H>;
   <A, B, C, D, E, F, G, H, I>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
@@ -213,7 +213,7 @@ export interface OperatorChain<T> {
     op7: Operator<F, G>,
     op8: Operator<G, H>,
     op9: Operator<H, I>
-  ): Stream<T, I>;
+  ): Stream<I>;
   <A, B, C, D, E, F, G, H, I, J>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
@@ -225,7 +225,7 @@ export interface OperatorChain<T> {
     op8: Operator<G, H>,
     op9: Operator<H, I>,
     op10: Operator<I, J>
-  ): Stream<T, J>;
+  ): Stream<J>;
   <A, B, C, D, E, F, G, H, I, J, K>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
@@ -238,7 +238,7 @@ export interface OperatorChain<T> {
     op9: Operator<H, I>,
     op10: Operator<I, J>,
     op11: Operator<J, K>
-  ): Stream<T, K>;
+  ): Stream<K>;
   <A, B, C, D, E, F, G, H, I, J, K, L>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
@@ -252,7 +252,7 @@ export interface OperatorChain<T> {
     op10: Operator<I, J>,
     op11: Operator<J, K>,
     op12: Operator<K, L>
-  ): Stream<T, L>;
+  ): Stream<L>;
   <A, B, C, D, E, F, G, H, I, J, K, L, M>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
@@ -267,7 +267,7 @@ export interface OperatorChain<T> {
     op11: Operator<J, K>,
     op12: Operator<K, L>,
     op13: Operator<L, M>
-  ): Stream<T, M>;
+  ): Stream<M>;
   <A, B, C, D, E, F, G, H, I, J, K, L, M, N>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
@@ -283,7 +283,7 @@ export interface OperatorChain<T> {
     op12: Operator<K, L>,
     op13: Operator<L, M>,
     op14: Operator<M, N>
-  ): Stream<T, N>;
+  ): Stream<N>;
   <A, B, C, D, E, F, G, H, I, J, K, L, M, N, O>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
@@ -300,7 +300,7 @@ export interface OperatorChain<T> {
     op13: Operator<L, M>,
     op14: Operator<M, N>,
     op15: Operator<N, O>
-  ): Stream<T, O>;
+  ): Stream<O>;
   <A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P>(
     op1: Operator<T, A>,
     op2: Operator<A, B>,
@@ -318,7 +318,7 @@ export interface OperatorChain<T> {
     op14: Operator<M, N>,
     op15: Operator<N, O>,
     op16: Operator<O, P>
-  ): Stream<T, P>;
+  ): Stream<P>;
 
-  (...operators: Operator<any, any>[]): Stream<any, any>;
+  (...operators: Operator<any, any>[]): Stream<any>;
 };

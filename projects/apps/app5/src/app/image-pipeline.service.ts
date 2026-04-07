@@ -1,13 +1,13 @@
 // services/image-pipeline.service.ts
 import { Injectable, NgZone } from '@angular/core';
 import {
-    createSubject,
-    filter,
-    fromPromise,
-    map,
-    Stream,
-    switchMap,
-    tap,
+  createSubject,
+  filter,
+  fromPromise,
+  map,
+  Stream,
+  switchMap,
+  tap,
 } from '@epikodelabs/streamix';
 
 import { cascade, coroutine, Coroutine } from '@epikodelabs/streamix/coroutines';
@@ -21,7 +21,7 @@ export class ImagePipelineService {
   private fileStream = createSubject<FileTask>();
   private progressStream = createSubject<{ id: string; progress: any }>();
 
-  readonly resultStream: Stream<FileTask, ProcessedResult>;
+  readonly resultStream: Stream<ProcessedResult>;
 
   constructor(private ngZone: NgZone) {
     const customMessageHandler = (

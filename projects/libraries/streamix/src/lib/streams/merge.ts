@@ -30,12 +30,12 @@ import { createAsyncCoordinator } from "../utils";
  * merge(fast, slow, instant).forEach(console.log);
  * ```
  */
-export function merge<T = any>(...sources: (Stream<any, T> | Promise<T>)[]): Stream<T> {
+export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T> {
   return createStream<T>('merge', async function* () {
     if (sources.length === 0) return;
 
     // Resolve any promises in sources
-    const resolvedSources: Array<Stream<any, T> | Array<T> | T> = [];
+    const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
     for (const source of sources) {
       resolvedSources.push(isPromiseLike(source) ? await source : source);
     }

@@ -15,8 +15,8 @@ import { eachValueFrom, fromAny } from '../converters';
  */
 export function iif<T = any>(
   condition: () => MaybePromise<boolean>,
-  trueStream: Stream<any, T> | Promise<T>,
-  falseStream: Stream<any, T> | Promise<T>
+  trueStream: Stream<T> | Promise<T>,
+  falseStream: Stream<T> | Promise<T>
 ): Stream<T> {
   async function* generator(): AsyncGenerator<T, void, unknown> {
     // Evaluate condition lazily when the stream starts

@@ -23,7 +23,7 @@ import { eachValueFrom, fromAny } from "../converters";
  * // emits: [2, 10]
  */
 export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
-  ...sources: { [K in keyof R]: Stream<any, R[K]> | Promise<R[K]> }
+  ...sources: { [K in keyof R]: Stream<R[K]> | Promise<R[K]> }
 ): Stream<T[]>;
 
 /**
@@ -35,7 +35,7 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
  * @returns A stream that emits a single array of last values.
  */
 export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
-  sources: { [K in keyof R]: Stream<any, R[K]> | Promise<R[K]> }
+  sources: { [K in keyof R]: Stream<R[K]> | Promise<R[K]> }
 ): Stream<T[]>;
 
 /**
@@ -48,7 +48,7 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
 ): Stream<T[]> {
   async function* generator() {
     const normalizedSources = sources.length === 1 && Array.isArray(sources[0]) ? sources[0] : sources;
-    const resolvedSources: Array<Stream<any, T> | Array<T> | T> = [];
+    const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
     for (const source of normalizedSources) {
       resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
