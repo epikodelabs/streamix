@@ -10,7 +10,7 @@ Added support for `Dropped` iterator results: public iteration skips them, while
 
 ## 2.0.35
 
-Refactored `Stream`, `Subject`, `ReplaySubject`, and `BehaviorSubject` to use dual generic parameters for input and output types, enabling robust type inference through operator chains and subscriptions. Updated all `subscribe` and `query` method signatures to reflect the correct output type, ensuring type safety and better developer experience. All stream and subject factory functions and instance methods now preserve and expose accurate types throughout pipelines.
+Collapsed dual generic parameters (`Stream<TIn, TOut>`) into a consistent single-param `Stream<T>` design for all subjects and piped streams, enabling robust type inference through operator chains and subscriptions. Updated all `subscribe` and `query` method signatures to reflect the correct output type, ensuring type safety and better developer experience. All stream and subject factory functions and instance methods now preserve and expose accurate types throughout pipelines.
 
 ### 2.0.32
 
