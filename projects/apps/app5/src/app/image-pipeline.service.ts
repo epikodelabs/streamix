@@ -21,7 +21,7 @@ export class ImagePipelineService {
   private fileStream = createSubject<FileTask>();
   private progressStream = createSubject<{ id: string; progress: any }>();
 
-  readonly resultStream: Stream<ProcessedResult>;
+  readonly resultStream: Stream<FileTask, ProcessedResult>;
 
   constructor(private ngZone: NgZone) {
     const customMessageHandler = (

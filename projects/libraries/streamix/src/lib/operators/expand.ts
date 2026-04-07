@@ -39,7 +39,7 @@ export type ExpandOptions = {
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const expand = <T = any>(
-  project: (value: T) => MaybePromise<Stream<T> | Array<T> | T>,
+  project: (value: T) => MaybePromise<Stream<any, T> | Array<T> | T>,
   options: ExpandOptions = {}
 ): Operator<T, T> =>
   createOperator<T, T>('expand', function (this: Operator, source) {

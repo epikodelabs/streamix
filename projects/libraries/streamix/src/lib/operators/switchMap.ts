@@ -1,8 +1,8 @@
 import type { MaybePromise, Operator, Stream } from "../abstractions";
 import {
-  createOperator,
-  DONE,
-  isPromiseLike,
+    createOperator,
+    DONE,
+    isPromiseLike,
 } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 import { createSubject } from "../subjects";
@@ -54,7 +54,7 @@ export function switchMap<T = any, R = any>(
     };
 
     const subscribeToInner = (
-      innerStream: Stream<R>,
+      innerStream: Stream<any, R>,
       token: object
     ) => {
       // Cancel the previous inner immediately so sync inner streams can't

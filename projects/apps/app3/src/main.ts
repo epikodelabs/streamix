@@ -11,7 +11,7 @@ import {
 import { onAnimationFrame, onIntersection } from '@epikodelabs/streamix/dom';
 
 // Text animation setup with Streamix
-const setupTextAnimation = (element: HTMLElement): Stream<void> => {
+const setupTextAnimation = (element: HTMLElement): Stream<boolean> => {
   const text = element.textContent || '';
   element.innerHTML = '';
 

@@ -1,11 +1,11 @@
 import {
-  createOperator,
-  DONE,
-  isPromiseLike,
-  MaybePromise,
-  NEXT,
-  type Operator,
-  type Stream
+    createOperator,
+    DONE,
+    isPromiseLike,
+    MaybePromise,
+    NEXT,
+    type Operator,
+    type Stream
 } from "../abstractions";
 import { eachValueFrom, fromAny } from "../converters";
 
