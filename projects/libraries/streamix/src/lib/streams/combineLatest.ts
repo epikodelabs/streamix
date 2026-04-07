@@ -16,7 +16,7 @@ import { createAsyncCoordinator } from "../utils";
  * @returns {Stream<T>} A new stream that emits a tuple of the latest values from all source streams.
  */
 export function combineLatest<T extends unknown[] = any[]>(
-  ...sources: Array<Stream<T[number]> | Promise<T[number]>>
+  ...sources: Array<Stream<any, T[number]> | Promise<T[number]>>
 ): Stream<T> {
   return createStream<T>("combineLatest", async function* () {
     if (sources.length === 0) return;

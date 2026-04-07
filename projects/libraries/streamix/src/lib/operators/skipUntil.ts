@@ -31,7 +31,7 @@ import { createAsyncCoordinator } from "../utils";
  * @returns An `Operator<T, T>` that drops source values until the notifier emits.
  */
 export function skipUntil<T = any, N = any>(
-  notifier: Stream<N> | Promise<N>
+  notifier: Stream<any, N> | Promise<N>
 ): Operator<T, T> {
   return createOperator<T, T>("skipUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();

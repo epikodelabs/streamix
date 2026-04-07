@@ -14,7 +14,7 @@ import { eachValueFrom, fromAny } from '../converters';
  * @param {() => (Stream<T> | Promise<T>)} factory A function that returns the stream or value to be subscribed to.
  * @returns {Stream<T>} A new stream that defers subscription to the inner stream.
  */
-export function defer<T = any>(factory: () => Stream<T> | Promise<T>): Stream<T> {
+export function defer<T = any>(factory: () => Stream<any, T> | Promise<T>): Stream<T> {
   async function* generator() {
     const produced = factory();
     const innerStream = isPromiseLike(produced) ? await produced : produced;

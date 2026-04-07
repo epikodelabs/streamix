@@ -19,7 +19,7 @@ import { createAsyncCoordinator } from "../utils";
  * @returns {Stream<T[number]>} A new stream that emits values from the first stream to produce a value.
  */
 export function race<T extends readonly unknown[] = any[]>(
-  ...streams: Array<Stream<T[number]> | Promise<T[number]>>
+  ...streams: Array<Stream<any, T[number]> | Promise<T[number]>>
 ): Stream<T[number]> {
   return createStream<T[number]>('race', async function* () {
     if (streams.length === 0) return;

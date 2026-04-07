@@ -1,8 +1,8 @@
 import {
-  createOperator,
-  MaybePromise,
-  type Operator,
-  type Stream
+    createOperator,
+    MaybePromise,
+    type Operator,
+    type Stream
 } from '../abstractions';
 import { fromAny } from '../converters';
 import { createAsyncCoordinator, type RunnerEvent } from '../utils';
