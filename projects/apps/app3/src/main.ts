@@ -28,18 +28,22 @@ const setupTextAnimation = (element: HTMLElement): Stream<boolean> => {
 
   let isVisible = false;
 
-  return onIntersection(element, { threshold: 0.5 }).pipe(
-    map((intersecting) => intersecting && !isVisible),
-    filter((shouldAnimate) => shouldAnimate),
+  const intersection$ = onIntersection(element, { threshold: 0.5 });
+
+  const show$ = intersection$.pipe(
+    filter((intersecting) => intersecting && !isVisible),
     tap(() => {
       isVisible = true;
       spans.forEach((span) => {
         span.style.opacity = '1';
         span.style.transform = 'translateY(0)';
       });
-    }),
-    debounce(1000), // Add debounce to control frequent changes
-    filter(() => !isVisible),
+    })
+  );
+
+  const hide$ = intersection$.pipe(
+    debounce(1000),
+    filter((intersecting) => !intersecting && isVisible),
     tap(() => {
       isVisible = false;
       spans.forEach((span) => {
@@ -48,6 +52,8 @@ const setupTextAnimation = (element: HTMLElement): Stream<boolean> => {
       });
     })
   );
+
+  return merge(show$, hide$);
 };
 
 // Breathing effect with Streamix operators
