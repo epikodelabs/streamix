@@ -67,8 +67,7 @@ projects/libraries/streamix/
 ├── aggregates/                 # Aggregate operators (average, min/max, etc.)
 ├── coroutines/                 # Web Worker background processing
 ├── dom/                        # DOM observation utilities (onResize, etc.)
-├── networking/                 # HTTP client, WebSocket, JSONP
-└── tracing/                    # Stream lifecycle tracing/debugging
+└── networking/                 # HTTP client, WebSocket, JSONP
 ```
 
 ## ⚡️ Quick start
