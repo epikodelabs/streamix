@@ -1,12 +1,12 @@
 import {
-  concatMap,
-  debounce,
-  filter,
-  fromEvent,
-  map,
-  merge,
-  Stream,
-  tap,
+    concatMap,
+    debounce,
+    filter,
+    fromEvent,
+    map,
+    merge,
+    Stream,
+    tap,
 } from '@epikodelabs/streamix';
 import { onAnimationFrame, onIntersection } from '@epikodelabs/streamix/dom';
 
