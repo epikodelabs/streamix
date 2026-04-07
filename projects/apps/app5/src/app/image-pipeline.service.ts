@@ -1,14 +1,14 @@
 // services/image-pipeline.service.ts
-import {
-  createSubject,
-  filter,
-  fromPromise,
-  map,
-  Stream,
-  switchMap,
-  tap,
-} from '@epikodelabs/streamix';
 import { Injectable, NgZone } from '@angular/core';
+import {
+    createSubject,
+    filter,
+    fromPromise,
+    map,
+    Stream,
+    switchMap,
+    tap,
+} from '@epikodelabs/streamix';
 
 import { cascade, coroutine, Coroutine } from '@epikodelabs/streamix/coroutines';
 import { compressImage, CompressInput, CompressOutput, FileTask, ProcessedResult, resizeImage, ResizeInput, ResizeOutput } from './image-processing.utils';
