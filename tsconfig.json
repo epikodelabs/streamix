@@ -1,7 +1,7 @@
 {
   "compileOnSave": false,
   "compilerOptions": {
-    "rootDir": "./projects/libraries/streamix/src",
+    "rootDir": ".",
     "allowJs": true,
     "declaration": true,
     "forceConsistentCasingInFileNames": true,
