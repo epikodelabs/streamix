@@ -1,0 +1,97 @@
+name: Update bundle size badge
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # Required to push commits
+  actions: read    # Required for workflow access
+
+jobs:
+  badge:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout full repo with token for pushing
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history needed for non-main branch
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true  # Keep credentials for later push
+
+      # 2️⃣ Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 3️⃣ Build library (so dist files exist)
+      - name: Build library
+        run: npm i && npm run build actionstack
+
+      # 4️⃣ Calculate gzipped bundle size
+      - name: Calculate gzipped bundle size
+        id: gzip
+        run: |
+          if [ ! -f "dist/actionstack/fesm2022/epikodelabs-actionstack.mjs" ]; then
+            echo "❌ Bundle file not found!"
+            ls -la dist/actionstack/fesm2022/ || echo "Directory doesn't exist"
+            exit 1
+          fi
+
+          gzip -c dist/actionstack/fesm2022/epikodelabs-actionstack.mjs > dist/actionstack/fesm2022/epikodelabs-actionstack.mjs.gz
+          SIZE=$(stat -c%s dist/actionstack/fesm2022/epikodelabs-actionstack.mjs.gz)
+          SIZE_KB=$((SIZE / 1024))
+          echo "BUNDLE_SIZE=${SIZE_KB}" >> $GITHUB_ENV
+          echo "✅ Gzipped bundle size: ${SIZE_KB} KB"
+
+      # 5️⃣ Generate badge
+      - name: Generate badge
+        run: |
+          mkdir -p projects/libraries/actionstack
+          COLOR="brightgreen"
+          if [ $BUNDLE_SIZE -gt 200 ]; then COLOR="red"; fi
+          if [ $BUNDLE_SIZE -gt 100 ] && [ $BUNDLE_SIZE -le 200 ]; then COLOR="yellow"; fi
+
+          echo "🎯 Creating badge with ${BUNDLE_SIZE}KB and color ${COLOR}"
+          curl -s -o projects/libraries/actionstack/bundle-size.svg \
+            "https://img.shields.io/badge/bundle-${BUNDLE_SIZE}KB-${COLOR}.svg"
+
+          # Verify badge was created
+          if [ -f "projects/libraries/actionstack/bundle-size.svg" ]; then
+            echo "✅ Badge created successfully"
+          else
+            echo "❌ Badge creation failed"
+            exit 1
+          fi
+
+      # 6️⃣ Configure git user
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # 7️⃣ Commit and push badge
+      - name: Commit and push badge
+        run: |
+          # Make sure we're on the right branch
+          git checkout main
+          git pull origin main
+
+          # Add the badge file
+          git add projects/libraries/actionstack/bundle-size.svg
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "ℹ️ No changes to commit"
+          else
+            echo "📝 Committing badge update..."
+            git commit -m "Update bundle size badge [skip ci]"
+            echo "🚀 Pushing to repository..."
+            # Use HTTPS, not SSH - the checkout action already set up credentials
+            git push origin HEAD:main
+            echo "✅ Badge updated successfully!"
+          fi
