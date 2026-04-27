@@ -1,5 +1,7 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
+import { createStream, DROPPED, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
+import { fromAny } from '../converters';
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Creates a stream that chooses between two streams based on a condition.
@@ -24,13 +26,18 @@ export function iif<T = any>(
     const resolvedCondition = isPromiseLike(conditionResult) ? await conditionResult : conditionResult;
     const chosen = resolvedCondition ? trueStream : falseStream;
     const resolvedChosen = isPromiseLike(chosen) ? await chosen : chosen;
-    const iterator = eachValueFrom(fromAny<T>(resolvedChosen));
+    const stream = fromAny<T>(resolvedChosen);
+    const iterator = ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
 
     try {
       while (true) {
         const result = await iterator.next();
         if (result.done) break;
-        yield result.value;
+        if ((result as any).dropped) {
+          yield DROPPED(result.value) as any;
+        } else {
+          yield result.value;
+        }
       }
     } finally {
       // Ensure proper cleanup of the iterator
