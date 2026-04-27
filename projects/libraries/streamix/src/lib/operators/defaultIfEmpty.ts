@@ -26,7 +26,7 @@ export const defaultIfEmpty = <T = any>(defaultValue: MaybePromise<T>) =>
         const result = await source.next();
 
         if (!result.done) {
-          emitted = true;
+          if (!(result as any).dropped) emitted = true;
           return result;
         }
 

@@ -140,6 +140,8 @@ export function switchMap<T = any, R = any>(
             return;
           }
 
+          if ((result as any).dropped) continue;
+
           processOuterValue(result.value);
         }
       };
@@ -152,6 +154,7 @@ export function switchMap<T = any, R = any>(
           while (!stopped) {
             const result = await source.next();
             if (result.done) break;
+            if ((result as any).dropped) continue;
             processOuterValue(result.value);
           }
 

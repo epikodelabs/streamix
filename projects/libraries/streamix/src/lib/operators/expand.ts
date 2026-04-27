@@ -79,6 +79,8 @@ export const expand = <T = any>(
               break;
             }
 
+            if ((result as any).dropped) continue;
+
             queue.push({ value: result.value, depth: 0 });
           }
 
