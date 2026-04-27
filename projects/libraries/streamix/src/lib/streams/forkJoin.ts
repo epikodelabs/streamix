@@ -69,7 +69,7 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
         }
 
         if (!hasValue[index]) {
-          throw new Error("forkJoin: one of the streams completed without emitting any value");
+          throw new Error(`forkJoin: stream at index ${index} completed without emitting any value`);
         }
       });
 
