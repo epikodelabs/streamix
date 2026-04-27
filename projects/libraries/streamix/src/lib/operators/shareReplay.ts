@@ -1,5 +1,4 @@
 import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
-import { eachValueFrom } from '../converters';
 import { createReplaySubject, type ReplaySubject } from '../subjects';
 
 /**
@@ -24,11 +23,6 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
   let isConnected = false;
   let output: ReplaySubject<T> | undefined;
   let resolvedSize: number | undefined;
-  const isSync = !isPromiseLike(bufferSize);
-  
-  if (isSync) {
-    resolvedSize = bufferSize;
-  }
   
   const connectSource = (source: AsyncIterator<T>) => {
     isConnected = true;
@@ -38,9 +32,11 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
           const result = await source.next();
           if (result.done) break;
 
-          if ((result as any).dropped) continue;
-
-          output!.next(result.value);
+          if ((result as any).dropped) {
+            output!.drop(result.value);
+          } else {
+            output!.next(result.value);
+          }
         }
       } catch (err) {
         output!.error(err);
@@ -51,48 +47,58 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
   };
 
   return createOperator<T, T>('shareReplay', function (this: Operator, source) {
-    // Short path: plain value, return synchronously
-    if (isSync) {
-      if (!output) output = createReplaySubject<T>(resolvedSize!);
-      if (!isConnected) connectSource(source);
-      else if (typeof source.return === "function") {
-        Promise.resolve(source.return()).catch(() => {});
+    let initialized = false;
+    let outputIterator: AsyncIterator<T> | null = null;
+
+    const ensureOutputIterator = async () => {
+      if (initialized && outputIterator) {
+        return outputIterator;
       }
-      const outputIterator = eachValueFrom(output);
-      const baseReturn = outputIterator.return?.bind(outputIterator);
-      const baseThrow = outputIterator.throw?.bind(outputIterator);
 
-      (outputIterator as any).return = async (value?: any) => {
-        try {
-          await source.return?.();
-        } catch {}
-        if (output && !output.completed()) output.complete();
-        return baseReturn ? baseReturn(value) : DONE;
-      };
+      initialized = true;
 
-      (outputIterator as any).throw = async (err: any) => {
-        try {
-          await source.return?.();
-        } catch {}
-        if (output && !output.completed()) output.error(err);
-        if (baseThrow) return baseThrow(err);
-        throw err;
-      };
-
-      return outputIterator;
-    }
-
-    // Long path: Promise, wrap in async generator
-    return (async function* () {
       if (resolvedSize === undefined) {
-        resolvedSize = await bufferSize;
+        resolvedSize = isPromiseLike(bufferSize) ? await bufferSize : bufferSize;
       }
       if (!output) output = createReplaySubject<T>(resolvedSize);
       if (!isConnected) connectSource(source);
       else if (typeof source.return === "function") {
         Promise.resolve(source.return()).catch(() => {});
       }
-      yield* eachValueFrom(output);
-    })();
+      if (!outputIterator) {
+        outputIterator = output[Symbol.asyncIterator]();
+      }
+      return outputIterator;
+    };
+
+    void ensureOutputIterator();
+
+    const iterator: AsyncIterator<T> = {
+      async next() {
+        const it = await ensureOutputIterator();
+        return it.next();
+      },
+
+      async return(value?: any) {
+        const it = await ensureOutputIterator();
+        try {
+          await source.return?.();
+        } catch {}
+        if (output && !output.completed()) output.complete();
+        return it.return ? it.return(value) : DONE;
+      },
+
+      async throw(err: any) {
+        const it = await ensureOutputIterator();
+        try {
+          await source.return?.();
+        } catch {}
+        if (output && !output.completed()) output.error(err);
+        if (it.throw) return it.throw(err);
+        throw err;
+      }
+    };
+
+    return iterator;
   });
 }

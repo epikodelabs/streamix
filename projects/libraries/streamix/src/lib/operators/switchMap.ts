@@ -1,11 +1,13 @@
 import type { MaybePromise, Operator, Stream } from "../abstractions";
 import {
-    createOperator,
-    DONE,
-    isPromiseLike,
+  createOperator,
+  DONE,
+  isPromiseLike,
 } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
-import { createSubject } from "../subjects";
+import { fromAny } from "../converters";
+import { createAsyncPushable } from "../utils";
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Transforms each value from the source stream into a new inner stream, promise, or array,
@@ -34,8 +36,8 @@ export function switchMap<T = any, R = any>(
   project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source) {
-    const output = createSubject<R>();
-    const outputIterator = eachValueFrom(output);
+    const output = createAsyncPushable<R>();
+    const outputIterator = output;
 
     let currentInner: { token: object; it: AsyncIterator<R> } | null = null;
     let inputCompleted = false;
@@ -66,7 +68,7 @@ export function switchMap<T = any, R = any>(
         } catch {}
       }
 
-      const it = innerStream[Symbol.asyncIterator]();
+      const it = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
       currentInner = { token, it };
 
       void (async () => {
@@ -76,7 +78,11 @@ export function switchMap<T = any, R = any>(
 
             if (r.done) break;
             if (stopped || token !== currentInnerToken) break;
-            output.next(r.value);
+            if ((r as any).dropped) {
+              output.drop(r.value);
+            } else {
+              output.push(r.value);
+            }
           }
         } catch (err) {
           if (!stopped && token === currentInnerToken) {
@@ -140,7 +146,10 @@ export function switchMap<T = any, R = any>(
             return;
           }
 
-          if ((result as any).dropped) continue;
+          if ((result as any).dropped) {
+            output.drop(result.value as any);
+            continue;
+          }
 
           processOuterValue(result.value);
         }
@@ -154,7 +163,10 @@ export function switchMap<T = any, R = any>(
           while (!stopped) {
             const result = await source.next();
             if (result.done) break;
-            if ((result as any).dropped) continue;
+            if ((result as any).dropped) {
+              output.drop(result.value as any);
+              continue;
+            }
             processOuterValue(result.value);
           }
 

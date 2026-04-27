@@ -7,7 +7,9 @@ import {
     type Operator,
     type Stream,
 } from "../abstractions";
-import { eachValueFrom, fromAny } from '../converters';
+import { fromAny } from '../converters';
+
+  const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Options for the expand operator.
@@ -44,7 +46,7 @@ export const expand = <T = any>(
 ): Operator<T, T> =>
   createOperator<T, T>('expand', function (this: Operator, source) {
     type QueueItem = {
-      value: T;
+      result: IteratorResult<T>;
       depth: number;
     };
     const queue: QueueItem[] = [];
@@ -59,8 +61,13 @@ export const expand = <T = any>(
       const projected = project(value);
       const normalized = isPromiseLike(projected) ? await projected : projected;
 
-      for await (const child of eachValueFrom(fromAny(normalized))) {
-        const item = { value: child, depth: depth + 1 };
+      const stream = fromAny(normalized);
+      const iterator = ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
+
+      while (true) {
+        const child = await iterator.next();
+        if (child.done) break;
+        const item = { result: child, depth: depth + 1 };
         if (options.traversal === 'breadth') {
           queue.push(item);
         } else {
@@ -79,16 +86,17 @@ export const expand = <T = any>(
               break;
             }
 
-            if ((result as any).dropped) continue;
+            if ((result as any).dropped) return result as any;
 
-            queue.push({ value: result.value, depth: 0 });
+            queue.push({ result, depth: 0 });
           }
 
           if (queue.length > 0) {
             const item =
               options.traversal === 'breadth' ? queue.shift()! : queue.pop()!;
-            await enqueueChildren(item.value, item.depth);
-            return NEXT(item.value);
+            if ((item.result as any).dropped) return item.result as any;
+            await enqueueChildren(item.result.value, item.depth);
+            return NEXT(item.result.value);
           }
 
           if (sourceDone && queue.length === 0) {

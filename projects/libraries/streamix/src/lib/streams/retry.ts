@@ -1,5 +1,7 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
+import { createStream, DROPPED, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
+import { fromAny } from "../converters";
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Creates a stream that subscribes to a source factory and retries on error.
@@ -40,8 +42,8 @@ export function retry<T = any>(
     let lastError: Error | null = null;
 
     while (retryCount <= resolvedMaxRetries) {
-      let iterator: AsyncGenerator<T> | null = null;
-      let buffered: T[] = [];
+      let iterator: AsyncIterator<T> | null = null;
+      let buffered: Array<IteratorResult<T>> = [];
 
       try {
         // Check abort signal at loop start
@@ -58,18 +60,26 @@ export function retry<T = any>(
         }
 
         const source = isPromiseLike(produced) ? await produced : produced;
-        iterator = eachValueFrom(fromAny(source));
+        const stream = fromAny(source);
+        iterator = ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
 
-        for await (const value of iterator) {
+        while (true) {
           // Check abort signal during iteration
           if (signal?.aborted) {
             throw new Error("Stream aborted");
           }
-          buffered.push(value);
+
+          const next = await iterator.next();
+          if (next.done) break;
+          buffered.push(next);
         }
 
         for (const value of buffered) {
-          yield value;
+          if ((value as any).dropped) {
+            yield DROPPED(value.value) as any;
+          } else {
+            yield value.value;
+          }
         }
         lastError = null;
         break;

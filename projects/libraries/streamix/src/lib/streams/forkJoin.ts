@@ -1,5 +1,8 @@
-import { createStream, isPromiseLike, type Stream } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
+import { createStream, DROPPED, isPromiseLike, type Stream } from "../abstractions";
+import { fromAny } from "../converters";
+import { createAsyncCoordinator } from "../utils";
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Waits for all sources to complete and emits an array of their last values.
@@ -55,32 +58,42 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
 
     const results = new Array(resolvedSources.length);
     const hasValue = new Array(resolvedSources.length).fill(false);
-    const resolvedIterators = resolvedSources.map((source) =>
-      eachValueFrom(fromAny(source))
-    );
+    const resolvedIterators = resolvedSources.map((source) => {
+      const stream = fromAny(source);
+      return ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
+    });
+    const coordinator = createAsyncCoordinator(resolvedIterators);
+    let completedCount = 0;
 
     try {
-      const promises = resolvedIterators.map(async (iterator, index) => {
-        while (true) {
-          const result = await iterator.next();
-          if (result.done) break;
-          hasValue[index] = true;
-          results[index] = result.value;
+      while (completedCount < resolvedIterators.length) {
+        const next = await coordinator.next();
+        if (next.done) break;
+
+        const event = next.value;
+        if (event.type === "error") {
+          throw event.error;
         }
 
-        if (!hasValue[index]) {
-          throw new Error(`forkJoin: stream at index ${index} completed without emitting any value`);
+        if (event.type === "value") {
+          if (event.dropped) {
+            yield DROPPED(event.value) as any;
+          } else {
+            hasValue[event.sourceIndex] = true;
+            results[event.sourceIndex] = event.value;
+          }
+          continue;
         }
-      });
 
-      await Promise.all(promises);
+        completedCount++;
+        if (!hasValue[event.sourceIndex]) {
+          throw new Error(`forkJoin: stream at index ${event.sourceIndex} completed without emitting any value`);
+        }
+      }
+
       yield results as T[];
     } finally {
-      await Promise.all(
-        resolvedIterators.map((iterator) =>
-          iterator.return ? iterator.return(undefined).catch(() => {}) : Promise.resolve()
-        )
-      );
+      await coordinator.return?.();
     }
   }
 
