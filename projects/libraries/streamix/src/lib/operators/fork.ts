@@ -1,5 +1,7 @@
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator, type Stream } from "../abstractions";
-import { eachValueFrom, fromAny } from '../converters';
+import { fromAny } from '../converters';
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Represents a conditional branch for the `fork` operator.
@@ -92,7 +94,8 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
               throw new Error(`No handler found for value: ${outerValue}`);
             }
 
-            innerIterator = eachValueFrom(fromAny(matched.handler(outerValue!)));
+            const innerStream = fromAny(matched.handler(outerValue!));
+            innerIterator = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
           }
 
           // Pull next inner value
@@ -102,6 +105,7 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
             continue;
           }
 
+          if ((innerResult as any).dropped) return innerResult as any;
           return NEXT(innerResult.value);
         }
       },

@@ -46,8 +46,15 @@ export function race<T extends readonly unknown[] = any[]>(
           throw event.error;
         }
 
+        // Dropped values must flow through the race output, but they must not
+        // participate in winner selection.
+        if (event.type === 'value' && event.dropped) {
+          yield DROPPED(event.value) as any;
+          continue;
+        }
+
         // 2. Identify the winner from the first real (non-dropped) value or completion
-        if (winnerIndex === null && !event.dropped) {
+        if (winnerIndex === null) {
           winnerIndex = event.sourceIndex;
           
           // Once we have a winner, tell the runner to stop polling the others
