@@ -1,6 +1,8 @@
-import { createStream, type Stream } from "../abstractions";
+import { createStream, DROPPED, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Combines multiple streams and emits a tuple containing the latest values
@@ -18,10 +20,13 @@ import { createAsyncCoordinator } from "../utils";
 export function combineLatest<T extends unknown[] = any[]>(
   ...sources: Array<Stream<T[number]> | Promise<T[number]>>
 ): Stream<T> {
-  return createStream<T>("combineLatest", async function* () {
+  const gen = async function* () {
     if (sources.length === 0) return;
 
-    const iterators = sources.map((s) => fromAny(s)[Symbol.asyncIterator]());
+    const iterators = sources.map((s) => {
+      const resolved = fromAny(s);
+      return ((resolved as any)[RAW]?.() ?? resolved[Symbol.asyncIterator]()) as AsyncIterator<T[number]>;
+    });
     const runner = createAsyncCoordinator(iterators);
 
     const latestValues = new Array(sources.length).fill(undefined);
@@ -31,13 +36,17 @@ export function combineLatest<T extends unknown[] = any[]>(
     try {
       while (completedCount < sources.length) {
         const result = await runner.next();
-        
+
         if (result.done) break;
 
         const event = result.value;
 
         switch (event.type) {
           case "value":
+            if (event.dropped) {
+              yield DROPPED(event.value) as any;
+              break;
+            }
             latestValues[event.sourceIndex] = event.value;
             hasEmitted.add(event.sourceIndex);
 
@@ -59,5 +68,9 @@ export function combineLatest<T extends unknown[] = any[]>(
       // Ensure all upstream iterators are closed
       await runner.return?.();
     }
-  });
+  };
+
+  const stream = createStream<T>("combineLatest", gen);
+  (stream as any)[RAW] = gen;
+  return stream;
 }

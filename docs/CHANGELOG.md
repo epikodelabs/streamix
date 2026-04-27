@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.39
+
+
+
 ## 2.0.38
 
 This is the first official release of Streamix. The 2.x line now serves as the stable public baseline for pull-based reactive streams built on async iterators, with strong type inference across operators and subjects plus the companion coroutines, DOM, and networking packages.
