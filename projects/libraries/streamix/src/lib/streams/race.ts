@@ -1,6 +1,8 @@
-import { createStream, type Stream } from "../abstractions";
+import { createStream, DROPPED, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Returns a stream that races multiple input streams.
@@ -21,10 +23,13 @@ import { createAsyncCoordinator } from "../utils";
 export function race<T extends readonly unknown[] = any[]>(
   ...streams: Array<Stream<T[number]> | Promise<T[number]>>
 ): Stream<T[number]> {
-  return createStream<T[number]>('race', async function* () {
+  const gen = async function* () {
     if (streams.length === 0) return;
 
-    const iterators = streams.map(s => fromAny(s)[Symbol.asyncIterator]());
+    const iterators = streams.map(s => {
+      const resolved = fromAny(s);
+      return ((resolved as any)[RAW]?.() ?? resolved[Symbol.asyncIterator]()) as AsyncIterator<T[number]>;
+    });
     const runner = createAsyncCoordinator(iterators);
     
     let winnerIndex: number | null = null;
@@ -41,8 +46,8 @@ export function race<T extends readonly unknown[] = any[]>(
           throw event.error;
         }
 
-        // 2. Identify the winner from the first value or completion
-        if (winnerIndex === null) {
+        // 2. Identify the winner from the first real (non-dropped) value or completion
+        if (winnerIndex === null && !event.dropped) {
           winnerIndex = event.sourceIndex;
           
           // Once we have a winner, tell the runner to stop polling the others
@@ -56,9 +61,13 @@ export function race<T extends readonly unknown[] = any[]>(
         }
 
         // 3. Only process events from the winner
-        if (event.sourceIndex === winnerIndex) {
+        if (winnerIndex !== null && event.sourceIndex === winnerIndex) {
           if (event.type === 'value') {
-            yield event.value;
+            if (event.dropped) {
+              yield DROPPED(event.value) as any;
+            } else {
+              yield event.value;
+            }
           } else if (event.type === 'complete') {
             break;
           }
@@ -68,5 +77,9 @@ export function race<T extends readonly unknown[] = any[]>(
       // Clean up the runner and all underlying iterators
       await runner.return?.();
     }
-  });
+  };
+
+  const stream = createStream<T[number]>('race', gen);
+  (stream as any)[RAW] = gen;
+  return stream;
 }

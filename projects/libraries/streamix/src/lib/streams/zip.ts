@@ -1,5 +1,7 @@
-import { createStream, isPromiseLike, type Stream } from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
+import { createStream, DROPPED, isPromiseLike, type Stream } from '../abstractions';
+import { fromAny } from '../converters';
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Combine multiple streams into a single stream that emits arrays of the latest values
@@ -14,7 +16,7 @@ export function zip<T extends readonly unknown[] = any[]>(
   ...sources: Array<Stream<T[number]> | Promise<T[number]>>
 ): Stream<T> {
 
-  return createStream<T>('zip', async function* (): AsyncGenerator<T, void, unknown> {
+  const gen = async function* (): AsyncGenerator<T, void, unknown> {
     if (sources.length === 0) return;
 
     const resolvedSources: Array<Stream<T[number]> | Array<T[number]> | T[number]> = [];
@@ -22,20 +24,30 @@ export function zip<T extends readonly unknown[] = any[]>(
       resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
 
-    const iterators = resolvedSources.map((source) =>
-      eachValueFrom(fromAny(source))
-    );
+    const iterators = resolvedSources.map((source) => {
+      const resolved = fromAny(source);
+      return ((resolved as any)[RAW]?.() ?? resolved[Symbol.asyncIterator]()) as AsyncIterator<T[number]>;
+    });
 
     try {
       while (true) {
         const results = await Promise.all(iterators.map(it => it.next()));
         if (results.some(r => r.done)) break;
-        yield results.map(r => r.value) as unknown as T;
+        const droppedResult = results.find((r: any) => r.dropped);
+        if (droppedResult) {
+          yield DROPPED(droppedResult.value) as any;
+        } else {
+          yield results.map(r => r.value) as unknown as T;
+        }
       }
     } finally {
       await Promise.all(
         iterators.map(it => (typeof it.return === 'function' ? it.return(undefined).catch(() => {}) : Promise.resolve()))
       );
     }
-  });
+  };
+
+  const stream = createStream<T>('zip', gen);
+  (stream as any)[RAW] = gen;
+  return stream;
 }
