@@ -1,6 +1,6 @@
 {
   "name": "@epikodelabs/streamix",
-  "version": "2.0.38",
+  "version": "2.0.39",
   "description": "Reactive TypeScript library",
   "license": "MIT",
   "keywords": [

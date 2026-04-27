@@ -45,13 +45,14 @@ export function race<T extends readonly unknown[] = any[]>(
         if (winnerIndex === null) {
           winnerIndex = event.sourceIndex;
           
-          // Once we have a winner, we can tell the runner to stop 
-          // polling the others. We do this by calling return on the losers.
-          iterators.forEach((it, idx) => {
-            if (idx !== winnerIndex) {
-              it.return?.();
-            }
-          });
+          // Once we have a winner, tell the runner to stop polling the others
+          // by calling return on the losers. Await all cleanups so resources
+          // are freed before we continue yielding from the winner.
+          await Promise.all(
+            iterators.map((it, idx) =>
+              idx !== winnerIndex ? it.return?.().catch(() => {}) : null
+            )
+          );
         }
 
         // 3. Only process events from the winner
