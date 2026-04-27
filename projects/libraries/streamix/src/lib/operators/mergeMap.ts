@@ -1,11 +1,14 @@
 import {
     createOperator,
+    DROPPED,
     MaybePromise,
     type Operator,
     type Stream
 } from '../abstractions';
 import { fromAny } from '../converters';
 import { createAsyncCoordinator, type RunnerEvent } from '../utils';
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream
@@ -53,7 +56,7 @@ export function mergeMap<T = any, R = any>(
       const startInner = (value: T) => {
         const projected = project(value, projectIndex++);
         const inner = fromAny(projected as any);
-        coordinator.addSource(inner[Symbol.asyncIterator]());
+        coordinator.addSource(((inner as any)[RAW]?.() ?? inner[Symbol.asyncIterator]()) as AsyncIterator<R>);
         pendingInners++;
       };
 
@@ -92,7 +95,11 @@ export function mergeMap<T = any, R = any>(
             }
           } else {
             if (event.type === 'value') {
-              yield event.value;
+              if (event.dropped) {
+                yield DROPPED(event.value) as any;
+              } else {
+                yield event.value;
+              }
             } else if (event.type === 'complete') {
               pendingInners--;
               drainQueuedSourceValues();
