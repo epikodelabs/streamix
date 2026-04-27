@@ -38,6 +38,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
         while (true) {
           const result = await source.next();
           if (result.done) break;
+          if ((result as any).dropped) continue;
           const p = new Promise<void>((resolve) => {
             schedule(() => {
               try {

@@ -57,6 +57,8 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
             break;
           }
 
+          if ((result as any).dropped) { output.drop(result.value); continue; }
+
           // The previous buffered value (if any) is superseded — record for drop.
           if (bufferedResult) {
             supersededValues.push(bufferedResult.value!);

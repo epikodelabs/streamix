@@ -45,6 +45,8 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
           const result = await source.next();
           if (result.done) break;
 
+          if ((result as any).dropped) { output.drop(result.value); continue; }
+
           // If a value is already pending, mark it as dropped.
           if (hasValue) {
             output.drop(lastValue!);

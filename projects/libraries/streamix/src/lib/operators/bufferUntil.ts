@@ -1,8 +1,8 @@
 import {
-  createOperator,
-  DONE,
-  type Operator,
-  type Stream,
+    createOperator,
+    DONE,
+    type Operator,
+    type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
@@ -84,7 +84,8 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
           switch (event.type) {
             case "value":
               if (event.sourceIndex === 0) {
-                // Source value: buffer it
+                // Source value: buffer it (skip dropped values)
+                if (event.dropped) break;
                 buffer.push(event.value as T);
               } else {
                 // Notifier value: flush buffer

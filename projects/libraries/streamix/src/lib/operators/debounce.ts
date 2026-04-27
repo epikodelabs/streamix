@@ -50,6 +50,8 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
             break;
           }
 
+          if ((result as any).dropped) { output.drop(result.value); continue; }
+
           // The previous latest (if any) is now superseded — mark it as pending drop.
           if (latestResult) {
             pendingDrops.push(latestResult.value!);
