@@ -32,6 +32,8 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
             return DONE;
           }
 
+          if ((result as any).dropped) continue;
+
           buffer.push(result);
         }
 

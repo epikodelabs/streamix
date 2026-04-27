@@ -1,10 +1,10 @@
 import {
-  createOperator,
-  DONE,
-  isPromiseLike,
-  NEXT,
-  type MaybePromise,
-  type Operator
+    createOperator,
+    DONE,
+    isPromiseLike,
+    NEXT,
+    type MaybePromise,
+    type Operator
 } from "../abstractions";
 
 type BufferRecord<T> = {
@@ -58,6 +58,8 @@ export const bufferWhile = <T = any>(
             }
             return DONE;
           }
+
+          if ((result as any).dropped) continue;
 
           const record = { result };
 

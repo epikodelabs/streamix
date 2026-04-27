@@ -38,6 +38,8 @@ export const concatMap = <T = any, R = any>(
 
             if (result.done) return DONE;
 
+            if ((result as any).dropped) return result as any;
+
             const projected = project(result.value, outerIndex++);
             const normalized = isPromiseLike(projected) ? await projected : projected;
             innerIterator = eachValueFrom(fromAny<R>(normalized));

@@ -83,6 +83,11 @@ export function retry<T = any>(
           // Allow abortion during delay
           try {
             await new Promise<void>((resolve, reject) => {
+              if (signal?.aborted) {
+                reject(new Error("Stream aborted"));
+                return;
+              }
+
               const timeoutId = setTimeout(resolve, resolvedDelay);
 
               if (signal) {

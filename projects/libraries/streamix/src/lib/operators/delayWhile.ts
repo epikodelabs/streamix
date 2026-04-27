@@ -1,7 +1,7 @@
 import {
-  createPushOperator,
-  isPromiseLike,
-  type MaybePromise,
+    createPushOperator,
+    isPromiseLike,
+    type MaybePromise,
 } from '../abstractions';
 
 /**
@@ -38,6 +38,8 @@ export const delayWhile = <T = any>(
         while (true) {
           const result = await source.next();
           if (result.done) break;
+
+          if ((result as any).dropped) { output.drop(result.value); continue; }
 
           const predicateResult = predicate(result.value, index++);
           const shouldDelay = isPromiseLike(predicateResult)

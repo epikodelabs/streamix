@@ -38,6 +38,8 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
           const result = await source.next();
           if (result.done) break;
 
+          if ((result as any).dropped) continue;
+
           output!.next(result.value);
         }
       } catch (err) {
