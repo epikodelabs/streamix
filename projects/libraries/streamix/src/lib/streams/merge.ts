@@ -1,6 +1,8 @@
-import { createStream, isPromiseLike, type Stream } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
+import { createStream, DROPPED, isPromiseLike, type Stream } from "../abstractions";
+import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Merges multiple source streams into a single stream, emitting values as they arrive from any source.
@@ -31,7 +33,7 @@ import { createAsyncCoordinator } from "../utils";
  * ```
  */
 export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T> {
-  return createStream<T>('merge', async function* () {
+  const gen = async function* () {
     if (sources.length === 0) return;
 
     // Resolve any promises in sources
@@ -40,10 +42,12 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
       resolvedSources.push(isPromiseLike(source) ? await source : source);
     }
 
-    const iterators = resolvedSources.map((source) => eachValueFrom(fromAny<T>(source)));
+    const iterators = resolvedSources.map((source) => {
+      const resolved = fromAny<T>(source);
+      return ((resolved as any)[RAW]?.() ?? resolved[Symbol.asyncIterator]()) as AsyncIterator<T>;
+    });
     const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));
 
-    const bufferedValues: T[] = [];
     const activeIterators: AsyncIterator<T>[] = [];
 
     for (let i = 0; i < initialResults.length; i++) {
@@ -57,12 +61,12 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
         continue;
       }
 
-      bufferedValues.push(result.value);
+      if ((result as any).dropped) {
+        yield DROPPED(result.value) as any;
+      } else {
+        yield result.value;
+      }
       activeIterators.push(iterators[i]);
-    }
-
-    for (const value of bufferedValues) {
-      yield value;
     }
 
     const coordinator = createAsyncCoordinator(activeIterators);
@@ -77,11 +81,19 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
           throw event.error;
         }
         if (event.type === 'value') {
-          yield event.value;
+          if (event.dropped) {
+            yield DROPPED(event.value) as any;
+          } else {
+            yield event.value;
+          }
         }
       }
     } finally {
       await coordinator.return?.();
     }
-  });
+  };
+
+  const stream = createStream<T>('merge', gen);
+  (stream as any)[RAW] = gen;
+  return stream;
 }
