@@ -70,6 +70,8 @@ export function buffer<T = any>(period: MaybePromise<number>) {
           const result = await source.next();
           if (result.done) break;
 
+          if ((result as any).dropped) continue;
+
           buf.push(result);
         }
       } catch (err) {

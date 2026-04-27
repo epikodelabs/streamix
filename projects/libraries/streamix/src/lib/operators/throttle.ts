@@ -44,6 +44,8 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
           const result = await source.next();
           if (result.done) break;
 
+          if ((result as any).dropped) { output.drop(result.value); continue; }
+
           const now = Date.now();
           if (resolvedDuration === undefined) {
             pendingResult = result;

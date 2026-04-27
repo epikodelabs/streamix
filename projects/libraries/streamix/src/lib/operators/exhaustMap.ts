@@ -70,6 +70,8 @@ export const exhaustMap = <T = any, R = any>(
             return DONE;
           }
 
+          if ((result as any).dropped) return result as any;
+
           const projected = project(result.value, outerIndex++);
 
           if (isPromiseLike(projected)) {

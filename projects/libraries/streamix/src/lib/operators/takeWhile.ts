@@ -35,6 +35,8 @@ export const takeWhile = <T = any>(
 
         if (result.done) return DONE;
 
+        if ((result as any).dropped) return result as any;
+
         const predicateResult = predicate(result.value, index++);
         const pass = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
         if (!pass) {
