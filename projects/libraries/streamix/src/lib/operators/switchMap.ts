@@ -1,8 +1,8 @@
 import type { MaybePromise, Operator, Stream } from "../abstractions";
 import {
-    createOperator,
-    DONE,
-    isPromiseLike,
+  createOperator,
+  DONE,
+  isPromiseLike,
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncPushable } from "../utils";
@@ -146,7 +146,10 @@ export function switchMap<T = any, R = any>(
             return;
           }
 
-          if ((result as any).dropped) continue;
+          if ((result as any).dropped) {
+            output.drop(result.value as any);
+            continue;
+          }
 
           processOuterValue(result.value);
         }
@@ -160,7 +163,10 @@ export function switchMap<T = any, R = any>(
           while (!stopped) {
             const result = await source.next();
             if (result.done) break;
-            if ((result as any).dropped) continue;
+            if ((result as any).dropped) {
+              output.drop(result.value as any);
+              continue;
+            }
             processOuterValue(result.value);
           }
 

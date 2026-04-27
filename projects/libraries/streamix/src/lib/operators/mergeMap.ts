@@ -1,6 +1,5 @@
 import {
-    createOperator,
-    DROPPED,
+    createPushOperator,
     MaybePromise,
     type Operator,
     type Stream
@@ -44,8 +43,10 @@ export function mergeMap<T = any, R = any>(
   project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>,
   concurrent: number = Infinity
 ) {
-  return createOperator<T, R>('mergeMap', function (this: Operator, source) {
-    const generator = async function* () {
+  return createPushOperator<T, R>('mergeMap', function (source, output) {
+    let stopped = false;
+
+    void (async () => {
       const SOURCE_INDEX = 0;
       const coordinator = createAsyncCoordinator([source]);
       let projectIndex = 0;
@@ -67,7 +68,7 @@ export function mergeMap<T = any, R = any>(
       };
 
       try {
-        while (true) {
+        while (!stopped) {
           const nextEvent = await coordinator.next();
           if (nextEvent.done) break;
 
@@ -96,9 +97,9 @@ export function mergeMap<T = any, R = any>(
           } else {
             if (event.type === 'value') {
               if (event.dropped) {
-                yield DROPPED(event.value) as any;
+                output.drop(event.value);
               } else {
-                yield event.value;
+                output.push(event.value);
               }
             } else if (event.type === 'complete') {
               pendingInners--;
@@ -112,11 +113,17 @@ export function mergeMap<T = any, R = any>(
             }
           }
         }
+
+        if (!output.completed()) output.complete();
+      } catch (err) {
+        if (!output.completed()) output.error(err);
       } finally {
         await coordinator.return?.();
       }
-    };
+    })();
 
-    return generator();
+    return async () => {
+      stopped = true;
+    };
   });
 }

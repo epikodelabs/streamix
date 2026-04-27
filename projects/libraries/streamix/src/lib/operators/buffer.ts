@@ -70,7 +70,10 @@ export function buffer<T = any>(period: MaybePromise<number>) {
           const result = await source.next();
           if (result.done) break;
 
-          if ((result as any).dropped) continue;
+          if ((result as any).dropped) {
+            output.drop(result.value as any);
+            continue;
+          }
 
           buf.push(result);
         }

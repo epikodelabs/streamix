@@ -55,6 +55,13 @@ export function createReplaySubject<T = any>(
     }
   };
 
+  const drop = (value: T) => {
+    if (isCompleted) return;
+    for (const listener of listeners) {
+      listener.drop(value);
+    }
+  };
+
   const complete = () => {
     if (isCompleted) return;
     isCompleted = true;
@@ -107,6 +114,8 @@ export function createReplaySubject<T = any>(
           // Skip next values after unsubscribe, but keep draining
           // so the terminal signal (DONE) can still be delivered.
           if (stopped) continue;
+
+          if ((result as any).dropped) continue;
 
           if (receiver.next) {
             const ret = receiver.next(result.value);
@@ -161,6 +170,7 @@ export function createReplaySubject<T = any>(
     name: "replaySubject",
     get value() { return latestValue; },
     next,
+    drop,
     complete,
     error,
     completed: () => isCompleted,

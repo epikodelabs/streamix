@@ -59,7 +59,7 @@ export const bufferWhile = <T = any>(
             return DONE;
           }
 
-          if ((result as any).dropped) continue;
+          if ((result as any).dropped) return result as any;
 
           const record = { result };
 
