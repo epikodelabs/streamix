@@ -2,7 +2,7 @@
 
 ## 2.0.39
 
-
+Enforced the `DROPPED` backpressure contract across the entire operator and stream pipeline.
 
 ## 2.0.38
 
