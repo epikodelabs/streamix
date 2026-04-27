@@ -1,5 +1,4 @@
 import { createOperator, DONE, type Operator } from '../abstractions';
-import { eachValueFrom } from '../converters';
 import { createSubject, type Subject } from '../subjects';
 
 /**
@@ -25,9 +24,11 @@ export function share<T = any>() {
           const result = await source.next();
           if (result.done) break;
 
-          if ((result as any).dropped) continue;
-
-          shared!.next(result.value);
+          if ((result as any).dropped) {
+            shared!.drop(result.value);
+          } else {
+            shared!.next(result.value);
+          }
         }
       } catch (err) {
         shared!.error(err);
@@ -49,7 +50,7 @@ export function share<T = any>() {
       Promise.resolve(source.return()).catch(() => {});
     }
 
-    const outputIterator = eachValueFrom(shared);
+    const outputIterator = shared[Symbol.asyncIterator]();
     const baseReturn = outputIterator.return?.bind(outputIterator);
     const baseThrow = outputIterator.throw?.bind(outputIterator);
 

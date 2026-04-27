@@ -1,11 +1,13 @@
 import {
-    createOperator,
+    createPushOperator,
     MaybePromise,
     type Operator,
     type Stream
 } from '../abstractions';
 import { fromAny } from '../converters';
 import { createAsyncCoordinator, type RunnerEvent } from '../utils';
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream
@@ -41,8 +43,10 @@ export function mergeMap<T = any, R = any>(
   project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>,
   concurrent: number = Infinity
 ) {
-  return createOperator<T, R>('mergeMap', function (this: Operator, source) {
-    const generator = async function* () {
+  return createPushOperator<T, R>('mergeMap', function (source, output) {
+    let stopped = false;
+
+    void (async () => {
       const SOURCE_INDEX = 0;
       const coordinator = createAsyncCoordinator([source]);
       let projectIndex = 0;
@@ -53,7 +57,7 @@ export function mergeMap<T = any, R = any>(
       const startInner = (value: T) => {
         const projected = project(value, projectIndex++);
         const inner = fromAny(projected as any);
-        coordinator.addSource(inner[Symbol.asyncIterator]());
+        coordinator.addSource(((inner as any)[RAW]?.() ?? inner[Symbol.asyncIterator]()) as AsyncIterator<R>);
         pendingInners++;
       };
 
@@ -64,7 +68,7 @@ export function mergeMap<T = any, R = any>(
       };
 
       try {
-        while (true) {
+        while (!stopped) {
           const nextEvent = await coordinator.next();
           if (nextEvent.done) break;
 
@@ -92,7 +96,11 @@ export function mergeMap<T = any, R = any>(
             }
           } else {
             if (event.type === 'value') {
-              yield event.value;
+              if (event.dropped) {
+                output.drop(event.value);
+              } else {
+                output.push(event.value);
+              }
             } else if (event.type === 'complete') {
               pendingInners--;
               drainQueuedSourceValues();
@@ -105,11 +113,17 @@ export function mergeMap<T = any, R = any>(
             }
           }
         }
+
+        if (!output.completed()) output.complete();
+      } catch (err) {
+        if (!output.completed()) output.error(err);
       } finally {
         await coordinator.return?.();
       }
-    };
+    })();
 
-    return generator();
+    return async () => {
+      stopped = true;
+    };
   });
 }

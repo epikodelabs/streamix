@@ -1,13 +1,13 @@
 import {
-    createReceiver,
-    createSubscription,
-    isPromiseLike,
-    pipeSourceThrough,
-    Subscription,
-    type MaybePromise,
-    type Operator,
-    type Receiver,
-    type Stream
+  createReceiver,
+  createSubscription,
+  isPromiseLike,
+  pipeSourceThrough,
+  Subscription,
+  type MaybePromise,
+  type Operator,
+  type Receiver,
+  type Stream
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { AsyncPushable, createAsyncPushable } from "../utils";
@@ -22,6 +22,7 @@ import { AsyncPushable, createAsyncPushable } from "../utils";
  */
 export type Subject<T = any> = Stream<T> & {
   next(value: T): void;
+  drop(value: T): void;
   complete(): void;
   error(err: any): void;
   completed(): boolean;
@@ -53,6 +54,13 @@ export function createSubject<T = any>(): Subject<T> {
     // Deliver to all current listeners
     for (const listener of listeners) {
        listener.push(value);
+    }
+  };
+
+  const drop = (value: T) => {
+    if (isCompleted) return;
+    for (const listener of listeners) {
+      listener.drop(value);
     }
   };
 
@@ -109,6 +117,8 @@ export function createSubject<T = any>(): Subject<T> {
           // so the terminal signal (DONE) can still be delivered.
           if (stopped) continue;
 
+           if ((result as any).dropped) continue;
+
           if (receiver.next) {
              const ret = receiver.next(result.value);
              if (isPromiseLike(ret)) {
@@ -157,6 +167,7 @@ export function createSubject<T = any>(): Subject<T> {
     name: "subject",
     get value() { return latestValue; },
     next,
+    drop,
     complete,
     error,
     completed: () => isCompleted,

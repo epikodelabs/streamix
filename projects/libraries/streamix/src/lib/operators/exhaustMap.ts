@@ -7,7 +7,9 @@ import {
     type Operator,
     type Stream
 } from "../abstractions";
-import { eachValueFrom, fromAny } from "../converters";
+import { fromAny } from "../converters";
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Maps each value from the source stream to an inner stream, ignoring 
@@ -56,8 +58,11 @@ export const exhaustMap = <T = any, R = any>(
           if (innerIterator) {
             const result = await innerIterator.next();
 
-            if (!result.done) return NEXT(result.value);
-            
+            if (!result.done) {
+              if ((result as any).dropped) return result as any;
+              return NEXT(result.value);
+            }
+
             innerIterator = null;
             await dropBufferedOuterValues();
             if (isSourceDone) return DONE;
@@ -76,9 +81,11 @@ export const exhaustMap = <T = any, R = any>(
 
           if (isPromiseLike(projected)) {
             const normalized = await projected;
-            innerIterator = eachValueFrom(fromAny<R>(normalized));
+            const innerStream = fromAny<R>(normalized);
+            innerIterator = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
           } else {
-            innerIterator = eachValueFrom(fromAny<R>(projected as any));
+            const innerStream = fromAny<R>(projected as any);
+            innerIterator = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
           }
         }
       },

@@ -1,5 +1,4 @@
 import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
-import { eachValueFrom } from '../converters';
 import { createSubject } from '../subjects';
 
 /**
@@ -23,7 +22,7 @@ import { createSubject } from '../subjects';
 export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotask" | "idle">) => {
   return createOperator<T, T>('observeOn', function (this: Operator, source) {
     const output = createSubject<T>();
-    const outputIterator = eachValueFrom(output);
+    const outputIterator = output[Symbol.asyncIterator]();
     const scheduledPromises: Promise<void>[] = [];
 
     void (async () => {
@@ -38,11 +37,14 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
         while (true) {
           const result = await source.next();
           if (result.done) break;
-          if ((result as any).dropped) continue;
           const p = new Promise<void>((resolve) => {
             schedule(() => {
               try {
-                output.next(result.value);
+                if ((result as any).dropped) {
+                  output.drop(result.value);
+                } else {
+                  output.next(result.value);
+                }
               } finally {
                 resolve();
               }

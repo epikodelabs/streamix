@@ -1,5 +1,7 @@
-import { createStream, isPromiseLike, type Stream } from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
+import { createStream, DROPPED, isPromiseLike, type Stream } from '../abstractions';
+import { fromAny } from '../converters';
+
+const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
  * Creates a stream that defers the creation of an inner stream until it is
@@ -20,10 +22,17 @@ export function defer<T = any>(factory: () => Stream<T> | Promise<T>): Stream<T>
     const innerStream = isPromiseLike(produced) ? await produced : produced;
 
     try {
-      const iterator = eachValueFrom(fromAny<T>(innerStream));
+      const stream = fromAny<T>(innerStream);
+      const iterator = ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
       try {
-        for await (const value of iterator) {
-          yield value;
+        while (true) {
+          const result = await iterator.next();
+          if (result.done) break;
+          if ((result as any).dropped) {
+            yield DROPPED(result.value) as any;
+          } else {
+            yield result.value;
+          }
         }
       } finally {
         if (iterator.return) {
