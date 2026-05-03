@@ -43,13 +43,42 @@ export function createReplaySubject<T = any>(
   let completionInfo: { kind: 'error'; error: any } | null = null;
 
   const listeners = new Set<AsyncPushable<T>>();
+  const isFiniteCapacity = capacity !== Infinity;
   const replay: T[] = [];
+  let replayHead = 0;
+  let replaySize = 0;
+
+  const pushReplay = (value: T) => {
+    if (!isFiniteCapacity) {
+      replay.push(value);
+      return;
+    }
+    if (capacity <= 0) return;
+    if (replay.length < capacity) {
+      replay.push(value);
+    } else {
+      replay[replayHead] = value;
+      replayHead = (replayHead + 1) % capacity;
+    }
+    replaySize = replaySize < capacity ? replaySize + 1 : replaySize;
+  };
+
+  const forEachReplay = (fn: (value: T) => void) => {
+    if (!isFiniteCapacity) {
+      for (const value of replay) fn(value);
+      return;
+    }
+    if (capacity <= 0) return;
+    const start = replaySize < capacity ? 0 : replayHead;
+    for (let i = 0; i < replaySize; i++) {
+      fn(replay[(start + i) % capacity]);
+    }
+  };
 
   const next = (value: T) => {
     if (isCompleted) return;
     latestValue = value;
-    replay.push(value);
-    if (replay.length > capacity) replay.shift();
+    pushReplay(value);
     for (const listener of listeners) {
       listener.push(value);
     }
@@ -139,9 +168,7 @@ export function createReplaySubject<T = any>(
     (listener as any).__onPush = drain;
 
     // Replay buffered values
-    for (const value of replay) {
-      listener.push(value);
-    }
+    forEachReplay((value) => listener.push(value));
 
     if (isCompleted) {
       if (completionInfo?.kind === 'error') listener.error(completionInfo.error);
@@ -184,9 +211,7 @@ export function createReplaySubject<T = any>(
       listeners.add(listener);
 
       // Replay buffered values
-      for (const value of replay) {
-        listener.push(value);
-      }
+      forEachReplay((value) => listener.push(value));
 
       if (isCompleted) {
         if (completionInfo?.kind === 'error') listener.error(completionInfo.error);

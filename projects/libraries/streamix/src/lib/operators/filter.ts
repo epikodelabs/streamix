@@ -1,4 +1,4 @@
-import { createOperator, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
+import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that filters values emitted by the source stream.
@@ -50,6 +50,14 @@ export const filter = <T = any>(
         }
 
         return DROPPED(value);
-      }
+      },
+      async return() {
+        await source.return?.();
+        return DONE;
+      },
+      async throw(err: any) {
+        await source.return?.();
+        throw err;
+      },
     };
   });
