@@ -1,9 +1,21 @@
 # Changelog
 
+## 2.0.40
+
+Performance optimizations and resource cleanup improvements:
+
+- **`stream.ts`** — Eliminated per-emission array allocation in `pipeSourceThrough` by hoisting the receivers array instead of recreating it on every `getReceivers()` call.
+- **`coordinator.ts`** — Optimized `allDone()` from O(n) to O(1) by tracking an `activeCount` counter, and simplified `getActiveSourceCount()` to a constant-time return.
+- **`replaySubject.ts`** — Replaced O(n) `Array.prototype.shift()` with a circular buffer for bounded replay capacity, making all buffer operations O(1).
+- **`map`, `filter`, `scan`, `groupBy`** — Added `return()` and `throw()` propagation to source iterators, preventing resource leaks when downstream consumers cancel iteration early.
+- **`switchMap.ts`** — Fixed potential unhandled promise rejection when cancelling previous inner streams; now catches async `return()` rejections properly.
+- **`combineLatest.ts`** — Removed unnecessary `[...latestValues]` spread on every emission, yielding the mutable array directly and saving an allocation per event.
+- **`mergeMap.ts`** — Added optional `bufferSize` parameter (default: `Infinity`) to cap the source-value queue when the concurrency limit is reached, preventing unbounded memory growth with fast producers.
+- **`httpClient.ts`** — Fixed O(n²) `Uint8Array` growth in `readFull` by accumulating chunks and copying each exactly once into a final buffer.
+
 ## 2.0.39
 
 Enforced the `DROPPED` backpressure contract across the entire operator and stream pipeline.
-
 
 ## 2.0.38
 
@@ -11,11 +23,11 @@ This is the first official release of Streamix. The 2.x line now serves as the s
 
 ## 2.0.37
 
-Added support for `Dropped` iterator results: public iteration skips them, while operator chains continue to propagate them internally.
+Added support for `dropped` iterator results: public iteration skips them, while operator chains continue to propagate them internally.
 
 ## 2.0.35
 
-Collapsed dual generic parameters (`Stream<TIn, TOut>`) into a consistent single-param `Stream<T>` design for all subjects and piped streams, enabling robust type inference through operator chains and subscriptions. Updated all `subscribe` and `query` method signatures to reflect the correct output type, ensuring type safety and better developer experience. All stream and subject factory functions and instance methods now preserve and expose accurate types throughout pipelines.
+Refactored `Stream`, `Subject`, `ReplaySubject`, and `BehaviorSubject` to use dual generic parameters for input and output types, enabling robust type inference through operator chains and subscriptions. Updated all `subscribe` and `query` method signatures to reflect the correct output type, ensuring type safety and better developer experience. All stream and subject factory functions and instance methods now preserve and expose accurate types throughout pipelines.
 
 ### 2.0.32
 
