@@ -45,6 +45,14 @@ export const groupBy = <T = any, K = any>(
         const keyResult = keySelector(result.value);
         const key = isPromiseLike(keyResult) ? await keyResult : keyResult;
         return NEXT({ key, value: result.value });
-      }
+      },
+      async return() {
+        await source.return?.();
+        return DONE;
+      },
+      async throw(err: any) {
+        await source.return?.();
+        throw err;
+      },
     };
   });

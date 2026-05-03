@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.40
+
+Performance optimizations and resource cleanup improvements:
+
+- **`stream.ts`** — Eliminated per-emission array allocation in `pipeSourceThrough` by hoisting the receivers array instead of recreating it on every `getReceivers()` call.
+- **`coordinator.ts`** — Optimized `allDone()` from O(n) to O(1) by tracking an `activeCount` counter, and simplified `getActiveSourceCount()` to a constant-time return.
+- **`replaySubject.ts`** — Replaced O(n) `Array.prototype.shift()` with a circular buffer for bounded replay capacity, making all buffer operations O(1).
+- **`map`, `filter`, `scan`, `groupBy`** — Added `return()` and `throw()` propagation to source iterators, preventing resource leaks when downstream consumers cancel iteration early.
+- **`switchMap.ts`** — Fixed potential unhandled promise rejection when cancelling previous inner streams; now catches async `return()` rejections properly.
+- **`combineLatest.ts`** — Removed unnecessary `[...latestValues]` spread on every emission, yielding the mutable array directly and saving an allocation per event.
+- **`mergeMap.ts`** — Added optional `bufferSize` parameter (default: `Infinity`) to cap the source-value queue when the concurrency limit is reached, preventing unbounded memory growth with fast producers.
+- **`httpClient.ts`** — Fixed O(n²) `Uint8Array` growth in `readFull` by accumulating chunks and copying each exactly once into a final buffer.
+
 ## 2.0.39
 
 Enforced the `DROPPED` backpressure contract across the entire operator and stream pipeline.

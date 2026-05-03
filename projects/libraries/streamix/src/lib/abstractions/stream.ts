@@ -323,11 +323,13 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
       receiver.complete?.();
     });
 
+    const entries = [{ receiver, subscription }];
+
     const baseSource = getRawIterator(source);
     const iterator = applyOperators(baseSource);
 
     queueMicrotask(() => {
-      drainIterator(iterator, () => [{ receiver, subscription }], signal).catch(
+      drainIterator(iterator, () => entries, signal).catch(
         () => {}
       );
     });

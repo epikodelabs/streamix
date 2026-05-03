@@ -29,6 +29,7 @@ const RAW = Symbol.for("streamix.rawAsyncIterator");
  *   - a {@link MaybePromise<R>},
  *   - or an array of `R`.
  * @param concurrent Maximum number of concurrent inner streams (default: Infinity).
+ * @param bufferSize Maximum number of source values to queue when concurrency limit is reached (default: Infinity).
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  *
  * @example
@@ -41,7 +42,8 @@ const RAW = Symbol.for("streamix.rawAsyncIterator");
  */
 export function mergeMap<T = any, R = any>(
   project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>,
-  concurrent: number = Infinity
+  concurrent: number = Infinity,
+  bufferSize: number = Infinity
 ) {
   return createPushOperator<T, R>('mergeMap', function (source, output) {
     let stopped = false;
@@ -82,6 +84,9 @@ export function mergeMap<T = any, R = any>(
 
               const sourceValue = event.value as unknown as T;
               if (pendingInners >= concurrent) {
+                if (bufferSize !== Infinity && queuedSourceValues.length >= bufferSize) {
+                  queuedSourceValues.shift();
+                }
                 queuedSourceValues.push(sourceValue);
               } else {
                 startInner(sourceValue);

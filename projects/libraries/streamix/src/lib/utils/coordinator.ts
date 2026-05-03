@@ -118,15 +118,9 @@ export function createAsyncCoordinator(
   let waitingResolve: ((v: any) => void) | null = null;
   let isDraining = false;
   let iteratorReturned = false;
+  let activeCount = sources.length;
 
-  const allDone = () => {
-    for (let i = 0; i < sourceList.length; i++) {
-      if (sourceList[i] !== null && !completed[i]) {
-        return false;
-      }
-    }
-    return true;
-  };
+  const allDone = () => activeCount === 0;
 
   function pushEvent(event: RunnerEvent<any>, sourceIndex: number) {
     queue.push({
@@ -166,7 +160,10 @@ export function createAsyncCoordinator(
         if (!sourceList[i] || completed[i] || iteratorReturned) return;
 
         if (r.done) {
-          completed[i] = true;
+          if (!completed[i]) {
+            completed[i] = true;
+            activeCount--;
+          }
           pushEvent({ type: "complete", sourceIndex: i }, i);
         } else {
           const event: RunnerEvent<any> = (r as any).dropped
@@ -188,7 +185,10 @@ export function createAsyncCoordinator(
         pulling[i] = false;
         if (!sourceList[i] || completed[i] || iteratorReturned) return;
         
-        completed[i] = true;
+        if (!completed[i]) {
+          completed[i] = true;
+          activeCount--;
+        }
         pushEvent({ type: "error", error: err, sourceIndex: i }, i);
         notify();
       }
@@ -205,7 +205,10 @@ export function createAsyncCoordinator(
         const r = src.__tryNext();
         if (!r) return;
         if (r.done) {
-          completed[i] = true;
+          if (!completed[i]) {
+            completed[i] = true;
+            activeCount--;
+          }
           pushEvent({ type: "complete", sourceIndex: i }, i);
         } else {
           const event: RunnerEvent<any> = (r as any).dropped
@@ -214,7 +217,10 @@ export function createAsyncCoordinator(
           pushEvent(event, i);
         }
       } catch (err) {
-        completed[i] = true;
+        if (!completed[i]) {
+          completed[i] = true;
+          activeCount--;
+        }
         pushEvent({ type: "error", error: err, sourceIndex: i }, i);
       }
       return;
@@ -305,6 +311,7 @@ export function createAsyncCoordinator(
 
     async return() {
       iteratorReturned = true;
+      activeCount = 0;
       
       // Mark all as completed immediately
       for (let i = 0; i < completed.length; i++) {
@@ -353,6 +360,7 @@ export function createAsyncCoordinator(
       completed.push(false);
       pulling.push(false);
       pendingPulls.push(false);
+      activeCount++;
 
       // Wire up push notification
       wireSource(source, index);
@@ -376,6 +384,9 @@ export function createAsyncCoordinator(
       if (!source) return;
 
       // Mark as completed and clear the slot
+      if (!completed[index]) {
+        activeCount--;
+      }
       completed[index] = true;
       pulling[index] = false;
       pendingPulls[index] = false;
@@ -398,13 +409,7 @@ export function createAsyncCoordinator(
      * @returns Number of active sources
      */
     getActiveSourceCount(): number {
-      let count = 0;
-      for (let i = 0; i < sourceList.length; i++) {
-        if (sourceList[i] !== null && !completed[i]) {
-          count++;
-        }
-      }
-      return count;
+      return activeCount;
     },
 
     /**

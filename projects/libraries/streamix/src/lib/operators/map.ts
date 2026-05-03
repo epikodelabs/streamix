@@ -36,5 +36,13 @@ export const map = <T = any, R = any>(
         const transformedValue = isPromiseLike(transformedResult) ? await transformedResult : transformedResult;
         return NEXT(transformedValue);
       },
+      async return() {
+        await source.return?.();
+        return DONE;
+      },
+      async throw(err: any) {
+        await source.return?.();
+        throw err;
+      },
     };
   });

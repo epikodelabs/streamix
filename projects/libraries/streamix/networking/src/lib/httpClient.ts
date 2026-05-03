@@ -898,22 +898,27 @@ export const readFull: ParserFunction<Uint8Array> = async function* (response) {
   }
 
   const reader = response.body.getReader();
-  let accumulatedData = new Uint8Array();
+  const chunks: Uint8Array[] = [];
+  let totalLength = 0;
 
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
 
     if (value) {
-      // Concatenate the new chunk with the accumulated data
-      const newData = new Uint8Array(accumulatedData.length + value.length);
-      newData.set(accumulatedData);
-      newData.set(value, accumulatedData.length);
-      accumulatedData = newData;
+      chunks.push(value);
+      totalLength += value.length;
     }
   }
 
-  // Once all data is collected, yield the full response body as a single chunk
+  // Concatenate all chunks into a single buffer
+  const accumulatedData = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    accumulatedData.set(chunk, offset);
+    offset += chunk.length;
+  }
+
   yield accumulatedData;
 };
 

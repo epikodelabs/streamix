@@ -41,5 +41,13 @@ export const scan = <T = any, R = any>(
         acc = isPromiseLike(accumulated) ? await accumulated : accumulated;
         return NEXT(acc);
       },
+      async return() {
+        await source.return?.();
+        return DONE;
+      },
+      async throw(err: any) {
+        await source.return?.();
+        throw err;
+      },
     };
   });

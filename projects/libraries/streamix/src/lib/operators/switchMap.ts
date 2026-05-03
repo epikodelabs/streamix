@@ -63,9 +63,7 @@ export function switchMap<T = any, R = any>(
       // interleave emissions out-of-order via re-entrant scheduler execution.
       const prev = currentInner;
       if (prev) {
-        try {
-          void prev.it.return?.();
-        } catch {}
+        Promise.resolve(prev.it.return?.()).catch(() => {});
       }
 
       const it = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
