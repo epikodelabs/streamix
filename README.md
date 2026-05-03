@@ -18,7 +18,7 @@ Small bundle, pull-based execution, and a familiar operator API.
     <img src="https://img.shields.io/npm/v/@epikodelabs%2Fstreamix.svg?style=flat-square" alt="NPM Version">
   </a>
   <a href="https://www.npmjs.com/package/@epikodelabs%2Fstreamix">
-    <img src="https://img.shields.io/npm/dm/@epikodelabs%2Fstreamix.svg?style=flat-square" alt="NPM Downloads">
+    <img src="https://img.shields.io/npm/dt/@epikodelabs%2Fstreamix.svg?style=flat-square" alt="Total Downloads">
   </a>
   <a href="https://github.com/epikodelabs/streamix">
     <img src="https://raw.githubusercontent.com/epikodelabs/streamix/main/projects/libraries/streamix/bundle-size.svg" alt="Bundle Size">
