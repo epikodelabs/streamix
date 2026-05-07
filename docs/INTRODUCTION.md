@@ -466,7 +466,7 @@ We welcome issues and pull requests. If you are new to the codebase:
 
 ## 📜 License
 
-MIT License
+GNU AGPL v3 or later
 
 
 <p align="center">

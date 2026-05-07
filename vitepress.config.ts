@@ -12,7 +12,16 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Home', link: '/' },
+      { text: 'Pricing', link: '/PRICING' },
       { text: 'Changelog', link: '/CHANGELOG' },
+      {
+        text: 'Legal',
+        items: [
+          { text: 'Terms of Service', link: '/TERMS-OF-SERVICE' },
+          { text: 'Privacy Policy', link: '/PRIVACY-POLICY' },
+          { text: 'Refund Policy', link: '/REFUND-POLICY' }
+        ]
+      },
       { text: 'API Reference', link: '/api/' },
       { text: 'GitHub', link: 'https://github.com/epikodelabs/streamix' }
     ],
@@ -36,12 +45,21 @@ export default defineConfig({
           text: 'Documentation',
           items: [
             { text: 'Getting Started', link: '/' },
+            { text: 'Pricing', link: '/PRICING' },
             { text: 'Changelog', link: '/CHANGELOG' },
             { text: 'Coroutines', link: '/COROUTINES' },
             { text: 'Generators', link: '/GENERATORS' },
             { text: 'Subjects', link: '/SUBJECTS' },
             { text: 'Angular', link: '/ANGULAR' },
             { text: 'React', link: '/REACT' }
+          ]
+        },
+        {
+          text: 'Legal',
+          items: [
+            { text: 'Terms of Service', link: '/TERMS-OF-SERVICE' },
+            { text: 'Privacy Policy', link: '/PRIVACY-POLICY' },
+            { text: 'Refund Policy', link: '/REFUND-POLICY' }
           ]
         },
         {
@@ -58,7 +76,7 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Released under the MIT License.',
+      message: 'Released under the GNU AGPL v3 or later.',
       copyright: 'Copyright © 2026 epikodelabs'
     },
 

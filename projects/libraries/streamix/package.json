@@ -2,7 +2,7 @@
   "name": "@epikodelabs/streamix",
   "version": "2.0.40",
   "description": "Reactive TypeScript library",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "keywords": [
     "RxJS-inspired",
     "reactive programming",
@@ -22,5 +22,4 @@
   "author": "Oleksii Shepel",
   "email": "oleksii.shepel@outlook.com"
 }
-
 

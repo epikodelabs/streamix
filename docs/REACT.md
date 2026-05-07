@@ -441,4 +441,4 @@ You'll notice:
 - [API Reference](https://epikodelabs.github.io/streamix)
 - [Feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
 
-**MIT Licensed** · Made with ❤️ for developers who value clean code
+**AGPL-3.0-or-later** · Made with ❤️ for developers who value clean code
