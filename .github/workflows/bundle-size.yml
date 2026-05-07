@@ -30,20 +30,20 @@ jobs:
 
       # 3️⃣ Build library (so dist files exist)
       - name: Build library
-        run: npm i && npm run build actionstack
+        run: npm i && npm run build streamix
 
       # 4️⃣ Calculate gzipped bundle size
       - name: Calculate gzipped bundle size
         id: gzip
         run: |
-          if [ ! -f "dist/actionstack/fesm2022/epikodelabs-actionstack.mjs" ]; then
+          if [ ! -f "dist/streamix/fesm2022/epikodelabs-streamix.mjs" ]; then
             echo "❌ Bundle file not found!"
-            ls -la dist/actionstack/fesm2022/ || echo "Directory doesn't exist"
+            ls -la dist/streamix/fesm2022/ || echo "Directory doesn't exist"
             exit 1
           fi
 
-          gzip -c dist/actionstack/fesm2022/epikodelabs-actionstack.mjs > dist/actionstack/fesm2022/epikodelabs-actionstack.mjs.gz
-          SIZE=$(stat -c%s dist/actionstack/fesm2022/epikodelabs-actionstack.mjs.gz)
+          gzip -c dist/streamix/fesm2022/epikodelabs-streamix.mjs > dist/streamix/fesm2022/epikodelabs-streamix.mjs.gz
+          SIZE=$(stat -c%s dist/streamix/fesm2022/epikodelabs-streamix.mjs.gz)
           SIZE_KB=$((SIZE / 1024))
           echo "BUNDLE_SIZE=${SIZE_KB}" >> $GITHUB_ENV
           echo "✅ Gzipped bundle size: ${SIZE_KB} KB"
@@ -51,17 +51,17 @@ jobs:
       # 5️⃣ Generate badge
       - name: Generate badge
         run: |
-          mkdir -p projects/libraries/actionstack
+          mkdir -p projects/libraries/streamix
           COLOR="brightgreen"
           if [ $BUNDLE_SIZE -gt 200 ]; then COLOR="red"; fi
           if [ $BUNDLE_SIZE -gt 100 ] && [ $BUNDLE_SIZE -le 200 ]; then COLOR="yellow"; fi
 
           echo "🎯 Creating badge with ${BUNDLE_SIZE}KB and color ${COLOR}"
-          curl -s -o projects/libraries/actionstack/bundle-size.svg \
+          curl -s -o projects/libraries/streamix/bundle-size.svg \
             "https://img.shields.io/badge/bundle-${BUNDLE_SIZE}KB-${COLOR}.svg"
 
           # Verify badge was created
-          if [ -f "projects/libraries/actionstack/bundle-size.svg" ]; then
+          if [ -f "projects/libraries/streamix/bundle-size.svg" ]; then
             echo "✅ Badge created successfully"
           else
             echo "❌ Badge creation failed"
@@ -82,7 +82,7 @@ jobs:
           git pull origin main
 
           # Add the badge file
-          git add projects/libraries/actionstack/bundle-size.svg
+          git add projects/libraries/streamix/bundle-size.svg
 
           # Check if there are changes to commit
           if git diff --staged --quiet; then
