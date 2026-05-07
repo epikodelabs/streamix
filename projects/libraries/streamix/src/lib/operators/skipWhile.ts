@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
+import { createOperator, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that skips values from the source stream while a predicate returns true.
@@ -22,23 +22,20 @@ export const skipWhile = <T = any>(
 
     return {
       next: async () => {
-        const result = await source.next();
-
-        if (result.done) return DONE;
-        if ((result as any).dropped) return result as any;
-
-        if (skipping) {
-          const predicateResult = predicate(result.value, index++);
-          const shouldSkip = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
-          if (!shouldSkip) {
-            skipping = false;
-            return NEXT(result.value);
+        return nextSourceResult(source, async (result) => {
+          if (skipping) {
+            const predicateResult = predicate(result.value, index++);
+            const shouldSkip = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
+            if (!shouldSkip) {
+              skipping = false;
+              return NEXT(result.value);
+            }
+            return DROPPED(result.value);
           }
-          return DROPPED(result.value);
-        }
 
-        index++;
-        return NEXT(result.value);
+          index++;
+          return NEXT(result.value);
+        });
       }
     };
   });

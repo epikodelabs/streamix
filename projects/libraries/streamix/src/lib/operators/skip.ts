@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
+import { createOperator, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that skips the first specified number of values from the source stream.
@@ -33,19 +33,16 @@ export const skip = <T = any>(count: MaybePromise<number>) =>
 
     return {
       next: async () => {
-        const result = await source.next();
-        if (result.done) return DONE;
+        return nextSourceResult(source, async (result) => {
+          const remainingOrPromise = getRemaining();
+          const currentRemaining = isPromiseLike(remainingOrPromise) ? await remainingOrPromise : remainingOrPromise;
+          if (currentRemaining > 0) {
+            remaining = currentRemaining - 1;
+            return DROPPED(result.value);
+          }
 
-        if ((result as any).dropped) return result as any;
-
-        const remainingOrPromise = getRemaining();
-        const currentRemaining = isPromiseLike(remainingOrPromise) ? await remainingOrPromise : remainingOrPromise;
-        if (currentRemaining > 0) {
-          remaining = currentRemaining - 1;
-          return DROPPED(result.value);
-        }
-
-        return NEXT(result.value);
+          return NEXT(result.value);
+        });
       },
     };
   });

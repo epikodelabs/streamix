@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
+import { createOperator, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "../abstractions";
 import type { GroupItem } from "./groupBy";
 
 /**
@@ -25,19 +25,12 @@ export const partition = <T = any>(
     let index = 0;
 
     return {
-      next: async () => {
-        const result = await source.next();
-        if (result.done) {
-          return DONE;
-        }
-
-        if ((result as any).dropped) {
-          return result as any;
-        }
-
-        const predicateResult = predicate(result.value, index++);
-        const key = (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) ? "true" : "false";
-        return NEXT({ key, value: result.value } as GroupItem<T, "true" | "false">);
+      next: async (): Promise<IteratorResult<GroupItem<T, "true" | "false">>> => {
+        return nextSourceResult(source, async (result) => {
+          const predicateResult = predicate(result.value, index++);
+          const key = (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) ? "true" : "false";
+          return NEXT({ key, value: result.value } as GroupItem<T, "true" | "false">);
+        }) as Promise<IteratorResult<GroupItem<T, "true" | "false">>>;
       }
     };
   });

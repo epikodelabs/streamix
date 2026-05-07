@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, DROPPED, nextSourceResult, NEXT, type Operator } from "../abstractions";
 
 /**
  * Collects all emitted values from the source stream into an array
@@ -14,27 +14,26 @@ export const toArray = <T = any>() =>
     let emitted = false;
 
     return {
-      next: async function () {
+      next: async function (): Promise<IteratorResult<T[]>> {
         if (completed && emitted) {
           return DONE;
         }
 
-        const result = await source.next();
-        if (result.done) {
-          completed = true;
-          if (!emitted) {
-            emitted = true;
-            return NEXT(collected);
+        return nextSourceResult(
+          source,
+          (result) => {
+            collected.push(result.value);
+            return DROPPED(result.value);
+          },
+          () => {
+            completed = true;
+            if (!emitted) {
+              emitted = true;
+              return NEXT(collected);
+            }
+            return DONE;
           }
-          return DONE;
-        }
-
-        if ((result as any).dropped) {
-          return result as any;
-        }
-
-        collected.push(result.value);
-        return DROPPED(result.value);
+        ) as Promise<IteratorResult<T[]>>;
       },
     };
   });

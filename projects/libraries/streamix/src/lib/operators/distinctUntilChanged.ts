@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
+import { createOperator, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that emits values from the source stream only if
@@ -23,29 +23,26 @@ export const distinctUntilChanged = <T = any>(
 
     return {
       next: async () => {
-        const result = await source.next();
+        return nextSourceResult(source, async (result) => {
+          if (!hasLast) {
+            lastValue = result.value;
+            hasLast = true;
+            return NEXT(result.value);
+          }
 
-        if (result.done) return DONE;
-        if ((result as any).dropped) return result as any;
+          const comparison = comparator ? comparator(lastValue!, result.value) : (lastValue === result.value);
+          const isSame = comparator
+            ? (isPromiseLike(comparison) ? await comparison : comparison)
+            : comparison;
 
-        if (!hasLast) {
-          lastValue = result.value;
-          hasLast = true;
-          return NEXT(result.value);
-        }
+          if (!isSame) {
+            lastValue = result.value;
+            hasLast = true;
+            return NEXT(result.value);
+          }
 
-        const comparison = comparator ? comparator(lastValue!, result.value) : (lastValue === result.value);
-        const isSame = comparator
-          ? (isPromiseLike(comparison) ? await comparison : comparison)
-          : comparison;
-
-        if (!isSame) {
-          lastValue = result.value;
-          hasLast = true;
-          return NEXT(result.value);
-        }
-
-        return DROPPED(result.value);
+          return DROPPED(result.value);
+        });
       },
     };
   });

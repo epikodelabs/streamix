@@ -1,4 +1,4 @@
-import { createOperator, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
+import { createOperator, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that filters out consecutive values from the source
@@ -34,39 +34,33 @@ export const distinctUntilKeyChanged = <T extends object = any, K extends keyof 
     };
 
     return {
-      next: async () => {
-        const result = await source.next();
-        if (result.done) return result;
+      next: async () =>
+        nextSourceResult(source, async (result) => {
+          const current = result.value;
+          const currentKey = await getKey();
 
-        // Propagate dropped results from upstream unchanged.
-        if ((result as any).dropped) return result as any;
+          if (isFirst) {
+            isFirst = false;
+            lastValue = current;
+            return NEXT(current);
+          }
 
-        const current = result.value;
-        const currentKey = await getKey();
+          const prevKey = lastValue![currentKey];
+          const currKey = current[currentKey];
+          let isSame: boolean;
+          if (comparator) {
+            const comparison = comparator(prevKey, currKey);
+            isSame = isPromiseLike(comparison) ? await comparison : comparison;
+          } else {
+            isSame = prevKey === currKey;
+          }
 
-        if (isFirst) {
-          isFirst = false;
-          lastValue = current;
-          return NEXT(current);
-        }
+          if (!isSame) {
+            lastValue = current;
+            return NEXT(current);
+          }
 
-        const prevKey = lastValue![currentKey];
-        const currKey = current[currentKey];
-        let isSame: boolean;
-        if (comparator) {
-          const comparison = comparator(prevKey, currKey);
-          isSame = isPromiseLike(comparison) ? await comparison : comparison;
-        } else {
-          isSame = prevKey === currKey;
-        }
-
-        if (!isSame) {
-          lastValue = current;
-          return NEXT(current);
-        }
-
-        // Key value unchanged — yield as dropped so backpressure is released.
-        return DROPPED(current);
-      }
+          return DROPPED(current);
+        })
     };
   });

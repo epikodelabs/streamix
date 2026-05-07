@@ -54,6 +54,35 @@ export const NEXT = <R = any>(value: R): { readonly done: false; readonly value:
 export const DROPPED = <R = any>(value: R): { readonly done: false; readonly value: R; readonly dropped: true } =>
   ({ done: false, value, dropped: true }) as const;
 
+export type DroppedResult<R = any> = ReturnType<typeof DROPPED<R>>;
+
+export const isDroppedResult = <R = any>(result: IteratorResult<R>): result is DroppedResult<R> =>
+  !result.done && (result as any).dropped === true;
+
+/**
+ * Pulls a single upstream result for simple operators.
+ *
+ * Dropped values are forwarded unchanged so operators that only care about real
+ * emissions do not need to repeat that boilerplate in every `next()` call.
+ */
+export async function nextSourceResult<T, R = T>(
+  source: AsyncIterator<T>,
+  onValue: (result: IteratorYieldResult<T>) => MaybePromise<IteratorResult<R> | DroppedResult<T>>,
+  onDone?: (result: IteratorReturnResult<any>) => MaybePromise<IteratorResult<R>>
+): Promise<IteratorResult<R> | DroppedResult<T>> {
+  const result = await source.next();
+
+  if (result.done) {
+    return onDone ? await onDone(result) : DONE as IteratorResult<R>;
+  }
+
+  if (isDroppedResult(result)) {
+    return result;
+  }
+
+  return await onValue(result);
+}
+
 /**
  * A stream operator that transforms a value from an input stream to an output stream.
  *

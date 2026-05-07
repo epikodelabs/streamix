@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that applies a transformation function to each value
@@ -24,17 +24,11 @@ export const map = <T = any, R = any>(
 
     return {
       async next(): Promise<IteratorResult<R>> {
-        const result = await source.next();
-        if (result.done) {
-          return DONE;
-        }
-        if ((result as any).dropped) {
-          return result as any;
-        }
-
-        const transformedResult = transform(result.value, index++);
-        const transformedValue = isPromiseLike(transformedResult) ? await transformedResult : transformedResult;
-        return NEXT(transformedValue);
+        return nextSourceResult(source, async (result) => {
+          const transformedResult = transform(result.value, index++);
+          const transformedValue = isPromiseLike(transformedResult) ? await transformedResult : transformedResult;
+          return NEXT(transformedValue);
+        }) as Promise<IteratorResult<R>>;
       },
       async return() {
         await source.return?.();

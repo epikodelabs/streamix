@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
+import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that filters values emitted by the source stream.
@@ -27,29 +27,29 @@ export const filter = <T = any>(
 
     return {
       next: async () => {
-        const result = await source.next();
-        if (result.done) return result;
+        return nextSourceResult(
+          source,
+          async (result) => {
+            const value = result.value;
+            let shouldInclude = false;
 
-        if ((result as any).dropped) return result as any;
+            if (typeof predicateOrValue === 'function') {
+              const predicateResult = (predicateOrValue as (value: T, index: number) => MaybePromise<boolean>)(value, index);
+              shouldInclude = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
+            } else if (Array.isArray(predicateOrValue)) {
+              shouldInclude = predicateOrValue.includes(value);
+            } else {
+              shouldInclude = value === predicateOrValue;
+            }
 
-        const value = result.value;
-        let shouldInclude = false;
+            if (shouldInclude) {
+              index++;
+              return NEXT(value);
+            }
 
-        if (typeof predicateOrValue === 'function') {
-          const predicateResult = (predicateOrValue as (value: T, index: number) => MaybePromise<boolean>)(value, index);
-          shouldInclude = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
-        } else if (Array.isArray(predicateOrValue)) {
-          shouldInclude = predicateOrValue.includes(value);
-        } else {
-          shouldInclude = value === predicateOrValue;
-        }
-
-        if (shouldInclude) {
-          index++;
-          return NEXT(value);
-        }
-
-        return DROPPED(value);
+            return DROPPED(value);
+          }
+        );
       },
       async return() {
         await source.return?.();

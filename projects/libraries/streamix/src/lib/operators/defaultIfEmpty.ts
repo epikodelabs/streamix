@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits a default value if the source stream is empty.
@@ -18,26 +18,28 @@ export const defaultIfEmpty = <T = any>(defaultValue: MaybePromise<T>) =>
     let completed = false;
 
     return {
-      next: async () => {
+      next: async (): Promise<IteratorResult<T>> => {
         if (completed) {
           return DONE;
         }
 
-        const result = await source.next();
+        return nextSourceResult(
+          source,
+          (result) => {
+            emitted = true;
+            return result;
+          },
+          async () => {
+            if (!emitted) {
+              completed = true;
+              const value = isPromiseLike(defaultValue) ? await defaultValue : defaultValue;
+              return NEXT(value);
+            }
 
-        if (!result.done) {
-          if (!(result as any).dropped) emitted = true;
-          return result;
-        }
-
-        if (!emitted) {
-          completed = true;
-          const value = isPromiseLike(defaultValue) ? await defaultValue : defaultValue;
-          return NEXT(value);
-        }
-
-        completed = true;
-        return DONE;
+            completed = true;
+            return DONE;
+          }
+        ) as Promise<IteratorResult<T>>;
       }
     };
   });

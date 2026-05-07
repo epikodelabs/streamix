@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, type Operator } from "../abstractions";
+import { createOperator, DROPPED, nextSourceResult, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that ignores all values emitted by the source stream.
@@ -15,17 +15,8 @@ export const ignoreElements = <T>() =>
   createOperator<T, never>("ignoreElements", function (this: Operator, source) {
 
     return {
-      next: async () => {
-        const result = await source.next();
-        if (result.done) {
-          return DONE;
-        }
-
-        if ((result as any).dropped) {
-          return result as any;
-        }
-
-        return DROPPED(result.value as never);
+      next: async (): Promise<IteratorResult<never>> => {
+        return nextSourceResult(source, (result) => DROPPED(result.value as never)) as Promise<IteratorResult<never>>;
       }
     };
   });

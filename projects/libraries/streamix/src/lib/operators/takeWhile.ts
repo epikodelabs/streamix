@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits values from the source stream as long as
@@ -26,25 +26,21 @@ export const takeWhile = <T = any>(
     let index = 0;
 
     return {
-      next: async () => {
+      next: async (): Promise<IteratorResult<T>> => {
         if (!active) {
           return DONE;
         }
 
-        const result = await source.next();
+        return nextSourceResult(source, async (result) => {
+          const predicateResult = predicate(result.value, index++);
+          const pass = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
+          if (!pass) {
+            active = false;
+            return DONE;
+          }
 
-        if (result.done) return DONE;
-
-        if ((result as any).dropped) return result as any;
-
-        const predicateResult = predicate(result.value, index++);
-        const pass = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
-        if (!pass) {
-          active = false;
-          return DONE;
-        }
-
-        return NEXT(result.value);
+          return NEXT(result.value);
+        }) as Promise<IteratorResult<T>>;
       },
     };
   });
