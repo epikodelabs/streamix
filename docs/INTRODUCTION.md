@@ -4,24 +4,21 @@ Reactive streams built on async generators.
 Small bundle, pull-based execution, and a familiar operator API.
 
 <p align="center">
-  <img src="https://github.com/epikodelabs/streamix/blob/main/LOGO.png?raw=true" alt="streamix Logo" width="500">
+  <img src="https://epikodelabs.github.io/streamix/LOGO.png?raw=true" alt="streamix Logo" width="500">
 </p>
 
 <div
   align="center"
   style="display:flex; justify-content:center; gap:0.5rem; flex-wrap:wrap;"
 >
-  <a href="https://github.com/epikodelabs/streamix/actions/workflows/build.yml">
-    <img src="https://github.com/epikodelabs/streamix/actions/workflows/build.yml/badge.svg?branch=main" alt="Build Status">
-  </a>
   <a href="https://www.npmjs.com/package/@epikodelabs%2Fstreamix">
     <img src="https://img.shields.io/npm/v/@epikodelabs%2Fstreamix.svg?style=flat-square" alt="NPM Version">
   </a>
   <a href="https://www.npmjs.com/package/@epikodelabs%2Fstreamix">
-    <img src="https://img.shields.io/npm/dm/@epikodelabs%2Fstreamix.svg?style=flat-square" alt="NPM Downloads">
+    <img src="https://img.shields.io/npm/dt/@epikodelabs%2Fstreamix.svg?style=flat-square" alt="Total Downloads">
   </a>
   <a href="https://github.com/epikodelabs/streamix">
-    <img src="https://raw.githubusercontent.com/epikodelabs/streamix/main/projects/libraries/streamix/bundle-size.svg" alt="Bundle Size">
+    <img src="https://epikodelabs.github.io/streamix/bundle-size.svg" alt="Bundle Size">
   </a>
 </div>
 
