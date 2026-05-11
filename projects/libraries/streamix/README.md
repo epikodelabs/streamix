@@ -4,7 +4,7 @@ Reactive streams built on async generators.
 Small bundle, pull-based execution, and a familiar operator API.
 
 <p align="center">
-  <img src="https://epikodelabs.github.io/streamix/LOGO.png?raw=true" alt="streamix Logo" width="500">
+  <img src="https://epikodelabs.github.io/streamix/LOGO.png" alt="streamix Logo" width="500">
 </p>
 
 <div
@@ -469,6 +469,6 @@ GNU AGPL v3 or later
 <p align="center">
   <strong>Get started</strong><br>
   <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> -
-  <a href="https://github.com/epikodelabs/streamix">View on GitHub</a> -
+  <a href="https://epikodelabs.github.io">View on GitHub</a> -
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
 </p>
