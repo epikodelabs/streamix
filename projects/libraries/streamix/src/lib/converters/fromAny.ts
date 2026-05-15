@@ -19,21 +19,30 @@ import { createStream, isPromiseLike, isStreamLike, MaybePromise, type Stream } 
  * @returns A {@link Stream<R>} that emits the normalized values.
  */
 export function fromAny<R = any>(
-  value: Stream<R> | MaybePromise<R> | Array<R> 
+  value: Stream<R> | MaybePromise<R> | Array<R> | Iterable<R> | AsyncIterable<R>
 ): Stream<R> {
   // Step 1: If it's already a stream, return as-is
   if (isStreamLike<R>(value)) {
     return value;
   }
   
-  // Step 2: Handle promises, arrays, and single values in one generator
+  // Step 2: Handle promises, arrays, iterables, and single values in one generator
   return createStream("fromAny", async function* () {
     // Await promise if needed
     const resolved = isPromiseLike(value) ? await value : value;
+    const candidate = resolved as any;
     
-    // Handle arrays - emit each element
+    // Handle arrays, iterables, and async iterables - emit each element
     if (Array.isArray(resolved)) {
       for (const item of resolved) {
+        yield item;
+      }
+    } else if (candidate != null && typeof candidate[Symbol.asyncIterator] === 'function') {
+      for await (const item of resolved as AsyncIterable<R>) {
+        yield item;
+      }
+    } else if (candidate != null && typeof candidate[Symbol.iterator] === 'function' && typeof resolved !== 'string') {
+      for (const item of resolved as Iterable<R>) {
         yield item;
       }
     } else {

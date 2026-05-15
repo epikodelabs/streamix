@@ -55,18 +55,13 @@ export function share<T = any>() {
     const baseThrow = outputIterator.throw?.bind(outputIterator);
 
     (outputIterator as any).return = async (value?: any) => {
-      try {
-        await source.return?.();
-      } catch {}
-      if (shared && !shared.completed()) shared.complete();
+      // Do NOT complete the shared subject when a single consumer unsubscribes.
+      // The shared subject is owned by the source connection, not by individual consumers.
+      // Completing it would terminate the multicast for all other active consumers.
       return baseReturn ? baseReturn(value) : DONE;
     };
 
     (outputIterator as any).throw = async (err: any) => {
-      try {
-        await source.return?.();
-      } catch {}
-      if (shared && !shared.completed()) shared.error(err);
       if (baseThrow) return baseThrow(err);
       throw err;
     };

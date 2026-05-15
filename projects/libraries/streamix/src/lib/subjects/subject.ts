@@ -125,8 +125,12 @@ export function createSubject<T = any>(): Subject<T> {
                 ret.then(() => {
                    isProcessing = false;
                    drain();
-                }, () => {
+                }, (err) => {
+                   // If receiver.next() rejects, report the error and resume draining
+                   // to prevent buffered values from stalling.
                    isProcessing = false;
+                   receiver.error?.(err);
+                   drain();
                 });
                 return;
              }
@@ -185,9 +189,14 @@ export function createSubject<T = any>(): Subject<T> {
        }
        
        const originalReturn = listener.return;
+       const originalThrow = listener.throw;
        (listener as any).return = (v?: any) => {
-           listeners.delete(listener);
-           return originalReturn ? originalReturn.call(listener, v) : Promise.resolve({ done: true, value: v});
+            listeners.delete(listener);
+            return originalReturn ? originalReturn.call(listener, v) : Promise.resolve({ done: true, value: v});
+       };
+       (listener as any).throw = (err?: any) => {
+            listeners.delete(listener);
+            return originalThrow ? originalThrow.call(listener, err) : Promise.reject(err);
        };
 
        return listener;

@@ -46,8 +46,8 @@ export const createSemaphore = (initialCount: number): Semaphore => {
 
   const release = () => {
     if (queue.length > 0) {
-      // Don't call the resolver immediately - schedule it as a microtask
-      // to maintain the expected order of execution
+      // Resume the next waiter in a microtask so its continuation does not run
+      // inline inside the current releaser's call stack.
       const nextResolver = queue.shift()!;
       queueMicrotask(nextResolver);
     } else {
