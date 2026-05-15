@@ -4,8 +4,8 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
-    "test": "npm run jasmine",
     "build": "ng build",
+    "test": "npx testify",
     "watch": "ng build --watch --configuration development",
     "jasmine": "testify --headless --browser chrome",
     "jasmine:coverage": "testify --headless --browser chrome --coverage",
