@@ -4,6 +4,11 @@
 
 Fixed iterator-lifecycle regressions in `fromAny`, `share`, `subject`, and `semaphore`.
 
+- **`fromAny.ts`** — Treat `null` and `undefined` as scalar values instead of probing iterator symbols on them, fixing `fromAny(undefined)`, `fromAny(null)`, promise-of-void inputs, and promise-backed notifier flows such as `delayUntil(Promise<void>)`.
+- **`share.ts`** — Restored per-consumer iterator cancellation semantics so `iterator.throw()` only closes the calling consumer instead of erroring the shared multicast source for every subscriber.
+- **`semaphore.ts`** — Restored microtask-based waiter resumption so FIFO acquire order remains deterministic without running the next waiter inline inside the releasing call stack.
+- **`subject.ts`** — Async-iterator listeners are now detached on `throw()` as well as `return()`, preventing abandoned listeners after consumer-level cancellation.
+
 ## 2.0.40
 
 Performance optimizations and resource cleanup improvements:
