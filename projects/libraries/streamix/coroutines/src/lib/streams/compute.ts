@@ -1,5 +1,5 @@
 import { createStream, isPromiseLike, type Stream } from "@epikodelabs/streamix";
-import { MaybePromise } from "rollup";
+import { MaybePromise } from "@epikodelabs/streamix";
 import type { Coroutine } from "../operators";
 
 /**
