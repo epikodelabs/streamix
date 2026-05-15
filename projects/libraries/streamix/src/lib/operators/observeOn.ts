@@ -23,7 +23,13 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
   return createOperator<T, T>('observeOn', function (this: Operator, source) {
     const output = createSubject<T>();
     const outputIterator = output[Symbol.asyncIterator]();
-    const scheduledPromises: Promise<void>[] = [];
+    let pendingCount = 0;
+    let allDoneResolve: (() => void) | null = null;
+
+    const waitForPending = (): Promise<void> => {
+      if (pendingCount === 0) return Promise.resolve();
+      return new Promise<void>((resolve) => { allDoneResolve = resolve; });
+    };
 
     void (async () => {
       try {
@@ -37,24 +43,27 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
         while (true) {
           const result = await source.next();
           if (result.done) break;
-          const p = new Promise<void>((resolve) => {
-            schedule(() => {
-              try {
-                if ((result as any).dropped) {
-                  output.drop(result.value);
-                } else {
-                  output.next(result.value);
-                }
-              } finally {
-                resolve();
+          pendingCount++;
+          const capturedResult = result;
+          schedule(() => {
+            try {
+              if ((capturedResult as any).dropped) {
+                output.drop(capturedResult.value);
+              } else {
+                output.next(capturedResult.value);
               }
-            });
+            } finally {
+              pendingCount--;
+              if (pendingCount === 0 && allDoneResolve) {
+                allDoneResolve();
+                allDoneResolve = null;
+              }
+            }
           });
-          scheduledPromises.push(p);
         }
 
         // Wait for all scheduled emissions before completing
-        await Promise.all(scheduledPromises);
+        await waitForPending();
       } catch (err) {
         output.error(err);
       } finally {

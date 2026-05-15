@@ -80,19 +80,15 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       },
 
       async return(value?: any) {
+        // Do NOT complete the shared output subject when a single consumer unsubscribes.
+        // The shared subject is owned by the source connection, not by individual consumers.
+        // Completing it would terminate the multicast for all other active consumers.
         const it = await ensureOutputIterator();
-        try {
-          await source.return?.();
-        } catch {}
-        if (output && !output.completed()) output.complete();
         return it.return ? it.return(value) : DONE;
       },
 
       async throw(err: any) {
         const it = await ensureOutputIterator();
-        try {
-          await source.return?.();
-        } catch {}
         if (output && !output.completed()) output.error(err);
         if (it.throw) return it.throw(err);
         throw err;

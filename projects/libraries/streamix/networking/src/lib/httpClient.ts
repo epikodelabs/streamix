@@ -203,7 +203,7 @@ export const useOauth = ({
     // If unauthorized and shouldRetry allows, refresh the token and retry
     if (newContext.status === 401 && shouldRetry(newContext)) {
       newContext.headers["Authorization"] = `Bearer ${await refreshToken()}`;
-      return await next(context); // Retry with the new token
+      return await next(newContext); // Retry with the new context (includes refreshed token)
     }
 
     return newContext;
@@ -500,10 +500,10 @@ export const createHttpClient = (): HttpClient => {
     const fullUrl =
       url.startsWith('http://') || url.startsWith('https://')
         ? url
-        : new URL(url).toString();
+        : url;
 
     if (params) {
-      const urlObj = new URL(fullUrl);
+      const urlObj = new URL(fullUrl, 'http://localhost');
       Object.entries(params).forEach(([key, value]) =>
         urlObj.searchParams.append(key, value),
       );
@@ -637,28 +637,28 @@ export const createHttpClient = (): HttpClient => {
     },
     get: <T>(
       url: string,
-      options: HttpOptions,
-      parser: ParserFunction<T>,
+      options?: HttpOptions | ParserFunction<T>,
+      parser?: ParserFunction<T>,
     ): HttpStream<T> => request<T>('GET', url, options, parser),
     post: <T>(
       url: string,
-      options: HttpOptions,
-      parser: ParserFunction<T>,
+      options?: HttpOptions | ParserFunction<T>,
+      parser?: ParserFunction<T>,
     ): HttpStream<T> => request<T>('POST', url, options, parser),
     put: <T>(
       url: string,
-      options: HttpOptions,
-      parser: ParserFunction<T>,
+      options?: HttpOptions | ParserFunction<T>,
+      parser?: ParserFunction<T>,
     ): HttpStream<T> => request<T>('PUT', url, options, parser),
     patch: <T>(
       url: string,
-      options: HttpOptions,
-      parser: ParserFunction<T>,
+      options?: HttpOptions | ParserFunction<T>,
+      parser?: ParserFunction<T>,
     ): HttpStream<T> => request<T>('PATCH', url, options, parser),
     delete: <T>(
       url: string,
-      options: HttpOptions,
-      parser: ParserFunction<T>,
+      options?: HttpOptions | ParserFunction<T>,
+      parser?: ParserFunction<T>,
     ): HttpStream<T> => request<T>('DELETE', url, options, parser),
   };
 };
@@ -864,8 +864,21 @@ export const readNdjsonChunk = (line: string): any => {
 /**
  * Converts a binary chunk to a Base64 string.
  */
-export const readBase64Chunk = (chunk: Uint8Array): string =>
-  btoa(String.fromCharCode(...chunk));
+export const readBase64Chunk = (chunk: Uint8Array): string => {
+  // Process in chunks to avoid stack overflow with large Uint8Arrays
+  const chunkSize = 8192;
+  let binary = '';
+  for (let i = 0; i < chunk.byteLength; i += chunkSize) {
+    const end = Math.min(i + chunkSize, chunk.byteLength);
+    const slice = chunk.subarray(i, end);
+    let chunkBinary = '';
+    for (let j = 0; j < slice.byteLength; j++) {
+      chunkBinary += String.fromCharCode(slice[j]);
+    }
+    binary += chunkBinary;
+  }
+  return btoa(binary);
+};
 
 /**
  * Parses a text chunk as CSV data.

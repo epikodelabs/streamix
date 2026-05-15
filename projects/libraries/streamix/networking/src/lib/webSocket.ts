@@ -47,9 +47,15 @@ export function webSocket<T = any>(
       setupSocketHandlers();
     } catch (error) {
       done = true;
+      // Reject any pending next() call
       if (rejectNext) {
         rejectNext(error);
         resolveNext = rejectNext = null;
+      }
+      // Notify about queued messages that will never be sent
+      if (sendQueue.length > 0) {
+        console.warn(`WebSocket initialization failed. ${sendQueue.length} queued message(s) will not be sent.`);
+        sendQueue.length = 0;
       }
     }
   };

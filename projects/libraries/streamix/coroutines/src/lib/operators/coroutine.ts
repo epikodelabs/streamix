@@ -343,12 +343,19 @@ export function coroutine<T, R>(
       }
     };
 
+    const generateTaskId = (): string => {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+      return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    };
+
     const assignTask = async (workerId: number, data: T): Promise<R> => {
       const worker = activeWorkers.get(workerId);
       if (!worker) {
         throw new Error(`Worker ${workerId} not found or is not active`);
       }
-      const taskId = crypto.randomUUID();
+      const taskId = generateTaskId();
       return new Promise<R>((resolve, reject) => {
         pendingMessages.set(taskId, { resolve, reject });
         worker.postMessage({ workerId, taskId, payload: data, type: 'task' });
@@ -357,7 +364,7 @@ export function coroutine<T, R>(
 
     const processTask = async (value: T): Promise<R> => {
       const { worker, workerId } = await getIdleWorker();
-      const taskId = crypto.randomUUID();
+      const taskId = generateTaskId();
       try {
         return await new Promise<R>((resolve, reject) => {
           pendingMessages.set(taskId, { resolve, reject });

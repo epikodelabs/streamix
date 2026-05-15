@@ -38,24 +38,17 @@ export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromi
     };
 
     try {
-      const start = performance.now();
-      let nextTime = start + (resolvedDelay > 0 ? resolvedDelay : 0);
-
       if (resolvedDelay > 0) {
-        await sleep(Math.max(0, nextTime - performance.now()));
+        await sleep(resolvedDelay);
       } else {
         await Promise.resolve();
-        nextTime = performance.now();
       }
 
       yield count++;
-      nextTime += resolvedInterval;
 
       while (true) {
-        const waitMs = Math.max(0, nextTime - performance.now());
-        await sleep(waitMs);
+        await sleep(resolvedInterval);
         yield count++;
-        nextTime += resolvedInterval;
       }
     } finally {
       cancelled = true;

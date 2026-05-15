@@ -1,13 +1,13 @@
 import {
-    createReceiver,
-    createSubscription,
-    isPromiseLike,
-    pipeSourceThrough,
-    Subscription,
-    type MaybePromise,
-    type Operator,
-    type Receiver,
-    type Stream,
+  createReceiver,
+  createSubscription,
+  isPromiseLike,
+  pipeSourceThrough,
+  Subscription,
+  type MaybePromise,
+  type Operator,
+  type Receiver,
+  type Stream,
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { AsyncPushable, createAsyncPushable } from "../utils";
@@ -46,7 +46,6 @@ export function createReplaySubject<T = any>(
   const isFiniteCapacity = capacity !== Infinity;
   const replay: T[] = [];
   let replayHead = 0;
-  let replaySize = 0;
 
   const pushReplay = (value: T) => {
     if (!isFiniteCapacity) {
@@ -60,7 +59,6 @@ export function createReplaySubject<T = any>(
       replay[replayHead] = value;
       replayHead = (replayHead + 1) % capacity;
     }
-    replaySize = replaySize < capacity ? replaySize + 1 : replaySize;
   };
 
   const forEachReplay = (fn: (value: T) => void) => {
@@ -69,8 +67,9 @@ export function createReplaySubject<T = any>(
       return;
     }
     if (capacity <= 0) return;
-    const start = replaySize < capacity ? 0 : replayHead;
-    for (let i = 0; i < replaySize; i++) {
+    const size = replay.length;
+    const start = size < capacity ? 0 : replayHead;
+    for (let i = 0; i < size; i++) {
       fn(replay[(start + i) % capacity]);
     }
   };
@@ -154,6 +153,7 @@ export function createReplaySubject<T = any>(
                 drain();
               }, () => {
                 isProcessing = false;
+                drain();
               });
               return;
             }

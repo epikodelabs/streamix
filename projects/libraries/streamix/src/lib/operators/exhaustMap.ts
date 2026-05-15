@@ -1,11 +1,11 @@
 import {
-    createOperator,
-    DONE,
-    isPromiseLike,
-    MaybePromise,
-    NEXT,
-    type Operator,
-    type Stream
+  createOperator,
+  DONE,
+  isPromiseLike,
+  MaybePromise,
+  NEXT,
+  type Operator,
+  type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
 
@@ -77,16 +77,24 @@ export const exhaustMap = <T = any, R = any>(
 
           if ((result as any).dropped) return result as any;
 
-          const projected = project(result.value, outerIndex++);
-
-          if (isPromiseLike(projected)) {
-            const normalized = await projected;
-            const innerStream = fromAny<R>(normalized);
-            innerIterator = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
-          } else {
-            const innerStream = fromAny<R>(projected as any);
-            innerIterator = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
+          let projected: any;
+          try {
+            projected = project(result.value, outerIndex++);
+          } catch (err) {
+            isSourceDone = true;
+            throw err;
           }
+          if (isPromiseLike(projected)) {
+            try {
+              projected = await projected;
+            } catch (err) {
+              isSourceDone = true;
+              throw err;
+            }
+          }
+
+          const innerStream = fromAny<R>(projected as any);
+          innerIterator = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
         }
       },
 

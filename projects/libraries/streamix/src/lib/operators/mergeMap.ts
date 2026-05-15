@@ -1,8 +1,8 @@
 import {
-    createPushOperator,
-    MaybePromise,
-    type Operator,
-    type Stream
+  createPushOperator,
+  MaybePromise,
+  type Operator,
+  type Stream
 } from '../abstractions';
 import { fromAny } from '../converters';
 import { createAsyncCoordinator, type RunnerEvent } from '../utils';
@@ -47,10 +47,10 @@ export function mergeMap<T = any, R = any>(
 ) {
   return createPushOperator<T, R>('mergeMap', function (source, output) {
     let stopped = false;
+    const coordinator = createAsyncCoordinator([source]);
 
     void (async () => {
       const SOURCE_INDEX = 0;
-      const coordinator = createAsyncCoordinator([source]);
       let projectIndex = 0;
       let sourceCompleted = false;
       let pendingInners = 0;
@@ -129,6 +129,7 @@ export function mergeMap<T = any, R = any>(
 
     return async () => {
       stopped = true;
+      await coordinator.return?.();
     };
   });
 }

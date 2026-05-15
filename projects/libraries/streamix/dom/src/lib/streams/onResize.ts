@@ -37,12 +37,26 @@ export function onResize(
   const emit = (entry?: ResizeObserverEntry) => {
     if (!resolvedElement) return;
 
-    const rect = entry?.contentRect ?? resolvedElement.getBoundingClientRect();
+    // Prefer contentBoxSize over deprecated contentRect for modern browsers.
+    // contentBoxSize is a FrozenArray<ResizeObserverSize>, use the first entry.
+    let width: number;
+    let height: number;
 
-    subject.next({
-      width: Math.round(rect.width),
-      height: Math.round(rect.height)
-    });
+    if (entry?.contentBoxSize?.length) {
+      const boxSize = entry.contentBoxSize[0];
+      width = Math.round(boxSize.inlineSize);
+      height = Math.round(boxSize.blockSize);
+    } else if (entry?.contentRect) {
+      // Fallback to contentRect for older browsers
+      width = Math.round(entry.contentRect.width);
+      height = Math.round(entry.contentRect.height);
+    } else {
+      const rect = resolvedElement.getBoundingClientRect();
+      width = Math.round(rect.width);
+      height = Math.round(rect.height);
+    }
+
+    subject.next({ width, height });
   };
 
   /* -------------------------------------------------- */

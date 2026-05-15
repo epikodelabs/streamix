@@ -1,4 +1,4 @@
-import { createStream, DROPPED, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 
 const RAW = Symbol.for("streamix.rawAsyncIterator");
@@ -43,7 +43,11 @@ export function retry<T = any>(
 
     while (retryCount <= resolvedMaxRetries) {
       let iterator: AsyncIterator<T> | null = null;
-      let buffered: Array<IteratorResult<T>> = [];
+      // Buffer all values from the current attempt. We only yield them to the
+      // consumer once the attempt completes successfully. If the attempt fails,
+      // the buffer is discarded and we retry with a fresh stream. This ensures
+      // the consumer sees a clean, sequential stream without duplicates.
+      const buffer: T[] = [];
 
       try {
         // Check abort signal at loop start
@@ -71,21 +75,25 @@ export function retry<T = any>(
 
           const next = await iterator.next();
           if (next.done) break;
-          buffered.push(next);
+          // Buffer values instead of yielding immediately.
+          // This ensures that if the stream fails partway through, the consumer
+          // doesn't receive duplicate values on retry.
+          buffer.push(next.value);
         }
 
-        for (const value of buffered) {
-          if ((value as any).dropped) {
-            yield DROPPED(value.value) as any;
-          } else {
-            yield value.value;
-          }
+        // Attempt completed successfully — now replay the buffered values
+        for (const value of buffer) {
+          yield value;
         }
+
         lastError = null;
         break;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         retryCount++;
+
+        // Discard the buffer — this attempt failed, we'll start fresh
+        buffer.length = 0;
 
         // Only delay if we're going to retry (check BEFORE sleeping)
         const resolvedDelay = await resolveDelayValue();

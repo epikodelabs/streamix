@@ -188,6 +188,9 @@ export function switchMap<T = any, R = any>(
       } finally {
         currentInner = null;
       }
+      try {
+        await source.return?.();
+      } catch {}
       return baseReturn ? baseReturn(undefined as any) : DONE;
     };
 

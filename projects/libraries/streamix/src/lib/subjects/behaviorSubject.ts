@@ -107,6 +107,8 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
           // so the terminal signal (DONE) can still be delivered.
           if (stopped) continue;
 
+          if ((result as any).dropped) continue;
+
           if (receiver.next) {
             const ret = receiver.next(result.value);
             if (isPromiseLike(ret)) {
@@ -115,6 +117,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
                 drain();
               }, () => {
                 isProcessing = false;
+                drain();
               });
               return;
             }

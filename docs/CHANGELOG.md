@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.42
+
+Fixed iterator-lifecycle regressions in `fromAny`, `share`, `subject`, and `semaphore`.
+
 ## 2.0.40
 
 Performance optimizations and resource cleanup improvements:

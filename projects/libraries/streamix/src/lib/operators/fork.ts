@@ -64,7 +64,6 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
 
     let outerIndex = 0;
     let innerIterator: AsyncIterator<R> | null = null;
-    let outerValue: T | undefined;
 
     const iterator: AsyncIterator<R> = {
       next: async () => {
@@ -79,11 +78,11 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
             if ((result as any).dropped) return result as any;
 
             let matched: typeof resolvedOptions[number] | undefined;
-            outerValue = result.value;
+            const outerValue = result.value;
             const currentIndex = outerIndex++;
 
             for (const option of resolvedOptions) {
-              const predicateResult = option.on(outerValue!, currentIndex);
+              const predicateResult = option.on(outerValue, currentIndex);
               if (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) {
                 matched = option;
                 break;
@@ -94,7 +93,7 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
               throw new Error(`No handler found for value: ${outerValue}`);
             }
 
-            const innerStream = fromAny(matched.handler(outerValue!));
+            const innerStream = fromAny(matched.handler(outerValue));
             innerIterator = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
           }
 

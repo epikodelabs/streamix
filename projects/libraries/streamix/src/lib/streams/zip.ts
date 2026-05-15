@@ -35,6 +35,11 @@ export function zip<T extends readonly unknown[] = any[]>(
         if (results.some(r => r.done)) break;
         const droppedResult = results.find((r: any) => r.dropped);
         if (droppedResult) {
+          // If one source drops, we still need to advance all iterators.
+          // The dropped value is yielded so downstream can observe it,
+          // but the other iterators have already advanced — their values
+          // are consumed and discarded. This is a known semantic limitation
+          // of zip with backpressure-aware sources.
           yield DROPPED(droppedResult.value) as any;
         } else {
           yield results.map(r => r.value) as unknown as T;

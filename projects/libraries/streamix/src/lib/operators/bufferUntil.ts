@@ -162,6 +162,10 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
           switch (event.type) {
             case "value":
               if (event.sourceIndex === 0) {
+                if ((event as any).dropped) {
+                  // Dropped source values should not be buffered
+                  break;
+                }
                 buffer.push(event.value as T);
               } else if (buffer.length > 0) {
                 return flushBuffer();
