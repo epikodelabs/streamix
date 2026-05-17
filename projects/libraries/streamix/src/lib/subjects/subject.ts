@@ -188,15 +188,38 @@ export function createSubject<T = any>(): Subject<T> {
          else listener.complete();
        }
        
-       const originalReturn = listener.return;
-       const originalThrow = listener.throw;
-       (listener as any).return = (v?: any) => {
-            listeners.delete(listener);
-            return originalReturn ? originalReturn.call(listener, v) : Promise.resolve({ done: true, value: v});
+       const originalReturn = listener.return!.bind(listener);
+       const originalThrow = listener.throw!.bind(listener);
+       const originalNext = listener.next.bind(listener);
+       const originalTryNext = (listener as any).__tryNext.bind(listener);
+
+       (listener as any).return = async (v?: any) => {
+         listeners.delete(listener);
+         return originalReturn(v);
        };
-       (listener as any).throw = (err?: any) => {
-            listeners.delete(listener);
-            return originalThrow ? originalThrow.call(listener, err) : Promise.reject(err);
+       (listener as any).throw = async (err?: any) => {
+         listeners.delete(listener);
+         return originalThrow(err);
+       };
+       
+       // Filter DROPPED from public consumers while preserving all other properties
+       listener.next = async () => {
+         while (true) {
+           const result = await originalNext();
+           if (result.done) return result;
+           if ((result as any).dropped) continue;
+           return result;
+         }
+       };
+       
+       (listener as any).__tryNext = () => {
+         while (true) {
+           const result = originalTryNext();
+           if (!result) return null;
+           if (result.done) return result;
+           if ((result as any).dropped) continue;
+           return result;
+         }
        };
 
        return listener;

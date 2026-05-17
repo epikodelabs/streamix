@@ -1,4 +1,4 @@
-import { createStream, DROPPED, isPromiseLike, type Stream } from "../abstractions";
+import { createStream, DROPPED, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
 
@@ -76,7 +76,7 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
         }
         if (event.type === 'value') {
           if (event.dropped) {
-            yield DROPPED(event.value) as any;
+            yield DROPPED(event.value);
           } else {
             yield event.value;
           }

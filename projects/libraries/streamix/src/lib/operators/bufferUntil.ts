@@ -86,7 +86,7 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
             case "value":
               if (event.sourceIndex === 0) {
                 // Source value: buffer it or relay dropped values unchanged
-                if (event.dropped) return DROPPED(event.value) as any;
+                if (event.dropped) return DROPPED(event.value);
                 buffer.push(event.value as T);
               } else {
                 // Notifier value: flush buffer
@@ -161,8 +161,7 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
             case "value":
               if (event.sourceIndex === 0) {
                 if ((event as any).dropped) {
-                  // Dropped source values should not be buffered
-                  break;
+                  return DROPPED(event.value);
                 }
                 buffer.push(event.value as T);
               } else if (buffer.length > 0) {

@@ -49,7 +49,7 @@ export function race<T extends readonly unknown[] = any[]>(
         // Dropped values must flow through the race output, but they must not
         // participate in winner selection.
         if (event.type === 'value' && event.dropped) {
-          yield DROPPED(event.value) as any;
+          yield DROPPED(event.value);
           continue;
         }
 
@@ -71,7 +71,7 @@ export function race<T extends readonly unknown[] = any[]>(
         if (winnerIndex !== null && event.sourceIndex === winnerIndex) {
           if (event.type === 'value') {
             if (event.dropped) {
-              yield DROPPED(event.value) as any;
+              yield DROPPED(event.value);
             } else {
               yield event.value;
             }

@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Creates a stream operator that tests if at least one value from the source stream satisfies a predicate.
@@ -33,23 +33,21 @@ export const some = <T = any>(
           return DONE;
         }
 
-        try {
-          while (true) {
-            const result = await source.next();
-
-            if (result.done) break;
-
+        return nextSourceResult(
+          source,
+          async (result) => {
             const predicateResult = predicate(result.value, index++);
             if (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) {
-              found = true;
-              break; // Predicate matched
+              evaluated = true;
+              return NEXT(true);
             }
+            return DROPPED(result.value);
+          },
+          () => {
+            evaluated = true;
+            return NEXT(false);
           }
-        } finally {
-          evaluated = true;
-        }
-
-        return NEXT(found);
+        ) as Promise<IteratorResult<boolean>>;
       }
     };
   });

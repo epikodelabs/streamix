@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Creates a stream operator that tests if all values from the source stream satisfy a predicate.
@@ -30,21 +30,22 @@ export const every = <T = any>(
       next: async () => {
         if (emitted) return DONE;
 
-        while (true) {
-          const result = await source.next();
-
-          if (result.done) {
+        return nextSourceResult(
+          source,
+          async (result) => {
+            const predicateResult = predicate(result.value, index++);
+            const passes = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
+            if (!passes) {
+              emitted = true;
+              return NEXT(false);
+            }
+            return DROPPED(result.value);
+          },
+          () => {
             emitted = true;
             return NEXT(true);
           }
-
-          const predicateResult = predicate(result.value, index++);
-          const passes = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
-          if (!passes) {
-            emitted = true;
-            return NEXT(false);
-          }
-        }
+        ) as Promise<IteratorResult<boolean>>;
       },
     };
   });

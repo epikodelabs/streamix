@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits only the first element from the source stream
@@ -44,25 +44,24 @@ export const first = <T = any>(predicate?: (value: T) => MaybePromise<boolean>) 
           throw new Error("No elements in sequence");
         }
 
-        while (!found) {
-          const result = await source.next();
-          if (result.done) {
-            sourceDone = true;
-            await stopSource();
-            throw new Error("No elements in sequence");
-          }
-          if ((result as any).dropped) return result as any;
-          const value = result.value;
-          const predicateResult = predicate ? predicate(value) : true;
-          const matches = predicate ? (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) : predicateResult;
-          if (matches) {
-            found = true;
-            await stopSource();
-            return NEXT(value);
-          }
+        const result = await source.next();
+        if (result.done) {
+          sourceDone = true;
+          await stopSource();
+          throw new Error("No elements in sequence");
+        }
+        if ((result as any).dropped) return result as any;
+
+        const value = result.value;
+        const predicateResult = predicate ? predicate(value) : true;
+        const matches = predicate ? (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) : predicateResult;
+        if (matches) {
+          found = true;
+          await stopSource();
+          return NEXT(value);
         }
 
-        return DONE;
+        return DROPPED(value);
       },
 
       return: async () => {

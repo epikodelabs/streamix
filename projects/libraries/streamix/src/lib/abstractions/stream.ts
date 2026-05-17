@@ -248,8 +248,11 @@ export function createStream<T>(
     subscriberCount++;
     const sub = activeRun.subject.subscribe(cb);
 
+    let unsubscribed = false;
     const originalUnsubscribe = sub.unsubscribe.bind(sub);
     sub.unsubscribe = async () => {
+      if (unsubscribed) return;
+      unsubscribed = true;
       await originalUnsubscribe();
       subscriberCount--;
       if (subscriberCount === 0) {

@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
+import { createStream, DROPPED, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
 
 /**
  * Creates a stream from an asynchronous or synchronous iterable.
@@ -15,9 +15,26 @@ import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../
 export function from<T = any>(source: MaybePromise<AsyncIterable<T> | Iterable<T>>): Stream<T> {
   async function* generator() {
     const resolvedSource = isPromiseLike(source) ? await source : source;
+    const iterator = (resolvedSource as any)[Symbol.asyncIterator]?.() ?? (resolvedSource as any)[Symbol.iterator]?.();
 
-    for await (const value of resolvedSource) {
-      yield value;
+    try {
+      while (true) {
+        const result = await iterator.next();
+        if (result.done) break;
+        if ((result as any).dropped) {
+          yield DROPPED(result.value) as any;
+        } else {
+          yield result.value;
+        }
+      }
+    } finally {
+      if (iterator.return) {
+        try {
+          await iterator.return();
+        } catch {
+          // ignore
+        }
+      }
     }
   }
 

@@ -1,4 +1,4 @@
-import { createOperator, type Operator } from "../abstractions";
+import { createOperator, DROPPED, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits only the values at the specified indices from a source stream.
@@ -45,6 +45,12 @@ export const select = <T = any>(
       while (true) {
         const result: IteratorResult<T> = await source.next();
         if (result.done) break;
+
+        if ((result as any).dropped) {
+          yield DROPPED(result.value) as any;
+          currentIndex++;
+          continue;
+        }
 
         const targetIndexResult = await nextTargetIndexPromise;
         

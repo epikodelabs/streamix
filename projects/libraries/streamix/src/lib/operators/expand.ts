@@ -67,7 +67,10 @@ export const expand = <T = any>(
       while (true) {
         const child = await iterator.next();
         if (child.done) break;
-        if ((child as any).dropped) continue;
+        if ((child as any).dropped) {
+          queue.push({ result: child, depth: depth + 1 });
+          continue;
+        }
         const item = { result: child, depth: depth + 1 };
         if (options.traversal === 'breadth') {
           queue.push(item);

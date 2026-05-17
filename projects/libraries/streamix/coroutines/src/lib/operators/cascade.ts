@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DONE, DROPPED, NEXT, type Operator } from "@epikodelabs/streamix";
 import type { Coroutine } from "./coroutine";
 
 /**
@@ -93,6 +93,7 @@ export function cascade<T = any, R = any>(
             completed = true;
             return DONE;
           }
+          if ((result as any).dropped) return result as any;
 
           let taskResult: any = result.value;
           const resolvedTasks = getTasks();

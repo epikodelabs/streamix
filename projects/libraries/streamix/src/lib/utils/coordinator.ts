@@ -312,6 +312,7 @@ export function createAsyncCoordinator(
     async return() {
       iteratorReturned = true;
       activeCount = 0;
+      queue.length = 0;
       
       // Mark all as completed immediately
       for (let i = 0; i < completed.length; i++) {

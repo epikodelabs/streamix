@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DONE, DROPPED, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * @typedef {object} CoroutineMessage
@@ -408,6 +408,7 @@ export function coroutine<T, R>(
               await finalize();
               return DONE;
             }
+            if ((result as any).dropped) return result as any;
 
             const taskResult = await processTask(result.value as any);
             return NEXT(taskResult);

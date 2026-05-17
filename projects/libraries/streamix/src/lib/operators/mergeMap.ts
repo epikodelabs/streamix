@@ -79,6 +79,7 @@ export function mergeMap<T = any, R = any>(
           if (event.sourceIndex === SOURCE_INDEX) {
             if (event.type === 'value') {
               if (event.dropped) {
+                output.drop(event.value as any);
                 continue;
               }
 

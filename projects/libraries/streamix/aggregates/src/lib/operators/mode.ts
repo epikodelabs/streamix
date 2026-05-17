@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DONE, DROPPED, isPromiseLike, nextSourceResult, NEXT, type MaybePromise, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Emits the most frequently occurring value(s) sampled from the source stream.
@@ -24,39 +24,42 @@ export const mode = <T = any, K = any>(
       async next() {
         if (emitted) return DONE;
 
-        while (true) {
-          const result = await source.next();
-          if (result.done) break;
+        return nextSourceResult(
+          source,
+          async (result) => {
+            const keyResult = keySelector ? keySelector(result.value) : result.value;
+            const key = isPromiseLike(keyResult) ? await keyResult : keyResult;
 
-          const keyResult = keySelector ? keySelector(result.value) : result.value;
-          const key = isPromiseLike(keyResult) ? await keyResult : keyResult;
+            const existing = frequencies.get(key);
+            if (existing) {
+              existing.count += 1;
+            } else {
+              frequencies.set(key, { value: result.value, count: 1 });
+            }
+            return DROPPED(result.value);
+          },
+          () => {
+            if (frequencies.size === 0) {
+              emitted = true;
+              return DONE;
+            }
 
-          const existing = frequencies.get(key);
-          if (existing) {
-            existing.count += 1;
-          } else {
-            frequencies.set(key, { value: result.value, count: 1 });
+            let maxCount = 0;
+            for (const entry of frequencies.values()) {
+              maxCount = Math.max(maxCount, entry.count);
+            }
+
+            const modes: T[] = [];
+            for (const entry of frequencies.values()) {
+              if (entry.count === maxCount) {
+                modes.push(entry.value);
+              }
+            }
+
+            emitted = true;
+            return NEXT(modes);
           }
-        }
-
-        if (frequencies.size === 0) {
-          return DONE;
-        }
-
-        let maxCount = 0;
-        for (const entry of frequencies.values()) {
-          maxCount = Math.max(maxCount, entry.count);
-        }
-
-        const modes: T[] = [];
-        for (const entry of frequencies.values()) {
-          if (entry.count === maxCount) {
-            modes.push(entry.value);
-          }
-        }
-
-        emitted = true;
-        return NEXT(modes);
+        ) as Promise<IteratorResult<T[]>>;
       },
     };
   });

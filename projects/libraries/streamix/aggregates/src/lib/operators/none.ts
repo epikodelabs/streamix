@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Creates a stream operator that tests if no values from the source stream satisfy a predicate.
@@ -26,27 +26,23 @@ export const none = <T = any>(
       async next() {
         if (evaluated) return DONE;
 
-        let matched = false;
-
-        try {
-          while (true) {
-            const result = await source.next();
-
-            if (result.done) break;
-
+        return nextSourceResult(
+          source,
+          async (result) => {
             const predicateResult = predicate(result.value, index++);
             const passes = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
 
             if (passes) {
-              matched = true;
-              break;
+              evaluated = true;
+              return NEXT(false);
             }
+            return DROPPED(result.value);
+          },
+          () => {
+            evaluated = true;
+            return NEXT(true);
           }
-        } finally {
-          evaluated = true;
-        }
-
-        return NEXT(!matched);
+        ) as Promise<IteratorResult<boolean>>;
       },
     };
   });

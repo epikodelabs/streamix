@@ -44,7 +44,7 @@ export function combineLatest<T extends unknown[] = any[]>(
         switch (event.type) {
           case "value":
             if (event.dropped) {
-              yield DROPPED(event.value) as any;
+              yield DROPPED(event.value);
               break;
             }
             latestValues[event.sourceIndex] = event.value;

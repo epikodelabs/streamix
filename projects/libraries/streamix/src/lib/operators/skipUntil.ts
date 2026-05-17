@@ -69,7 +69,7 @@ export function skipUntil<T = any, N = any>(
       if (gateOpened && droppingBacklog) {
         // Drop values that were already buffered before the gate opened.
         droppingBacklog = !!(source as any).__hasBufferedValues?.();
-        return DROPPED(event.value) as any;
+        return DROPPED(event.value);
       }
 
       if (gateOpened) {
@@ -77,7 +77,7 @@ export function skipUntil<T = any, N = any>(
       }
 
       // Gate not yet open — yield as dropped so backpressure is released.
-      return DROPPED(event.value) as any;
+      return DROPPED(event.value);
     };
 
     const iterator: AsyncIterator<T> & {
