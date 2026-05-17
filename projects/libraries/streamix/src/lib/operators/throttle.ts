@@ -17,7 +17,6 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
   createPushOperator<T>('throttle', (source, output) => {
     let lastEmit = 0;
     let pendingResult: IteratorResult<T> | undefined;
-    let droppedDuringCooldown: T[] = [];
     let timer: ReturnType<typeof setTimeout> | null = null;
     let resolvedDuration: number | undefined = undefined;
     // Track whether the operator has been torn down so that a flushPending()
@@ -33,12 +32,6 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
       }
 
       if (pendingResult !== undefined) {
-        // Drop all values that were superseded during the cooldown.
-        for (const v of droppedDuringCooldown) {
-          output.drop(v);
-        }
-        droppedDuringCooldown = [];
-
         output.push(pendingResult.value);
         pendingResult = undefined;
         // Use the scheduled expiry time rather than Date.now() to avoid clock
@@ -58,8 +51,6 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
           const result = await source.next();
           if (result.done) break;
 
-          if ((result as any).dropped) { output.drop(result.value); continue; }
-
           const now = Date.now();
 
           if (now - lastEmit >= resolvedDuration) {
@@ -75,10 +66,6 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
             output.push(result.value);
             lastEmit = now;
           } else {
-            // Supersede any previous pending value — mark it as dropped.
-            if (pendingResult !== undefined) {
-              droppedDuringCooldown.push(pendingResult.value);
-            }
             pendingResult = result;
             if (!timer) {
               const delay = resolvedDuration - (now - lastEmit);

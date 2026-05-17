@@ -47,11 +47,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
           const capturedResult = result;
           schedule(() => {
             try {
-              if ((capturedResult as any).dropped) {
-                output.drop(capturedResult.value);
-              } else {
-                output.next(capturedResult.value);
-              }
+              output.next(capturedResult.value);
             } finally {
               pendingCount--;
               if (pendingCount === 0 && allDoneResolve) {

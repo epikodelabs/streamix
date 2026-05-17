@@ -59,8 +59,6 @@ export const bufferWhile = <T = any>(
             return DONE;
           }
 
-          if ((result as any).dropped) return result as any;
-
           const record = { result };
 
           const values = buffer.map((item) => item.result.value!);

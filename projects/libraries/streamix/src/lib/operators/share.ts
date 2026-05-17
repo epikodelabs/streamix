@@ -24,11 +24,7 @@ export function share<T = any>() {
           const result = await source.next();
           if (result.done) break;
 
-          if ((result as any).dropped) {
-            shared!.drop(result.value);
-          } else {
-            shared!.next(result.value);
-          }
+          shared!.next(result.value);
         }
       } catch (err) {
         shared!.error(err);

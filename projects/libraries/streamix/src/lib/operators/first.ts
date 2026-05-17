@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits only the first element from the source stream
@@ -6,7 +6,7 @@ import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, 
  *
  * This operator is designed to find a specific value and then immediately terminate.
  * - If a `predicate` function is provided, the operator will emit the first value for which
- * the predicate returns a truthy value.
+ *   the predicate returns a truthy value.
  * - If no predicate is provided, it will simply emit the very first value from the source.
  *
  * After emitting a single value, the operator completes. If the source stream completes
@@ -44,24 +44,25 @@ export const first = <T = any>(predicate?: (value: T) => MaybePromise<boolean>) 
           throw new Error("No elements in sequence");
         }
 
-        const result = await source.next();
-        if (result.done) {
-          sourceDone = true;
-          await stopSource();
-          throw new Error("No elements in sequence");
-        }
-        if ((result as any).dropped) return result as any;
+        while (true) {
+          const result = await source.next();
+          if (result.done) {
+            sourceDone = true;
+            await stopSource();
+            throw new Error("No elements in sequence");
+          }
 
-        const value = result.value;
-        const predicateResult = predicate ? predicate(value) : true;
-        const matches = predicate ? (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) : predicateResult;
-        if (matches) {
-          found = true;
-          await stopSource();
-          return NEXT(value);
-        }
+          const value = result.value;
+          const predicateResult = predicate ? predicate(value) : true;
+          const matches = predicate ? (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) : predicateResult;
+          if (matches) {
+            found = true;
+            await stopSource();
+            return NEXT(value);
+          }
 
-        return DROPPED(value);
+          // predicate doesn't match, continue loop
+        }
       },
 
       return: async () => {

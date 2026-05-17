@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Creates a stream operator that computes the arithmetic mean of values from the source stream.
@@ -26,21 +26,18 @@ export const average = <T = any>(
       async next() {
         if (emitted) return DONE;
 
-        return nextSourceResult(
-          source,
-          async (result) => {
-            const selected = selector(result.value, index++);
-            const value = isPromiseLike(selected) ? await selected : selected;
-            total += value;
-            count++;
-            return DROPPED(result.value);
-          },
-          () => {
+        while (true) {
+          const result = await source.next();
+          if (result.done) {
             emitted = true;
             const averageValue = count === 0 ? 0 : total / count;
             return NEXT(averageValue);
           }
-        ) as Promise<IteratorResult<number>>;
+          const selected = selector(result.value, index++);
+          const value = isPromiseLike(selected) ? await selected : selected;
+          total += value;
+          count++;
+        }
       },
     };
   });

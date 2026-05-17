@@ -78,7 +78,6 @@ export function delayUntil<T = any, N = any>(
       }
 
       if (event.sourceIndex === 1) {
-        if (event.dropped) return { done: false as const, value: event.value, dropped: true } as any;
         if (gateOpened) {
           // Gate is open - forward immediately
           return { done: false, value: event.value };

@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
 
 /**
  * Represents a grouped item with its original value and the associated key.
@@ -34,11 +34,13 @@ export const groupBy = <T = any, K = any>(
   createOperator<T, GroupItem<T, K>>("groupBy", function (this: Operator, source) {
     return {
       next: async (): Promise<IteratorResult<GroupItem<T, K>>> => {
-        return nextSourceResult(source, async (result) => {
-          const keyResult = keySelector(result.value);
-          const key = isPromiseLike(keyResult) ? await keyResult : keyResult;
-          return NEXT({ key, value: result.value });
-        }) as Promise<IteratorResult<GroupItem<T, K>>>;
+        const result = await source.next();
+        if (result.done) {
+          return DONE;
+        }
+        const keyResult = keySelector(result.value);
+        const key = isPromiseLike(keyResult) ? await keyResult : keyResult;
+        return NEXT({ key, value: result.value });
       },
       async return() {
         await source.return?.();

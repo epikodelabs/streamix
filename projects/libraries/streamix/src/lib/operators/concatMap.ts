@@ -40,8 +40,6 @@ export const concatMap = <T = any, R = any>(
 
             if (result.done) return DONE;
 
-            if ((result as any).dropped) return result as any;
-
             const projected = project(result.value, outerIndex++);
             const normalized = isPromiseLike(projected) ? await projected : projected;
             const innerStream = fromAny<R>(normalized);
@@ -58,7 +56,6 @@ export const concatMap = <T = any, R = any>(
             continue;
           }
 
-          if ((innerResult as any).dropped) return innerResult as any;
           return NEXT(innerResult.value);
         }
       },

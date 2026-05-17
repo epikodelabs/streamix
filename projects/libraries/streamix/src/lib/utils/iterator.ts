@@ -6,21 +6,12 @@ import {
   AsyncIteratorState,
   asyncPull,
   pushComplete,
-  pushDropped,
-  pushError, // <-- new helper
+  pushError,
   pushValue,
   syncPull
 } from "./helpers";
 
-/**
- * Extended iterator result that carries an optional `dropped` flag.
- * When `dropped: true`, the emission was suppressed by a filter operator
- * but the iterator still yields to allow backpressure signalling and
- * introspection without terminating the stream.
- */
-export type AsyncIteratorYieldResult<T> =
-  | { value: T; done?: false; dropped?: never }
-  | { value: T; done?: false; dropped: true };
+export type AsyncIteratorYieldResult<T> = { value: T; done?: false };
 
 export type AsyncIteratorResult<T> =
   | AsyncIteratorYieldResult<T>
@@ -43,9 +34,8 @@ export type AsyncIteratorResult<T> =
  * (either `next()` or `__tryNext>`), which avoids hidden subscriptions for
  * iterators that are constructed but never consumed.
  *
- * `__pushDropped(value)` pushes a value that will be yielded with
- * `dropped: true` — useful for filter operators that need to release
- * backpressure without surfacing the value to the consumer as a real emission.
+ * Each call of the returned factory function creates an independent iterator
+ * with its own buffer and subscription.
  *
  * @template T Value type.
  * @param opts Registration function and lazy mode.
@@ -62,7 +52,7 @@ export function createAsyncIterator<T>(opts: {
     let receiver: StrictReceiver<T> | null = null;
 
     const pendingPushes: Array<{
-      type: 'next' | 'complete' | 'error' | 'dropped';
+      type: 'next' | 'complete' | 'error';
       value?: T;
       err?: any;
     }> = [];
@@ -91,9 +81,6 @@ export function createAsyncIterator<T>(opts: {
         for (const push of pendingPushes) {
           if (push.type === 'next') {
             _receiver.next(push.value!);
-          } else if (push.type === 'dropped') {
-            // Replay dropped pushes directly — no receiver method needed
-            pushDropped(state, iterator, push.value!, iterator.__onPush);
           } else if (push.type === 'complete') {
             _receiver.complete();
           } else if (push.type === 'error') {
@@ -118,7 +105,6 @@ export function createAsyncIterator<T>(opts: {
       __hasBufferedValues?: () => boolean;
       __onPush?: () => void;
       __pushNext?: (value: T) => void;
-      __pushDropped?: (value: T) => void;  // <-- new
       __pushComplete?: () => void;
       __pushError?: (err: any) => void;
     } = {
@@ -167,17 +153,6 @@ export function createAsyncIterator<T>(opts: {
         receiver.next(value);
       } else {
         pendingPushes.push({ type: 'next', value });
-      }
-    };
-
-    // Push a value that will be yielded with dropped: true.
-    // Releases backpressure on the producer without surfacing the
-    // value as a real emission to downstream consumers.
-    iterator.__pushDropped = (value: T) => {
-      if (receiver) {
-        pushDropped(state, iterator, value, iterator.__onPush);
-      } else {
-        pendingPushes.push({ type: 'dropped', value });
       }
     };
 

@@ -1,4 +1,4 @@
-import { createOperator, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that emits values from the source stream only if
@@ -23,7 +23,10 @@ export const distinctUntilChanged = <T = any>(
 
     return {
       next: async () => {
-        return nextSourceResult(source, async (result) => {
+        while (true) {
+          const result = await source.next();
+          if (result.done) return DONE;
+
           if (!hasLast) {
             lastValue = result.value;
             hasLast = true;
@@ -41,8 +44,8 @@ export const distinctUntilChanged = <T = any>(
             return NEXT(result.value);
           }
 
-          return DROPPED(result.value);
-        });
+          // duplicate found, continue loop
+        }
       },
     };
   });

@@ -90,10 +90,6 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
               return;
             }
             if (!buffered || buffered.done) break;
-            if ((buffered as any).dropped) {
-              output.drop(buffered.value as any);
-              continue;
-            }
           }
         }
 
@@ -121,12 +117,6 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
 
           // Disregard control signals
           if (ev.type !== 'value') {
-            continue;
-          }
-
-          // Propagate dropped frames from upstream
-          if (ev.dropped) {
-            output.drop(ev.value as any);
             continue;
           }
 

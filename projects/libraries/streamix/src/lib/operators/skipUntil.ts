@@ -1,7 +1,6 @@
 import {
     createOperator,
     DONE,
-    DROPPED,
     type Operator,
     type Stream
 } from "../abstractions";
@@ -69,15 +68,15 @@ export function skipUntil<T = any, N = any>(
       if (gateOpened && droppingBacklog) {
         // Drop values that were already buffered before the gate opened.
         droppingBacklog = !!(source as any).__hasBufferedValues?.();
-        return DROPPED(event.value);
+        return null;
       }
 
       if (gateOpened) {
         return { done: false, value: event.value };
       }
 
-      // Gate not yet open — yield as dropped so backpressure is released.
-      return DROPPED(event.value);
+      // Gate not yet open — skip this value and continue waiting.
+      return null;
     };
 
     const iterator: AsyncIterator<T> & {

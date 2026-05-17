@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits only the first `count` values from the source stream
@@ -40,28 +40,25 @@ export const take = <T = any>(count: MaybePromise<number>) =>
           return DONE;
         }
 
-        return nextSourceResult(
-          source,
-          async (result) => {
-            emitted++;
+        const result = await source.next();
+        if (result.done) {
+          done = true;
+          return DONE;
+        }
 
-            const countOrPromise = getCount();
-            const limit = isPromiseLike(countOrPromise) ? await countOrPromise : countOrPromise;
-            if (emitted > limit) {
-              done = true;
-              try {
-                await source.return?.();
-              } catch {}
-              return DONE;
-            }
+        emitted++;
 
-            return NEXT(result.value);
-          },
-          () => {
-            done = true;
-            return DONE;
-          }
-        ) as Promise<IteratorResult<T>>;
+        const countOrPromise = getCount();
+        const limit = isPromiseLike(countOrPromise) ? await countOrPromise : countOrPromise;
+        if (emitted > limit) {
+          done = true;
+          try {
+            await source.return?.();
+          } catch {}
+          return DONE;
+        }
+
+        return NEXT(result.value);
       },
 
       async return(value?: any) {

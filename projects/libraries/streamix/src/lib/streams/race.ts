@@ -1,4 +1,4 @@
-import { createStream, DROPPED, type Stream } from "../abstractions";
+import { createStream, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
 
@@ -46,14 +46,7 @@ export function race<T extends readonly unknown[] = any[]>(
           throw event.error;
         }
 
-        // Dropped values must flow through the race output, but they must not
-        // participate in winner selection.
-        if (event.type === 'value' && event.dropped) {
-          yield DROPPED(event.value);
-          continue;
-        }
-
-        // 2. Identify the winner from the first real (non-dropped) value or completion
+        // 2. Identify the winner from the first real value or completion
         if (winnerIndex === null) {
           winnerIndex = event.sourceIndex;
           
@@ -70,11 +63,7 @@ export function race<T extends readonly unknown[] = any[]>(
         // 3. Only process events from the winner
         if (winnerIndex !== null && event.sourceIndex === winnerIndex) {
           if (event.type === 'value') {
-            if (event.dropped) {
-              yield DROPPED(event.value);
-            } else {
-              yield event.value;
-            }
+            yield event.value;
           } else if (event.type === 'complete') {
             break;
           }

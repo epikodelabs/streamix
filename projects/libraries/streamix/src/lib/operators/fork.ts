@@ -75,8 +75,6 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
               return DONE;
             }
 
-            if ((result as any).dropped) return result as any;
-
             let matched: typeof resolvedOptions[number] | undefined;
             const outerValue = result.value;
             const currentIndex = outerIndex++;
@@ -104,7 +102,6 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
             continue;
           }
 
-          if ((innerResult as any).dropped) return innerResult as any;
           return NEXT(innerResult.value);
         }
       },

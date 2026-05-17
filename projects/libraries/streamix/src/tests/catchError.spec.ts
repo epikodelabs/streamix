@@ -49,7 +49,7 @@ describe('catchError', () => {
     subject.complete();
   });
 
-  it('should return a dropped result from the raw iterator for the first caught error and then complete', async () => {
+  it('should complete after catching the first error', async () => {
     const error = new Error('Unhandled exception.');
     subject = createSubject<number>();
     const streamWithCatchError = subject.pipe(
@@ -68,11 +68,10 @@ describe('catchError', () => {
     expect(await streamIterator.next()).toEqual({ done: false, value: 1 });
 
     subject.next(2);
-    const dropped = await streamIterator.next();
+    const result = await streamIterator.next();
 
-    expect(dropped.done).toBeFalse();
-    expect((dropped as any).dropped).toBeTrue();
-    expect(dropped.value).toBe(error);
+    expect(result.done).toBeTrue();
+    expect(result.value).toBeUndefined();
     expect(handlerMock).toHaveBeenCalledTimes(1);
     expect(handlerMock).toHaveBeenCalledWith(error);
 

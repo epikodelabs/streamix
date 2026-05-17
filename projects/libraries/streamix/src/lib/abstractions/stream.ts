@@ -63,10 +63,6 @@ async function drainIterator<T>(
   const processResult = (result: IteratorResult<T>) => {
     if (result.done) return true;
 
-    // Do not forward dropped results to subscribers — they are internal
-    // backpressure signals emitted by filter/skip/debounce etc.
-    if ((result as any).dropped) return false;
-
     const receivers = getReceivers();
     for (const { receiver, subscription } of receivers) {
       if (!subscription.unsubscribed) {
@@ -193,8 +189,6 @@ export function createStream<T>(
                 run.subject.complete();
                 return;
               }
-              // Do not forward dropped results — they are internal backpressure signals.
-              if ((result as any).dropped) continue;
               run.subject.next(result.value);
             }
           }
@@ -210,9 +204,6 @@ export function createStream<T>(
             run.subject.complete();
             break;
           }
-
-          // Do not forward dropped results — they are internal backpressure signals.
-          if ((result.result as any).dropped) continue;
 
           run.subject.next(result.result.value);
         }
@@ -350,12 +341,7 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
       const iterator = applyOperators(getRawIterator(source));
       const publicIterator: AsyncIterator<TOut> = {
         async next() {
-          while (true) {
-            const result = await iterator.next();
-            if (result.done) return result;
-            if ((result as any).dropped) continue;
-            return result;
-          }
+          return iterator.next();
         },
         async return(value?: any) {
           if (iterator.return) {

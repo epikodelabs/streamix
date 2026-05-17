@@ -48,7 +48,6 @@ export const exhaustMap = <T = any, R = any>(
           isSourceDone = true;
           return null;
         }
-        if ((r as any).dropped) return r;
       }
     };
 
@@ -59,7 +58,6 @@ export const exhaustMap = <T = any, R = any>(
             const result = await innerIterator.next();
 
             if (!result.done) {
-              if ((result as any).dropped) return result as any;
               return NEXT(result.value);
             }
 
@@ -75,8 +73,6 @@ export const exhaustMap = <T = any, R = any>(
             isSourceDone = true;
             return DONE;
           }
-
-          if ((result as any).dropped) return result as any;
 
           let projected: any;
           try {

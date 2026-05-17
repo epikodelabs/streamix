@@ -1,4 +1,4 @@
-import { createStream, DROPPED, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
 import { fromAny } from '../converters';
 
 const RAW = Symbol.for("streamix.rawAsyncIterator");
@@ -33,11 +33,7 @@ export function iif<T = any>(
       while (true) {
         const result = await iterator.next();
         if (result.done) break;
-        if ((result as any).dropped) {
-          yield DROPPED(result.value) as any;
-        } else {
-          yield result.value;
-        }
+        yield result.value;
       }
     } finally {
       // Ensure proper cleanup of the iterator

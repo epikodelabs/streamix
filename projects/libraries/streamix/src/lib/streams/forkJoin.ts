@@ -1,4 +1,4 @@
-import { createStream, DROPPED, type Stream } from "../abstractions";
+import { createStream, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
 
@@ -73,12 +73,8 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
         }
 
         if (event.type === "value") {
-          if (event.dropped) {
-            yield DROPPED(event.value);
-          } else {
-            hasValue[event.sourceIndex] = true;
-            results[event.sourceIndex] = event.value;
-          }
+          hasValue[event.sourceIndex] = true;
+          results[event.sourceIndex] = event.value;
           continue;
         }
 

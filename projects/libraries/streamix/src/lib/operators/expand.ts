@@ -67,10 +67,6 @@ export const expand = <T = any>(
       while (true) {
         const child = await iterator.next();
         if (child.done) break;
-        if ((child as any).dropped) {
-          queue.push({ result: child, depth: depth + 1 });
-          continue;
-        }
         const item = { result: child, depth: depth + 1 };
         if (options.traversal === 'breadth') {
           queue.push(item);
@@ -90,15 +86,12 @@ export const expand = <T = any>(
               break;
             }
 
-            if ((result as any).dropped) return result as any;
-
             queue.push({ result, depth: 0 });
           }
 
           if (queue.length > 0) {
             const item =
               options.traversal === 'breadth' ? queue.shift()! : queue.pop()!;
-            if ((item.result as any).dropped) return item.result as any;
             await enqueueChildren(item.result.value, item.depth);
             return NEXT(item.result.value);
           }

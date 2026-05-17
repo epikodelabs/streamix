@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that accumulates all values from the source stream
@@ -24,21 +24,20 @@ export const reduce = <T = any, A = any>(
 
     return {
       next: async (): Promise<IteratorResult<A>> => {
-        return nextSourceResult(
-          source,
-          async (result) => {
-            const accumulated = accumulator(finalValue, result.value);
-            finalValue = isPromiseLike(accumulated) ? await accumulated : accumulated;
-            return DROPPED(result.value);
-          },
-          () => {
+        while (true) {
+          const result = await source.next();
+          if (result.done) {
             if (!emittedFinal) {
               emittedFinal = true;
               return NEXT(finalValue);
             }
             return DONE;
           }
-        ) as Promise<IteratorResult<A>>;
+
+          const accumulated = accumulator(finalValue, result.value);
+          finalValue = isPromiseLike(accumulated) ? await accumulated : accumulated;
+          // continue consuming values
+        }
       },
     };
   });

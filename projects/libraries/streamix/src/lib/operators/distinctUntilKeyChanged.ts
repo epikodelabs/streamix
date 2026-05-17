@@ -1,4 +1,4 @@
-import { createOperator, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that filters out consecutive values from the source
@@ -34,8 +34,11 @@ export const distinctUntilKeyChanged = <T extends object = any, K extends keyof 
     };
 
     return {
-      next: async () =>
-        nextSourceResult(source, async (result) => {
+      next: async () => {
+        while (true) {
+          const result = await source.next();
+          if (result.done) return DONE;
+
           const current = result.value;
           const currentKey = await getKey();
 
@@ -60,7 +63,8 @@ export const distinctUntilKeyChanged = <T extends object = any, K extends keyof 
             return NEXT(current);
           }
 
-          return DROPPED(current);
-        })
+          // duplicate found, continue loop
+        }
+      }
     };
   });

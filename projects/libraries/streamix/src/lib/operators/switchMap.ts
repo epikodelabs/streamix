@@ -76,11 +76,7 @@ export function switchMap<T = any, R = any>(
 
             if (r.done) break;
             if (stopped || token !== currentInnerToken) break;
-            if ((r as any).dropped) {
-              output.drop(r.value);
-            } else {
-              output.push(r.value);
-            }
+            output.push(r.value);
           }
         } catch (err) {
           if (!stopped && token === currentInnerToken) {
@@ -144,11 +140,6 @@ export function switchMap<T = any, R = any>(
             return;
           }
 
-          if ((result as any).dropped) {
-            output.drop(result.value as any);
-            continue;
-          }
-
           processOuterValue(result.value);
         }
       };
@@ -161,10 +152,6 @@ export function switchMap<T = any, R = any>(
           while (!stopped) {
             const result = await source.next();
             if (result.done) break;
-            if ((result as any).dropped) {
-              output.drop(result.value as any);
-              continue;
-            }
             processOuterValue(result.value);
           }
 
