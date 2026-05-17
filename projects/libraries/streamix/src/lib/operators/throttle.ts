@@ -20,8 +20,18 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
     let droppedDuringCooldown: T[] = [];
     let timer: ReturnType<typeof setTimeout> | null = null;
     let resolvedDuration: number | undefined = undefined;
+    // Track whether the operator has been torn down so that a flushPending()
+    // callback queued before cleanup fires cannot write to an
+    // already-completed/aborted output.
+    let aborted = false;
 
     const flushPending = () => {
+      // Guard against firing after cleanup.
+      if (aborted) {
+        timer = null;
+        return;
+      }
+
       if (pendingResult !== undefined) {
         // Drop all values that were superseded during the cooldown.
         for (const v of droppedDuringCooldown) {
@@ -29,9 +39,13 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
         }
         droppedDuringCooldown = [];
 
-        output.push(pendingResult.value!);
+        output.push(pendingResult.value);
         pendingResult = undefined;
-        lastEmit = Date.now();
+        // Use the scheduled expiry time rather than Date.now() to avoid clock
+        // drift: if the JS event loop fires the callback late, the next window
+        // would start from the wrong baseline and incorrectly gate values that
+        // arrived after the intended boundary.
+        lastEmit = lastEmit + resolvedDuration!;
       }
       timer = null;
     };
@@ -47,24 +61,23 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
           if ((result as any).dropped) { output.drop(result.value); continue; }
 
           const now = Date.now();
-          if (resolvedDuration === undefined) {
-            pendingResult = result;
-            continue;
-          }
 
           if (now - lastEmit >= resolvedDuration) {
-            // If a timer is running and a new value arrives after cooldown, flush pending first
+            // A new value arrived after the cooldown. If a timer is still
+            // running it means the scheduled trailing emit hasn't fired yet
+            // (the event loop hadn't yielded). Flush it as a real trailing
+            // emission first, then emit the new value as the next leading emit.
             if (timer) {
               clearTimeout(timer);
               timer = null;
-              flushPending();
+              flushPending(); // emits pendingResult and advances lastEmit
             }
             output.push(result.value);
             lastEmit = now;
           } else {
             // Supersede any previous pending value — mark it as dropped.
             if (pendingResult !== undefined) {
-              droppedDuringCooldown.push(pendingResult.value!);
+              droppedDuringCooldown.push(pendingResult.value);
             }
             pendingResult = result;
             if (!timer) {
@@ -76,14 +89,17 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
 
         if (pendingResult !== undefined) flushPending();
       } catch (err) {
-        output.error(err);
+        // Normalise to Error, consistent with every other operator.
+        output.error(err instanceof Error ? err : new Error(String(err)));
       } finally {
+        aborted = true;
         if (timer) { clearTimeout(timer); timer = null; }
         if (!output.completed()) output.complete();
       }
     })();
 
     return () => {
+      aborted = true;
       if (timer) { clearTimeout(timer); timer = null; }
     };
   });

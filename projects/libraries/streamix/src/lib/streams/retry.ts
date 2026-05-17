@@ -4,20 +4,21 @@ import { fromAny } from "../converters";
 const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 /**
- * Creates a stream that subscribes to a source factory and retries on error.
+ * Creates a stream that subscribes to a source factory and retries the entire sequence on error.
  *
- * This operator is useful for handling streams that may fail due to
- * temporary issues, such as network problems. It will attempt to
- * resubscribe to the source stream up to `maxRetries` times, with an
- * optional delay between each attempt. If the stream completes successfully
- * on any attempt, it will emit all of its values and then complete.
- * If all retry attempts fail, the final error is propagated.
+ * @description
+ * This operator isolates the downstream consumer from partial failures by buffering **all** * values emitted during an execution attempt. 
+ * * * **Transactional Behavior:** If an execution attempt errors partway through, the internal 
+ * buffer is discarded completely and no values are pushed downstream. Values are only yielded 
+ * to the consumer once an entire sequence execution finishes successfully (`next.done === true`).
+ * * **Abortion:** The operator honors the abort signal during stream iteration and between-retry delays,
+ * clearing allocations safely without event listener leaks.
  *
- * @template T The type of values emitted by the stream.
- * @param {() => (Stream<T> | Promise<T>)} factory A function that returns a new stream or value for each attempt.
- * @param {MaybePromise<number>} [maxRetries=3] The maximum number of times to retry the stream. A value of 0 means no retries.
- * @param {MaybePromise<number>} [delay=1000] The time in milliseconds to wait before each retry attempt.
- * @returns {Stream<T>} A new stream that applies the retry logic.
+ * @template T - The type of values emitted by the source stream.
+ * @param {() => (Stream<T> | Promise<T>)} factory - A factory function executed on each initialization attempt.
+ * @param {MaybePromise<number>} [maxRetries=3] - The maximum number of retry operations allowed. A value of 0 runs a single attempt.
+ * @param {MaybePromise<number>} [delay=1000] - The delay window in milliseconds to pause between attempts.
+ * @returns {Stream<T>} A transactionally guarded stream that applies sequence retry logic.
  */
 export function retry<T = any>(
   factory: () => Stream<T> | Promise<T>,
@@ -27,13 +28,10 @@ export function retry<T = any>(
   return createStream<T>("retry", async function* (signal) {
     const resolvedMaxRetries = isPromiseLike(maxRetries) ? await maxRetries : maxRetries;
     let resolvedDelayValue: number | undefined;
+
     const resolveDelayValue = async () => {
-      if (resolvedDelayValue !== undefined) {
-        return resolvedDelayValue;
-      }
-      if (delay === undefined) {
-        return undefined;
-      }
+      if (resolvedDelayValue !== undefined) return resolvedDelayValue;
+      if (delay === undefined) return undefined;
       resolvedDelayValue = isPromiseLike(delay) ? await delay : delay;
       return resolvedDelayValue;
     };
@@ -43,19 +41,15 @@ export function retry<T = any>(
 
     while (retryCount <= resolvedMaxRetries) {
       let iterator: AsyncIterator<T> | null = null;
-      // Buffer all values from the current attempt. We only yield them to the
-      // consumer once the attempt completes successfully. If the attempt fails,
-      // the buffer is discarded and we retry with a fresh stream. This ensures
-      // the consumer sees a clean, sequential stream without duplicates.
+      
+      // Transaction buffer: Isolate consumer from seeing partial failures
       const buffer: T[] = [];
 
       try {
-        // Check abort signal at loop start
         if (signal?.aborted) {
-          throw new Error("Stream aborted");
+          throw new DOMException("Stream aborted", "AbortError");
         }
 
-        // Wrap factory call in try-catch to handle factory errors
         let produced: Stream<T> | Promise<T>;
         try {
           produced = factory();
@@ -68,20 +62,17 @@ export function retry<T = any>(
         iterator = ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
 
         while (true) {
-          // Check abort signal during iteration
           if (signal?.aborted) {
-            throw new Error("Stream aborted");
+            throw new DOMException("Stream aborted", "AbortError");
           }
 
           const next = await iterator.next();
           if (next.done) break;
-          // Buffer values instead of yielding immediately.
-          // This ensures that if the stream fails partway through, the consumer
-          // doesn't receive duplicate values on retry.
+          
           buffer.push(next.value);
         }
 
-        // Attempt completed successfully — now replay the buffered values
+        // Entire sequence passed successfully — safely unload transaction buffer downstream
         for (const value of buffer) {
           yield value;
         }
@@ -92,46 +83,44 @@ export function retry<T = any>(
         lastError = error instanceof Error ? error : new Error(String(error));
         retryCount++;
 
-        // Discard the buffer — this attempt failed, we'll start fresh
+        // Clear references immediately to free up memory on failure drop
         buffer.length = 0;
 
-        // Only delay if we're going to retry (check BEFORE sleeping)
         const resolvedDelay = await resolveDelayValue();
         if (retryCount <= resolvedMaxRetries && resolvedDelay !== undefined && resolvedDelay > 0) {
-          // Allow abortion during delay
-          try {
-            await new Promise<void>((resolve, reject) => {
-              if (signal?.aborted) {
-                reject(new Error("Stream aborted"));
-                return;
-              }
+          
+          // Secure delay engine that cleanly removes abort listeners when timing out naturally
+          await new Promise<void>((resolve, reject) => {
+            if (signal?.aborted) {
+              return reject(new DOMException("Stream aborted", "AbortError"));
+            }
 
-              const timeoutId = setTimeout(resolve, resolvedDelay);
+            const timeoutId = setTimeout(() => {
+              if (signal) signal.removeEventListener("abort", abortHandler);
+              resolve();
+            }, resolvedDelay);
 
-              if (signal) {
-                const abortHandler = () => {
-                  clearTimeout(timeoutId);
-                  reject(new Error("Stream aborted"));
-                };
-                signal.addEventListener("abort", abortHandler, { once: true });
-              }
-            });
-          } catch (delayError) {
-            throw delayError;
-          }
+            const abortHandler = () => {
+              clearTimeout(timeoutId);
+              reject(new DOMException("Stream aborted", "AbortError"));
+            };
+
+            if (signal) {
+              signal.addEventListener("abort", abortHandler, { once: true });
+            }
+          });
         }
       } finally {
         if (iterator?.return) {
           try {
             await iterator.return(undefined);
           } catch {
-            // Ignore cleanup errors
+            // Suppress secondary exceptions to protect the core error trace
           }
         }
       }
     }
 
-    // If we exhausted retries and had errors, throw the last error
     if (lastError) {
       throw lastError;
     }

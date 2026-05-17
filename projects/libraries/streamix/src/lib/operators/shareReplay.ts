@@ -63,7 +63,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       if (!output) output = createReplaySubject<T>(resolvedSize);
       if (!isConnected) connectSource(source);
       else if (typeof source.return === "function") {
-        Promise.resolve(source.return()).catch(() => {});
+        await Promise.resolve(source.return()).catch(() => {});
       }
       if (!outputIterator) {
         outputIterator = output[Symbol.asyncIterator]();
