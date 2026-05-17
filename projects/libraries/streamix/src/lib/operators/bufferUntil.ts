@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import {
   createOperator,
   DONE,
@@ -160,7 +161,7 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
           switch (event.type) {
             case "value":
               if (event.sourceIndex === 0) {
-                if ((event as any).dropped) {
+                if (isDroppedResult(event)) {
                   return DROPPED(event.value);
                 }
                 buffer.push(event.value as T);

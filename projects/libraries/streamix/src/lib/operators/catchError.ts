@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
 
 /**
@@ -42,7 +43,7 @@ export const catchError = <T = any>(
             return DONE;
           }
 
-          if ((result as any).dropped) {
+          if (isDroppedResult(result)) {
             return result as any;
           }
 

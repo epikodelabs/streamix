@@ -1,4 +1,5 @@
-import { createStream, DROPPED, isPromiseLike, type Stream } from '../abstractions';
+import { isDroppedResult } from '../abstractions';
+import { createStream, isPromiseLike, type Stream } from '../abstractions';
 import { fromAny } from '../converters';
 
 const RAW = Symbol.for("streamix.rawAsyncIterator");
@@ -28,8 +29,8 @@ export function defer<T = any>(factory: () => Stream<T> | Promise<T>): Stream<T>
         while (true) {
           const result = await iterator.next();
           if (result.done) break;
-          if ((result as any).dropped) {
-            yield DROPPED(result.value) as any;
+          if (isDroppedResult(result)) {
+            yield result as any;
           } else {
             yield result.value;
           }

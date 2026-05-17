@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import {
   createReceiver,
   createSubscription,
@@ -117,7 +118,7 @@ export function createSubject<T = any>(): Subject<T> {
           // so the terminal signal (DONE) can still be delivered.
           if (stopped) continue;
 
-           if ((result as any).dropped) continue;
+           if (isDroppedResult(result)) continue;
 
           if (receiver.next) {
              const ret = receiver.next(result.value);
@@ -207,7 +208,7 @@ export function createSubject<T = any>(): Subject<T> {
          while (true) {
            const result = await originalNext();
            if (result.done) return result;
-           if ((result as any).dropped) continue;
+           if (isDroppedResult(result)) continue;
            return result;
          }
        };
@@ -217,7 +218,7 @@ export function createSubject<T = any>(): Subject<T> {
            const result = originalTryNext();
            if (!result) return null;
            if (result.done) return result;
-           if ((result as any).dropped) continue;
+           if (isDroppedResult(result)) continue;
            return result;
          }
        };

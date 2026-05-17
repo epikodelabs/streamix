@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import type { Stream } from "../abstractions";
 
 /**
@@ -28,7 +29,7 @@ export function lastValueFrom<T = any>(stream: Stream<T>): Promise<T> {
         const next = await iterator.next();
         if (next.done) break;
         // Skip dropped results — they are internal backpressure signals.
-        if ((next as any).dropped) continue;
+        if (isDroppedResult(next)) continue;
         hasValue = true;
         lastValue = next.value;
       }

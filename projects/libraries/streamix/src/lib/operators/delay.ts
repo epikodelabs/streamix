@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
@@ -20,7 +21,7 @@ export function delay<T = any>(ms: MaybePromise<number>) {
           const result = await source.next();
           if (result.done) break;
 
-          if ((result as any).dropped) { output.drop(result.value); continue; }
+          if (isDroppedResult(result)) { output.drop(result.value); continue; }
 
           if (resolvedMs !== undefined) {
             await new Promise((resolve) => setTimeout(resolve, resolvedMs));

@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 
@@ -40,7 +41,7 @@ export const concatMap = <T = any, R = any>(
 
             if (result.done) return DONE;
 
-            if ((result as any).dropped) return result as any;
+            if (isDroppedResult(result)) return result;
 
             const projected = project(result.value, outerIndex++);
             const normalized = isPromiseLike(projected) ? await projected : projected;
@@ -58,7 +59,7 @@ export const concatMap = <T = any, R = any>(
             continue;
           }
 
-          if ((innerResult as any).dropped) return innerResult as any;
+          if (isDroppedResult(innerResult)) return innerResult;
           return NEXT(innerResult.value);
         }
       },

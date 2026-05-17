@@ -1,4 +1,5 @@
-import { createStream, DROPPED, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
+import { isDroppedResult } from '../abstractions';
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 
 const RAW = Symbol.for("streamix.rawAsyncIterator");
@@ -69,8 +70,8 @@ export function retry<T = any>(
           const next = await iterator.next();
           if (next.done) break;
 
-          if ((next as any).dropped) {
-            yield DROPPED(next.value) as any;
+          if (isDroppedResult(next)) {
+            yield next as any;
             continue;
           }
           

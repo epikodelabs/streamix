@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 
 /**
@@ -21,7 +22,7 @@ export const throwError = <T = any>(message: MaybePromise<string>) =>
       next: async () => {
         const result = await source.next();
         if (result.done) return DONE as any;
-        if ((result as any).dropped) return result as any;
+        if (isDroppedResult(result)) return result;
         throw new Error(isPromiseLike(message) ? await message : message);
       }
     };

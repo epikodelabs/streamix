@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 import { createSubject } from '../subjects';
 
@@ -47,7 +48,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
           const capturedResult = result;
           schedule(() => {
             try {
-              if ((capturedResult as any).dropped) {
+              if (isDroppedResult(capturedResult)) {
                 output.drop(capturedResult.value);
               } else {
                 output.next(capturedResult.value);

@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import {
     createPushOperator,
     isPromiseLike,
@@ -39,7 +40,7 @@ export const delayWhile = <T = any>(
           const result = await source.next();
           if (result.done) break;
 
-          if ((result as any).dropped) { output.drop(result.value); continue; }
+          if (isDroppedResult(result)) { output.drop(result.value); continue; }
 
           const predicateResult = predicate(result.value, index++);
           const shouldDelay = isPromiseLike(predicateResult)

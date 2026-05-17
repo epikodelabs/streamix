@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 
 /**
  * Coordinator utilities for merging and managing multiple async iterators.
@@ -166,7 +167,7 @@ export function createAsyncCoordinator(
           }
           pushEvent({ type: "complete", sourceIndex: i }, i);
         } else {
-          const event: RunnerEvent<any> = (r as any).dropped
+          const event: RunnerEvent<any> = isDroppedResult(r)
             ? { type: "value", value: r.value, sourceIndex: i, dropped: true }
             : { type: "value", value: r.value, sourceIndex: i };
           pushEvent(event, i);
@@ -211,7 +212,7 @@ export function createAsyncCoordinator(
           }
           pushEvent({ type: "complete", sourceIndex: i }, i);
         } else {
-          const event: RunnerEvent<any> = (r as any).dropped
+          const event: RunnerEvent<any> = isDroppedResult(r)
             ? { type: "value", value: r.value, sourceIndex: i, dropped: true }
             : { type: "value", value: r.value, sourceIndex: i };
           pushEvent(event, i);

@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
@@ -57,7 +58,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
             break;
           }
 
-          if ((result as any).dropped) { output.drop(result.value); continue; }
+          if (isDroppedResult(result)) { output.drop(result.value); continue; }
 
           // The previous buffered value (if any) is superseded — record for drop.
           if (bufferedResult) {

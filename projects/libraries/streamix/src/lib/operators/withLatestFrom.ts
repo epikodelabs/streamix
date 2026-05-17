@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import {
   createPushOperator,
   isPromiseLike,
@@ -90,7 +91,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
               return;
             }
             if (!buffered || buffered.done) break;
-            if ((buffered as any).dropped) {
+            if (isDroppedResult(buffered)) {
               output.drop(buffered.value as any);
               continue;
             }

@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
@@ -58,7 +59,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
           const result = await source.next();
           if (result.done) break;
 
-          if ((result as any).dropped) { output.drop(result.value); continue; }
+          if (isDroppedResult(result)) { output.drop(result.value); continue; }
 
           const now = Date.now();
 

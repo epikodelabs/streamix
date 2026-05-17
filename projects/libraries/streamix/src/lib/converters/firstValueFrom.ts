@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import type { Stream } from "../abstractions";
 
 /**
@@ -25,7 +26,7 @@ export function firstValueFrom<T = any>(stream: Stream<T>): Promise<T> {
           throw new Error("Stream completed without emitting a value");
         }
         // Skip dropped results — they are internal backpressure signals.
-        if ((result as any).dropped) continue;
+        if (isDroppedResult(result)) continue;
         return result.value;
       }
     } finally {

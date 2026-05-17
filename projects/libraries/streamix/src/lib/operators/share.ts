@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import { createOperator, DONE, type Operator } from '../abstractions';
 import { createSubject, type Subject } from '../subjects';
 
@@ -24,7 +25,7 @@ export function share<T = any>() {
           const result = await source.next();
           if (result.done) break;
 
-          if ((result as any).dropped) {
+          if (isDroppedResult(result)) {
             shared!.drop(result.value);
           } else {
             shared!.next(result.value);

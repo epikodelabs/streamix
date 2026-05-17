@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import {
   createOperator,
   DONE,
@@ -48,7 +49,7 @@ export const exhaustMap = <T = any, R = any>(
           isSourceDone = true;
           return null;
         }
-        if ((r as any).dropped) return r;
+        if (isDroppedResult(r)) return r;
       }
     };
 
@@ -59,7 +60,7 @@ export const exhaustMap = <T = any, R = any>(
             const result = await innerIterator.next();
 
             if (!result.done) {
-              if ((result as any).dropped) return result as any;
+              if (isDroppedResult(result)) return result;
               return NEXT(result.value);
             }
 
@@ -76,7 +77,7 @@ export const exhaustMap = <T = any, R = any>(
             return DONE;
           }
 
-          if ((result as any).dropped) return result as any;
+          if (isDroppedResult(result)) return result;
 
           let projected: any;
           try {

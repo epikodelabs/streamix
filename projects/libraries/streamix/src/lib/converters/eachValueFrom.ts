@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import type { Stream } from "../abstractions";
 
 /**
@@ -25,7 +26,7 @@ export function eachValueFrom<T = any>(stream: Stream<T>): AsyncGenerator<T> {
         const result = await iterator.next();
         if (result.done) return;
         // Skip dropped results — they are internal backpressure signals.
-        if ((result as any).dropped) continue;
+        if (isDroppedResult(result)) continue;
         yield result.value;
       }
     } finally {

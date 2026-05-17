@@ -1,4 +1,5 @@
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '@epikodelabs/streamix';
+import { isDroppedResult } from '@epikodelabs/streamix';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '@epikodelabs/streamix';
 
 /**
  * Creates a stream operator that emits the maximum value from the source stream.
@@ -34,7 +35,7 @@ export const max = <T = any>(
 
           const result = await source.next();
 
-          if ((result as any).dropped) return result as any;
+          if (isDroppedResult(result)) return result;
 
           if (result.done) {
             // Emit final max if exists

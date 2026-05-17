@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
 
 /**
@@ -50,7 +51,7 @@ export const first = <T = any>(predicate?: (value: T) => MaybePromise<boolean>) 
           await stopSource();
           throw new Error("No elements in sequence");
         }
-        if ((result as any).dropped) return result as any;
+        if (isDroppedResult(result)) return result;
 
         const value = result.value;
         const predicateResult = predicate ? predicate(value) : true;

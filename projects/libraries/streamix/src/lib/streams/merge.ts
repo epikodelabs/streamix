@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import { createStream, DROPPED, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
@@ -55,8 +56,8 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
         continue;
       }
 
-      if ((result as any).dropped) {
-        yield DROPPED(result.value) as any;
+      if (isDroppedResult(result)) {
+        yield result as any;
       } else {
         yield result.value;
       }

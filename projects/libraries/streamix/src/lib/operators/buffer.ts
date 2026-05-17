@@ -1,3 +1,4 @@
+import { isDroppedResult } from '../abstractions';
 import { createPushOperator, type MaybePromise } from "../abstractions";
 import { timer } from "../streams";
 
@@ -70,7 +71,7 @@ export function buffer<T = any>(period: MaybePromise<number>) {
           const result = await source.next();
           if (result.done) break;
 
-          if ((result as any).dropped) {
+          if (isDroppedResult(result)) {
             output.drop(result.value as any);
             continue;
           }

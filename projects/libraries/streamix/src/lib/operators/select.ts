@@ -1,4 +1,5 @@
-import { createOperator, DROPPED, type Operator } from "../abstractions";
+import { isDroppedResult } from '../abstractions';
+import { createOperator, type Operator } from "../abstractions";
 
 /**
  * Creates a stream operator that emits only the values at the specified indices from a source stream.
@@ -46,8 +47,8 @@ export const select = <T = any>(
         const result: IteratorResult<T> = await source.next();
         if (result.done) break;
 
-        if ((result as any).dropped) {
-          yield DROPPED(result.value) as any;
+        if (isDroppedResult(result)) {
+          yield result as any;
           currentIndex++;
           continue;
         }
