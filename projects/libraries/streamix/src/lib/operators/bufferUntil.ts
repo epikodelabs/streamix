@@ -103,7 +103,7 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
               // Propagate error and cancel iterator
               cancelled = true;
               try {
-                await notifierIt.return?.();
+                await runner.return?.();
               } catch {}
               throw event.error;
           }
@@ -121,7 +121,6 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
         cancelled = true;
         try {
           await runner.return?.();
-          await notifierIt.return?.();
         } catch {}
         return value !== undefined ? { value, done: true } : DONE;
       },
@@ -136,8 +135,7 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
         if (cancelled) return Promise.reject(err);
         cancelled = true;
         try {
-          await runner.throw?.(err).catch(() => {});
-          await notifierIt.return?.();
+          await runner.throw?.(err);
         } catch {}
         return Promise.reject(err);
       },
@@ -178,7 +176,7 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
 
             case "error":
               cancelled = true;
-              notifierIt.return?.().catch(() => {});
+              runner.return?.().catch(() => {});
               throw event.error;
           }
         }

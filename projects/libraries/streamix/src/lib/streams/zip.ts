@@ -19,13 +19,8 @@ export function zip<T extends readonly unknown[] = any[]>(
   const gen = async function* (): AsyncGenerator<T, void, unknown> {
     if (sources.length === 0) return;
 
-    const resolvedSources: Array<Stream<T[number]> | Array<T[number]> | T[number]> = [];
-    for (const source of sources) {
-      resolvedSources.push(isPromiseLike(source) ? await source : source);
-    }
-
-    const iterators = resolvedSources.map((source) => {
-      const resolved = fromAny(source);
+    const iterators = sources.map((source) => {
+      const resolved = fromAny(source as any);
       return ((resolved as any)[RAW]?.() ?? resolved[Symbol.asyncIterator]()) as AsyncIterator<T[number]>;
     });
 

@@ -49,9 +49,9 @@ export const catchError = <T = any>(
           return NEXT(result.value);
         } catch (error) {
           if (!errorCaughtAndHandled) {
+            errorCaughtAndHandled = true;
             const handlerResult = handler(error);
             if (isPromiseLike(handlerResult)) await handlerResult;
-            errorCaughtAndHandled = true;
             completed = true;
             return DROPPED(error as T);
           }

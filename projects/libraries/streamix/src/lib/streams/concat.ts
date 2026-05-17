@@ -24,15 +24,9 @@ const RAW = Symbol.for("streamix.rawAsyncIterator");
 
 export function concat<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T> {
   async function* generator() {
-    const isPromiseSource = (value: Stream<T> | Promise<T>): value is Promise<any> =>
-      isPromiseLike(value);
-    const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
     for (const source of sources) {
-      resolvedSources.push(isPromiseSource(source) ? await source : source);
-    }
-
-    for (const source of resolvedSources) {
-      const stream = fromAny<T>(source);
+      const resolvedSource = isPromiseLike(source) ? await source : source;
+      const stream = fromAny<T>(resolvedSource);
       const iterator = ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
 
       try {
@@ -45,8 +39,6 @@ export function concat<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<
             yield result.value;
           }
         }
-      } catch (error) {
-        throw error;
       } finally {
         // Attempt to close iterator early on abort or completion
         if (iterator.return) {

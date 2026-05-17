@@ -36,14 +36,8 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
   const gen = async function* () {
     if (sources.length === 0) return;
 
-    // Resolve any promises in sources
-    const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
-    for (const source of sources) {
-      resolvedSources.push(isPromiseLike(source) ? await source : source);
-    }
-
-    const iterators = resolvedSources.map((source) => {
-      const resolved = fromAny<T>(source);
+    const iterators = sources.map((source) => {
+      const resolved = fromAny<T>(source as any);
       return ((resolved as any)[RAW]?.() ?? resolved[Symbol.asyncIterator]()) as AsyncIterator<T>;
     });
     const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));

@@ -51,22 +51,19 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
 ): Stream<T[]> {
   async function* generator() {
     const normalizedSources = sources.length === 1 && Array.isArray(sources[0]) ? sources[0] : sources;
-    const resolvedSources: Array<Stream<T> | Array<T> | T> = [];
-    for (const source of normalizedSources) {
-      resolvedSources.push(isPromiseLike(source) ? await source : source);
-    }
 
-    const results = new Array(resolvedSources.length);
-    const hasValue = new Array(resolvedSources.length).fill(false);
-    const resolvedIterators = resolvedSources.map((source) => {
-      const stream = fromAny(source);
+    const results = new Array(normalizedSources.length);
+    const hasValue = new Array(normalizedSources.length).fill(false);
+    const iterators = normalizedSources.map((source) => {
+      const stream = fromAny(source as any);
       return ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
     });
-    const coordinator = createAsyncCoordinator(resolvedIterators);
+
+    const coordinator = createAsyncCoordinator(iterators);
     let completedCount = 0;
 
     try {
-      while (completedCount < resolvedIterators.length) {
+      while (completedCount < iterators.length) {
         const next = await coordinator.next();
         if (next.done) break;
 
