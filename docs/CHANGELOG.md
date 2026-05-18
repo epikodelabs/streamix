@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.44
+
+Removed the internal `DROPPED` backpressure mechanism and simplified operator, stream, and subject internals across the library.
+
+- **`operator.ts`** — Removed `DROPPED`, `isDroppedResult`, `DroppedResult`, and `nextSourceResult`. Operators now handle suppression internally with simple loops instead of emitting special dropped signals.
+- **`stream.ts`** — Eliminated all dropped-result filtering from the stream pipeline and public iterator wrapper.
+- **`subject.ts`** — Removed the `drop()` method and dropped-result filtering from async-iterator listeners.
+- **`iterator.ts`** — Removed `__pushDropped`, `pushDropped`, and the `dropped` flag from iterator results and pending-push replay.
+- **Aggregate operators** — Simplified `average`, `count`, `every`, `max`, `min`, `mode`, `none`, `some`, `sum`, and `unique` implementations.
+- **Coroutine operators** — Cleaned up `cascade` and `coroutine` internals.
+- **General cleanup** — Removed unused imports and dead code across streams, operators, converters, and utilities.
+
 ## 2.0.43
 
 Fixed stream lifecycle and networking edge cases across the core and companion packages.
