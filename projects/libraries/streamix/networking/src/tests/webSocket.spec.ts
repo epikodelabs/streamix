@@ -182,6 +182,34 @@ idescribe("webSocket", () => {
     expect(warn).toHaveBeenCalledWith("Cannot send message: WebSocket is not open");
   });
 
+  it("should close connecting sockets and drop queued messages when stream.close() is called", async () => {
+    const stream = webSocket<any>("ws://test", factory);
+    spyOn(lastWs, "close").and.callThrough();
+
+    stream.send({ cmd: "queued" });
+    stream.close();
+    lastWs.triggerOpen();
+
+    expect(lastWs.close).toHaveBeenCalled();
+    expect(lastWs.sent).toEqual([]);
+  });
+
+  it("should close sockets created after close() when factory resolves asynchronously", async () => {
+    let ws: MockWebSocket | undefined;
+    const asyncFactory = jasmine.createSpy("asyncFactory").and.callFake((url: string) => {
+      ws = new MockWebSocket(url);
+      return Promise.resolve(ws as any);
+    });
+
+    const stream = webSocket<any>("ws://test", asyncFactory);
+    stream.close();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ws).toBeDefined();
+    expect(ws!.readyState).toBe(3);
+  });
+
   it("should error if socket fails to initialize (rejected URL promise)", async () => {
     const stream = webSocket<any>(Promise.reject(new Error("bad url")), factory);
     const iterator = eachValueFrom(stream);

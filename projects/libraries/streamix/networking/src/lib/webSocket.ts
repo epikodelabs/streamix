@@ -45,6 +45,14 @@ export function webSocket<T = any>(
       const created = factory(resolvedUrl);
       socket = isPromise(created) ? await created : created;
       setupSocketHandlers();
+      if (
+        done &&
+        socket &&
+        (socket.readyState === WebSocket.CONNECTING ||
+          socket.readyState === WebSocket.OPEN)
+      ) {
+        socket.close();
+      }
     } catch (error) {
       done = true;
       // Reject any pending next() call
@@ -66,6 +74,13 @@ export function webSocket<T = any>(
     if (!socket) return;
 
     const onOpen = () => {
+      if (done) {
+        try {
+          socket?.close();
+        } catch {}
+        return;
+      }
+
       isOpen = true;
       while (sendQueue.length) {
         try {
@@ -188,7 +203,12 @@ export function webSocket<T = any>(
   stream.close = () => {
     done = true;
     isOpen = false;
-    if (socket && socket.readyState === WebSocket.OPEN) {
+    sendQueue.length = 0;
+    if (
+      socket &&
+      (socket.readyState === WebSocket.CONNECTING ||
+        socket.readyState === WebSocket.OPEN)
+    ) {
       socket.close();
     }
     if (rejectNext) {

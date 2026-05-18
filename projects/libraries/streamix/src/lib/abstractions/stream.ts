@@ -167,16 +167,16 @@ export function createStream<T>(
   interface ActiveRun {
     subject: Stream<T> & { next: (v: T) => void; error: (e: any) => void; complete: () => void; };
     abortController: AbortController;
+    subscriberCount: number;
   }
 
   let activeRun: ActiveRun | null = null;
-  let subscriberCount = 0;
 
   const startNewRun = (): ActiveRun => {
     // Create new run state
     const abortController = new AbortController();
     const subject = createSubject<T>();
-    const run: ActiveRun = { subject, abortController };
+    const run: ActiveRun = { subject, abortController, subscriberCount: 0 };
     
     // activeRun = run; // Caller handles this
 
@@ -245,9 +245,10 @@ export function createStream<T>(
     if (!activeRun || activeRun.abortController.signal.aborted) {
       activeRun = startNewRun();
     }
-    
-    subscriberCount++;
-    const sub = activeRun.subject.subscribe(cb);
+
+    const run = activeRun;
+    run.subscriberCount++;
+    const sub = run.subject.subscribe(cb);
 
     let unsubscribed = false;
     const originalUnsubscribe = sub.unsubscribe.bind(sub);
@@ -255,11 +256,13 @@ export function createStream<T>(
       if (unsubscribed) return;
       unsubscribed = true;
       await originalUnsubscribe();
-      subscriberCount--;
-      if (subscriberCount === 0) {
-        if (activeRun && !activeRun.abortController.signal.aborted) {
-          activeRun.abortController.abort();
-        }
+      run.subscriberCount = Math.max(0, run.subscriberCount - 1);
+      if (
+        run.subscriberCount === 0 &&
+        activeRun === run &&
+        !run.abortController.signal.aborted
+      ) {
+        run.abortController.abort();
       }
     };
 

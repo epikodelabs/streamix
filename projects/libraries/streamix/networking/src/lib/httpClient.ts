@@ -50,6 +50,11 @@ export type Context = {
   [key: string]: any;
 };
 
+type HttpContextError = Error & {
+  context?: Context;
+  status?: number;
+};
+
 /**
  * A middleware function for modifying the HTTP request context.
  *
@@ -197,8 +202,18 @@ export const useOauth = ({
     // Set the initial token in the Authorization header
     context.headers["Authorization"] = `Bearer ${await getToken()}`;
 
-    // Attempt the request
-    const newContext = await next(context);
+    let newContext: Context;
+    try {
+      newContext = await next(context);
+    } catch (error: any) {
+      const contextualError = error as HttpContextError;
+      const retryContext = contextualError.context;
+      if (contextualError.status === 401 && retryContext && shouldRetry(retryContext)) {
+        retryContext.headers["Authorization"] = `Bearer ${await refreshToken()}`;
+        return await next(retryContext);
+      }
+      throw error;
+    }
 
     // If unauthorized and shouldRetry allows, refresh the token and retry
     if (newContext.status === 401 && shouldRetry(newContext)) {
@@ -497,20 +512,32 @@ export const createHttpClient = (): HttpClient => {
    * Resolves the final request URL, adding query parameters if provided.
    */
   const resolveUrl = (url: string, params?: Record<string, string>): string => {
-    const fullUrl =
-      url.startsWith('http://') || url.startsWith('https://')
-        ? url
-        : url;
+    const isAbsolute = url.startsWith('http://') || url.startsWith('https://');
 
     if (params) {
-      const urlObj = new URL(fullUrl, 'http://localhost');
+      if (isAbsolute) {
+        const urlObj = new URL(url);
+        Object.entries(params).forEach(([key, value]) =>
+          urlObj.searchParams.append(key, value),
+        );
+        return urlObj.toString();
+      }
+
+      const baseHref =
+        (typeof document !== 'undefined' && document.baseURI) ||
+        (typeof location !== 'undefined' && typeof location.href === 'string'
+          ? location.href
+          : undefined) ||
+        'http://localhost';
+
+      const urlObj = new URL(url, baseHref);
       Object.entries(params).forEach(([key, value]) =>
         urlObj.searchParams.append(key, value),
       );
       return urlObj.toString();
     }
 
-    return fullUrl;
+    return url;
   };
 
   /**
@@ -560,7 +587,12 @@ export const createHttpClient = (): HttpClient => {
 
       // **Handle errors before processing response**
       if (!response.ok) {
-        throw new Error(`${LOG_PREFIX} HTTP Error: ${response.status} ${response.statusText} for ${method} ${url}`);
+        const error = new Error(
+          `${LOG_PREFIX} HTTP Error: ${response.status} ${response.statusText} for ${method} ${url}`
+        ) as HttpContextError;
+        error.status = response.status;
+        error.context = { ...context };
+        throw error;
       }
 
       const data = createReplaySubject();

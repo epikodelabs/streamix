@@ -237,6 +237,42 @@ describe('stream', () => {
       done();
     }, 0);
   });
+
+  it('tracks subscriber lifecycles per run after a completed stream restarts', (done) => {
+    let runCount = 0;
+    let restartedRunAborted = false;
+
+    const s = createStream('restartable', async function* (signal: AbortSignal | undefined) {
+      runCount++;
+
+      if (runCount === 1) {
+        yield 1;
+        return;
+      }
+
+      try {
+        yield 2;
+        await new Promise<void>((resolve) =>
+          signal?.addEventListener('abort', () => resolve(), { once: true })
+        );
+      } finally {
+        restartedRunAborted = true;
+      }
+    });
+
+    s.subscribe({ next: () => {} });
+
+    setTimeout(() => {
+      const secondSub = s.subscribe({ next: () => {} });
+      secondSub.unsubscribe();
+
+      setTimeout(() => {
+        expect(runCount).toBe(2);
+        expect(restartedRunAborted).toBeTrue();
+        done();
+      }, 0);
+    }, 0);
+  });
 });
 
 
