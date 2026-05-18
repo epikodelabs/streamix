@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Creates a stream operator that sums values from the source stream.
@@ -24,19 +24,16 @@ export const sum = <T = any>(
       async next() {
         if (emitted) return DONE;
 
-        return nextSourceResult(
-          source,
-          async (result) => {
-            const selected = selector(result.value, index++);
-            const value = isPromiseLike(selected) ? await selected : selected;
-            total += value;
-            return DROPPED(result.value);
-          },
-          () => {
+        while (true) {
+          const result = await source.next();
+          if (result.done) {
             emitted = true;
             return NEXT(total);
           }
-        ) as Promise<IteratorResult<number>>;
+          const selected = selector(result.value, index++);
+          const value = isPromiseLike(selected) ? await selected : selected;
+          total += value;
+        }
       },
     };
   });

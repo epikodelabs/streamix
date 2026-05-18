@@ -1,4 +1,3 @@
-import { isDroppedResult } from '@epikodelabs/streamix';
 import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
@@ -172,7 +171,7 @@ onmessage = async (event) => {
       postMessage({ workerId, taskId, error: error.message, type: 'error' });
     }
   }
-};`;
+}`;
 
 /**
  * Minified helper script used inside Web Worker blobs.
@@ -205,8 +204,8 @@ export function coroutine(config: CoroutineConfig): <T, R>(main: MainTask<T, R>,
 
 /**
  * Creates a coroutine operator with a default configuration.
- * @template T The type of the input data for the main task.
- * @template R The type of the return value from the main task.
+ * @template T The input type of the first coroutine.
+ * @template R The output type of the last coroutine.
  * @param {MainTask<T, R>} main - The main task function to run inside the workers.
  * @param {Function[]} functions - Any helper functions required by the main task.
  * @returns {Coroutine<T, R>} A Coroutine operator.
@@ -409,7 +408,6 @@ export function coroutine<T, R>(
               await finalize();
               return DONE;
             }
-            if (isDroppedResult(result)) return result;
 
             const taskResult = await processTask(result.value as any);
             return NEXT(taskResult);

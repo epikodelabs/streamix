@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import {
     createOperator,
     DONE,
@@ -68,10 +67,6 @@ export const expand = <T = any>(
       while (true) {
         const child = await iterator.next();
         if (child.done) break;
-        if (isDroppedResult(child)) {
-          queue.push({ result: child, depth: depth + 1 });
-          continue;
-        }
         const item = { result: child, depth: depth + 1 };
         if (options.traversal === 'breadth') {
           queue.push(item);
@@ -91,15 +86,12 @@ export const expand = <T = any>(
               break;
             }
 
-            if (isDroppedResult(result)) return result;
-
             queue.push({ result, depth: 0 });
           }
 
           if (queue.length > 0) {
             const item =
               options.traversal === 'breadth' ? queue.shift()! : queue.pop()!;
-            if (isDroppedResult(item.result)) return item.result;
             await enqueueChildren(item.result.value, item.depth);
             return NEXT(item.result.value);
           }

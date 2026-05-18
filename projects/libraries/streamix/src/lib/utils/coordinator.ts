@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 
 /**
  * Coordinator utilities for merging and managing multiple async iterators.
@@ -21,7 +20,7 @@ import { DONE } from "../abstractions";
  * @typeParam T - The type of value emitted by the sources.
  */
 export type RunnerEvent<T> =
-  | { type: "value"; value: T; sourceIndex: number; dropped?: true }
+  | { type: "value"; value: T; sourceIndex: number }
   | { type: "complete"; sourceIndex: number }
   | { type: "error"; error: any; sourceIndex: number };
 
@@ -167,10 +166,7 @@ export function createAsyncCoordinator(
           }
           pushEvent({ type: "complete", sourceIndex: i }, i);
         } else {
-          const event: RunnerEvent<any> = isDroppedResult(r)
-            ? { type: "value", value: r.value, sourceIndex: i, dropped: true }
-            : { type: "value", value: r.value, sourceIndex: i };
-          pushEvent(event, i);
+          pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
         }
 
         notify();
@@ -212,10 +208,7 @@ export function createAsyncCoordinator(
           }
           pushEvent({ type: "complete", sourceIndex: i }, i);
         } else {
-          const event: RunnerEvent<any> = isDroppedResult(r)
-            ? { type: "value", value: r.value, sourceIndex: i, dropped: true }
-            : { type: "value", value: r.value, sourceIndex: i };
-          pushEvent(event, i);
+          pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
         }
       } catch (err) {
         if (!completed[i]) {

@@ -6,7 +6,6 @@ import {
   AsyncIteratorState,
   asyncPull,
   pushComplete,
-  pushDropped,
   pushError,
   pushValue,
   syncPull
@@ -17,7 +16,6 @@ import {
  */
 export type AsyncPushable<R> = AsyncIterator<R> & AsyncIterable<R> & {
   push(value: R): void | Promise<void>;
-  drop(value: R): void | Promise<void>;
   error(err: any): void;
   complete(): void;
   completed(): boolean;
@@ -56,7 +54,6 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
     __hasBufferedValues?: () => boolean;
     __onPush?: () => void;
     push?: any;
-    drop?: any;
     error?: any;
     complete?: any;
     completed?: any;
@@ -98,10 +95,6 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
   // Augment with push API
   iterator.push = function(value: R): void | Promise<void> {
     return receiver.next(value);
-  };
-
-  iterator.drop = function(value: R): void | Promise<void> {
-    return pushDropped(state, iterator, value, iterator.__onPush);
   };
 
   iterator.error = function(err: any) {

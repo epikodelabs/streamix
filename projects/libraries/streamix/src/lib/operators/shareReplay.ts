@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 import { createReplaySubject, type ReplaySubject } from '../subjects';
 
@@ -33,11 +32,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
           const result = await source.next();
           if (result.done) break;
 
-          if (isDroppedResult(result)) {
-            output!.drop(result.value);
-          } else {
-            output!.next(result.value);
-          }
+          output!.next(result.value);
         }
       } catch (err) {
         output!.error(err);

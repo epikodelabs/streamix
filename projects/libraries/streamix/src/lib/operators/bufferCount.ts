@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import { DONE, type MaybePromise, NEXT, type Operator, createOperator, isPromiseLike } from "../abstractions";
 
 /**
@@ -32,8 +31,6 @@ export const bufferCount = <T = any>(bufferSize: MaybePromise<number> = Infinity
 
             return DONE;
           }
-
-          if (isDroppedResult(result)) return result;
 
           buffer.push(result);
         }

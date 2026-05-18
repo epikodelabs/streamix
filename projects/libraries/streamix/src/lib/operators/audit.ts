@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
@@ -18,19 +17,12 @@ import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstrac
 export const audit = <T = any>(duration: MaybePromise<number>) =>
   createPushOperator<T>('audit', (source, output) => {
     let bufferedResult: IteratorResult<T> | undefined;
-    let supersededValues: T[] = [];
     let timerId: ReturnType<typeof setTimeout> | undefined;
     let resolvedDuration: number | undefined;
     let completed = false;
 
     const flush = () => {
       if (!bufferedResult) return;
-
-      // Drop all values that were superseded during the audit window.
-      for (const v of supersededValues) {
-        output.drop(v);
-      }
-      supersededValues = [];
 
       output.push(bufferedResult.value!);
 
@@ -56,13 +48,6 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
             completed = true;
             if (bufferedResult) flush();
             break;
-          }
-
-          if (isDroppedResult(result)) { output.drop(result.value); continue; }
-
-          // The previous buffered value (if any) is superseded — record for drop.
-          if (bufferedResult) {
-            supersededValues.push(bufferedResult.value!);
           }
 
           bufferedResult = result;

@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
 
 /**
@@ -22,11 +21,7 @@ export function from<T = any>(source: MaybePromise<AsyncIterable<T> | Iterable<T
       while (true) {
         const result = await iterator.next();
         if (result.done) break;
-        if (isDroppedResult(result)) {
-          yield result as any;
-        } else {
-          yield result.value;
-        }
+        yield result.value;
       }
     } finally {
       if (iterator.return) {

@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
 import { fromAny } from '../converters';
 
@@ -34,11 +33,7 @@ export function iif<T = any>(
       while (true) {
         const result = await iterator.next();
         if (result.done) break;
-        if (isDroppedResult(result)) {
-          yield result as any;
-        } else {
-          yield result.value;
-        }
+        yield result.value;
       }
     } finally {
       // Ensure proper cleanup of the iterator

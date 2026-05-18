@@ -1,16 +1,12 @@
-import { isDroppedResult } from '../abstractions';
 import type { Stream } from "../abstractions";
 
 /**
  * Returns a promise that resolves with the last emitted value from a `Stream`.
  *
- * Dropped results (internal backpressure signals from filter/skip/debounce etc.)
- * are skipped transparently — only real emissions are considered.
- *
- * - **Successful resolution:** The promise resolves with the last *real* value
+ * - **Successful resolution:** The promise resolves with the last value
  *   emitted by the stream, after the stream has completed.
  * - **Rejection on error:** If the stream emits an error, the promise is rejected.
- * - **Rejection on no value:** If the stream completes without emitting any real
+ * - **Rejection on no value:** If the stream completes without emitting any
  *   values, the promise is rejected with a specific error message.
  *
  * @template T The type of the value expected from the stream.
@@ -28,8 +24,6 @@ export function lastValueFrom<T = any>(stream: Stream<T>): Promise<T> {
       while (true) {
         const next = await iterator.next();
         if (next.done) break;
-        // Skip dropped results — they are internal backpressure signals.
-        if (isDroppedResult(next)) continue;
         hasValue = true;
         lastValue = next.value;
       }

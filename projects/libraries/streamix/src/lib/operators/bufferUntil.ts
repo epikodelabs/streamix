@@ -1,8 +1,6 @@
-import { isDroppedResult } from '../abstractions';
 import {
   createOperator,
   DONE,
-  DROPPED,
   type Operator,
   type Stream,
 } from "../abstractions";
@@ -86,8 +84,7 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
           switch (event.type) {
             case "value":
               if (event.sourceIndex === 0) {
-                // Source value: buffer it or relay dropped values unchanged
-                if (event.dropped) return DROPPED(event.value);
+                // Source value: buffer it
                 buffer.push(event.value as T);
               } else {
                 // Notifier value: flush buffer
@@ -161,9 +158,6 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
           switch (event.type) {
             case "value":
               if (event.sourceIndex === 0) {
-                if (isDroppedResult(event)) {
-                  return DROPPED(event.value);
-                }
                 buffer.push(event.value as T);
               } else if (buffer.length > 0) {
                 return flushBuffer();

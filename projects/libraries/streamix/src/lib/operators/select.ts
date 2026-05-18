@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import { createOperator, type Operator } from "../abstractions";
 
 /**
@@ -46,12 +45,6 @@ export const select = <T = any>(
       while (true) {
         const result: IteratorResult<T> = await source.next();
         if (result.done) break;
-
-        if (isDroppedResult(result)) {
-          yield result as any;
-          currentIndex++;
-          continue;
-        }
 
         const targetIndexResult = await nextTargetIndexPromise;
         

@@ -1,5 +1,4 @@
-import { isDroppedResult } from '@epikodelabs/streamix';
-import { createOperator, DONE, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '@epikodelabs/streamix';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from '@epikodelabs/streamix';
 
 /**
  * Creates a stream operator that emits the smallest value produced by the source stream.
@@ -19,19 +18,18 @@ export const min = <T = any>(
   createOperator<T, T>("min", function (this: Operator, source) {
     let minValue: T | undefined;
     let hasMin = false;
-    let emittedMin = false;
+    let emitted = false;
 
     return {
       next: async () => {
+        if (emitted) return DONE;
+
         while (true) {
           const result = await source.next();
 
-          if (isDroppedResult(result)) return result;
-
           if (result.done) {
-            // Emit the final minimum once
-            if (hasMin && !emittedMin) {
-              emittedMin = true;
+            emitted = true;
+            if (hasMin) {
               return NEXT(minValue!);
             }
             return DONE;

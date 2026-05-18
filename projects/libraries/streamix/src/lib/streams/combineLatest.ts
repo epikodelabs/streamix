@@ -1,4 +1,4 @@
-import { createStream, DROPPED, type Stream } from "../abstractions";
+import { createStream, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
 
@@ -43,10 +43,6 @@ export function combineLatest<T extends unknown[] = any[]>(
 
         switch (event.type) {
           case "value":
-            if (event.dropped) {
-              yield DROPPED(event.value);
-              break;
-            }
             latestValues[event.sourceIndex] = event.value;
             hasEmitted.add(event.sourceIndex);
 

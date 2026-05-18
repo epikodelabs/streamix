@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 
@@ -70,11 +69,6 @@ export function retry<T = any>(
           const next = await iterator.next();
           if (next.done) break;
 
-          if (isDroppedResult(next)) {
-            yield next as any;
-            continue;
-          }
-          
           buffer.push(next.value);
         }
 

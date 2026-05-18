@@ -1,5 +1,4 @@
-import { isDroppedResult } from '../abstractions';
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that catches errors from the source stream and handles them.
@@ -11,9 +10,9 @@ import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, NEXT, 
  *
  * - **Error Handling:** The `handler` is executed only for the first error encountered.
  * - **Dropped Signal:** The first handled error is yielded with `dropped: true` so
- * backpressure is released and downstream operators can observe the suppressed error.
+ *   backpressure is released and downstream operators can observe the suppressed error.
  * - **Completion:** After that dropped signal, the operator completes, terminating
- * the stream's flow.
+ *   the stream's flow.
  * - **Subsequent Errors:** Any errors after the first will be re-thrown.
  *
  * This is useful for error-handling strategies where you want to perform a specific
@@ -43,10 +42,6 @@ export const catchError = <T = any>(
             return DONE;
           }
 
-          if (isDroppedResult(result)) {
-            return result as any;
-          }
-
           return NEXT(result.value);
         } catch (error) {
           if (!errorCaughtAndHandled) {
@@ -54,7 +49,7 @@ export const catchError = <T = any>(
             const handlerResult = handler(error);
             if (isPromiseLike(handlerResult)) await handlerResult;
             completed = true;
-            return DROPPED(error as T);
+            return DONE;
           }
 
           throw error;

@@ -55,7 +55,6 @@ export function takeUntil<T = any, N = any>(
             case 'value':
               if (event.sourceIndex === 0) {
                 // Source value - forward it (preserving dropped flag)
-                if (event.dropped) return { done: false, value: event.value, dropped: true } as any;
                 return { done: false, value: event.value };
               }
               // Notifier emitted - stop immediately
@@ -94,7 +93,6 @@ export function takeUntil<T = any, N = any>(
           switch (event.type) {
             case 'value':
               if (event.sourceIndex === 0) {
-                if (event.dropped) return { done: false, value: event.value, dropped: true } as any;
                 return { done: false, value: event.value };
               }
               isDone = true;

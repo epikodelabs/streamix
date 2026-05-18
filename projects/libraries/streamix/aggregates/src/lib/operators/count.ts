@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, nextSourceResult, NEXT, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Creates a stream operator that counts the number of items emitted by the source stream.
@@ -20,17 +20,14 @@ export const count = <T = any>() =>
       async next(): Promise<IteratorResult<number>> {
         if (counted) return DONE;
 
-        return nextSourceResult(
-          source,
-          (result) => {
-            total++;
-            return DROPPED(result.value);
-          },
-          () => {
+        while (true) {
+          const result = await source.next();
+          if (result.done) {
             counted = true;
             return NEXT(total);
           }
-        ) as Promise<IteratorResult<number>>;
+          total++;
+        }
       },
     };
   });

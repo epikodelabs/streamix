@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import {
   createReceiver,
   createSubscription,
@@ -84,13 +83,6 @@ export function createReplaySubject<T = any>(
     }
   };
 
-  const drop = (value: T) => {
-    if (isCompleted) return;
-    for (const listener of listeners) {
-      listener.drop(value);
-    }
-  };
-
   const complete = () => {
     if (isCompleted) return;
     isCompleted = true;
@@ -144,8 +136,6 @@ export function createReplaySubject<T = any>(
           // so the terminal signal (DONE) can still be delivered.
           if (stopped) continue;
 
-          if (isDroppedResult(result)) continue;
-
           if (receiver.next) {
             const ret = receiver.next(result.value);
             if (isPromiseLike(ret)) {
@@ -198,7 +188,6 @@ export function createReplaySubject<T = any>(
     name: "replaySubject",
     get value() { return latestValue; },
     next,
-    drop,
     complete,
     error,
     completed: () => isCompleted,
@@ -233,25 +222,8 @@ export function createReplaySubject<T = any>(
         return originalThrow(err);
       };
       
-      // Filter DROPPED from public consumers while preserving all other properties
-      listener.next = async () => {
-        while (true) {
-          const result = await originalNext();
-          if (result.done) return result;
-          if (isDroppedResult(result)) continue;
-          return result;
-        }
-      };
-      
-      (listener as any).__tryNext = () => {
-        while (true) {
-          const result = originalTryNext();
-          if (!result) return null;
-          if (result.done) return result;
-          if (isDroppedResult(result)) continue;
-          return result;
-        }
-      };
+      listener.next = originalNext;
+      (listener as any).__tryNext = originalTryNext;
 
       return listener;
     }

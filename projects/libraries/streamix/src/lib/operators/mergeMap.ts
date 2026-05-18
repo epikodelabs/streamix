@@ -78,11 +78,6 @@ export function mergeMap<T = any, R = any>(
 
           if (event.sourceIndex === SOURCE_INDEX) {
             if (event.type === 'value') {
-              if (event.dropped) {
-                output.drop(event.value as any);
-                continue;
-              }
-
               const sourceValue = event.value as unknown as T;
               if (pendingInners >= concurrent) {
                 if (bufferSize !== Infinity && queuedSourceValues.length >= bufferSize) {
@@ -102,11 +97,7 @@ export function mergeMap<T = any, R = any>(
             }
           } else {
             if (event.type === 'value') {
-              if (event.dropped) {
-                output.drop(event.value);
-              } else {
-                output.push(event.value);
-              }
+              output.push(event.value);
             } else if (event.type === 'complete') {
               pendingInners--;
               drainQueuedSourceValues();

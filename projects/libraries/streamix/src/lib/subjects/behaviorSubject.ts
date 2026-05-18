@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import {
     createReceiver,
     createSubscription,
@@ -108,8 +107,6 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
           // so the terminal signal (DONE) can still be delivered.
           if (stopped) continue;
 
-          if (isDroppedResult(result)) continue;
-
           if (receiver.next) {
             const ret = receiver.next(result.value);
             if (isPromiseLike(ret)) {
@@ -201,25 +198,8 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
         return originalThrow(err);
       };
       
-      // Filter DROPPED from public consumers while preserving all other properties
-      listener.next = async () => {
-        while (true) {
-          const result = await originalNext();
-          if (result.done) return result;
-          if (isDroppedResult(result)) continue;
-          return result;
-        }
-      };
-      
-      (listener as any).__tryNext = () => {
-        while (true) {
-          const result = originalTryNext();
-          if (!result) return null;
-          if (result.done) return result;
-          if (isDroppedResult(result)) continue;
-          return result;
-        }
-      };
+      listener.next = originalNext;
+      (listener as any).__tryNext = originalTryNext;
 
       return listener;
     }

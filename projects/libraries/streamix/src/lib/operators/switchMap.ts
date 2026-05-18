@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import type { MaybePromise, Operator, Stream } from "../abstractions";
 import {
   createOperator,
@@ -77,11 +76,7 @@ export function switchMap<T = any, R = any>(
 
             if (r.done) break;
             if (stopped || token !== currentInnerToken) break;
-            if (isDroppedResult(r)) {
-              output.drop(r.value);
-            } else {
-              output.push(r.value);
-            }
+            output.push(r.value);
           }
         } catch (err) {
           if (!stopped && token === currentInnerToken) {
@@ -145,11 +140,6 @@ export function switchMap<T = any, R = any>(
             return;
           }
 
-          if (isDroppedResult(result)) {
-            output.drop(result.value as any);
-            continue;
-          }
-
           processOuterValue(result.value);
         }
       };
@@ -162,10 +152,6 @@ export function switchMap<T = any, R = any>(
           while (!stopped) {
             const result = await source.next();
             if (result.done) break;
-            if (isDroppedResult(result)) {
-              output.drop(result.value as any);
-              continue;
-            }
             processOuterValue(result.value);
           }
 

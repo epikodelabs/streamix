@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
 
 /**
@@ -46,12 +45,6 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
           const result = await source.next();
           if (result.done) break;
 
-          if (isDroppedResult(result)) { output.drop(result.value); continue; }
-
-          // If a value is already pending, mark it as dropped.
-          if (hasValue) {
-            output.drop(lastValue!);
-          }
           lastValue = result.value;
           hasValue = true;
         }

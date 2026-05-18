@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import { createStream, isPromiseLike, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 
@@ -34,11 +33,7 @@ export function concat<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<
         while (true) {
           const result = await iterator.next();
           if (result.done) break;
-          if (isDroppedResult(result)) {
-            yield result as any;
-          } else {
-            yield result.value;
-          }
+          yield result.value;
         }
       } finally {
         // Attempt to close iterator early on abort or completion

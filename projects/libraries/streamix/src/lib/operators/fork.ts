@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator, type Stream } from "../abstractions";
 import { fromAny } from '../converters';
 
@@ -76,8 +75,6 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
               return DONE;
             }
 
-            if (isDroppedResult(result)) return result;
-
             let matched: typeof resolvedOptions[number] | undefined;
             const outerValue = result.value;
             const currentIndex = outerIndex++;
@@ -105,7 +102,6 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
             continue;
           }
 
-          if (isDroppedResult(innerResult)) return innerResult;
           return NEXT(innerResult.value);
         }
       },

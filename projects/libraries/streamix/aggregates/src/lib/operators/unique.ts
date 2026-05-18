@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Creates a stream operator that emits only distinct values from the source stream.
@@ -26,7 +26,13 @@ export const unique = <T = any, K = any>(
 
     return {
       next: async () => {
-        return nextSourceResult(source, async (result) => {
+        while (true) {
+          const result = await source.next();
+
+          if (result.done) {
+            return DONE;
+          }
+
           const selectedKey = keySelector ? keySelector(result.value) : result.value;
           const key = isPromiseLike(selectedKey) ? await selectedKey : selectedKey;
 
@@ -34,8 +40,7 @@ export const unique = <T = any, K = any>(
             seen.add(key);
             return NEXT(result.value);
           }
-          return DROPPED(result.value);
-        }) as Promise<IteratorResult<T>>;
+        }
       }
     };
   });

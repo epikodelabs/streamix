@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import {
     createOperator,
     DONE,
@@ -59,8 +58,6 @@ export const bufferWhile = <T = any>(
             }
             return DONE;
           }
-
-          if (isDroppedResult(result)) return result;
 
           const record = { result };
 

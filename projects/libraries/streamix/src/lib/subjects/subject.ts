@@ -1,4 +1,3 @@
-import { isDroppedResult } from '../abstractions';
 import {
   createReceiver,
   createSubscription,
@@ -23,7 +22,6 @@ import { AsyncPushable, createAsyncPushable } from "../utils";
  */
 export type Subject<T = any> = Stream<T> & {
   next(value: T): void;
-  drop(value: T): void;
   complete(): void;
   error(err: any): void;
   completed(): boolean;
@@ -55,13 +53,6 @@ export function createSubject<T = any>(): Subject<T> {
     // Deliver to all current listeners
     for (const listener of listeners) {
        listener.push(value);
-    }
-  };
-
-  const drop = (value: T) => {
-    if (isCompleted) return;
-    for (const listener of listeners) {
-      listener.drop(value);
     }
   };
 
@@ -118,8 +109,6 @@ export function createSubject<T = any>(): Subject<T> {
           // so the terminal signal (DONE) can still be delivered.
           if (stopped) continue;
 
-           if (isDroppedResult(result)) continue;
-
           if (receiver.next) {
              const ret = receiver.next(result.value);
              if (isPromiseLike(ret)) {
@@ -172,7 +161,6 @@ export function createSubject<T = any>(): Subject<T> {
     name: "subject",
     get value() { return latestValue; },
     next,
-    drop,
     complete,
     error,
     completed: () => isCompleted,
@@ -203,25 +191,8 @@ export function createSubject<T = any>(): Subject<T> {
          return originalThrow(err);
        };
        
-       // Filter DROPPED from public consumers while preserving all other properties
-       listener.next = async () => {
-         while (true) {
-           const result = await originalNext();
-           if (result.done) return result;
-           if (isDroppedResult(result)) continue;
-           return result;
-         }
-       };
-       
-       (listener as any).__tryNext = () => {
-         while (true) {
-           const result = originalTryNext();
-           if (!result) return null;
-           if (result.done) return result;
-           if (isDroppedResult(result)) continue;
-           return result;
-         }
-       };
+       listener.next = originalNext;
+       (listener as any).__tryNext = originalTryNext;
 
        return listener;
     }
