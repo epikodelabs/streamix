@@ -41,7 +41,7 @@ export const concatMap = <T = any, R = any>(
 
             if (result.done) return DONE;
 
-            if (isDroppedResult(result)) return result;
+            if (isDroppedResult(result)) return result as any;
 
             const projected = project(result.value, outerIndex++);
             const normalized = isPromiseLike(projected) ? await projected : projected;

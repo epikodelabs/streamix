@@ -76,7 +76,7 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
               return DONE;
             }
 
-            if (isDroppedResult(result)) return result;
+            if (isDroppedResult(result)) return result as any;
 
             let matched: typeof resolvedOptions[number] | undefined;
             const outerValue = result.value;

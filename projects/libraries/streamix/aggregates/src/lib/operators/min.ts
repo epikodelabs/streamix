@@ -1,5 +1,5 @@
 import { isDroppedResult } from '@epikodelabs/streamix';
-import { createOperator, DONE, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from '@epikodelabs/streamix';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from '@epikodelabs/streamix';
 
 /**
  * Creates a stream operator that emits the smallest value produced by the source stream.

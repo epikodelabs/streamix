@@ -409,7 +409,7 @@ export function coroutine<T, R>(
               await finalize();
               return DONE;
             }
-            if (isDroppedResult(result)) return result;
+            if (isDroppedResult(result)) return result as any;
 
             const taskResult = await processTask(result.value as any);
             return NEXT(taskResult);

@@ -1,4 +1,4 @@
-import { createOperator, DONE, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "@epikodelabs/streamix";
+import { createOperator, DROPPED, isPromiseLike, type MaybePromise, nextSourceResult, NEXT, type Operator } from "@epikodelabs/streamix";
 
 /**
  * Creates a stream operator that emits only distinct values from the source stream.

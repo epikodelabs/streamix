@@ -74,7 +74,7 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
 
         if (event.type === "value") {
           if (event.dropped) {
-            yield DROPPED(event.value);
+            yield DROPPED(event.value) as any;
           } else {
             hasValue[event.sourceIndex] = true;
             results[event.sourceIndex] = event.value;

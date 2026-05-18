@@ -24,7 +24,6 @@ export const some = <T = any>(
 ) =>
   createOperator<T, boolean>('some', function (this: Operator, source) {
     let evaluated = false;
-    let found = false;
     let index = 0;
 
     return {
