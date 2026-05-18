@@ -282,6 +282,33 @@ describe('httpClient', () => {
     const client = createHttpClient().withDefaults(useCustom(fetch));
     await collect(client.get('https://external.api/data', readJson));
   });
+
+  it('uses the current browser origin instead of forcing localhost when appending params', async () => {
+    const originalLocation = (globalThis as any).location;
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      value: { href: 'https://app.test/dashboard' },
+    });
+
+    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
+      expect(req.url).toBe('https://app.test/items?page=2&filter=new');
+      return jsonResponse({ ok: true });
+    });
+
+    try {
+      const client = createHttpClient().withDefaults(useCustom(fetch));
+      await collect(client.get('/items', { params: { page: '2', filter: 'new' } }, readJson));
+    } finally {
+      if (originalLocation === undefined) {
+        delete (globalThis as any).location;
+      } else {
+        Object.defineProperty(globalThis, 'location', {
+          configurable: true,
+          value: originalLocation,
+        });
+      }
+    }
+  });
 });
 
 /* ================================================== */
@@ -502,6 +529,34 @@ describe('middleware', () => {
 
     await collect(client.get('/secure', readJson));
     expect(refreshToken).toHaveBeenCalled();
+  });
+
+  it('refreshes token on 401 without requiring fallback middleware', async () => {
+    const fetch = mockFetchSequence([
+      async (req?: Request) => {
+        expect(req?.headers.get('Authorization')).toBe('Bearer token1');
+        return new Response(null, { status: 401, statusText: 'Unauthorized' });
+      },
+      async (req?: Request) => {
+        expect(req?.headers.get('Authorization')).toBe('Bearer token2');
+        return jsonResponse({ ok: true });
+      },
+    ]);
+
+    const getToken = jasmine.createSpy().and.resolveTo('token1');
+    const refreshToken = jasmine.createSpy().and.resolveTo('token2');
+
+    const client = createHttpClient().withDefaults(
+      useCustom(fetch),
+      useBase('http://test.local'),
+      useOauth({ getToken, refreshToken, shouldRetry: () => true }),
+    );
+
+    const values = await collect(client.get('/secure', readJson));
+
+    expect(values).toEqual([{ ok: true }]);
+    expect(refreshToken).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it('does not refresh token when shouldRetry returns false', async () => {
