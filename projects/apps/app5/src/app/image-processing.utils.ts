@@ -43,9 +43,9 @@ export interface CompressOutput extends CompressInput {
  */
 export async function resizeImage(
   data: ResizeInput,
-  utils: { reportProgress: (p: any) => void }
+  utils: { main: { send: (p: any) => void } }
 ): Promise<ResizeOutput> {
-  utils.reportProgress({ stage: 'resize', progress: 0 });
+  utils.main.send({ stage: 'resize', progress: 0 });
 
   const { blob, width, height } = data;
   const imageBitmap = await createImageBitmap(new Blob([blob]));
@@ -60,7 +60,7 @@ export async function resizeImage(
   // Draw the image onto the OffscreenCanvas
   ctx.drawImage(imageBitmap, 0, 0, width, height);
 
-  utils.reportProgress({ stage: 'resize', progress: 0.5 });
+  utils.main.send({ stage: 'resize', progress: 0.5 });
 
   // Convert the canvas content to a blob
   const outputBlob = await offscreenCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
@@ -68,7 +68,7 @@ export async function resizeImage(
   // Clean up the image bitmap
   imageBitmap.close();
 
-  utils.reportProgress({ stage: 'resize', progress: 1.0 });
+  utils.main.send({ stage: 'resize', progress: 1.0 });
 
   return {
     ...data,
@@ -85,9 +85,9 @@ export async function resizeImage(
  */
 export async function compressImage(
   data: CompressInput,
-  utils: { reportProgress: (p: any) => void }
+  utils: { main: { send: (p: any) => void } }
 ): Promise<CompressOutput> {
-  utils.reportProgress({ stage: 'compress', progress: 0 });
+  utils.main.send({ stage: 'compress', progress: 0 });
 
   const { blob } = data;
   const quality = 0.7;
@@ -102,13 +102,13 @@ export async function compressImage(
 
   ctx.drawImage(imageBitmap, 0, 0);
 
-  utils.reportProgress({ stage: 'compress', progress: 0.5 });
+  utils.main.send({ stage: 'compress', progress: 0.5 });
 
   const outputBlob = await offscreenCanvas.convertToBlob({ type: 'image/jpeg', quality });
 
   imageBitmap.close();
 
-  utils.reportProgress({ stage: 'compress', progress: 1.0 });
+  utils.main.send({ stage: 'compress', progress: 1.0 });
 
   return {
     ...data,

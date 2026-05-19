@@ -10,7 +10,7 @@ import {
   tap,
 } from '@epikodelabs/streamix';
 
-import { cascade, coroutine, Coroutine } from '@epikodelabs/streamix/coroutines';
+import { cascade, Coroutine, interactive } from '@epikodelabs/streamix/coroutines';
 import { compressImage, CompressInput, CompressOutput, FileTask, ProcessedResult, resizeImage, ResizeInput, ResizeOutput } from './image-processing.utils';
 
 @Injectable({ providedIn: 'root' })
@@ -34,7 +34,7 @@ export class ImagePipelineService {
     ) => {
       const { taskId, payload, type, error } = event.data;
 
-      if (type === 'progress') {
+      if (type === 'worker-message') {
         this.ngZone.run(() => {
           this.progressStream.next({ id: taskId, progress: payload });
         });
@@ -53,8 +53,8 @@ export class ImagePipelineService {
       }
     };
 
-    this.resizeCoroutine = coroutine({ customMessageHandler })(resizeImage);
-    this.compressCoroutine = coroutine({ customMessageHandler })(compressImage);
+    this.resizeCoroutine = interactive({ customMessageHandler })(resizeImage);
+    this.compressCoroutine = interactive({ customMessageHandler })(compressImage);
 
     this.resultStream = this.fileStream.pipe(
       filter((task) => task.file.type.startsWith('image/')),

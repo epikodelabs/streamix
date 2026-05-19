@@ -1,5 +1,5 @@
 import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
-import type { Coroutine } from "./coroutine";
+import type { Coroutine } from "./shared";
 
 /**
  * A coroutine-like operator that can process tasks asynchronously in the background.

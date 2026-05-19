@@ -1,5 +1,20 @@
 import { createStream } from "@epikodelabs/streamix";
-import { coroutine, type CoroutineMessage } from "@epikodelabs/streamix/coroutines";
+import {
+  ChannelClosedError,
+  ContextCancelledError,
+  background,
+  channel,
+  coroutine,
+  interactive,
+  otherwise,
+  recv,
+  select,
+  send,
+  withCancel,
+  withDeadline,
+  withTimeout,
+  type CoroutineMessage
+} from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe('coroutine', () => {
@@ -24,15 +39,9 @@ idescribe('coroutine', () => {
       onmessage: ((ev: any) => void) | null = null;
       listeners: Record<string, ((ev: any) => void)[]> = {};
       terminated = false;
-      private workerUtils: any;
+      private workerInbox = channel<any>();
 
-      constructor(_url: string, _options?: any) { 
-        // Create mock utils for the worker
-        this.workerUtils = {
-          requestData: (requestPayload: any) => this.handleDataRequest(requestPayload),
-          reportProgress: (progressData: any) => this.handleProgressReport(progressData)
-        };
-      }
+      constructor(_url: string, _options?: any) {}
 
       private handleDataRequest(_requestPayload: any): Promise<any> {
         return new Promise((resolve) => {
@@ -43,9 +52,35 @@ idescribe('coroutine', () => {
         });
       }
 
-      private handleProgressReport(progressData: any) {
-        // Progress reports are just logged in tests
-        console.log('Progress report:', progressData);
+      private createWorkerUtils(message: { workerId: number; taskId: string }) {
+        return {
+          main: {
+            send: (payload: any) => {
+              const event: MessageEvent<CoroutineMessage> = {
+                data: { workerId: message.workerId, taskId: message.taskId, type: "worker-message", payload }
+              } as any;
+              this.onmessage?.(event);
+              this.listeners["message"]?.forEach(fn => fn(event));
+            },
+            request: (requestPayload: any) => this.handleDataRequest(requestPayload),
+            recv: (signal?: AbortSignal) => this.workerInbox.recv(signal),
+            receive: (signal?: AbortSignal) => this.workerInbox.receive(signal),
+            inbox: this.workerInbox,
+          },
+          concurrency: {
+            channel,
+            recv,
+            send,
+            otherwise,
+            select,
+            background,
+            withCancel,
+            withTimeout,
+            withDeadline,
+            ChannelClosedError,
+            ContextCancelledError,
+          }
+        };
       }
 
       postMessage(msg: any) {
@@ -58,13 +93,14 @@ idescribe('coroutine', () => {
               if (!mainTask) {
                 throw new Error('No main task configured');
               }
+              const workerUtils = this.createWorkerUtils(msg);
               
               let result;
               
               // Check if mainTask expects utils parameter
               if (mainTask.length >= 2) {
                 // Call with both data and utils
-                result = mainTask(msg.payload, this.workerUtils);
+                result = mainTask(msg.payload, workerUtils);
               } else {
                 // Call with only data
                 result = mainTask(msg.payload);
@@ -92,6 +128,8 @@ idescribe('coroutine', () => {
               this.onmessage?.(event);
               this.listeners['message']?.forEach(fn => fn(event));
             }
+          } else if (msg.type === "main-message") {
+            this.workerInbox.send(msg.payload).catch(() => {});
           } else if (msg.type === 'data') {
             // Handle responses to worker data requests (if needed)
             console.log('MockWorker received data response:', msg);
@@ -272,20 +310,86 @@ idescribe('coroutine', () => {
     // Define the main task as a proper function (not arrow function if that causes issues)
     function mainTask(x: number, utils: any) {
       // Request additional data from main thread
-      return utils.requestData({ request: 'more data' }).then((additionalData: any) => {
+      return utils.main.request({ request: 'more data' }).then((additionalData: any) => {
         return x + additionalData.value;
       });
     }
     
     (globalThis as any).currentMainTask = mainTask;
 
-    const co = coroutine(mainTask);
+    const co = interactive(mainTask);
     
     // Process a task - the worker will request data and our mock will respond with dummy data
     const result = await co.processTask(5);
     
     // The dummy data response adds {value: 10}, so 5 + 10 = 15
     expect(result).toBe(15);
+  });
+
+  it('should deliver main-thread messages through utils.main.recv()', async () => {
+    async function mainTask(_x: number, utils: any) {
+      return utils.main.recv();
+    }
+
+    (globalThis as any).currentMainTask = mainTask;
+
+    const co = interactive(mainTask);
+    const { workerId } = await co.getIdleWorker();
+    co.returnWorker(workerId);
+    const pending = co.processTask(11);
+    (co as any).sendToWorker(workerId, 99);
+    await expectAsync(pending).toBeResolvedTo(99);
+    await co.finalize();
+  });
+
+  it('should expose concurrency primitives on interactive worker utils', async () => {
+    async function mainTask(_x: number, utils: any) {
+      const { channel, recv, send, otherwise, select, background, withCancel, ChannelClosedError, ContextCancelledError } = utils.concurrency;
+
+      const ch = channel<number>(1);
+      await ch.send(7);
+      const first = await ch.recv();
+
+      const sendCase = send(ch, 9, "send");
+      const recvCase = recv(ch, "receive");
+      const selected = await select([sendCase, recvCase, otherwise("default")]);
+
+      const [ctx, cancel] = withCancel(background());
+      cancel(new ContextCancelledError("stop"));
+
+      let cancelled = false;
+      try {
+        await select([sendCase], ctx);
+      } catch (error) {
+        cancelled =
+          error instanceof ContextCancelledError ||
+          error instanceof ChannelClosedError ||
+          error instanceof Error;
+      }
+
+      return {
+        first,
+        selectedOp: selected.op,
+        cancelled,
+        hasErrors:
+          typeof ChannelClosedError === "function" &&
+          typeof ContextCancelledError === "function"
+      };
+    }
+
+    (globalThis as any).currentMainTask = mainTask;
+
+    const co = interactive(mainTask);
+    const result = await co.processTask(1);
+
+    expect(result).toEqual(jasmine.objectContaining({
+      first: 7,
+      cancelled: true,
+      hasErrors: true,
+    }));
+    expect(["send", "receive", "default"]).toContain(result.selectedOp);
+
+    await co.finalize();
   });
 
   it('should fall back to 4 workers when navigator.hardwareConcurrency is not set', async () => {
@@ -321,12 +425,12 @@ idescribe('coroutine', () => {
     await co.finalize();
   });
 
-  it('should handle request/progress/unknown worker messages via default handler', async () => {
+  it('should handle request/message/unknown worker messages via default handler', async () => {
     const warn = spyOn(console, "warn");
 
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
-    const co = coroutine(mainTask);
+    const co = interactive(mainTask);
 
     const { worker, workerId } = await co.getIdleWorker();
 
@@ -336,10 +440,12 @@ idescribe('coroutine', () => {
 
     spyOn(worker as any, "postMessage").and.callThrough();
 
-    handler({ data: { type: "request", workerId, taskId: "t1", payload: { q: 1 } } });
-    expect((worker as any).postMessage).toHaveBeenCalledWith(jasmine.objectContaining({ type: "data" }));
+    handler({ data: { type: "request", workerId, taskId: "t1", requestId: "r1", payload: { q: 1 } } });
+    handler({ data: { type: "request", workerId, taskId: "t1", requestId: "r2", payload: { q: 2 } } });
+    expect((worker as any).postMessage).toHaveBeenCalledWith(jasmine.objectContaining({ type: "data", requestId: "r1" }));
+    expect((worker as any).postMessage).toHaveBeenCalledWith(jasmine.objectContaining({ type: "data", requestId: "r2" }));
 
-    handler({ data: { type: "progress", workerId, taskId: "t1", payload: { pct: 10 } } });
+    handler({ data: { type: "worker-message", workerId, taskId: "t1", payload: { pct: 10 } } });
     handler({ data: { type: "something-else", workerId, taskId: "t1", payload: null } });
 
     expect(warn).toHaveBeenCalled();
@@ -417,7 +523,7 @@ idescribe('coroutine', () => {
         p.resolve(msg.payload);
       });
 
-    const coFactory = coroutine({ customMessageHandler }) as any;
+    const coFactory = interactive({ customMessageHandler }) as any;
     const co = coFactory(mainTask);
 
     const r = await co.processTask(1);
