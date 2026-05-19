@@ -284,11 +284,7 @@ describe('httpClient', () => {
   });
 
   it('uses the current browser origin instead of forcing localhost when appending params', async () => {
-    const originalLocation = (globalThis as any).location;
-    Object.defineProperty(globalThis, 'location', {
-      configurable: true,
-      value: { href: 'https://app.test/dashboard' },
-    });
+    const baseUriSpy = spyOnProperty(document, 'baseURI', 'get').and.returnValue('https://app.test/dashboard');
 
     const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
       expect(req.url).toBe('https://app.test/items?page=2&filter=new');
@@ -299,14 +295,7 @@ describe('httpClient', () => {
       const client = createHttpClient().withDefaults(useCustom(fetch));
       await collect(client.get('/items', { params: { page: '2', filter: 'new' } }, readJson));
     } finally {
-      if (originalLocation === undefined) {
-        delete (globalThis as any).location;
-      } else {
-        Object.defineProperty(globalThis, 'location', {
-          configurable: true,
-          value: originalLocation,
-        });
-      }
+      baseUriSpy.and.callThrough();
     }
   });
 });
