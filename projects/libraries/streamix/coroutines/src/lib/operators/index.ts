@@ -1,5 +1,5 @@
 export * from './cascade';
 export * from './coroutine';
-export * from './interactive';
+export * from './actor';
 export * from './shared';
 

@@ -15,7 +15,7 @@ export type CoroutineMessageType =
 
 /**
  * `taskId` tracks the outer task lifecycle.
- * `requestId` is reserved for nested interactive request/response exchanges.
+ * `requestId` is reserved for nested actor request/response exchanges.
  */
 export type CoroutineMessage = {
   workerId: number;
@@ -35,7 +35,7 @@ export type PendingTaskMap = Map<
 >;
 
 /**
- * Shared worker-script configuration used by both `coroutine` and `interactive`.
+ * Shared worker-script configuration used by both `coroutine` and `actor`.
  */
 export type WorkerPoolConfig = {
   /**

@@ -1,5 +1,5 @@
 import { createStream, type MaybePromise, type Stream } from "@epikodelabs/streamix";
-import type { Coroutine, CoroutineMessage, Interactive } from "../operators";
+import type { Coroutine, CoroutineMessage, Actor } from "../operators";
 
 /**
  * Subset of `Coroutine` needed to hire and manage a dedicated worker.
@@ -32,9 +32,9 @@ export interface HiredWorker<T = any, R = T> {
 }
 
 /**
- * Interactive sessions support main-to-worker messaging on the dedicated worker.
+ * Actor sessions support main-to-worker messaging on the dedicated worker.
  */
-export interface HiredInteractiveWorker<T = any, R = T, FromMain = any> extends HiredWorker<T, R> {
+export interface HiredActorWorker<T = any, R = T, FromMain = any> extends HiredWorker<T, R> {
   sendMessage: (payload: FromMain) => void;
 }
 
@@ -47,7 +47,7 @@ export interface HiredInteractiveWorker<T = any, R = T, FromMain = any> extends 
  *
  * @template T The type of task input.
  * @template R The type of task output.
- * @param task The coroutine or interactive coroutine to hire from.
+ * @param task The coroutine or actor to hire from.
  * @param onMessage Handler for messages emitted by the hired worker.
  * @param onError Handler for errors emitted by the hired worker.
  * @returns A stream that yields one `HiredWorker`.
@@ -59,29 +59,29 @@ export function hire<T = any, R = T>(
 ): Stream<HiredWorker<T, R>>;
 
 /**
- * Hires a dedicated interactive worker and exposes it as a stream.
+ * Hires a dedicated actor worker and exposes it as a stream.
  *
- * The stream yields a single `HiredInteractiveWorker` that supports both direct
+ * The stream yields a single `HiredActorWorker` that supports both direct
  * task assignment and main-to-worker messaging.
  *
  * @template T The type of task input.
  * @template R The type of task output.
  * @template FromMain The type of messages sent from main to the worker.
- * @param task An interactive coroutine.
+ * @param task An actor.
  * @param onMessage Handler for messages emitted by the hired worker.
  * @param onError Handler for errors emitted by the hired worker.
- * @returns A stream that yields one `HiredInteractiveWorker`.
+ * @returns A stream that yields one `HiredActorWorker`.
  */
 export function hire<T = any, R = T, FromMain = any>(
-  task: Interactive<T, R, FromMain>,
+  task: Actor<T, R, FromMain>,
   onMessage: (message: CoroutineMessage) => MaybePromise<void>,
   onError: (error: Error) => MaybePromise<void>
-): Stream<HiredInteractiveWorker<T, R, FromMain>>;
+): Stream<HiredActorWorker<T, R, FromMain>>;
 
 /**
  * Hires a dedicated worker from a coroutine pool.
  *
- * @param task The coroutine or interactive coroutine to hire from.
+ * @param task The coroutine or actor to hire from.
  * @param onMessage Handler for messages emitted by the hired worker.
  * @param onError Handler for errors emitted by the hired worker.
  * @returns A stream that yields one hired worker.
@@ -131,14 +131,14 @@ export function hire<T = any, R = T>(
       messageTask.sendToWorker(workerId, payload);
     };
 
-    const hiredWorker: HiredWorker<T, R> | HiredInteractiveWorker<T, R> = {
+    const hiredWorker: HiredWorker<T, R> | HiredActorWorker<T, R> = {
       workerId,
       sendTask: (data: T) => task.assignTask(workerId, data),
       release: cleanup,
     };
 
     if ("sendToWorker" in task && typeof (task as any).sendToWorker === "function") {
-      (hiredWorker as HiredInteractiveWorker<T, R>).sendMessage = sendMessage;
+      (hiredWorker as HiredActorWorker<T, R>).sendMessage = sendMessage;
     }
 
     try {

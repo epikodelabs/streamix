@@ -11,7 +11,7 @@ import {
 export type CoroutineConfig = WorkerPoolConfig;
 
 /**
- * Task function executed inside a worker without interactive utilities.
+ * Task function executed inside a worker without actor utilities.
  */
 export type CoroutineTask<T = any, R = any> = (data: T) => Promise<R> | R;
 

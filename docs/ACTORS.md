@@ -1,6 +1,6 @@
-# Streamix Interactives
+# Streamix Actors
 
-`interactive(...)` runs your code in a Web Worker and gives it two tools:
+`actor(...)` runs your code in a Web Worker and gives it two tools:
 
 - `utils.main` — talk to the main thread (request data, send messages, receive commands)
 - `utils.concurrency` — coordinate async work inside the worker (channels, select, timeouts)
@@ -16,7 +16,7 @@ Use it when your worker needs to **both** compute in the background **and** chat
 The worker asks, the main thread fetches, the worker gets its answer.
 
 ```ts
-const dogFinder = interactive({
+const dogFinder = actor({
   request: async (breed) => {
     return fetch(`https://dog.ceo/api/breed/${breed}/images/random`)
       .then((r) => r.json());
@@ -34,7 +34,7 @@ const photo = await dogFinder.processTask("corgi");
 The worker brags about its progress while the main thread listens.
 
 ```ts
-const oven = interactive({
+const oven = actor({
   onMessage: (payload) => {
     console.log(`Cookies ${payload.status} (${payload.percent}%)`);
   },
@@ -53,7 +53,7 @@ const oven = interactive({
 The main thread steers the worker in real time.
 
 ```ts
-const vacuum = interactive(async function task(room, utils) {
+const vacuum = actor(async function task(room, utils) {
   while (true) {
     const cmd = await utils.main.recv();
     if (cmd === "dock") return "docked";
@@ -79,7 +79,7 @@ vacuum.returnWorker(workerId);
 The worker boils noodles, counts down, and listens for the chef to call it off.
 
 ```ts
-const ramen = interactive({
+const ramen = actor({
   request: async (flavor) => ({ flavor, minutes: flavor === "udon" ? 6 : 3 }),
   onMessage: (payload) => console.log(payload.stage),
 })(async function cook(input, utils) {
@@ -135,7 +135,7 @@ ramen.returnWorker(workerId);
 Inject raw snippets into the worker if you need them:
 
 ```ts
-const worker = interactive({
+const worker = actor({
   helpers: [
     "function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }",
   ],
@@ -148,16 +148,16 @@ const worker = interactive({
 Prefer normal helper arguments when possible:
 
 ```ts
-const worker = interactive(async function task(input, utils, clamp) {
+const worker = actor(async function task(input, utils, clamp) {
   return clamp(input, 0, 100);
 }, clamp);
 ```
 
 ---
 
-## `coroutine(...)` vs `interactive(...)`
+## `coroutine(...)` vs `actor(...)`
 
-| Use `coroutine(...)` | Use `interactive(...)` |
+| Use `coroutine(...)` | Use `actor(...)` |
 |----------------------|------------------------|
 | Background computation only | Ask main for data |
 | | Send events to main |

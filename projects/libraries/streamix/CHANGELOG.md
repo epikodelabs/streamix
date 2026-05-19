@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.45
+
+Implemented the `actor` coroutine API for two-way worker/main-thread communication.
+
 ## 2.0.44
 
 Removed the internal `DROPPED` backpressure mechanism and simplified operator, stream, and subject internals across the library.

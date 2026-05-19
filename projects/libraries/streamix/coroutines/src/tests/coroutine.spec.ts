@@ -5,7 +5,7 @@ import {
   background,
   channel,
   coroutine,
-  interactive,
+  actor,
   otherwise,
   recv,
   select,
@@ -317,7 +317,7 @@ idescribe('coroutine', () => {
     
     (globalThis as any).currentMainTask = mainTask;
 
-    const co = interactive(mainTask);
+    const co = actor(mainTask);
     
     // Process a task - the worker will request data and our mock will respond with dummy data
     const result = await co.processTask(5);
@@ -333,7 +333,7 @@ idescribe('coroutine', () => {
 
     (globalThis as any).currentMainTask = mainTask;
 
-    const co = interactive(mainTask);
+    const co = actor(mainTask);
     const { workerId } = await co.getIdleWorker();
     co.returnWorker(workerId);
     const pending = co.processTask(11);
@@ -342,7 +342,7 @@ idescribe('coroutine', () => {
     await co.finalize();
   });
 
-  it('should expose concurrency primitives on interactive worker utils', async () => {
+  it('should expose concurrency primitives on actor worker utils', async () => {
     async function mainTask(_x: number, utils: any) {
       const { channel, recv, send, otherwise, select, background, withCancel, ChannelClosedError, ContextCancelledError } = utils.concurrency;
 
@@ -379,7 +379,7 @@ idescribe('coroutine', () => {
 
     (globalThis as any).currentMainTask = mainTask;
 
-    const co = interactive(mainTask);
+    const co = actor(mainTask);
     const result = await co.processTask(1);
 
     expect(result).toEqual(jasmine.objectContaining({
@@ -430,7 +430,7 @@ idescribe('coroutine', () => {
 
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
-    const co = interactive(mainTask);
+    const co = actor(mainTask);
 
     const { worker, workerId } = await co.getIdleWorker();
 
@@ -523,7 +523,7 @@ idescribe('coroutine', () => {
         p.resolve(msg.payload);
       });
 
-    const coFactory = interactive({ customMessageHandler }) as any;
+    const coFactory = actor({ customMessageHandler }) as any;
     const co = coFactory(mainTask);
 
     const r = await co.processTask(1);

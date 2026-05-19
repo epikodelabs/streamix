@@ -9,7 +9,7 @@ Use plain `coroutine(...)` when you need:
 - stream integration through `compute(...)`
 - persistent worker reuse through `hire(...)`
 
-If you need worker/main-thread messaging, use `interactive(...)` instead. See [INTERACTIVES.md](./INTERACTIVES.md).
+If you need worker/main-thread messaging, use `actor(...)` instead. See [ACTORS.md](./ACTORS.md).
 
 ## Quick Start
 
@@ -158,12 +158,12 @@ const worker = coroutine(config)(function task(input: number) {
 - Pass helper functions explicitly when the worker needs them.
 - Use config `helpers` only for raw injected snippets that cannot be expressed as normal helper functions.
 
-## When To Use `interactive(...)` Instead
+## When To Use `actor(...)` Instead
 
-Use `interactive(...)` when the worker needs:
+Use `actor(...)` when the worker needs:
 - request/response with the main thread
 - one-way worker-to-main events
 - one-way main-to-worker messages
 - worker-local concurrency primitives plus a main-thread bridge
 
-See [INTERACTIVES.md](./INTERACTIVES.md).
+See [ACTORS.md](./ACTORS.md).

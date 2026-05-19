@@ -29,7 +29,7 @@ import {
 } from "./select";
 
 /**
- * Concurrency primitives injected into interactive workers.
+ * Concurrency primitives injected into actor workers.
  *
  * Provides channel operations, context control, and select helpers
  * that mirror the main-thread API but run inside the worker scope.
@@ -49,7 +49,7 @@ export type WorkerConcurrency = {
 };
 
 /**
- * Bridge API exposed to interactive workers for communicating with the main thread.
+ * Bridge API exposed to actor workers for communicating with the main thread.
  *
  * @template Q The request payload type sent from the worker.
  * @template D The response data type returned to the worker.
@@ -70,7 +70,7 @@ export type MainThreadBridge<Q = any, D = any, FromMain = any, ToMain = any> = {
 };
 
 /**
- * Utility functions available only to interactive worker tasks.
+ * Utility functions available only to actor worker tasks.
  */
 export type WorkerUtils<Q = any, D = any, FromMain = any, ToMain = any> = {
   concurrency: WorkerConcurrency;
@@ -78,9 +78,9 @@ export type WorkerUtils<Q = any, D = any, FromMain = any, ToMain = any> = {
 };
 
 /**
- * Worker task signature for interactive workers.
+ * Worker task signature for actor workers.
  */
-export type InteractiveTask<T = any, R = any, Q = any, D = any, FromMain = any, ToMain = any> =
+export type ActorTask<T = any, R = any, Q = any, D = any, FromMain = any, ToMain = any> =
   | ((data: T) => Promise<R> | R)
   | ((data: T, utils: WorkerUtils<Q, D, FromMain, ToMain>) => Promise<R> | R);
 
@@ -90,31 +90,31 @@ export type InteractiveTask<T = any, R = any, Q = any, D = any, FromMain = any, 
  * Keep this function small, or delegate to a `coroutine(...)` instance via
  * `request: dataWorker.processTask` when data resolution itself is expensive.
  */
-export type InteractiveRequestHandler<Q = any, D = any> = (
+export type ActorRequestHandler<Q = any, D = any> = (
   request: Q,
   message: CoroutineMessage
 ) => Promise<D> | D;
 
 /**
- * Configuration for interactive workers.
+ * Configuration for actor workers.
  *
  * `request` resolves `utils.main.request(payload)` calls initiated from inside
  * the worker. `onMessage` receives one-way `utils.main.send(payload)` traffic.
  */
-export type InteractiveConfig<Q = any, D = any, ToMain = any> = WorkerPoolConfig & {
-  request?: InteractiveRequestHandler<Q, D>;
+export type ActorConfig<Q = any, D = any, ToMain = any> = WorkerPoolConfig & {
+  request?: ActorRequestHandler<Q, D>;
   onMessage?: (payload: ToMain, message: CoroutineMessage) => void | Promise<void>;
   customMessageHandler?: WorkerMessageHandler;
 };
 
 /**
- * Interactive workers share the same runtime shape as plain coroutines.
+ * Actor workers share the same runtime shape as plain coroutines.
  */
-export type Interactive<T = any, R = T, FromMain = any> = Coroutine<T, R> & {
+export type Actor<T = any, R = T, FromMain = any> = Coroutine<T, R> & {
   sendToWorker: (workerId: number, payload: FromMain) => void;
 };
 
-const INTERACTIVE_CONCURRENCY_RUNTIME = `
+const ACTOR_CONCURRENCY_RUNTIME = `
 class __streamixChannelClosedError extends Error {
   constructor(message = "channel is closed") {
     super(message);
@@ -467,12 +467,12 @@ const __streamixConcurrency = Object.freeze({
 `;
 
 /**
- * Interactive workers use a richer message contract than plain coroutines.
+ * Actor workers use a richer message contract than plain coroutines.
  * `taskId` identifies the outer task while `requestId` identifies nested
  * `utils.main.request()` round-trips initiated from inside the worker. Failed
  * request replies reuse `"error"` and are distinguished by `requestId`.
  */
-const buildInteractiveWorkerRuntime = (): string =>
+const buildActorWorkerRuntime = (): string =>
   [
     "const __pendingWorkerRequests = new Map();",
     "const __taskMailboxes = new Map();",
@@ -539,20 +539,20 @@ const buildInteractiveWorkerRuntime = (): string =>
     "  if (type === 'main-message') {",
     "    const targetTaskId = taskId || __activeTaskId;",
     "    if (!targetTaskId) {",
-    "      console.warn('Interactive worker received main message without active task', event.data);",
+    "      console.warn('Actor worker received main message without active task', event.data);",
     "      return;",
     "    }",
     "",
     "    const mailbox = __getTaskMailbox(targetTaskId);",
     "    mailbox.send(payload).catch((error) => {",
-    "      console.warn('Interactive worker failed to enqueue main-thread message', error);",
+    "      console.warn('Actor worker failed to enqueue main-thread message', error);",
     "    });",
     "    return;",
     "  }",
     "",
     "  if (type === 'data' || (type === 'error' && !!requestId)) {",
     "    if (!requestId) {",
-    "      console.warn('Interactive worker received request response without requestId', event.data);",
+    "      console.warn('Actor worker received request response without requestId', event.data);",
     "      return;",
     "    }",
     "",
@@ -562,7 +562,7 @@ const buildInteractiveWorkerRuntime = (): string =>
     "      if (type === 'data') {",
     "        pendingRequest.resolve(payload);",
     "      } else {",
-    "        pendingRequest.reject(new Error(payload?.error || payload?.message || 'Interactive request failed'));",
+    "        pendingRequest.reject(new Error(payload?.error || payload?.message || 'Actor request failed'));",
     "      }",
     "    }",
     "    return;",
@@ -589,8 +589,8 @@ const toErrorPayload = (error: unknown) => ({
   message: error instanceof Error ? error.message : String(error),
 });
 
-function createInteractiveMessageHandler<Q, D, ToMain>(
-  config?: InteractiveConfig<Q, D, ToMain>
+function createActorMessageHandler<Q, D, ToMain>(
+  config?: ActorConfig<Q, D, ToMain>
 ) {
   return (worker: Worker, pendingTasks: PendingTaskMap) => {
     if (config?.customMessageHandler) {
@@ -607,7 +607,7 @@ function createInteractiveMessageHandler<Q, D, ToMain>(
             workerId,
             taskId,
             type: "error",
-            payload: { message: "Interactive request is missing requestId" }
+            payload: { message: "Actor request is missing requestId" }
           });
           return;
         }
@@ -618,7 +618,7 @@ function createInteractiveMessageHandler<Q, D, ToMain>(
             taskId,
             requestId,
             type: "error",
-            payload: { message: "No interactive request handler configured" }
+            payload: { message: "No actor request handler configured" }
           });
           return;
         }
@@ -652,21 +652,21 @@ function createInteractiveMessageHandler<Q, D, ToMain>(
 }
 
 /**
- * Creates a configured interactive worker factory with message/request hooks.
+ * Creates a configured actor worker factory with message/request hooks.
  */
-export function interactive<Q = any, D = any, ToMain = any, FromMain = any>(
-  config: InteractiveConfig<Q, D, ToMain>
-): <T, R>(main: InteractiveTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Interactive<T, R, FromMain>;
+export function actor<Q = any, D = any, ToMain = any, FromMain = any>(
+  config: ActorConfig<Q, D, ToMain>
+): <T, R>(main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain>;
 /**
- * Creates an interactive worker directly from a task function and optional helpers.
+ * Creates an actor worker directly from a task function and optional helpers.
  */
-export function interactive<T, R>(main: InteractiveTask<T, R>, ...functions: Function[]): Interactive<T, R>;
+export function actor<T, R>(main: ActorTask<T, R>, ...functions: Function[]): Actor<T, R>;
 /**
- * Creates an interactive worker coroutine.
+ * Creates an actor worker coroutine.
  *
  * When called with a configuration object, returns a factory function that accepts
- * the interactive task and optional helpers. When called with a task function directly,
- * creates the interactive coroutine immediately using default configuration.
+ * the actor task and optional helpers. When called with a task function directly,
+ * creates the actor coroutine immediately using default configuration.
  *
  * @template T The type of input data.
  * @template R The type of output data.
@@ -674,32 +674,32 @@ export function interactive<T, R>(main: InteractiveTask<T, R>, ...functions: Fun
  * @template D The response data type for main-thread requests.
  * @template ToMain The type of one-way messages sent from worker to main.
  * @template FromMain The type of one-way messages sent from main to worker.
- * @param arg1 Either an `InteractiveConfig` or the main `InteractiveTask`.
+ * @param arg1 Either an `ActorConfig` or the main `ActorTask`.
  * @param rest Optional helper functions available inside the worker.
- * @returns An `Interactive` instance or a factory that produces one.
+ * @returns An `Actor` instance or a factory that produces one.
  */
-export function interactive<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
-  arg1: InteractiveConfig<Q, D, ToMain> | InteractiveTask<T, R, Q, D, FromMain, ToMain>,
+export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
+  arg1: ActorConfig<Q, D, ToMain> | ActorTask<T, R, Q, D, FromMain, ToMain>,
   ...rest: Function[]
-): Interactive<T, R, FromMain> | ((main: InteractiveTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Interactive<T, R, FromMain>) {
-  const implementInteractive = (
-    config: InteractiveConfig<Q, D, ToMain> | undefined,
-    main: InteractiveTask<T, R, Q, D, FromMain, ToMain>,
+): Actor<T, R, FromMain> | ((main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain>) {
+  const implementActor = (
+    config: ActorConfig<Q, D, ToMain> | undefined,
+    main: ActorTask<T, R, Q, D, FromMain, ToMain>,
     functions: Function[]
-  ): Interactive<T, R, FromMain> => {
+  ): Actor<T, R, FromMain> => {
     const operator = createCoroutineOperator<T, R>({
-      name: "interactive",
+      name: "actor",
       config,
       main,
       functions,
       generateWorkerScript: (task, dependencies, workerConfig) =>
         buildWorkerScript({
-          helpers: [INTERACTIVE_CONCURRENCY_RUNTIME, ...(workerConfig?.helpers || [])],
+          helpers: [ACTOR_CONCURRENCY_RUNTIME, ...(workerConfig?.helpers || [])],
           main: task,
           functions: dependencies,
-          runtime: buildInteractiveWorkerRuntime(),
+          runtime: buildActorWorkerRuntime(),
         }),
-      createMessageHandler: createInteractiveMessageHandler(config),
+      createMessageHandler: createActorMessageHandler(config),
     });
 
     return Object.assign(operator, {
@@ -716,11 +716,11 @@ export function interactive<T, R, Q = any, D = any, ToMain = any, FromMain = any
   };
 
   if (typeof arg1 === "function") {
-    return implementInteractive(undefined, arg1 as InteractiveTask<T, R, Q, D, FromMain, ToMain>, rest);
+    return implementActor(undefined, arg1 as ActorTask<T, R, Q, D, FromMain, ToMain>, rest);
   }
 
-  return (main: InteractiveTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) =>
-    implementInteractive(arg1, main, functions);
+  return (main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) =>
+    implementActor(arg1, main, functions);
 }
 
 export type { CoroutineMessage } from "./shared";

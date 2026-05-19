@@ -10,7 +10,7 @@ import {
   tap,
 } from '@epikodelabs/streamix';
 
-import { cascade, Coroutine, interactive } from '@epikodelabs/streamix/coroutines';
+import { cascade, Coroutine, actor } from '@epikodelabs/streamix/coroutines';
 import { compressImage, CompressInput, CompressOutput, FileTask, ProcessedResult, resizeImage, ResizeInput, ResizeOutput } from './image-processing.utils';
 
 @Injectable({ providedIn: 'root' })
@@ -53,8 +53,8 @@ export class ImagePipelineService {
       }
     };
 
-    this.resizeCoroutine = interactive({ customMessageHandler })(resizeImage);
-    this.compressCoroutine = interactive({ customMessageHandler })(compressImage);
+    this.resizeCoroutine = actor({ customMessageHandler })(resizeImage);
+    this.compressCoroutine = actor({ customMessageHandler })(compressImage);
 
     this.resultStream = this.fileStream.pipe(
       filter((task) => task.file.type.startsWith('image/')),
