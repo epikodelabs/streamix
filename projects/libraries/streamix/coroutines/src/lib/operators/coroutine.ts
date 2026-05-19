@@ -42,6 +42,19 @@ export function coroutine(config: CoroutineConfig): <T, R>(main: CoroutineTask<T
  * Creates a coroutine directly from a task function and optional helpers.
  */
 export function coroutine<T, R>(main: CoroutineTask<T, R>, ...functions: Function[]): Coroutine<T, R>;
+/**
+ * Creates a coroutine for plain background task execution.
+ *
+ * When called with a configuration object, returns a factory function that accepts
+ * the task function and optional helpers. When called with a task function directly,
+ * creates the coroutine immediately using default configuration.
+ *
+ * @template T The type of input data.
+ * @template R The type of output data.
+ * @param arg1 Either a `CoroutineConfig` or the main `CoroutineTask`.
+ * @param rest Optional helper functions available inside the worker.
+ * @returns A `Coroutine` instance or a factory that produces one.
+ */
 export function coroutine<T, R>(
   arg1: CoroutineConfig | CoroutineTask<T, R>,
   ...rest: Function[]

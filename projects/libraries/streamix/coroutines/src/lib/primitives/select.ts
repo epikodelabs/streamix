@@ -1,12 +1,22 @@
 import type { Channel, ReceiveResult } from "./channel";
 import { background, createAbortError, Context, ContextCancelledError } from "./context";
 
+/**
+ * Represents a `select` case that receives a value from a channel.
+ *
+ * @template T The type of value received from the channel.
+ */
 export type SelectReceiveCase<T = any> = {
   op: "receive";
   channel: Channel<T>;
   name?: string;
 };
 
+/**
+ * Represents a `select` case that sends a value into a channel.
+ *
+ * @template T The type of value sent to the channel.
+ */
 export type SelectSendCase<T = any> = {
   op: "send";
   channel: Channel<T>;
@@ -14,13 +24,26 @@ export type SelectSendCase<T = any> = {
   name?: string;
 };
 
+/**
+ * Represents a default `select` case that fires when no other case is ready.
+ */
 export type SelectDefaultCase = {
   op: "default";
   name?: string;
 };
 
+/**
+ * A union of all possible `select` cases.
+ *
+ * @template T The channel value type.
+ */
 export type SelectCase<T = any> = SelectReceiveCase<T> | SelectSendCase<T> | SelectDefaultCase;
 
+/**
+ * Result of a `select` operation indicating which case was chosen.
+ *
+ * @template T The channel value type.
+ */
 export type SelectResult<T = any> = {
   index: number;
   case: SelectCase<T>;
@@ -30,10 +53,46 @@ export type SelectResult<T = any> = {
   ok?: boolean;
 };
 
+/**
+ * Builds a receive case for use with `select(...)`.
+ *
+ * @template T The channel value type.
+ * @param ch The channel to receive from.
+ * @param name Optional identifier for this case.
+ * @returns A `SelectReceiveCase`.
+ */
 export const recv = <T>(ch: Channel<T>, name?: string): SelectReceiveCase<T> => ({ op: "receive", channel: ch, name });
+
+/**
+ * Builds a send case for use with `select(...)`.
+ *
+ * @template T The channel value type.
+ * @param ch The channel to send into.
+ * @param value The value to send.
+ * @param name Optional identifier for this case.
+ * @returns A `SelectSendCase`.
+ */
 export const send = <T>(ch: Channel<T>, value: T, name?: string): SelectSendCase<T> => ({ op: "send", channel: ch, value, name });
+
+/**
+ * Builds a default case for use with `select(...)`.
+ *
+ * @param name Optional identifier for this case.
+ * @returns A `SelectDefaultCase`.
+ */
 export const otherwise = (name = "default"): SelectDefaultCase => ({ op: "default", name });
 
+/**
+ * Waits on multiple channel operations simultaneously and returns the first one that is ready.
+ *
+ * If a default case is provided and no channel operation is immediately available,
+ * the default case is selected without blocking.
+ *
+ * @template T The channel value type.
+ * @param cases An array of select cases (receive, send, or default).
+ * @param ctx A cancellation context. Defaults to `background()`.
+ * @returns A `SelectResult` describing which case was chosen and its value.
+ */
 export async function select<T = any>(cases: SelectCase<T>[], ctx: Context = background()): Promise<SelectResult<T>> {
   if (ctx.signal.aborted) throw createAbortError(ctx.signal);
 

@@ -1,5 +1,8 @@
 import { createAbortError } from "./context";
 
+/**
+ * Thrown when sending to or receiving from a closed channel.
+ */
 export class ChannelClosedError extends Error {
   constructor(message = "channel is closed") {
     super(message);
@@ -7,6 +10,10 @@ export class ChannelClosedError extends Error {
   }
 }
 
+/**
+ * Result of a channel receive operation.
+ * `ok: true` when a value was available, `ok: false` when the channel is closed and empty.
+ */
 export type ReceiveResult<T> =
   | { ok: true; value: T }
   | { ok: false; value: undefined };
@@ -26,18 +33,41 @@ type WaitingSender<T> = {
   abort?: () => void;
 };
 
+/**
+ * An async channel for passing values between concurrent operations.
+ *
+ * - `capacity = 0` creates an unbuffered channel (send blocks until receive is ready).
+ * - `capacity > 0` creates a buffered channel (send succeeds while buffer has space).
+ *
+ * Channels are async iterables; use `for await...of` to consume values until closed.
+ */
 export type Channel<T> = AsyncIterable<T> & {
+  /** Maximum number of values that can be buffered. */
   readonly capacity: number;
+  /** Current number of buffered values. */
   readonly size: number;
+  /** Whether the channel has been closed. */
   readonly closed: boolean;
+  /** Sends a value. Blocks if the channel is unbuffered and no receiver is waiting, or if the buffer is full. Rejects if the channel is closed. */
   send(value: T, signal?: AbortSignal): Promise<void>;
+  /** Receives a value. Returns `{ ok: true, value }` or `{ ok: false }` when closed. Blocks if the channel is empty. */
   receive(signal?: AbortSignal): Promise<ReceiveResult<T>>;
+  /** Convenience receiver that returns the value directly, or `undefined` when closed. */
   recv(signal?: AbortSignal): Promise<T | undefined>;
+  /** Non-blocking send. Returns `true` if the value was accepted immediately. */
   trySend(value: T): boolean;
+  /** Non-blocking receive. Returns the result immediately, or `undefined` if nothing is available. */
   tryReceive(): ReceiveResult<T> | undefined;
+  /** Closes the channel. Pending receivers resolve with `{ ok: false }`; pending senders reject. */
   close(): void;
 };
 
+/**
+ * Creates a new async channel with the given buffer capacity.
+ *
+ * @param capacity - Buffer size. `0` means unbuffered (hand-off semantics). Must be a non-negative integer.
+ * @returns A new channel.
+ */
 export function channel<T>(capacity = 0): Channel<T> {
   if (!Number.isInteger(capacity) || capacity < 0) {
     throw new RangeError("channel capacity must be a non-negative integer");

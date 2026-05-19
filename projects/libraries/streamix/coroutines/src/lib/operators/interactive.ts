@@ -28,6 +28,12 @@ import {
   send,
 } from "./select";
 
+/**
+ * Concurrency primitives injected into interactive workers.
+ *
+ * Provides channel operations, context control, and select helpers
+ * that mirror the main-thread API but run inside the worker scope.
+ */
 export type WorkerConcurrency = {
   channel: typeof channel;
   recv: typeof recv;
@@ -42,11 +48,24 @@ export type WorkerConcurrency = {
   ContextCancelledError: typeof ContextCancelledError;
 };
 
+/**
+ * Bridge API exposed to interactive workers for communicating with the main thread.
+ *
+ * @template Q The request payload type sent from the worker.
+ * @template D The response data type returned to the worker.
+ * @template FromMain The type of one-way messages sent from main to worker.
+ * @template ToMain The type of one-way messages sent from worker to main.
+ */
 export type MainThreadBridge<Q = any, D = any, FromMain = any, ToMain = any> = {
+  /** Sends a one-way message to the main thread. */
   send: (payload: ToMain) => void;
+  /** Sends a request to the main thread and awaits a response. */
   request: (payload: Q) => Promise<D>;
+  /** Receives a message from the main thread, or `undefined` if the inbox closes. */
   recv: (signal?: AbortSignal) => Promise<FromMain | undefined>;
+  /** Receives a full result from the main thread inbox. */
   receive: (signal?: AbortSignal) => Promise<ReceiveResult<FromMain>>;
+  /** The worker's inbox channel for messages from the main thread. */
   inbox: Channel<FromMain>;
 };
 
@@ -642,6 +661,23 @@ export function interactive<Q = any, D = any, ToMain = any, FromMain = any>(
  * Creates an interactive worker directly from a task function and optional helpers.
  */
 export function interactive<T, R>(main: InteractiveTask<T, R>, ...functions: Function[]): Interactive<T, R>;
+/**
+ * Creates an interactive worker coroutine.
+ *
+ * When called with a configuration object, returns a factory function that accepts
+ * the interactive task and optional helpers. When called with a task function directly,
+ * creates the interactive coroutine immediately using default configuration.
+ *
+ * @template T The type of input data.
+ * @template R The type of output data.
+ * @template Q The request payload type for main-thread requests.
+ * @template D The response data type for main-thread requests.
+ * @template ToMain The type of one-way messages sent from worker to main.
+ * @template FromMain The type of one-way messages sent from main to worker.
+ * @param arg1 Either an `InteractiveConfig` or the main `InteractiveTask`.
+ * @param rest Optional helper functions available inside the worker.
+ * @returns An `Interactive` instance or a factory that produces one.
+ */
 export function interactive<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
   arg1: InteractiveConfig<Q, D, ToMain> | InteractiveTask<T, R, Q, D, FromMain, ToMain>,
   ...rest: Function[]

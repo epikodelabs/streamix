@@ -64,9 +64,15 @@ export type WorkerMessageHandler = (
   pendingTasks: PendingTaskMap
 ) => void;
 
+/**
+ * Optional hooks for the default main-thread worker message handler.
+ */
 export type DefaultMessageHandlerOptions = {
+  /** Called when the worker sends a request message. */
   onRequest?: (message: CoroutineMessage) => void | Promise<void>;
+  /** Called when the worker sends a progress update. */
   onProgress?: (message: CoroutineMessage) => void | Promise<void>;
+  /** Called when the worker sends a one-way message. */
   onWorkerMessage?: (message: CoroutineMessage) => void | Promise<void>;
 };
 
