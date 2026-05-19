@@ -1,151 +1,143 @@
 # Streamix Interactives
 
-`interactive(...)` builds on the coroutine worker pool and adds a worker/main-thread bridge.
+`interactive(...)` runs your code in a Web Worker and gives it two tools:
 
-Use it when your worker needs both:
-- local worker-side concurrency
-- explicit messaging with the main thread
+- `utils.main` — talk to the main thread (request data, send messages, receive commands)
+- `utils.concurrency` — coordinate async work inside the worker (channels, select, timeouts)
 
-The worker receives two namespaces:
+Use it when your worker needs to **both** compute in the background **and** chat with the main thread.
 
-- `utils.concurrency`
-- `utils.main`
+---
 
-## Worker-Side API
+## Basic Usage
 
-### `utils.concurrency`
+### Ask main for data
 
-Local coordination inside the worker runtime:
-
-- `channel(...)`
-- `recv(...)`
-- `send(...)`
-- `otherwise(...)`
-- `select(...)`
-- `background()`
-- `withCancel(...)`
-- `withTimeout(...)`
-- `withDeadline(...)`
-
-These are local primitives. They do not cross the worker boundary by themselves.
-
-### `utils.main`
-
-The worker/main-thread bridge:
-
-- `utils.main.request(payload)`
-- `utils.main.send(payload)`
-- `utils.main.recv()`
-- `utils.main.receive()`
-- `utils.main.inbox`
-
-This bridge is task-scoped for the currently running interactive task.
-
-## Main-Thread API
-
-### `request`
-
-Handle worker request/response calls:
+The worker asks, the main thread fetches, the worker gets its answer.
 
 ```ts
-import { interactive } from "@epikodelabs/streamix/coroutines";
-
-const worker = interactive({
-  request: async (payload: { id: string }) => {
-    return fetch(`/api/items/${payload.id}`).then((r) => r.json());
+const dogFinder = interactive({
+  request: async (breed) => {
+    return fetch(`https://dog.ceo/api/breed/${breed}/images/random`)
+      .then((r) => r.json());
   },
-})(async function task(input: string, utils) {
-  return utils.main.request({ id: input });
+})(async function task(breed, utils) {
+  const dog = await utils.main.request(breed);
+  return dog.message; // URL of a very good boy
 });
+
+const photo = await dogFinder.processTask("corgi");
 ```
 
-### `onMessage`
+### Send one-way updates to main
 
-Handle one-way worker-to-main messages:
+The worker brags about its progress while the main thread listens.
 
 ```ts
-const worker = interactive({
+const oven = interactive({
   onMessage: (payload) => {
-    console.log("Worker message:", payload);
+    console.log(`Cookies ${payload.status} (${payload.percent}%)`);
   },
-})(async function task(_input: void, utils) {
-  utils.main.send({ stage: "started" });
-  return 1;
+})(async function bake(count, utils) {
+  for (let i = 0; i <= count; i++) {
+    utils.main.send({ status: "baking", percent: Math.round((i / count) * 100) });
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  utils.main.send({ status: "done", percent: 100 });
+  return "🍪".repeat(count);
 });
 ```
 
-### `sendToWorker(...)`
+### Send commands from main to worker
 
-Push main-thread messages into the active worker task:
+The main thread steers the worker in real time.
 
 ```ts
-const worker = interactive(async function task(_input: void, utils) {
-  const message = await utils.main.recv();
-  return message;
+const vacuum = interactive(async function task(room, utils) {
+  while (true) {
+    const cmd = await utils.main.recv();
+    if (cmd === "dock") return "docked";
+    if (cmd === "panic") return "hiding under couch";
+    // ...cleaning logic...
+  }
 });
 
-const { workerId } = await worker.getIdleWorker();
-worker.returnWorker(workerId);
+const { workerId } = await vacuum.getIdleWorker();
+const pending = vacuum.assignTask(workerId, "kitchen");
 
-const pending = worker.processTask(undefined);
-worker.sendToWorker(workerId, { command: "continue" });
+// Change your mind
+vacuum.sendToWorker(workerId, "dock");
 
-const result = await pending;
+const result = await pending; // "docked"
+vacuum.returnWorker(workerId);
 ```
 
-## Full Example
+---
+
+## Full Example — Ramen Timer
+
+The worker boils noodles, counts down, and listens for the chef to call it off.
 
 ```ts
-import { interactive } from "@epikodelabs/streamix/coroutines";
-
-const timer = interactive<
-  { seconds: number },
-  number,
-  { id: string },
-  { id: string; value: number },
-  { command: "stop" }
->({
-  request: async ({ id }) => ({ id, value: 10 }),
-  onMessage: (payload) => {
-    console.log("tick", payload);
-  },
-})(async function runTimer(input, utils) {
-  const { channel, recv, send, select, otherwise } = utils.concurrency;
+const ramen = interactive({
+  request: async (flavor) => ({ flavor, minutes: flavor === "udon" ? 6 : 3 }),
+  onMessage: (payload) => console.log(payload.stage),
+})(async function cook(input, utils) {
+  const { channel, recv, select, otherwise } = utils.concurrency;
   const ticks = channel<number>(1);
 
-  const data = await utils.main.request({ id: "seed" });
-  await ticks.send(data.value);
+  // Ask main how long this noodle type needs
+  const recipe = await utils.main.request(input.flavor);
+  await ticks.send(recipe.minutes);
 
-  for (let remaining = input.seconds; remaining > 0; remaining--) {
-    utils.main.send({ remaining });
+  for (let remaining = recipe.minutes; remaining > 0; remaining--) {
+    utils.main.send({ stage: `boiling... ${remaining} min left` });
 
+    // Wait for tick, a command from the chef, or just keep bubbling
     const winner = await select([
       recv(ticks, "tick"),
-      recv(utils.main.inbox, "main"),
-      otherwise("idle"),
+      recv(utils.main.inbox, "chef"),
+      otherwise("bubble"),
     ]);
 
-    if (winner.name === "main" && winner.value?.command === "stop") {
-      return remaining;
+    // Chef says dinner is cancelled
+    if (winner.name === "chef" && winner.value === "abort") {
+      return "poured down the sink";
     }
 
+    // Tick received — continue countdown
     if (winner.name === "tick") {
       await ticks.send(remaining - 1);
     }
   }
 
-  return 0;
+  return "slurp time";
 });
 ```
 
+Drive it from main:
+
+```ts
+const { workerId } = await ramen.getIdleWorker();
+const pending = ramen.processTask({ flavor: "udon" });
+
+// Oh no, forgot the guest is allergic
+ramen.sendToWorker(workerId, "abort");
+
+const result = await pending; // "poured down the sink"
+ramen.returnWorker(workerId);
+```
+
+---
+
 ## Helpers
 
-Interactive workers still support helper injection through `helpers`:
+Inject raw snippets into the worker if you need them:
 
 ```ts
 const worker = interactive({
   helpers: [
-    "function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }",
+    "function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }",
   ],
 })(function task(input, utils) {
   utils.main.send({ value: clamp(input, 0, 100) });
@@ -153,16 +145,21 @@ const worker = interactive({
 });
 ```
 
-Prefer normal positional helper functions when possible, and reserve config `helpers` for raw injected snippets.
-The async worker bootstrap is injected internally by the library and is separate
-from these user-facing `helpers`.
+Prefer normal helper arguments when possible:
 
-## Choosing Between `coroutine(...)` and `interactive(...)`
+```ts
+const worker = interactive(async function task(input, utils, clamp) {
+  return clamp(input, 0, 100);
+}, clamp);
+```
 
-Use `coroutine(...)` when you only need background computation.
+---
 
-Use `interactive(...)` when the worker must:
-- ask the main thread for data
-- emit events to the main thread
-- receive messages from the main thread
-- coordinate multiple local worker flows while still talking to the host
+## `coroutine(...)` vs `interactive(...)`
+
+| Use `coroutine(...)` | Use `interactive(...)` |
+|----------------------|------------------------|
+| Background computation only | Ask main for data |
+| | Send events to main |
+| | Receive commands from main |
+| | Coordinate local worker flows |
