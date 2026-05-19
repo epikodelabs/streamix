@@ -125,6 +125,10 @@ export async function select<T = any>(cases: SelectCase<T>[], ctx: Context = bac
   const onContextAbort = () => abortAll();
   ctx.signal.addEventListener("abort", onContextAbort, { once: true });
 
+  // NOTE: Promise.race can leave other cases in a pending state where they may
+  // still advance (e.g., consume a channel value) before abortAll() runs in
+  // finally. This is an inherent limitation of racing async channel ops.
+
   try {
     return await Promise.race(
       cases.map(async (item, index): Promise<SelectResult<T>> => {

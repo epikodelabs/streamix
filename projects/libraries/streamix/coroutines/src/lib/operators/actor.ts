@@ -13,20 +13,20 @@ import {
   type Channel,
   type ReceiveResult,
   channel,
-} from "./channel";
+} from "../primitives/channel";
 import {
   ContextCancelledError,
   background,
   withCancel,
   withDeadline,
   withTimeout,
-} from "./context";
+} from "../primitives/context";
 import {
   otherwise,
   recv,
   select,
   send,
-} from "./select";
+} from "../primitives/select";
 
 /**
  * Concurrency primitives injected into actor workers.
@@ -111,6 +111,11 @@ export type ActorConfig<Q = any, D = any, ToMain = any> = WorkerPoolConfig & {
  * Actor workers share the same runtime shape as plain coroutines.
  */
 export type Actor<T = any, R = T, FromMain = any> = Coroutine<T, R> & {
+  /**
+   * Sends a one-way message to a specific worker.
+   * The message is routed to the currently active task on that worker.
+   * If no task is active when the message arrives, it will be dropped.
+   */
   sendToWorker: (workerId: number, payload: FromMain) => void;
 };
 
@@ -534,7 +539,7 @@ const buildActorWorkerRuntime = (): string =>
     "};",
     "",
     "onmessage = async (event) => {",
-    "  const { workerId, taskId, payload, type, requestId } = event.data;",
+    "  const { workerId, taskId, payload, type, requestId, error } = event.data;",
     "",
     "  if (type === 'main-message') {",
     "    const targetTaskId = taskId || __activeTaskId;",
@@ -562,7 +567,7 @@ const buildActorWorkerRuntime = (): string =>
     "      if (type === 'data') {",
     "        pendingRequest.resolve(payload);",
     "      } else {",
-    "        pendingRequest.reject(new Error(payload?.error || payload?.message || 'Actor request failed'));",
+    "        pendingRequest.reject(new Error(error || payload?.error || payload?.message || 'Actor request failed'));",
     "      }",
     "    }",
     "    return;",
@@ -585,10 +590,6 @@ const buildActorWorkerRuntime = (): string =>
     "};",
   ].join("\n");
 
-const toErrorPayload = (error: unknown) => ({
-  message: error instanceof Error ? error.message : String(error),
-});
-
 function createActorMessageHandler<Q, D, ToMain>(
   config?: ActorConfig<Q, D, ToMain>
 ) {
@@ -607,7 +608,7 @@ function createActorMessageHandler<Q, D, ToMain>(
             workerId,
             taskId,
             type: "error",
-            payload: { message: "Actor request is missing requestId" }
+            error: "Actor request is missing requestId",
           });
           return;
         }
@@ -618,7 +619,7 @@ function createActorMessageHandler<Q, D, ToMain>(
             taskId,
             requestId,
             type: "error",
-            payload: { message: "No actor request handler configured" }
+            error: "No actor request handler configured",
           });
           return;
         }
@@ -638,7 +639,7 @@ function createActorMessageHandler<Q, D, ToMain>(
             taskId,
             requestId,
             type: "error",
-            payload: toErrorPayload(error),
+            error: error instanceof Error ? error.message : String(error),
           });
         }
       },
@@ -704,9 +705,7 @@ export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
 
     return Object.assign(operator, {
       sendToWorker(workerId: number, payload: FromMain) {
-        (operator as Coroutine<T, R> & {
-          postMessageToWorker: (workerId: number, message: Omit<CoroutineMessage, "workerId">) => void;
-        }).postMessageToWorker(workerId, {
+        operator.postMessageToWorker(workerId, {
           taskId: "",
           type: "main-message",
           payload,

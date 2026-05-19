@@ -33,22 +33,22 @@ export interface CoroutineLike<T = any, R = T> extends Operator<T, R> {
 
 
 /**
- * Chains two coroutines into a single `CoroutineLike` operator.
+ * Wraps a single coroutine as a `CoroutineLike` operator.
  *
- * @template A The input type of the first coroutine.
- * @template B The output type of the second (and final) coroutine.
- * @param tasks A tuple of two coroutines to chain.
+ * @template A The input type of the coroutine.
+ * @template B The output type of the coroutine.
+ * @param tasks A tuple containing one coroutine.
  * @returns A `CoroutineLike` operator representing the cascaded pipeline.
  */
 export function cascade<A, B>(...tasks: [Coroutine<A, B>]): CoroutineLike<A, B>;
 
 /**
- * Chains three coroutines into a single `CoroutineLike` operator.
+ * Chains two coroutines into a single `CoroutineLike` operator.
  *
  * @template A The input type of the first coroutine.
  * @template B The output type of the first coroutine.
- * @template C The output type of the third (and final) coroutine.
- * @param tasks A tuple of three coroutines to chain.
+ * @template C The output type of the second coroutine.
+ * @param tasks A tuple of two coroutines to chain.
  * @returns A `CoroutineLike` operator representing the cascaded pipeline.
  */
 export function cascade<A, B, C>(
@@ -56,13 +56,13 @@ export function cascade<A, B, C>(
 ): CoroutineLike<A, C>;
 
 /**
- * Chains four coroutines into a single `CoroutineLike` operator.
+ * Chains three coroutines into a single `CoroutineLike` operator.
  *
  * @template A The input type of the first coroutine.
  * @template B The output type of the first coroutine.
  * @template C The output type of the second coroutine.
- * @template D The output type of the fourth (and final) coroutine.
- * @param tasks A tuple of four coroutines to chain.
+ * @template D The output type of the third coroutine.
+ * @param tasks A tuple of three coroutines to chain.
  * @returns A `CoroutineLike` operator representing the cascaded pipeline.
  */
 export function cascade<A, B, C, D>(
@@ -99,6 +99,7 @@ export function cascade<T = any, R = any>(
   ...tasks: Array<Coroutine<any, any>>
 ): CoroutineLike<T, R> {
   const getTasks = () => tasks;
+  let isFinalizing = false;
 
   const operator = createOperator<T, R>("cascade", function (this: Operator, source) {
     let completed = false;
@@ -106,13 +107,14 @@ export function cascade<T = any, R = any>(
     return {
       async next() {
         while (true) {
-          if (completed) {
+          if (completed || isFinalizing) {
             return DONE;
           }
 
           const result = await source.next();
           if (result.done) {
             completed = true;
+            await coroutineLike.finalize();
             return DONE;
           }
 
@@ -127,10 +129,12 @@ export function cascade<T = any, R = any>(
       },
       async return() {
         completed = true;
+        await coroutineLike.finalize();
         return DONE;
       },
       async throw(err) {
         completed = true;
+        await coroutineLike.finalize();
         throw err;
       }
     };
@@ -146,6 +150,8 @@ export function cascade<T = any, R = any>(
       return result as R;
     },
     async finalize() {
+      if (isFinalizing) return;
+      isFinalizing = true;
       const tasksList = getTasks();
       for (const task of tasksList) {
         await task.finalize();

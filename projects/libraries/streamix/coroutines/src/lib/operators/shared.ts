@@ -53,6 +53,7 @@ export type Coroutine<T = any, R = T> = Operator<T, R> & {
   getIdleWorker: () => Promise<{ worker: Worker; workerId: number }>;
   returnWorker: (workerId: number) => void;
   finalize: () => Promise<void>;
+  postMessageToWorker: (workerId: number, message: Omit<CoroutineMessage, "workerId">) => void;
 };
 
 /**
@@ -211,13 +212,15 @@ export function createCoroutineOperator<T, R>({
   generateWorkerScript,
   createMessageHandler,
 }: CreateCoroutineOperatorOptions): Coroutine<T, R> {
-  const maxWorkers = navigator.hardwareConcurrency || 4;
+  const maxWorkers = (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined) || 4;
   const workerPool: { worker: Worker; workerId: number }[] = [];
   const waitingQueue: Array<(entry: { worker: Worker; workerId: number }) => void> = [];
   const activeWorkers = new Map<number, Worker>();
   const pendingMessages: PendingTaskMap = new Map();
 
   let createdWorkersCount = 0;
+  // Caches the blob URL for the first generated script in this operator instance.
+  // Assumes main/functions are constant for the lifetime of the operator.
   let blobUrlCache: string | null = null;
   let isFinalizing = false;
 

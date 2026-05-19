@@ -23,6 +23,17 @@ export type MessageCapableTask<FromMain = any> = {
 };
 
 /**
+ * Optional configuration for the `hire` stream.
+ */
+export type HireOptions = {
+  /**
+   * Maximum time in milliseconds to hold the worker before auto-releasing.
+   * If omitted, the worker is held until `release()` is called.
+   */
+  timeout?: number;
+};
+
+/**
  * Interface for a worker that has been "hired" from the coroutine pool.
  */
 export interface HiredWorker<T = any, R = T> {
@@ -43,19 +54,24 @@ export interface HiredActorWorker<T = any, R = T, FromMain = any> extends HiredW
  *
  * The stream yields a single `HiredWorker` that can be used to send tasks directly
  * to the same worker instance. The worker is returned to the pool when the stream
- * is unsubscribed or the worker is released.
+ * is unsubscribed, the worker is released, or the optional timeout expires.
+ *
+ * **Important:** The consumer must call `hiredWorker.release()` when done, or
+ * provide a `timeout`, otherwise the worker will be held indefinitely.
  *
  * @template T The type of task input.
  * @template R The type of task output.
  * @param task The coroutine or actor to hire from.
  * @param onMessage Handler for messages emitted by the hired worker.
  * @param onError Handler for errors emitted by the hired worker.
+ * @param options Optional configuration for hire behavior.
  * @returns A stream that yields one `HiredWorker`.
  */
 export function hire<T = any, R = T>(
   task: HirableTask<T, R>,
   onMessage: (message: CoroutineMessage) => MaybePromise<void>,
-  onError: (error: Error) => MaybePromise<void>
+  onError: (error: Error) => MaybePromise<void>,
+  options?: HireOptions
 ): Stream<HiredWorker<T, R>>;
 
 /**
@@ -64,18 +80,23 @@ export function hire<T = any, R = T>(
  * The stream yields a single `HiredActorWorker` that supports both direct
  * task assignment and main-to-worker messaging.
  *
+ * **Important:** The consumer must call `hiredWorker.release()` when done, or
+ * provide a `timeout`, otherwise the worker will be held indefinitely.
+ *
  * @template T The type of task input.
  * @template R The type of task output.
  * @template FromMain The type of messages sent from main to the worker.
  * @param task An actor.
  * @param onMessage Handler for messages emitted by the hired worker.
  * @param onError Handler for errors emitted by the hired worker.
+ * @param options Optional configuration for hire behavior.
  * @returns A stream that yields one `HiredActorWorker`.
  */
 export function hire<T = any, R = T, FromMain = any>(
   task: Actor<T, R, FromMain>,
   onMessage: (message: CoroutineMessage) => MaybePromise<void>,
-  onError: (error: Error) => MaybePromise<void>
+  onError: (error: Error) => MaybePromise<void>,
+  options?: HireOptions
 ): Stream<HiredActorWorker<T, R, FromMain>>;
 
 /**
@@ -84,18 +105,21 @@ export function hire<T = any, R = T, FromMain = any>(
  * @param task The coroutine or actor to hire from.
  * @param onMessage Handler for messages emitted by the hired worker.
  * @param onError Handler for errors emitted by the hired worker.
+ * @param options Optional configuration for hire behavior.
  * @returns A stream that yields one hired worker.
  */
 export function hire<T = any, R = T>(
   task: HirableTask<T, R>,
   onMessage: (message: CoroutineMessage) => MaybePromise<void>,
-  onError: (error: Error) => MaybePromise<void>
+  onError: (error: Error) => MaybePromise<void>,
+  options?: HireOptions
 ): Stream<HiredWorker<T, R>> {
   return createStream("hire", async function* () {
     const { worker, workerId } = await task.getIdleWorker();
     let disposed = false;
     const ac = new AbortController();
     const signal = ac.signal;
+    let releaseResolve: (() => void) | undefined;
 
     const messageHandler = async (event: MessageEvent<CoroutineMessage>) => {
       if (event.data.workerId === workerId) {
@@ -106,18 +130,31 @@ export function hire<T = any, R = T>(
       await onError(event.error);
       if (!disposed) {
         ac.abort();
+        releaseResolve?.();
       }
     };
 
     const cleanup = () => {
       if (!disposed) {
         disposed = true;
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
         worker.removeEventListener("message", messageHandler);
         worker.removeEventListener("error", errorHandler);
         task.returnWorker(workerId);
         ac.abort();
+        releaseResolve?.();
       }
     };
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (options?.timeout !== undefined && options.timeout > 0) {
+      timeoutId = setTimeout(() => {
+        if (!disposed) {
+          console.warn(`[hire] Worker ${workerId} auto-released after ${options.timeout}ms timeout`);
+          cleanup();
+        }
+      }, options.timeout);
+    }
 
     worker.addEventListener("message", messageHandler);
 
@@ -144,8 +181,11 @@ export function hire<T = any, R = T>(
     try {
       yield hiredWorker;
 
-      // Wait until release or iterator is abandoned
-      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+      // Wait until release, error, timeout, or iterator is abandoned
+      await new Promise<void>((resolve) => {
+        releaseResolve = resolve;
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
     } finally {
       cleanup();
     }

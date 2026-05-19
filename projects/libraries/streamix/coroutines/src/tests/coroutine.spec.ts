@@ -442,8 +442,8 @@ idescribe('coroutine', () => {
 
     handler({ data: { type: "request", workerId, taskId: "t1", requestId: "r1", payload: { q: 1 } } });
     handler({ data: { type: "request", workerId, taskId: "t1", requestId: "r2", payload: { q: 2 } } });
-    expect((worker as any).postMessage).toHaveBeenCalledWith(jasmine.objectContaining({ type: "data", requestId: "r1" }));
-    expect((worker as any).postMessage).toHaveBeenCalledWith(jasmine.objectContaining({ type: "data", requestId: "r2" }));
+    expect((worker as any).postMessage).toHaveBeenCalledWith(jasmine.objectContaining({ type: "error", requestId: "r1" }));
+    expect((worker as any).postMessage).toHaveBeenCalledWith(jasmine.objectContaining({ type: "error", requestId: "r2" }));
 
     handler({ data: { type: "worker-message", workerId, taskId: "t1", payload: { pct: 10 } } });
     handler({ data: { type: "something-else", workerId, taskId: "t1", payload: null } });
