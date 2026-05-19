@@ -1,5 +1,5 @@
 import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
-import type { Coroutine } from "./coroutine";
+import type { Coroutine } from "./shared";
 
 /**
  * A coroutine-like operator that can process tasks asynchronously in the background.
@@ -33,27 +33,49 @@ export interface CoroutineLike<T = any, R = T> extends Operator<T, R> {
 
 
 /**
- * Function cascade.
+ * Chains two coroutines into a single `CoroutineLike` operator.
+ *
+ * @template A The input type of the first coroutine.
+ * @template B The output type of the second (and final) coroutine.
+ * @param tasks A tuple of two coroutines to chain.
+ * @returns A `CoroutineLike` operator representing the cascaded pipeline.
  */
 export function cascade<A, B>(...tasks: [Coroutine<A, B>]): CoroutineLike<A, B>;
 
 /**
- * Function cascade.
+ * Chains three coroutines into a single `CoroutineLike` operator.
+ *
+ * @template A The input type of the first coroutine.
+ * @template B The output type of the first coroutine.
+ * @template C The output type of the third (and final) coroutine.
+ * @param tasks A tuple of three coroutines to chain.
+ * @returns A `CoroutineLike` operator representing the cascaded pipeline.
  */
 export function cascade<A, B, C>(
   ...tasks: [Coroutine<A, B>, Coroutine<B, C>]
 ): CoroutineLike<A, C>;
 
 /**
- * Function cascade.
+ * Chains four coroutines into a single `CoroutineLike` operator.
+ *
+ * @template A The input type of the first coroutine.
+ * @template B The output type of the first coroutine.
+ * @template C The output type of the second coroutine.
+ * @template D The output type of the fourth (and final) coroutine.
+ * @param tasks A tuple of four coroutines to chain.
+ * @returns A `CoroutineLike` operator representing the cascaded pipeline.
  */
 export function cascade<A, B, C, D>(
   ...tasks: [Coroutine<A, B>, Coroutine<B, C>, Coroutine<C, D>]
 ): CoroutineLike<A, D>;
 
-
 /**
- * Function cascade.
+ * Chains multiple coroutines into a single `CoroutineLike` operator (generic fallback).
+ *
+ * @template T The input type of the first coroutine.
+ * @template R The output type of the last coroutine.
+ * @param tasks An array of coroutines to chain.
+ * @returns A `CoroutineLike` operator representing the cascaded pipeline.
  */
 export function cascade<T = any, R = any>(
   ...tasks: Array<Coroutine<any, any>>

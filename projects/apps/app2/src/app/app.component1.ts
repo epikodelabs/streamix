@@ -1,14 +1,12 @@
 import { Component, OnInit } from '@angular/core';
-import { coroutine, CoroutineMessage, hire, HiredWorker } from '@epikodelabs/streamix/coroutines';
+import { CoroutineMessage, hire, HiredWorker, actor, WorkerUtils } from '@epikodelabs/streamix/coroutines';
 
 // --- Worker Function that runs the timer logic ---
 // This is a single, stateful function designed to run in a web worker.
-// Worker function for use in Coroutine
-import { WorkerUtils } from '@epikodelabs/streamix/coroutines';
 
 /**
  * A main task function that runs a countdown timer inside a Web Worker.
- * It uses WorkerUtils to report progress to the main thread.
+ * It uses WorkerUtils to send messages to the main thread.
  */
 async function createTimerWorker(
   data: { initialTime: number; type: 'start' | 'reset' },
@@ -23,7 +21,7 @@ async function createTimerWorker(
   let counter = data.initialTime;
 
   // Send initial counter value
-  utils.reportProgress({ tick: counter, timestamp: Date.now() });
+  utils.main.send({ tick: counter, timestamp: Date.now() });
 
   // Return a promise that resolves when the timer completes
   return new Promise((resolve) => {
@@ -31,7 +29,7 @@ async function createTimerWorker(
       counter--;
 
       // Send periodic update
-      utils.reportProgress({ tick: counter, timestamp: Date.now() });
+      utils.main.send({ tick: counter, timestamp: Date.now() });
 
       if (counter <= 0) {
         clearInterval(timer);
@@ -56,7 +54,7 @@ export class AppComponent implements OnInit {
   ngOnInit(): void {
     // The coroutine manages a pool of workers running our timer logic.
     // This is the direct invocation of createCoroutine.
-    const timerTask = coroutine(createTimerWorker);
+    const timerTask = actor(createTimerWorker);
 
     // We use the hire operator to get a single dedicated worker from the pool.
     // We now pass callbacks directly to hire for handling messages and errors.
@@ -64,7 +62,7 @@ export class AppComponent implements OnInit {
       timerTask,
       // onMessage callback
       (msg: CoroutineMessage) => {
-        if (msg.type === 'progress') {
+        if (msg.type === 'worker-message') {
           this.timerValue = msg.payload.tick;
           console.log('Counting down...');
         } else if (msg.type === 'response') {

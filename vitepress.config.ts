@@ -48,6 +48,7 @@ export default defineConfig({
             { text: 'Pricing', link: '/PRICING' },
             { text: 'Changelog', link: '/CHANGELOG' },
             { text: 'Coroutines', link: '/COROUTINES' },
+            { text: 'Actors', link: '/ACTORS' },
             { text: 'Generators', link: '/GENERATORS' },
             { text: 'Subjects', link: '/SUBJECTS' },
             { text: 'Angular', link: '/ANGULAR' },
