@@ -1,223 +1,401 @@
-import { createStream, type MaybePromise, type Stream } from "@epikodelabs/streamix";
+import {
+  createStream,
+  isPromiseLike,
+  type MaybePromise,
+  type Stream,
+} from "@epikodelabs/streamix";
 
 /**
- * A stream that represents a WebSocket-like interface.
- * Extends a standard Stream with a `.send()` method to send messages.
+ * A bidirectional stream built on top of WebSocket.
  *
- * @template T The type of messages sent and received.
+ * Incoming WebSocket messages are emitted through the stream,
+ * while outgoing messages can be sent using {@link WebSocketStream.send}.
+ *
+ * @template T Message payload type.
  */
 export type WebSocketStream<T = any> = Stream<T> & {
-  /** Sends a JSON-serializable message to the WebSocket server. */
+  /**
+   * Sends a JSON-serializable message to the server.
+   *
+   * If the socket is still connecting, the message is queued automatically
+   * and flushed once the connection opens.
+   *
+   * @param message Message payload to send.
+   */
   send: (message: T) => void;
-  /** Close the WebSocket and stop the generator */
+
+  /**
+   * Closes the WebSocket connection and terminates the stream.
+   *
+   * Any queued outgoing messages are discarded.
+   */
   close: () => void;
 };
 
 /**
- * Creates a WebSocket stream for bidirectional communication with a server.
+ * Internal pending consumer state for async iteration.
  *
- * Incoming messages from the WebSocket are emitted as stream values.
- * Outgoing messages are sent via the `.send()` method.
- * Messages sent before the connection is open are queued automatically.
+ * Used when the generator is waiting for the next WebSocket message.
  *
- * @template T - Type of messages to send and receive.
- * @param url The WebSocket URL (can be a Promise).
- * @param factory Optional WebSocket factory for dependency injection (useful for testing, can be a Promise).
- * @returns {WebSocketStream<T>} A WebSocketStream that can be used to
- * send and receive messages of type T.
+ * @template T Message payload type.
+ */
+type PendingNext<T> = {
+  /**
+   * Resolves the pending consumer with either:
+   * - a message value
+   * - or a closed notification.
+   */
+  resolve: (value: { kind: "message"; value: T } | { kind: "closed" }) => void;
+
+  /**
+   * Rejects the pending consumer with an error.
+   */
+  reject: (error: unknown) => void;
+};
+
+/**
+ * WebSocket readyState constants.
+ */
+const WS_CONNECTING = 0;
+const WS_OPEN = 1;
+
+/**
+ * Creates a reactive WebSocket stream.
+ *
+ * Features:
+ * - Bidirectional messaging
+ * - Automatic send queue while connecting
+ * - Async URL / socket factory support
+ * - Proper stream termination semantics
+ * - AbortSignal support
+ * - Cleanup-safe event handling
+ *
+ * Incoming WebSocket messages are expected to be JSON encoded.
+ * Outgoing messages are automatically serialized with `JSON.stringify`.
+ *
+ * @template T Message payload type.
+ *
+ * @param url
+ * WebSocket URL or async URL provider.
+ *
+ * @param factory
+ * Optional WebSocket factory for dependency injection or testing.
+ *
+ * @returns A {@link WebSocketStream} instance.
  */
 export function webSocket<T = any>(
   url: MaybePromise<string>,
   factory: (url: string) => MaybePromise<WebSocket> = (u: string) => new WebSocket(u)
 ): WebSocketStream<T> {
+  /**
+   * Buffered incoming messages waiting to be consumed.
+   */
   const messageQueue: T[] = [];
+
+  /**
+   * Buffered outgoing messages waiting for socket open.
+   */
   const sendQueue: T[] = [];
-  let resolveNext: ((value: T) => void) | null = null;
-  let rejectNext: ((error: any) => void) | null = null;
-  let isOpen = false;
-  let done = false;
+
+  /**
+   * Active WebSocket instance.
+   */
   let socket: WebSocket | null = null;
 
-  // Helper to initialize the WebSocket
-  const initWebSocket = async () => {
-    try {
-      const resolvedUrl = isPromise(url) ? await url : (url as string);
-      const created = factory(resolvedUrl);
-      socket = isPromise(created) ? await created : created;
-      setupSocketHandlers();
-      if (
-        done &&
-        socket &&
-        (socket.readyState === WebSocket.CONNECTING ||
-          socket.readyState === WebSocket.OPEN)
-      ) {
-        socket.close();
-      }
-    } catch (error) {
-      done = true;
-      // Reject any pending next() call
-      if (rejectNext) {
-        rejectNext(error);
-        resolveNext = rejectNext = null;
-      }
-      // Notify about queued messages that will never be sent
-      if (sendQueue.length > 0) {
-        console.warn(`WebSocket initialization failed. ${sendQueue.length} queued message(s) will not be sent.`);
-        sendQueue.length = 0;
-      }
+  /**
+   * Current pending async consumer.
+   */
+  let pendingNext: PendingNext<T> | null = null;
+
+  /**
+   * Cleanup callback for socket listeners.
+   */
+  let cleanupHandlers: (() => void) | null = null;
+
+  /**
+   * Whether the socket is currently open.
+   */
+  let isOpen = false;
+
+  /**
+   * Whether the stream has terminated.
+   */
+  let closed = false;
+
+  /**
+   * Terminal stream error.
+   */
+  let terminalError: unknown = null;
+
+  /**
+   * Safely closes the current socket.
+   */
+  const closeSocket = () => {
+    if (socket && (socket.readyState === WS_CONNECTING || socket.readyState === WS_OPEN)) {
+      socket.close();
     }
   };
 
-  const isPromise = (v: any): v is Promise<any> => v && typeof v.then === "function";
+  /**
+   * Resolves the pending consumer with a closed notification.
+   */
+  const resolveClosed = () => {
+    pendingNext?.resolve({ kind: "closed" });
+    pendingNext = null;
+  };
 
-  const setupSocketHandlers = () => {
-    if (!socket) return;
+  /**
+   * Rejects the current pending consumer.
+   *
+   * @param error Error cause.
+   */
+  const rejectPending = (error: unknown) => {
+    pendingNext?.reject(error);
+    pendingNext = null;
+  };
 
+  /**
+   * Transitions the stream into a failed state.
+   *
+   * @param error Terminal stream error.
+   */
+  const fail = (error: unknown) => {
+    terminalError = error;
+    closed = true;
+    isOpen = false;
+
+    rejectPending(error);
+  };
+
+  /**
+   * Gracefully finishes the stream.
+   */
+  const finish = () => {
+    closed = true;
+    isOpen = false;
+
+    resolveClosed();
+  };
+
+  /**
+   * Attaches WebSocket event handlers.
+   *
+   * @param ws Target WebSocket instance.
+   */
+  const setupSocketHandlers = (ws: WebSocket) => {
+    /**
+     * Flush queued outgoing messages once connected.
+     */
     const onOpen = () => {
-      if (done) {
-        try {
-          socket?.close();
-        } catch {}
+      if (closed) {
+        closeSocket();
         return;
       }
 
       isOpen = true;
-      while (sendQueue.length) {
+
+      while (sendQueue.length && ws.readyState === WS_OPEN) {
+        const message = sendQueue.shift()!;
+
         try {
-          socket!.send(JSON.stringify(sendQueue.shift()!));
+          ws.send(JSON.stringify(message));
         } catch (error) {
-          console.warn("Failed to send queued message:", error);
+          console.warn("Failed to send queued WebSocket message:", error);
         }
       }
     };
 
+    /**
+     * Handles incoming socket messages.
+     *
+     * @param ev Browser message event.
+     */
     const onMessage = (ev: MessageEvent) => {
+      if (closed) return;
+
       try {
-        const data = JSON.parse(ev.data);
-        messageQueue.push(data);
-        if (resolveNext) {
-          resolveNext(messageQueue.shift()!);
-          resolveNext = rejectNext = null;
+        const value = JSON.parse(ev.data) as T;
+
+        if (pendingNext) {
+          pendingNext.resolve({
+            kind: "message",
+            value,
+          });
+
+          pendingNext = null;
+        } else {
+          messageQueue.push(value);
         }
-      } catch (err) {
-        if (rejectNext) {
-          rejectNext(err);
-          resolveNext = rejectNext = null;
-        }
+      } catch (error) {
+        fail(error);
       }
     };
 
-    const closeWithError = (err: Error) => {
-      done = true;
-      isOpen = false;
-      if (rejectNext) {
-        rejectNext(err);
-        resolveNext = rejectNext = null;
-      }
+    /**
+     * Handles graceful socket closure.
+     */
+    const onClose = () => {
+      finish();
     };
 
-    const onClose = () => closeWithError(new Error("WebSocket closed"));
-    const onError = () => closeWithError(new Error("WebSocket error"));
+    /**
+     * Handles socket-level failures.
+     */
+    const onError = () => {
+      fail(new Error("WebSocket error"));
+    };
 
-    socket.addEventListener("open", onOpen);
-    socket.addEventListener("message", onMessage);
-    socket.addEventListener("close", onClose);
-    socket.addEventListener("error", onError);
+    ws.addEventListener("open", onOpen);
+    ws.addEventListener("message", onMessage);
+    ws.addEventListener("close", onClose);
+    ws.addEventListener("error", onError);
 
-    // Cleanup helper
     cleanupHandlers = () => {
-      socket?.removeEventListener("open", onOpen);
-      socket?.removeEventListener("message", onMessage);
-      socket?.removeEventListener("close", onClose);
-      socket?.removeEventListener("error", onError);
+      ws.removeEventListener("open", onOpen);
+      ws.removeEventListener("message", onMessage);
+      ws.removeEventListener("close", onClose);
+      ws.removeEventListener("error", onError);
     };
   };
 
-  let cleanupHandlers: (() => void) | null = null;
-
-  // Start initialization (sync or async)
-  initWebSocket();
-
-  async function* generator() {
+  /**
+   * Starts socket initialization immediately so callers can interact with the
+   * underlying WebSocket before the first subscription pull.
+   */
+  const initPromise = (async () => {
     try {
-      // Wait for socket initialization if it's happening asynchronously
-      if (!socket && !done) {
-        await new Promise<void>((resolve) => {
-          const checkSocket = () => {
-            if (socket || done) {
-              resolve();
-            } else {
-              setTimeout(checkSocket, 0);
-            }
-          };
-          checkSocket();
-        });
+      const resolvedUrl = isPromiseLike(url) ? await url : url;
+      const created = factory(resolvedUrl);
+
+      socket = isPromiseLike(created)
+        ? await created
+        : created;
+
+      setupSocketHandlers(socket);
+
+      if (closed) {
+        closeSocket();
+      }
+    } catch (error) {
+      sendQueue.length = 0;
+      fail(error);
+      throw error;
+    }
+  })();
+
+  /**
+   * Internal stream generator implementation.
+   *
+   * @param signal Optional cancellation signal.
+   */
+  async function* generator(signal?: AbortSignal) {
+    /**
+     * Handles external cancellation.
+     */
+    const onAbort = () => {
+      closed = true;
+      isOpen = false;
+
+      closeSocket();
+      resolveClosed();
+    };
+
+    signal?.addEventListener("abort", onAbort, {
+      once: true,
+    });
+
+    try {
+      await initPromise;
+
+      if (terminalError) {
+        throw terminalError;
       }
 
-      if (done) {
-        throw new Error("WebSocket failed to initialize");
-      }
-
-      while (!done) {
+      while (!closed && !signal?.aborted) {
         if (messageQueue.length) {
           yield messageQueue.shift()!;
-        } else {
-          yield await new Promise<T>((resolve, reject) => {
-            resolveNext = resolve;
-            rejectNext = reject;
-          });
+          continue;
         }
+
+        const next = await new Promise<
+          { kind: "message"; value: T } | { kind: "closed" }
+        >((resolve, reject) => {
+          pendingNext = {
+            resolve,
+            reject,
+          };
+        });
+
+        if (next.kind === "closed") {
+          return;
+        }
+
+        yield next.value;
       }
     } finally {
+      signal?.removeEventListener("abort", onAbort);
+
       cleanupHandlers?.();
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.close();
-      }
+      cleanupHandlers = null;
+
+      closeSocket();
     }
-  };
+  }
 
-  const stream = createStream<T>("webSocket", generator) as WebSocketStream<T>;
+  /**
+   * Base reactive stream instance.
+   */
+  const stream = createStream<T>(
+    "webSocket",
+    generator
+  ) as WebSocketStream<T>;
 
-  // Send method
-  stream.send = (msg: T) => {
-    if (done) {
+  /**
+   * Sends a message through the WebSocket.
+   *
+   * Messages are automatically queued while the socket is connecting.
+   */
+  stream.send = (message: T) => {
+    if (closed) {
       return;
     }
 
-    if (isOpen && socket) {
+    if (isOpen && socket?.readyState === WS_OPEN) {
       try {
-        socket.send(JSON.stringify(msg));
+        socket.send(JSON.stringify(message));
       } catch (error) {
-        console.warn("Failed to send message:", error);
+        console.warn("Failed to send WebSocket message:", error);
       }
-    } else if (socket && socket.readyState === WebSocket.CONNECTING) {
-      sendQueue.push(msg);
-    } else if (!socket) {
-      // Socket not initialized yet - queue the message
-      sendQueue.push(msg);
-    } else {
-      console.warn("Cannot send message: WebSocket is not open");
+
+      return;
+    }
+
+    if (!socket || socket.readyState !== WS_OPEN) {
+      sendQueue.push(message);
+      return;
     }
   };
 
+  /**
+   * Closes the stream and underlying socket.
+   */
   stream.close = () => {
-    done = true;
+    if (closed) {
+      return;
+    }
+
+    closed = true;
     isOpen = false;
+
     sendQueue.length = 0;
-    if (
-      socket &&
-      (socket.readyState === WebSocket.CONNECTING ||
-        socket.readyState === WebSocket.OPEN)
-    ) {
-      socket.close();
-    }
-    if (rejectNext) {
-      rejectNext(new Error("WebSocket closed"));
-      resolveNext = rejectNext = null;
-    }
+
+    resolveClosed();
+
+    closeSocket();
+
+    cleanupHandlers?.();
+    cleanupHandlers = null;
   };
 
   return stream;
 }
-
-
