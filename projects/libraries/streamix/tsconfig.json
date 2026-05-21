@@ -1,7 +1,18 @@
 {
-  "extends": "./tsconfig.spec.json",
+  "extends": "../../../tsconfig.json",
   "compilerOptions": {
-    "rootDir": "./src"
+    "rootDir": ".",
+    "types": [
+      "jasmine",
+      "node"
+    ]
   },
-  "include": ["./src/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "aggregates/**/*.ts",
+    "coroutines/**/*.ts",
+    "dom/**/*.ts",
+    "networking/**/*.ts",
+    "tests/**src/**/*.ts"
+  ]
 }
