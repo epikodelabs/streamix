@@ -34,6 +34,12 @@ export type PendingTaskMap = Map<
   { resolve: (value: any) => void; reject: (error: Error) => void }
 >;
 
+/**
+ * Pending request for a worker when the pool is saturated.
+ *
+ * Callers are queued here until a worker is returned to the pool or
+ * finalization rejects the request.
+ */
 type WaitingWorkerRequest = {
   resolve: (entry: { worker: Worker; workerId: number }) => void;
   reject: (error: Error) => void;
