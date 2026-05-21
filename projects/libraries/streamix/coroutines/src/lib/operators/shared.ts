@@ -34,6 +34,11 @@ export type PendingTaskMap = Map<
   { resolve: (value: any) => void; reject: (error: Error) => void }
 >;
 
+type WaitingWorkerRequest = {
+  resolve: (entry: { worker: Worker; workerId: number }) => void;
+  reject: (error: Error) => void;
+};
+
 /**
  * Shared worker-script configuration used by both `coroutine` and `actor`.
  */
@@ -214,7 +219,7 @@ export function createCoroutineOperator<T, R>({
 }: CreateCoroutineOperatorOptions): Coroutine<T, R> {
   const maxWorkers = (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined) || 4;
   const workerPool: { worker: Worker; workerId: number }[] = [];
-  const waitingQueue: Array<(entry: { worker: Worker; workerId: number }) => void> = [];
+  const waitingQueue: WaitingWorkerRequest[] = [];
   const activeWorkers = new Map<number, Worker>();
   const pendingMessages: PendingTaskMap = new Map();
 
@@ -246,12 +251,15 @@ export function createCoroutineOperator<T, R>({
   };
 
   const getIdleWorker = async (): Promise<{ worker: Worker; workerId: number }> => {
+    if (isFinalizing) {
+      throw new Error(`${name} is finalizing`);
+    }
     if (workerPool.length > 0) return workerPool.shift()!;
     if (createdWorkersCount < maxWorkers) {
       createdWorkersCount++;
       return createWorker();
     }
-    return new Promise((resolve) => waitingQueue.push(resolve));
+    return new Promise((resolve, reject) => waitingQueue.push({ resolve, reject }));
   };
 
   const returnWorker = (workerId: number): void => {
@@ -266,8 +274,8 @@ export function createCoroutineOperator<T, R>({
       return;
     }
     if (waitingQueue.length > 0) {
-      const resolve = waitingQueue.shift()!;
-      resolve({ worker, workerId });
+      const pending = waitingQueue.shift()!;
+      pending.resolve({ worker, workerId });
     } else {
       workerPool.push({ worker, workerId });
     }
@@ -323,17 +331,25 @@ export function createCoroutineOperator<T, R>({
     });
     pendingMessages.clear();
 
+    while (waitingQueue.length > 0) {
+      waitingQueue.shift()!.reject(
+        new Error(`${name} finalized before a worker became available`)
+      );
+    }
+
     activeWorkers.forEach((worker) => worker.terminate());
     activeWorkers.clear();
     while (workerPool.length > 0) {
       const { worker } = workerPool.pop()!;
       worker.terminate();
     }
-    waitingQueue.length = 0;
     if (blobUrlCache) {
       URL.revokeObjectURL(blobUrlCache);
       blobUrlCache = null;
     }
+
+    createdWorkersCount = 0;
+    isFinalizing = false;
   };
 
   const operator = createOperator<T, R>(name, function (this: Operator, source) {

@@ -115,7 +115,6 @@ function createBareIteratorStream(): Stream<string> {
   const stream = {} as Stream<string>;
 
   stream.type = 'stream';
-  stream.id = 'bare-it';
   stream.name = 'bare-iterator';
   stream.pipe = (() => stream) as any;
   stream.subscribe = () => createSubscription(async () => {});

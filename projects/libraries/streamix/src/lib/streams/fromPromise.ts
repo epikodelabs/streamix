@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, type Stream } from "../abstractions";
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
 
 /**
  * Creates a stream from a value, promise, or a cancelable asynchronous factory.
@@ -17,7 +17,7 @@ import { createStream, isPromiseLike, type Stream } from "../abstractions";
  * @returns A stream that emits the produced value and then completes.
  */
 export function fromPromise<T>(
-  input: Promise<T> | ((signal: AbortSignal) => Promise<T>)
+  input: MaybePromise<T> | ((signal: AbortSignal) => MaybePromise<T>)
 ): Stream<T> {
   return createStream<T>('fromPromise', async function* (signal?: AbortSignal) {
     const valueOrPromise =

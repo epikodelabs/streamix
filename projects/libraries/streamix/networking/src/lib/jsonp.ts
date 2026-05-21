@@ -16,6 +16,14 @@ import { createStream, isPromiseLike, type MaybePromise, type Stream } from '@ep
  */
 export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePromise<string> = 'callback'): Stream<T> {
   return createStream<T>('jsonp', async function* (signal) {
+    if (
+      typeof document === "undefined" ||
+      typeof window === "undefined" ||
+      !document.head
+    ) {
+      throw new Error("JSONP requires a browser environment");
+    }
+
     const resolvedUrl = isPromiseLike(url) ? await url : url;
     const resolvedCallbackParam = isPromiseLike(callbackParam) ? await callbackParam : callbackParam;
 

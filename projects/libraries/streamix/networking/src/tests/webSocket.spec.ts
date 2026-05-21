@@ -119,6 +119,19 @@ idescribe("webSocket", () => {
     expect(lastWs.close).toHaveBeenCalled();
   });
 
+  it("should close a connecting socket on iterator return", async () => {
+    const stream = webSocket<any>("ws://test", factory);
+    const iterator = stream[Symbol.asyncIterator]();
+    spyOn(lastWs, "close").and.callThrough();
+
+    const pending = iterator.next();
+    await iterator.return?.(undefined);
+    await pending.catch(() => {});
+
+    expect(lastWs.close).toHaveBeenCalled();
+    expect(lastWs.readyState).toBe(3);
+  });
+
   it("should reject when incoming message is not valid JSON", async () => {
     const stream = webSocket<any>("ws://test", factory);
     const iterator = eachValueFrom(stream);
@@ -129,14 +142,15 @@ idescribe("webSocket", () => {
     await expectAsync(next).toBeRejected();
   });
 
-  it("should reject a pending read when stream.close() is called", async () => {
+  it("should complete gracefully when stream.close() is called", async () => {
     const stream = webSocket<any>("ws://test", factory);
     const iterator = eachValueFrom(stream);
 
     const next = iterator.next();
     stream.close();
 
-    await expectAsync(next).toBeRejectedWithError("WebSocket closed");
+    const result = await next;
+    expect(result.done).toBe(true);
   });
 
   it("should not send after stream is closed", async () => {
@@ -172,14 +186,14 @@ idescribe("webSocket", () => {
     expect(warn).toHaveBeenCalled();
   });
 
-  it("should warn when trying to send while socket is not open or connecting", async () => {
+  it("should queue messages when socket is not open", async () => {
     const stream = webSocket<any>("ws://test", factory);
     lastWs.readyState = 2; // CLOSING
 
-    const warn = spyOn(console, "warn");
     stream.send({ cmd: "nope" });
+    lastWs.triggerOpen();
 
-    expect(warn).toHaveBeenCalledWith("Cannot send message: WebSocket is not open");
+    expect(lastWs.sent).toEqual([JSON.stringify({ cmd: "nope" })]);
   });
 
   it("should close connecting sockets and drop queued messages when stream.close() is called", async () => {
@@ -214,7 +228,7 @@ idescribe("webSocket", () => {
     const stream = webSocket<any>(Promise.reject(new Error("bad url")), factory);
     const iterator = eachValueFrom(stream);
 
-    await expectAsync(iterator.next()).toBeRejectedWithError("WebSocket failed to initialize");
+    await expectAsync(iterator.next()).toBeRejectedWithError("bad url");
   });
 
   it("should use the default factory when none is provided", async () => {

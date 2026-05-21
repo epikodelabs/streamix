@@ -284,7 +284,20 @@ describe('httpClient', () => {
   });
 
   it('uses the current browser origin instead of forcing localhost when appending params', async () => {
-    const baseUriSpy = spyOnProperty(document, 'baseURI', 'get').and.returnValue('https://app.test/dashboard');
+    const originalDocumentDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'document');
+    const canRedefineDocument =
+      !originalDocumentDescriptor || originalDocumentDescriptor.configurable;
+    const baseUriSpy =
+      !canRedefineDocument && typeof document !== 'undefined'
+        ? spyOnProperty(document, 'baseURI', 'get').and.returnValue('https://app.test/dashboard')
+        : null;
+
+    if (canRedefineDocument) {
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        value: { baseURI: 'https://app.test/dashboard' },
+      });
+    }
 
     const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
       expect(req.url).toBe('https://app.test/items?page=2&filter=new');
@@ -295,7 +308,14 @@ describe('httpClient', () => {
       const client = createHttpClient().withDefaults(useCustom(fetch));
       await collect(client.get('/items', { params: { page: '2', filter: 'new' } }, readJson));
     } finally {
-      baseUriSpy.and.callThrough();
+      baseUriSpy?.and.callThrough();
+      if (canRedefineDocument) {
+        if (originalDocumentDescriptor) {
+          Object.defineProperty(globalThis, 'document', originalDocumentDescriptor);
+        } else {
+          delete (globalThis as any).document;
+        }
+      }
     }
   });
 });

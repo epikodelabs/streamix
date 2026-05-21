@@ -595,6 +595,45 @@ idescribe('coroutine', () => {
     await co.finalize();
   });
 
+  it('should reject queued getIdleWorker requests when finalized', async () => {
+    const mainTask = (x: number) => x;
+    (globalThis as any).currentMainTask = mainTask;
+    const co = coroutine(mainTask);
+
+    const max = (navigator as any).hardwareConcurrency || 4;
+    const acquired: Array<{ worker: Worker; workerId: number }> = [];
+
+    for (let i = 0; i < max; i++) {
+      acquired.push(await co.getIdleWorker());
+    }
+
+    const waiting = co.getIdleWorker();
+    await co.finalize();
+
+    await expectAsync(waiting).toBeRejectedWithError(/finalized before a worker became available/);
+  });
+
+  it('should allow reusing the pool after finalize even when max workers were created', async () => {
+    const mainTask = (x: number) => x;
+    (globalThis as any).currentMainTask = mainTask;
+    const co = coroutine(mainTask);
+
+    const max = (navigator as any).hardwareConcurrency || 4;
+    const acquired: Array<{ worker: Worker; workerId: number }> = [];
+
+    for (let i = 0; i < max; i++) {
+      acquired.push(await co.getIdleWorker());
+    }
+
+    await co.finalize();
+
+    const { workerId } = await co.getIdleWorker();
+    expect(workerId).toBeGreaterThan(0);
+
+    co.returnWorker(workerId);
+    await co.finalize();
+  });
+
   it('returnWorker warns when workerId is unknown', async () => {
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
@@ -625,5 +664,3 @@ idescribe('coroutine', () => {
     await co.finalize();
   });
 });
-
-

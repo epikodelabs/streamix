@@ -1,4 +1,4 @@
-import { createStream, isPromiseLike, type Stream } from '../abstractions';
+import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
 import { fromAny } from '../converters';
 
 const RAW = Symbol.for("streamix.rawAsyncIterator");
@@ -16,7 +16,7 @@ const RAW = Symbol.for("streamix.rawAsyncIterator");
  * @param {() => (Stream<T> | Promise<T>)} factory A function that returns the stream or value to be subscribed to.
  * @returns {Stream<T>} A new stream that defers subscription to the inner stream.
  */
-export function defer<T = any>(factory: () => Stream<T> | Promise<T>): Stream<T> {
+export function defer<T = any>(factory: () => Stream<T> | MaybePromise<T>): Stream<T> {
   async function* generator() {
     const produced = factory();
     const innerStream = isPromiseLike(produced) ? await produced : produced;
