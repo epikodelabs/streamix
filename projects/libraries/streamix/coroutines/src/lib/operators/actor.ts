@@ -140,6 +140,8 @@ const __streamixCreateAbortError = (signal) => {
   return new __streamixContextCancelledError(reason ? String(reason) : undefined);
 };
 
+const __streamixChannelInternals = Symbol("streamix.channelInternals");
+
 const __streamixChannel = (capacity = 0) => {
   if (!Number.isInteger(capacity) || capacity < 0) {
     throw new RangeError("channel capacity must be a non-negative integer");
@@ -174,23 +176,177 @@ const __streamixChannel = (capacity = 0) => {
     cleanupSender(sender);
   };
 
+  const settleSelectedReceive = (receiver, value, ok) =>
+    receiver.select.registration.settle({
+      index: receiver.select.meta.index,
+      caseRef: receiver.select.meta.caseRef,
+      op: "receive",
+      name: receiver.select.meta.name,
+      value,
+      ok,
+    });
+
+  const settleSelectedSend = (sender) =>
+    sender.select.registration.settle({
+      index: sender.select.meta.index,
+      caseRef: sender.select.meta.caseRef,
+      op: "send",
+      name: sender.select.meta.name,
+      ok: true,
+    });
+
+  const rejectSelectedWaiter = (waiter, error) =>
+    waiter.select.registration.reject(error);
+
+  const tryDispatchToWaitingReceiver = (value, senderSelectId) => {
+    for (let index = 0; index < receivers.length; index++) {
+      const receiver = receivers[index];
+      const receiverSelectId = receiver.select?.registration.id;
+
+      if (receiver.select?.registration.isSettled()) {
+        receivers.splice(index, 1);
+        cleanupReceiver(receiver);
+        index -= 1;
+        continue;
+      }
+
+      if (senderSelectId && receiverSelectId === senderSelectId) {
+        continue;
+      }
+
+      receivers.splice(index, 1);
+      cleanupReceiver(receiver);
+
+      if (receiver.select) {
+        if (!settleSelectedReceive(receiver, value, true)) {
+          index -= 1;
+          continue;
+        }
+      } else {
+        receiver.resolve({ ok: true, value });
+      }
+
+      return true;
+    }
+
+    return false;
+  };
+
+  const tryAcquireFromWaitingSender = (receiverSelectId) => {
+    for (let index = 0; index < senders.length; index++) {
+      const sender = senders[index];
+      const senderSelectId = sender.select?.registration.id;
+
+      if (sender.select?.registration.isSettled()) {
+        senders.splice(index, 1);
+        cleanupSender(sender);
+        index -= 1;
+        continue;
+      }
+
+      if (receiverSelectId && senderSelectId === receiverSelectId) {
+        continue;
+      }
+
+      senders.splice(index, 1);
+      cleanupSender(sender);
+
+      if (sender.select) {
+        if (!settleSelectedSend(sender)) {
+          index -= 1;
+          continue;
+        }
+      } else {
+        sender.resolve();
+      }
+
+      return { ok: true, value: sender.value };
+    }
+
+    if (isClosed) {
+      return { ok: false, value: undefined };
+    }
+
+    return undefined;
+  };
+
+  const tryBufferWaitingSender = () => {
+    for (let index = 0; index < senders.length; index++) {
+      const sender = senders[index];
+
+      if (sender.select?.registration.isSettled()) {
+        senders.splice(index, 1);
+        cleanupSender(sender);
+        index -= 1;
+        continue;
+      }
+
+      senders.splice(index, 1);
+      cleanupSender(sender);
+
+      if (sender.select) {
+        if (!settleSelectedSend(sender)) {
+          index -= 1;
+          continue;
+        }
+      } else {
+        sender.resolve();
+      }
+
+      buffer.push(sender.value);
+      return true;
+    }
+
+    return false;
+  };
+
+  const tryPairWaitingSenderToReceiver = () => {
+    for (let index = 0; index < senders.length; index++) {
+      const sender = senders[index];
+      const senderSelectId = sender.select?.registration.id;
+
+      if (sender.select?.registration.isSettled()) {
+        senders.splice(index, 1);
+        cleanupSender(sender);
+        index -= 1;
+        continue;
+      }
+
+      if (!tryDispatchToWaitingReceiver(sender.value, senderSelectId)) {
+        continue;
+      }
+
+      senders.splice(index, 1);
+      cleanupSender(sender);
+
+      if (sender.select) {
+        if (!settleSelectedSend(sender)) {
+          index -= 1;
+          continue;
+        }
+      } else {
+        sender.resolve();
+      }
+
+      return true;
+    }
+
+    return false;
+  };
+
   const flushSenders = () => {
     while (senders.length > 0) {
       if (receivers.length > 0) {
-        const sender = senders.shift();
-        const receiver = receivers.shift();
-        cleanupSender(sender);
-        cleanupReceiver(receiver);
-        receiver.resolve({ ok: true, value: sender.value });
-        sender.resolve();
+        if (!tryPairWaitingSenderToReceiver()) {
+          break;
+        }
         continue;
       }
 
       if (capacity > 0 && buffer.length < capacity) {
-        const sender = senders.shift();
-        cleanupSender(sender);
-        buffer.push(sender.value);
-        sender.resolve();
+        if (!tryBufferWaitingSender()) {
+          break;
+        }
         continue;
       }
 
@@ -202,10 +358,7 @@ const __streamixChannel = (capacity = 0) => {
     if (isClosed) return Promise.reject(new __streamixChannelClosedError());
     if (signal?.aborted) return Promise.reject(__streamixCreateAbortError(signal));
 
-    if (receivers.length > 0) {
-      const receiver = receivers.shift();
-      cleanupReceiver(receiver);
-      receiver.resolve({ ok: true, value });
+    if (tryDispatchToWaitingReceiver(value)) {
       return Promise.resolve();
     }
 
@@ -234,11 +387,9 @@ const __streamixChannel = (capacity = 0) => {
       return Promise.resolve({ ok: true, value });
     }
 
-    if (senders.length > 0) {
-      const sender = senders.shift();
-      cleanupSender(sender);
-      sender.resolve();
-      return Promise.resolve({ ok: true, value: sender.value });
+    const matchedSender = tryAcquireFromWaitingSender();
+    if (matchedSender) {
+      return Promise.resolve(matchedSender);
     }
 
     if (isClosed) {
@@ -278,10 +429,7 @@ const __streamixChannel = (capacity = 0) => {
     },
     trySend(value) {
       if (isClosed) return false;
-      if (receivers.length > 0) {
-        const receiver = receivers.shift();
-        cleanupReceiver(receiver);
-        receiver.resolve({ ok: true, value });
+      if (tryDispatchToWaitingReceiver(value)) {
         return true;
       }
       if (capacity > 0 && buffer.length < capacity) {
@@ -296,11 +444,9 @@ const __streamixChannel = (capacity = 0) => {
         flushSenders();
         return { ok: true, value };
       }
-      if (senders.length > 0) {
-        const sender = senders.shift();
-        cleanupSender(sender);
-        sender.resolve();
-        return { ok: true, value: sender.value };
+      const matchedSender = tryAcquireFromWaitingSender();
+      if (matchedSender) {
+        return matchedSender;
       }
       if (isClosed) return { ok: false, value: undefined };
       return undefined;
@@ -312,14 +458,49 @@ const __streamixChannel = (capacity = 0) => {
       while (receivers.length > 0) {
         const receiver = receivers.shift();
         cleanupReceiver(receiver);
-        receiver.resolve({ ok: false, value: undefined });
+        if (receiver.select) {
+          settleSelectedReceive(receiver, undefined, false);
+        } else {
+          receiver.resolve({ ok: false, value: undefined });
+        }
       }
 
       while (senders.length > 0) {
         const sender = senders.shift();
         cleanupSender(sender);
-        sender.reject(new __streamixChannelClosedError());
+        const error = new __streamixChannelClosedError();
+        if (sender.select) {
+          rejectSelectedWaiter(sender, error);
+        } else {
+          sender.reject(error);
+        }
       }
+    },
+    [__streamixChannelInternals]: {
+      registerSelectReceive(registration, meta) {
+        const receiver = {
+          resolve() {},
+          reject() {},
+          select: { registration, meta },
+        };
+        receivers.push(receiver);
+        return () => removeReceiver(receiver);
+      },
+      registerSelectSend(value, registration, meta) {
+        if (isClosed) {
+          registration.reject(new __streamixChannelClosedError());
+          return () => {};
+        }
+
+        const sender = {
+          value,
+          resolve() {},
+          reject() {},
+          select: { registration, meta },
+        };
+        senders.push(sender);
+        return () => removeSender(sender);
+      },
     },
     async *[Symbol.asyncIterator]() {
       while (true) {
@@ -415,6 +596,9 @@ const __streamixSelect = async (cases, ctx = __streamixBackground()) => {
         return { index, case: item, op: item.op, name: item.name, value: result.value, ok: result.ok };
       }
     } else if (item.op === "send") {
+      if (item.channel.closed) {
+        throw new __streamixChannelClosedError();
+      }
       if (item.channel.trySend(item.value)) {
         return { index, case: item, op: item.op, name: item.name, ok: true };
       }
@@ -426,33 +610,68 @@ const __streamixSelect = async (cases, ctx = __streamixBackground()) => {
     return { index: defaultIndex, case: item, op: item.op, name: item.name, ok: true };
   }
 
-  const controllers = cases.map(() => new AbortController());
-  const abortAll = () => controllers.forEach((controller) => {
-    if (!controller.signal.aborted) controller.abort(new __streamixContextCancelledError("select case lost"));
-  });
-
-  const onContextAbort = () => abortAll();
-  ctx.signal.addEventListener("abort", onContextAbort, { once: true });
+  const selectId = Symbol("streamix.select");
+  let settled = false;
+  const cleanupFns = [];
 
   try {
-    return await Promise.race(
-      cases.map(async (item, index) => {
-        const signal = controllers[index].signal;
-        if (item.op === "receive") {
-          const result = await item.channel.receive(signal);
-          return { index, case: item, op: item.op, name: item.name, value: result.value, ok: result.ok };
+    return await new Promise((resolve, reject) => {
+      const registration = {
+        id: selectId,
+        isSettled: () => settled,
+        settle: (outcome) => {
+          if (settled) return false;
+          settled = true;
+          resolve({
+            index: outcome.index,
+            case: outcome.caseRef,
+            op: outcome.op,
+            name: outcome.name,
+            value: outcome.value,
+            ok: outcome.ok,
+          });
+          return true;
+        },
+        reject: (error) => {
+          if (settled) return false;
+          settled = true;
+          reject(error);
+          return true;
+        },
+      };
+
+      const onContextAbort = () => {
+        registration.reject(__streamixCreateAbortError(ctx.signal));
+      };
+
+      ctx.signal.addEventListener("abort", onContextAbort, { once: true });
+      cleanupFns.push(() => ctx.signal.removeEventListener("abort", onContextAbort));
+
+      for (let index = 0; index < cases.length; index++) {
+        if (settled) break;
+
+        const item = cases[index];
+        if (item.op === "default") continue;
+
+        const internals = item.channel[__streamixChannelInternals];
+        if (!internals) {
+          registration.reject(new __streamixContextCancelledError("channel does not support select"));
+          break;
         }
-        if (item.op === "send") {
-          await item.channel.send(item.value, signal);
-          return { index, case: item, op: item.op, name: item.name, ok: true };
-        }
-        return { index, case: item, op: item.op, name: item.name, ok: true };
-      })
-    );
+
+        const meta = { index, caseRef: item, name: item.name };
+        const unregister =
+          item.op === "receive"
+            ? internals.registerSelectReceive(registration, meta)
+            : internals.registerSelectSend(item.value, registration, meta);
+
+        cleanupFns.push(unregister);
+      }
+    });
   } finally {
-    ctx.signal.removeEventListener("abort", onContextAbort);
-    abortAll();
-    if (ctx.signal.aborted) throw __streamixCreateAbortError(ctx.signal);
+    while (cleanupFns.length > 0) {
+      cleanupFns.pop()();
+    }
   }
 };
 

@@ -13,7 +13,8 @@ import {
   withCancel,
   withDeadline,
   withTimeout,
-  type CoroutineMessage
+  type CoroutineMessage,
+  type PendingTaskMap
 } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
@@ -392,6 +393,59 @@ idescribe('coroutine', () => {
     await co.finalize();
   });
 
+  it('should keep losing main-thread select receive cases from consuming values', async () => {
+    const left = channel<number>(1);
+    const right = channel<number>(1);
+
+    const pending = select([recv(left, "left"), recv(right, "right")]);
+
+    await Promise.all([left.send(1), right.send(2)]);
+
+    const selected = await pending;
+    const remaining = [left.tryReceive(), right.tryReceive()].filter((item) => item !== undefined);
+
+    expect(selected.ok).toBeTrue();
+    expect(remaining.length).toBe(1);
+    expect(remaining[0]).toEqual(jasmine.objectContaining({ ok: true }));
+  });
+
+  it('should keep losing worker-side select receive cases from consuming values', async () => {
+    const suiteWorker = (globalThis as any).Worker;
+    (globalThis as any).Worker = originalWorker;
+
+    try {
+      async function mainTask(_x: number, utils: any) {
+        const { channel, recv, select } = utils.concurrency;
+        const left = channel<number>(1);
+        const right = channel<number>(1);
+
+        const pending = select([recv(left, "left"), recv(right, "right")]);
+        await Promise.all([left.send(1), right.send(2)]);
+        const selected = await pending;
+
+        return {
+          selectedName: selected.name,
+          selectedOk: selected.ok,
+          remainingLeft: left.tryReceive(),
+          remainingRight: right.tryReceive(),
+        };
+      }
+
+      const co = actor(mainTask);
+      const result = await co.processTask(1);
+      const remaining = [result.remainingLeft, result.remainingRight].filter((item: any) => item !== undefined);
+
+      expect(["left", "right"]).toContain(result.selectedName);
+      expect(result.selectedOk).toBeTrue();
+      expect(remaining.length).toBe(1);
+      expect(remaining[0]).toEqual(jasmine.objectContaining({ ok: true }));
+
+      await co.finalize();
+    } finally {
+      (globalThis as any).Worker = suiteWorker;
+    }
+  });
+
   it('should fall back to 4 workers when navigator.hardwareConcurrency is not set', async () => {
     const originalDescriptor = Object.getOwnPropertyDescriptor(navigator, "hardwareConcurrency");
 
@@ -531,6 +585,77 @@ idescribe('coroutine', () => {
     expect(customMessageHandler).toHaveBeenCalled();
 
     await co.finalize();
+  });
+
+  it('should clean pending tasks when worker.postMessage throws synchronously', async () => {
+    const suiteWorker = (globalThis as any).Worker;
+    let capturedPending: PendingTaskMap | undefined;
+
+    class ThrowingPostMessageWorker {
+      listeners: Record<string, ((ev: any) => void)[]> = {};
+      postCount = 0;
+
+      constructor(_url: string, _options?: any) {}
+
+      addEventListener(type: string, fn: (ev: any) => void) {
+        this.listeners[type] ||= [];
+        this.listeners[type].push(fn);
+      }
+
+      removeEventListener(type: string, fn: (ev: any) => void) {
+        if (this.listeners[type]) {
+          this.listeners[type] = this.listeners[type].filter((listener) => listener !== fn);
+        }
+      }
+
+      postMessage(msg: any) {
+        this.postCount += 1;
+        if (this.postCount === 1) {
+          throw new DOMException("DataCloneError", "DataCloneError");
+        }
+
+        setTimeout(() => {
+          const event: MessageEvent<CoroutineMessage> = {
+            data: { ...msg, type: "response", payload: msg.payload },
+          } as any;
+
+          this.listeners.message?.forEach((listener) => listener(event));
+        }, 1);
+      }
+
+      terminate() {
+        this.listeners = {};
+      }
+    }
+
+    (globalThis as any).Worker = ThrowingPostMessageWorker;
+
+    try {
+      const coFactory = actor({
+        customMessageHandler: (_event, _worker, pending) => {
+          capturedPending = pending;
+          const response = _event.data;
+          if (response.type !== "response") {
+            return;
+          }
+          const entry = pending.get(response.taskId);
+          if (!entry) {
+            return;
+          }
+          pending.delete(response.taskId);
+          entry.resolve(response.payload);
+        },
+      }) as any;
+      const co = coFactory((x: number) => x);
+
+      await expectAsync(co.processTask(1)).toBeRejected();
+      await expectAsync(co.processTask(2)).toBeResolvedTo(2);
+      expect(capturedPending?.size).toBe(0);
+
+      await co.finalize();
+    } finally {
+      (globalThis as any).Worker = suiteWorker;
+    }
   });
 
   it('should include helper function names when generating worker script', async () => {

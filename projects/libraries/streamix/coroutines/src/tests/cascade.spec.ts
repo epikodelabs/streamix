@@ -132,6 +132,29 @@ idescribe("cascade", () => {
 
     expect(results).toEqual([1, 2]);
   });
+
+  it("should finalize every task even when one finalizer throws", async () => {
+    const finalized: string[] = [];
+
+    const cascaded = cascade(
+      {
+        processTask: async (x: number) => x + 1,
+        finalize: async () => {
+          finalized.push("c1");
+          throw new Error("boom");
+        },
+      } as any,
+      {
+        processTask: async (x: number) => x * 2,
+        finalize: async () => {
+          finalized.push("c2");
+        },
+      } as any
+    );
+
+    await expectAsync(cascaded.finalize()).toBeRejectedWithError("boom");
+    expect(finalized).toEqual(["c1", "c2"]);
+  });
 });
 
 

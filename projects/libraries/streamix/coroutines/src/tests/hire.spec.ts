@@ -245,6 +245,34 @@ idescribe("hire", () => {
 
     await co.finalize();
   });
+
+  it("should discard a worker after a native worker error instead of returning it to the pool", async () => {
+    const co = coroutine((x: number) => x);
+    (globalThis as any).currentMainTask = (x: number) => x;
+
+    let capturedError: Error | undefined;
+    const stream = hire(co, () => { }, (error) => { capturedError = error; });
+    const iterator = eachValueFrom(stream);
+    const hired: HiredWorker<number, number> = (await iterator.next()).value;
+
+    const workerList = Object.values(mockWorkersById as any) as Array<{ listeners?: Record<string, Function[]>; mockId: number }>;
+    const worker = workerList.find((entry) => entry.listeners?.["error"]?.length);
+    if (!worker) {
+      fail("Expected a mock worker with an error listener");
+      return;
+    }
+
+    worker.listeners!.error!.forEach((fn: Function) => fn({ error: new Error("fatal worker error") }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(capturedError?.message).toBe("fatal worker error");
+
+    const replacement = await co.getIdleWorker();
+    expect((replacement.worker as any).mockId).not.toBe(worker.mockId);
+
+    co.returnWorker(replacement.workerId);
+    await co.finalize();
+  });
 });
 
 

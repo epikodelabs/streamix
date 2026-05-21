@@ -1,5 +1,70 @@
-import type { Channel, ReceiveResult } from "./channel";
+import {
+  ChannelClosedError,
+  CHANNEL_INTERNALS,
+  type Channel,
+} from "./channel";
 import { background, createAbortError, Context, ContextCancelledError } from "./context";
+
+/**
+ * Internal outcome payload used when a registered `select(...)` case wins.
+ *
+ * The outer `select(...)` call maps this low-level result back into the public
+ * `SelectResult` shape.
+ *
+ * @internal
+ */
+export type SelectOutcome<T> = {
+  index: number;
+  caseRef: unknown;
+  op: "receive" | "send";
+  name?: string;
+  value?: T;
+  ok?: boolean;
+};
+
+/**
+ * Internal select registration shared between `channel(...)` and `select(...)`.
+ *
+ * A registration owns the winner/loser state for one `select(...)` call so the
+ * channel can settle exactly one branch atomically.
+ *
+ * @internal
+ */
+export type SelectRegistration<T> = {
+  id: symbol;
+  isSettled: () => boolean;
+  settle: (outcome: SelectOutcome<T>) => boolean;
+  reject: (error: Error) => boolean;
+};
+
+/**
+ * Internal metadata carried with each registered channel case.
+ *
+ * @internal
+ */
+export type SelectCaseMeta = {
+  index: number;
+  caseRef: unknown;
+  name?: string;
+};
+
+/**
+ * Internal hooks exposed by a channel so `select(...)` can register atomic send
+ * and receive contenders directly against the waiting queues.
+ *
+ * @internal
+ */
+export type ChannelSelectInternals<T> = {
+  registerSelectReceive: (
+    registration: SelectRegistration<T>,
+    meta: SelectCaseMeta
+  ) => () => void;
+  registerSelectSend: (
+    value: T,
+    registration: SelectRegistration<T>,
+    meta: SelectCaseMeta
+  ) => () => void;
+};
 
 /**
  * Represents a `select` case that receives a value from a channel.
@@ -106,6 +171,9 @@ export async function select<T = any>(cases: SelectCase<T>[], ctx: Context = bac
         return { index, case: item, op: item.op, name: item.name, value: result.value, ok: result.ok };
       }
     } else if (item.op === "send") {
+      if (item.channel.closed) {
+        throw new ChannelClosedError();
+      }
       if (item.channel.trySend(item.value)) {
         return { index, case: item, op: item.op, name: item.name, ok: true };
       }
@@ -117,36 +185,76 @@ export async function select<T = any>(cases: SelectCase<T>[], ctx: Context = bac
     return { index: defaultIndex, case: item, op: item.op, name: item.name, ok: true };
   }
 
-  const controllers = cases.map(() => new AbortController());
-  const abortAll = () => controllers.forEach((controller) => {
-    if (!controller.signal.aborted) controller.abort(new ContextCancelledError("select case lost"));
-  });
-
-  const onContextAbort = () => abortAll();
-  ctx.signal.addEventListener("abort", onContextAbort, { once: true });
-
-  // NOTE: Promise.race can leave other cases in a pending state where they may
-  // still advance (e.g., consume a channel value) before abortAll() runs in
-  // finally. This is an inherent limitation of racing async channel ops.
+  const selectId = Symbol("streamix.select");
+  let settled = false;
+  const cleanupFns: Array<() => void> = [];
 
   try {
-    return await Promise.race(
-      cases.map(async (item, index): Promise<SelectResult<T>> => {
-        const signal = controllers[index].signal;
-        if (item.op === "receive") {
-          const result: ReceiveResult<T> = await item.channel.receive(signal);
-          return { index, case: item, op: item.op, name: item.name, value: result.value, ok: result.ok };
+    return await new Promise<SelectResult<T>>((resolve, reject) => {
+      // One registration coordinates all channel contenders for this select call.
+      const registration: SelectRegistration<T> = {
+        id: selectId,
+        isSettled: () => settled,
+        settle: (outcome) => {
+          if (settled) return false;
+          settled = true;
+          resolve({
+            index: outcome.index,
+            case: outcome.caseRef as SelectCase<T>,
+            op: outcome.op,
+            name: outcome.name,
+            value: outcome.value,
+            ok: outcome.ok,
+          });
+          return true;
+        },
+        reject: (error) => {
+          if (settled) return false;
+          settled = true;
+          reject(error);
+          return true;
+        },
+      };
+
+      const onContextAbort = () => {
+        registration.reject(createAbortError(ctx.signal));
+      };
+
+      ctx.signal.addEventListener("abort", onContextAbort, { once: true });
+      cleanupFns.push(() => ctx.signal.removeEventListener("abort", onContextAbort));
+
+      for (let index = 0; index < cases.length; index++) {
+        if (settled) {
+          break;
         }
-        if (item.op === "send") {
-          await item.channel.send(item.value, signal);
-          return { index, case: item, op: item.op, name: item.name, ok: true };
+
+        const item = cases[index];
+        if (item.op === "default") {
+          continue;
         }
-        return { index, case: item, op: item.op, name: item.name, ok: true };
-      })
-    );
+
+        const internals = (item.channel as Channel<T> & {
+          [CHANNEL_INTERNALS]?: ChannelSelectInternals<T>;
+        })[CHANNEL_INTERNALS];
+
+        if (!internals) {
+          registration.reject(new ContextCancelledError("channel does not support select"));
+          break;
+        }
+
+        // Register the case directly with the channel queues so only one branch
+        // can win, even when multiple channels become ready in the same tick.
+        const meta = { index, caseRef: item, name: item.name };
+        const unregister =
+          item.op === "receive"
+            ? internals.registerSelectReceive(registration, meta)
+            : internals.registerSelectSend(item.value, registration, meta);
+        cleanupFns.push(unregister);
+      }
+    });
   } finally {
-    ctx.signal.removeEventListener("abort", onContextAbort);
-    abortAll();
-    if (ctx.signal.aborted) throw createAbortError(ctx.signal);
+    while (cleanupFns.length > 0) {
+      cleanupFns.pop()!();
+    }
   }
 }

@@ -6,12 +6,14 @@ const RAW = Symbol.for("streamix.rawAsyncIterator");
 /**
  * Creates a stream that subscribes to a source factory and retries the entire sequence on error.
  *
- * @description
- * This operator isolates the downstream consumer from partial failures by buffering **all** * values emitted during an execution attempt. 
- * * * **Transactional Behavior:** If an execution attempt errors partway through, the internal 
- * buffer is discarded completely and no values are pushed downstream. Values are only yielded 
- * to the consumer once an entire sequence execution finishes successfully (`next.done === true`).
- * * **Abortion:** The operator honors the abort signal during stream iteration and between-retry delays,
+ * This operator isolates the downstream consumer from partial failures by buffering all values
+ * emitted during an execution attempt.
+ *
+ * Transactional behavior: if an execution attempt errors partway through, the internal buffer is
+ * discarded completely and no values are pushed downstream. Values are only yielded to the
+ * consumer once an entire sequence execution finishes successfully (`next.done === true`).
+ *
+ * Abortion: the operator honors the abort signal during stream iteration and between-retry delays,
  * clearing allocations safely without event listener leaks.
  *
  * @template T - The type of values emitted by the source stream.
@@ -72,7 +74,7 @@ export function retry<T = any>(
           buffer.push(next.value);
         }
 
-        // Entire sequence passed successfully — safely unload transaction buffer downstream
+        // Entire sequence passed successfully; unload the transaction buffer downstream.
         for (const value of buffer) {
           yield value;
         }

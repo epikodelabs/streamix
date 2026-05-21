@@ -9,7 +9,7 @@ import type { Coroutine, CoroutineMessage, Actor } from "../operators";
  */
 export type HirableTask<T = any, R = any> = Pick<
   Coroutine<T, R>,
-  "assignTask" | "getIdleWorker" | "returnWorker"
+  "assignTask" | "getIdleWorker" | "returnWorker" | "discardWorker"
 >;
 
 /**
@@ -117,6 +117,8 @@ export function hire<T = any, R = T>(
   return createStream("hire", async function* () {
     const { worker, workerId } = await task.getIdleWorker();
     let disposed = false;
+    let fatalWorkerError = false;
+    let fatalWorkerReason: Error | undefined;
     const ac = new AbortController();
     const signal = ac.signal;
     let releaseResolve: (() => void) | undefined;
@@ -127,7 +129,10 @@ export function hire<T = any, R = T>(
       }
     };
     const errorHandler = async (event: ErrorEvent) => {
-      await onError(event.error);
+      fatalWorkerError = true;
+      fatalWorkerReason =
+        event.error instanceof Error ? event.error : new Error(String(event.error));
+      await onError(fatalWorkerReason);
       if (!disposed) {
         ac.abort();
         releaseResolve?.();
@@ -140,7 +145,14 @@ export function hire<T = any, R = T>(
         if (timeoutId !== undefined) clearTimeout(timeoutId);
         worker.removeEventListener("message", messageHandler);
         worker.removeEventListener("error", errorHandler);
-        task.returnWorker(workerId);
+        if (fatalWorkerError) {
+          task.discardWorker(
+            workerId,
+            fatalWorkerReason ?? new Error(`Worker ${workerId} emitted an error event`)
+          );
+        } else {
+          task.returnWorker(workerId);
+        }
         ac.abort();
         releaseResolve?.();
       }

@@ -31,7 +31,7 @@ export type CoroutineMessage = {
  */
 export type PendingTaskMap = Map<
   string,
-  { resolve: (value: any) => void; reject: (error: Error) => void }
+  { workerId: number; resolve: (value: any) => void; reject: (error: Error) => void }
 >;
 
 /**
@@ -63,6 +63,7 @@ export type Coroutine<T = any, R = T> = Operator<T, R> & {
   processTask: (data: T) => Promise<R>;
   getIdleWorker: () => Promise<{ worker: Worker; workerId: number }>;
   returnWorker: (workerId: number) => void;
+  discardWorker: (workerId: number, reason?: Error) => void;
   finalize: () => Promise<void>;
   postMessageToWorker: (workerId: number, message: Omit<CoroutineMessage, "workerId">) => void;
 };
@@ -235,6 +236,34 @@ export function createCoroutineOperator<T, R>({
   let blobUrlCache: string | null = null;
   let isFinalizing = false;
 
+  const toError = (error: unknown): Error =>
+    error instanceof Error ? error : new Error(String(error));
+
+  const rejectPendingTasksForWorker = (workerId: number, reason: Error) => {
+    const taskIds = [...pendingMessages.entries()]
+      .filter(([, pending]) => pending.workerId === workerId)
+      .map(([taskId]) => taskId);
+
+    for (const taskId of taskIds) {
+      pendingMessages.get(taskId)?.reject(reason);
+      pendingMessages.delete(taskId);
+    }
+  };
+
+  const satisfyWaitingQueue = () => {
+    while (!isFinalizing && waitingQueue.length > 0 && createdWorkersCount < maxWorkers) {
+      const pending = waitingQueue.shift()!;
+      createdWorkersCount++;
+      createWorker().then(
+        pending.resolve,
+        (error) => {
+          createdWorkersCount--;
+          pending.reject(toError(error));
+        }
+      );
+    }
+  };
+
   const createWorker = async (): Promise<{ worker: Worker; workerId: number }> => {
     const workerId = ++workerIdentifierCounter;
     const workerBody = generateWorkerScript(main, functions, config);
@@ -263,7 +292,12 @@ export function createCoroutineOperator<T, R>({
     if (workerPool.length > 0) return workerPool.shift()!;
     if (createdWorkersCount < maxWorkers) {
       createdWorkersCount++;
-      return createWorker();
+      try {
+        return await createWorker();
+      } catch (error) {
+        createdWorkersCount--;
+        throw toError(error);
+      }
     }
     return new Promise((resolve, reject) => waitingQueue.push({ resolve, reject }));
   };
@@ -287,6 +321,32 @@ export function createCoroutineOperator<T, R>({
     }
   };
 
+  const discardWorker = (workerId: number, reason?: Error): void => {
+    const worker = activeWorkers.get(workerId);
+    if (!worker) {
+      console.warn(`Worker with id ${workerId} not found.`);
+      return;
+    }
+
+    activeWorkers.delete(workerId);
+    worker.terminate();
+    rejectPendingTasksForWorker(
+      workerId,
+      reason ?? new Error(`${name} worker ${workerId} failed and was discarded`)
+    );
+
+    const pooledIndex = workerPool.findIndex((entry) => entry.workerId === workerId);
+    if (pooledIndex >= 0) {
+      workerPool.splice(pooledIndex, 1);
+    }
+
+    if (createdWorkersCount > 0) {
+      createdWorkersCount--;
+    }
+
+    satisfyWaitingQueue();
+  };
+
   const generateTaskId = (): string => {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
       return crypto.randomUUID();
@@ -301,8 +361,13 @@ export function createCoroutineOperator<T, R>({
     }
     const taskId = generateTaskId();
     return new Promise<R>((resolve, reject) => {
-      pendingMessages.set(taskId, { resolve, reject });
-      worker.postMessage({ workerId, taskId, payload: data, type: "task" });
+      pendingMessages.set(taskId, { workerId, resolve, reject });
+      try {
+        worker.postMessage({ workerId, taskId, payload: data, type: "task" });
+      } catch (error) {
+        pendingMessages.delete(taskId);
+        reject(toError(error));
+      }
     });
   };
 
@@ -320,8 +385,13 @@ export function createCoroutineOperator<T, R>({
     const taskId = generateTaskId();
     try {
       return await new Promise<R>((resolve, reject) => {
-        pendingMessages.set(taskId, { resolve, reject });
-        worker.postMessage({ workerId, taskId, payload: value, type: "task" });
+        pendingMessages.set(taskId, { workerId, resolve, reject });
+        try {
+          worker.postMessage({ workerId, taskId, payload: value, type: "task" });
+        } catch (error) {
+          pendingMessages.delete(taskId);
+          reject(toError(error));
+        }
       });
     } finally {
       returnWorker(workerId);
@@ -399,6 +469,7 @@ export function createCoroutineOperator<T, R>({
     processTask,
     getIdleWorker,
     returnWorker,
+    discardWorker,
     postMessageToWorker,
   } as Coroutine<T, R>;
 }

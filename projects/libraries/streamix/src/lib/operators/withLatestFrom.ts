@@ -9,13 +9,12 @@ import { createAsyncCoordinator } from '../utils';
 /**
  * Combines the source stream with the latest values from one or more auxiliary streams or promises.
  *
- * @description
- * When the source stream emits a value, this operator emits a tuple containing that source value 
- * along with the most recent values from each auxiliary input. 
+ * When the source stream emits a value, this operator emits a tuple containing that source value
+ * along with the most recent values from each auxiliary input.
  *
  * @typeParam T - The type of values emitted by the source stream.
  * @typeParam R - A readonly array/tuple representing the types emitted by the auxiliary streams.
- * @param args - One or more streams, promises, or an array of streams/promises whose latest values 
+ * @param args - One or more streams, promises, or an array of streams/promises whose latest values
  * will be combined with the source value.
  * @returns A push operator function that transforms the source stream into a stream of combined tuples.
  *

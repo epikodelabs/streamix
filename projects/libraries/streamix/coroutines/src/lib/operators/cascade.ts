@@ -99,7 +99,7 @@ export function cascade<T = any, R = any>(
   ...tasks: Array<Coroutine<any, any>>
 ): CoroutineLike<T, R> {
   const getTasks = () => tasks;
-  let isFinalizing = false;
+  let finalizePromise: Promise<void> | null = null;
 
   const operator = createOperator<T, R>("cascade", function (this: Operator, source) {
     let completed = false;
@@ -107,7 +107,7 @@ export function cascade<T = any, R = any>(
     return {
       async next() {
         while (true) {
-          if (completed || isFinalizing) {
+          if (completed || finalizePromise) {
             return DONE;
           }
 
@@ -150,12 +150,29 @@ export function cascade<T = any, R = any>(
       return result as R;
     },
     async finalize() {
-      if (isFinalizing) return;
-      isFinalizing = true;
-      const tasksList = getTasks();
-      for (const task of tasksList) {
-        await task.finalize();
-      }
+      if (finalizePromise) return finalizePromise;
+
+      finalizePromise = (async () => {
+        const tasksList = getTasks();
+        const errors: Error[] = [];
+
+        for (const task of tasksList) {
+          try {
+            await task.finalize();
+          } catch (error) {
+            errors.push(error instanceof Error ? error : new Error(String(error)));
+          }
+        }
+
+        if (errors.length === 1) {
+          throw errors[0];
+        }
+        if (errors.length > 1) {
+          throw new AggregateError(errors, "cascade finalization failed");
+        }
+      })();
+
+      return finalizePromise;
     }
   });
 
