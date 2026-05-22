@@ -9,8 +9,6 @@ import {
 } from "../abstractions";
 import { fromAny } from "../converters";
 
-const RAW = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * Maps each value from the source stream to an inner stream, ignoring 
  * new outer values while the current inner stream is still executing.
@@ -91,7 +89,7 @@ export const exhaustMap = <T = any, R = any>(
           }
 
           const innerStream = fromAny<R>(projected as any);
-          innerIterator = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
+          innerIterator = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
         }
       },
 

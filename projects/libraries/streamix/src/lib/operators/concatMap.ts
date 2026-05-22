@@ -1,8 +1,6 @@
 import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 
-const RAW = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * Creates a stream operator that maps each value from the source stream to a new
  * inner stream (or value/array/promise) and flattens all inner streams sequentially.
@@ -43,7 +41,7 @@ export const concatMap = <T = any, R = any>(
             const projected = project(result.value, outerIndex++);
             const normalized = isPromiseLike(projected) ? await projected : projected;
             const innerStream = fromAny<R>(normalized);
-            innerIterator = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
+            innerIterator = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
           }
 
           // Pull next value from inner stream

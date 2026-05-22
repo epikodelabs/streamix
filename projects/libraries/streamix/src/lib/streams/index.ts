@@ -1,4 +1,5 @@
 export * from './combineLatest';
+export * from './commit';
 export * from './concat';
 export * from './defer';
 export * from './EMPTY';
@@ -16,3 +17,4 @@ export * from './range';
 export * from './retry';
 export * from './timer';
 export * from './zip';
+

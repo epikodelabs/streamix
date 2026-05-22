@@ -2,8 +2,6 @@ import { createStream, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
 
-const RAW = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * Combines multiple streams and emits a tuple containing the latest values
  * from each stream whenever any of the source streams emits a new value.
@@ -25,7 +23,7 @@ export function combineLatest<T extends unknown[] = any[]>(
 
     const iterators = sources.map((s) => {
       const resolved = fromAny(s);
-      return ((resolved as any)[RAW]?.() ?? resolved[Symbol.asyncIterator]()) as AsyncIterator<T[number]>;
+      return resolved[Symbol.asyncIterator]() as AsyncIterator<T[number]>;
     });
     const runner = createAsyncCoordinator(iterators);
 
@@ -66,7 +64,5 @@ export function combineLatest<T extends unknown[] = any[]>(
     }
   };
 
-  const stream = createStream<T>("combineLatest", gen);
-  (stream as any)[RAW] = gen;
-  return stream;
+  return createStream<T>("combineLatest", gen);
 }

@@ -2,8 +2,6 @@ import { createStream, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
 
-const RAW = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * Returns a stream that races multiple input streams.
  * It emits values from the first stream that produces a value,
@@ -28,7 +26,7 @@ export function race<T extends readonly unknown[] = any[]>(
 
     const iterators = streams.map(s => {
       const resolved = fromAny(s);
-      return ((resolved as any)[RAW]?.() ?? resolved[Symbol.asyncIterator]()) as AsyncIterator<T[number]>;
+      return resolved[Symbol.asyncIterator]() as AsyncIterator<T[number]>;
     });
     const runner = createAsyncCoordinator(iterators);
     
@@ -75,7 +73,5 @@ export function race<T extends readonly unknown[] = any[]>(
     }
   };
 
-  const stream = createStream<T[number]>('race', gen);
-  (stream as any)[RAW] = gen;
-  return stream;
+  return createStream<T[number]>('race', gen);
 }

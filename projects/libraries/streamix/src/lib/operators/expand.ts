@@ -9,8 +9,6 @@ import {
 } from "../abstractions";
 import { fromAny } from '../converters';
 
-  const RAW = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * Options for the expand operator.
  *
@@ -62,7 +60,7 @@ export const expand = <T = any>(
       const normalized = isPromiseLike(projected) ? await projected : projected;
 
       const stream = fromAny(normalized);
-      const iterator = ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
+      const iterator = stream[Symbol.asyncIterator]() as AsyncIterator<T>;
 
       while (true) {
         const child = await iterator.next();

@@ -5,8 +5,6 @@ import type { MaybePromise, Operator, OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
 import { createSubscription, type Subscription } from "./subscription";
 
-const RAW_ASYNC_ITERATOR = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * A Stream is an async iterable with additional methods for piping, subscribing, and querying values.
  *
@@ -295,10 +293,8 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
   source: Stream<TIn>,
   operators: [...Ops]
 ): Stream<TOut> {
-  const getRawIterator = (stream: any) => {
-    const factory = stream[RAW_ASYNC_ITERATOR] ?? stream[Symbol.asyncIterator];
-    return factory.call(stream);
-  };
+  const getSourceIterator = <T>(stream: Stream<T>) =>
+    stream[Symbol.asyncIterator]() as AsyncIterator<T>;
 
   const applyOperators = (baseSource: AsyncIterator<any>) => {
     let iterator: AsyncIterator<any> = baseSource;
@@ -322,7 +318,7 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
 
     const entries = [{ receiver, subscription }];
 
-    const baseSource = getRawIterator(source);
+    const baseSource = getSourceIterator(source);
     const iterator = applyOperators(baseSource);
 
     queueMicrotask(() => {
@@ -341,7 +337,7 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
     subscribe: (cb) => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(pipedStream),
     [Symbol.asyncIterator]: () => {
-      const iterator = applyOperators(getRawIterator(source));
+      const iterator = applyOperators(getSourceIterator(source));
       const publicIterator: AsyncIterator<TOut> = {
         async next() {
           return iterator.next();
@@ -363,8 +359,6 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
       return publicIterator;
     },
   };
-
-  (pipedStream as any)[RAW_ASYNC_ITERATOR] = () => applyOperators(getRawIterator(source));
 
   return pipedStream as Stream<TOut>;
 }

@@ -2,8 +2,6 @@ import { createStream, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
 
-const RAW = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * Merges multiple source streams into a single stream, emitting values as they arrive from any source.
  *
@@ -38,7 +36,7 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
 
     const iterators = sources.map((source) => {
       const resolved = fromAny<T>(source as any);
-      return ((resolved as any)[RAW]?.() ?? resolved[Symbol.asyncIterator]()) as AsyncIterator<T>;
+      return resolved[Symbol.asyncIterator]() as AsyncIterator<T>;
     });
     const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));
 
@@ -79,7 +77,5 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
     }
   };
 
-  const stream = createStream<T>('merge', gen);
-  (stream as any)[RAW] = gen;
-  return stream;
+  return createStream<T>('merge', gen);
 }

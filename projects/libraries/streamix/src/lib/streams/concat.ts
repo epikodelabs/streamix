@@ -1,8 +1,6 @@
 import { createStream, isPromiseLike, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 
-const RAW = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * Concatenates sources sequentially.
  *
@@ -27,7 +25,7 @@ export function concat<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<
     for (const source of sources) {
       const resolvedSource = isPromiseLike(source) ? await source : source;
       const stream = fromAny<T>(resolvedSource);
-      const iterator = ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
+      const iterator = stream[Symbol.asyncIterator]() as AsyncIterator<T>;
 
       try {
         while (true) {

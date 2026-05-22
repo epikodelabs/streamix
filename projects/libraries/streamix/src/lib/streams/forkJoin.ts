@@ -2,8 +2,6 @@ import { createStream, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
 
-const RAW = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * Waits for all sources to complete and emits an array of their last values.
  *
@@ -56,7 +54,7 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
     const hasValue = new Array(normalizedSources.length).fill(false);
     const iterators = normalizedSources.map((source) => {
       const stream = fromAny(source as any);
-      return ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
+      return stream[Symbol.asyncIterator]() as AsyncIterator<T>;
     });
 
     const coordinator = createAsyncCoordinator(iterators);

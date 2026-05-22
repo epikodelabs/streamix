@@ -62,7 +62,7 @@ describe('catchError', () => {
       }),
       catchError(handlerMock)
     );
-    const streamIterator = (streamWithCatchError as any)[Symbol.for('streamix.rawAsyncIterator')]();
+    const streamIterator = streamWithCatchError[Symbol.asyncIterator]();
 
     subject.next(1);
     expect(await streamIterator.next()).toEqual({ done: false, value: 1 });

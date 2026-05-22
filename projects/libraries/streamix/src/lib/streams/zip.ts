@@ -1,8 +1,6 @@
 import { createStream, type Stream } from '../abstractions';
 import { fromAny } from '../converters';
 
-const RAW = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * Combine multiple streams into a single stream that emits arrays of the latest values
  * from each input stream whenever any input emits. Emission occurs only when all inputs
@@ -21,7 +19,7 @@ export function zip<T extends readonly unknown[] = any[]>(
 
     const iterators = sources.map((source) => {
       const resolved = fromAny(source as any);
-      return ((resolved as any)[RAW]?.() ?? resolved[Symbol.asyncIterator]()) as AsyncIterator<T[number]>;
+      return resolved[Symbol.asyncIterator]() as AsyncIterator<T[number]>;
     });
 
     try {
@@ -37,7 +35,5 @@ export function zip<T extends readonly unknown[] = any[]>(
     }
   };
 
-  const stream = createStream<T>('zip', gen);
-  (stream as any)[RAW] = gen;
-  return stream;
+  return createStream<T>('zip', gen);
 }

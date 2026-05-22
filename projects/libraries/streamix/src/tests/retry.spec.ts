@@ -3,7 +3,7 @@ import { createStream, retry } from "@epikodelabs/streamix";
 describe('retry', () => {
   const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  it('should retry the stream once on error and emit correct values', async () => {
+  it('should retry the stream once and preserve values already emitted by the failed attempt', async () => {
     let attempt = 0;
     const factory = jasmine.createSpy('factory').and.callFake(() => {
       attempt++;
@@ -26,7 +26,7 @@ describe('retry', () => {
       result.push(value);
     }
 
-    expect(result).toEqual([3, 4]);
+    expect(result).toEqual([1, 2, 3, 4]);
     expect(factory).toHaveBeenCalledTimes(2);
   });
 
@@ -110,7 +110,7 @@ describe('retry', () => {
     expect((caught as Error).message).toBe("FACTORY_STR");
   });
 
-  it('should emit correct values after retrying stream multiple times', async () => {
+  it('should emit values from each attempt while retrying', async () => {
     let attempt = 0;
     const factory = () => createStream<number>("errorStream", async function* () {
       attempt++;
@@ -136,7 +136,7 @@ describe('retry', () => {
     }
 
 
-    expect(result).toEqual([3, 4]);
+    expect(result).toEqual([1, 2, 3, 4]);
   });
 
   it('should support promise-like options and a promise-produced plain value', async () => {
@@ -292,7 +292,7 @@ describe('retry', () => {
     // Wait for first attempt to complete and fail
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(factory).toHaveBeenCalledTimes(1);
-    expect(result).toEqual([]); // No values emitted yet (buffered from failed attempt)
+    expect(result).toEqual([1]);
 
     // At this point, retry is waiting for delayPromise to resolve
     // Resolve the delay to allow retry
@@ -302,7 +302,7 @@ describe('retry', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(factory).toHaveBeenCalledTimes(2);
-    expect(result).toEqual([2]); // Only value from successful attempt
+    expect(result).toEqual([1, 2]);
   });
 
   it('should abort at loop start when signal is already aborted', async () => {
@@ -356,7 +356,7 @@ describe('retry', () => {
       complete: () => {},
     });
 
-    // Let a few iterations happen (values are buffered, not emitted yet)
+    // Let a few iterations happen before aborting the active attempt.
     await sleep(35);
     
     // Abort during iteration
@@ -364,11 +364,9 @@ describe('retry', () => {
     
     await sleep(20);
 
-    // Since retry buffers values, no values will be emitted before abort
-    // But we can verify that iterations started and then stopped
     expect(iterationCount).toBeGreaterThan(0);
     expect(iterationCount).toBeLessThan(10); // Should stop before too many iterations
-    expect(values.length).toBe(0); // No values yielded due to abort during buffering
+    expect(values.length).toBeGreaterThan(0);
   });
 
   it('should handle abort during delay and cleanup iterator', async () => {

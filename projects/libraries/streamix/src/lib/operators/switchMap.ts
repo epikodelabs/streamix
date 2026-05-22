@@ -7,8 +7,6 @@ import {
 import { fromAny } from "../converters";
 import { createAsyncPushable } from "../utils";
 
-const RAW = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * Transforms each value from the source stream into a new inner stream, promise, or array,
  * and emits values only from the most recently created inner stream.
@@ -66,7 +64,7 @@ export function switchMap<T = any, R = any>(
         Promise.resolve(prev.it.return?.()).catch(() => {});
       }
 
-      const it = ((innerStream as any)[RAW]?.() ?? innerStream[Symbol.asyncIterator]()) as AsyncIterator<R>;
+      const it = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
       currentInner = { token, it };
 
       void (async () => {

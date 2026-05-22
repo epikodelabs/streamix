@@ -2,7 +2,7 @@
 
 ## 2.0.45
 
-Implemented the `actor` coroutine API for two-way worker/main-thread communication.
+Added the `actor` coroutine API and shipped follow-up fixes across coroutine primitives, worker lifecycle handling, networking streams, and documentation. Updated stream retry semantics, added transactional `commit(...)`, removed the hidden raw-iterator hook, and bumped the test runner dependency.
 
 ## 2.0.44
 

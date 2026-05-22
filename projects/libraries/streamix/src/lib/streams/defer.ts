@@ -1,8 +1,6 @@
 import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
 import { fromAny } from '../converters';
 
-const RAW = Symbol.for("streamix.rawAsyncIterator");
-
 /**
  * Creates a stream that defers the creation of an inner stream until it is
  * subscribed to.
@@ -23,7 +21,7 @@ export function defer<T = any>(factory: () => Stream<T> | MaybePromise<T>): Stre
 
     try {
       const stream = fromAny<T>(innerStream);
-      const iterator = ((stream as any)[RAW]?.() ?? stream[Symbol.asyncIterator]()) as AsyncIterator<T>;
+      const iterator = stream[Symbol.asyncIterator]() as AsyncIterator<T>;
       try {
         while (true) {
           const result = await iterator.next();
