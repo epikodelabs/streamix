@@ -101,7 +101,7 @@ export function checkout<T = any, R = any>(
 
     const checkedOutWorker: CheckedOutWorker<T, R> = {
       worker,
-      sendTask: (data: T) => pool.assignTask(worker, data),
+      processTask: (data: T) => pool.assignTask(worker, data),
       release: cleanup,
     };
 

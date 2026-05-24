@@ -106,8 +106,8 @@ const multiply = coroutine(function multiply(value: number) {
 const session = await checkout(multiply, () => {}, () => {}).query();
 
 try {
-  const a = await session.sendTask(1);
-  const b = await session.sendTask(2);
+  const a = await session.processTask(1);
+  const b = await session.processTask(2);
 } finally {
   session.release();
 }

@@ -86,7 +86,7 @@ export class AppComponent implements OnInit {
       this.timerStatus = 'Running';
       console.log('Worker hired, starting timer...');
       // Start the timer for the first time
-      this.hiredWorker.sendTask({ initialTime: 60, type: 'start' });
+      this.hiredWorker.processTask({ initialTime: 60, type: 'start' });
     });
   }
 
@@ -96,7 +96,7 @@ export class AppComponent implements OnInit {
       console.log('Resetting...');
       this.timerStatus = 'Resetting';
       // Send a message to the worker to reset the timer to 30 seconds
-      this.hiredWorker.sendTask({ type: 'reset', initialTime: 30 });
+      this.hiredWorker.processTask({ type: 'reset', initialTime: 30 });
     }
   }
 

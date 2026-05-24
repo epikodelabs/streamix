@@ -53,8 +53,8 @@ export interface WorkerPool<T = any, R = any> {
  * When the source task supports messaging (e.g. an `actor`), `sendMessage`
  * will be present.
  */
-export interface CheckedOutWorker<T = any, R = T> {
+export interface CheckedOutWorker<T = any, R = T> extends TaskRunner<T, R> {
   worker: Worker;
-  sendTask: (data: T) => Promise<R>;
+  processTask: (data: T) => Promise<R>;
   release: () => void;
 }

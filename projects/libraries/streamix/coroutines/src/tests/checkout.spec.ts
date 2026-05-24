@@ -104,7 +104,7 @@ idescribe("checkout", () => {
     const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
 
     // Execute task
-    const result = await hired.sendTask(5);
+    const result = await hired.processTask(5);
     expect(result).toBe(6);
 
     hired.release();
@@ -123,9 +123,9 @@ idescribe("checkout", () => {
     const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
 
     // Execute tasks sequentially
-    const r1 = await hired.sendTask(1);
-    const r2 = await hired.sendTask(2);
-    const r3 = await hired.sendTask(3);
+    const r1 = await hired.processTask(1);
+    const r2 = await hired.processTask(2);
+    const r3 = await hired.processTask(3);
 
     expect([r1, r2, r3]).toEqual([10, 20, 30]);
 
@@ -157,8 +157,8 @@ idescribe("checkout", () => {
 
     let rejectionError: any = null;
     try {
-      // Task triggers error path and the promise from sendTask will reject
-      await hired.sendTask(99);
+      // Task triggers error path and the promise from processTask will reject
+      await hired.processTask(99);
     } catch (err) {
       rejectionError = err; // Catch the rejection to prevent test failure/timeout
     }
@@ -189,7 +189,7 @@ idescribe("checkout", () => {
     const iterator = eachValueFrom(stream);
     const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
 
-    const result = await hired.sendTask(2);
+    const result = await hired.processTask(2);
     expect(result).toBe(3);
 
     hired.release();
