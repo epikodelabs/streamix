@@ -24,6 +24,11 @@ export interface Coroutine<T = any, R = T> extends Operator<T, R>, TaskRunner<T,
 export interface Actor<T = any, R = T, FromMain = any, ToMain = any>
   extends Operator<T, R>, TaskRunner<T, R> {
   /**
+   * The underlying specialized task pool. Exposed so advanced users can
+   * check out individual workers or send raw messages.
+   */
+  pool: TaskPool<T, R>;
+  /**
    * Sends a one-way message to a specific worker.
    * The message is routed to the currently active task on that worker.
    * If no task is active when the message arrives, it will be dropped.
@@ -37,10 +42,11 @@ export interface Actor<T = any, R = T, FromMain = any, ToMain = any>
 }
 
 /**
- * Worker-pool management methods for low-level worker control.
+ * Low-level worker lifecycle management.
+ *
+ * All pool variants (specialized and generic) implement this interface.
  */
-export interface WorkerPool<T = any, R = any> {
-  assignTask: (worker: Worker, data: T) => Promise<R>;
+export interface WorkerPool {
   getIdleWorker: () => Promise<Worker>;
   returnWorker: (worker: Worker) => void;
   discardWorker: (worker: Worker, reason?: Error) => void;
@@ -48,13 +54,29 @@ export interface WorkerPool<T = any, R = any> {
 }
 
 /**
- * Interface for a worker that has been checked out from the coroutine pool.
+ * Specialized pool with a task baked into the worker blob.
  *
- * When the source task supports messaging (e.g. an `actor`), `sendMessage`
- * will be present.
+ * Used internally by `coroutine()` and `actor()`.
  */
-export interface CheckedOutWorker<T = any, R = T> extends TaskRunner<T, R> {
+export interface TaskPool<T = any, R = any> extends WorkerPool, TaskRunner<T, R> {
+  assignTask: (worker: Worker, data: T) => Promise<R>;
+}
+
+/**
+ * Generic pool that compiles tasks dynamically inside workers.
+ *
+ * Created by the public `createPool()` factory.
+ */
+export interface GenericPool extends WorkerPool {
+  processTask: <T, R>(fn: (data: T) => R | Promise<R>, data: T) => Promise<R>;
+  finalize: () => Promise<void>;
+}
+
+/**
+ * Interface for a worker that has been checked out from a pool.
+ */
+export interface CheckedOutWorker {
   worker: Worker;
-  processTask: (data: T) => Promise<R>;
+  processTask: <T, R>(fn: (data: T) => R | Promise<R>, data: T) => Promise<R>;
   release: () => void;
 }

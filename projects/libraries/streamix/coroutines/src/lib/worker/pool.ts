@@ -1,6 +1,6 @@
 import type { CoroutineMessage, PendingTaskMap } from "./messages";
 import { createDefaultMessageHandler } from "./messages";
-import type { TaskRunner, WorkerPool } from "./types";
+import type { GenericPool, TaskPool } from "./types";
 
 /**
  * Shared worker-script configuration used by both `coroutine` and `actor`.
@@ -26,35 +26,60 @@ type PoolOptions = {
   createMessageHandler?: (worker: Worker, pendingTasks: PendingTaskMap) => (event: MessageEvent<CoroutineMessage>) => void;
 };
 
+type GenericPoolOptions = {
+  name?: string;
+  maxWorkers?: number;
+};
+
 let workerIdentifierCounter = 0;
 
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
-/**
- * Creates a standalone worker pool.
- *
- * The returned object exposes low-level worker management (`WorkerPool`)
- * and high-level task processing (`TaskRunner`), but **not** a stream
- * `Operator`.  Use `createOperator` from `@epikodelabs/streamix` to wrap
- * the pool into a pipeable coroutine or actor.
- */
-export function createPool<T, R>({
-  name,
-  config,
-  main,
-  functions,
-  generateWorkerScript,
-  createMessageHandler,
-}: PoolOptions): WorkerPool<T, R> & TaskRunner<T, R> {
-  const maxWorkers = (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined) || 4;
+const generateTaskId = (): string => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+};
+
+const buildGenericWorkerRuntime = (): string =>
+  [
+    "const __taskCache = new Map();",
+    "",
+    "onmessage = async (event) => {",
+    "  const { workerId, taskId, payload, type, code, deps } = event.data;",
+    "  if (type !== 'task') { return; }",
+    "",
+    "  let fn = __taskCache.get(code);",
+    "  if (!fn) {",
+    "    const scripts = [...(deps || []), 'return (' + code + ');'];",
+    "    fn = new Function(scripts.join('\\n'))();",
+    "    __taskCache.set(code, fn);",
+    "  }",
+    "",
+    "  try {",
+    "    const result = await fn(payload);",
+    "    postMessage({ workerId, taskId, payload: result, type: 'response' });",
+    "  } catch (error) {",
+    "    const message = error instanceof Error ? error.message : String(error);",
+    "    postMessage({ workerId, taskId, error: message, type: 'error' });",
+    "  }",
+    "};",
+  ].join("\n");
+
+function createPoolCore(
+  name: string,
+  maxWorkers: number,
+  createWorker: () => Promise<Worker>,
+  createMessageHandler: (worker: Worker, pendingTasks: PendingTaskMap) => (event: MessageEvent<CoroutineMessage>) => void
+) {
   const workerPool: Worker[] = [];
   const waitingQueue: WaitingWorkerRequest[] = [];
   const activeWorkers = new Map<number, Worker>();
   const pendingMessages: PendingTaskMap = new Map();
 
   let createdWorkersCount = 0;
-  let blobUrlCache: string | null = null;
   let isFinalizing = false;
 
   const getWorkerId = (worker: Worker): number | undefined => {
@@ -85,27 +110,6 @@ export function createPool<T, R>({
         }
       );
     }
-  };
-
-  const createWorker = async (): Promise<Worker> => {
-    const workerId = ++workerIdentifierCounter;
-    const workerBody = generateWorkerScript(main, functions, config);
-
-    if (!blobUrlCache) {
-      const blob = new Blob([workerBody], { type: "application/javascript" });
-      blobUrlCache = URL.createObjectURL(blob);
-    }
-
-    const worker = new Worker(blobUrlCache, { type: "module" });
-    const messageHandler = createMessageHandler
-      ? createMessageHandler(worker, pendingMessages)
-      : createDefaultMessageHandler(worker, pendingMessages);
-
-    worker.addEventListener("message", messageHandler);
-    (worker as any).__id = workerId;
-    activeWorkers.set(workerId, worker);
-
-    return worker;
   };
 
   const getIdleWorker = async (): Promise<Worker> => {
@@ -170,56 +174,12 @@ export function createPool<T, R>({
     satisfyWaitingQueue();
   };
 
-  const generateTaskId = (): string => {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-      return crypto.randomUUID();
-    }
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  };
-
-  const assignTask = async (worker: Worker, data: T): Promise<R> => {
-    const workerId = getWorkerId(worker);
-    if (workerId === undefined || !activeWorkers.has(workerId)) {
-      throw new Error(`Worker not found or is not active`);
-    }
-    const taskId = generateTaskId();
-    return new Promise<R>((resolve, reject) => {
-      pendingMessages.set(taskId, { workerId, resolve, reject });
-      try {
-        worker.postMessage({ workerId, taskId, payload: data, type: "task" });
-      } catch (error) {
-        pendingMessages.delete(taskId);
-        reject(toError(error));
-      }
-    });
-  };
-
   const postMessageToWorker = (worker: Worker, message: Omit<CoroutineMessage, "workerId">): void => {
     const workerId = getWorkerId(worker);
     if (workerId === undefined || !activeWorkers.has(workerId)) {
       throw new Error(`Worker not found or is not active`);
     }
-
     worker.postMessage({ ...message, workerId });
-  };
-
-  const processTask = async (value: T): Promise<R> => {
-    const worker = await getIdleWorker();
-    const workerId = getWorkerId(worker)!;
-    const taskId = generateTaskId();
-    try {
-      return await new Promise<R>((resolve, reject) => {
-        pendingMessages.set(taskId, { workerId, resolve, reject });
-        try {
-          worker.postMessage({ workerId, taskId, payload: value, type: "task" });
-        } catch (error) {
-          pendingMessages.delete(taskId);
-          reject(toError(error));
-        }
-      });
-    } finally {
-      returnWorker(worker);
-    }
   };
 
   const finalize = async () => {
@@ -243,22 +203,179 @@ export function createPool<T, R>({
       const worker = workerPool.pop()!;
       worker.terminate();
     }
-    if (blobUrlCache) {
-      URL.revokeObjectURL(blobUrlCache);
-      blobUrlCache = null;
-    }
 
     createdWorkersCount = 0;
     isFinalizing = false;
   };
 
   return {
-    finalize,
-    assignTask,
-    processTask,
     getIdleWorker,
     returnWorker,
     discardWorker,
     postMessageToWorker,
+    finalize,
+    pendingMessages,
+    activeWorkers,
+    getWorkerId,
+    satisfyWaitingQueue,
+  };
+}
+
+/**
+ * Creates a specialized worker pool with a task baked into the worker blob.
+ *
+ * Internal — used by `coroutine()` and `actor()`.
+ */
+export function createTaskPool<T, R>({
+  name,
+  config,
+  main,
+  functions,
+  generateWorkerScript,
+  createMessageHandler,
+}: PoolOptions): TaskPool<T, R> {
+  const maxWorkers = (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined) || 4;
+  let blobUrlCache: string | null = null;
+
+  const core = createPoolCore(
+    name,
+    maxWorkers,
+    async () => {
+      const workerId = ++workerIdentifierCounter;
+      const workerBody = generateWorkerScript(main, functions, config);
+
+      if (!blobUrlCache) {
+        const blob = new Blob([workerBody], { type: "application/javascript" });
+        blobUrlCache = URL.createObjectURL(blob);
+      }
+
+      const worker = new Worker(blobUrlCache, { type: "module" });
+      const messageHandler = createMessageHandler
+        ? createMessageHandler(worker, core.pendingMessages)
+        : createDefaultMessageHandler(worker, core.pendingMessages);
+
+      worker.addEventListener("message", messageHandler);
+      (worker as any).__id = workerId;
+      core.activeWorkers.set(workerId, worker);
+
+      return worker;
+    },
+    createMessageHandler || createDefaultMessageHandler
+  );
+
+  const assignTask = async (worker: Worker, data: T): Promise<R> => {
+    const workerId = core.getWorkerId(worker);
+    if (workerId === undefined || !core.activeWorkers.has(workerId)) {
+      throw new Error(`Worker not found or is not active`);
+    }
+    const taskId = generateTaskId();
+    return new Promise<R>((resolve, reject) => {
+      core.pendingMessages.set(taskId, { workerId, resolve, reject });
+      try {
+        worker.postMessage({ workerId, taskId, payload: data, type: "task" });
+      } catch (error) {
+        core.pendingMessages.delete(taskId);
+        reject(toError(error));
+      }
+    });
+  };
+
+  const processTask = async (value: T): Promise<R> => {
+    const worker = await core.getIdleWorker();
+    const workerId = core.getWorkerId(worker)!;
+    const taskId = generateTaskId();
+    try {
+      return await new Promise<R>((resolve, reject) => {
+        core.pendingMessages.set(taskId, { workerId, resolve, reject });
+        try {
+          worker.postMessage({ workerId, taskId, payload: value, type: "task" });
+        } catch (error) {
+          core.pendingMessages.delete(taskId);
+          reject(toError(error));
+        }
+      });
+    } finally {
+      core.returnWorker(worker);
+    }
+  };
+
+  return {
+    getIdleWorker: core.getIdleWorker,
+    returnWorker: core.returnWorker,
+    discardWorker: core.discardWorker,
+    postMessageToWorker: core.postMessageToWorker,
+    finalize: core.finalize,
+    assignTask,
+    processTask,
+  };
+}
+
+/**
+ * Creates a generic worker pool.
+ *
+ * Workers are not preinitialized with a task. Tasks are sent at runtime as
+ * serialized function code and compiled inside the worker with `new Function`.
+ * Compiled functions are cached per worker by their source code.
+ */
+export function createPool(options?: GenericPoolOptions): GenericPool {
+  const name = options?.name ?? "pool";
+  const maxWorkers = options?.maxWorkers ?? ((typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined) || 4);
+  let blobUrlCache: string | null = null;
+
+  const core = createPoolCore(
+    name,
+    maxWorkers,
+    async () => {
+      const workerId = ++workerIdentifierCounter;
+
+      if (!blobUrlCache) {
+        const blob = new Blob([buildGenericWorkerRuntime()], { type: "application/javascript" });
+        blobUrlCache = URL.createObjectURL(blob);
+      }
+
+      const worker = new Worker(blobUrlCache, { type: "module" });
+      const messageHandler = createDefaultMessageHandler(worker, core.pendingMessages);
+
+      worker.addEventListener("message", messageHandler);
+      (worker as any).__id = workerId;
+      core.activeWorkers.set(workerId, worker);
+
+      return worker;
+    },
+    createDefaultMessageHandler
+  );
+
+  const processTask = async <T, R>(fn: (data: T) => R | Promise<R>, data: T): Promise<R> => {
+    const worker = await core.getIdleWorker();
+    const workerId = core.getWorkerId(worker)!;
+    const taskId = generateTaskId();
+    try {
+      return await new Promise<R>((resolve, reject) => {
+        core.pendingMessages.set(taskId, { workerId, resolve, reject });
+        try {
+          worker.postMessage({
+            workerId,
+            taskId,
+            payload: data,
+            type: "task",
+            code: fn.toString(),
+          });
+        } catch (error) {
+          core.pendingMessages.delete(taskId);
+          reject(toError(error));
+        }
+      });
+    } finally {
+      core.returnWorker(worker);
+    }
+  };
+
+  return {
+    getIdleWorker: core.getIdleWorker,
+    returnWorker: core.returnWorker,
+    discardWorker: core.discardWorker,
+    postMessageToWorker: core.postMessageToWorker,
+    finalize: core.finalize,
+    processTask,
   };
 }

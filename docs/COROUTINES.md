@@ -6,11 +6,11 @@ A **coroutine** is a background-task operator created from your function. It gen
 
 Use `coroutine(...)` when you need:
 - background computation
-- worker pooling
 - direct task execution through `processTask(...)`
 - stream integration through `compute(...)`
-- dedicated worker checkout through `checkout(...)`
 - sequential pipeline composition through `compose(...)`
+
+Use `createPool()` and `checkout(...)` when you need dedicated worker access for stateful sessions.
 
 If you need worker/main-thread messaging, use `actor(...)` instead. See [ACTORS.md](./ACTORS.md).
 
@@ -19,19 +19,17 @@ If you need worker/main-thread messaging, use `actor(...)` instead. See [ACTORS.
 ## What a coroutine is
 
 ```
-Your function ──► blob script ──► WorkerPool ──► Coroutine (Operator + TaskRunner)
+Your function ──► blob script ──► WorkerPool (internal) ──► Coroutine (Operator + TaskRunner)
 ```
 
 1. You provide a task function.
 2. The coroutine factory turns it into a Web Worker script (blob URL).
-3. A `WorkerPool` creates and reuses workers from that blob.
-4. The returned `Coroutine` is both:
+3. An internal `WorkerPool` creates and reuses workers from that blob.
+4. The returned `Coroutine` is:
    - an `Operator` — you can pipe streams through it with `compute(...)`
    - a `TaskRunner` — you can call `processTask(data)` directly
 
-A **worker** is a single Web Worker thread — an implementation detail managed by the pool. You rarely interact with workers directly unless you use `checkout(...)`.
-
-A coroutine result wears two hats: it is a stream `Operator`/`TaskRunner` **and** it exposes the underlying `WorkerPool` methods (`getIdleWorker`, `assignTask`, etc.). `checkout(...)` uses only the pool facet — it does not care about the operator part.
+A **worker** is a single Web Worker thread — an implementation detail managed by the internal pool. `Coroutine` does **not** expose pool methods. If you need low-level worker control, use `createPool()` instead.
 
 ---
 
@@ -91,27 +89,26 @@ const stream = from([1, 2, 3]).pipe(
 
 ### `checkout(...)`
 
-Check out a single dedicated worker from a pool for multiple sequential tasks. The worker is returned to the pool when you call `release()`.
+Check out a single dedicated worker from a **generic pool** for multiple sequential tasks. The worker is returned to the pool when you call `release()`.
 
-`checkout` works with any `WorkerPool` — a plain `coroutine(...)`, an `actor(...)`, or even a raw `createPool(...)` result.
+Unlike `coroutine.processTask()`, which assigns each task to any idle worker, `checkout` pins all tasks to the **same worker**. This is useful for stateful sessions.
 
 ```ts
-import { checkout, coroutine } from "@epikodelabs/streamix/coroutines";
+import { checkout, createPool } from "@epikodelabs/streamix/coroutines";
 
-const multiply = coroutine(function multiply(value: number) {
-  return value * 10;
-});
+const pool = createPool();
 
-// A coroutine result is also a WorkerPool, so it can be passed to checkout.
-const session = await checkout(multiply, () => {}, () => {}).query();
+const session = await checkout(pool, () => {}, () => {}).query();
 
 try {
-  const a = await session.processTask(1);
-  const b = await session.processTask(2);
+  const a = await session.processTask((x: number) => x * 10, 1);
+  const b = await session.processTask((x: number) => x * 10, 2);
 } finally {
   session.release();
 }
 ```
+
+`session.processTask(fn, data)` sends the function and data directly to the checked-out worker. The worker compiles the function with `new Function` and executes it. Functions are cached per worker by their source code.
 
 ### `compose(...)`
 

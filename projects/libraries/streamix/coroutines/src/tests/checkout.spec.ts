@@ -1,5 +1,5 @@
 import { eachValueFrom } from "@epikodelabs/streamix";
-import { coroutine, checkout, type CoroutineMessage, type CheckedOutWorker } from "@epikodelabs/streamix/coroutines";
+import { createPool, checkout, type CoroutineMessage, type CheckedOutWorker } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe("checkout", () => {
@@ -37,13 +37,17 @@ idescribe("checkout", () => {
         }
       }
 
-      // Inside your MockWorker class
       postMessage(msg: any) {
         setTimeout(() => {
           if (msg.type !== "task") return;
 
           try {
-            const result = (globalThis as any).currentMainTask(msg.payload);
+            // Compile function from code (generic pool) or fallback to currentMainTask
+            const fn = msg.code
+              ? new Function('return (' + msg.code + ')')()
+              : (globalThis as any).currentMainTask;
+
+            const result = fn(msg.payload);
 
             // Success Path (correct)
             const successEvent: MessageEvent<CoroutineMessage> = {
@@ -56,7 +60,7 @@ idescribe("checkout", () => {
             const errorEvent: ErrorEvent = { error: err } as any;
             this.listeners["error"]?.forEach(fn => fn(errorEvent));
 
-            // 2. Send an explicit CoroutineMessage (for Coroutine's promise rejection)
+            // 2. Send an explicit CoroutineMessage (for promise rejection)
             const rejectionMessage: MessageEvent<CoroutineMessage> = {
               data: {
                 ...msg,
@@ -84,53 +88,47 @@ idescribe("checkout", () => {
   });
 
   beforeEach(() => {
-    // Reset currentMainTask for each test
-    (globalThis as any).currentMainTask = (x: any) => x;
-
     // Clear the global mock worker map before each test to ensure fresh state
     Object.keys(mockWorkersById).forEach(key => delete (mockWorkersById as any)[key]);
   });
 
   it("should yield a CheckedOutWorker and successfully execute a task", async () => {
-    const co = coroutine((x: number) => x + 1);
-    (globalThis as any).currentMainTask = (x: number) => x + 1;
+    const pool = createPool();
 
     const messages: CoroutineMessage[] = [];
     const errors: Error[] = [];
 
-    const stream = checkout(co, msg => { messages.push(msg); }, err => { errors.push(err); });
+    const stream = checkout(pool, msg => { messages.push(msg); }, err => { errors.push(err); });
 
     const iterator = eachValueFrom(stream);
-    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker = (await iterator.next()).value;
 
     // Execute task
-    const result = await hired.processTask(5);
+    const result = await hired.processTask((x: number) => x + 1, 5);
     expect(result).toBe(6);
 
     hired.release();
-    await co.finalize();
+    await pool.finalize();
 
-    expect(messages.some(m => m.type === "response")).toBeTrue();
     expect(errors.length).toBe(0);
   });
 
   it("should support multiple sequential tasks on the same hired worker", async () => {
-    const co = coroutine((x: number) => x * 10);
-    (globalThis as any).currentMainTask = (x: number) => x * 10;
+    const pool = createPool();
 
-    const stream = checkout(co, () => { }, () => { });
+    const stream = checkout(pool, () => { }, () => { });
     const iterator = eachValueFrom(stream);
-    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker = (await iterator.next()).value;
 
     // Execute tasks sequentially
-    const r1 = await hired.processTask(1);
-    const r2 = await hired.processTask(2);
-    const r3 = await hired.processTask(3);
+    const r1 = await hired.processTask((x: number) => x * 10, 1);
+    const r2 = await hired.processTask((x: number) => x * 10, 2);
+    const r3 = await hired.processTask((x: number) => x * 10, 3);
 
     expect([r1, r2, r3]).toEqual([10, 20, 30]);
 
     hired.release();
-    await co.finalize();
+    await pool.finalize();
   });
 
   // ===============================================
@@ -138,27 +136,19 @@ idescribe("checkout", () => {
   // ===============================================
 
   it("should forward worker error events to the provided onError callback", async () => {
-    const co = coroutine(function task(x: number) {
-      if (x === 99) throw new Error("boom");
-      return x + 1;
-    });
-
-    (globalThis as any).currentMainTask = (x: number) => {
-      if (x === 99) throw new Error("boom");
-      return x + 1;
-    };
+    const pool = createPool();
 
     let capturedError: any = null;
 
-    const stream = checkout(co, () => { }, err => { capturedError = err; });
+    const stream = checkout(pool, () => { }, err => { capturedError = err; });
 
     const iterator = eachValueFrom(stream);
-    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker = (await iterator.next()).value;
 
     let rejectionError: any = null;
     try {
       // Task triggers error path and the promise from processTask will reject
-      await hired.processTask(99);
+      await hired.processTask((x: number) => { if (x === 99) throw new Error("boom"); return x + 1; }, 99);
     } catch (err) {
       rejectionError = err; // Catch the rejection to prevent test failure/timeout
     }
@@ -171,7 +161,7 @@ idescribe("checkout", () => {
 
     hired.release();
     // Ensure cleanup runs
-    await co.finalize();
+    await pool.finalize();
   });
 
   // ===============================================
@@ -180,31 +170,29 @@ idescribe("checkout", () => {
 
   // checkout operator > should release worker and clean up event listeners on manual release()
   it("should release worker and clean up event listeners on manual release()", async () => {
-    const co = coroutine((x: number) => x + 1);
-    (globalThis as any).currentMainTask = (x: number) => x + 1;
+    const pool = createPool();
 
     const messages: CoroutineMessage[] = [];
-    const stream = checkout(co, msg => { messages.push(msg); }, () => { });
+    const stream = checkout(pool, msg => { messages.push(msg); }, () => { });
 
     const iterator = eachValueFrom(stream);
-    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker = (await iterator.next()).value;
 
-    const result = await hired.processTask(2);
+    const result = await hired.processTask((x: number) => x + 1, 2);
     expect(result).toBe(3);
 
     hired.release();
-    await co.finalize();
+    await pool.finalize();
   });
 
   it("should ignore messages for other workerId and process matching ones", async () => {
-    const co = coroutine((x: number) => x);
-    (globalThis as any).currentMainTask = (x: number) => x;
+    const pool = createPool();
 
     const messages: CoroutineMessage[] = [];
-    const stream = checkout(co, msg => { messages.push(msg); }, () => { });
+    const stream = checkout(pool, msg => { messages.push(msg); }, () => { });
 
     const iterator = eachValueFrom(stream);
-    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker = (await iterator.next()).value;
 
     // Access the mock worker instance via the file-scoped mock map created in the test setup
     // Find the actual mock worker instance that has message listeners attached
@@ -230,32 +218,30 @@ idescribe("checkout", () => {
     expect(messages.some(m => (m as any).payload === 5)).toBeTrue();
 
     hired.release();
-    await co.finalize();
+    await pool.finalize();
   });
 
   it("should allow multiple calls to release() without throwing", async () => {
-    const co = coroutine((x: number) => x + 1);
-    (globalThis as any).currentMainTask = (x: number) => x + 1;
+    const pool = createPool();
 
-    const stream = checkout(co, () => { }, () => { });
+    const stream = checkout(pool, () => { }, () => { });
     const iterator = eachValueFrom(stream);
-    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker = (await iterator.next()).value;
 
     hired.release();
     // second release should not throw
     expect(() => hired.release()).not.toThrow();
 
-    await co.finalize();
+    await pool.finalize();
   });
 
   it("should discard a worker after a native worker error instead of returning it to the pool", async () => {
-    const co = coroutine((x: number) => x);
-    (globalThis as any).currentMainTask = (x: number) => x;
+    const pool = createPool();
 
     let capturedError: Error | undefined;
-    const stream = checkout(co, () => { }, (error) => { capturedError = error; });
+    const stream = checkout(pool, () => { }, (error) => { capturedError = error; });
     const iterator = eachValueFrom(stream);
-    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker = (await iterator.next()).value;
 
     const workerList = Object.values(mockWorkersById as any) as Array<{ listeners?: Record<string, Function[]>; mockId: number }>;
     const worker = workerList.find((entry) => entry.listeners?.["error"]?.length);
@@ -269,13 +255,11 @@ idescribe("checkout", () => {
 
     expect(capturedError?.message).toBe("fatal worker error");
 
-    const replacement = await co.getIdleWorker();
+    const replacement = await pool.getIdleWorker();
     expect((replacement as any).mockId).not.toBe(worker.mockId);
 
-    co.returnWorker(replacement);
+    pool.returnWorker(replacement);
     hired.release();
-    await co.finalize();
+    await pool.finalize();
   });
 });
-
-

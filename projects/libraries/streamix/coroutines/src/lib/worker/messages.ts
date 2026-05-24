@@ -22,6 +22,10 @@ export type CoroutineMessage = {
   payload?: any;
   error?: string;
   requestId?: string;
+  /** Serialized function source (used by generic pools). */
+  code?: string;
+  /** Serialized helper function sources (used by generic pools). */
+  deps?: string[];
 };
 
 /**

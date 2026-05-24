@@ -5,6 +5,7 @@ import {
   background,
   channel,
   coroutine,
+  createTaskPool,
   actor,
   otherwise,
   recv,
@@ -190,16 +191,17 @@ idescribe('coroutine', () => {
   });
 
   it('should allow assignTask directly to a worker', async () => {
-    const mainTask = (x: number) => x * 2; // Fixed: x * 2, not x * 3
+    const mainTask = (x: number) => x * 2;
     (globalThis as any).currentMainTask = mainTask;
-    
-    const co = coroutine(mainTask);
 
-    const worker = await co.getIdleWorker();
-    const result = await co.assignTask(worker, 5);
+    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
-    expect(result).toBe(10); // 5 * 2 = 10
-    co.returnWorker(worker);
+    const worker = await pool.getIdleWorker();
+    const result = await pool.assignTask(worker, 5);
+
+    expect(result).toBe(10);
+    pool.returnWorker(worker);
+    await pool.finalize();
   });
 
   it('should process multiple tasks in sequence', async () => {
@@ -220,22 +222,22 @@ idescribe('coroutine', () => {
   it('should finalize and terminate all workers', async () => {
     const mainTask = (x: number) => x * 2;
     (globalThis as any).currentMainTask = mainTask;
-    
-    const co = coroutine(mainTask);
+
+    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
     // Get a worker to ensure one is created
-    const worker = await co.getIdleWorker();
-    co.returnWorker(worker);
-    
-    await co.finalize();
+    const worker = await pool.getIdleWorker();
+    pool.returnWorker(worker);
+
+    await pool.finalize();
 
     // After finalize, getting a new worker should work
-    const newWorker = await co.getIdleWorker();
+    const newWorker = await pool.getIdleWorker();
     expect((newWorker as any).__id).toBeGreaterThan(0);
-    
+
     // Clean up
-    co.returnWorker(newWorker);
-    await co.finalize();
+    pool.returnWorker(newWorker);
+    await pool.finalize();
   });
 
   it('should throw error from processTask directly', async () => {
@@ -335,10 +337,10 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
 
     const co = actor(mainTask);
-    const worker = await co.getIdleWorker();
-    co.returnWorker(worker);
+    const worker = await co.pool.getIdleWorker();
+    co.pool.returnWorker(worker);
     const pending = co.processTask(11);
-    (co as any).sendToWorker(worker, 99);
+    co.sendToWorker(worker, 99);
     await expectAsync(pending).toBeResolvedTo(99);
     await co.finalize();
   });
@@ -455,10 +457,10 @@ idescribe('coroutine', () => {
       const mainTask = (x: number) => x + 1;
       (globalThis as any).currentMainTask = mainTask;
 
-      const co = coroutine(mainTask);
-      const worker = await co.getIdleWorker();
-      co.returnWorker(worker);
-      await co.finalize();
+      const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
+      const worker = await pool.getIdleWorker();
+      pool.returnWorker(worker);
+      await pool.finalize();
     } finally {
       if (originalDescriptor) {
         Object.defineProperty(navigator, "hardwareConcurrency", originalDescriptor);
@@ -486,7 +488,7 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
     const co = actor(mainTask);
 
-    const worker = await co.getIdleWorker();
+    const worker = await co.pool.getIdleWorker();
     const workerId = (worker as any).__id as number;
 
     const listeners = (worker as any).listeners?.message as Array<(ev: any) => void> | undefined;
@@ -505,7 +507,7 @@ idescribe('coroutine', () => {
 
     expect(warn).toHaveBeenCalled();
 
-    co.returnWorker(worker);
+    co.pool.returnWorker(worker);
     await co.finalize();
   });
 
@@ -667,10 +669,10 @@ idescribe('coroutine', () => {
       return 1;
     }
 
-    const co = coroutine(mainTask, helperNamed, function () { return 2; });
-    const worker = await co.getIdleWorker();
-    co.returnWorker(worker);
-    await co.finalize();
+    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [helperNamed, function () { return 2; }], generateWorkerScript: () => '' });
+    const worker = await pool.getIdleWorker();
+    pool.returnWorker(worker);
+    await pool.finalize();
   });
 
   it('should ignore response/error messages when no pending task exists', async () => {
@@ -678,9 +680,9 @@ idescribe('coroutine', () => {
 
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
-    const co = coroutine(mainTask);
+    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
-    const worker = await co.getIdleWorker();
+    const worker = await pool.getIdleWorker();
     const workerId = (worker as any).__id as number;
     const handler = (worker as any).listeners.message[0] as (ev: any) => void;
 
@@ -689,53 +691,53 @@ idescribe('coroutine', () => {
 
     expect(warn).toHaveBeenCalled();
 
-    co.returnWorker(worker);
-    await co.finalize();
+    pool.returnWorker(worker);
+    await pool.finalize();
   });
 
   it('should queue getIdleWorker requests once max workers are reached', async () => {
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
-    const co = coroutine(mainTask);
+    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
     const max = (navigator as any).hardwareConcurrency || 4;
     const acquired: Worker[] = [];
 
     for (let i = 0; i < max; i++) {
-      acquired.push(await co.getIdleWorker());
+      acquired.push(await pool.getIdleWorker());
     }
 
-    const waiting = co.getIdleWorker();
+    const waiting = pool.getIdleWorker();
 
     // Return one worker to satisfy the waiting request.
-    co.returnWorker(acquired[0]);
+    pool.returnWorker(acquired[0]);
     const extra = await waiting;
 
     expect((extra as any).__id).toBe((acquired[0] as any).__id);
 
     // Cleanup: return everything to the pool.
     for (const entry of acquired.slice(1)) {
-      co.returnWorker(entry);
+      pool.returnWorker(entry);
     }
-    co.returnWorker(extra);
+    pool.returnWorker(extra);
 
-    await co.finalize();
+    await pool.finalize();
   });
 
   it('should reject queued getIdleWorker requests when finalized', async () => {
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
-    const co = coroutine(mainTask);
+    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
     const max = (navigator as any).hardwareConcurrency || 4;
     const acquired: Worker[] = [];
 
     for (let i = 0; i < max; i++) {
-      acquired.push(await co.getIdleWorker());
+      acquired.push(await pool.getIdleWorker());
     }
 
-    const waiting = co.getIdleWorker();
-    await co.finalize();
+    const waiting = pool.getIdleWorker();
+    await pool.finalize();
 
     await expectAsync(waiting).toBeRejectedWithError(/finalized before a worker became available/);
   });
@@ -743,44 +745,44 @@ idescribe('coroutine', () => {
   it('should allow reusing the pool after finalize even when max workers were created', async () => {
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
-    const co = coroutine(mainTask);
+    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
     const max = (navigator as any).hardwareConcurrency || 4;
     const acquired: Worker[] = [];
 
     for (let i = 0; i < max; i++) {
-      acquired.push(await co.getIdleWorker());
+      acquired.push(await pool.getIdleWorker());
     }
 
-    await co.finalize();
+    await pool.finalize();
 
-    const worker = await co.getIdleWorker();
+    const worker = await pool.getIdleWorker();
     expect((worker as any).__id).toBeGreaterThan(0);
 
-    co.returnWorker(worker);
-    await co.finalize();
+    pool.returnWorker(worker);
+    await pool.finalize();
   });
 
   it('returnWorker warns when workerId is unknown', async () => {
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
-    const co = coroutine(mainTask);
+    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
     const warn = spyOn(console, "warn");
-    co.returnWorker({} as Worker);
+    pool.returnWorker({} as Worker);
 
     expect(warn).toHaveBeenCalled();
 
-    await co.finalize();
+    await pool.finalize();
   });
 
   it('assignTask throws when workerId is unknown', async () => {
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
-    const co = coroutine(mainTask);
+    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
-    await expectAsync(co.assignTask({} as Worker, 1)).toBeRejectedWithError(/not found/i);
-    await co.finalize();
+    await expectAsync(pool.assignTask({} as Worker, 1)).toBeRejectedWithError(/not found/i);
+    await pool.finalize();
   });
 
   it('finalize is safe when called before any worker is created', async () => {

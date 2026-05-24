@@ -20,9 +20,9 @@ import {
   type PendingTaskMap,
   type WorkerMessageHandler,
 } from "../worker";
-import { createPool, type WorkerPoolConfig } from "../worker/pool";
+import { createTaskPool, type WorkerPoolConfig } from "../worker/pool";
 import { buildWorkerScript } from "../worker/script";
-import type { Actor, WorkerPool } from "../worker/types";
+import type { Actor, TaskPool } from "../worker/types";
 
 /**
  * Concurrency utils injected into actor workers.
@@ -907,7 +907,7 @@ export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
       },
     };
 
-    const pool = createPool<T, R>({
+    const pool = createTaskPool<T, R>({
       name: "actor",
       config: mergedConfig,
       main,
@@ -954,7 +954,15 @@ export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
       };
     });
 
-    return Object.assign({ ...operator, ...pool }, {
+    return Object.assign({ ...operator,
+      pool,
+      async processTask(data: T) {
+        return pool.processTask(data);
+      },
+      async finalize() {
+        return pool.finalize();
+      },
+    }, {
       sendToWorker(worker: Worker, payload: FromMain) {
         pool.postMessageToWorker(worker, {
           taskId: "",
@@ -966,7 +974,7 @@ export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
         messageHandlers.add(handler);
         return () => messageHandlers.delete(handler);
       },
-    }) as Actor<T, R, FromMain, ToMain> & WorkerPool<T, R>;
+    }) as Actor<T, R, FromMain, ToMain>;
   };
 
   if (typeof arg1 === "function") {

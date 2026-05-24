@@ -1,7 +1,7 @@
 import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
-import { createPool, type WorkerPoolConfig } from "../worker/pool";
+import { createTaskPool, type WorkerPoolConfig } from "../worker/pool";
 import { buildWorkerScript } from "../worker/script";
-import type { Coroutine, WorkerPool } from "../worker/types";
+import type { Coroutine } from "../worker/types";
 
 /**
  * Configuration for plain one-way coroutine workers.
@@ -35,11 +35,11 @@ const buildCoroutineWorkerRuntime = (): string =>
 /**
  * Creates a configured coroutine factory for plain background task execution.
  */
-export function coroutine(config: CoroutineConfig): <T, R>(main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R> & WorkerPool<T, R>;
+export function coroutine(config: CoroutineConfig): <T, R>(main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R>;
 /**
  * Creates a coroutine directly from a task function and optional helpers.
  */
-export function coroutine<T, R>(main: CoroutineTask<T, R>, ...functions: Function[]): Coroutine<T, R> & WorkerPool<T, R>;
+export function coroutine<T, R>(main: CoroutineTask<T, R>, ...functions: Function[]): Coroutine<T, R>;
 /**
  * Creates a coroutine for plain background task execution.
  *
@@ -56,13 +56,13 @@ export function coroutine<T, R>(main: CoroutineTask<T, R>, ...functions: Functio
 export function coroutine<T, R>(
   arg1: CoroutineConfig | CoroutineTask<T, R>,
   ...rest: Function[]
-): (Coroutine<T, R> & WorkerPool<T, R>) | ((main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R> & WorkerPool<T, R>) {
+): (Coroutine<T, R>) | ((main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R>) {
   const implement = (
     config: CoroutineConfig | undefined,
     main: CoroutineTask<T, R>,
     functions: Function[]
-  ): Coroutine<T, R> & WorkerPool<T, R> => {
-    const pool = createPool<T, R>({
+  ): Coroutine<T, R> => {
+    const pool = createTaskPool<T, R>({
       name: "coroutine",
       config,
       main,
@@ -108,7 +108,15 @@ export function coroutine<T, R>(
       };
     });
 
-    return { ...operator, ...pool } as Coroutine<T, R> & WorkerPool<T, R>;
+    return {
+      ...operator,
+      async processTask(data: T) {
+        return pool.processTask(data);
+      },
+      async finalize() {
+        return pool.finalize();
+      },
+    } as Coroutine<T, R>;
   };
 
   if (typeof arg1 === "function") {

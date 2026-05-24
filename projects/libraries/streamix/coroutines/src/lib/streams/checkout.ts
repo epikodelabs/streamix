@@ -13,34 +13,35 @@ export type CheckoutOptions = {
   timeout?: number;
 };
 
+function generateTaskId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 /**
  * Checks out a dedicated worker from a worker pool and exposes it as a stream.
  *
- * The stream yields a single `CheckedOutWorker` that can be used to send tasks directly
- * to the same worker instance. The worker is returned to the pool when the stream
- * is unsubscribed, the worker is released, or the optional timeout expires.
- *
- * The pool must expose `WorkerPool` methods. If you need actor messaging, use
- * `postMessageToWorker` directly on the pool.
+ * The stream yields a single `CheckedOutWorker` that can run any task function
+ * directly on the same worker instance. The worker is returned to the pool when
+ * the stream is unsubscribed, the worker is released, or the optional timeout expires.
  *
  * **Important:** The consumer must call `worker.release()` when done, or
  * provide a `timeout`, otherwise the worker will be held indefinitely.
  *
- * @template T The type of task input.
- * @template R The type of task output.
-
  * @param pool The worker pool to check out from.
  * @param onMessage Handler for messages emitted by the checked-out worker.
  * @param onError Handler for errors emitted by the checked-out worker.
  * @param options Optional configuration for checkout behavior.
  * @returns A stream that yields one `CheckedOutWorker`.
  */
-export function checkout<T = any, R = any>(
-  pool: WorkerPool<T, R>,
+export function checkout(
+  pool: WorkerPool,
   onMessage: (message: CoroutineMessage) => MaybePromise<void>,
   onError: (error: Error) => MaybePromise<void>,
   options?: CheckoutOptions
-): Stream<CheckedOutWorker<T, R>> {
+): Stream<CheckedOutWorker> {
   return createStream("checkout", async function* () {
     const worker = await pool.getIdleWorker();
     const workerId = (worker as any).__id as number;
@@ -51,11 +52,29 @@ export function checkout<T = any, R = any>(
     const signal = ac.signal;
     let releaseResolve: (() => void) | undefined;
 
+    const pendingMessages = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+
     const messageHandler = async (event: MessageEvent<CoroutineMessage>) => {
-      if (event.data.workerId === workerId) {
-        await onMessage(event.data);
+      const msg = event.data;
+      if (msg.workerId !== workerId) return;
+
+      // Route task responses to pending promises
+      if (msg.type === "response" || msg.type === "error") {
+        const pending = pendingMessages.get(msg.taskId);
+        if (pending) {
+          pendingMessages.delete(msg.taskId);
+          if (msg.type === "response") {
+            pending.resolve(msg.payload);
+          } else {
+            pending.reject(new Error(msg.error ?? "Unknown worker error"));
+          }
+          return;
+        }
       }
+
+      await onMessage(msg);
     };
+
     const errorHandler = async (event: ErrorEvent) => {
       fatalWorkerError = true;
       fatalWorkerReason =
@@ -73,6 +92,13 @@ export function checkout<T = any, R = any>(
         if (timeoutId !== undefined) clearTimeout(timeoutId);
         worker.removeEventListener("message", messageHandler);
         worker.removeEventListener("error", errorHandler);
+
+        // Reject any pending task promises
+        pendingMessages.forEach(({ reject }) => {
+          reject(new Error("Worker released before task completed"));
+        });
+        pendingMessages.clear();
+
         if (fatalWorkerError) {
           pool.discardWorker(
             worker,
@@ -99,9 +125,26 @@ export function checkout<T = any, R = any>(
     worker.addEventListener("message", messageHandler);
     worker.addEventListener("error", errorHandler);
 
-    const checkedOutWorker: CheckedOutWorker<T, R> = {
+    const checkedOutWorker: CheckedOutWorker = {
       worker,
-      processTask: (data: T) => pool.assignTask(worker, data),
+      processTask: async <T, R>(fn: (data: T) => R | Promise<R>, data: T): Promise<R> => {
+        const taskId = generateTaskId();
+        return new Promise<R>((resolve, reject) => {
+          pendingMessages.set(taskId, { resolve, reject });
+          try {
+            worker.postMessage({
+              workerId,
+              taskId,
+              payload: data,
+              type: "task",
+              code: fn.toString(),
+            });
+          } catch (error) {
+            pendingMessages.delete(taskId);
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+      },
       release: cleanup,
     };
 
