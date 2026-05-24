@@ -195,11 +195,11 @@ idescribe('coroutine', () => {
     
     const co = coroutine(mainTask);
 
-    const { workerId } = await co.getIdleWorker();
-    const result = await co.assignTask(workerId, 5);
+    const worker = await co.getIdleWorker();
+    const result = await co.assignTask(worker, 5);
 
     expect(result).toBe(10); // 5 * 2 = 10
-    co.returnWorker(workerId);
+    co.returnWorker(worker);
   });
 
   it('should process multiple tasks in sequence', async () => {
@@ -224,17 +224,17 @@ idescribe('coroutine', () => {
     const co = coroutine(mainTask);
 
     // Get a worker to ensure one is created
-    const { workerId } = await co.getIdleWorker();
-    co.returnWorker(workerId);
+    const worker = await co.getIdleWorker();
+    co.returnWorker(worker);
     
     await co.finalize();
 
     // After finalize, getting a new worker should work
-    const { workerId: newWorkerId } = await co.getIdleWorker();
-    expect(newWorkerId).toBeGreaterThan(0);
+    const newWorker = await co.getIdleWorker();
+    expect((newWorker as any).__id).toBeGreaterThan(0);
     
     // Clean up
-    co.returnWorker(newWorkerId);
+    co.returnWorker(newWorker);
     await co.finalize();
   });
 
@@ -335,17 +335,17 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
 
     const co = actor(mainTask);
-    const { workerId } = await co.getIdleWorker();
-    co.returnWorker(workerId);
+    const worker = await co.getIdleWorker();
+    co.returnWorker(worker);
     const pending = co.processTask(11);
-    (co as any).sendToWorker(workerId, 99);
+    (co as any).sendToWorker(worker, 99);
     await expectAsync(pending).toBeResolvedTo(99);
     await co.finalize();
   });
 
-  it('should expose concurrency primitives on actor worker utils', async () => {
+  it('should expose concurrency utils on actor worker utils', async () => {
     async function mainTask(_x: number, utils: any) {
-      const { channel, recv, send, otherwise, select, background, withCancel, ChannelClosedError, ContextCancelledError } = utils.concurrency;
+      const { channel: _channel, recv, send, otherwise, select, background, withCancel, ChannelClosedError, ContextCancelledError } = utils.concurrency;
 
       const ch = channel<number>(1);
       await ch.send(7);
@@ -416,8 +416,8 @@ idescribe('coroutine', () => {
     try {
       async function mainTask(_x: number, utils: any) {
         const { channel, recv, select } = utils.concurrency;
-        const left = channel<number>(1);
-        const right = channel<number>(1);
+        const left = (channel as any)(1);
+        const right = (channel as any)(1);
 
         const pending = select([recv(left, "left"), recv(right, "right")]);
         await Promise.all([left.send(1), right.send(2)]);
@@ -456,8 +456,8 @@ idescribe('coroutine', () => {
       (globalThis as any).currentMainTask = mainTask;
 
       const co = coroutine(mainTask);
-      const { workerId } = await co.getIdleWorker();
-      co.returnWorker(workerId);
+      const worker = await co.getIdleWorker();
+      co.returnWorker(worker);
       await co.finalize();
     } finally {
       if (originalDescriptor) {
@@ -486,7 +486,8 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
     const co = actor(mainTask);
 
-    const { worker, workerId } = await co.getIdleWorker();
+    const worker = await co.getIdleWorker();
+    const workerId = (worker as any).__id as number;
 
     const listeners = (worker as any).listeners?.message as Array<(ev: any) => void> | undefined;
     expect(Array.isArray(listeners)).toBeTrue();
@@ -504,7 +505,7 @@ idescribe('coroutine', () => {
 
     expect(warn).toHaveBeenCalled();
 
-    co.returnWorker(workerId);
+    co.returnWorker(worker);
     await co.finalize();
   });
 
@@ -619,7 +620,7 @@ idescribe('coroutine', () => {
             data: { ...msg, type: "response", payload: msg.payload },
           } as any;
 
-          this.listeners.message?.forEach((listener) => listener(event));
+          this.listeners['message']?.forEach((listener) => listener(event));
         }, 1);
       }
 
@@ -667,8 +668,8 @@ idescribe('coroutine', () => {
     }
 
     const co = coroutine(mainTask, helperNamed, function () { return 2; });
-    const { workerId } = await co.getIdleWorker();
-    co.returnWorker(workerId);
+    const worker = await co.getIdleWorker();
+    co.returnWorker(worker);
     await co.finalize();
   });
 
@@ -679,7 +680,8 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
     const co = coroutine(mainTask);
 
-    const { worker, workerId } = await co.getIdleWorker();
+    const worker = await co.getIdleWorker();
+    const workerId = (worker as any).__id as number;
     const handler = (worker as any).listeners.message[0] as (ev: any) => void;
 
     handler({ data: { type: "response", workerId, taskId: "missing", payload: 1 } });
@@ -687,7 +689,7 @@ idescribe('coroutine', () => {
 
     expect(warn).toHaveBeenCalled();
 
-    co.returnWorker(workerId);
+    co.returnWorker(worker);
     await co.finalize();
   });
 
@@ -697,7 +699,7 @@ idescribe('coroutine', () => {
     const co = coroutine(mainTask);
 
     const max = (navigator as any).hardwareConcurrency || 4;
-    const acquired: Array<{ worker: Worker; workerId: number }> = [];
+    const acquired: Worker[] = [];
 
     for (let i = 0; i < max; i++) {
       acquired.push(await co.getIdleWorker());
@@ -706,16 +708,16 @@ idescribe('coroutine', () => {
     const waiting = co.getIdleWorker();
 
     // Return one worker to satisfy the waiting request.
-    co.returnWorker(acquired[0].workerId);
+    co.returnWorker(acquired[0]);
     const extra = await waiting;
 
-    expect(extra.workerId).toBe(acquired[0].workerId);
+    expect((extra as any).__id).toBe((acquired[0] as any).__id);
 
     // Cleanup: return everything to the pool.
     for (const entry of acquired.slice(1)) {
-      co.returnWorker(entry.workerId);
+      co.returnWorker(entry);
     }
-    co.returnWorker(extra.workerId);
+    co.returnWorker(extra);
 
     await co.finalize();
   });
@@ -726,7 +728,7 @@ idescribe('coroutine', () => {
     const co = coroutine(mainTask);
 
     const max = (navigator as any).hardwareConcurrency || 4;
-    const acquired: Array<{ worker: Worker; workerId: number }> = [];
+    const acquired: Worker[] = [];
 
     for (let i = 0; i < max; i++) {
       acquired.push(await co.getIdleWorker());
@@ -744,7 +746,7 @@ idescribe('coroutine', () => {
     const co = coroutine(mainTask);
 
     const max = (navigator as any).hardwareConcurrency || 4;
-    const acquired: Array<{ worker: Worker; workerId: number }> = [];
+    const acquired: Worker[] = [];
 
     for (let i = 0; i < max; i++) {
       acquired.push(await co.getIdleWorker());
@@ -752,10 +754,10 @@ idescribe('coroutine', () => {
 
     await co.finalize();
 
-    const { workerId } = await co.getIdleWorker();
-    expect(workerId).toBeGreaterThan(0);
+    const worker = await co.getIdleWorker();
+    expect((worker as any).__id).toBeGreaterThan(0);
 
-    co.returnWorker(workerId);
+    co.returnWorker(worker);
     await co.finalize();
   });
 
@@ -765,7 +767,7 @@ idescribe('coroutine', () => {
     const co = coroutine(mainTask);
 
     const warn = spyOn(console, "warn");
-    co.returnWorker(999999);
+    co.returnWorker({} as Worker);
 
     expect(warn).toHaveBeenCalled();
 
@@ -777,7 +779,7 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
     const co = coroutine(mainTask);
 
-    await expectAsync(co.assignTask(999999, 1)).toBeRejectedWithError(/not found/i);
+    await expectAsync(co.assignTask({} as Worker, 1)).toBeRejectedWithError(/not found/i);
     await co.finalize();
   });
 

@@ -1,5 +1,5 @@
 import { Component, OnInit } from '@angular/core';
-import { CoroutineMessage, hire, HiredWorker, actor, WorkerUtils } from '@epikodelabs/streamix/coroutines';
+import { CoroutineMessage, checkout, CheckedOutWorker, actor, WorkerUtils } from '@epikodelabs/streamix/coroutines';
 
 // --- Worker Function that runs the timer logic ---
 // This is a single, stateful function designed to run in a web worker.
@@ -49,16 +49,16 @@ export class AppComponent implements OnInit {
   title = 'Timer App with Coroutine';
   timerValue: number = 0;
   timerStatus: string = 'Stopped';
-  private hiredWorker!: HiredWorker<any, any>;
+  private hiredWorker!: CheckedOutWorker<any, any>;
 
   ngOnInit(): void {
     // The coroutine manages a pool of workers running our timer logic.
     // This is the direct invocation of createCoroutine.
     const timerTask = actor(createTimerWorker);
 
-    // We use the hire operator to get a single dedicated worker from the pool.
-    // We now pass callbacks directly to hire for handling messages and errors.
-    const timerWorker$ = hire(
+    // We use the checkout operator to get a single dedicated worker from the pool.
+    // We now pass callbacks directly to checkout for handling messages and errors.
+    const timerWorker$ = checkout(
       timerTask,
       // onMessage callback
       (msg: CoroutineMessage) => {
@@ -79,7 +79,7 @@ export class AppComponent implements OnInit {
       }
     );
 
-    // Subscribe to the stream to get the HiredWorker instance.
+    // Subscribe to the stream to get the CheckedOutWorker instance.
     // This is where we get the control object to send tasks to the worker.
     timerWorker$.subscribe((hiredWorker) => {
       this.hiredWorker = hiredWorker;

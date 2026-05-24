@@ -1,4 +1,5 @@
+export * from './utils';
+export * from './worker';
 export * from './operators';
-export * from './primitives';
+export * from './actors';
 export * from './streams';
-

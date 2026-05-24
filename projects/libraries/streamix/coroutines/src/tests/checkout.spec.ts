@@ -1,8 +1,8 @@
 import { eachValueFrom } from "@epikodelabs/streamix";
-import { coroutine, hire, type CoroutineMessage, type HiredWorker } from "@epikodelabs/streamix/coroutines";
+import { coroutine, checkout, type CoroutineMessage, type CheckedOutWorker } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
-idescribe("hire", () => {
+idescribe("checkout", () => {
   let originalWorker: any;
   // Global tracker for all created mock workers
   const mockWorkersById: Record<number, any> = {};
@@ -52,7 +52,7 @@ idescribe("hire", () => {
             this.listeners["message"]?.forEach(fn => fn(successEvent));
 
           } catch (err: any) {
-            // 1. Send the global ErrorEvent (for hire's onError callback)
+            // 1. Send the global ErrorEvent (for checkout's onError callback)
             const errorEvent: ErrorEvent = { error: err } as any;
             this.listeners["error"]?.forEach(fn => fn(errorEvent));
 
@@ -91,17 +91,17 @@ idescribe("hire", () => {
     Object.keys(mockWorkersById).forEach(key => delete (mockWorkersById as any)[key]);
   });
 
-  it("should yield a HiredWorker and successfully execute a task", async () => {
+  it("should yield a CheckedOutWorker and successfully execute a task", async () => {
     const co = coroutine((x: number) => x + 1);
     (globalThis as any).currentMainTask = (x: number) => x + 1;
 
     const messages: CoroutineMessage[] = [];
     const errors: Error[] = [];
 
-    const stream = hire(co, msg => { messages.push(msg); }, err => { errors.push(err); });
+    const stream = checkout(co, msg => { messages.push(msg); }, err => { errors.push(err); });
 
     const iterator = eachValueFrom(stream);
-    const hired: HiredWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
 
     // Execute task
     const result = await hired.sendTask(5);
@@ -118,9 +118,9 @@ idescribe("hire", () => {
     const co = coroutine((x: number) => x * 10);
     (globalThis as any).currentMainTask = (x: number) => x * 10;
 
-    const stream = hire(co, () => { }, () => { });
+    const stream = checkout(co, () => { }, () => { });
     const iterator = eachValueFrom(stream);
-    const hired: HiredWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
 
     // Execute tasks sequentially
     const r1 = await hired.sendTask(1);
@@ -150,10 +150,10 @@ idescribe("hire", () => {
 
     let capturedError: any = null;
 
-    const stream = hire(co, () => { }, err => { capturedError = err; });
+    const stream = checkout(co, () => { }, err => { capturedError = err; });
 
     const iterator = eachValueFrom(stream);
-    const hired: HiredWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
 
     let rejectionError: any = null;
     try {
@@ -163,7 +163,7 @@ idescribe("hire", () => {
       rejectionError = err; // Catch the rejection to prevent test failure/timeout
     }
 
-    // Assert that the error was captured by the 'hire' onError callback
+    // Assert that the error was captured by the 'checkout' onError callback
     expect(capturedError?.message).toBe("boom");
 
     // Optionally assert the error thrown by the promise rejection
@@ -178,16 +178,16 @@ idescribe("hire", () => {
   // 3. Resource Management and Cleanup
   // ===============================================
 
-  // hire operator > should release worker and clean up event listeners on manual release()
+  // checkout operator > should release worker and clean up event listeners on manual release()
   it("should release worker and clean up event listeners on manual release()", async () => {
     const co = coroutine((x: number) => x + 1);
     (globalThis as any).currentMainTask = (x: number) => x + 1;
 
     const messages: CoroutineMessage[] = [];
-    const stream = hire(co, msg => { messages.push(msg); }, () => { });
+    const stream = checkout(co, msg => { messages.push(msg); }, () => { });
 
     const iterator = eachValueFrom(stream);
-    const hired: HiredWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
 
     const result = await hired.sendTask(2);
     expect(result).toBe(3);
@@ -201,10 +201,10 @@ idescribe("hire", () => {
     (globalThis as any).currentMainTask = (x: number) => x;
 
     const messages: CoroutineMessage[] = [];
-    const stream = hire(co, msg => { messages.push(msg); }, () => { });
+    const stream = checkout(co, msg => { messages.push(msg); }, () => { });
 
     const iterator = eachValueFrom(stream);
-    const hired: HiredWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
 
     // Access the mock worker instance via the file-scoped mock map created in the test setup
     // Find the actual mock worker instance that has message listeners attached
@@ -215,14 +215,16 @@ idescribe("hire", () => {
       return;
     }
 
+    const hiredWorkerId = (hired.worker as any).__id as number;
+
     // Trigger a message with a different workerId (should be ignored)
-    const evWrong = { data: { workerId: hired.workerId + 999, type: 'response', payload: 123 } } as any;
+    const evWrong = { data: { workerId: hiredWorkerId + 999, type: 'response', payload: 123 } } as any;
     worker.listeners?.['message']?.forEach((fn: Function) => fn(evWrong));
     await new Promise((r) => setTimeout(r, 10));
     expect(messages.length).toBe(0);
 
     // Now trigger a message for the correct workerId
-    const evGood = { data: { workerId: hired.workerId, type: 'response', payload: 5 } } as any;
+    const evGood = { data: { workerId: hiredWorkerId, type: 'response', payload: 5 } } as any;
     worker.listeners?.['message']?.forEach((fn: Function) => fn(evGood));
     await new Promise((r) => setTimeout(r, 10));
     expect(messages.some(m => (m as any).payload === 5)).toBeTrue();
@@ -235,9 +237,9 @@ idescribe("hire", () => {
     const co = coroutine((x: number) => x + 1);
     (globalThis as any).currentMainTask = (x: number) => x + 1;
 
-    const stream = hire(co, () => { }, () => { });
+    const stream = checkout(co, () => { }, () => { });
     const iterator = eachValueFrom(stream);
-    const hired: HiredWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
 
     hired.release();
     // second release should not throw
@@ -251,9 +253,9 @@ idescribe("hire", () => {
     (globalThis as any).currentMainTask = (x: number) => x;
 
     let capturedError: Error | undefined;
-    const stream = hire(co, () => { }, (error) => { capturedError = error; });
+    const stream = checkout(co, () => { }, (error) => { capturedError = error; });
     const iterator = eachValueFrom(stream);
-    const hired: HiredWorker<number, number> = (await iterator.next()).value;
+    const hired: CheckedOutWorker<number, number> = (await iterator.next()).value;
 
     const workerList = Object.values(mockWorkersById as any) as Array<{ listeners?: Record<string, Function[]>; mockId: number }>;
     const worker = workerList.find((entry) => entry.listeners?.["error"]?.length);
@@ -262,15 +264,16 @@ idescribe("hire", () => {
       return;
     }
 
-    worker.listeners!.error!.forEach((fn: Function) => fn({ error: new Error("fatal worker error") }));
+    worker.listeners!['error']!.forEach((fn: Function) => fn({ error: new Error("fatal worker error") }));
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(capturedError?.message).toBe("fatal worker error");
 
     const replacement = await co.getIdleWorker();
-    expect((replacement.worker as any).mockId).not.toBe(worker.mockId);
+    expect((replacement as any).mockId).not.toBe(worker.mockId);
 
-    co.returnWorker(replacement.workerId);
+    co.returnWorker(replacement);
+    hired.release();
     await co.finalize();
   });
 });

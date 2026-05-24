@@ -13,7 +13,7 @@ Removed the internal `DROPPED` backpressure mechanism and simplified operator, s
 - **`subject.ts`** — Removed the `drop()` method and dropped-result filtering from async-iterator listeners.
 - **`iterator.ts`** — Removed `__pushDropped`, `pushDropped`, and the `dropped` flag from iterator results and pending-push replay.
 - **Aggregate operators** — Simplified `average`, `count`, `every`, `max`, `min`, `mode`, `none`, `some`, `sum`, and `unique` implementations.
-- **Coroutine operators** — Cleaned up `cascade` and `coroutine` internals.
+- **Coroutine operators** — Cleaned up `compose` and `coroutine` internals.
 - **General cleanup** — Removed unused imports and dead code across streams, operators, converters, and utilities.
 
 ## 2.0.43

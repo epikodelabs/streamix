@@ -1,15 +1,37 @@
 # Streamix Coroutines
 
-`@epikodelabs/streamix/coroutines` provides worker-backed operators for CPU-heavy work without blocking the main thread.
+`@epikodelabs/streamix/coroutines` runs CPU-heavy work in Web Workers without blocking the main thread.
 
-Use plain `coroutine(...)` when you need:
+A **coroutine** is a background-task operator created from your function. It generates a worker script (as a blob), manages a pool of Web Workers, and exposes both a **stream operator** and a **direct task runner**.
+
+Use `coroutine(...)` when you need:
 - background computation
 - worker pooling
 - direct task execution through `processTask(...)`
 - stream integration through `compute(...)`
-- persistent worker reuse through `hire(...)`
+- dedicated worker checkout through `checkout(...)`
+- sequential pipeline composition through `compose(...)`
 
 If you need worker/main-thread messaging, use `actor(...)` instead. See [ACTORS.md](./ACTORS.md).
+
+---
+
+## What a coroutine is
+
+```
+Your function ──► blob script ──► WorkerPool ──► Coroutine (Operator + TaskRunner)
+```
+
+1. You provide a task function.
+2. The coroutine factory turns it into a Web Worker script (blob URL).
+3. A `WorkerPool` creates and reuses workers from that blob.
+4. The returned `Coroutine` is both:
+   - an `Operator` — you can pipe streams through it with `compute(...)`
+   - a `TaskRunner` — you can call `processTask(data)` directly
+
+A **worker** is a single Web Worker thread — an implementation detail managed by the pool. You rarely interact with workers directly unless you use `checkout(...)`.
+
+---
 
 ## Quick Start
 
@@ -36,6 +58,8 @@ const primes = coroutine(function findPrimes(limit: number) {
 const values = await primes.processTask(10_000);
 ```
 
+---
+
 ## Main APIs
 
 ### `processTask(...)`
@@ -54,42 +78,44 @@ Use a coroutine inside a stream pipeline:
 import { compute, coroutine } from "@epikodelabs/streamix/coroutines";
 import { from } from "@epikodelabs/streamix";
 
-const worker = coroutine(function square(value: number) {
+const square = coroutine(function square(value: number) {
   return value * value;
 });
 
 const stream = from([1, 2, 3]).pipe(
-  compute(worker, Promise.resolve(4))
+  compute(square, Promise.resolve(4))
 );
 ```
 
-### `hire(...)`
+### `checkout(...)`
 
-Keep one worker checked out for multiple sequential tasks:
+Check out a single dedicated worker from a pool for multiple sequential tasks. The worker is returned to the pool when you call `release()`.
+
+`checkout` works with any `WorkerPool` — a plain `coroutine(...)`, an `actor(...)`, or even a raw `createPool(...)` result.
 
 ```ts
-import { hire, coroutine } from "@epikodelabs/streamix/coroutines";
+import { checkout, coroutine } from "@epikodelabs/streamix/coroutines";
 
-const worker = coroutine(function multiply(value: number) {
+const multiply = coroutine(function multiply(value: number) {
   return value * 10;
 });
 
-const hired = await hire(worker, () => {}, () => {}).query();
+const session = await checkout(multiply, () => {}, () => {}).query();
 
 try {
-  const a = await hired.sendTask(1);
-  const b = await hired.sendTask(2);
+  const a = await session.sendTask(1);
+  const b = await session.sendTask(2);
 } finally {
-  hired.release();
+  session.release();
 }
 ```
 
-### `cascade(...)`
+### `compose(...)`
 
-Chain coroutine stages:
+Chain coroutines sequentially — the output of each becomes the input of the next:
 
 ```ts
-import { cascade, coroutine } from "@epikodelabs/streamix/coroutines";
+import { compose, coroutine } from "@epikodelabs/streamix/coroutines";
 
 const decode = coroutine(function decode(input: string) {
   return JSON.parse(input);
@@ -99,20 +125,21 @@ const project = coroutine(function project(input: { value: number }) {
   return input.value;
 });
 
-const pipeline = cascade(decode, project);
+const pipeline = compose(decode, project);
 const result = await pipeline.processTask('{"value":42}');
 ```
 
+Each coroutine in the chain keeps its own worker pool. `compose` does not create new workers or blobs — it reuses the pools you provide.
+
+---
+
 ## Helpers
 
-Coroutines still support helpers. There are two forms:
-
-The library also injects its own internal async bootstrap for transpiled worker
-code. That bootstrap is not the same thing as user-facing `helpers`.
+There are two ways to give a worker extra functions.
 
 ### Positional helper functions
 
-Use this when the helper is normal code you control:
+Use this for normal helper code you control:
 
 ```ts
 const worker = coroutine(
@@ -131,7 +158,7 @@ const worker = coroutine(
 
 ### Config `helpers`
 
-Use this when you need to inject raw worker-side snippets:
+Use this for raw worker-side snippets that cannot be expressed as normal functions:
 
 ```ts
 import { coroutine, type CoroutineConfig } from "@epikodelabs/streamix/coroutines";
@@ -150,6 +177,8 @@ const worker = coroutine(config)(function task(input: number) {
 });
 ```
 
+---
+
 ## Rules
 
 - Prefer `function` expressions for worker tasks and helper functions.
@@ -157,6 +186,8 @@ const worker = coroutine(config)(function task(input: number) {
 - Do not rely on variables from outer lexical scope.
 - Pass helper functions explicitly when the worker needs them.
 - Use config `helpers` only for raw injected snippets that cannot be expressed as normal helper functions.
+
+---
 
 ## When To Use `actor(...)` Instead
 

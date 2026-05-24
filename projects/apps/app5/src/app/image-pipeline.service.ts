@@ -10,7 +10,7 @@ import {
   tap,
 } from '@epikodelabs/streamix';
 
-import { cascade, Coroutine, actor } from '@epikodelabs/streamix/coroutines';
+import { compose, Coroutine, actor } from '@epikodelabs/streamix/coroutines';
 import { compressImage, CompressInput, CompressOutput, FileTask, ProcessedResult, resizeImage, ResizeInput, ResizeOutput } from './image-processing.utils';
 
 @Injectable({ providedIn: 'root' })
@@ -70,7 +70,7 @@ export class ImagePipelineService {
           }))
         )
       ),
-      cascade(this.resizeCoroutine, this.compressCoroutine),
+      compose(this.resizeCoroutine, this.compressCoroutine),
       map((result) => {
         const finalBlob = new Blob([result.finalBlob], { type: 'image/jpeg' });
         const url = URL.createObjectURL(finalBlob);

@@ -1,5 +1,2 @@
-export * from './cascade';
+export * from './compose';
 export * from './coroutine';
-export * from './actor';
-export * from './shared';
-

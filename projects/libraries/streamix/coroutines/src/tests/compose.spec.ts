@@ -1,18 +1,18 @@
 import { createStream } from "@epikodelabs/streamix";
-import { cascade, coroutine } from "@epikodelabs/streamix/coroutines";
+import { compose, coroutine } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
-idescribe("cascade", () => {
+idescribe("compose", () => {
   it("should process tasks sequentially via processTask", async () => {
     const c1 = coroutine((x: number) => x + 1);
     const c2 = coroutine((x: number) => x * 2);
 
-    const cascaded = cascade(c1, c2);
+    const composed = compose(c1, c2);
 
-    const result = await cascaded.processTask(3); // (3 + 1) * 2
+    const result = await composed.processTask(3); // (3 + 1) * 2
     expect(result).toBe(8);
 
-    await cascaded.finalize();
+    await composed.finalize();
   });
 
   it("should process tasks sequentially in a stream", async () => {
@@ -25,17 +25,17 @@ idescribe("cascade", () => {
       yield 3;
     });
 
-    const cascaded = cascade(c1, c2);
+    const composed = compose(c1, c2);
 
     const results: number[] = [];
-    for await (const v of stream.pipe(cascaded)) {
+    for await (const v of stream.pipe(composed)) {
       results.push(v);
     }
 
     // (1+1)*2 = 4, (2+1)*2 = 6, (3+1)*2 = 8
     expect(results).toEqual([4, 6, 8]);
 
-    await cascaded.finalize();
+    await composed.finalize();
   });
 
   it("should propagate errors from inner coroutine", async () => {
@@ -45,16 +45,16 @@ idescribe("cascade", () => {
       return x * 2;
     });
 
-    const cascaded = cascade(c1, c2);
+    const composed = compose(c1, c2);
 
     try {
-      await cascaded.processTask(1); // (1+1) => 2, then boom
+      await composed.processTask(1); // (1+1) => 2, then boom
       fail("Expected error to be thrown");
     } catch (err: any) {
       expect(err.message).toBe("boom");
     }
 
-    await cascaded.finalize();
+    await composed.finalize();
   });
 
   it("should finalize all tasks", async () => {
@@ -69,33 +69,33 @@ idescribe("cascade", () => {
       finalize: async () => finalized.push("c2"),
     } as any;
 
-    const cascaded = cascade(c1, c2);
+    const composed = compose(c1, c2);
 
-    const result = await cascaded.processTask(5);
+    const result = await composed.processTask(5);
     expect(result).toBe(12);
 
-    await cascaded.finalize();
+    await composed.finalize();
     expect(finalized).toEqual(["c1", "c2"]);
   });
 
-  it("should handle empty cascades gracefully", async () => {
-    const cascaded = cascade(); // no tasks
-    const result = await cascaded.processTask(42);
+  it("should handle empty composes gracefully", async () => {
+    const composed = compose(); // no tasks
+    const result = await composed.processTask(42);
 
     expect(result).toBe(42);
 
-    await cascaded.finalize();
+    await composed.finalize();
   });
 
   it("return() marks the operator as completed", async () => {
     const c1 = coroutine((x: number) => x + 1);
-    const cascaded = cascade(c1);
+    const composed = compose(c1);
 
     const source: AsyncIterator<number> = (async function* () {
       yield 1;
     })();
 
-    const it = (cascaded as any).apply(source) as AsyncIterator<number>;
+    const it = (composed as any).apply(source) as AsyncIterator<number>;
 
     const r0 = await it.return?.();
     expect(r0).toEqual(jasmine.objectContaining({ done: true }));
@@ -105,13 +105,13 @@ idescribe("cascade", () => {
   });
 
   it("throw() marks the operator as completed and rethrows", async () => {
-    const cascaded = cascade();
+    const composed = compose();
 
     const source: AsyncIterator<number> = (async function* () {
       yield 1;
     })();
 
-    const it = (cascaded as any).apply(source) as AsyncIterator<number>;
+    const it = (composed as any).apply(source) as AsyncIterator<number>;
 
     await expectAsync(it.throw?.(new Error("boom"))).toBeRejectedWithError("boom");
 
@@ -126,7 +126,7 @@ idescribe("cascade", () => {
     });
 
     const results: number[] = [];
-    for await (const v of stream.pipe(cascade())) {
+    for await (const v of stream.pipe(compose())) {
       results.push(v);
     }
 
@@ -136,7 +136,7 @@ idescribe("cascade", () => {
   it("should finalize every task even when one finalizer throws", async () => {
     const finalized: string[] = [];
 
-    const cascaded = cascade(
+    const composed = compose(
       {
         processTask: async (x: number) => x + 1,
         finalize: async () => {
@@ -152,7 +152,7 @@ idescribe("cascade", () => {
       } as any
     );
 
-    await expectAsync(cascaded.finalize()).toBeRejectedWithError("boom");
+    await expectAsync(composed.finalize()).toBeRejectedWithError("boom");
     expect(finalized).toEqual(["c1", "c2"]);
   });
 });

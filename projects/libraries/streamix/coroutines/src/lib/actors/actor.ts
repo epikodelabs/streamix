@@ -1,35 +1,31 @@
+import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
 import {
-  buildWorkerScript,
-  createCoroutineOperator,
-  createDefaultMessageHandler,
-  type Coroutine,
-  type CoroutineMessage,
-  type PendingTaskMap,
-  type WorkerMessageHandler,
-  type WorkerPoolConfig,
-} from "./shared";
-import {
-  ChannelClosedError,
-  type Channel,
-  type ReceiveResult,
-  channel,
-} from "../primitives/channel";
-import {
-  ContextCancelledError,
   background,
-  withCancel,
-  withDeadline,
-  withTimeout,
-} from "../primitives/context";
-import {
+  channel,
+  ChannelClosedError,
+  ContextCancelledError,
   otherwise,
   recv,
   select,
   send,
-} from "../primitives/select";
+  withCancel,
+  withDeadline,
+  withTimeout,
+  type Channel,
+  type ReceiveResult,
+} from "../utils";
+import {
+  createDefaultMessageHandler,
+  type CoroutineMessage,
+  type PendingTaskMap,
+  type WorkerMessageHandler,
+} from "../worker";
+import { createPool, type WorkerPoolConfig } from "../worker/pool";
+import { buildWorkerScript } from "../worker/script";
+import type { Actor, WorkerPool } from "../worker/types";
 
 /**
- * Concurrency primitives injected into actor workers.
+ * Concurrency utils injected into actor workers.
  *
  * Provides channel operations, context control, and select helpers
  * that mirror the main-thread API but run inside the worker scope.
@@ -105,18 +101,6 @@ export type ActorConfig<Q = any, D = any, ToMain = any> = WorkerPoolConfig & {
   request?: ActorRequestHandler<Q, D>;
   onMessage?: (payload: ToMain, message: CoroutineMessage) => void | Promise<void>;
   customMessageHandler?: WorkerMessageHandler;
-};
-
-/**
- * Actor workers share the same runtime shape as plain coroutines.
- */
-export type Actor<T = any, R = T, FromMain = any> = Coroutine<T, R> & {
-  /**
-   * Sends a one-way message to a specific worker.
-   * The message is routed to the currently active task on that worker.
-   * If no task is active when the message arrives, it will be dropped.
-   */
-  sendToWorker: (workerId: number, payload: FromMain) => void;
 };
 
 const ACTOR_CONCURRENCY_RUNTIME = `
@@ -876,11 +860,11 @@ function createActorMessageHandler<Q, D, ToMain>(
  */
 export function actor<Q = any, D = any, ToMain = any, FromMain = any>(
   config: ActorConfig<Q, D, ToMain>
-): <T, R>(main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain>;
+): <T, R>(main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain, ToMain> & WorkerPool<T, R>;
 /**
  * Creates an actor worker directly from a task function and optional helpers.
  */
-export function actor<T, R>(main: ActorTask<T, R>, ...functions: Function[]): Actor<T, R>;
+export function actor<T, R>(main: ActorTask<T, R>, ...functions: Function[]): Actor<T, R> & WorkerPool<T, R>;
 /**
  * Creates an actor worker coroutine.
  *
@@ -901,15 +885,31 @@ export function actor<T, R>(main: ActorTask<T, R>, ...functions: Function[]): Ac
 export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
   arg1: ActorConfig<Q, D, ToMain> | ActorTask<T, R, Q, D, FromMain, ToMain>,
   ...rest: Function[]
-): Actor<T, R, FromMain> | ((main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain>) {
+): (Actor<T, R, FromMain, ToMain> & WorkerPool<T, R>) | ((main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain, ToMain> & WorkerPool<T, R>) {
   const implementActor = (
     config: ActorConfig<Q, D, ToMain> | undefined,
     main: ActorTask<T, R, Q, D, FromMain, ToMain>,
     functions: Function[]
-  ): Actor<T, R, FromMain> => {
-    const operator = createCoroutineOperator<T, R>({
+  ): Actor<T, R, FromMain, ToMain> & WorkerPool<T, R> => {
+    const messageHandlers = new Set<(payload: ToMain) => void>();
+
+    // Seed any static handler provided in config into the set
+    if (config?.onMessage) {
+      const staticHandler = config.onMessage;
+      messageHandlers.add((payload) => staticHandler(payload, {} as CoroutineMessage));
+    }
+
+    // Merged config routes all worker-message traffic through the handler set
+    const mergedConfig: ActorConfig<Q, D, ToMain> = {
+      ...config,
+      onMessage: (payload, _message) => {
+        messageHandlers.forEach((h) => h(payload));
+      },
+    };
+
+    const pool = createPool<T, R>({
       name: "actor",
-      config,
+      config: mergedConfig,
       main,
       functions,
       generateWorkerScript: (task, dependencies, workerConfig) =>
@@ -919,18 +919,54 @@ export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
           functions: dependencies,
           runtime: buildActorWorkerRuntime(),
         }),
-      createMessageHandler: createActorMessageHandler(config),
+      createMessageHandler: createActorMessageHandler(mergedConfig),
     });
 
-    return Object.assign(operator, {
-      sendToWorker(workerId: number, payload: FromMain) {
-        operator.postMessageToWorker(workerId, {
+    const operator = createOperator<T, R>("actor", function (this: Operator, source) {
+      let completed = false;
+
+      return {
+        next: async () => {
+          while (true) {
+            if (completed) return DONE;
+
+            const result = await source.next();
+            if (result.done) {
+              completed = true;
+              await pool.finalize();
+              return DONE;
+            }
+
+            const taskResult = await pool.processTask(result.value as T);
+            return NEXT(taskResult);
+          }
+        },
+        async return() {
+          completed = true;
+          await pool.finalize();
+          return DONE;
+        },
+        async throw(err) {
+          completed = true;
+          await pool.finalize();
+          throw err;
+        }
+      };
+    });
+
+    return Object.assign({ ...operator, ...pool }, {
+      sendToWorker(worker: Worker, payload: FromMain) {
+        pool.postMessageToWorker(worker, {
           taskId: "",
           type: "main-message",
           payload,
         });
-      }
-    });
+      },
+      onMessage(handler: (payload: ToMain) => void): () => void {
+        messageHandlers.add(handler);
+        return () => messageHandlers.delete(handler);
+      },
+    }) as Actor<T, R, FromMain, ToMain> & WorkerPool<T, R>;
   };
 
   if (typeof arg1 === "function") {
@@ -941,4 +977,5 @@ export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
     implementActor(arg1, main, functions);
 }
 
-export type { CoroutineMessage } from "./shared";
+export type { CoroutineMessage } from "../worker/messages";
+
