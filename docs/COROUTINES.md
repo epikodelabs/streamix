@@ -31,6 +31,8 @@ Your function ──► blob script ──► WorkerPool ──► Coroutine (Op
 
 A **worker** is a single Web Worker thread — an implementation detail managed by the pool. You rarely interact with workers directly unless you use `checkout(...)`.
 
+A coroutine result wears two hats: it is a stream `Operator`/`TaskRunner` **and** it exposes the underlying `WorkerPool` methods (`getIdleWorker`, `assignTask`, etc.). `checkout(...)` uses only the pool facet — it does not care about the operator part.
+
 ---
 
 ## Quick Start
@@ -100,6 +102,7 @@ const multiply = coroutine(function multiply(value: number) {
   return value * 10;
 });
 
+// A coroutine result is also a WorkerPool, so it can be passed to checkout.
 const session = await checkout(multiply, () => {}, () => {}).query();
 
 try {
