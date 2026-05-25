@@ -23,7 +23,7 @@ export interface TaskRunner<T = any, R = any> {
 /**
  * Low-level worker lifecycle management.
  *
- * All pool variants (specialized and generic) implement this interface.
+ * All pool variants implement this interface.
  */
 export interface WorkerPool {
   getIdleWorker: () => Promise<Worker>;
@@ -41,24 +41,6 @@ export interface TaskPool<T = any, R = any> extends WorkerPool, TaskRunner<T, R>
   assignTask: (worker: Worker, data: T) => Promise<R>;
 }
 
-/**
- * Generic pool that compiles tasks dynamically inside workers.
- *
- * Created by the public `createPool()` factory.
- */
-export interface GenericPool extends WorkerPool {
-  processTask: <T, R>(script: WorkerScript<T, R>, data: T) => Promise<R>;
-  finalize: () => Promise<void>;
-}
-
-/**
- * Interface for a worker that has been checked out from a pool.
- */
-export interface CheckedOutWorker {
-  worker: Worker;
-  processTask: <T, R>(fn: (data: T) => R | Promise<R>, data: T) => Promise<R>;
-  release: () => void;
-}
 
 /**
  * Plain background-task runner backed by a worker pool.

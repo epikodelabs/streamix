@@ -1,8 +1,7 @@
 import type { CoroutineMessage, PendingTaskMap } from "./messages";
 import { createDefaultMessageHandler } from "./messages";
-import { serializeScript } from "./script";
 import { generateTaskId } from "./utils";
-import type { GenericPool, TaskPool, WorkerScript } from "./types";
+import type { TaskPool } from "./types";
 
 /**
  * Shared worker-script configuration used by both `coroutine` and `actor`.
@@ -28,40 +27,12 @@ type PoolOptions = {
   createMessageHandler?: (worker: Worker, pendingTasks: PendingTaskMap) => (event: MessageEvent<CoroutineMessage>) => void;
 };
 
-type GenericPoolOptions = {
-  name?: string;
-  maxWorkers?: number;
-};
-
 let workerIdentifierCounter = 0;
 
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
 
-
-const buildGenericWorkerRuntime = (): string =>
-  `const __taskCache = new Map();
-
-onmessage = async (event) => {
-  const { workerId, taskId, payload, type, code, deps, helpers } = event.data;
-  if (type !== 'task') { return; }
-
-  let fn = __taskCache.get(code);
-  if (!fn) {
-    const scripts = [...(helpers || []), ...(deps || []), code];
-    fn = new Function(scripts.join('\\n'))();
-    __taskCache.set(code, fn);
-  }
-
-  try {
-    const result = await fn(payload);
-    postMessage({ workerId, taskId, payload: result, type: 'response' });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    postMessage({ workerId, taskId, error: message, type: 'error' });
-  }
-};`;
 
 function createPoolCore(
   name: string,
@@ -302,74 +273,4 @@ export function createTaskPool<T, R>({
   };
 }
 
-/**
- * Creates a generic worker pool (MIMD).
- *
- * Workers are not preinitialized with a task. Tasks are sent at runtime as
- * serialized function code and compiled inside the worker with `new Function`.
- * Compiled functions are cached per worker by their source code.
- */
-export function createPool(options?: GenericPoolOptions): GenericPool {
-  const name = options?.name ?? "pool";
-  const maxWorkers = options?.maxWorkers ?? ((typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined) || 4);
-  let blobUrlCache: string | null = null;
 
-  const core = createPoolCore(
-    name,
-    maxWorkers,
-    async () => {
-      const workerId = ++workerIdentifierCounter;
-
-      if (!blobUrlCache) {
-        const blob = new Blob([buildGenericWorkerRuntime()], { type: "application/javascript" });
-        blobUrlCache = URL.createObjectURL(blob);
-      }
-
-      const worker = new Worker(blobUrlCache, { type: "module" });
-      const messageHandler = createDefaultMessageHandler(worker, core.pendingMessages);
-
-      worker.addEventListener("message", messageHandler);
-      (worker as any).__id = workerId;
-      core.activeWorkers.set(workerId, worker);
-
-      return worker;
-    }
-  );
-
-  const processTask = async <T, R>(script: WorkerScript<T, R>, data: T): Promise<R> => {
-    const worker = await core.getIdleWorker();
-    const workerId = core.getWorkerId(worker)!;
-    const taskId = generateTaskId();
-    const { code, deps } = serializeScript(script);
-    try {
-      return await new Promise<R>((resolve, reject) => {
-        core.pendingMessages.set(taskId, { workerId, resolve, reject });
-        try {
-          worker.postMessage({
-            workerId,
-            taskId,
-            payload: data,
-            type: "task",
-            code,
-            deps,
-            helpers: script.helpers,
-          });
-        } catch (error) {
-          core.pendingMessages.delete(taskId);
-          reject(toError(error));
-        }
-      });
-    } finally {
-      core.returnWorker(worker);
-    }
-  };
-
-  return {
-    getIdleWorker: core.getIdleWorker,
-    returnWorker: core.returnWorker,
-    discardWorker: core.discardWorker,
-    postMessageToWorker: core.postMessageToWorker,
-    finalize: core.finalize,
-    processTask,
-  };
-}

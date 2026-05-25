@@ -343,7 +343,7 @@ idescribe("actor", () => {
     console.warn = originalWarn;
   });
 
-  it("should expose pool for advanced worker checkout", async () => {
+  it("should expose pool for advanced worker control", async () => {
     const mainTask = (x: number) => x + 100;
     (globalThis as any).currentMainTask = mainTask;
 

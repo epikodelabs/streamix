@@ -10,8 +10,6 @@ Use `coroutine(...)` when you need:
 - one-off worker execution through `compute(...)`
 - sequential pipeline composition through `compose(...)`
 
-Use `createPool()` and `checkout(...)` when you need dedicated worker access for stateful sessions.
-
 If you need worker/main-thread messaging, use `actor(...)` instead. See [ACTORS.md](./ACTORS.md).
 
 ---
@@ -27,7 +25,7 @@ Your function ──► blob script ──► WorkerPool (internal) ──► Ta
 3. An internal `WorkerPool` creates and reuses workers from that blob.
 4. The returned object is a `TaskRunner` — call `processTask(data)` directly.
 
-A **worker** is a single Web Worker thread — an implementation detail managed by the internal pool. `Coroutine` does **not** expose pool methods. If you need low-level worker control, use `createPool()` instead.
+A **worker** is a single Web Worker thread — an implementation detail managed by the internal pool. `Coroutine` does **not** expose pool methods.
 
 ---
 
@@ -84,29 +82,6 @@ await run.finalize();        // terminate workers when done
 ```
 
 The pool is created when `compute(...)` is called. Workers are spawned lazily as tasks arrive, up to `navigator.hardwareConcurrency` (or 4 as fallback).
-
-### `checkout(...)`
-
-Check out a single dedicated worker from a **generic pool** for multiple sequential tasks. The worker is returned to the pool when you call `release()`.
-
-Unlike `coroutine.processTask()`, which assigns each task to any idle worker, `checkout` pins all tasks to the **same worker**. This is useful for stateful sessions.
-
-```ts
-import { checkout, createPool } from "@epikodelabs/streamix/coroutines";
-
-const pool = createPool();
-
-const session = await checkout(pool, () => {}, () => {}).query();
-
-try {
-  const a = await session.processTask((x: number) => x * 10, 1);
-  const b = await session.processTask((x: number) => x * 10, 2);
-} finally {
-  session.release();
-}
-```
-
-`session.processTask(fn, data)` sends the function and data directly to the checked-out worker. The worker compiles the function with `new Function` and executes it. Functions are cached per worker by their source code.
 
 ### `compose(...)`
 
