@@ -320,9 +320,9 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
 
     const co = actor(mainTask);
-    
+
     // Process a task - the worker will request data and our mock will respond with dummy data
-    const result = await co.processTask(5);
+    const result = await co.start(5);
     
     // The dummy data response adds {value: 10}, so 5 + 10 = 15
     expect(result).toBe(15);
@@ -336,10 +336,8 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
 
     const co = actor(mainTask);
-    const worker = await co.pool.getIdleWorker();
-    co.pool.returnWorker(worker);
-    const pending = co.processTask(11);
-    co.sendToWorker(worker, 99);
+    const pending = co.start(11);
+    co.send(99);
     await expectAsync(pending).toBeResolvedTo(99);
     await co.finalize();
   });
@@ -382,7 +380,7 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
 
     const co = actor(mainTask);
-    const result = await co.processTask(1);
+    const result = await co.start(1);
 
     expect(result).toEqual(jasmine.objectContaining({
       first: 7,
@@ -433,7 +431,7 @@ idescribe('coroutine', () => {
       }
 
       const co = actor(mainTask);
-      const result = await co.processTask(1);
+      const result = await co.start(1);
       const remaining = [result.remainingLeft, result.remainingRight].filter((item: any) => item !== undefined);
 
       expect(["left", "right"]).toContain(result.selectedName);
@@ -480,34 +478,56 @@ idescribe('coroutine', () => {
     await co.finalize();
   });
 
-  it('should handle request/message/unknown worker messages via default handler', async () => {
+  it('should warn when actor receives unknown message types', async () => {
     const warn = spyOn(console, "warn");
 
-    const mainTask = (x: number) => x;
-    (globalThis as any).currentMainTask = mainTask;
-    const co = actor(mainTask);
+    const suiteWorker = (globalThis as any).Worker;
 
-    const worker = await co.pool.getIdleWorker();
-    const workerId = (worker as any).__id as number;
+    class UnknownMessageWorker {
+      listeners: Record<string, ((ev: any) => void)[]> = {};
 
-    const listeners = (worker as any).listeners?.message as Array<(ev: any) => void> | undefined;
-    expect(Array.isArray(listeners)).toBeTrue();
-    const handler = listeners![0];
+      constructor(_url: string, _options?: any) {}
 
-    spyOn(worker as any, "postMessage").and.callThrough();
+      addEventListener(type: string, fn: (ev: any) => void) {
+        this.listeners[type] ||= [];
+        this.listeners[type].push(fn);
+      }
 
-    handler({ data: { type: "request", workerId, taskId: "t1", requestId: "r1", payload: { q: 1 } } });
-    handler({ data: { type: "request", workerId, taskId: "t1", requestId: "r2", payload: { q: 2 } } });
-    expect((worker as any).postMessage).toHaveBeenCalledWith(jasmine.objectContaining({ type: "error", requestId: "r1" }));
-    expect((worker as any).postMessage).toHaveBeenCalledWith(jasmine.objectContaining({ type: "error", requestId: "r2" }));
+      postMessage(msg: any) {
+        if (msg.type !== "task") return;
+        setTimeout(() => {
+          const workerId = 1;
+          const taskId = msg.taskId;
 
-    handler({ data: { type: "worker-message", workerId, taskId: "t1", payload: { pct: 10 } } });
-    handler({ data: { type: "something-else", workerId, taskId: "t1", payload: null } });
+          // Fire an unknown message type
+          const unkEvent = { data: { type: "something-else", workerId, taskId, payload: null } };
+          this.listeners["message"]?.forEach(fn => fn(unkEvent));
 
-    expect(warn).toHaveBeenCalled();
+          // Then resolve the task
+          const resEvent = { data: { type: "response", workerId, taskId, payload: "done" } };
+          this.listeners["message"]?.forEach(fn => fn(resEvent));
+        }, 1);
+      }
 
-    co.pool.returnWorker(worker);
-    await co.finalize();
+      terminate() {
+        this.listeners = {};
+      }
+    }
+
+    (globalThis as any).Worker = UnknownMessageWorker;
+
+    try {
+      const mainTask = (x: number) => x;
+      (globalThis as any).currentMainTask = mainTask;
+      const co = actor(mainTask);
+
+      await co.start(1);
+
+      expect(warn).toHaveBeenCalled();
+      await co.finalize();
+    } finally {
+      (globalThis as any).Worker = suiteWorker;
+    }
   });
 
   it('should reject with "Unknown worker error" when worker error message is missing', async () => {
@@ -579,10 +599,9 @@ idescribe('coroutine', () => {
         p.resolve(msg.payload);
       });
 
-    const coFactory = actor({ customMessageHandler }) as any;
-    const co = coFactory(mainTask);
+    const co = actor({ customMessageHandler } as any)(mainTask);
 
-    const r = await co.processTask(1);
+    const r = await co.start(1);
     expect(r).toBe(2);
     expect(customMessageHandler).toHaveBeenCalled();
 
@@ -633,7 +652,7 @@ idescribe('coroutine', () => {
     (globalThis as any).Worker = ThrowingPostMessageWorker;
 
     try {
-      const coFactory = actor({
+      const co = actor({
         customMessageHandler: (_event, _worker, pending) => {
           capturedPending = pending;
           const response = _event.data;
@@ -647,11 +666,10 @@ idescribe('coroutine', () => {
           pending.delete(response.taskId);
           entry.resolve(response.payload);
         },
-      }) as any;
-      const co = coFactory((x: number) => x);
+      } as any)((x: number) => x);
 
-      await expectAsync(co.processTask(1)).toBeRejected();
-      await expectAsync(co.processTask(2)).toBeResolvedTo(2);
+      await expectAsync(co.start(1)).toBeRejected();
+      await expectAsync(co.start(2)).toBeResolvedTo(2);
       expect(capturedPending?.size).toBe(0);
 
       await co.finalize();
@@ -804,15 +822,13 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
 
     const vacuum = actor(mainTask);
-    const worker = await vacuum.pool.getIdleWorker();
 
-    const pending = vacuum.pool.assignTask(worker, 'kitchen');
-    vacuum.sendToWorker(worker, 'dock');
+    const pending = vacuum.start('kitchen');
+    vacuum.send('dock');
 
     const result = await pending;
     expect(result).toBe('docked in kitchen');
 
-    vacuum.pool.returnWorker(worker);
     await vacuum.finalize();
   });
 });

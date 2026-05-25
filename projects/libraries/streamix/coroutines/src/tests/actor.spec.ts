@@ -1,4 +1,3 @@
-import { createStream } from "@epikodelabs/streamix";
 import {
   actor,
   background,
@@ -44,7 +43,6 @@ idescribe("actor", () => {
               this.listeners["message"]?.forEach(fn => fn(event));
             },
             request: (requestPayload: any) => {
-              // Simulate request/response round-trip through onmessage
               return new Promise((resolve) => {
                 setTimeout(() => {
                   const reqEvent = {
@@ -59,7 +57,6 @@ idescribe("actor", () => {
                   this.onmessage?.(reqEvent);
                   this.listeners["message"]?.forEach(fn => fn(reqEvent));
 
-                  // Resolve with dummy data
                   resolve({ value: 10, message: "Mock response" });
                 }, 1);
               });
@@ -149,12 +146,12 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = undefined;
   });
 
-  it("should process a task and return a result", async () => {
+  it("should start a task and return a result", async () => {
     const mainTask = (x: number) => x * 3;
     (globalThis as any).currentMainTask = mainTask;
 
     const a = actor(mainTask);
-    const result = await a.processTask(7);
+    const result = await a.start(7);
 
     expect(result).toBe(21);
     await a.finalize();
@@ -167,7 +164,7 @@ idescribe("actor", () => {
     const factory = actor({});
     const a = factory(mainTask);
 
-    const result = await a.processTask(5);
+    const result = await a.start(5);
     expect(result).toBe(6);
     await a.finalize();
   });
@@ -184,15 +181,14 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = mainTask;
 
-    const a = actor({ onRequest });
-    const instance = a(mainTask);
+    const a = actor({ onRequest })(mainTask);
 
-    // MockWorker request resolution is hardcoded; onRequest won't actually be
-    // invoked by MockWorker. Instead, verify the spy was *not* called through
-    // MockWorker's fake path, and that the result comes from the mock.
-    const result = await instance.processTask(1);
+    // MockWorker resolves requests with hardcoded dummy data, but the
+    // onRequest handler is still invoked on the main thread.
+    const result = await a.start(1);
     expect(result).toEqual(jasmine.objectContaining({ value: 10 }));
-    await instance.finalize();
+    expect(onRequest).toHaveBeenCalled();
+    await a.finalize();
   });
 
   it("should deliver worker messages to onMessage subscribers", async () => {
@@ -209,8 +205,7 @@ idescribe("actor", () => {
     const a = actor(mainTask);
     a.onMessage((msg) => messages.push(msg));
 
-    await a.processTask(1);
-    await new Promise(r => setTimeout(r, 10));
+    await a.start(1);
 
     expect(messages).toEqual(["msg-a", "msg-b"]);
     await a.finalize();
@@ -230,14 +225,13 @@ idescribe("actor", () => {
     const unsubscribe = a.onMessage((msg) => messages.push(msg));
     unsubscribe();
 
-    await a.processTask(1);
-    await new Promise(r => setTimeout(r, 10));
+    await a.start(1);
 
     expect(messages).toEqual([]);
     await a.finalize();
   });
 
-  it("should send messages from main to worker via sendToWorker", async () => {
+  it("should send messages from main to worker via send", async () => {
     async function mainTask(_x: number, utils: any) {
       const first = await utils.main.receive();
       const second = await utils.main.receive();
@@ -247,19 +241,17 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = mainTask;
 
     const a = actor(mainTask);
-    const worker = await a.pool.getIdleWorker();
-    a.pool.returnWorker(worker);
 
-    const pending = a.processTask(1);
-    a.sendToWorker(worker, "alpha");
-    a.sendToWorker(worker, "beta");
+    const pending = a.start(1);
+    a.send("alpha");
+    a.send("beta");
 
     const result = await pending;
     expect(result).toEqual(["alpha", "beta"]);
     await a.finalize();
   });
 
-  it("should propagate worker errors through processTask", async () => {
+  it("should propagate worker errors through start", async () => {
     console.log = () => {};
     console.error = () => {};
     console.warn = () => {};
@@ -272,8 +264,8 @@ idescribe("actor", () => {
     const a = actor(mainTask);
 
     try {
-      await a.processTask(1);
-      fail("Expected processTask to throw");
+      await a.start(1);
+      fail("Expected start to throw");
     } catch (err: any) {
       expect(err.message).toBe("actor failure");
     }
@@ -284,96 +276,35 @@ idescribe("actor", () => {
     await a.finalize();
   });
 
-  it("should work as a stream operator", async () => {
-    const mainTask = (x: number) => x * 2;
+  it("should expose running state", async () => {
+    const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
 
     const a = actor(mainTask);
+    expect(a.running).toBe(false);
 
-    const stream = createStream("test", async function* () {
-      yield 1;
-      yield 2;
-      yield 3;
-    });
+    const pending = a.start(1);
+    expect(a.running).toBe(true);
 
-    const results: number[] = [];
-    for await (const v of stream) {
-      results.push(await a.processTask(v as number));
-    }
+    await pending;
+    expect(a.running).toBe(false);
 
-    expect(results).toEqual([2, 4, 6]);
     await a.finalize();
   });
 
-  it("should handle stream errors and finalize the pool", async () => {
-    console.log = () => {};
-    console.error = () => {};
-    console.warn = () => {};
-
-    const mainTask = (x: number) => {
-      if (x === 2) throw new Error("stream boom");
-      return x * 2;
-    };
-    (globalThis as any).currentMainTask = mainTask;
-
-    const a = actor(mainTask);
-
-    const stream = createStream("test", async function* () {
-      yield 1;
-      yield 2;
-      yield 3;
-    });
-
-    const results: number[] = [];
-    let caught: Error | null = null;
-
-    try {
-      for await (const v of stream) {
-        results.push(await a.processTask(v as number));
-      }
-    } catch (err: any) {
-      caught = err;
-    }
-
-    expect(caught?.message).toBe("stream boom");
-    expect(results).toEqual([2]);
-
-    console.log = originalLog;
-    console.error = originalError;
-    console.warn = originalWarn;
-  });
-
-  it("should expose pool for advanced worker control", async () => {
-    const mainTask = (x: number) => x + 100;
-    (globalThis as any).currentMainTask = mainTask;
-
-    const a = actor(mainTask);
-    const worker = await a.pool.getIdleWorker();
-
-    const result = await a.pool.assignTask(worker, 5);
-    expect(result).toBe(105);
-
-    a.pool.returnWorker(worker);
-    await a.finalize();
-  });
-
-  it("should process multiple tasks concurrently", async () => {
-    async function mainTask(x: number) {
-      await new Promise(r => setTimeout(r, 5));
-      return x * x;
+  it("should stop while running", async () => {
+    async function mainTask(_x: number) {
+      await new Promise(r => setTimeout(r, 50));
+      return "done";
     }
 
     (globalThis as any).currentMainTask = mainTask;
 
     const a = actor(mainTask);
+    const pending = a.start(1);
+    a.stop();
 
-    const results = await Promise.all([
-      a.processTask(2),
-      a.processTask(3),
-      a.processTask(4),
-    ]);
-
-    expect(results).toEqual([4, 9, 16]);
+    await expectAsync(pending).toBeRejectedWithError("Actor stopped");
     await a.finalize();
   });
 
@@ -394,10 +325,8 @@ idescribe("actor", () => {
     const a = factory(mainTask);
     a.onMessage((msg) => instanceMessages.push(msg));
 
-    await a.processTask(1);
-    await new Promise(r => setTimeout(r, 10));
+    await a.start(1);
 
-    // Both handlers should receive the same message
     expect(configMessages).toEqual(["ping"]);
     expect(instanceMessages).toEqual(["ping"]);
     await a.finalize();
@@ -424,7 +353,7 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = mainTask;
 
     const a = actor(mainTask);
-    const result = await a.processTask(1);
+    const result = await a.start(1);
 
     expect(result.r1).toBe(1);
     expect(result.r2).toBe(2);
@@ -437,6 +366,45 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = mainTask;
 
     const a = actor(mainTask);
+    await a.finalize();
+  });
+
+  it("should use customMessageHandler when provided", async () => {
+    const mainTask = (x: number) => x + 1;
+    (globalThis as any).currentMainTask = mainTask;
+
+    const customMessageHandler = jasmine
+      .createSpy("customMessageHandler")
+      .and.callFake((event: MessageEvent<any>, _worker: Worker, pending: Map<string, any>) => {
+        const msg = event.data;
+        if (msg.type !== "response") return;
+        const p = pending.get(msg.taskId);
+        if (!p) return;
+        pending.delete(msg.taskId);
+        p.resolve(msg.payload);
+      });
+
+    const a = actor({ customMessageHandler } as any)(mainTask);
+
+    const r = await a.start(1);
+    expect(r).toBe(2);
+    expect(customMessageHandler).toHaveBeenCalled();
+
+    await a.finalize();
+  });
+
+  it("should reject start when already running", async () => {
+    async function mainTask(_x: number) {
+      await new Promise(r => setTimeout(r, 10));
+      return "done";
+    }
+
+    (globalThis as any).currentMainTask = mainTask;
+
+    const a = actor(mainTask);
+    const pending = a.start(1);
+    await expectAsync(a.start(2)).toBeRejectedWithError("Actor is already running");
+    pending.catch(() => {});
     await a.finalize();
   });
 });

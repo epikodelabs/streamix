@@ -13,15 +13,13 @@ import {
   type Channel,
 } from "../utils";
 import {
-  createDefaultMessageHandler,
   type CoroutineMessage,
-  type PendingTaskMap,
   type WorkerMessageHandler,
 } from "../worker";
 import { type WorkerPoolConfig } from "../worker/pool";
-import { createTaskRunner } from "../worker/runner";
 import { buildWorkerScript } from "../worker/script";
-import type { Actor } from "../worker/types";
+import { generateTaskId } from "../worker/utils";
+import type { ActorRef } from "../worker/types";
 
 /**
  * Concurrency utils injected into actor workers.
@@ -89,7 +87,7 @@ export type ActorRequestHandler<Q = any, D = any> = (
 ) => Promise<D> | D;
 
 /**
- * Configuration for actor workers.
+ * Configuration for actor workers that use the default message handler.
  *
  * `request` resolves `utils.main.request(payload)` calls initiated from inside
  * the worker. `onMessage` receives one-way `utils.main.send(payload)` traffic.
@@ -97,7 +95,14 @@ export type ActorRequestHandler<Q = any, D = any> = (
 export type ActorConfig<Q = any, D = any, ToMain = any> = WorkerPoolConfig & {
   onRequest?: ActorRequestHandler<Q, D>;
   onMessage?: (payload: ToMain, message: CoroutineMessage) => void | Promise<void>;
-  customMessageHandler?: WorkerMessageHandler;
+};
+
+/**
+ * Alternative configuration that replaces the entire main-thread message
+ * handler. When this is used, `onRequest` and `onMessage` are ignored.
+ */
+export type ActorCustomMessageHandlerConfig = WorkerPoolConfig & {
+  customMessageHandler: WorkerMessageHandler;
 };
 
 const ACTOR_CONCURRENCY_RUNTIME = `
@@ -403,7 +408,6 @@ const __streamixChannel = (capacity = 0) => {
       return isClosed;
     },
     send: sendValue,
-    receive: receiveValue,
     async receive(signal) {
       const result = await receiveValue(signal);
       return result.ok ? result.value : undefined;
@@ -564,12 +568,25 @@ const __streamixRecv = (ch, name) => ({ op: "receive", channel: ch, name });
 const __streamixSend = (ch, value, name) => ({ op: "send", channel: ch, value, name });
 const __streamixOtherwise = (name = "default") => ({ op: "default", name });
 
+const __streamixShuffledIndices = (length) => {
+  const indices = Array.from({ length }, (_, i) => i);
+  for (let i = length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  return indices;
+};
+
 const __streamixSelect = async (cases, ctx = __streamixBackground()) => {
   if (ctx.signal.aborted) throw __streamixCreateAbortError(ctx.signal);
 
   const defaultIndex = cases.findIndex((item) => item.op === "default");
+  const channelIndices = cases
+    .map((_, i) => i)
+    .filter((i) => cases[i].op !== "default");
+  const randomOrder = __streamixShuffledIndices(channelIndices.length).map((j) => channelIndices[j]);
 
-  for (let index = 0; index < cases.length; index++) {
+  for (const index of randomOrder) {
     const item = cases[index];
     if (item.op === "receive") {
       const result = item.channel.tryReceive();
@@ -628,7 +645,7 @@ const __streamixSelect = async (cases, ctx = __streamixBackground()) => {
       ctx.signal.addEventListener("abort", onContextAbort, { once: true });
       cleanupFns.push(() => ctx.signal.removeEventListener("abort", onContextAbort));
 
-      for (let index = 0; index < cases.length; index++) {
+      for (const index of randomOrder) {
         if (settled) break;
 
         const item = cases[index];
@@ -677,7 +694,7 @@ const __streamixConcurrency = Object.freeze({
  * `utils.main.request()` round-trips initiated from inside the worker. Failed
  * request replies reuse `"error"` and are distinguished by `requestId`.
  */
-const buildActorWorkerRuntime = (): string => `
+const ACTOR_WORKER_RUNTIME = `
 const __pendingWorkerRequests = new Map();
 const __taskMailboxes = new Map();
 let __activeTaskId = null;
@@ -787,84 +804,98 @@ onmessage = async (event) => {
   }
 };`;
 
-function createActorMessageHandler<Q, D, ToMain>(
-  config?: ActorConfig<Q, D, ToMain>
+function handleRequest<Q, D>(
+  message: CoroutineMessage,
+  config: ActorConfig<Q, D, any> | ActorCustomMessageHandlerConfig | undefined,
+  worker: Worker
 ) {
-  return (worker: Worker, pendingTasks: PendingTaskMap) => {
-    if (config?.customMessageHandler) {
-      return (event: MessageEvent<CoroutineMessage>) =>
-        config.customMessageHandler!(event, worker, pendingTasks);
-    }
+  const { workerId, taskId, requestId, payload } = message;
 
-    return createDefaultMessageHandler(worker, pendingTasks, {
-      onRequest: async (message) => {
-        const { workerId, taskId, requestId, payload } = message;
-
-        if (!requestId) {
-          worker.postMessage({
-            workerId,
-            taskId,
-            type: "error",
-            error: "Actor request is missing requestId",
-          });
-          return;
-        }
-
-        if (!config?.onRequest) {
-          worker.postMessage({
-            workerId,
-            taskId,
-            requestId,
-            type: "error",
-            error: "No actor request handler configured",
-          });
-          return;
-        }
-
-        try {
-          const result = await config.onRequest(payload as Q, message);
-          worker.postMessage({
-            workerId,
-            taskId,
-            requestId,
-            type: "data",
-            payload: result,
-          });
-        } catch (error) {
-          worker.postMessage({
-            workerId,
-            taskId,
-            requestId,
-            type: "error",
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      },
-      onWorkerMessage: async (message) => {
-        if (config?.onMessage) {
-          await config.onMessage(message.payload as ToMain, message);
-        }
-      }
+  if (!config || !("onRequest" in config) || !config.onRequest) {
+    worker.postMessage({
+      workerId,
+      taskId,
+      requestId,
+      type: "error",
+      error: "No actor request handler configured",
     });
-  };
+    return;
+  }
+
+  try {
+    const result = config.onRequest(payload as Q, message);
+    Promise.resolve(result)
+      .then((resolved) => {
+        worker.postMessage({
+          workerId,
+          taskId,
+          requestId,
+          type: "data",
+          payload: resolved,
+        });
+      })
+      .catch((err) => {
+        worker.postMessage({
+          workerId,
+          taskId,
+          requestId,
+          type: "error",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+  } catch (err) {
+    worker.postMessage({
+      workerId,
+      taskId,
+      requestId,
+      type: "error",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
+function handleWorkerMessage<ToMain>(
+  message: CoroutineMessage,
+  config: ActorConfig<any, any, ToMain> | ActorCustomMessageHandlerConfig | undefined,
+  messageHandlers: Set<(payload: ToMain) => void>
+) {
+  const payload = message.payload as ToMain;
+  if (config && "onMessage" in config && config.onMessage) {
+    Promise.resolve(config.onMessage(payload, message)).catch((err) => {
+      console.warn("config.onMessage failed:", err);
+    });
+  }
+  messageHandlers.forEach((h) => {
+    try {
+      h(payload);
+    } catch (err) {
+      console.warn("onMessage handler failed:", err);
+    }
+  });
+}
+
+/**
+ * Creates a configured actor worker factory with a custom message handler.
+ */
+export function actor<Q = any, D = any, ToMain = any, FromMain = any>(
+  config: ActorCustomMessageHandlerConfig
+): <T, R>(main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => ActorRef<T, R, FromMain, ToMain>;
 /**
  * Creates a configured actor worker factory with message/request hooks.
  */
 export function actor<Q = any, D = any, ToMain = any, FromMain = any>(
   config: ActorConfig<Q, D, ToMain>
-): <T, R>(main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain, ToMain>;
+): <T, R>(main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => ActorRef<T, R, FromMain, ToMain>;
 /**
  * Creates an actor worker directly from a task function and optional helpers.
  */
-export function actor<T, R>(main: ActorTask<T, R>, ...functions: Function[]): Actor<T, R>;
+export function actor<T, R>(main: ActorTask<T, R>, ...functions: Function[]): ActorRef<T, R>;
 /**
  * Creates an actor worker coroutine.
  *
  * When called with a configuration object, returns a factory function that accepts
  * the actor task and optional helpers. When called with a task function directly,
- * creates the actor coroutine immediately using default configuration.
+ * creates the actor immediately using default configuration.
  *
  * @template T The type of input data.
  * @template R The type of output data.
@@ -874,65 +905,161 @@ export function actor<T, R>(main: ActorTask<T, R>, ...functions: Function[]): Ac
  * @template FromMain The type of one-way messages sent from main to worker.
  * @param arg1 Either an `ActorConfig` or the main `ActorTask`.
  * @param rest Optional helper functions available inside the worker.
- * @returns An `Actor` instance or a factory that produces one.
+ * @returns An `ActorRef` instance or a factory that produces one.
  */
 export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
-  arg1: ActorConfig<Q, D, ToMain> | ActorTask<T, R, Q, D, FromMain, ToMain>,
+  arg1: ActorConfig<Q, D, ToMain> | ActorCustomMessageHandlerConfig | ActorTask<T, R, Q, D, FromMain, ToMain>,
   ...rest: Function[]
-): Actor<T, R, FromMain, ToMain> | ((main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain, ToMain>) {
+): ActorRef<T, R, FromMain, ToMain> | ((main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => ActorRef<T, R, FromMain, ToMain>) {
+
   const implementActor = (
-    config: ActorConfig<Q, D, ToMain> | undefined,
+    config: ActorConfig<Q, D, ToMain> | ActorCustomMessageHandlerConfig | undefined,
     main: ActorTask<T, R, Q, D, FromMain, ToMain>,
     functions: Function[]
-  ): Actor<T, R, FromMain, ToMain> => {
-    const messageHandlers = new Set<(payload: ToMain) => void>();
-
-    // Seed any static handler provided in config into the set
-    if (config?.onMessage) {
-      const staticHandler = config.onMessage;
-      messageHandlers.add((payload) => staticHandler(payload, {} as CoroutineMessage));
-    }
-
-    // Merged config routes all worker-message traffic through the handler set
-    const mergedConfig: ActorConfig<Q, D, ToMain> = {
-      ...config,
-      onMessage: (payload, _message) => {
-        messageHandlers.forEach((h) => h(payload));
-      },
-    };
-
-    const runner = createTaskRunner<T, R>({
-      name: "actor",
-      config: mergedConfig,
+  ): ActorRef<T, R, FromMain, ToMain> => {
+    const workerScript = buildWorkerScript({
+      helpers: [ACTOR_CONCURRENCY_RUNTIME, ...(config?.helpers || [])],
       main,
       functions,
-      generateWorkerScript: (task, dependencies, workerConfig) =>
-        buildWorkerScript({
-          helpers: [ACTOR_CONCURRENCY_RUNTIME, ...(workerConfig?.helpers || [])],
-          main: task,
-          functions: dependencies,
-          runtime: buildActorWorkerRuntime(),
-        }),
-      createMessageHandler: createActorMessageHandler(mergedConfig),
+      runtime: ACTOR_WORKER_RUNTIME,
     });
 
-    return Object.assign({
-      pool: runner.pool,
-      processTask: runner.processTask,
-      finalize: runner.finalize,
-    }, {
-      sendToWorker(worker: Worker, payload: FromMain) {
-        runner.pool.postMessageToWorker(worker, {
-          taskId: "",
-          type: "main-message",
-          payload,
+    const blob = new Blob([workerScript], { type: "application/javascript" });
+    const blobUrl = URL.createObjectURL(blob);
+
+    let worker: Worker | null = null;
+    let activeTaskId: string | null = null;
+    let running = false;
+    let taskResolve: ((value: R) => void) | null = null;
+    let taskReject: ((error: Error) => void) | null = null;
+    const messageHandlers = new Set<(payload: ToMain) => void>();
+    const pendingTasks = new Map<string, { workerId: number; resolve: (value: any) => void; reject: (error: Error) => void }>();
+
+    let nextWorkerId = 1;
+
+    const cleanupTask = () => {
+      if (activeTaskId) {
+        pendingTasks.delete(activeTaskId);
+        activeTaskId = null;
+      }
+      running = false;
+      taskResolve = null;
+      taskReject = null;
+    };
+
+    const handleMessage = (event: MessageEvent<CoroutineMessage>) => {
+      const msg = event.data;
+
+      if (config && "customMessageHandler" in config && config.customMessageHandler) {
+        config.customMessageHandler(event, worker!, pendingTasks);
+        return;
+      }
+
+      const { type, taskId, payload, error, requestId } = msg;
+
+      if (type === "response" && taskId === activeTaskId) {
+        const resolve = taskResolve;
+        cleanupTask();
+        resolve?.(payload);
+      } else if (type === "error" && !requestId && taskId === activeTaskId) {
+        const reject = taskReject;
+        cleanupTask();
+        reject?.(new Error(error ?? "Unknown worker error"));
+      } else if (type === "request") {
+        handleRequest(msg, config, worker!);
+      } else if (type === "worker-message") {
+        handleWorkerMessage(msg, config, messageHandlers);
+      } else {
+        console.warn("Unknown message type from worker:", msg);
+      }
+    };
+
+    return {
+      get running() {
+        return running;
+      },
+
+      start(data) {
+        if (running) {
+          return Promise.reject(new Error("Actor is already running"));
+        }
+
+        if (!worker) {
+          worker = new Worker(blobUrl, { type: "module" });
+          (worker as any).__id = nextWorkerId++;
+          worker.addEventListener("message", handleMessage);
+        }
+
+        running = true;
+        activeTaskId = generateTaskId();
+
+        return new Promise((resolve, reject) => {
+          taskResolve = resolve;
+          taskReject = reject;
+          pendingTasks.set(activeTaskId!, {
+            workerId: (worker as any).__id,
+            resolve,
+            reject,
+          });
+          try {
+            worker!.postMessage({
+              workerId: (worker as any).__id,
+              taskId: activeTaskId,
+              payload: data,
+              type: "task",
+            });
+          } catch (err) {
+            cleanupTask();
+            reject(err instanceof Error ? err : new Error(String(err)));
+          }
         });
       },
-      onMessage(handler: (payload: ToMain) => void): () => void {
+
+      send(payload) {
+        if (!worker || !running || !activeTaskId) {
+          console.warn("Actor is not running; message dropped");
+          return;
+        }
+        worker.postMessage({
+          workerId: (worker as any).__id,
+          taskId: activeTaskId,
+          payload,
+          type: "main-message",
+        });
+      },
+
+      stop(reason) {
+        if (!running) return;
+        const stopError = new Error(
+          reason instanceof Error ? reason.message : String(reason ?? "Actor stopped")
+        );
+        if (taskReject) {
+          taskReject(stopError);
+        }
+        cleanupTask();
+        if (worker) {
+          worker.terminate();
+          worker = null;
+        }
+      },
+
+      async finalize() {
+        if (running && taskReject) {
+          taskReject(new Error("Actor finalized before task completed"));
+        }
+        cleanupTask();
+        if (worker) {
+          worker.terminate();
+          worker = null;
+        }
+        URL.revokeObjectURL(blobUrl);
+      },
+
+      onMessage(handler) {
         messageHandlers.add(handler);
         return () => messageHandlers.delete(handler);
       },
-    }) as Actor<T, R, FromMain, ToMain>;
+    };
   };
 
   if (typeof arg1 === "function") {
@@ -944,4 +1071,3 @@ export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
 }
 
 export type { CoroutineMessage } from "../worker/messages";
-

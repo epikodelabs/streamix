@@ -35,12 +35,11 @@ export interface WorkerPool {
 /**
  * Specialized pool with a task baked into the worker blob.
  *
- * Used internally by `actor()`.
+ * Used internally by `coroutine()` and `compute()`.
  */
 export interface TaskPool<T = any, R = any> extends WorkerPool, TaskRunner<T, R> {
   assignTask: (worker: Worker, data: T) => Promise<R>;
 }
-
 
 /**
  * Plain background-task runner backed by a worker pool.
@@ -50,28 +49,30 @@ export interface TaskPool<T = any, R = any> extends WorkerPool, TaskRunner<T, R>
 export interface Coroutine<T = any, R = T> extends TaskRunner<T, R> {}
 
 /**
- * Rich bidirectional worker with main-thread messaging.
+ * Long-lived dedicated worker with bidirectional messaging.
  *
- * `Actor` does **not** extend `Coroutine`; it is an independent top-level
- * concept built on the same underlying worker pool but with its own
- * bootstrap runtime and messaging surface.
+ * `ActorRef` represents a single worker instance. Call `start(data)` to begin
+ * execution, `send(payload)` to push messages into the worker's mailbox, and
+ * `finalize()` to terminate the worker when done.
+ *
+ * Unlike `Coroutine`, an actor is not pool-based; it owns exactly one worker.
  */
-export interface Actor<T = any, R = T, FromMain = any, ToMain = any>
-  extends TaskRunner<T, R> {
-  /**
-   * The underlying specialized task pool. Exposed so advanced users can
-   * check out individual workers or send raw messages.
-   */
-  pool: TaskPool<T, R>;
-  /**
-   * Sends a one-way message to a specific worker.
-   * The message is routed to the currently active task on that worker.
-   * If no task is active when the message arrives, it will be dropped.
-   */
-  sendToWorker: (worker: Worker, payload: FromMain) => void;
-  /**
-   * Subscribes to one-way messages sent from the worker via `utils.main.send()`.
-   * Returns an unsubscribe function.
-   */
-  onMessage: (handler: (payload: ToMain) => void) => () => void;
+export interface ActorRef<T = any, R = any, FromMain = any, ToMain = any> {
+  /** `true` while the worker has an active task. */
+  readonly running: boolean;
+
+  /** Starts the worker task with the given input data. */
+  start(data: T): Promise<R>;
+
+  /** Sends a one-way message to the active worker task. */
+  send(payload: FromMain): void;
+
+  /** Stops the worker and rejects the pending `start()` promise. */
+  stop(reason?: unknown): void;
+
+  /** Terminates the worker and releases resources. */
+  finalize(): Promise<void>;
+
+  /** Subscribes to one-way messages sent from the worker via `utils.main.send()`. */
+  onMessage(handler: (payload: ToMain) => void): () => void;
 }
