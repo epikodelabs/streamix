@@ -11,24 +11,22 @@ function isWorkerScript(value: unknown): value is WorkerScript {
   );
 }
 
-const buildCoroutineWorkerRuntime = (): string =>
-  [
-    "onmessage = async (event) => {",
-    "  const { workerId, taskId, payload, type } = event.data;",
-    "",
-    "  if (type !== 'task') {",
-    "    return;",
-    "  }",
-    "",
-    "  try {",
-    "    const result = await __mainTask(payload);",
-    "    postMessage({ workerId, taskId, payload: result, type: 'response' });",
-    "  } catch (error) {",
-    "    const message = error instanceof Error ? error.message : String(error);",
-    "    postMessage({ workerId, taskId, error: message, type: 'error' });",
-    "  }",
-    "};",
-  ].join("\n");
+const buildCoroutineWorkerRuntime = (): string => `
+onmessage = async (event) => {
+  const { workerId, taskId, payload, type } = event.data;
+
+  if (type !== 'task') {
+    return;
+  }
+
+  try {
+    const result = await __mainTask(payload);
+    postMessage({ workerId, taskId, payload: result, type: 'response' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    postMessage({ workerId, taskId, error: message, type: 'error' });
+  }
+};`;
 
 /**
  * Merges multiple `WorkerScript`s into a single composed script suitable for
@@ -49,20 +47,17 @@ function mergeWorkerScripts(scripts: WorkerScript[]): {
   const stageBodies = scripts
     .map((s, i) => {
       const depsSection = s.deps.length > 0 ? s.deps.join(";\n") + ";" : "";
-      return [
-        `const __stage${i} = (() => {`,
-        ...(depsSection ? ["  " + depsSection.replace(/\n/g, "\n  ")] : []),
-        `  return (${s.code});`,
-        `})();`,
-      ].join("\n");
+      return `const __stage${i} = (() => {
+${depsSection ? '  ' + depsSection.replace(/\n/g, '\n  ') + '\n' : ''}  return (${s.code});
+})();`;
     })
-    .join("\n\n");
+    .reduce((acc, body, i) => `${acc}${i > 0 ? '\n\n' : ''}${body}`, '');
 
   const composedMain = new Function(
     "data",
     `
     let result = data;
-    ${scripts.map((_, i) => `result = __stage${i}(result);`).join("\n    ")}
+    ${scripts.map((_, i) => `result = __stage${i}(result);`).reduce((acc, line, i) => `${acc}${i > 0 ? '\n    ' : ''}${line}`, '')}
     return result;
     `
   ) as (data: any) => any;

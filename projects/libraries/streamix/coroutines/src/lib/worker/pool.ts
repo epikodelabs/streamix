@@ -44,29 +44,27 @@ const generateTaskId = (): string => {
 };
 
 const buildGenericWorkerRuntime = (): string =>
-  [
-    "const __taskCache = new Map();",
-    "",
-    "onmessage = async (event) => {",
-    "  const { workerId, taskId, payload, type, code, deps, helpers } = event.data;",
-    "  if (type !== 'task') { return; }",
-    "",
-    "  let fn = __taskCache.get(code);",
-    "  if (!fn) {",
-    "    const scripts = [...(helpers || []), ...(deps || []), code];",
-    "    fn = new Function(scripts.join('\\n'))();",
-    "    __taskCache.set(code, fn);",
-    "  }",
-    "",
-    "  try {",
-    "    const result = await fn(payload);",
-    "    postMessage({ workerId, taskId, payload: result, type: 'response' });",
-    "  } catch (error) {",
-    "    const message = error instanceof Error ? error.message : String(error);",
-    "    postMessage({ workerId, taskId, error: message, type: 'error' });",
-    "  }",
-    "};",
-  ].join("\n");
+  `const __taskCache = new Map();
+
+onmessage = async (event) => {
+  const { workerId, taskId, payload, type, code, deps, helpers } = event.data;
+  if (type !== 'task') { return; }
+
+  let fn = __taskCache.get(code);
+  if (!fn) {
+    const scripts = [...(helpers || []), ...(deps || []), code];
+    fn = new Function(scripts.join('\\n'))();
+    __taskCache.set(code, fn);
+  }
+
+  try {
+    const result = await fn(payload);
+    postMessage({ workerId, taskId, payload: result, type: 'response' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    postMessage({ workerId, taskId, error: message, type: 'error' });
+  }
+};`;
 
 function createPoolCore(
   name: string,

@@ -677,117 +677,115 @@ const __streamixConcurrency = Object.freeze({
  * `utils.main.request()` round-trips initiated from inside the worker. Failed
  * request replies reuse `"error"` and are distinguished by `requestId`.
  */
-const buildActorWorkerRuntime = (): string =>
-  [
-    "const __pendingWorkerRequests = new Map();",
-    "const __taskMailboxes = new Map();",
-    "let __activeTaskId = null;",
-    "let __requestCounter = 0;",
-    "",
-    "const __postToMain = (message) => {",
-    "  postMessage(message);",
-    "};",
-    "",
-    "const __createRequestId = (taskId) => {",
-    "  __requestCounter += 1;",
-    "  return taskId + ':request:' + __requestCounter;",
-    "};",
-    "",
-    "const __requestMain = (workerId, taskId, payload) => {",
-    "  return new Promise((resolve, reject) => {",
-    "    const requestId = __createRequestId(taskId);",
-    "    __pendingWorkerRequests.set(requestId, { resolve, reject });",
-    "    __postToMain({ workerId, taskId, requestId, type: 'request', payload });",
-    "  });",
-    "};",
-    "",
-    "const __getTaskMailbox = (taskId) => {",
-    "  if (!__taskMailboxes.has(taskId)) {",
-    "    __taskMailboxes.set(taskId, __streamixConcurrency.channel());",
-    "  }",
-    "  return __taskMailboxes.get(taskId);",
-    "};",
-    "",
-    "const __closeTaskMailbox = (taskId) => {",
-    "  const mailbox = __taskMailboxes.get(taskId);",
-    "  if (mailbox) {",
-    "    mailbox.close();",
-    "    __taskMailboxes.delete(taskId);",
-    "  }",
-    "  if (__activeTaskId === taskId) {",
-    "    __activeTaskId = null;",
-    "  }",
-    "};",
-    "",
-    "const __createMainBridge = (workerId, taskId) => {",
-    "  const inbox = __getTaskMailbox(taskId);",
-    "  return {",
-    "    send: (messagePayload) => __postToMain({ workerId, taskId, payload: messagePayload, type: 'worker-message' }),",
-    "    request: (requestPayload) => __requestMain(workerId, taskId, requestPayload),",
-    "    receive: (signal) => inbox.receive(signal),",
-    "    inbox,",
-    "  };",
-    "};",
-    "",
-    "const __createWorkerUtils = (workerId, taskId) => {",
-    "  const main = __createMainBridge(workerId, taskId);",
-    "  return {",
-    "    main,",
-    "    concurrency: __streamixConcurrency,",
-    "  };",
-    "};",
-    "",
-    "onmessage = async (event) => {",
-    "  const { workerId, taskId, payload, type, requestId, error } = event.data;",
-    "",
-    "  if (type === 'main-message') {",
-    "    const targetTaskId = taskId || __activeTaskId;",
-    "    if (!targetTaskId) {",
-    "      console.warn('Actor worker received main message without active task', event.data);",
-    "      return;",
-    "    }",
-    "",
-    "    const mailbox = __getTaskMailbox(targetTaskId);",
-    "    mailbox.send(payload).catch((error) => {",
-    "      console.warn('Actor worker failed to enqueue main-thread message', error);",
-    "    });",
-    "    return;",
-    "  }",
-    "",
-    "  if (type === 'data' || (type === 'error' && !!requestId)) {",
-    "    if (!requestId) {",
-    "      console.warn('Actor worker received request response without requestId', event.data);",
-    "      return;",
-    "    }",
-    "",
-    "    const pendingRequest = __pendingWorkerRequests.get(requestId);",
-    "    if (pendingRequest) {",
-    "      __pendingWorkerRequests.delete(requestId);",
-    "      if (type === 'data') {",
-    "        pendingRequest.resolve(payload);",
-    "      } else {",
-    "        pendingRequest.reject(new Error(error || payload?.error || payload?.message || 'Actor request failed'));",
-    "      }",
-    "    }",
-    "    return;",
-    "  }",
-    "",
-    "  if (type !== 'task') {",
-    "    return;",
-    "  }",
-    "",
-    "  try {",
-    "    __activeTaskId = taskId;",
-    "    const result = await __mainTask(payload, __createWorkerUtils(workerId, taskId));",
-    "    __postToMain({ workerId, taskId, payload: result, type: 'response' });",
-    "  } catch (error) {",
-    "    const message = error instanceof Error ? error.message : String(error);",
-    "    __postToMain({ workerId, taskId, error: message, type: 'error' });",
-    "  } finally {",
-    "    __closeTaskMailbox(taskId);",
-    "  }",
-    "};",
-  ].join("\n");
+const buildActorWorkerRuntime = (): string => `
+const __pendingWorkerRequests = new Map();
+const __taskMailboxes = new Map();
+let __activeTaskId = null;
+let __requestCounter = 0;
+
+const __postToMain = (message) => {
+  postMessage(message);
+};
+
+const __createRequestId = (taskId) => {
+  __requestCounter += 1;
+  return taskId + ':request:' + __requestCounter;
+};
+
+const __requestMain = (workerId, taskId, payload) => {
+  return new Promise((resolve, reject) => {
+    const requestId = __createRequestId(taskId);
+    __pendingWorkerRequests.set(requestId, { resolve, reject });
+    __postToMain({ workerId, taskId, requestId, type: 'request', payload });
+  });
+};
+
+const __getTaskMailbox = (taskId) => {
+  if (!__taskMailboxes.has(taskId)) {
+    __taskMailboxes.set(taskId, __streamixConcurrency.channel());
+  }
+  return __taskMailboxes.get(taskId);
+};
+
+const __closeTaskMailbox = (taskId) => {
+  const mailbox = __taskMailboxes.get(taskId);
+  if (mailbox) {
+    mailbox.close();
+    __taskMailboxes.delete(taskId);
+  }
+  if (__activeTaskId === taskId) {
+    __activeTaskId = null;
+  }
+};
+
+const __createMainBridge = (workerId, taskId) => {
+  const inbox = __getTaskMailbox(taskId);
+  return {
+    send: (messagePayload) => __postToMain({ workerId, taskId, payload: messagePayload, type: 'worker-message' }),
+    request: (requestPayload) => __requestMain(workerId, taskId, requestPayload),
+    receive: (signal) => inbox.receive(signal),
+    inbox,
+  };
+};
+
+const __createWorkerUtils = (workerId, taskId) => {
+  const main = __createMainBridge(workerId, taskId);
+  return {
+    main,
+    concurrency: __streamixConcurrency,
+  };
+};
+
+onmessage = async (event) => {
+  const { workerId, taskId, payload, type, requestId, error } = event.data;
+
+  if (type === 'main-message') {
+    const targetTaskId = taskId || __activeTaskId;
+    if (!targetTaskId) {
+      console.warn('Actor worker received main message without active task', event.data);
+      return;
+    }
+
+    const mailbox = __getTaskMailbox(targetTaskId);
+    mailbox.send(payload).catch((error) => {
+      console.warn('Actor worker failed to enqueue main-thread message', error);
+    });
+    return;
+  }
+
+  if (type === 'data' || (type === 'error' && !!requestId)) {
+    if (!requestId) {
+      console.warn('Actor worker received request response without requestId', event.data);
+      return;
+    }
+
+    const pendingRequest = __pendingWorkerRequests.get(requestId);
+    if (pendingRequest) {
+      __pendingWorkerRequests.delete(requestId);
+      if (type === 'data') {
+        pendingRequest.resolve(payload);
+      } else {
+        pendingRequest.reject(new Error(error || payload?.error || payload?.message || 'Actor request failed'));
+      }
+    }
+    return;
+  }
+
+  if (type !== 'task') {
+    return;
+  }
+
+  try {
+    __activeTaskId = taskId;
+    const result = await __mainTask(payload, __createWorkerUtils(workerId, taskId));
+    __postToMain({ workerId, taskId, payload: result, type: 'response' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    __postToMain({ workerId, taskId, error: message, type: 'error' });
+  } finally {
+    __closeTaskMailbox(taskId);
+  }
+};`;
 
 function createActorMessageHandler<Q, D, ToMain>(
   config?: ActorConfig<Q, D, ToMain>
