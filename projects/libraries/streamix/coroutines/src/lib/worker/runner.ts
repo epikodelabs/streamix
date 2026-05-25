@@ -1,5 +1,6 @@
 import { createTaskPool } from "./pool";
-import type { TaskPool, TaskRunner, WorkerPoolConfig } from "./types";
+import type { WorkerPoolConfig } from "./pool";
+import type { TaskPool, TaskRunner } from "./types";
 
 /**
  * Internal helper that wires `createTaskPool` with a `TaskRunner` facade.
