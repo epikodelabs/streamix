@@ -1,11 +1,12 @@
 import type { CoroutineMessage } from "./messages";
 
 /**
- * Serialized task ready to be sent to a worker.
+ * Task descriptor ready to be baked into a worker blob.
+ *
+ * `main` and `functions` are the single source of truth.
+ * String forms are derived on demand via `serializeScript()`.
  */
 export interface WorkerScript<T = any, R = any> {
-  code: string;
-  deps: string[];
   helpers?: string[];
   main: (data: T) => R | Promise<R>;
   functions?: Function[];

@@ -1,5 +1,6 @@
 import { createStream, type MaybePromise, type Stream } from "@epikodelabs/streamix";
 import type { CoroutineMessage } from "../worker/messages";
+import { generateTaskId } from "../worker/utils";
 import type { CheckedOutWorker, WorkerPool } from "../worker/types";
 
 /**
@@ -12,13 +13,6 @@ export type CheckoutOptions = {
    */
   timeout?: number;
 };
-
-function generateTaskId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
 
 /**
  * Checks out a dedicated worker from a worker pool and exposes it as a stream.

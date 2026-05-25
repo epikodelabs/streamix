@@ -1,5 +1,7 @@
 import type { CoroutineMessage, PendingTaskMap } from "./messages";
 import { createDefaultMessageHandler } from "./messages";
+import { serializeScript } from "./script";
+import { generateTaskId } from "./utils";
 import type { GenericPool, TaskPool, WorkerScript } from "./types";
 
 /**
@@ -36,12 +38,7 @@ let workerIdentifierCounter = 0;
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
-const generateTaskId = (): string => {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-};
+
 
 const buildGenericWorkerRuntime = (): string =>
   `const __taskCache = new Map();
@@ -343,6 +340,7 @@ export function createPool(options?: GenericPoolOptions): GenericPool {
     const worker = await core.getIdleWorker();
     const workerId = core.getWorkerId(worker)!;
     const taskId = generateTaskId();
+    const { code, deps } = serializeScript(script);
     try {
       return await new Promise<R>((resolve, reject) => {
         core.pendingMessages.set(taskId, { workerId, resolve, reject });
@@ -352,8 +350,8 @@ export function createPool(options?: GenericPoolOptions): GenericPool {
             taskId,
             payload: data,
             type: "task",
-            code: script.code,
-            deps: script.deps,
+            code,
+            deps,
             helpers: script.helpers,
           });
         } catch (error) {

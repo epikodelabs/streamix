@@ -1,31 +1,13 @@
-import { buildWorkerScript, createTaskPool } from "../worker";
+import { buildWorkerScript, buildCoroutineWorkerRuntime, createTaskRunner, serializeScript } from "../worker";
 import type { Coroutine, TaskRunner, WorkerScript } from "../worker/types";
 
 function isWorkerScript(value: unknown): value is WorkerScript {
   return (
     typeof value === "object" &&
     value !== null &&
-    typeof (value as WorkerScript).code === "string" &&
-    Array.isArray((value as WorkerScript).deps)
+    typeof (value as WorkerScript).main === "function"
   );
 }
-
-const buildCoroutineWorkerRuntime = (): string => `
-onmessage = async (event) => {
-  const { workerId, taskId, payload, type } = event.data;
-
-  if (type !== 'task') {
-    return;
-  }
-
-  try {
-    const result = await __mainTask(payload);
-    postMessage({ workerId, taskId, payload: result, type: 'response' });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    postMessage({ workerId, taskId, error: message, type: 'error' });
-  }
-};`;
 
 /**
  * Merges multiple `WorkerScript`s into a single composed script suitable for
@@ -45,9 +27,10 @@ function mergeWorkerScripts(scripts: WorkerScript[]): {
 
   const stageBodies = scripts
     .map((s, i) => {
-      const depsSection = s.deps.length > 0 ? s.deps.join(";\n") + ";" : "";
+      const { code, deps } = serializeScript(s);
+      const depsSection = deps.length > 0 ? deps.join(";\n") + ";" : "";
       return `const __stage${i} = (() => {
-${depsSection ? '  ' + depsSection.replace(/\n/g, '\n  ') + '\n' : ''}  return (${s.code});
+${depsSection ? '  ' + depsSection.replace(/\n/g, '\n  ') + '\n' : ''}  return (${code});
 })();`;
     })
     .reduce((acc, body, i) => `${acc}${i > 0 ? '\n\n' : ''}${body}`, '');
@@ -104,11 +87,11 @@ export function compose<T = any, R = any>(
     }
   }
 
-  let pool: ReturnType<typeof createTaskPool> | null = null;
+  let workerRunner: TaskRunner<T, R> | null = null;
 
   if (workerScripts.length > 0) {
     const merged = mergeWorkerScripts(workerScripts);
-    pool = createTaskPool({
+    workerRunner = createTaskRunner<T, R>({
       name: "compose",
       config: merged.helpers.length > 0 ? { helpers: merged.helpers } : undefined,
       main: merged.main,
@@ -121,8 +104,8 @@ export function compose<T = any, R = any>(
   const processTask = async (data: T): Promise<R> => {
     let result: any = data;
 
-    if (pool) {
-      result = await pool.processTask(result);
+    if (workerRunner) {
+      result = await workerRunner.processTask(result);
     }
 
     for (const runner of taskRunners) {
@@ -135,9 +118,9 @@ export function compose<T = any, R = any>(
   const finalize = async (): Promise<void> => {
     const errors: Error[] = [];
 
-    if (pool) {
+    if (workerRunner) {
       try {
-        await pool.finalize();
+        await workerRunner.finalize();
       } catch (e) {
         errors.push(e instanceof Error ? e : new Error(String(e)));
       }

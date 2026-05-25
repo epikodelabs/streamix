@@ -18,7 +18,8 @@ import {
   type PendingTaskMap,
   type WorkerMessageHandler,
 } from "../worker";
-import { createTaskPool, type WorkerPoolConfig } from "../worker/pool";
+import { type WorkerPoolConfig } from "../worker/pool";
+import { createTaskRunner } from "../worker/runner";
 import { buildWorkerScript } from "../worker/script";
 import type { Actor } from "../worker/types";
 
@@ -900,7 +901,7 @@ export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
       },
     };
 
-    const pool = createTaskPool<T, R>({
+    const runner = createTaskRunner<T, R>({
       name: "actor",
       config: mergedConfig,
       main,
@@ -916,16 +917,12 @@ export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
     });
 
     return Object.assign({
-      pool,
-      processTask(data: T) {
-        return pool.processTask(data);
-      },
-      finalize() {
-        return pool.finalize();
-      },
+      pool: runner.pool,
+      processTask: runner.processTask,
+      finalize: runner.finalize,
     }, {
       sendToWorker(worker: Worker, payload: FromMain) {
-        pool.postMessageToWorker(worker, {
+        runner.pool.postMessageToWorker(worker, {
           taskId: "",
           type: "main-message",
           payload,

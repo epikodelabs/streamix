@@ -1,5 +1,6 @@
-import { createTaskPool } from "../worker/pool";
 import { buildWorkerScript } from "../worker/script";
+import { buildCoroutineWorkerRuntime } from "../worker/runtimes";
+import { createTaskRunner } from "../worker/runner";
 import type { Coroutine, WorkerScript } from "../worker/types";
 
 /**
@@ -14,29 +15,12 @@ export type CoroutineConfig = {
   helpers?: string[];
 };
 
-const buildCoroutineWorkerRuntime = (): string => `
-onmessage = async (event) => {
-  const { workerId, taskId, payload, type } = event.data;
-
-  if (type !== 'task') {
-    return;
-  }
-
-  try {
-    const result = await __mainTask(payload);
-    postMessage({ workerId, taskId, payload: result, type: 'response' });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    postMessage({ workerId, taskId, error: message, type: 'error' });
-  }
-};`;
-
 function createCoroutineImpl<T, R>(
   main: CoroutineTask<T, R>,
   functions: Function[],
   helpers: string[]
 ): Coroutine<T, R> & WorkerScript<T, R> {
-  const pool = createTaskPool<T, R>({
+  const runner = createTaskRunner<T, R>({
     name: "coroutine",
     config: helpers.length > 0 ? { helpers } : undefined,
     main,
@@ -51,14 +35,8 @@ function createCoroutineImpl<T, R>(
   });
 
   return {
-    processTask(data: T) {
-      return pool.processTask(data);
-    },
-    finalize() {
-      return pool.finalize();
-    },
-    code: main.toString(),
-    deps: functions.map((f) => f.toString()),
+    processTask: runner.processTask,
+    finalize: runner.finalize,
     helpers,
     main,
     functions,

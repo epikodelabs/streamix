@@ -1,3 +1,5 @@
+import type { WorkerScript } from "./types";
+
 /**
  * Internal bootstrap required by transpiled async/generator code inside worker
  * tasks and injected helper functions.
@@ -9,6 +11,21 @@ const ASYNC_WORKER_BOOTSTRAP = `var __defProp=Object.defineProperty,__defProps=O
  */
 export function serializeFunction(fn: Function): string {
   return fn.toString().replace(/function[\s]*\(/, `function ${fn.name || ""}(`);
+}
+
+/**
+ * Derives the string representation of a `WorkerScript` from its
+ * function source(s).  This is the single source-of-truth for how
+ * `main` and `functions` are turned into worker-transmittable code.
+ */
+export function serializeScript<T, R>(script: WorkerScript<T, R>): {
+  code: string;
+  deps: string[];
+} {
+  return {
+    code: script.main.toString(),
+    deps: (script.functions || []).map((f) => f.toString()),
+  };
 }
 
 const joinScriptSections = (sections: string[]): string =>
