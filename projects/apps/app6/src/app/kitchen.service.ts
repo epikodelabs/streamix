@@ -107,24 +107,11 @@ const headChef = actor<string, Recipe, KitchenEvent, KitchenCommand>({
 
     // ---- Channels ----
     const orderQueue = channel<Order>(input.orders.length);
-    const cmdChannel = channel<KitchenCommand>(10);
 
     for (const order of input.orders) {
       orderQueue.trySend(order);
     }
     orderQueue.close();
-
-    // ---- Command forwarder ----
-    // Reads commands from main thread and forwards them into cmdChannel
-    // so the rest of the worker can select/recv from a local channel.
-    const commandForwarder = async () => {
-      while (!closing) {
-        const cmd = await utils.main.receive();
-        if (!cmd) break;
-        await cmdChannel.send(cmd);
-        if (cmd.type === 'close') break;
-      }
-    };
 
     // ---- Oven worker ----
     // Each oven is a concurrent task inside the actor worker.
@@ -201,15 +188,15 @@ const headChef = actor<string, Recipe, KitchenEvent, KitchenCommand>({
     };
 
     // ---- Command processor ----
-    // Reads the local command channel and updates shared state.
+    // Reads commands directly from the main thread and updates shared state.
     const commandProcessor = async () => {
       while (!closing) {
         const [pollCtx, pollCancel] = withTimeout(background(), 100);
         let cmd: KitchenCommand | undefined;
         try {
-          cmd = await cmdChannel.receive(pollCtx.signal);
+          cmd = await utils.main.receive(pollCtx.signal);
         } catch {
-          // timeout
+          // timeout — loop around and check closing
         } finally {
           pollCancel();
         }
@@ -228,7 +215,6 @@ const headChef = actor<string, Recipe, KitchenEvent, KitchenCommand>({
     };
 
     // ---- Run everything concurrently ----
-    const forwarder = commandForwarder();
     const processor = commandProcessor();
     const ovens = Promise.all([
       ovenWorker('Oven #1'),
@@ -236,12 +222,12 @@ const headChef = actor<string, Recipe, KitchenEvent, KitchenCommand>({
       ovenWorker('Oven #3'),
     ]);
 
-    // Processor drives shutdown; ovens finish their current pizzas.
-    await processor;
+    // Ovens finish their queued pizzas.
     await ovens;
-    await forwarder.catch(() => {});
 
-    cmdChannel.close();
+    // Signal shutdown so the processor exits cleanly.
+    closing = true;
+    await processor;
 
     // Report final stats
     utils.main.send({
@@ -283,6 +269,7 @@ export class KitchenService {
 
   private running = false;
   private fullDayClosing = false;
+  private inFullDay = false;
   private onMessageUnsubscribe: (() => void) | null = null;
   private destroyed = false;
 
@@ -376,7 +363,9 @@ export class KitchenService {
           `[${time}] 🏁 Shift closed! Completed: ${event.completed}, Cancelled: ${event.cancelled}, Revenue: $${event.totalRevenue.toFixed(2)}`
         );
         this.statsSubject.next({ ...this.statsSubject.value, active: 0 });
-        this.running = false;
+        if (!this.inFullDay) {
+          this.running = false;
+        }
         break;
     }
 
@@ -385,11 +374,13 @@ export class KitchenService {
 
   async runShift(
     orders: Order[],
-    options: { accumulate?: boolean } = {}
+    options: { accumulate?: boolean; internal?: boolean } = {}
   ): Promise<{ completed: number; cancelled: number; revenue: number } | undefined> {
-    if (this.running) return;
+    if (!options.internal && this.running) return;
 
-    this.running = true;
+    if (!options.internal) {
+      this.running = true;
+    }
 
     if (options.accumulate) {
       this.resetOvens();
@@ -410,7 +401,9 @@ export class KitchenService {
         revenue: result?.totalRevenue ?? 0,
       };
     } finally {
-      this.running = false;
+      if (!options.internal) {
+        this.running = false;
+      }
     }
   }
 
@@ -455,6 +448,8 @@ export class KitchenService {
     ];
 
     this.fullDayClosing = false;
+    this.inFullDay = true;
+    this.running = true;
     this.resetState();
 
     this.logSubject.next('\n=== Full Day Started ===');
@@ -464,7 +459,7 @@ export class KitchenService {
 
       this.logSubject.next(`\n=== ${shift.name} ===`);
 
-      await this.runShift(shift.orders, { accumulate: true });
+      await this.runShift(shift.orders, { accumulate: true, internal: true });
 
       if (this.fullDayClosing) break;
 
@@ -474,6 +469,9 @@ export class KitchenService {
     this.cancellableOrdersSubject.next([]);
 
     this.logSubject.next('\n=== Full Day Complete ===');
+
+    this.inFullDay = false;
+    this.running = false;
 
     const stats = this.statsSubject.value;
 
