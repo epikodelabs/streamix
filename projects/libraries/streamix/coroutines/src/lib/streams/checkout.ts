@@ -23,9 +23,10 @@ function generateTaskId(): string {
 /**
  * Checks out a dedicated worker from a worker pool and exposes it as a stream.
  *
- * The stream yields a single `CheckedOutWorker` that can run any task function
+ * The stream yields a single `CheckedOutWorker` that can run any `WorkerScript`
  * directly on the same worker instance. The worker is returned to the pool when
- * the stream is unsubscribed, the worker is released, or the optional timeout expires.
+ * the stream is unsubscribed, the worker is released, or the optional timeout
+ * expires.
  *
  * **Important:** The consumer must call `worker.release()` when done, or
  * provide a `timeout`, otherwise the worker will be held indefinitely.
@@ -138,6 +139,8 @@ export function checkout(
               payload: data,
               type: "task",
               code: fn.toString(),
+              deps: [],
+              helpers: [],
             });
           } catch (error) {
             pendingMessages.delete(taskId);

@@ -1,17 +1,19 @@
 import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
-import { createTaskPool, type WorkerPoolConfig } from "../worker/pool";
+import { createTaskPool } from "../worker/pool";
 import { buildWorkerScript } from "../worker/script";
-import type { Coroutine } from "../worker/types";
-
-/**
- * Configuration for plain one-way coroutine workers.
- */
-export type CoroutineConfig = WorkerPoolConfig;
+import type { Coroutine, WorkerScript } from "../worker/types";
 
 /**
  * Task function executed inside a worker without actor utilities.
  */
 export type CoroutineTask<T = any, R = any> = (data: T) => Promise<R> | R;
+
+/**
+ * Configuration for plain one-way coroutine workers.
+ */
+export type CoroutineConfig = {
+  helpers?: string[];
+};
 
 const buildCoroutineWorkerRuntime = (): string =>
   [
@@ -32,96 +34,92 @@ const buildCoroutineWorkerRuntime = (): string =>
     "};",
   ].join("\n");
 
+function createCoroutineImpl<T, R>(
+  main: CoroutineTask<T, R>,
+  functions: Function[],
+  helpers: string[]
+): Coroutine<T, R> & WorkerScript<T, R> {
+  const pool = createTaskPool<T, R>({
+    name: "coroutine",
+    config: helpers.length > 0 ? { helpers } : undefined,
+    main,
+    functions,
+    generateWorkerScript: (task, dependencies, workerConfig) =>
+      buildWorkerScript({
+        helpers: workerConfig?.helpers,
+        main: task,
+        functions: dependencies,
+        runtime: buildCoroutineWorkerRuntime(),
+      }),
+  });
+
+  const operator = createOperator<T, R>("coroutine", function (this: Operator, source) {
+    let completed = false;
+
+    return {
+      next: async () => {
+        while (true) {
+          if (completed) return DONE;
+
+          const result = await source.next();
+          if (result.done) {
+            completed = true;
+            await pool.finalize();
+            return DONE;
+          }
+
+          const taskResult = await pool.processTask(result.value as T);
+          return NEXT(taskResult);
+        }
+      },
+      async return() {
+        completed = true;
+        await pool.finalize();
+        return DONE;
+      },
+      async throw(err) {
+        completed = true;
+        await pool.finalize();
+        throw err;
+      }
+    };
+  });
+
+  return {
+    ...operator,
+    async processTask(data: T) {
+      return pool.processTask(data);
+    },
+    async finalize() {
+      return pool.finalize();
+    },
+    code: main.toString(),
+    deps: functions.map((f) => f.toString()),
+    helpers,
+    main,
+    functions,
+  } as Coroutine<T, R> & WorkerScript<T, R>;
+}
+
 /**
- * Creates a configured coroutine factory for plain background task execution.
- */
-export function coroutine(config: CoroutineConfig): <T, R>(main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R>;
-/**
- * Creates a coroutine directly from a task function and optional helpers.
- */
-export function coroutine<T, R>(main: CoroutineTask<T, R>, ...functions: Function[]): Coroutine<T, R>;
-/**
- * Creates a coroutine for plain background task execution.
+ * Creates a SIMD coroutine — one task baked into the worker blob.
  *
- * When called with a configuration object, returns a factory function that accepts
- * the task function and optional helpers. When called with a task function directly,
- * creates the coroutine immediately using default configuration.
- *
- * @template T The type of input data.
- * @template R The type of output data.
- * @param arg1 Either a `CoroutineConfig` or the main `CoroutineTask`.
- * @param rest Optional helper functions available inside the worker.
- * @returns A `Coroutine` instance or a factory that produces one.
+ * The returned `Coroutine` can be used with `.pipe()` in stream pipelines
+ * or called directly via `.processTask()`. Call `.finalize()` when done
+ * to terminate the underlying worker pool.
  */
+export function coroutine<T, R>(config: CoroutineConfig): (main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R> & WorkerScript<T, R>;
+export function coroutine<T, R>(main: CoroutineTask<T, R>, ...functions: Function[]): Coroutine<T, R> & WorkerScript<T, R>;
 export function coroutine<T, R>(
   arg1: CoroutineConfig | CoroutineTask<T, R>,
   ...rest: Function[]
-): (Coroutine<T, R>) | ((main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R>) {
-  const implement = (
-    config: CoroutineConfig | undefined,
-    main: CoroutineTask<T, R>,
-    functions: Function[]
-  ): Coroutine<T, R> => {
-    const pool = createTaskPool<T, R>({
-      name: "coroutine",
-      config,
-      main,
-      functions,
-      generateWorkerScript: (task, dependencies, workerConfig) =>
-        buildWorkerScript({
-          helpers: workerConfig?.helpers,
-          main: task,
-          functions: dependencies,
-          runtime: buildCoroutineWorkerRuntime(),
-        }),
-    });
-
-    const operator = createOperator<T, R>("coroutine", function (this: Operator, source) {
-      let completed = false;
-
-      return {
-        next: async () => {
-          while (true) {
-            if (completed) return DONE;
-
-            const result = await source.next();
-            if (result.done) {
-              completed = true;
-              await pool.finalize();
-              return DONE;
-            }
-
-            const taskResult = await pool.processTask(result.value as T);
-            return NEXT(taskResult);
-          }
-        },
-        async return() {
-          completed = true;
-          await pool.finalize();
-          return DONE;
-        },
-        async throw(err) {
-          completed = true;
-          await pool.finalize();
-          throw err;
-        }
-      };
-    });
-
-    return {
-      ...operator,
-      async processTask(data: T) {
-        return pool.processTask(data);
-      },
-      async finalize() {
-        return pool.finalize();
-      },
-    } as Coroutine<T, R>;
-  };
-
+): Coroutine<T, R> & WorkerScript<T, R> | ((main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R> & WorkerScript<T, R>) {
   if (typeof arg1 === "function") {
-    return implement({}, arg1 as CoroutineTask<T, R>, rest);
+    return createCoroutineImpl(arg1, rest, []);
   }
 
-  return (main: CoroutineTask<T, R>, ...functions: Function[]) => implement(arg1, main, functions);
+  const helpers = arg1?.helpers || [];
+
+  return (main: CoroutineTask<T, R>, ...functions: Function[]) =>
+    createCoroutineImpl(main, functions, helpers);
 }

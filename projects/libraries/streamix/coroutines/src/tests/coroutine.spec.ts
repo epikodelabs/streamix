@@ -1,21 +1,21 @@
 import { createStream } from "@epikodelabs/streamix";
 import {
-  ChannelClosedError,
-  ContextCancelledError,
-  background,
-  channel,
-  coroutine,
-  createTaskPool,
-  actor,
-  otherwise,
-  recv,
-  select,
-  send,
-  withCancel,
-  withDeadline,
-  withTimeout,
-  type CoroutineMessage,
-  type PendingTaskMap
+    ChannelClosedError,
+    ContextCancelledError,
+    actor,
+    background,
+    channel,
+    coroutine,
+    createTaskPool,
+    otherwise,
+    receive,
+    select,
+    send,
+    withCancel,
+    withDeadline,
+    withTimeout,
+    type CoroutineMessage,
+    type PendingTaskMap
 } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
@@ -65,13 +65,12 @@ idescribe('coroutine', () => {
               this.listeners["message"]?.forEach(fn => fn(event));
             },
             request: (requestPayload: any) => this.handleDataRequest(requestPayload),
-            recv: (signal?: AbortSignal) => this.workerInbox.recv(signal),
             receive: (signal?: AbortSignal) => this.workerInbox.receive(signal),
             inbox: this.workerInbox,
           },
           concurrency: {
             channel,
-            recv,
+            receive,
             send,
             otherwise,
             select,
@@ -329,9 +328,9 @@ idescribe('coroutine', () => {
     expect(result).toBe(15);
   });
 
-  it('should deliver main-thread messages through utils.main.recv()', async () => {
+  it('should deliver main-thread messages through utils.main.receive()', async () => {
     async function mainTask(_x: number, utils: any) {
-      return utils.main.recv();
+      return utils.main.receive();
     }
 
     (globalThis as any).currentMainTask = mainTask;
@@ -347,15 +346,15 @@ idescribe('coroutine', () => {
 
   it('should expose concurrency utils on actor worker utils', async () => {
     async function mainTask(_x: number, utils: any) {
-      const { channel: _channel, recv, send, otherwise, select, background, withCancel, ChannelClosedError, ContextCancelledError } = utils.concurrency;
+      const { channel: _channel, receive, send, otherwise, select, background, withCancel, ChannelClosedError, ContextCancelledError } = utils.concurrency;
 
       const ch = channel<number>(1);
       await ch.send(7);
-      const first = await ch.recv();
+      const first = await ch.receive();
 
       const sendCase = send(ch, 9, "send");
-      const recvCase = recv(ch, "receive");
-      const selected = await select([sendCase, recvCase, otherwise("default")]);
+      const receiveCase = receive(ch, "receive");
+      const selected = await select([sendCase, receiveCase, otherwise("default")]);
 
       const [ctx, cancel] = withCancel(background());
       cancel(new ContextCancelledError("stop"));
@@ -399,7 +398,7 @@ idescribe('coroutine', () => {
     const left = channel<number>(1);
     const right = channel<number>(1);
 
-    const pending = select([recv(left, "left"), recv(right, "right")]);
+    const pending = select([receive(left, "left"), receive(right, "right")]);
 
     await Promise.all([left.send(1), right.send(2)]);
 
@@ -417,11 +416,11 @@ idescribe('coroutine', () => {
 
     try {
       async function mainTask(_x: number, utils: any) {
-        const { channel, recv, select } = utils.concurrency;
+        const { channel, receive, select } = utils.concurrency;
         const left = (channel as any)(1);
         const right = (channel as any)(1);
 
-        const pending = select([recv(left, "left"), recv(right, "right")]);
+        const pending = select([receive(left, "left"), receive(right, "right")]);
         await Promise.all([left.send(1), right.send(2)]);
         const selected = await pending;
 
@@ -791,5 +790,29 @@ idescribe('coroutine', () => {
     const co = coroutine(mainTask);
 
     await co.finalize();
+  });
+
+  it('should steer a worker via sendToWorker in a command loop (kitchen pattern)', async () => {
+    async function mainTask(room: string, utils: any) {
+      while (true) {
+        const cmd = await utils.main.receive();
+        if (cmd === 'dock') return 'docked in ' + room;
+        if (cmd === 'panic') return 'hiding under couch in ' + room;
+      }
+    }
+
+    (globalThis as any).currentMainTask = mainTask;
+
+    const vacuum = actor(mainTask);
+    const worker = await vacuum.pool.getIdleWorker();
+
+    const pending = vacuum.pool.assignTask(worker, 'kitchen');
+    vacuum.sendToWorker(worker, 'dock');
+
+    const result = await pending;
+    expect(result).toBe('docked in kitchen');
+
+    vacuum.pool.returnWorker(worker);
+    await vacuum.finalize();
   });
 });

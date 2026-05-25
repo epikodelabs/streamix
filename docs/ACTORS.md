@@ -19,8 +19,8 @@ actor({                                async function task(input, utils) {
              (q) => ...,     ── res ─►    
   onMessage: (p) => ...,     ◄─ msg ──   utils.main.send({ progress: 50 });
 
-})(task);                                // cmd arrives via utils.main.recv
-actor.sendToWorker(id, cmd)  ── cmd ─►   const cmd = await utils.main.recv();              
+})(task);                                // cmd arrives via utils.main.receive
+actor.sendToWorker(id, cmd)  ── cmd ─►   const cmd = await utils.main.receive();              
                                        }
 ```
 
@@ -79,13 +79,13 @@ const oven = actor({
 
 ### Send commands from main to worker
 
-`actor.sendToWorker(workerId, payload)` delivers a message from the **main thread** into the worker's inbox. The worker reads it with `utils.main.recv()`.
+`actor.sendToWorker(workerId, payload)` delivers a message from the **main thread** into the worker's inbox. The worker reads it with `utils.main.receive()`.
 
 ```ts
-// Worker: task runs here; utils.main.recv() blocks until a message arrives from main
+// Worker: task runs here; utils.main.receive() blocks until a message arrives from main
 const vacuum = actor(async function task(room: string, utils) {
   while (true) {
-    const cmd = await utils.main.recv();
+    const cmd = await utils.main.receive();
     if (cmd === "dock") return "docked";
     if (cmd === "panic") return "hiding under couch";
     // ...cleaning logic...
@@ -96,7 +96,7 @@ const vacuum = actor(async function task(room: string, utils) {
 const { workerId } = await vacuum.getIdleWorker();
 const pending = vacuum.assignTask(workerId, "kitchen");
 
-vacuum.sendToWorker(workerId, "dock"); // delivered to utils.main.recv() inside the worker
+vacuum.sendToWorker(workerId, "dock"); // delivered to utils.main.receive() inside the worker
 
 const result = await pending; // "docked"
 vacuum.returnWorker(workerId);
@@ -116,7 +116,7 @@ const ramen = actor({
 })(
   // Worker: task runs here
   async function cook(input: { flavor: string }, utils) {
-    const { channel, recv, select, otherwise } = utils.concurrency; // worker-side concurrency
+    const { channel, receive, select, otherwise } = utils.concurrency; // worker-side concurrency
     const ticks = channel<number>(1);
 
     // Ask main for the recipe — handled by `request` on the main thread
@@ -128,8 +128,8 @@ const ramen = actor({
       utils.main.send({ stage: `boiling... ${remaining} min left` });
 
       const winner = await select([
-        recv(ticks, "tick"),
-        recv(utils.main.inbox, "chef"), // messages sent via actor.sendToWorker(...)
+        receive(ticks, "tick"),
+        receive(utils.main.inbox, "chef"), // messages sent via actor.sendToWorker(...)
         otherwise("bubble"),
       ]);
 
@@ -153,7 +153,7 @@ Drive it from the main thread:
 const { workerId } = await ramen.getIdleWorker();
 const pending = ramen.assignTask(workerId, { flavor: "udon" });
 
-// Send a command into the worker's inbox — received via utils.main.inbox / utils.main.recv()
+// Send a command into the worker's inbox — received via utils.main.inbox / utils.main.receive()
 ramen.sendToWorker(workerId, "abort");
 
 const result = await pending; // "poured down the sink"
@@ -195,5 +195,5 @@ const worker = actor({
 | Runs in a Worker | ✓ | ✓ |
 | Main-thread `request` handler | — | ✓ `utils.main.request(q)` |
 | One-way events to main | — | ✓ `utils.main.send(payload)` |
-| Receive commands from main | — | ✓ `utils.main.recv()` |
+| Receive commands from main | — | ✓ `utils.main.receive()` |
 | Worker-side channels & select | — | ✓ `utils.concurrency` |

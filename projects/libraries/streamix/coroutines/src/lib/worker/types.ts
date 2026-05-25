@@ -2,6 +2,17 @@ import type { Operator } from "@epikodelabs/streamix";
 import type { CoroutineMessage } from "./messages";
 
 /**
+ * Serialized task ready to be sent to a worker.
+ */
+export interface WorkerScript<T = any, R = any> {
+  code: string;
+  deps: string[];
+  helpers?: string[];
+  main: (data: T) => R | Promise<R>;
+  functions?: Function[];
+}
+
+/**
  * Base contract for anything that can process a task and be finalized.
  */
 export interface TaskRunner<T = any, R = any> {
@@ -10,7 +21,49 @@ export interface TaskRunner<T = any, R = any> {
 }
 
 /**
+ * Low-level worker lifecycle management.
+ *
+ * All pool variants (specialized and generic) implement this interface.
+ */
+export interface WorkerPool {
+  getIdleWorker: () => Promise<Worker>;
+  returnWorker: (worker: Worker) => void;
+  discardWorker: (worker: Worker, reason?: Error) => void;
+  postMessageToWorker: (worker: Worker, message: Omit<CoroutineMessage, "workerId">) => void;
+}
+
+/**
+ * Specialized pool with a task baked into the worker blob.
+ *
+ * Used internally by `actor()`.
+ */
+export interface TaskPool<T = any, R = any> extends WorkerPool, TaskRunner<T, R> {
+  assignTask: (worker: Worker, data: T) => Promise<R>;
+}
+
+/**
+ * Generic pool that compiles tasks dynamically inside workers.
+ *
+ * Created by the public `createPool()` factory.
+ */
+export interface GenericPool extends WorkerPool {
+  processTask: <T, R>(script: WorkerScript<T, R>, data: T) => Promise<R>;
+  finalize: () => Promise<void>;
+}
+
+/**
+ * Interface for a worker that has been checked out from a pool.
+ */
+export interface CheckedOutWorker {
+  worker: Worker;
+  processTask: <T, R>(fn: (data: T) => R | Promise<R>, data: T) => Promise<R>;
+  release: () => void;
+}
+
+/**
  * Plain background-task operator.
+ *
+ * Created by `compute(pool, script)`.
  */
 export interface Coroutine<T = any, R = T> extends Operator<T, R>, TaskRunner<T, R> {}
 
@@ -39,44 +92,4 @@ export interface Actor<T = any, R = T, FromMain = any, ToMain = any>
    * Returns an unsubscribe function.
    */
   onMessage: (handler: (payload: ToMain) => void) => () => void;
-}
-
-/**
- * Low-level worker lifecycle management.
- *
- * All pool variants (specialized and generic) implement this interface.
- */
-export interface WorkerPool {
-  getIdleWorker: () => Promise<Worker>;
-  returnWorker: (worker: Worker) => void;
-  discardWorker: (worker: Worker, reason?: Error) => void;
-  postMessageToWorker: (worker: Worker, message: Omit<CoroutineMessage, "workerId">) => void;
-}
-
-/**
- * Specialized pool with a task baked into the worker blob.
- *
- * Used internally by `coroutine()` and `actor()`.
- */
-export interface TaskPool<T = any, R = any> extends WorkerPool, TaskRunner<T, R> {
-  assignTask: (worker: Worker, data: T) => Promise<R>;
-}
-
-/**
- * Generic pool that compiles tasks dynamically inside workers.
- *
- * Created by the public `createPool()` factory.
- */
-export interface GenericPool extends WorkerPool {
-  processTask: <T, R>(fn: (data: T) => R | Promise<R>, data: T) => Promise<R>;
-  finalize: () => Promise<void>;
-}
-
-/**
- * Interface for a worker that has been checked out from a pool.
- */
-export interface CheckedOutWorker {
-  worker: Worker;
-  processTask: <T, R>(fn: (data: T) => R | Promise<R>, data: T) => Promise<R>;
-  release: () => void;
 }

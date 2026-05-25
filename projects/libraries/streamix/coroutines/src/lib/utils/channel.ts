@@ -1,9 +1,9 @@
 import { createAbortError } from "./context";
 import type {
-  ChannelSelectInternals,
-  SelectCaseMeta,
-  SelectOutcome,
-  SelectRegistration,
+    ChannelSelectInternals,
+    SelectCaseMeta,
+    SelectOutcome,
+    SelectRegistration,
 } from "./select";
 
 /**
@@ -78,10 +78,8 @@ export type Channel<T> = AsyncIterable<T> & {
   readonly closed: boolean;
   /** Sends a value. Blocks if the channel is unbuffered and no receiver is waiting, or if the buffer is full. Rejects if the channel is closed. */
   send(value: T, signal?: AbortSignal): Promise<void>;
-  /** Receives a value. Returns `{ ok: true, value }` or `{ ok: false }` when closed. Blocks if the channel is empty. */
-  receive(signal?: AbortSignal): Promise<ReceiveResult<T>>;
-  /** Convenience receiver that returns the value directly, or `undefined` when closed. */
-  recv(signal?: AbortSignal): Promise<T | undefined>;
+  /** Receives a value. Returns the value directly, or `undefined` when the channel is closed. Blocks if the channel is empty. */
+  receive(signal?: AbortSignal): Promise<T | undefined>;
   /** Non-blocking send. Returns `true` if the value was accepted immediately. */
   trySend(value: T): boolean;
   /** Non-blocking receive. Returns the result immediately, or `undefined` if nothing is available. */
@@ -380,37 +378,6 @@ export function channel<T>(capacity = 0): Channel<T> {
     });
   };
 
-  const receive = (signal?: AbortSignal): Promise<ReceiveResult<T>> => {
-    if (buffer.length > 0) {
-      const value = buffer.shift()!;
-      flushSenders();
-      return Promise.resolve({ ok: true, value });
-    }
-
-    const matchedSender = tryAcquireFromWaitingSender();
-    if (matchedSender) {
-      return Promise.resolve(matchedSender);
-    }
-
-    if (isClosed) {
-      return Promise.resolve({ ok: false, value: undefined });
-    }
-
-    if (signal?.aborted) return Promise.reject(createAbortError(signal));
-
-    return new Promise<ReceiveResult<T>>((resolve, reject) => {
-      const receiver: WaitingReceiver<T> = { resolve, reject, signal };
-      if (signal) {
-        receiver.abort = () => {
-          removeReceiver(receiver);
-          reject(createAbortError(signal));
-        };
-        signal.addEventListener("abort", receiver.abort, { once: true });
-      }
-      receivers.push(receiver);
-    });
-  };
-
   const instance: SelectableChannel<T> = {
     get capacity() {
       return capacity;
@@ -422,9 +389,35 @@ export function channel<T>(capacity = 0): Channel<T> {
       return isClosed;
     },
     send,
-    receive,
-    async recv(signal?: AbortSignal) {
-      const result = await receive(signal);
+    async receive(signal?: AbortSignal) {
+      if (buffer.length > 0) {
+        const value = buffer.shift()!;
+        flushSenders();
+        return value;
+      }
+
+      const matchedSender = tryAcquireFromWaitingSender();
+      if (matchedSender) {
+        return matchedSender.ok ? matchedSender.value : undefined;
+      }
+
+      if (isClosed) {
+        return undefined;
+      }
+
+      if (signal?.aborted) return Promise.reject(createAbortError(signal));
+
+      const result = await new Promise<ReceiveResult<T>>((resolve, reject) => {
+        const receiver: WaitingReceiver<T> = { resolve, reject, signal };
+        if (signal) {
+          receiver.abort = () => {
+            removeReceiver(receiver);
+            reject(createAbortError(signal));
+          };
+          signal.addEventListener("abort", receiver.abort, { once: true });
+        }
+        receivers.push(receiver);
+      });
       return result.ok ? result.value : undefined;
     },
     trySend(value: T) {
@@ -511,9 +504,9 @@ export function channel<T>(capacity = 0): Channel<T> {
     } satisfies ChannelSelectInternals<T>,
     async *[Symbol.asyncIterator]() {
       while (true) {
-        const item = await receive();
-        if (!item.ok) return;
-        yield item.value;
+        const item = await this.receive();
+        if (item === undefined) return;
+        yield item;
       }
     },
   };

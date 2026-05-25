@@ -1,149 +1,202 @@
 import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
-import type { Coroutine } from "../worker/types";
+import { buildWorkerScript, createTaskPool } from "../worker";
+import type { Coroutine, TaskRunner, WorkerScript } from "../worker/types";
+
+function isWorkerScript(value: unknown): value is WorkerScript {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as WorkerScript).code === "string" &&
+    Array.isArray((value as WorkerScript).deps)
+  );
+}
+
+const buildCoroutineWorkerRuntime = (): string =>
+  [
+    "onmessage = async (event) => {",
+    "  const { workerId, taskId, payload, type } = event.data;",
+    "",
+    "  if (type !== 'task') {",
+    "    return;",
+    "  }",
+    "",
+    "  try {",
+    "    const result = await __mainTask(payload);",
+    "    postMessage({ workerId, taskId, payload: result, type: 'response' });",
+    "  } catch (error) {",
+    "    const message = error instanceof Error ? error.message : String(error);",
+    "    postMessage({ workerId, taskId, error: message, type: 'error' });",
+    "  }",
+    "};",
+  ].join("\n");
 
 /**
- * Wraps a single coroutine as a `Coroutine` operator.
+ * Merges multiple `WorkerScript`s into a single composed script suitable for
+ * baking into a worker blob via `createTaskPool`.
  *
- * @template A The input type of the coroutine.
- * @template B The output type of the coroutine.
- * @param tasks A tuple containing one coroutine.
- * @returns A `Coroutine` operator representing the composed pipeline.
+ * Each stage is wrapped in an IIFE so that dependency function names
+ * and internal variables do not collide across stages.
  */
-export function compose<A, B>(...tasks: [Coroutine<A, B>]): Coroutine<A, B>;
+function mergeWorkerScripts(scripts: WorkerScript[]): {
+  main: Function;
+  helpers: string[];
+  generateScript: (main: Function, helpers?: string[]) => string;
+} {
+  const helpers = Array.from(
+    new Set(scripts.flatMap((s) => s.helpers || []))
+  );
+
+  const stageBodies = scripts
+    .map((s, i) => {
+      const depsSection = s.deps.length > 0 ? s.deps.join(";\n") + ";" : "";
+      return [
+        `const __stage${i} = (() => {`,
+        ...(depsSection ? ["  " + depsSection.replace(/\n/g, "\n  ")] : []),
+        `  return (${s.code});`,
+        `})();`,
+      ].join("\n");
+    })
+    .join("\n\n");
+
+  const composedMain = new Function(
+    "data",
+    `
+    let result = data;
+    ${scripts.map((_, i) => `result = __stage${i}(result);`).join("\n    ")}
+    return result;
+    `
+  ) as (data: any) => any;
+
+  const generateScript = (task: Function, taskHelpers?: string[]) => {
+    const allHelpers = Array.from(
+      new Set([...(taskHelpers || []), ...helpers])
+    );
+    return buildWorkerScript({
+      helpers: [stageBodies, ...allHelpers],
+      main: task,
+      functions: [],
+      runtime: buildCoroutineWorkerRuntime(),
+    });
+  };
+
+  return { main: composedMain, helpers, generateScript };
+}
 
 /**
- * Chains two coroutines into a single `Coroutine` operator.
+ * Chains multiple coroutines sequentially into a single `Coroutine`.
  *
- * @template A The input type of the first coroutine.
- * @template B The output type of the first coroutine.
- * @template C The output type of the second coroutine.
- * @param tasks A tuple of two coroutines to chain.
- * @returns A `Coroutine` operator representing the composed pipeline.
+ * `WorkerScript` inputs (created by `coroutine()`) are merged into one
+ * worker script so the entire pipeline runs on a single worker per task.
+ *
+ * `TaskRunner` inputs are chained in the main thread after the worker
+ * stage completes.
  */
-export function compose<A, B, C>(
-  ...tasks: [Coroutine<A, B>, Coroutine<B, C>]
-): Coroutine<A, C>;
+export function compose<A, B>(...scripts: [WorkerScript<A, B>]): Coroutine<A, B>;
+export function compose<A, B, C>(...scripts: [WorkerScript<A, B>, WorkerScript<B, C>]): Coroutine<A, C>;
+export function compose<A, B, C, D>(...scripts: [WorkerScript<A, B>, WorkerScript<B, C>, WorkerScript<C, D>]): Coroutine<A, D>;
+export function compose<T = any, R = any>(...scripts: Array<WorkerScript<any, any> | TaskRunner<any, any>>): Coroutine<T, R>;
 
-/**
- * Chains three coroutines into a single `Coroutine` operator.
- *
- * @template A The input type of the first coroutine.
- * @template B The output type of the first coroutine.
- * @template C The output type of the second coroutine.
- * @template D The output type of the third coroutine.
- * @param tasks A tuple of three coroutines to chain.
- * @returns A `Coroutine` operator representing the composed pipeline.
- */
-export function compose<A, B, C, D>(
-  ...tasks: [Coroutine<A, B>, Coroutine<B, C>, Coroutine<C, D>]
-): Coroutine<A, D>;
-
-/**
- * Chains multiple coroutines into a single `Coroutine` operator (generic fallback).
- *
- * @template T The input type of the first coroutine.
- * @template R The output type of the last coroutine.
- * @param tasks An array of coroutines to chain.
- * @returns A `Coroutine` operator representing the composed pipeline.
- */
 export function compose<T = any, R = any>(
-  ...tasks: Array<Coroutine<any, any>>
-): Coroutine<T, R>;
-
-/**
- * Chains multiple coroutine tasks sequentially, creating a single `Coroutine` operator.
- *
- * Each coroutine in the sequence processes the output of the previous coroutine,
- * forming a data processing pipeline. This function is useful for composing
- * complex asynchronous operations from simpler, reusable building blocks.
- *
- * The final output type of the compose is the output type of the last coroutine in the chain.
- *
- * @template T The input type of the first coroutine.
- * @template R The output type of the last coroutine.
- * @param tasks Coroutines to chain.
- * @returns {Coroutine<T, R>} A `Coroutine` operator representing the entire composed pipeline.
- */
-export function compose<T = any, R = any>(
-  ...tasks: Array<Coroutine<any, any>>
+  ...scripts: Array<WorkerScript<any, any> | TaskRunner<any, any>>
 ): Coroutine<T, R> {
-  const getTasks = () => tasks;
-  let finalizePromise: Promise<void> | null = null;
+  const workerScripts: WorkerScript<any, any>[] = [];
+  const taskRunners: TaskRunner<any, any>[] = [];
+
+  for (const s of scripts) {
+    if (isWorkerScript(s)) {
+      workerScripts.push(s);
+    } else if (s && typeof (s as TaskRunner).processTask === "function") {
+      taskRunners.push(s as TaskRunner);
+    }
+  }
+
+  let pool: ReturnType<typeof createTaskPool> | null = null;
+
+  if (workerScripts.length > 0) {
+    const merged = mergeWorkerScripts(workerScripts);
+    pool = createTaskPool({
+      name: "compose",
+      config: merged.helpers.length > 0 ? { helpers: merged.helpers } : undefined,
+      main: merged.main,
+      functions: [],
+      generateWorkerScript: (task, _dependencies, workerConfig) =>
+        merged.generateScript(task, workerConfig?.helpers),
+    });
+  }
+
+  const processTask = async (data: T): Promise<R> => {
+    let result: any = data;
+
+    if (pool) {
+      result = await pool.processTask(result);
+    }
+
+    for (const runner of taskRunners) {
+      result = await runner.processTask(result);
+    }
+
+    return result;
+  };
+
+  const finalize = async (): Promise<void> => {
+    const errors: Error[] = [];
+
+    if (pool) {
+      try {
+        await pool.finalize();
+      } catch (e) {
+        errors.push(e instanceof Error ? e : new Error(String(e)));
+      }
+    }
+
+    for (const runner of taskRunners) {
+      try {
+        await runner.finalize();
+      } catch (e) {
+        errors.push(e instanceof Error ? e : new Error(String(e)));
+      }
+    }
+
+    if (errors.length > 0) {
+      throw errors[0];
+    }
+  };
 
   const operator = createOperator<T, R>("compose", function (this: Operator, source) {
     let completed = false;
 
     return {
-      async next() {
+      next: async () => {
         while (true) {
-          if (completed || finalizePromise) {
-            return DONE;
-          }
+          if (completed) return DONE;
 
           const result = await source.next();
           if (result.done) {
             completed = true;
-            await coroutine.finalize();
+            await finalize();
             return DONE;
           }
 
-          let taskResult: any = result.value;
-          const resolvedTasks = getTasks();
-          for (const task of resolvedTasks) {
-            taskResult = await task.processTask(taskResult);
-          }
-
+          const taskResult = await processTask(result.value as T);
           return NEXT(taskResult);
         }
       },
       async return() {
         completed = true;
-        await coroutine.finalize();
+        await finalize();
         return DONE;
       },
       async throw(err) {
         completed = true;
-        await coroutine.finalize();
+        await finalize();
         throw err;
       }
     };
-  }) as Operator<T, R>;
-
-  const coroutine: Coroutine<T, R> = Object.assign(operator, {
-    async processTask(data: T) {
-      let result: any = data;
-      const tasksList = getTasks();
-      for (const task of tasksList) {
-        result = await task.processTask(result);
-      }
-      return result as R;
-    },
-    async finalize() {
-      if (finalizePromise) return finalizePromise;
-
-      finalizePromise = (async () => {
-        const tasksList = getTasks();
-        const errors: Error[] = [];
-
-        for (const task of tasksList) {
-          try {
-            await task.finalize();
-          } catch (error) {
-            errors.push(error instanceof Error ? error : new Error(String(error)));
-          }
-        }
-
-        if (errors.length === 1) {
-          throw errors[0];
-        }
-        if (errors.length > 1) {
-          throw new AggregateError(errors, "compose finalization failed");
-        }
-      })();
-
-      return finalizePromise;
-    }
   });
 
-  return coroutine;
+  return {
+    ...operator,
+    processTask,
+    finalize,
+  } as Coroutine<T, R>;
 }

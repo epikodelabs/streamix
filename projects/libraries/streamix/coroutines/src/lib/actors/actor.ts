@@ -5,14 +5,13 @@ import {
   ChannelClosedError,
   ContextCancelledError,
   otherwise,
-  recv,
+  receive,
   select,
   send,
   withCancel,
   withDeadline,
   withTimeout,
   type Channel,
-  type ReceiveResult,
 } from "../utils";
 import {
   createDefaultMessageHandler,
@@ -22,7 +21,7 @@ import {
 } from "../worker";
 import { createTaskPool, type WorkerPoolConfig } from "../worker/pool";
 import { buildWorkerScript } from "../worker/script";
-import type { Actor, TaskPool } from "../worker/types";
+import type { Actor } from "../worker/types";
 
 /**
  * Concurrency utils injected into actor workers.
@@ -32,7 +31,7 @@ import type { Actor, TaskPool } from "../worker/types";
  */
 export type WorkerConcurrency = {
   channel: typeof channel;
-  recv: typeof recv;
+  receive: typeof receive;
   send: typeof send;
   otherwise: typeof otherwise;
   select: typeof select;
@@ -58,9 +57,7 @@ export type MainThreadBridge<Q = any, D = any, FromMain = any, ToMain = any> = {
   /** Sends a request to the main thread and awaits a response. */
   request: (payload: Q) => Promise<D>;
   /** Receives a message from the main thread, or `undefined` if the inbox closes. */
-  recv: (signal?: AbortSignal) => Promise<FromMain | undefined>;
-  /** Receives a full result from the main thread inbox. */
-  receive: (signal?: AbortSignal) => Promise<ReceiveResult<FromMain>>;
+  receive: (signal?: AbortSignal) => Promise<FromMain | undefined>;
   /** The worker's inbox channel for messages from the main thread. */
   inbox: Channel<FromMain>;
 };
@@ -98,7 +95,7 @@ export type ActorRequestHandler<Q = any, D = any> = (
  * the worker. `onMessage` receives one-way `utils.main.send(payload)` traffic.
  */
 export type ActorConfig<Q = any, D = any, ToMain = any> = WorkerPoolConfig & {
-  request?: ActorRequestHandler<Q, D>;
+  onRequest?: ActorRequestHandler<Q, D>;
   onMessage?: (payload: ToMain, message: CoroutineMessage) => void | Promise<void>;
   customMessageHandler?: WorkerMessageHandler;
 };
@@ -407,7 +404,7 @@ const __streamixChannel = (capacity = 0) => {
     },
     send: sendValue,
     receive: receiveValue,
-    async recv(signal) {
+    async receive(signal) {
       const result = await receiveValue(signal);
       return result.ok ? result.value : undefined;
     },
@@ -661,7 +658,7 @@ const __streamixSelect = async (cases, ctx = __streamixBackground()) => {
 
 const __streamixConcurrency = Object.freeze({
   channel: __streamixChannel,
-  recv: __streamixRecv,
+  receive: __streamixRecv,
   send: __streamixSend,
   otherwise: __streamixOtherwise,
   select: __streamixSelect,
@@ -727,7 +724,6 @@ const buildActorWorkerRuntime = (): string =>
     "  return {",
     "    send: (messagePayload) => __postToMain({ workerId, taskId, payload: messagePayload, type: 'worker-message' }),",
     "    request: (requestPayload) => __requestMain(workerId, taskId, requestPayload),",
-    "    recv: (signal) => inbox.recv(signal),",
     "    receive: (signal) => inbox.receive(signal),",
     "    inbox,",
     "  };",
@@ -816,7 +812,7 @@ function createActorMessageHandler<Q, D, ToMain>(
           return;
         }
 
-        if (!config?.request) {
+        if (!config?.onRequest) {
           worker.postMessage({
             workerId,
             taskId,
@@ -828,7 +824,7 @@ function createActorMessageHandler<Q, D, ToMain>(
         }
 
         try {
-          const result = await config.request(payload as Q, message);
+          const result = await config.onRequest(payload as Q, message);
           worker.postMessage({
             workerId,
             taskId,
@@ -860,11 +856,11 @@ function createActorMessageHandler<Q, D, ToMain>(
  */
 export function actor<Q = any, D = any, ToMain = any, FromMain = any>(
   config: ActorConfig<Q, D, ToMain>
-): <T, R>(main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain, ToMain> & WorkerPool<T, R>;
+): <T, R>(main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain, ToMain>;
 /**
  * Creates an actor worker directly from a task function and optional helpers.
  */
-export function actor<T, R>(main: ActorTask<T, R>, ...functions: Function[]): Actor<T, R> & WorkerPool<T, R>;
+export function actor<T, R>(main: ActorTask<T, R>, ...functions: Function[]): Actor<T, R>;
 /**
  * Creates an actor worker coroutine.
  *
@@ -885,12 +881,12 @@ export function actor<T, R>(main: ActorTask<T, R>, ...functions: Function[]): Ac
 export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
   arg1: ActorConfig<Q, D, ToMain> | ActorTask<T, R, Q, D, FromMain, ToMain>,
   ...rest: Function[]
-): (Actor<T, R, FromMain, ToMain> & WorkerPool<T, R>) | ((main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain, ToMain> & WorkerPool<T, R>) {
+): Actor<T, R, FromMain, ToMain> | ((main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => Actor<T, R, FromMain, ToMain>) {
   const implementActor = (
     config: ActorConfig<Q, D, ToMain> | undefined,
     main: ActorTask<T, R, Q, D, FromMain, ToMain>,
     functions: Function[]
-  ): Actor<T, R, FromMain, ToMain> & WorkerPool<T, R> => {
+  ): Actor<T, R, FromMain, ToMain> => {
     const messageHandlers = new Set<(payload: ToMain) => void>();
 
     // Seed any static handler provided in config into the set

@@ -1,6 +1,6 @@
 import type { CoroutineMessage, PendingTaskMap } from "./messages";
 import { createDefaultMessageHandler } from "./messages";
-import type { GenericPool, TaskPool } from "./types";
+import type { GenericPool, TaskPool, WorkerScript } from "./types";
 
 /**
  * Shared worker-script configuration used by both `coroutine` and `actor`.
@@ -48,12 +48,12 @@ const buildGenericWorkerRuntime = (): string =>
     "const __taskCache = new Map();",
     "",
     "onmessage = async (event) => {",
-    "  const { workerId, taskId, payload, type, code, deps } = event.data;",
+    "  const { workerId, taskId, payload, type, code, deps, helpers } = event.data;",
     "  if (type !== 'task') { return; }",
     "",
     "  let fn = __taskCache.get(code);",
     "  if (!fn) {",
-    "    const scripts = [...(deps || []), 'return (' + code + ');'];",
+    "    const scripts = [...(helpers || []), ...(deps || []), code];",
     "    fn = new Function(scripts.join('\\n'))();",
     "    __taskCache.set(code, fn);",
     "  }",
@@ -71,8 +71,7 @@ const buildGenericWorkerRuntime = (): string =>
 function createPoolCore(
   name: string,
   maxWorkers: number,
-  createWorker: () => Promise<Worker>,
-  createMessageHandler: (worker: Worker, pendingTasks: PendingTaskMap) => (event: MessageEvent<CoroutineMessage>) => void
+  createWorker: () => Promise<Worker>
 ) {
   const workerPool: Worker[] = [];
   const waitingQueue: WaitingWorkerRequest[] = [];
@@ -217,14 +216,13 @@ function createPoolCore(
     pendingMessages,
     activeWorkers,
     getWorkerId,
-    satisfyWaitingQueue,
   };
 }
 
 /**
  * Creates a specialized worker pool with a task baked into the worker blob.
  *
- * Internal — used by `coroutine()` and `actor()`.
+ * Internal — used by `compute()` and `actor()`.
  */
 export function createTaskPool<T, R>({
   name,
@@ -259,8 +257,7 @@ export function createTaskPool<T, R>({
       core.activeWorkers.set(workerId, worker);
 
       return worker;
-    },
-    createMessageHandler || createDefaultMessageHandler
+    }
   );
 
   const assignTask = async (worker: Worker, data: T): Promise<R> => {
@@ -311,7 +308,7 @@ export function createTaskPool<T, R>({
 }
 
 /**
- * Creates a generic worker pool.
+ * Creates a generic worker pool (MIMD).
  *
  * Workers are not preinitialized with a task. Tasks are sent at runtime as
  * serialized function code and compiled inside the worker with `new Function`.
@@ -341,11 +338,10 @@ export function createPool(options?: GenericPoolOptions): GenericPool {
       core.activeWorkers.set(workerId, worker);
 
       return worker;
-    },
-    createDefaultMessageHandler
+    }
   );
 
-  const processTask = async <T, R>(fn: (data: T) => R | Promise<R>, data: T): Promise<R> => {
+  const processTask = async <T, R>(script: WorkerScript<T, R>, data: T): Promise<R> => {
     const worker = await core.getIdleWorker();
     const workerId = core.getWorkerId(worker)!;
     const taskId = generateTaskId();
@@ -358,7 +354,9 @@ export function createPool(options?: GenericPoolOptions): GenericPool {
             taskId,
             payload: data,
             type: "task",
-            code: fn.toString(),
+            code: script.code,
+            deps: script.deps,
+            helpers: script.helpers,
           });
         } catch (error) {
           core.pendingMessages.delete(taskId);

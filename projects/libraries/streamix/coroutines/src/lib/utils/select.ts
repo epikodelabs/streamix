@@ -1,9 +1,9 @@
 import {
-  ChannelClosedError,
-  CHANNEL_INTERNALS,
-  type Channel,
+    CHANNEL_INTERNALS,
+    ChannelClosedError,
+    type Channel,
 } from "./channel";
-import { background, createAbortError, Context, ContextCancelledError } from "./context";
+import { background, Context, ContextCancelledError, createAbortError } from "./context";
 
 /**
  * Internal outcome payload used when a registered `select(...)` case wins.
@@ -126,7 +126,7 @@ export type SelectResult<T = any> = {
  * @param name Optional identifier for this case.
  * @returns A `SelectReceiveCase`.
  */
-export const recv = <T>(ch: Channel<T>, name?: string): SelectReceiveCase<T> => ({ op: "receive", channel: ch, name });
+export const receive = <T>(ch: Channel<T>, name?: string): SelectReceiveCase<T> => ({ op: "receive", channel: ch, name });
 
 /**
  * Builds a send case for use with `select(...)`.
@@ -158,12 +158,29 @@ export const otherwise = (name = "default"): SelectDefaultCase => ({ op: "defaul
  * @param ctx A cancellation context. Defaults to `background()`.
  * @returns A `SelectResult` describing which case was chosen and its value.
  */
+/**
+ * Fisher-Yates shuffle for randomizing select case evaluation order.
+ */
+function shuffledIndices(length: number): number[] {
+  const indices = Array.from({ length }, (_, i) => i);
+  for (let i = length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  return indices;
+}
+
 export async function select<T = any>(cases: SelectCase<T>[], ctx: Context = background()): Promise<SelectResult<T>> {
   if (ctx.signal.aborted) throw createAbortError(ctx.signal);
 
   const defaultIndex = cases.findIndex((item) => item.op === "default");
+  const channelIndices = cases
+    .map((_, i) => i)
+    .filter((i) => cases[i].op !== "default");
+  const randomOrder = shuffledIndices(channelIndices.length).map((j) => channelIndices[j]);
 
-  for (let index = 0; index < cases.length; index++) {
+  // Fast path: check ready cases in random order
+  for (const index of randomOrder) {
     const item = cases[index];
     if (item.op === "receive") {
       const result = item.channel.tryReceive();
@@ -223,7 +240,9 @@ export async function select<T = any>(cases: SelectCase<T>[], ctx: Context = bac
       ctx.signal.addEventListener("abort", onContextAbort, { once: true });
       cleanupFns.push(() => ctx.signal.removeEventListener("abort", onContextAbort));
 
-      for (let index = 0; index < cases.length; index++) {
+      // Register waiters in random order so no channel starves when
+      // multiple become ready in the same tick.
+      for (const index of randomOrder) {
         if (settled) {
           break;
         }
