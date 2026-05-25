@@ -2,12 +2,12 @@
 
 `@epikodelabs/streamix/coroutines` runs CPU-heavy work in Web Workers without blocking the main thread.
 
-A **coroutine** is a background-task operator created from your function. It generates a worker script (as a blob), manages a pool of Web Workers, and exposes both a **stream operator** and a **direct task runner**.
+A **coroutine** is a background task runner created from your function. It generates a worker script (as a blob), manages a pool of Web Workers, and exposes a direct task runner via `processTask(...)`.
 
 Use `coroutine(...)` when you need:
 - background computation
 - direct task execution through `processTask(...)`
-- stream integration through `compute(...)`
+- one-off worker execution through `compute(...)`
 - sequential pipeline composition through `compose(...)`
 
 Use `createPool()` and `checkout(...)` when you need dedicated worker access for stateful sessions.
@@ -19,15 +19,13 @@ If you need worker/main-thread messaging, use `actor(...)` instead. See [ACTORS.
 ## What a coroutine is
 
 ```
-Your function ──► blob script ──► WorkerPool (internal) ──► Coroutine (Operator + TaskRunner)
+Your function ──► blob script ──► WorkerPool (internal) ──► TaskRunner
 ```
 
 1. You provide a task function.
 2. The coroutine factory turns it into a Web Worker script (blob URL).
 3. An internal `WorkerPool` creates and reuses workers from that blob.
-4. The returned `Coroutine` is:
-   - an `Operator` — you can pipe streams through it with `compute(...)`
-   - a `TaskRunner` — you can call `processTask(data)` directly
+4. The returned object is a `TaskRunner` — call `processTask(data)` directly.
 
 A **worker** is a single Web Worker thread — an implementation detail managed by the internal pool. `Coroutine` does **not** expose pool methods. If you need low-level worker control, use `createPool()` instead.
 
@@ -72,20 +70,20 @@ const result = await primes.processTask(10_000);
 
 ### `compute(...)`
 
-Use a coroutine inside a stream pipeline:
+Offload a function to a dedicated worker pool without managing `coroutine()` yourself. `compute` creates a **SIMD pool** — the task is baked into the worker blob once and shared by every worker.
 
 ```ts
-import { compute, coroutine } from "@epikodelabs/streamix/coroutines";
-import { from } from "@epikodelabs/streamix";
+import { compute } from "@epikodelabs/streamix/coroutines";
 
-const square = coroutine(function square(value: number) {
+const run = compute(function square(value: number) {
   return value * value;
 });
 
-const stream = from([1, 2, 3]).pipe(
-  compute(square, Promise.resolve(4))
-);
+const result = await run(7); // 49
+await run.finalize();        // terminate workers when done
 ```
+
+The pool is created when `compute(...)` is called. Workers are spawned lazily as tasks arrive, up to `navigator.hardwareConcurrency` (or 4 as fallback).
 
 ### `checkout(...)`
 
