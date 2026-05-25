@@ -1,4 +1,3 @@
-import type { Operator } from "@epikodelabs/streamix";
 import type { CoroutineMessage } from "./messages";
 
 /**
@@ -61,11 +60,11 @@ export interface CheckedOutWorker {
 }
 
 /**
- * Plain background-task operator.
+ * Plain background-task runner backed by a worker pool.
  *
- * Created by `compute(pool, script)`.
+ * Created by `coroutine(mainTask)` or `compute(pool, script)`.
  */
-export interface Coroutine<T = any, R = T> extends Operator<T, R>, TaskRunner<T, R> {}
+export interface Coroutine<T = any, R = T> extends TaskRunner<T, R> {}
 
 /**
  * Rich bidirectional worker with main-thread messaging.
@@ -75,7 +74,7 @@ export interface Coroutine<T = any, R = T> extends Operator<T, R>, TaskRunner<T,
  * bootstrap runtime and messaging surface.
  */
 export interface Actor<T = any, R = T, FromMain = any, ToMain = any>
-  extends Operator<T, R>, TaskRunner<T, R> {
+  extends TaskRunner<T, R> {
   /**
    * The underlying specialized task pool. Exposed so advanced users can
    * check out individual workers or send raw messages.

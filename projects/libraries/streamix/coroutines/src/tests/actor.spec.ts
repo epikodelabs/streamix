@@ -297,8 +297,8 @@ idescribe("actor", () => {
     });
 
     const results: number[] = [];
-    for await (const v of stream.pipe(a)) {
-      results.push(v as number);
+    for await (const v of stream) {
+      results.push(await a.processTask(v as number));
     }
 
     expect(results).toEqual([2, 4, 6]);
@@ -328,8 +328,8 @@ idescribe("actor", () => {
     let caught: Error | null = null;
 
     try {
-      for await (const v of stream.pipe(a)) {
-        results.push(v as number);
+      for await (const v of stream) {
+        results.push(await a.processTask(v as number));
       }
     } catch (err: any) {
       caught = err;

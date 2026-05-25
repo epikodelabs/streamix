@@ -1,4 +1,3 @@
-import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
 import {
   background,
   channel,
@@ -916,44 +915,12 @@ export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
       createMessageHandler: createActorMessageHandler(mergedConfig),
     });
 
-    const operator = createOperator<T, R>("actor", function (this: Operator, source) {
-      let completed = false;
-
-      return {
-        next: async () => {
-          while (true) {
-            if (completed) return DONE;
-
-            const result = await source.next();
-            if (result.done) {
-              completed = true;
-              await pool.finalize();
-              return DONE;
-            }
-
-            const taskResult = await pool.processTask(result.value as T);
-            return NEXT(taskResult);
-          }
-        },
-        async return() {
-          completed = true;
-          await pool.finalize();
-          return DONE;
-        },
-        async throw(err) {
-          completed = true;
-          await pool.finalize();
-          throw err;
-        }
-      };
-    });
-
-    return Object.assign({ ...operator,
+    return Object.assign({
       pool,
-      async processTask(data: T) {
+      processTask(data: T) {
         return pool.processTask(data);
       },
-      async finalize() {
+      finalize() {
         return pool.finalize();
       },
     }, {

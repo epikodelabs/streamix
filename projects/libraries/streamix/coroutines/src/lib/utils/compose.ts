@@ -1,4 +1,3 @@
-import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
 import { buildWorkerScript, createTaskPool } from "../worker";
 import type { Coroutine, TaskRunner, WorkerScript } from "../worker/types";
 
@@ -157,40 +156,7 @@ export function compose<T = any, R = any>(
     }
   };
 
-  const operator = createOperator<T, R>("compose", function (this: Operator, source) {
-    let completed = false;
-
-    return {
-      next: async () => {
-        while (true) {
-          if (completed) return DONE;
-
-          const result = await source.next();
-          if (result.done) {
-            completed = true;
-            await finalize();
-            return DONE;
-          }
-
-          const taskResult = await processTask(result.value as T);
-          return NEXT(taskResult);
-        }
-      },
-      async return() {
-        completed = true;
-        await finalize();
-        return DONE;
-      },
-      async throw(err) {
-        completed = true;
-        await finalize();
-        throw err;
-      }
-    };
-  });
-
   return {
-    ...operator,
     processTask,
     finalize,
   } as Coroutine<T, R>;

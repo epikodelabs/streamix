@@ -182,8 +182,8 @@ idescribe('coroutine', () => {
     });
 
     const processed: number[] = [];
-    for await (const v of stream.pipe(co)) {
-      processed.push(v as number);
+    for await (const v of stream) {
+      processed.push(await co.processTask(v as number));
     }
 
     expect(processed).toEqual([2, 3, 4]); // Fixed expectation: x + 1
@@ -291,8 +291,8 @@ idescribe('coroutine', () => {
     let errorCaught = false;
 
     try {
-      for await (const v of stream.pipe(co)) {
-        processed.push(v as any);
+      for await (const v of stream) {
+        processed.push(await co.processTask(v as number));
       }
     } catch (err: any) {
       errorCaught = true;

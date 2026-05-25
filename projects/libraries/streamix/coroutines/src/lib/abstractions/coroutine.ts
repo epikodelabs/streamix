@@ -1,4 +1,3 @@
-import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
 import { createTaskPool } from "../worker/pool";
 import { buildWorkerScript } from "../worker/script";
 import type { Coroutine, WorkerScript } from "../worker/types";
@@ -51,44 +50,11 @@ function createCoroutineImpl<T, R>(
       }),
   });
 
-  const operator = createOperator<T, R>("coroutine", function (this: Operator, source) {
-    let completed = false;
-
-    return {
-      next: async () => {
-        while (true) {
-          if (completed) return DONE;
-
-          const result = await source.next();
-          if (result.done) {
-            completed = true;
-            await pool.finalize();
-            return DONE;
-          }
-
-          const taskResult = await pool.processTask(result.value as T);
-          return NEXT(taskResult);
-        }
-      },
-      async return() {
-        completed = true;
-        await pool.finalize();
-        return DONE;
-      },
-      async throw(err) {
-        completed = true;
-        await pool.finalize();
-        throw err;
-      }
-    };
-  });
-
   return {
-    ...operator,
-    async processTask(data: T) {
+    processTask(data: T) {
       return pool.processTask(data);
     },
-    async finalize() {
+    finalize() {
       return pool.finalize();
     },
     code: main.toString(),
