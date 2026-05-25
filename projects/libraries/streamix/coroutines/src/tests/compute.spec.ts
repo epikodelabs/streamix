@@ -1,4 +1,3 @@
-import { from, of } from "@epikodelabs/streamix";
 import { compute } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
@@ -13,60 +12,47 @@ idescribe("compute", () => {
     originalWarn = console.warn;
   });
 
-  it("should emit a single computed result", async () => {
-    const worker = compute<number, number>((x: number) => x * 2);
-    const stream = of(5).pipe(worker);
+  it("should compute a single value", async () => {
+    const run = compute<number, number>((x: number) => x * 2);
+    const result = await run(5);
+    expect(result).toBe(10);
+    await run.finalize();
+  });
 
+  it("should reuse the same pool across calls", async () => {
+    const run = compute<number, number>((x: number) => x + 1);
+
+    const r1 = await run(1);
+    const r2 = await run(5);
+
+    expect(r1).toBe(2);
+    expect(r2).toBe(6);
+    await run.finalize();
+  });
+
+  it("should process many values sequentially", async () => {
+    const run = compute<number, number>((x: number) => x * x);
     const results: number[] = [];
-    for await (const v of stream) {
-      results.push(v);
+
+    for (const n of [2, 3, 4, 5]) {
+      results.push(await run(n));
     }
 
-    expect(results).toEqual([10]);
+    expect(results).toEqual([4, 9, 16, 25]);
+    await run.finalize();
   });
 
-  it("should work with multiple compute calls using the same operator", async () => {
-    const worker = compute<number, number>((x: number) => x + 1);
-
-    const stream1 = of(1).pipe(worker);
-    const stream2 = of(5).pipe(worker);
-
-    const r1: number[] = [];
-    const r2: number[] = [];
-
-    for await (const v of stream1) r1.push(v);
-    for await (const v of stream2) r2.push(v);
-
-    expect(r1).toEqual([2]);
-    expect(r2).toEqual([6]);
-  });
-
-  it("should process multiple emissions in one subscription", async () => {
-    const worker = compute<number, number>((x: number) => x * x);
-    const stream = from([2, 3, 4]).pipe(worker);
-
-    const results: number[] = [];
-    for await (const v of stream) {
-      results.push(v);
-    }
-
-    expect(results).toEqual([4, 9, 16]);
-  });
-
-  it("should propagate errors from the coroutine task", async () => {
+  it("should propagate errors from the worker task", async () => {
     console.log = () => {};
     console.error = () => {};
     console.warn = () => {};
 
-    const worker = compute<number, number>((_x: number) => {
+    const run = compute<number, number>((_x: number) => {
       throw new Error("boom");
     });
-    const stream = of(99).pipe(worker);
 
     try {
-      for await (const _ of stream) {
-        // should not reach here
-      }
+      await run(99);
       fail("Expected error to be thrown");
     } catch (err: any) {
       expect(err.message).toBe("boom");
@@ -74,29 +60,23 @@ idescribe("compute", () => {
       console.log = originalLog;
       console.error = originalError;
       console.warn = originalWarn;
+      await run.finalize();
     }
   });
 
   it("should await promised parameters before computing", async () => {
-    const worker = compute<number, number>((x: number) => x + 7);
+    const run = compute<number, number>((x: number) => x + 7);
 
     let resolver: (value: number) => void;
     const promiseParam = new Promise<number>((resolve) => {
       resolver = resolve;
     });
 
-    const stream = of(promiseParam).pipe(worker);
-
-    const results: number[] = [];
-    const iterate = (async () => {
-      for await (const v of stream) {
-        results.push(v);
-      }
-    })();
-
+    const pending = run(promiseParam);
     setTimeout(() => resolver!(5), 10);
-    await iterate;
+    const result = await pending;
 
-    expect(results).toEqual([12]);
+    expect(result).toBe(12);
+    await run.finalize();
   });
 });

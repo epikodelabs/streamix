@@ -1,67 +1,63 @@
-import { createOperator, DONE, NEXT, type Operator } from "@epikodelabs/streamix";
-import { coroutine } from "../abstractions/coroutine";
+import { isPromiseLike } from "@epikodelabs/streamix";
+import { buildWorkerScript } from "../worker/script";
+import { buildCoroutineWorkerRuntime } from "../worker/runtimes";
+import { createTaskPool } from "../worker/pool";
 import type { WorkerScript } from "../worker/types";
 
+export interface ComputeRunner<T = any, R = any> {
+  (params: T): Promise<R>;
+  finalize: () => Promise<void>;
+}
+
 /**
- * Creates a reusable worker operator from a task function.
+ * Offloads a function to a dedicated worker pool.
  *
- * The returned operator runs each upstream value through a SIMD worker pool.
- * The pool is created on the first subscription and finalized when the stream
- * completes, errors, or is cancelled.
+ * `compute` creates a **specialized SIMD pool** — the task is baked into the
+ * worker blob once and shared by every worker in the pool. There is no
+ * runtime compilation overhead; workers are pre-initialized with the task.
+ *
+ * The returned async function submits params to that pool. The pool lives
+ * for as long as the function exists. Call `.finalize()` when done to
+ * terminate the underlying workers.
  *
  * @example
  * ```ts
- * const worker = compute((x: number) => x * 2);
- * of(1, 2, 3).pipe(worker).subscribe(console.log); // 2, 4, 6
+ * const run = compute((x: number) => x * 2);
+ * const result = await run(5); // 10
+ * await run.finalize();
  * ```
  */
 export function compute<T = any, R = any>(
-  script: WorkerScript<T, R>
-): Operator<T, R>;
-export function compute<T = any, R = any>(
   main: (data: T) => R | Promise<R>,
   ...functions: Function[]
-): Operator<T, R>;
-export function compute<T = any, R = any>(
-  arg1: WorkerScript<T, R> | ((data: T) => R | Promise<R>),
-  ...rest: Function[]
-): Operator<T, R> {
-  const main = typeof arg1 === "function" ? arg1 : arg1.main;
-  const functions = typeof arg1 === "function" ? rest : (arg1.functions || []);
-
-  const worker = coroutine<T, R>(main, ...functions);
-
-  return createOperator<T, R>("compute", function (source) {
-    let finalized = false;
-
-    return {
-      next: async () => {
-        if (finalized) return DONE;
-        const result = await source.next();
-        if (result.done) {
-          finalized = true;
-          await worker.finalize();
-          return DONE;
-        }
-        try {
-          const taskResult = await worker.processTask(result.value as T);
-          return NEXT(taskResult);
-        } catch (err) {
-          finalized = true;
-          await worker.finalize();
-          throw err;
-        }
-      },
-      async return() {
-        finalized = true;
-        await worker.finalize();
-        return DONE;
-      },
-      async throw(err) {
-        finalized = true;
-        await worker.finalize();
-        throw err;
-      },
-    };
+): ComputeRunner<T, R> {
+  const pool = createTaskPool<T, R>({
+    name: "compute",
+    main,
+    functions,
+    generateWorkerScript: (task, deps, workerConfig) =>
+      buildWorkerScript({
+        helpers: workerConfig?.helpers,
+        main: task,
+        functions: deps,
+        runtime: buildCoroutineWorkerRuntime(),
+      }),
   });
+
+  const run = async (params: T | Promise<T>): Promise<R> => {
+    const resolved = isPromiseLike(params) ? await params : params;
+    return pool.processTask(resolved);
+  };
+
+  run.finalize = () => pool.finalize();
+  return run;
+}
+
+/**
+ * Creates a compute runner from a `WorkerScript` descriptor.
+ */
+export function computeScript<T = any, R = any>(
+  script: WorkerScript<T, R>
+): ComputeRunner<T, R> {
+  return compute(script.main, ...(script.functions || []));
 }

@@ -1,7 +1,7 @@
 import { concatMap, debounce, finalize, fromPromise, map, mergeMap, range, scan, startWith, Stream, tap } from '@epikodelabs/streamix';
-import { coroutine } from '@epikodelabs/streamix/coroutines';
+import { compute } from '@epikodelabs/streamix/coroutines';
 import { onResize } from '@epikodelabs/streamix/dom';
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 
 // Main Mandelbrot computation function
 function computeMandelbrot(data: { px: number, py: number, maxIterations: number, zoom: number, centerX: number, centerY: number, panX: number, panY: number }) {
@@ -79,7 +79,7 @@ function computeMandelbrotInChunks(data: { index: number, width: number, height:
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.scss']
 })
-export class AppComponent implements OnInit {
+export class AppComponent implements OnInit, OnDestroy {
   title = 'app2';
 
   canvas!: HTMLCanvasElement;
@@ -97,10 +97,15 @@ export class AppComponent implements OnInit {
 
   fractal$!: Stream;
   average$!: Stream;
+  private run!: ((params: any) => Promise<any>) & { finalize: () => Promise<void> };
 
   ngOnInit(): void {
     this.fractal$ = this.drawFractal();
     this.fractal$.subscribe();
+  }
+
+  ngOnDestroy(): void {
+    this.run?.finalize();
   }
 
   showProgressOverlay() {
@@ -120,8 +125,8 @@ export class AppComponent implements OnInit {
   }
 
   drawFractal(): Stream {
-    // Create ComputeOperator instance
-    const task = coroutine(computeMandelbrotInChunks, computeMandelbrot, computeColor);
+    this.run = compute(computeMandelbrotInChunks, computeMandelbrot, computeColor);
+    const run = this.run;
     this.canvas = document.getElementById('mandelbrotCanvas')! as HTMLCanvasElement;
 
     return onResize(this.canvas).pipe(
@@ -146,7 +151,7 @@ export class AppComponent implements OnInit {
 
         return range(0, numChunks).pipe(
           map(index => ({ index, width, height, maxIterations: 20, zoom: 200, centerX: width / 2, centerY: height / 2, panX: 0.5, panY: 0 })),
-          mergeMap((params) => fromPromise(task.processTask(params))),
+          mergeMap((params) => fromPromise(run(params))),
           tap((result: any) => {
             result.forEach(({ px, py, r, g, b }: any) => {
               const i = py * width + px;
@@ -169,7 +174,7 @@ export class AppComponent implements OnInit {
         );
       }),
       finalize(() => {
-        task.finalize();
+        // pool finalized in ngOnDestroy
       })
     );
   }
