@@ -1,5 +1,5 @@
-import { concatMap, debounce, finalize, map, mergeMap, range, scan, startWith, Stream, tap } from '@epikodelabs/streamix';
-import { compute, coroutine } from '@epikodelabs/streamix/coroutines';
+import { concatMap, debounce, finalize, fromPromise, map, mergeMap, range, scan, startWith, Stream, tap } from '@epikodelabs/streamix';
+import { coroutine } from '@epikodelabs/streamix/coroutines';
 import { onResize } from '@epikodelabs/streamix/dom';
 import { Component, OnInit } from '@angular/core';
 
@@ -146,7 +146,7 @@ export class AppComponent implements OnInit {
 
         return range(0, numChunks).pipe(
           map(index => ({ index, width, height, maxIterations: 20, zoom: 200, centerX: width / 2, centerY: height / 2, panX: 0.5, panY: 0 })),
-          mergeMap((params) => compute(task, params)),
+          mergeMap((params) => fromPromise(task.processTask(params))),
           tap((result: any) => {
             result.forEach(({ px, py, r, g, b }: any) => {
               const i = py * width + px;
