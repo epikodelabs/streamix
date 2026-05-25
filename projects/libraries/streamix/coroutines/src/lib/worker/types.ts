@@ -63,7 +63,7 @@ export interface CheckedOutWorker {
 /**
  * Plain background-task runner backed by a worker pool.
  *
- * Created by `coroutine(mainTask)` or `compute(pool, script)`.
+ * Created by `coroutine(mainTask)` or used as input to `compute(script)`.
  */
 export interface Coroutine<T = any, R = T> extends TaskRunner<T, R> {}
 
