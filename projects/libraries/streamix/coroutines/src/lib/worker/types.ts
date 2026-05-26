@@ -57,7 +57,7 @@ export interface Coroutine<T = any, R = T> extends TaskRunner<T, R> {}
  *
  * Unlike `Coroutine`, an actor is not pool-based; it owns exactly one worker.
  */
-export interface Actor<FromMain = any, ToMain = any, S = any> {
+export interface Actor {
   /** `true` while the behavior loop is running. */
   readonly running: boolean;
 

@@ -12,6 +12,7 @@ import {
 import { actor, main } from '@epikodelabs/streamix/coroutines';
 import {
     compressImage,
+    CompressOutput,
     DEFAULT_SETTINGS,
     FileTask,
     JobProgress,
@@ -19,6 +20,7 @@ import {
     ProcessingSettings,
     ProcessInput,
     resizeImage,
+    ResizeOutput,
 } from './image-processing.utils';
 
 export interface ImageJob {
@@ -50,8 +52,12 @@ export class ImagePipelineService {
   );
   readonly isProcessing = computed(() => this.jobs().some(j => j.state === 'processing'));
 
-  private resizeActor = actor((msg: ProcessInput, _state: any, utils: any) => resizeImage(msg, utils) as any)(null);
-  private compressActor = actor((msg: ProcessInput, _state: any, utils: any) => compressImage(msg as any, utils) as any)(null);
+  private resizeActor = actor<ResizeOutput, any, any, JobProgress, ProcessInput>(
+    (msg: ProcessInput, _state: any, utils: any) => resizeImage(msg, utils)
+  )(null!);
+  private compressActor = actor<CompressOutput, any, any, JobProgress, ResizeOutput>(
+    (msg: ResizeOutput, _state: any, utils: any) => compressImage(msg, utils)
+  )(null!);
 
   constructor(private ngZone: NgZone) {
     main.inbox.receive(this.resizeActor, (progress: JobProgress) => {
@@ -188,9 +194,9 @@ export class ImagePipelineService {
     return { arrayBuffer, url: URL.createObjectURL(file) };
   }
 
-  private async runPipeline(input: ProcessInput) {
-    const resized = await main.outbox.request(this.resizeActor, input);
-    const compressed = await main.outbox.request(this.compressActor, resized);
+  private async runPipeline(input: ProcessInput): Promise<CompressOutput> {
+    const resized = await main.outbox.request<ProcessInput, ResizeOutput>(this.resizeActor, input);
+    const compressed = await main.outbox.request<ResizeOutput, CompressOutput>(this.compressActor, resized);
     return compressed;
   }
 

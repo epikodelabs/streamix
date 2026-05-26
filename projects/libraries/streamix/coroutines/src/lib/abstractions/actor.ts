@@ -782,7 +782,7 @@ function handleWorkerMessage<ToMain>(
 export function actor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   behavior: ActorBehavior<S, Q, D, FromMain, ToMain>,
   ...functions: Function[]
-): (initialState: S) => Actor<FromMain, ToMain, S>;
+): (initialState: S) => Actor;
 /**
  * Creates a configured autonomous behavior-mode actor.
  *
@@ -802,7 +802,7 @@ export function actor<Q = any, D = any, ToMain = any>(
 ): <S = any, FromMain = any>(
   behavior: ActorBehavior<S, Q, D, FromMain, ToMain>,
   ...functions: Function[]
-) => (initialState: S) => Actor<FromMain, ToMain, S>;
+) => (initialState: S) => Actor;
 /**
  * Creates an autonomous behavior-mode actor.
  *
@@ -820,10 +820,10 @@ export function actor<Q = any, D = any, ToMain = any>(
 export function actor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   arg1: ActorConfig<Q, D, ToMain> | ActorCustomMessageHandlerConfig | ActorBehavior<S, Q, D, FromMain, ToMain>,
   ...rest: Function[]
-): ((initialState: S) => Actor<FromMain, ToMain, S>) | (<S2 = any, FromMain2 = any>(
+): ((initialState: S) => Actor) | (<S2 = any, FromMain2 = any>(
   behavior: ActorBehavior<S2, Q, D, FromMain2, ToMain>,
   ...functions: Function[]
-) => (initialState: S2) => Actor<FromMain2, ToMain, S2>) {
+) => (initialState: S2) => Actor) {
   if (typeof arg1 === "function") {
     // actor(behavior, ...helpers) => (initialState) => Actor
     const behavior = arg1 as ActorBehavior<S, Q, D, FromMain, ToMain>;
@@ -836,7 +836,7 @@ export function actor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   return <S2 = any, FromMain2 = any>(
     behavior: ActorBehavior<S2, Q, D, FromMain2, ToMain>,
     ...functions: Function[]
-  ): ((initialState: S2) => Actor<FromMain2, ToMain, S2>) => (initialState: S2) => createActor(config, behavior, initialState, functions);
+  ): ((initialState: S2) => Actor) => (initialState: S2) => createActor(config, behavior, initialState, functions);
 }
 
 function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
@@ -844,7 +844,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   behavior: ActorBehavior<S, Q, D, FromMain, ToMain>,
   initialState: S,
   functions: Function[]
-): Actor<FromMain, ToMain, S> {
+): Actor {
   const workerScript = buildWorkerScript({
     helpers: [ACTOR_CONCURRENCY_RUNTIME, ...(config?.helpers || [])],
     main: behavior as any,
@@ -864,7 +864,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   (worker as any).__id = 1;
   running = true;
 
-  let actorRef: Actor<FromMain, ToMain, S>;
+  let actorRef: Actor;
 
   const handleMessage = (event: MessageEvent<CoroutineMessage>) => {
     const msg = event.data;
@@ -897,7 +897,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
     type: "init",
   });
 
-  const actor: Actor<FromMain, ToMain, S> = {
+  const actor: Actor = {
     get running() {
       return running;
     },
@@ -1011,14 +1011,14 @@ function releaseBlobUrl(workerScript: string): void {
 }
 
 interface GlobalInboxEntry {
-  actor: Actor<any, any, any>;
+  actor: Actor;
   payload: any;
 }
 
 let globalInboxQueue: GlobalInboxEntry[] = [];
 let globalInboxResolver: ((entry: GlobalInboxEntry) => void) | null = null;
 
-function pushGlobalInbox(actor: Actor<any, any, any>, payload: any) {
+function pushGlobalInbox(actor: Actor, payload: any) {
   const entry = { actor, payload };
   if (globalInboxResolver) {
     globalInboxResolver(entry);
@@ -1029,7 +1029,7 @@ function pushGlobalInbox(actor: Actor<any, any, any>, payload: any) {
 }
 
 interface InboxAPI {
-  <ToMain>(actor: Actor<any, ToMain, any>, handler: (payload: ToMain) => void): () => void;
+  <ToMain>(actor: Actor, handler: (payload: ToMain) => void): () => void;
   (): Promise<GlobalInboxEntry>;
 }
 
@@ -1045,12 +1045,12 @@ interface InboxAPI {
 export const main = {
   outbox: {
     /** Sends a one-way message to the actor. */
-    send<FromMain>(actor: Actor<FromMain, any, any>, msg: FromMain): void {
+    send<FromMain>(actor: Actor, msg: FromMain): void {
       (actor as any)[$actorInternals].post(msg);
     },
 
     /** Sends a message and awaits the updated state. */
-    request<FromMain, S>(actor: Actor<FromMain, any, S>, msg: FromMain): Promise<S> {
+    request<FromMain, S>(actor: Actor, msg: FromMain): Promise<S> {
       return (actor as any)[$actorInternals].request(msg);
     },
   },

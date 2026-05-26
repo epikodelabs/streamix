@@ -303,7 +303,7 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(behavior)(0);
-    const unsubscribe = main.inbox.receive(a, (msg) => messages.push(msg));
+    const unsubscribe = main.inbox.receive(a, (msg: string) => messages.push(msg));
     unsubscribe();
 
     main.outbox.send(a, "ping");
@@ -427,7 +427,7 @@ idescribe("actor", () => {
       onMessage: (payload: string) => void configMessages.push(payload),
     });
     const a = factory(behavior)(0);
-    main.inbox.receive(a, (msg) => instanceMessages.push(msg));
+    main.inbox.receive(a, (msg: string) => instanceMessages.push(msg));
 
     main.outbox.send(a, "go");
     await new Promise(r => setTimeout(r, 20));
