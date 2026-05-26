@@ -17,8 +17,8 @@ import {
   type WorkerMessageHandler,
 } from "../worker";
 import { type WorkerPoolConfig } from "../worker/pool";
-import { buildWorkerScript } from "../worker/script";
 import { buildActorWorkerRuntime } from "../worker/runtimes";
+import { buildWorkerScript } from "../worker/script";
 import type { Actor } from "../worker/types";
 
 /**
@@ -776,7 +776,7 @@ function handleWorkerMessage<ToMain>(
  * const Counter = actor((msg, state, utils) => state + msg.n);
  * const counter = Counter(0);
  * counter.post({ n: 1 });
- * const value = await counter.ask({ n: 2 });
+ * const value = await counter.request({ n: 2 });
  * ```
  */
 export function actor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
@@ -807,7 +807,7 @@ export function actor<Q = any, D = any, ToMain = any>(
  * Creates an autonomous behavior-mode actor.
  *
  * The worker eagerly initializes with `initialState` and runs a persistent loop
- * that receives messages via `post()` or `ask()` and returns updated state.
+ * that receives messages via `post()` or `request()` and returns updated state.
  *
  * @template S The actor state type.
  * @template Q The request payload type for main-thread requests.
@@ -857,8 +857,8 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   let worker: Worker | null = null;
   let running = false;
   const messageHandlers = new Set<(payload: ToMain) => void>();
-  let nextAskId = 1;
-  const pendingAsks = new Map<string, { resolve: (value: S) => void; reject: (error: Error) => void }>();
+  let nextRequestId = 1;
+  const pendingRequests = new Map<string, { resolve: (value: S) => void; reject: (error: Error) => void }>();
 
   worker = new Worker(blobUrl, { type: "module" });
   (worker as any).__id = 1;
@@ -870,14 +870,14 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
     const msg = event.data;
     const { type, payload, requestId } = msg;
 
-    if (type === "response" && requestId && pendingAsks.has(requestId)) {
-      const { resolve } = pendingAsks.get(requestId)!;
-      pendingAsks.delete(requestId);
+    if (type === "response" && requestId && pendingRequests.has(requestId)) {
+      const { resolve } = pendingRequests.get(requestId)!;
+      pendingRequests.delete(requestId);
       resolve(payload);
-    } else if (type === "error" && requestId && pendingAsks.has(requestId)) {
-      const { reject } = pendingAsks.get(requestId)!;
-      pendingAsks.delete(requestId);
-      reject(new Error(msg.error ?? "Actor ask failed"));
+    } else if (type === "error" && requestId && pendingRequests.has(requestId)) {
+      const { reject } = pendingRequests.get(requestId)!;
+      pendingRequests.delete(requestId);
+      reject(new Error(msg.error ?? "Actor request failed"));
     } else if (type === "request") {
       handleRequest(msg, config, worker!);
     } else if (type === "notify") {
@@ -958,18 +958,18 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
       });
     },
 
-    ask(msg: FromMain): Promise<S> {
+    request(msg: FromMain): Promise<S> {
       if (!worker || !running) {
         return Promise.reject(new Error("Actor stopped"));
       }
-      const askId = String(nextAskId++);
+      const id = String(nextRequestId++);
       return new Promise((resolve, reject) => {
-        pendingAsks.set(askId, { resolve, reject });
+        pendingRequests.set(id, { resolve, reject });
         worker!.postMessage({
           workerId: (worker as any).__id,
           taskId: (worker as any).__id,
           payload: msg,
-          requestId: askId,
+          requestId: id,
           type: "request",
         });
       });
@@ -1038,7 +1038,7 @@ interface InboxAPI {
  *
  * Mirrors the worker-side `utils` structure:
  * - `main.outbox.send(actor, msg)` — fire-and-forget
- * - `main.outbox.ask(actor, msg)` — send and await updated state
+ * - `main.outbox.request(actor, msg)` — send and await updated state
  * - `main.inbox.receive(actor, handler)` — subscribe to one actor's events
  * - `main.inbox.receive()` — global inbox; await next message from any actor
  */
@@ -1050,8 +1050,8 @@ export const main = {
     },
 
     /** Sends a message and awaits the updated state. */
-    ask<FromMain, S>(actor: Actor<FromMain, any, S>, msg: FromMain): Promise<S> {
-      return (actor as any)[$actorInternals].ask(msg);
+    request<FromMain, S>(actor: Actor<FromMain, any, S>, msg: FromMain): Promise<S> {
+      return (actor as any)[$actorInternals].request(msg);
     },
   },
 

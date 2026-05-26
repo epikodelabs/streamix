@@ -46,6 +46,7 @@ export interface CompressOutput extends ResizeOutput {
 export interface JobProgress {
   stage: 'resize' | 'compress' | 'idle';
   percent: number;
+  taskId?: string;
 }
 
 export interface ProcessedResult {
@@ -66,16 +67,16 @@ export interface ProcessedResult {
  */
 export async function resizeImage(
   data: ProcessInput,
-  utils: { main: { send: (p: JobProgress) => void } }
+  utils: { outbox: { send: (p: JobProgress) => void } }
 ): Promise<ResizeOutput> {
-  utils.outbox.send({ stage: 'resize', percent: 10 });
+  utils.outbox.send({ stage: 'resize', percent: 10, taskId: data.taskId });
 
   const imageBitmap = await createImageBitmap(new Blob([data.blob]));
   const ratio = Math.min(data.width / imageBitmap.width, data.height / imageBitmap.height, 1);
   const w = Math.round(imageBitmap.width * ratio);
   const h = Math.round(imageBitmap.height * ratio);
 
-  utils.outbox.send({ stage: 'resize', percent: 40 });
+  utils.outbox.send({ stage: 'resize', percent: 40, taskId: data.taskId });
 
   const canvas = new OffscreenCanvas(w, h);
   const ctx = canvas.getContext('2d');
@@ -88,12 +89,12 @@ export async function resizeImage(
   ctx.drawImage(imageBitmap, 0, 0, w, h);
   imageBitmap.close();
 
-  utils.outbox.send({ stage: 'resize', percent: 80 });
+  utils.outbox.send({ stage: 'resize', percent: 80, taskId: data.taskId });
 
   const outputBlob = await canvas.convertToBlob({ type: data.format, quality: data.quality });
   const resizedBlob = await outputBlob.arrayBuffer();
 
-  utils.outbox.send({ stage: 'resize', percent: 100 });
+  utils.outbox.send({ stage: 'resize', percent: 100, taskId: data.taskId });
 
   return {
     ...data,
@@ -109,13 +110,13 @@ export async function resizeImage(
  */
 export async function compressImage(
   data: ResizeOutput,
-  utils: { main: { send: (p: JobProgress) => void } }
+  utils: { outbox: { send: (p: JobProgress) => void } }
 ): Promise<CompressOutput> {
-  utils.outbox.send({ stage: 'compress', percent: 10 });
+  utils.outbox.send({ stage: 'compress', percent: 10, taskId: data.taskId });
 
   const imageBitmap = await createImageBitmap(new Blob([data.resizedBlob]));
 
-  utils.outbox.send({ stage: 'compress', percent: 40 });
+  utils.outbox.send({ stage: 'compress', percent: 40, taskId: data.taskId });
 
   const canvas = new OffscreenCanvas(data.width, data.height);
   const ctx = canvas.getContext('2d');
@@ -124,12 +125,12 @@ export async function compressImage(
   ctx.drawImage(imageBitmap, 0, 0);
   imageBitmap.close();
 
-  utils.outbox.send({ stage: 'compress', percent: 70 });
+  utils.outbox.send({ stage: 'compress', percent: 70, taskId: data.taskId });
 
   const outputBlob = await canvas.convertToBlob({ type: data.format, quality: data.quality });
   const finalBlob = await outputBlob.arrayBuffer();
 
-  utils.outbox.send({ stage: 'compress', percent: 100 });
+  utils.outbox.send({ stage: 'compress', percent: 100, taskId: data.taskId });
 
   return {
     ...data,

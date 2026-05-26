@@ -244,13 +244,13 @@ idescribe("actor", () => {
     main.outbox.send(a, { type: "sub", n: 3 });
     main.outbox.send(a, { type: "add", n: 2 });
 
-    const state = await main.outbox.ask(a, { type: "add", n: 0 });
+    const state = await main.outbox.request(a, { type: "add", n: 0 });
     expect(state).toBe(14);
 
     await a.finalize();
   });
 
-  it("should ask and receive updated state", async () => {
+  it("should request and receive updated state", async () => {
     async function behavior(msg: number, state: number) {
       return state + msg;
     }
@@ -259,10 +259,10 @@ idescribe("actor", () => {
 
     const a = actor(behavior)(0);
 
-    const s1 = await main.outbox.ask(a, 5);
+    const s1 = await main.outbox.request(a, 5);
     expect(s1).toBe(5);
 
-    const s2 = await main.outbox.ask(a, 3);
+    const s2 = await main.outbox.request(a, 3);
     expect(s2).toBe(8);
 
     await a.finalize();
@@ -349,7 +349,7 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(behavior as any)(42);
-    const result = await main.outbox.ask(a, "go") as any;
+    const result = await main.outbox.request(a, "go") as any;
 
     expect(result.state).toBe(42);
     expect(result.r1).toBe(1);
@@ -358,7 +358,7 @@ idescribe("actor", () => {
     await a.finalize();
   });
 
-  it("should reject ask after stop", async () => {
+  it("should reject request after stop", async () => {
     async function behavior(_msg: any, state: number) {
       return state;
     }
@@ -370,7 +370,7 @@ idescribe("actor", () => {
     await new Promise(r => setTimeout(r, 10));
 
     a.stop();
-    await expectAsync(main.outbox.ask(a, "y")).toBeRejectedWithError("Actor stopped");
+    await expectAsync(main.outbox.request(a, "y")).toBeRejectedWithError("Actor stopped");
     await a.finalize();
   });
 
@@ -384,7 +384,7 @@ idescribe("actor", () => {
     const factory = actor({});
     const a = factory(behavior)(5);
 
-    const state = await main.outbox.ask(a, 10);
+    const state = await main.outbox.request(a, 10);
     expect(state).toBe(15);
     await a.finalize();
   });

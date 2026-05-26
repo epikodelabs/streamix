@@ -1,24 +1,24 @@
 // services/image-pipeline.service.ts
-import { Injectable, NgZone, signal, computed } from '@angular/core';
+import { computed, Injectable, NgZone, signal } from '@angular/core';
 import {
-  createSubject,
-  filter,
-  fromPromise,
-  map,
-  switchMap,
-  tap,
+    createSubject,
+    filter,
+    fromPromise,
+    map,
+    switchMap,
+    tap,
 } from '@epikodelabs/streamix';
 
-import { actor, type CoroutineMessage, type PendingTaskMap } from '@epikodelabs/streamix/coroutines';
+import { actor, main } from '@epikodelabs/streamix/coroutines';
 import {
-  compressImage,
-  DEFAULT_SETTINGS,
-  FileTask,
-  JobProgress,
-  ProcessInput,
-  ProcessedResult,
-  ProcessingSettings,
-  resizeImage,
+    compressImage,
+    DEFAULT_SETTINGS,
+    FileTask,
+    JobProgress,
+    ProcessedResult,
+    ProcessingSettings,
+    ProcessInput,
+    resizeImage,
 } from './image-processing.utils';
 
 export interface ImageJob {
@@ -50,10 +50,22 @@ export class ImagePipelineService {
   );
   readonly isProcessing = computed(() => this.jobs().some(j => j.state === 'processing'));
 
-  private resizeActor = actor({ customMessageHandler: this.makeHandler() })(resizeImage);
-  private compressActor = actor({ customMessageHandler: this.makeHandler() })(compressImage);
+  private resizeActor = actor((msg: ProcessInput, _state: any, utils: any) => resizeImage(msg, utils) as any)(null);
+  private compressActor = actor((msg: ProcessInput, _state: any, utils: any) => compressImage(msg as any, utils) as any)(null);
 
   constructor(private ngZone: NgZone) {
+    main.inbox.receive(this.resizeActor, (progress: JobProgress) => {
+      this.ngZone.run(() => {
+        this.progressStream.next({ id: progress.taskId!, progress });
+      });
+    });
+
+    main.inbox.receive(this.compressActor, (progress: JobProgress) => {
+      this.ngZone.run(() => {
+        this.progressStream.next({ id: progress.taskId!, progress });
+      });
+    });
+
     this.progressStream.subscribe(({ id, progress }) => {
       this.ngZone.run(() => {
         this.jobs.update(list =>
@@ -129,31 +141,6 @@ export class ImagePipelineService {
     });
   }
 
-  private makeHandler() {
-    return (event: MessageEvent<CoroutineMessage>, _worker: Worker, pendingTasks: PendingTaskMap) => {
-      const msg = event.data;
-      const { taskId, payload, type, error } = msg as any;
-
-      if (type === 'worker-message') {
-        this.ngZone.run(() => {
-          this.progressStream.next({ id: taskId, progress: payload as JobProgress });
-        });
-        return;
-      }
-
-      const pending = pendingTasks.get(taskId);
-      if (!pending) return;
-
-      if (type === 'response') {
-        pendingTasks.delete(taskId);
-        pending.resolve(payload);
-      } else if (type === 'error') {
-        pendingTasks.delete(taskId);
-        pending.reject(new Error(error ?? 'Unknown worker error'));
-      }
-    };
-  }
-
   uploadFile(file: File) {
     const id = crypto.randomUUID();
     const url = URL.createObjectURL(file);
@@ -202,8 +189,8 @@ export class ImagePipelineService {
   }
 
   private async runPipeline(input: ProcessInput) {
-    const resized = await this.resizeActor.processTask(input);
-    const compressed = await this.compressActor.processTask(resized);
+    const resized = await main.outbox.request(this.resizeActor, input);
+    const compressed = await main.outbox.request(this.compressActor, resized);
     return compressed;
   }
 
