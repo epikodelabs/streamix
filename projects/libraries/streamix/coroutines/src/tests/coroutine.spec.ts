@@ -2,7 +2,6 @@ import { createStream } from "@epikodelabs/streamix";
 import {
     ChannelClosedError,
     ContextCancelledError,
-    actor,
     background,
     channel,
     coroutine,
@@ -14,8 +13,7 @@ import {
     withCancel,
     withDeadline,
     withTimeout,
-    type CoroutineMessage,
-    type PendingTaskMap
+    type CoroutineMessage
 } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
@@ -308,143 +306,6 @@ idescribe('coroutine', () => {
     console.warn = originalWarn;
   });
 
-  it('should handle data requests from workers', async () => {
-    // Define the main task as a proper function (not arrow function if that causes issues)
-    function mainTask(x: number, utils: any) {
-      // Request additional data from main thread
-      return utils.main.request({ request: 'more data' }).then((additionalData: any) => {
-        return x + additionalData.value;
-      });
-    }
-    
-    (globalThis as any).currentMainTask = mainTask;
-
-    const co = actor(mainTask);
-
-    // Process a task - the worker will request data and our mock will respond with dummy data
-    const result = await co.start(5);
-    
-    // The dummy data response adds {value: 10}, so 5 + 10 = 15
-    expect(result).toBe(15);
-  });
-
-  it('should deliver main-thread messages through utils.main.receive()', async () => {
-    async function mainTask(_x: number, utils: any) {
-      return utils.main.receive();
-    }
-
-    (globalThis as any).currentMainTask = mainTask;
-
-    const co = actor(mainTask);
-    const pending = co.start(11);
-    co.send(99);
-    await expectAsync(pending).toBeResolvedTo(99);
-    await co.finalize();
-  });
-
-  it('should expose concurrency utils on actor worker utils', async () => {
-    async function mainTask(_x: number, utils: any) {
-      const { channel: _channel, receive, send, otherwise, select, background, withCancel, ChannelClosedError, ContextCancelledError } = utils.concurrency;
-
-      const ch = channel<number>(1);
-      await ch.send(7);
-      const first = await ch.receive();
-
-      const sendCase = send(ch, 9, "send");
-      const receiveCase = receive(ch, "receive");
-      const selected = await select([sendCase, receiveCase, otherwise("default")]);
-
-      const [ctx, cancel] = withCancel(background());
-      cancel(new ContextCancelledError("stop"));
-
-      let cancelled = false;
-      try {
-        await select([sendCase], ctx);
-      } catch (error) {
-        cancelled =
-          error instanceof ContextCancelledError ||
-          error instanceof ChannelClosedError ||
-          error instanceof Error;
-      }
-
-      return {
-        first,
-        selectedOp: selected.op,
-        cancelled,
-        hasErrors:
-          typeof ChannelClosedError === "function" &&
-          typeof ContextCancelledError === "function"
-      };
-    }
-
-    (globalThis as any).currentMainTask = mainTask;
-
-    const co = actor(mainTask);
-    const result = await co.start(1);
-
-    expect(result).toEqual(jasmine.objectContaining({
-      first: 7,
-      cancelled: true,
-      hasErrors: true,
-    }));
-    expect(["send", "receive", "default"]).toContain(result.selectedOp);
-
-    await co.finalize();
-  });
-
-  it('should keep losing main-thread select receive cases from consuming values', async () => {
-    const left = channel<number>(1);
-    const right = channel<number>(1);
-
-    const pending = select([receive(left, "left"), receive(right, "right")]);
-
-    await Promise.all([left.send(1), right.send(2)]);
-
-    const selected = await pending;
-    const remaining = [left.tryReceive(), right.tryReceive()].filter((item) => item !== undefined);
-
-    expect(selected.ok).toBeTrue();
-    expect(remaining.length).toBe(1);
-    expect(remaining[0]).toEqual(jasmine.objectContaining({ ok: true }));
-  });
-
-  it('should keep losing worker-side select receive cases from consuming values', async () => {
-    const suiteWorker = (globalThis as any).Worker;
-    (globalThis as any).Worker = originalWorker;
-
-    try {
-      async function mainTask(_x: number, utils: any) {
-        const { channel, receive, select } = utils.concurrency;
-        const left = (channel as any)(1);
-        const right = (channel as any)(1);
-
-        const pending = select([receive(left, "left"), receive(right, "right")]);
-        await Promise.all([left.send(1), right.send(2)]);
-        const selected = await pending;
-
-        return {
-          selectedName: selected.name,
-          selectedOk: selected.ok,
-          remainingLeft: left.tryReceive(),
-          remainingRight: right.tryReceive(),
-        };
-      }
-
-      const co = actor(mainTask);
-      const result = await co.start(1);
-      const remaining = [result.remainingLeft, result.remainingRight].filter((item: any) => item !== undefined);
-
-      expect(["left", "right"]).toContain(result.selectedName);
-      expect(result.selectedOk).toBeTrue();
-      expect(remaining.length).toBe(1);
-      expect(remaining[0]).toEqual(jasmine.objectContaining({ ok: true }));
-
-      await co.finalize();
-    } finally {
-      (globalThis as any).Worker = suiteWorker;
-    }
-  });
-
   it('should fall back to 4 workers when navigator.hardwareConcurrency is not set', async () => {
     const originalDescriptor = Object.getOwnPropertyDescriptor(navigator, "hardwareConcurrency");
 
@@ -476,58 +337,6 @@ idescribe('coroutine', () => {
     expect(r).toBe(2);
 
     await co.finalize();
-  });
-
-  it('should warn when actor receives unknown message types', async () => {
-    const warn = spyOn(console, "warn");
-
-    const suiteWorker = (globalThis as any).Worker;
-
-    class UnknownMessageWorker {
-      listeners: Record<string, ((ev: any) => void)[]> = {};
-
-      constructor(_url: string, _options?: any) {}
-
-      addEventListener(type: string, fn: (ev: any) => void) {
-        this.listeners[type] ||= [];
-        this.listeners[type].push(fn);
-      }
-
-      postMessage(msg: any) {
-        if (msg.type !== "task") return;
-        setTimeout(() => {
-          const workerId = 1;
-          const taskId = msg.taskId;
-
-          // Fire an unknown message type
-          const unkEvent = { data: { type: "something-else", workerId, taskId, payload: null } };
-          this.listeners["message"]?.forEach(fn => fn(unkEvent));
-
-          // Then resolve the task
-          const resEvent = { data: { type: "response", workerId, taskId, payload: "done" } };
-          this.listeners["message"]?.forEach(fn => fn(resEvent));
-        }, 1);
-      }
-
-      terminate() {
-        this.listeners = {};
-      }
-    }
-
-    (globalThis as any).Worker = UnknownMessageWorker;
-
-    try {
-      const mainTask = (x: number) => x;
-      (globalThis as any).currentMainTask = mainTask;
-      const co = actor(mainTask);
-
-      await co.start(1);
-
-      expect(warn).toHaveBeenCalled();
-      await co.finalize();
-    } finally {
-      (globalThis as any).Worker = suiteWorker;
-    }
   });
 
   it('should reject with "Unknown worker error" when worker error message is missing', async () => {
@@ -581,100 +390,6 @@ idescribe('coroutine', () => {
       await co.finalize();
     } finally {
       (globalThis as any).Worker = originalWorker;
-    }
-  });
-
-  it('should use customMessageHandler when provided', async () => {
-    const mainTask = (x: number) => x + 1;
-    (globalThis as any).currentMainTask = mainTask;
-
-    const customMessageHandler = jasmine
-      .createSpy("customMessageHandler")
-      .and.callFake((event: MessageEvent<CoroutineMessage>, _worker: Worker, pending: Map<string, any>) => {
-        const msg = event.data;
-        if (msg.type !== "response") return;
-        const p = pending.get(msg.taskId);
-        if (!p) return;
-        pending.delete(msg.taskId);
-        p.resolve(msg.payload);
-      });
-
-    const co = actor({ customMessageHandler } as any)(mainTask);
-
-    const r = await co.start(1);
-    expect(r).toBe(2);
-    expect(customMessageHandler).toHaveBeenCalled();
-
-    await co.finalize();
-  });
-
-  it('should clean pending tasks when worker.postMessage throws synchronously', async () => {
-    const suiteWorker = (globalThis as any).Worker;
-    let capturedPending: PendingTaskMap | undefined;
-
-    class ThrowingPostMessageWorker {
-      listeners: Record<string, ((ev: any) => void)[]> = {};
-      postCount = 0;
-
-      constructor(_url: string, _options?: any) {}
-
-      addEventListener(type: string, fn: (ev: any) => void) {
-        this.listeners[type] ||= [];
-        this.listeners[type].push(fn);
-      }
-
-      removeEventListener(type: string, fn: (ev: any) => void) {
-        if (this.listeners[type]) {
-          this.listeners[type] = this.listeners[type].filter((listener) => listener !== fn);
-        }
-      }
-
-      postMessage(msg: any) {
-        this.postCount += 1;
-        if (this.postCount === 1) {
-          throw new DOMException("DataCloneError", "DataCloneError");
-        }
-
-        setTimeout(() => {
-          const event: MessageEvent<CoroutineMessage> = {
-            data: { ...msg, type: "response", payload: msg.payload },
-          } as any;
-
-          this.listeners['message']?.forEach((listener) => listener(event));
-        }, 1);
-      }
-
-      terminate() {
-        this.listeners = {};
-      }
-    }
-
-    (globalThis as any).Worker = ThrowingPostMessageWorker;
-
-    try {
-      const co = actor({
-        customMessageHandler: (_event, _worker, pending) => {
-          capturedPending = pending;
-          const response = _event.data;
-          if (response.type !== "response") {
-            return;
-          }
-          const entry = pending.get(response.taskId);
-          if (!entry) {
-            return;
-          }
-          pending.delete(response.taskId);
-          entry.resolve(response.payload);
-        },
-      } as any)((x: number) => x);
-
-      await expectAsync(co.start(1)).toBeRejected();
-      await expectAsync(co.start(2)).toBeResolvedTo(2);
-      expect(capturedPending?.size).toBe(0);
-
-      await co.finalize();
-    } finally {
-      (globalThis as any).Worker = suiteWorker;
     }
   });
 
@@ -810,25 +525,4 @@ idescribe('coroutine', () => {
     await co.finalize();
   });
 
-  it('should steer a worker via sendToWorker in a command loop (kitchen pattern)', async () => {
-    async function mainTask(room: string, utils: any) {
-      while (true) {
-        const cmd = await utils.main.receive();
-        if (cmd === 'dock') return 'docked in ' + room;
-        if (cmd === 'panic') return 'hiding under couch in ' + room;
-      }
-    }
-
-    (globalThis as any).currentMainTask = mainTask;
-
-    const vacuum = actor(mainTask);
-
-    const pending = vacuum.start('kitchen');
-    vacuum.send('dock');
-
-    const result = await pending;
-    expect(result).toBe('docked in kitchen');
-
-    await vacuum.finalize();
-  });
 });

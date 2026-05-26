@@ -9,7 +9,12 @@ export type CoroutineMessageType =
   | "data"
   | "progress"
   | "worker-message"
-  | "main-message";
+  | "main-message"
+  | "ask"
+  | "ask-response"
+  | "init"
+  | "stop"
+  | "stopped";
 
 /**
  * `taskId` tracks the outer task lifecycle.

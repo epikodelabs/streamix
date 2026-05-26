@@ -18,8 +18,7 @@ import {
 } from "../worker";
 import { type WorkerPoolConfig } from "../worker/pool";
 import { buildWorkerScript } from "../worker/script";
-import { generateTaskId } from "../worker/utils";
-import type { ActorRef } from "../worker/types";
+import type { Actor } from "../worker/types";
 
 /**
  * Concurrency utils injected into actor workers.
@@ -42,41 +41,46 @@ export type WorkerConcurrency = {
 };
 
 /**
- * Bridge API exposed to actor workers for communicating with the main thread.
- *
- * @template Q The request payload type sent from the worker.
- * @template D The response data type returned to the worker.
- * @template FromMain The type of one-way messages sent from main to worker.
- * @template ToMain The type of one-way messages sent from worker to main.
+ * Outbox API for sending messages from the worker to the main thread.
  */
-export type MainThreadBridge<Q = any, D = any, FromMain = any, ToMain = any> = {
+export type WorkerOutbox<Q = any, D = any, ToMain = any> = {
   /** Sends a one-way message to the main thread. */
   send: (payload: ToMain) => void;
   /** Sends a request to the main thread and awaits a response. */
   request: (payload: Q) => Promise<D>;
+};
+
+/**
+ * Inbox API for receiving messages from the main thread in the worker.
+ */
+export type WorkerInbox<FromMain = any> = {
   /** Receives a message from the main thread, or `undefined` if the inbox closes. */
   receive: (signal?: AbortSignal) => Promise<FromMain | undefined>;
   /** The worker's inbox channel for messages from the main thread. */
-  inbox: Channel<FromMain>;
+  channel: Channel<FromMain>;
 };
 
 /**
- * Utility functions available only to actor worker tasks.
+ * Utility functions available to actor workers.
  */
 export type WorkerUtils<Q = any, D = any, FromMain = any, ToMain = any> = {
   concurrency: WorkerConcurrency;
-  main: MainThreadBridge<Q, D, FromMain, ToMain>;
+  outbox: WorkerOutbox<Q, D, ToMain>;
+  inbox: WorkerInbox<FromMain>;
 };
 
 /**
- * Worker task signature for actor workers.
+ * Actor behavior signature for autonomous entity mode.
+ *
+ * Receives a message, the current state, and worker utilities.
+ * Returns the new state (or a Promise resolving to it).
  */
-export type ActorTask<T = any, R = any, Q = any, D = any, FromMain = any, ToMain = any> =
-  | ((data: T) => Promise<R> | R)
-  | ((data: T, utils: WorkerUtils<Q, D, FromMain, ToMain>) => Promise<R> | R);
+export interface ActorBehavior<S = any, Q = any, D = any, FromMain = any, ToMain = any> {
+  (msg: FromMain, state: S, utils: WorkerUtils<Q, D, FromMain, ToMain>): Promise<S> | S;
+}
 
 /**
- * Request handler used by `utils.main.request()`.
+ * Request handler used by `utils.outbox.request()`.
  *
  * Keep this function small, or delegate to a `coroutine(...)` instance via
  * `request: dataWorker.processTask` when data resolution itself is expensive.
@@ -89,8 +93,8 @@ export type ActorRequestHandler<Q = any, D = any> = (
 /**
  * Configuration for actor workers that use the default message handler.
  *
- * `request` resolves `utils.main.request(payload)` calls initiated from inside
- * the worker. `onMessage` receives one-way `utils.main.send(payload)` traffic.
+ * `request` resolves `utils.outbox.request(payload)` calls initiated from inside
+ * the worker. `onMessage` receives one-way `utils.outbox.send(payload)` traffic.
  */
 export type ActorConfig<Q = any, D = any, ToMain = any> = WorkerPoolConfig & {
   onRequest?: ActorRequestHandler<Q, D>;
@@ -689,15 +693,13 @@ const __streamixConcurrency = Object.freeze({
 `;
 
 /**
- * Actor workers use a richer message contract than plain coroutines.
- * `taskId` identifies the outer task while `requestId` identifies nested
- * `utils.main.request()` round-trips initiated from inside the worker. Failed
- * request replies reuse `"error"` and are distinguished by `requestId`.
+ * Behavior-mode worker runtime.
+ *
+ * Supports persistent message loop via `init`, `post` (`main-message`),
+ * `ask`, and `stop` messages.
  */
 const ACTOR_WORKER_RUNTIME = `
 const __pendingWorkerRequests = new Map();
-const __taskMailboxes = new Map();
-let __activeTaskId = null;
 let __requestCounter = 0;
 
 const __postToMain = (message) => {
@@ -717,90 +719,118 @@ const __requestMain = (workerId, taskId, payload) => {
   });
 };
 
-const __getTaskMailbox = (taskId) => {
-  if (!__taskMailboxes.has(taskId)) {
-    __taskMailboxes.set(taskId, __streamixConcurrency.channel());
-  }
-  return __taskMailboxes.get(taskId);
-};
-
-const __closeTaskMailbox = (taskId) => {
-  const mailbox = __taskMailboxes.get(taskId);
-  if (mailbox) {
-    mailbox.close();
-    __taskMailboxes.delete(taskId);
-  }
-  if (__activeTaskId === taskId) {
-    __activeTaskId = null;
-  }
-};
-
-const __createMainBridge = (workerId, taskId) => {
-  const inbox = __getTaskMailbox(taskId);
-  return {
-    send: (messagePayload) => __postToMain({ workerId, taskId, payload: messagePayload, type: 'worker-message' }),
-    request: (requestPayload) => __requestMain(workerId, taskId, requestPayload),
-    receive: (signal) => inbox.receive(signal),
-    inbox,
-  };
-};
-
 const __createWorkerUtils = (workerId, taskId) => {
-  const main = __createMainBridge(workerId, taskId);
+  const inbox = __streamixConcurrency.channel();
   return {
-    main,
+    outbox: {
+      send: (messagePayload) => __postToMain({ workerId, taskId, payload: messagePayload, type: 'worker-message' }),
+      request: (requestPayload) => __requestMain(workerId, taskId, requestPayload),
+    },
+    inbox: {
+      receive: (signal) => inbox.receive(signal),
+      channel: inbox,
+    },
     concurrency: __streamixConcurrency,
+    send: (destination, payload) => destination.send(payload),
   };
+};
+
+const __actorMailbox = __streamixConcurrency.channel();
+let __actorState = undefined;
+let __actorRunning = false;
+let __actorId = null;
+let __workerId = null;
+
+const __runBehaviorLoop = async (workerId, taskId) => {
+  const utils = __createWorkerUtils(workerId, taskId);
+
+  while (__actorRunning) {
+    const envelope = await __actorMailbox.receive();
+    if (!envelope) break;
+
+    let msg = envelope;
+    let isAsk = false;
+    let requestId = null;
+
+    if (envelope && typeof envelope === "object" && envelope.__isAsk) {
+      isAsk = true;
+      requestId = envelope.__requestId;
+      msg = envelope.msg;
+    }
+
+    try {
+      const result = await __mainTask(msg, __actorState, utils);
+      __actorState = result;
+
+      if (isAsk) {
+        __postToMain({ workerId, taskId, requestId, type: "ask-response", payload: result });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (isAsk) {
+        __postToMain({ workerId, taskId, requestId, type: "error", error: message });
+      } else {
+        __postToMain({ workerId, taskId, type: "worker-message", payload: { type: "error", error: message } });
+      }
+    }
+  }
+
+  __actorMailbox.close();
+  __postToMain({ workerId, taskId, type: "stopped" });
 };
 
 onmessage = async (event) => {
   const { workerId, taskId, payload, type, requestId, error } = event.data;
 
-  if (type === 'main-message') {
-    const targetTaskId = taskId || __activeTaskId;
-    if (!targetTaskId) {
-      console.warn('Actor worker received main message without active task', event.data);
-      return;
+  if (type === "main-message") {
+    if (__actorRunning) {
+      __actorMailbox.send(payload).catch((error) => {
+        console.warn("Actor worker failed to enqueue message", error);
+      });
+    } else {
+      console.warn("Actor worker received main message before init", event.data);
     }
-
-    const mailbox = __getTaskMailbox(targetTaskId);
-    mailbox.send(payload).catch((error) => {
-      console.warn('Actor worker failed to enqueue main-thread message', error);
-    });
     return;
   }
 
-  if (type === 'data' || (type === 'error' && !!requestId)) {
+  if (type === "data" || (type === "error" && !!requestId)) {
     if (!requestId) {
-      console.warn('Actor worker received request response without requestId', event.data);
+      console.warn("Actor worker received request response without requestId", event.data);
       return;
     }
 
     const pendingRequest = __pendingWorkerRequests.get(requestId);
     if (pendingRequest) {
       __pendingWorkerRequests.delete(requestId);
-      if (type === 'data') {
+      if (type === "data") {
         pendingRequest.resolve(payload);
       } else {
-        pendingRequest.reject(new Error(error || payload?.error || payload?.message || 'Actor request failed'));
+        pendingRequest.reject(new Error(error || payload?.error || payload?.message || "Actor request failed"));
       }
     }
     return;
   }
 
-  if (type !== 'task') {
+  if (type === "init") {
+    __workerId = workerId;
+    __actorId = taskId;
+    __actorState = payload;
+    __actorRunning = true;
+    __runBehaviorLoop(workerId, taskId);
     return;
   }
 
-  try {
-    __activeTaskId = taskId;
-    const result = await __mainTask(payload, __createWorkerUtils(workerId, taskId));
-    __postToMain({ workerId, taskId, payload: result, type: 'response' });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    __postToMain({ workerId, taskId, error: message, type: 'error' });
-  } finally {
-    __closeTaskMailbox(taskId);
+  if (type === "stop") {
+    __actorRunning = false;
+    __actorMailbox.close();
+    return;
+  }
+
+  if (type === "ask") {
+    __actorMailbox.send({ __isAsk: true, __requestId: payload.requestId, msg: payload.msg }).catch((error) => {
+      console.warn("Actor worker failed to enqueue ask", error);
+    });
+    return;
   }
 };`;
 
@@ -875,199 +905,281 @@ function handleWorkerMessage<ToMain>(
 }
 
 /**
- * Creates a configured actor worker factory with a custom message handler.
- */
-export function actor<Q = any, D = any, ToMain = any, FromMain = any>(
-  config: ActorCustomMessageHandlerConfig
-): <T, R>(main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => ActorRef<T, R, FromMain, ToMain>;
-/**
- * Creates a configured actor worker factory with message/request hooks.
- */
-export function actor<Q = any, D = any, ToMain = any, FromMain = any>(
-  config: ActorConfig<Q, D, ToMain>
-): <T, R>(main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => ActorRef<T, R, FromMain, ToMain>;
-/**
- * Creates an actor worker directly from a task function and optional helpers.
- */
-export function actor<T, R>(main: ActorTask<T, R>, ...functions: Function[]): ActorRef<T, R>;
-/**
- * Creates an actor worker coroutine.
+ * Creates an autonomous behavior-mode actor.
  *
- * When called with a configuration object, returns a factory function that accepts
- * the actor task and optional helpers. When called with a task function directly,
- * creates the actor immediately using default configuration.
+ * `actor(behavior, ...helpers)` returns a factory function that accepts
+ * `initialState` and eagerly creates the worker.
  *
- * @template T The type of input data.
- * @template R The type of output data.
+ * @example
+ * ```ts
+ * const Counter = actor((msg, state, utils) => state + msg.n);
+ * const counter = Counter(0);
+ * counter.post({ n: 1 });
+ * const value = await counter.ask({ n: 2 });
+ * ```
+ */
+export function actor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
+  behavior: ActorBehavior<S, Q, D, FromMain, ToMain>,
+  ...functions: Function[]
+): (initialState: S) => Actor<FromMain, ToMain, S>;
+/**
+ * Creates a configured autonomous behavior-mode actor.
+ *
+ * `actor(config)` returns a factory function that accepts
+ * `(behavior, ...helpers)` and returns another factory for `initialState`.
+ *
+ * @example
+ * ```ts
+ * const Counter = actor({
+ *   onRequest: (q) => fetch(q),
+ * });
+ * const counter = Counter((msg, state) => state + msg)(0);
+ * ```
+ */
+export function actor<Q = any, D = any, ToMain = any>(
+  config: ActorConfig<Q, D, ToMain> | ActorCustomMessageHandlerConfig,
+): <S = any, FromMain = any>(
+  behavior: ActorBehavior<S, Q, D, FromMain, ToMain>,
+  ...functions: Function[]
+) => (initialState: S) => Actor<FromMain, ToMain, S>;
+/**
+ * Creates an autonomous behavior-mode actor.
+ *
+ * The worker eagerly initializes with `initialState` and runs a persistent loop
+ * that receives messages via `post()` or `ask()` and returns updated state.
+ *
+ * @template S The actor state type.
  * @template Q The request payload type for main-thread requests.
  * @template D The response data type for main-thread requests.
  * @template ToMain The type of one-way messages sent from worker to main.
  * @template FromMain The type of one-way messages sent from main to worker.
- * @param arg1 Either an `ActorConfig` or the main `ActorTask`.
- * @param rest Optional helper functions available inside the worker.
- * @returns An `ActorRef` instance or a factory that produces one.
+ * @param arg1 Either a config object or the behavior function.
+ * @param rest Helper functions available inside the worker.
  */
-export function actor<T, R, Q = any, D = any, ToMain = any, FromMain = any>(
-  arg1: ActorConfig<Q, D, ToMain> | ActorCustomMessageHandlerConfig | ActorTask<T, R, Q, D, FromMain, ToMain>,
+export function actor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
+  arg1: ActorConfig<Q, D, ToMain> | ActorCustomMessageHandlerConfig | ActorBehavior<S, Q, D, FromMain, ToMain>,
   ...rest: Function[]
-): ActorRef<T, R, FromMain, ToMain> | ((main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) => ActorRef<T, R, FromMain, ToMain>) {
-
-  const implementActor = (
-    config: ActorConfig<Q, D, ToMain> | ActorCustomMessageHandlerConfig | undefined,
-    main: ActorTask<T, R, Q, D, FromMain, ToMain>,
-    functions: Function[]
-  ): ActorRef<T, R, FromMain, ToMain> => {
-    const workerScript = buildWorkerScript({
-      helpers: [ACTOR_CONCURRENCY_RUNTIME, ...(config?.helpers || [])],
-      main,
-      functions,
-      runtime: ACTOR_WORKER_RUNTIME,
-    });
-
-    const blob = new Blob([workerScript], { type: "application/javascript" });
-    const blobUrl = URL.createObjectURL(blob);
-
-    let worker: Worker | null = null;
-    let activeTaskId: string | null = null;
-    let running = false;
-    let taskResolve: ((value: R) => void) | null = null;
-    let taskReject: ((error: Error) => void) | null = null;
-    const messageHandlers = new Set<(payload: ToMain) => void>();
-    const pendingTasks = new Map<string, { workerId: number; resolve: (value: any) => void; reject: (error: Error) => void }>();
-
-    let nextWorkerId = 1;
-
-    const cleanupTask = () => {
-      if (activeTaskId) {
-        pendingTasks.delete(activeTaskId);
-        activeTaskId = null;
-      }
-      running = false;
-      taskResolve = null;
-      taskReject = null;
-    };
-
-    const handleMessage = (event: MessageEvent<CoroutineMessage>) => {
-      const msg = event.data;
-
-      if (config && "customMessageHandler" in config && config.customMessageHandler) {
-        config.customMessageHandler(event, worker!, pendingTasks);
-        return;
-      }
-
-      const { type, taskId, payload, error, requestId } = msg;
-
-      if (type === "response" && taskId === activeTaskId) {
-        const resolve = taskResolve;
-        cleanupTask();
-        resolve?.(payload);
-      } else if (type === "error" && !requestId && taskId === activeTaskId) {
-        const reject = taskReject;
-        cleanupTask();
-        reject?.(new Error(error ?? "Unknown worker error"));
-      } else if (type === "request") {
-        handleRequest(msg, config, worker!);
-      } else if (type === "worker-message") {
-        handleWorkerMessage(msg, config, messageHandlers);
-      } else {
-        console.warn("Unknown message type from worker:", msg);
-      }
-    };
-
-    return {
-      get running() {
-        return running;
-      },
-
-      start(data) {
-        if (running) {
-          return Promise.reject(new Error("Actor is already running"));
-        }
-
-        if (!worker) {
-          worker = new Worker(blobUrl, { type: "module" });
-          (worker as any).__id = nextWorkerId++;
-          worker.addEventListener("message", handleMessage);
-        }
-
-        running = true;
-        activeTaskId = generateTaskId();
-
-        return new Promise((resolve, reject) => {
-          taskResolve = resolve;
-          taskReject = reject;
-          pendingTasks.set(activeTaskId!, {
-            workerId: (worker as any).__id,
-            resolve,
-            reject,
-          });
-          try {
-            worker!.postMessage({
-              workerId: (worker as any).__id,
-              taskId: activeTaskId,
-              payload: data,
-              type: "task",
-            });
-          } catch (err) {
-            cleanupTask();
-            reject(err instanceof Error ? err : new Error(String(err)));
-          }
-        });
-      },
-
-      send(payload) {
-        if (!worker || !running || !activeTaskId) {
-          console.warn("Actor is not running; message dropped");
-          return;
-        }
-        worker.postMessage({
-          workerId: (worker as any).__id,
-          taskId: activeTaskId,
-          payload,
-          type: "main-message",
-        });
-      },
-
-      stop(reason) {
-        if (!running) return;
-        const stopError = new Error(
-          reason instanceof Error ? reason.message : String(reason ?? "Actor stopped")
-        );
-        if (taskReject) {
-          taskReject(stopError);
-        }
-        cleanupTask();
-        if (worker) {
-          worker.terminate();
-          worker = null;
-        }
-      },
-
-      async finalize() {
-        if (running && taskReject) {
-          taskReject(new Error("Actor finalized before task completed"));
-        }
-        cleanupTask();
-        if (worker) {
-          worker.terminate();
-          worker = null;
-        }
-        URL.revokeObjectURL(blobUrl);
-      },
-
-      onMessage(handler) {
-        messageHandlers.add(handler);
-        return () => messageHandlers.delete(handler);
-      },
-    };
-  };
-
+): ((initialState: S) => Actor<FromMain, ToMain, S>) | (<S2 = any, FromMain2 = any>(
+  behavior: ActorBehavior<S2, Q, D, FromMain2, ToMain>,
+  ...functions: Function[]
+) => (initialState: S2) => Actor<FromMain2, ToMain, S2>) {
   if (typeof arg1 === "function") {
-    return implementActor(undefined, arg1 as ActorTask<T, R, Q, D, FromMain, ToMain>, rest);
+    // actor(behavior, ...helpers) => (initialState) => Actor
+    const behavior = arg1 as ActorBehavior<S, Q, D, FromMain, ToMain>;
+    const functions = rest;
+    return (initialState: S) => createActor(undefined, behavior, initialState, functions);
   }
 
-  return (main: ActorTask<T, R, Q, D, FromMain, ToMain>, ...functions: Function[]) =>
-    implementActor(arg1, main, functions);
+  // actor(config) => (behavior, ...helpers) => (initialState) => Actor
+  const config = arg1 as ActorConfig<Q, D, ToMain> | ActorCustomMessageHandlerConfig;
+  return <S2 = any, FromMain2 = any>(
+    behavior: ActorBehavior<S2, Q, D, FromMain2, ToMain>,
+    ...functions: Function[]
+  ): ((initialState: S2) => Actor<FromMain2, ToMain, S2>) => (initialState: S2) => createActor(config, behavior, initialState, functions);
 }
+
+function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
+  config: ActorConfig<Q, D, ToMain> | ActorCustomMessageHandlerConfig | undefined,
+  behavior: ActorBehavior<S, Q, D, FromMain, ToMain>,
+  initialState: S,
+  functions: Function[]
+): Actor<FromMain, ToMain, S> {
+  const workerScript = buildWorkerScript({
+    helpers: [ACTOR_CONCURRENCY_RUNTIME, ...(config?.helpers || [])],
+    main: behavior as any,
+    functions,
+    runtime: ACTOR_WORKER_RUNTIME,
+  });
+
+  const blob = new Blob([workerScript], { type: "application/javascript" });
+  const blobUrl = URL.createObjectURL(blob);
+
+  let worker: Worker | null = null;
+  let running = false;
+  const messageHandlers = new Set<(payload: ToMain) => void>();
+  let nextAskId = 1;
+  const pendingAsks = new Map<string, { resolve: (value: S) => void; reject: (error: Error) => void }>();
+
+  worker = new Worker(blobUrl, { type: "module" });
+  (worker as any).__id = 1;
+  running = true;
+
+  let actorRef: Actor<FromMain, ToMain, S>;
+
+  const handleMessage = (event: MessageEvent<CoroutineMessage>) => {
+    const msg = event.data;
+    const { type, payload, requestId } = msg;
+
+    if (type === "ask-response" && requestId && pendingAsks.has(requestId)) {
+      const { resolve } = pendingAsks.get(requestId)!;
+      pendingAsks.delete(requestId);
+      resolve(payload);
+    } else if (type === "error" && requestId && pendingAsks.has(requestId)) {
+      const { reject } = pendingAsks.get(requestId)!;
+      pendingAsks.delete(requestId);
+      reject(new Error(msg.error ?? "Actor ask failed"));
+    } else if (type === "request") {
+      handleRequest(msg, config, worker!);
+    } else if (type === "worker-message") {
+      handleWorkerMessage(msg, config, messageHandlers);
+      pushGlobalInbox(actorRef, payload);
+    } else if (type === "stopped") {
+      running = false;
+    }
+  };
+
+  worker.addEventListener("message", handleMessage);
+
+  worker.postMessage({
+    workerId: (worker as any).__id,
+    taskId: (worker as any).__id,
+    payload: initialState,
+    type: "init",
+  });
+
+  const actor: Actor<FromMain, ToMain, S> = {
+    get running() {
+      return running;
+    },
+
+    stop(_reason) {
+      if (!running) return;
+      running = false;
+      if (worker) {
+        worker.postMessage({
+          workerId: (worker as any).__id,
+          taskId: (worker as any).__id,
+          type: "stop",
+        });
+        setTimeout(() => {
+          if (worker) {
+            worker.terminate();
+            worker = null;
+          }
+        }, 100);
+      }
+    },
+
+    async finalize() {
+      running = false;
+      if (worker) {
+        worker.postMessage({
+          workerId: (worker as any).__id,
+          taskId: (worker as any).__id,
+          type: "stop",
+        });
+        worker.terminate();
+        worker = null;
+      }
+      URL.revokeObjectURL(blobUrl);
+    },
+  };
+
+  actorRef = actor;
+
+  actorInternals.set(actor as any, {
+    post(msg: FromMain) {
+      if (!worker || !running) {
+        console.warn("Actor is not running; message dropped");
+        return;
+      }
+      worker.postMessage({
+        workerId: (worker as any).__id,
+        taskId: (worker as any).__id,
+        payload: msg,
+        type: "main-message",
+      });
+    },
+
+    ask(msg: FromMain): Promise<S> {
+      if (!worker || !running) {
+        return Promise.reject(new Error("Actor stopped"));
+      }
+      const askId = String(nextAskId++);
+      return new Promise((resolve, reject) => {
+        pendingAsks.set(askId, { resolve, reject });
+        worker!.postMessage({
+          workerId: (worker as any).__id,
+          taskId: (worker as any).__id,
+          payload: { requestId: askId, msg },
+          type: "ask",
+        });
+      });
+    },
+
+    onMessage(handler: (payload: ToMain) => void): () => void {
+      messageHandlers.add(handler);
+      return () => messageHandlers.delete(handler);
+    },
+  });
+
+  return actor;
+}
+
+const actorInternals = new WeakMap<object, {
+  post(msg: any): void;
+  ask(msg: any): Promise<any>;
+  onMessage(handler: (payload: any) => void): () => void;
+}>();
+
+interface GlobalInboxEntry {
+  actor: Actor<any, any, any>;
+  payload: any;
+}
+
+let globalInboxQueue: GlobalInboxEntry[] = [];
+let globalInboxResolver: ((entry: GlobalInboxEntry) => void) | null = null;
+
+function pushGlobalInbox(actor: Actor<any, any, any>, payload: any) {
+  const entry = { actor, payload };
+  if (globalInboxResolver) {
+    globalInboxResolver(entry);
+    globalInboxResolver = null;
+  } else {
+    globalInboxQueue.push(entry);
+  }
+}
+
+interface InboxAPI {
+  <ToMain>(actor: Actor<any, ToMain, any>, handler: (payload: ToMain) => void): () => void;
+  (): Promise<GlobalInboxEntry>;
+}
+
+/**
+ * Main-thread communication utility.
+ *
+ * Mirrors the worker-side `utils` structure:
+ * - `main.outbox.send(actor, msg)` — fire-and-forget
+ * - `main.outbox.ask(actor, msg)` — send and await updated state
+ * - `main.inbox.receive(actor, handler)` — subscribe to one actor's events
+ * - `main.inbox.receive()` — global inbox; await next message from any actor
+ */
+export const main = {
+  outbox: {
+    /** Sends a one-way message to the actor. */
+    send<FromMain>(actor: Actor<FromMain, any, any>, msg: FromMain): void {
+      actorInternals.get(actor as any)!.post(msg);
+    },
+
+    /** Sends a message and awaits the updated state. */
+    ask<FromMain, S>(actor: Actor<FromMain, any, S>, msg: FromMain): Promise<S> {
+      return actorInternals.get(actor as any)!.ask(msg);
+    },
+  },
+
+  inbox: {
+    receive: ((actorOrHandler?: any, handler?: any): (() => void) | Promise<GlobalInboxEntry> => {
+      if (actorOrHandler === undefined) {
+        if (globalInboxQueue.length > 0) {
+          return Promise.resolve(globalInboxQueue.shift()!);
+        }
+        return new Promise((resolve) => {
+          globalInboxResolver = resolve;
+        });
+      }
+      return actorInternals.get(actorOrHandler as any)!.onMessage(handler);
+    }) as InboxAPI,
+  },
+};
 
 export type { CoroutineMessage } from "../worker/messages";

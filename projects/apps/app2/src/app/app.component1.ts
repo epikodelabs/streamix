@@ -1,42 +1,48 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { actor, WorkerUtils } from '@epikodelabs/streamix/coroutines';
+import { actor, main, WorkerUtils } from '@epikodelabs/streamix/coroutines';
 
-// --- Worker Function that runs the timer logic ---
-// This is a single, stateful function designed to run in a web worker.
+type TimerMessage =
+  | { type: 'start'; initialTime: number }
+  | { type: 'reset'; initialTime: number }
+  | { type: 'stop' };
 
-/**
- * A main task function that runs a countdown timer inside a Web Worker.
- * It uses WorkerUtils to send messages to the main thread.
- */
-async function createTimerWorker(
-  data: { initialTime: number; type: 'start' | 'reset' },
-  utils: WorkerUtils
-): Promise<number> {
-  // Validate input
-  if (typeof data.initialTime !== 'number' || isNaN(data.initialTime) || data.initialTime < 0) {
-    throw new Error(`Invalid initialTime: ${data.initialTime}`);
-  }
+type TimerState = {
+  counter: number;
+  timerId: ReturnType<typeof setInterval> | null;
+};
 
-  // Initialize counter
-  let counter = data.initialTime;
+async function timerBehavior(
+  msg: TimerMessage,
+  state: TimerState,
+  utils: WorkerUtils<any, any, TimerMessage, any>
+) {
+  if (msg.type === 'start' || msg.type === 'reset') {
+    if (state.timerId !== null) {
+      clearInterval(state.timerId);
+    }
 
-  // Send initial counter value
-  utils.main.send({ tick: counter, timestamp: Date.now() });
-
-  // Return a promise that resolves when the timer completes
-  return new Promise((resolve) => {
-    const timer = setInterval(() => {
-      counter--;
-
-      // Send periodic update
-      utils.main.send({ tick: counter, timestamp: Date.now() });
-
-      if (counter <= 0) {
-        clearInterval(timer);
-        resolve(counter); // Resolve with final counter value
+    state.counter = msg.initialTime;
+    state.timerId = setInterval(() => {
+      state.counter--;
+      utils.outbox.send({ tick: state.counter, timestamp: Date.now() });
+      if (state.counter <= 0 && state.timerId !== null) {
+        clearInterval(state.timerId);
+        state.timerId = null;
       }
     }, 1000);
-  });
+
+    // Emit the initial tick immediately
+    utils.outbox.send({ tick: state.counter, timestamp: Date.now() });
+  }
+
+  if (msg.type === 'stop') {
+    if (state.timerId !== null) {
+      clearInterval(state.timerId);
+      state.timerId = null;
+    }
+  }
+
+  return state;
 }
 
 @Component({
@@ -46,51 +52,38 @@ async function createTimerWorker(
   styleUrls: ['./app.component.scss']
 })
 export class AppComponent implements OnInit, OnDestroy {
-  title = 'Timer App with Coroutine';
+  title = 'Timer App with Actor';
   timerValue: number = 0;
   timerStatus: string = 'Stopped';
-  private timerTask = actor(createTimerWorker);
+
+  private timerActor = actor(timerBehavior)({
+    counter: 0,
+    timerId: null,
+  });
+
   private unsubscribeMessage!: () => void;
 
   ngOnInit(): void {
-    // Subscribe to worker messages (ticks)
-    this.unsubscribeMessage = this.timerTask.onMessage((msg) => {
+    this.unsubscribeMessage = main.inbox.receive(this.timerActor, (msg) => {
       this.timerValue = msg.tick;
-      console.log('Counting down...');
+      console.log('Counting down...', msg.tick);
     });
 
-    // Start the timer
     this.timerStatus = 'Running';
     console.log('Starting timer...');
-    this.timerTask.processTask({ initialTime: 60, type: 'start' })
-      .then(() => {
-        console.log('Completed');
-        this.timerStatus = 'Stopped';
-      })
-      .catch((error) => {
-        console.error('Worker error:', error);
-        this.timerStatus = 'Error';
-      });
+    main.outbox.send(this.timerActor, { type: 'start', initialTime: 60 });
   }
 
-  // Method to reset the timer from the UI
   resetTimer() {
     console.log('Resetting...');
     this.timerStatus = 'Resetting';
-    // Send a new task to reset the timer to 30 seconds
-    this.timerTask.processTask({ type: 'reset', initialTime: 30 })
-      .then(() => {
-        this.timerStatus = 'Running';
-      })
-      .catch((error) => {
-        console.error('Worker error:', error);
-        this.timerStatus = 'Error';
-      });
+    main.outbox.send(this.timerActor, { type: 'reset', initialTime: 30 });
+    this.timerStatus = 'Running';
   }
 
-  // Clean up on component destruction
   ngOnDestroy(): void {
     this.unsubscribeMessage?.();
-    this.timerTask.finalize();
+    main.outbox.send(this.timerActor, { type: 'stop' });
+    this.timerActor.finalize();
   }
 }

@@ -2,26 +2,19 @@
  * Kitchen Simulation Service — Actor-based Pizza Bakery Demo
  *
  * Orchestrates a multi-stage pizza kitchen using a dedicated Web Worker actor
- * (`headChef`). The actor manages an internal order queue and runs three
- * concurrent "oven" tasks that bake orders stage-by-stage.
+ * (`headChef`). The actor runs a persistent behavior loop that manages an
+ * internal order queue and dispatches orders to three concurrent oven workers.
  *
  * Communication flow:
- *   • Main thread → Worker : `start({orders})` initiates a shift;
- *                            `send({type:'cancel'|'close'})` sends commands
- *   • Worker → Main thread : `utils.main.send(event)` pushes live events
- *                            (started, stage, ready, cancelled, closed)
- *   • Worker → Main thread : `utils.main.request(item)` fetches recipes
- *
- * Features:
- *   – Live oven state tracking (idle → preparing → baking → finishing)
- *   – Order cancellation mid-bake
- *   – Kitchen close (finish active, drop queued)
- *   – Full-day mode: morning → lunch → afternoon → evening shifts
- *   – Revenue tracking per order
+ *   • Main thread → Worker : `main.outbox.send(actor, {type:'runShift',orders})`
+ *                            `main.outbox.send(actor, {type:'cancel',orderId})`
+ *                            `main.outbox.send(actor, {type:'close'})`
+ *   • Worker → Main thread : `utils.outbox.send(event)` pushes live events
+ *   • Worker → Main thread : `utils.outbox.request(item)` fetches recipes
  */
 import { Injectable } from '@angular/core';
 import { createBehaviorSubject, createSubject } from '@epikodelabs/streamix';
-import { actor, WorkerUtils } from '@epikodelabs/streamix/coroutines';
+import { actor, main, WorkerUtils } from '@epikodelabs/streamix/coroutines';
 
 export type Order = { id: string; item: string; customer: string };
 
@@ -31,7 +24,8 @@ export type Recipe = {
   bakeMs: number;
 };
 
-export type KitchenCommand =
+export type KitchenMessage =
+  | { type: 'runShift'; orders: Order[] }
   | { type: 'cancel'; orderId: string }
   | { type: 'close' };
 
@@ -56,6 +50,15 @@ export type KitchenStats = {
   active: number;
 };
 
+export type KitchenWorkerState = {
+  running: boolean;
+  closing: boolean;
+  cancelledIds: Set<string>;
+  completedCount: number;
+  cancelledCount: number;
+  totalRevenue: number;
+};
+
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const recipes = new Map<string, Recipe>([
@@ -67,27 +70,32 @@ const recipes = new Map<string, Recipe>([
 ]);
 
 // ===== HEAD CHEF ACTOR =====
-// The chef runs inside a dedicated worker. It manages a queue of orders and
-// dispatches them to three concurrent oven workers via channels.
-// Communication with the main thread:
-//   utils.main.request(item)  → asks main for a recipe
-//   utils.main.send(event)    → pushes live kitchen events to main
-//   utils.main.receive()      → receives cancel / close commands from main
+// The chef runs inside a dedicated worker. It maintains mutable state that
+// background oven workers capture by reference, so commands (cancel / close)
+// are visible to them immediately.
 
-const headChef = actor<string, Recipe, KitchenEvent, KitchenCommand>({
+const headChef = actor({
   onRequest: async (item: string): Promise<Recipe> => {
     await delay(500);
     const recipe = recipes.get(item);
     if (!recipe) throw new Error(`No recipe for ${item}`);
     return recipe;
   },
-})(
-  async function kitchenShift(
-    input: { orders: Order[] },
-    utils: WorkerUtils<string, Recipe, KitchenCommand, KitchenEvent>
-  ) {
-    const { channel, background, withTimeout } = utils.concurrency;
-    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+})(async function kitchenBehavior(
+  msg: KitchenMessage,
+  state: KitchenWorkerState,
+  utils: WorkerUtils<string, Recipe, KitchenMessage, KitchenEvent>
+) {
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const { channel, background, withTimeout } = utils.concurrency;
+
+  if (msg.type === 'runShift' && !state.running) {
+    state.running = true;
+    state.closing = false;
+    state.completedCount = 0;
+    state.cancelledCount = 0;
+    state.totalRevenue = 0;
+    state.cancelledIds.clear();
 
     // ---- Prices live inside the worker (closures are not serialized) ----
     const prices = new Map<string, number>([
@@ -98,27 +106,16 @@ const headChef = actor<string, Recipe, KitchenEvent, KitchenCommand>({
       ['Diavola', 16.99],
     ]);
 
-    // ---- Shared state ----
-    let totalRevenue = 0;
-    let completedCount = 0;
-    let cancelledCount = 0;
-    let closing = false;
-    const cancelledIds = new Set<string>();
-
-    // ---- Channels ----
-    const orderQueue = channel<Order>(input.orders.length);
-
-    for (const order of input.orders) {
+    // ---- Order queue ----
+    const orderQueue = channel<Order>(msg.orders.length);
+    for (const order of msg.orders) {
       orderQueue.trySend(order);
     }
     orderQueue.close();
 
     // ---- Oven worker ----
-    // Each oven is a concurrent task inside the actor worker.
-    // It pulls orders from the shared queue and bakes them stage-by-stage.
     const ovenWorker = async (ovenId: string) => {
-      while (!closing) {
-        // Short-timeout receive so we stay responsive to the closing flag
+      while (!state.closing) {
         const [pollCtx, pollCancel] = withTimeout(background(), 100);
         let order: Order | undefined;
         try {
@@ -134,19 +131,19 @@ const headChef = actor<string, Recipe, KitchenEvent, KitchenCommand>({
           continue;
         }
 
-        if (closing) break;
+        if (state.closing) break;
 
         // Pre-check cancellation
-        if (cancelledIds.has(order.id)) {
-          cancelledCount++;
-          utils.main.send({ type: 'cancelled', order, reason: 'Customer changed mind', oven: ovenId });
+        if (state.cancelledIds.has(order.id)) {
+          state.cancelledCount++;
+          utils.outbox.send({ type: 'cancelled', order, reason: 'Customer changed mind', oven: ovenId });
           continue;
         }
 
         // Fetch recipe from main thread
-        const recipe = await utils.main.request(order.item);
+        const recipe = await utils.outbox.request(order.item);
 
-        utils.main.send({ type: 'started', order, oven: ovenId });
+        utils.outbox.send({ type: 'started', order, oven: ovenId });
 
         // Bake stage by stage
         const stages = [
@@ -158,12 +155,11 @@ const headChef = actor<string, Recipe, KitchenEvent, KitchenCommand>({
         let wasCancelled = false;
 
         for (const stage of stages) {
-          utils.main.send({ type: 'stage', order, stage: stage.name, oven: ovenId });
+          utils.outbox.send({ type: 'stage', order, stage: stage.name, oven: ovenId });
 
-          // Wait stage duration while polling for cancellation
           const deadline = Date.now() + stage.ms;
           while (Date.now() < deadline) {
-            if (cancelledIds.has(order.id)) {
+            if (state.cancelledIds.has(order.id)) {
               wasCancelled = true;
               break;
             }
@@ -174,72 +170,52 @@ const headChef = actor<string, Recipe, KitchenEvent, KitchenCommand>({
         }
 
         if (wasCancelled) {
-          cancelledCount++;
-          utils.main.send({ type: 'cancelled', order, reason: 'Customer changed mind', oven: ovenId });
+          state.cancelledCount++;
+          utils.outbox.send({ type: 'cancelled', order, reason: 'Customer changed mind', oven: ovenId });
           continue;
         }
 
         // Done!
         const price = prices.get(order.item) ?? 10;
-        totalRevenue += price;
-        completedCount++;
-        utils.main.send({ type: 'ready', order, oven: ovenId, price });
+        state.totalRevenue += price;
+        state.completedCount++;
+        utils.outbox.send({ type: 'ready', order, oven: ovenId, price });
       }
     };
 
-    // ---- Command processor ----
-    // Reads commands directly from the main thread and updates shared state.
-    const commandProcessor = async () => {
-      while (!closing) {
-        const [pollCtx, pollCancel] = withTimeout(background(), 100);
-        let cmd: KitchenCommand | undefined;
-        try {
-          cmd = await utils.main.receive(pollCtx.signal);
-        } catch {
-          // timeout — loop around and check closing
-        } finally {
-          pollCancel();
-        }
-
-        if (!cmd) continue;
-
-        if (cmd.type === 'cancel') {
-          cancelledIds.add(cmd.orderId);
-        }
-
-        if (cmd.type === 'close') {
-          closing = true;
-          break;
-        }
-      }
-    };
-
-    // ---- Run everything concurrently ----
-    const processor = commandProcessor();
-    const ovens = Promise.all([
+    // Run ovens in background — when they finish, push the closed event
+    Promise.all([
       ovenWorker('Oven #1'),
       ovenWorker('Oven #2'),
       ovenWorker('Oven #3'),
-    ]);
-
-    // Ovens finish their queued pizzas.
-    await ovens;
-
-    // Signal shutdown so the processor exits cleanly.
-    closing = true;
-    await processor;
-
-    // Report final stats
-    utils.main.send({
-      type: 'closed',
-      completed: completedCount,
-      cancelled: cancelledCount,
-      totalRevenue,
+    ]).then(() => {
+      utils.outbox.send({
+        type: 'closed',
+        completed: state.completedCount,
+        cancelled: state.cancelledCount,
+        totalRevenue: state.totalRevenue,
+      });
+      state.running = false;
     });
-
-    return { completed: completedCount, cancelled: cancelledCount, totalRevenue };
   }
-);
+
+  if (msg.type === 'cancel') {
+    state.cancelledIds.add(msg.orderId);
+  }
+
+  if (msg.type === 'close') {
+    state.closing = true;
+  }
+
+  return state;
+})({
+  running: false,
+  closing: false,
+  cancelledIds: new Set(),
+  completedCount: 0,
+  cancelledCount: 0,
+  totalRevenue: 0,
+});
 
 @Injectable({ providedIn: 'root' })
 export class KitchenService {
@@ -274,7 +250,7 @@ export class KitchenService {
   private destroyed = false;
 
   constructor() {
-    this.onMessageUnsubscribe = headChef.onMessage((event: KitchenEvent) => {
+    this.onMessageUnsubscribe = main.inbox.receive(headChef, (event: KitchenEvent) => {
       this.eventsSubject.next(event);
       this.handleEvent(event);
     });
@@ -392,19 +368,26 @@ export class KitchenService {
 
     this.logSubject.next(`--- Starting shift with ${orders.length} orders ---`);
 
-    try {
-      const result = await headChef.start({ orders });
+    return new Promise((resolve) => {
+      let resolved = false;
 
-      return {
-        completed: result?.completed ?? 0,
-        cancelled: result?.cancelled ?? 0,
-        revenue: result?.totalRevenue ?? 0,
-      };
-    } finally {
-      if (!options.internal) {
-        this.running = false;
-      }
-    }
+      const unsub = main.inbox.receive(headChef, (event: KitchenEvent) => {
+        if (event.type === 'closed' && !resolved) {
+          resolved = true;
+          unsub();
+          if (!options.internal) {
+            this.running = false;
+          }
+          resolve({
+            completed: event.completed,
+            cancelled: event.cancelled,
+            revenue: event.totalRevenue,
+          });
+        }
+      });
+
+      main.outbox.send(headChef, { type: 'runShift', orders });
+    });
   }
 
   async runFullDay(): Promise<void> {
@@ -483,7 +466,7 @@ export class KitchenService {
   cancelOrder(orderId: string) {
     if (!this.running) return;
 
-    headChef.send({ type: 'cancel', orderId });
+    main.outbox.send(headChef, { type: 'cancel', orderId });
     this.logSubject.next(`🚫 Cancellation requested for order ${orderId}`);
   }
 
@@ -491,7 +474,7 @@ export class KitchenService {
     if (!this.running) return;
 
     this.fullDayClosing = true;
-    headChef.send({ type: 'close' });
+    main.outbox.send(headChef, { type: 'close' });
     this.logSubject.next('🚨 Kitchen closing requested — active ovens finish, queued orders are cancelled');
   }
 

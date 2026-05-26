@@ -51,28 +51,19 @@ export interface Coroutine<T = any, R = T> extends TaskRunner<T, R> {}
 /**
  * Long-lived dedicated worker with bidirectional messaging.
  *
- * `ActorRef` represents a single worker instance. Call `start(data)` to begin
- * execution, `send(payload)` to push messages into the worker's mailbox, and
- * `finalize()` to terminate the worker when done.
+ * `Actor` is an opaque handle to a persistent behavior loop running in a
+ * dedicated worker. Messaging is done through the `main` utility:
+ * `main.send(actor, msg)`, `main.ask(actor, msg)`, `main.receive(actor, handler)`.
  *
  * Unlike `Coroutine`, an actor is not pool-based; it owns exactly one worker.
  */
-export interface ActorRef<T = any, R = any, FromMain = any, ToMain = any> {
-  /** `true` while the worker has an active task. */
+export interface Actor<FromMain = any, ToMain = any, S = any> {
+  /** `true` while the behavior loop is running. */
   readonly running: boolean;
 
-  /** Starts the worker task with the given input data. */
-  start(data: T): Promise<R>;
-
-  /** Sends a one-way message to the active worker task. */
-  send(payload: FromMain): void;
-
-  /** Stops the worker and rejects the pending `start()` promise. */
+  /** Stops the worker. */
   stop(reason?: unknown): void;
 
   /** Terminates the worker and releases resources. */
   finalize(): Promise<void>;
-
-  /** Subscribes to one-way messages sent from the worker via `utils.main.send()`. */
-  onMessage(handler: (payload: ToMain) => void): () => void;
 }

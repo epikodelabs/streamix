@@ -1,4 +1,5 @@
 import {
+  main,
   actor,
   background,
   channel,
@@ -9,7 +10,8 @@ import {
   send,
   withCancel,
 } from "@epikodelabs/streamix/coroutines";
-import { idescribe } from "./env.spec";
+import {
+  idescribe } from "./env.spec";
 
 idescribe("actor", () => {
   let originalWorker: any;
@@ -29,41 +31,51 @@ idescribe("actor", () => {
       listeners: Record<string, ((ev: any) => void)[]> = {};
       terminated = false;
       private workerInbox = channel<any>();
+      private actorState: any = undefined;
+      private actorRunning = false;
+      private workerId = 1;
+      private taskId = "";
 
-      constructor(_url: string, _options?: any) {}
+      constructor(_url: string, _options?: any) {
+        this.workerId = Math.floor(Math.random() * 100000);
+      }
 
       private createWorkerUtils(message: { workerId: number; taskId: string }) {
-        return {
-          main: {
-            send: (payload: any) => {
-              const event = {
-                data: { workerId: message.workerId, taskId: message.taskId, type: "worker-message", payload }
-              } as any;
-              this.onmessage?.(event);
-              this.listeners["message"]?.forEach(fn => fn(event));
-            },
-            request: (requestPayload: any) => {
-              return new Promise((resolve) => {
-                setTimeout(() => {
-                  const reqEvent = {
-                    data: {
-                      workerId: message.workerId,
-                      taskId: message.taskId,
-                      requestId: message.taskId + ":request:1",
-                      type: "request",
-                      payload: requestPayload,
-                    }
-                  } as any;
-                  this.onmessage?.(reqEvent);
-                  this.listeners["message"]?.forEach(fn => fn(reqEvent));
-
-                  resolve({ value: 10, message: "Mock response" });
-                }, 1);
-              });
-            },
-            receive: (signal?: AbortSignal) => this.workerInbox.receive(signal),
-            inbox: this.workerInbox,
+        const outbox = {
+          send: (payload: any) => {
+            const event = {
+              data: { workerId: message.workerId, taskId: message.taskId, type: "worker-message", payload }
+            } as any;
+            this.onmessage?.(event);
+            this.listeners["message"]?.forEach(fn => fn(event));
           },
+          request: (requestPayload: any) => {
+            return new Promise((resolve) => {
+              setTimeout(() => {
+                const reqEvent = {
+                  data: {
+                    workerId: message.workerId,
+                    taskId: message.taskId,
+                    requestId: message.taskId + ":request:1",
+                    type: "request",
+                    payload: requestPayload,
+                  }
+                } as any;
+                this.onmessage?.(reqEvent);
+                this.listeners["message"]?.forEach(fn => fn(reqEvent));
+
+                resolve({ value: 10, message: "Mock response" });
+              }, 1);
+            });
+          },
+        };
+        return {
+          outbox,
+          inbox: {
+            receive: (signal?: AbortSignal) => this.workerInbox.receive(signal),
+            channel: this.workerInbox,
+          },
+          get main() { return outbox; },
           concurrency: {
             channel,
             receive,
@@ -77,41 +89,75 @@ idescribe("actor", () => {
         };
       }
 
+      private async runBehaviorLoop(msg: any) {
+        const utils = this.createWorkerUtils({ workerId: this.workerId, taskId: this.taskId });
+        const mainTask = (globalThis as any).currentMainTask;
+        if (!mainTask) return;
+
+        while (this.actorRunning && !this.terminated) {
+          const envelope = await this.workerInbox.receive();
+          if (!envelope) break;
+
+          let item = envelope;
+          let isAsk = false;
+          let requestId = null;
+
+          if (envelope && typeof envelope === "object" && envelope.__isAsk) {
+            isAsk = true;
+            requestId = envelope.__requestId;
+            item = envelope.msg;
+          }
+
+          try {
+            const result = await Promise.resolve(mainTask(item, this.actorState, utils));
+            this.actorState = result;
+
+            if (isAsk) {
+              const event = {
+                data: { workerId: this.workerId, taskId: this.taskId, requestId, type: "ask-response", payload: result }
+              } as any;
+              this.onmessage?.(event);
+              this.listeners["message"]?.forEach(fn => fn(event));
+            }
+          } catch (err: any) {
+            if (isAsk) {
+              const event = {
+                data: { workerId: this.workerId, taskId: this.taskId, requestId, type: "error", error: err.message }
+              } as any;
+              this.onmessage?.(event);
+              this.listeners["message"]?.forEach(fn => fn(event));
+            } else {
+              const event = {
+                data: { workerId: this.workerId, taskId: this.taskId, type: "worker-message", payload: { type: "error", error: err.message } }
+              } as any;
+              this.onmessage?.(event);
+              this.listeners["message"]?.forEach(fn => fn(event));
+            }
+          }
+        }
+
+        this.actorRunning = false;
+        const stoppedEvent = { data: { workerId: this.workerId, taskId: this.taskId, type: "stopped" } } as any;
+        this.onmessage?.(stoppedEvent);
+        this.listeners["message"]?.forEach(fn => fn(stoppedEvent));
+      }
+
       postMessage(msg: any) {
         setTimeout(() => {
           if (this.terminated) return;
 
-          if (msg.type === "task") {
-            try {
-              const mainTask = (globalThis as any).currentMainTask;
-              if (!mainTask) {
-                throw new Error("No main task configured");
-              }
-              const workerUtils = this.createWorkerUtils(msg);
-
-              let result;
-              if (mainTask.length >= 2) {
-                result = mainTask(msg.payload, workerUtils);
-              } else {
-                result = mainTask(msg.payload);
-              }
-
-              Promise.resolve(result).then(finalResult => {
-                const event = { data: { ...msg, type: "response", payload: finalResult } } as any;
-                this.onmessage?.(event);
-                this.listeners["message"]?.forEach(fn => fn(event));
-              }).catch(err => {
-                const event = { data: { ...msg, type: "error", error: err.message } } as any;
-                this.onmessage?.(event);
-                this.listeners["message"]?.forEach(fn => fn(event));
-              });
-            } catch (err: any) {
-              const event = { data: { ...msg, type: "error", error: err.message } } as any;
-              this.onmessage?.(event);
-              this.listeners["message"]?.forEach(fn => fn(event));
-            }
+          if (msg.type === "init") {
+            this.taskId = msg.taskId;
+            this.actorState = msg.payload;
+            this.actorRunning = true;
+            this.runBehaviorLoop(msg);
+          } else if (msg.type === "stop") {
+            this.actorRunning = false;
+            this.workerInbox.close();
           } else if (msg.type === "main-message") {
             this.workerInbox.send(msg.payload).catch(() => {});
+          } else if (msg.type === "ask") {
+            this.workerInbox.send({ __isAsk: true, __requestId: msg.payload.requestId, msg: msg.payload.msg }).catch(() => {});
           }
         }, 1);
       }
@@ -129,6 +175,8 @@ idescribe("actor", () => {
 
       terminate() {
         this.terminated = true;
+        this.actorRunning = false;
+        this.workerInbox.close();
         this.listeners = {};
         this.onmessage = null;
       }
@@ -146,165 +194,201 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = undefined;
   });
 
-  it("should start a task and return a result", async () => {
-    const mainTask = (x: number) => x * 3;
-    (globalThis as any).currentMainTask = mainTask;
-
-    const a = actor(mainTask);
-    const result = await a.start(7);
-
-    expect(result).toBe(21);
-    await a.finalize();
-  });
-
-  it("should support factory invocation with config", async () => {
-    const mainTask = (x: number) => x + 1;
-    (globalThis as any).currentMainTask = mainTask;
-
-    const factory = actor({});
-    const a = factory(mainTask);
-
-    const result = await a.start(5);
-    expect(result).toBe(6);
-    await a.finalize();
-  });
-
-  it("should call onRequest handler when worker calls utils.main.request()", async () => {
-    const onRequest = jasmine.createSpy("onRequest").and.callFake((payload: string) => {
-      return payload.toUpperCase();
-    });
-
-    async function mainTask(_x: number, utils: any) {
-      const response = await utils.main.request("hello");
-      return response;
+  it("should eagerly initialize behavior actor with state", async () => {
+    async function behavior(msg: string, state: number) {
+      return state + (msg === "inc" ? 1 : -1);
     }
 
-    (globalThis as any).currentMainTask = mainTask;
+    (globalThis as any).currentMainTask = behavior;
 
-    const a = actor({ onRequest })(mainTask);
+    const a = actor(behavior)(0);
+    await new Promise(r => setTimeout(r, 10));
+    expect(a.running).toBe(true);
 
-    // MockWorker resolves requests with hardcoded dummy data, but the
-    // onRequest handler is still invoked on the main thread.
-    const result = await a.start(1);
-    expect(result).toEqual(jasmine.objectContaining({ value: 10 }));
-    expect(onRequest).toHaveBeenCalled();
+    main.outbox.send(a, "inc");
+    await new Promise(r => setTimeout(r, 10));
+    expect(a.running).toBe(true);
+
+    await a.finalize();
+  });
+
+  it("should process multiple sends and update state", async () => {
+    async function behavior(msg: { type: string; n: number }, state: number) {
+      if (msg.type === "add") return state + msg.n;
+      if (msg.type === "sub") return state - msg.n;
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const a = actor(behavior)(10);
+    main.outbox.send(a, { type: "add", n: 5 });
+    main.outbox.send(a, { type: "sub", n: 3 });
+    main.outbox.send(a, { type: "add", n: 2 });
+
+    const state = await main.outbox.ask(a, { type: "add", n: 0 });
+    expect(state).toBe(14);
+
+    await a.finalize();
+  });
+
+  it("should ask and receive updated state", async () => {
+    async function behavior(msg: number, state: number) {
+      return state + msg;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const a = actor(behavior)(0);
+
+    const s1 = await main.outbox.ask(a, 5);
+    expect(s1).toBe(5);
+
+    const s2 = await main.outbox.ask(a, 3);
+    expect(s2).toBe(8);
+
     await a.finalize();
   });
 
   it("should deliver worker messages to onMessage subscribers", async () => {
     const messages: string[] = [];
 
-    async function mainTask(_x: number, utils: any) {
-      utils.main.send("msg-a");
-      utils.main.send("msg-b");
-      return "done";
+    async function behavior(msg: string, state: number, utils: any) {
+      if (msg === "ping") {
+        utils.outbox.send("pong");
+      }
+      return state;
     }
 
-    (globalThis as any).currentMainTask = mainTask;
+    (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(mainTask);
-    a.onMessage((msg) => messages.push(msg));
+    const a = actor(behavior)(0);
+    main.inbox.receive(a, (msg: string) => messages.push(msg));
 
-    await a.start(1);
+    main.outbox.send(a, "ping");
+    await new Promise(r => setTimeout(r, 20));
 
-    expect(messages).toEqual(["msg-a", "msg-b"]);
+    expect(messages).toEqual(["pong"]);
     await a.finalize();
   });
 
   it("should allow unsubscribing from onMessage", async () => {
     const messages: string[] = [];
 
-    async function mainTask(_x: number, utils: any) {
-      utils.main.send("only-one");
-      return "done";
+    async function behavior(msg: string, state: number, utils: any) {
+      if (msg === "ping") {
+        utils.outbox.send("pong");
+      }
+      return state;
     }
 
-    (globalThis as any).currentMainTask = mainTask;
+    (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(mainTask);
-    const unsubscribe = a.onMessage((msg) => messages.push(msg));
+    const a = actor(behavior)(0);
+    const unsubscribe = main.inbox.receive(a, (msg) => messages.push(msg));
     unsubscribe();
 
-    await a.start(1);
+    main.outbox.send(a, "ping");
+    await new Promise(r => setTimeout(r, 20));
 
     expect(messages).toEqual([]);
     await a.finalize();
   });
 
-  it("should send messages from main to worker via send", async () => {
-    async function mainTask(_x: number, utils: any) {
-      const first = await utils.main.receive();
-      const second = await utils.main.receive();
-      return [first, second];
+  it("should stop behavior actor gracefully", async () => {
+    async function behavior(_msg: any, state: number) {
+      return state;
     }
 
-    (globalThis as any).currentMainTask = mainTask;
+    (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(mainTask);
-
-    const pending = a.start(1);
-    a.send("alpha");
-    a.send("beta");
-
-    const result = await pending;
-    expect(result).toEqual(["alpha", "beta"]);
-    await a.finalize();
-  });
-
-  it("should propagate worker errors through start", async () => {
-    console.log = () => {};
-    console.error = () => {};
-    console.warn = () => {};
-
-    const mainTask = () => {
-      throw new Error("actor failure");
-    };
-    (globalThis as any).currentMainTask = mainTask;
-
-    const a = actor(mainTask);
-
-    try {
-      await a.start(1);
-      fail("Expected start to throw");
-    } catch (err: any) {
-      expect(err.message).toBe("actor failure");
-    }
-
-    console.log = originalLog;
-    console.error = originalError;
-    console.warn = originalWarn;
-    await a.finalize();
-  });
-
-  it("should expose running state", async () => {
-    const mainTask = (x: number) => x;
-    (globalThis as any).currentMainTask = mainTask;
-
-    const a = actor(mainTask);
-    expect(a.running).toBe(false);
-
-    const pending = a.start(1);
+    const a = actor(behavior)(0);
+    main.outbox.send(a, "anything");
+    await new Promise(r => setTimeout(r, 10));
     expect(a.running).toBe(true);
 
-    await pending;
+    a.stop();
+    await new Promise(r => setTimeout(r, 50));
     expect(a.running).toBe(false);
 
     await a.finalize();
   });
 
-  it("should stop while running", async () => {
-    async function mainTask(_x: number) {
-      await new Promise(r => setTimeout(r, 50));
-      return "done";
+  it("should use concurrency utils inside behavior actor", async () => {
+    async function behavior(_msg: any, state: number, utils: any) {
+      const { channel: ch, receive, send, select, otherwise } = utils.concurrency;
+      const c = ch(2);
+      await c.send(1);
+      await c.send(2);
+      const r1 = await c.receive();
+      const r2 = await c.receive();
+      const s = send(c, 3, "s");
+      const rc = receive(c, "r");
+      const sel = await select([s, rc, otherwise("def")]);
+      return { state, r1, r2, selName: sel.name };
     }
 
-    (globalThis as any).currentMainTask = mainTask;
+    (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(mainTask);
-    const pending = a.start(1);
+    const a = actor(behavior)(42);
+    const result = await main.outbox.ask(a, "go");
+
+    expect(result.state).toBe(42);
+    expect(result.r1).toBe(1);
+    expect(result.r2).toBe(2);
+    expect(["s", "r", "def"]).toContain(result.selName);
+    await a.finalize();
+  });
+
+  it("should reject ask after stop", async () => {
+    async function behavior(_msg: any, state: number) {
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const a = actor(behavior)(0);
+    main.outbox.send(a, "x");
+    await new Promise(r => setTimeout(r, 10));
+
     a.stop();
+    await expectAsync(main.outbox.ask(a, a, "y")).toBeRejectedWithError("Actor stopped");
+    await a.finalize();
+  });
 
-    await expectAsync(pending).toBeRejectedWithError("Actor stopped");
+  it("should support factory invocation with config", async () => {
+    async function behavior(msg: number, state: number) {
+      return state + msg;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const factory = actor({});
+    const a = factory(behavior)(5);
+
+    const state = await main.outbox.ask(a, 10);
+    expect(state).toBe(15);
+    await a.finalize();
+  });
+
+  it("should call onRequest handler when worker calls utils.outbox.request()", async () => {
+    const onRequest = jasmine.createSpy("onRequest").and.callFake((payload: string) => {
+      return payload.toUpperCase();
+    });
+
+    async function behavior(msg: string, state: number, utils: any) {
+      const response = await utils.outbox.request(msg);
+      utils.outbox.send(response);
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const a = actor({ onRequest })(behavior)(0);
+    main.outbox.send(a, "hello");
+    await new Promise(r => setTimeout(r, 20));
+
+    expect(onRequest).toHaveBeenCalled();
     await a.finalize();
   });
 
@@ -312,99 +396,26 @@ idescribe("actor", () => {
     const configMessages: string[] = [];
     const instanceMessages: string[] = [];
 
-    async function mainTask(_x: number, utils: any) {
-      utils.main.send("ping");
-      return "done";
+    async function behavior(msg: string, state: number, utils: any) {
+      if (msg === "go") {
+        utils.outbox.send("ping");
+      }
+      return state;
     }
 
-    (globalThis as any).currentMainTask = mainTask;
+    (globalThis as any).currentMainTask = behavior;
 
     const factory = actor({
       onMessage: (payload: string) => void configMessages.push(payload),
     });
-    const a = factory(mainTask);
-    a.onMessage((msg) => instanceMessages.push(msg));
+    const a = factory(behavior)(0);
+    main.inbox.receive(a, (msg) => instanceMessages.push(msg));
 
-    await a.start(1);
+    main.outbox.send(a, "go");
+    await new Promise(r => setTimeout(r, 20));
 
     expect(configMessages).toEqual(["ping"]);
     expect(instanceMessages).toEqual(["ping"]);
-    await a.finalize();
-  });
-
-  it("should allow actor task to use concurrency utils", async () => {
-    async function mainTask(_x: number, utils: any) {
-      const { channel: ch, receive, send, select, otherwise } = utils.concurrency;
-
-      const c = ch(2);
-      await c.send(1);
-      await c.send(2);
-
-      const r1 = await c.receive();
-      const r2 = await c.receive();
-
-      const s = send(c, 3, "s");
-      const rc = receive(c, "r");
-      const sel = await select([s, rc, otherwise("def")]);
-
-      return { r1, r2, selName: sel.name };
-    }
-
-    (globalThis as any).currentMainTask = mainTask;
-
-    const a = actor(mainTask);
-    const result = await a.start(1);
-
-    expect(result.r1).toBe(1);
-    expect(result.r2).toBe(2);
-    expect(["s", "r", "def"]).toContain(result.selName);
-    await a.finalize();
-  });
-
-  it("should finalize gracefully even when no tasks were run", async () => {
-    const mainTask = (x: number) => x;
-    (globalThis as any).currentMainTask = mainTask;
-
-    const a = actor(mainTask);
-    await a.finalize();
-  });
-
-  it("should use customMessageHandler when provided", async () => {
-    const mainTask = (x: number) => x + 1;
-    (globalThis as any).currentMainTask = mainTask;
-
-    const customMessageHandler = jasmine
-      .createSpy("customMessageHandler")
-      .and.callFake((event: MessageEvent<any>, _worker: Worker, pending: Map<string, any>) => {
-        const msg = event.data;
-        if (msg.type !== "response") return;
-        const p = pending.get(msg.taskId);
-        if (!p) return;
-        pending.delete(msg.taskId);
-        p.resolve(msg.payload);
-      });
-
-    const a = actor({ customMessageHandler } as any)(mainTask);
-
-    const r = await a.start(1);
-    expect(r).toBe(2);
-    expect(customMessageHandler).toHaveBeenCalled();
-
-    await a.finalize();
-  });
-
-  it("should reject start when already running", async () => {
-    async function mainTask(_x: number) {
-      await new Promise(r => setTimeout(r, 10));
-      return "done";
-    }
-
-    (globalThis as any).currentMainTask = mainTask;
-
-    const a = actor(mainTask);
-    const pending = a.start(1);
-    await expectAsync(a.start(2)).toBeRejectedWithError("Actor is already running");
-    pending.catch(() => {});
     await a.finalize();
   });
 });
