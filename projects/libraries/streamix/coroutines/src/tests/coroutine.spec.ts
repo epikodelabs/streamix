@@ -57,7 +57,7 @@ idescribe('coroutine', () => {
           main: {
             send: (payload: any) => {
               const event: MessageEvent<CoroutineMessage> = {
-                data: { workerId: message.workerId, taskId: message.taskId, type: "worker-message", payload }
+                data: { workerId: message.workerId, taskId: message.taskId, type: "notify", payload }
               } as any;
               this.onmessage?.(event);
               this.listeners["message"]?.forEach(fn => fn(event));
@@ -127,7 +127,7 @@ idescribe('coroutine', () => {
               this.onmessage?.(event);
               this.listeners['message']?.forEach(fn => fn(event));
             }
-          } else if (msg.type === "main-message") {
+          } else if (msg.type === "notify") {
             this.workerInbox.send(msg.payload).catch(() => {});
           } else if (msg.type === 'data') {
             // Handle responses to worker data requests (if needed)

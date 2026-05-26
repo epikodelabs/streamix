@@ -6,12 +6,7 @@ export type CoroutineMessageType =
   | "response"
   | "error"
   | "request"
-  | "data"
-  | "progress"
-  | "worker-message"
-  | "main-message"
-  | "ask"
-  | "ask-response"
+  | "notify"
   | "init"
   | "stop"
   | "stopped";
@@ -56,8 +51,6 @@ export type WorkerMessageHandler = (
 export type DefaultMessageHandlerOptions = {
   /** Called when the worker sends a request message. */
   onRequest?: (message: CoroutineMessage) => void | Promise<void>;
-  /** Called when the worker sends a progress update. */
-  onProgress?: (message: CoroutineMessage) => void | Promise<void>;
   /** Called when the worker sends a one-way message. */
   onWorkerMessage?: (message: CoroutineMessage) => void | Promise<void>;
 };
@@ -98,16 +91,7 @@ export function createDefaultMessageHandler(
           console.warn("Unhandled worker request:", msg);
         }
         break;
-      case "progress":
-        if (options?.onProgress) {
-          Promise.resolve(options.onProgress(msg)).catch((hookError) => {
-            console.warn("Worker progress hook failed:", hookError);
-          });
-        } else {
-          console.warn("Unhandled worker progress:", msg);
-        }
-        break;
-      case "worker-message":
+      case "notify":
         if (options?.onWorkerMessage) {
           Promise.resolve(options.onWorkerMessage(msg)).catch((hookError) => {
             console.warn("Worker message hook failed:", hookError);

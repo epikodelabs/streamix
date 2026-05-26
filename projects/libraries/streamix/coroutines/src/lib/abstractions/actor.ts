@@ -18,6 +18,7 @@ import {
 } from "../worker";
 import { type WorkerPoolConfig } from "../worker/pool";
 import { buildWorkerScript } from "../worker/script";
+import { buildActorWorkerRuntime } from "../worker/runtimes";
 import type { Actor } from "../worker/types";
 
 /**
@@ -692,147 +693,7 @@ const __streamixConcurrency = Object.freeze({
 });
 `;
 
-/**
- * Behavior-mode worker runtime.
- *
- * Supports persistent message loop via `init`, `post` (`main-message`),
- * `ask`, and `stop` messages.
- */
-const ACTOR_WORKER_RUNTIME = `
-const __pendingWorkerRequests = new Map();
-let __requestCounter = 0;
 
-const __postToMain = (message) => {
-  postMessage(message);
-};
-
-const __createRequestId = (taskId) => {
-  __requestCounter += 1;
-  return taskId + ':request:' + __requestCounter;
-};
-
-const __requestMain = (workerId, taskId, payload) => {
-  return new Promise((resolve, reject) => {
-    const requestId = __createRequestId(taskId);
-    __pendingWorkerRequests.set(requestId, { resolve, reject });
-    __postToMain({ workerId, taskId, requestId, type: 'request', payload });
-  });
-};
-
-const __createWorkerUtils = (workerId, taskId) => {
-  const inbox = __streamixConcurrency.channel();
-  return {
-    outbox: {
-      send: (messagePayload) => __postToMain({ workerId, taskId, payload: messagePayload, type: 'worker-message' }),
-      request: (requestPayload) => __requestMain(workerId, taskId, requestPayload),
-    },
-    inbox: {
-      receive: (signal) => inbox.receive(signal),
-      channel: inbox,
-    },
-    concurrency: __streamixConcurrency,
-    send: (destination, payload) => destination.send(payload),
-  };
-};
-
-const __actorMailbox = __streamixConcurrency.channel();
-let __actorState = undefined;
-let __actorRunning = false;
-let __actorId = null;
-let __workerId = null;
-
-const __runBehaviorLoop = async (workerId, taskId) => {
-  const utils = __createWorkerUtils(workerId, taskId);
-
-  while (__actorRunning) {
-    const envelope = await __actorMailbox.receive();
-    if (!envelope) break;
-
-    let msg = envelope;
-    let isAsk = false;
-    let requestId = null;
-
-    if (envelope && typeof envelope === "object" && envelope.__isAsk) {
-      isAsk = true;
-      requestId = envelope.__requestId;
-      msg = envelope.msg;
-    }
-
-    try {
-      const result = await __mainTask(msg, __actorState, utils);
-      __actorState = result;
-
-      if (isAsk) {
-        __postToMain({ workerId, taskId, requestId, type: "ask-response", payload: result });
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (isAsk) {
-        __postToMain({ workerId, taskId, requestId, type: "error", error: message });
-      } else {
-        __postToMain({ workerId, taskId, type: "worker-message", payload: { type: "error", error: message } });
-      }
-    }
-  }
-
-  __actorMailbox.close();
-  __postToMain({ workerId, taskId, type: "stopped" });
-};
-
-onmessage = async (event) => {
-  const { workerId, taskId, payload, type, requestId, error } = event.data;
-
-  if (type === "main-message") {
-    if (__actorRunning) {
-      __actorMailbox.send(payload).catch((error) => {
-        console.warn("Actor worker failed to enqueue message", error);
-      });
-    } else {
-      console.warn("Actor worker received main message before init", event.data);
-    }
-    return;
-  }
-
-  if (type === "data" || (type === "error" && !!requestId)) {
-    if (!requestId) {
-      console.warn("Actor worker received request response without requestId", event.data);
-      return;
-    }
-
-    const pendingRequest = __pendingWorkerRequests.get(requestId);
-    if (pendingRequest) {
-      __pendingWorkerRequests.delete(requestId);
-      if (type === "data") {
-        pendingRequest.resolve(payload);
-      } else {
-        pendingRequest.reject(new Error(error || payload?.error || payload?.message || "Actor request failed"));
-      }
-    }
-    return;
-  }
-
-  if (type === "init") {
-    __workerId = workerId;
-    __actorId = taskId;
-    __actorState = payload;
-    __actorRunning = true;
-    __runBehaviorLoop(workerId, taskId);
-    return;
-  }
-
-  if (type === "stop") {
-    __actorRunning = false;
-    __actorMailbox.close();
-    return;
-  }
-
-  if (type === "ask") {
-    __actorMailbox.send({ __isAsk: true, __requestId: payload.requestId, msg: payload.msg }).catch((error) => {
-      console.warn("Actor worker failed to enqueue ask", error);
-    });
-    return;
-  }
-};`;
 
 function handleRequest<Q, D>(
   message: CoroutineMessage,
@@ -860,7 +721,7 @@ function handleRequest<Q, D>(
           workerId,
           taskId,
           requestId,
-          type: "data",
+          type: "response",
           payload: resolved,
         });
       })
@@ -988,11 +849,10 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
     helpers: [ACTOR_CONCURRENCY_RUNTIME, ...(config?.helpers || [])],
     main: behavior as any,
     functions,
-    runtime: ACTOR_WORKER_RUNTIME,
+    runtime: buildActorWorkerRuntime(),
   });
 
-  const blob = new Blob([workerScript], { type: "application/javascript" });
-  const blobUrl = URL.createObjectURL(blob);
+  const blobUrl = acquireBlobUrl(workerScript);
 
   let worker: Worker | null = null;
   let running = false;
@@ -1010,7 +870,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
     const msg = event.data;
     const { type, payload, requestId } = msg;
 
-    if (type === "ask-response" && requestId && pendingAsks.has(requestId)) {
+    if (type === "response" && requestId && pendingAsks.has(requestId)) {
       const { resolve } = pendingAsks.get(requestId)!;
       pendingAsks.delete(requestId);
       resolve(payload);
@@ -1020,7 +880,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
       reject(new Error(msg.error ?? "Actor ask failed"));
     } else if (type === "request") {
       handleRequest(msg, config, worker!);
-    } else if (type === "worker-message") {
+    } else if (type === "notify") {
       handleWorkerMessage(msg, config, messageHandlers);
       pushGlobalInbox(actorRef, payload);
     } else if (type === "stopped") {
@@ -1068,16 +928,23 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
           taskId: (worker as any).__id,
           type: "stop",
         });
-        worker.terminate();
-        worker = null;
+        await new Promise<void>((resolve) =>
+          setTimeout(() => {
+            if (worker) {
+              worker.terminate();
+              worker = null;
+            }
+            resolve();
+          }, 100)
+        );
       }
-      URL.revokeObjectURL(blobUrl);
+      releaseBlobUrl(workerScript);
     },
   };
 
   actorRef = actor;
 
-  actorInternals.set(actor as any, {
+  (actor as any)[$actorInternals] = {
     post(msg: FromMain) {
       if (!worker || !running) {
         console.warn("Actor is not running; message dropped");
@@ -1087,7 +954,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
         workerId: (worker as any).__id,
         taskId: (worker as any).__id,
         payload: msg,
-        type: "main-message",
+        type: "notify",
       });
     },
 
@@ -1101,8 +968,9 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
         worker!.postMessage({
           workerId: (worker as any).__id,
           taskId: (worker as any).__id,
-          payload: { requestId: askId, msg },
-          type: "ask",
+          payload: msg,
+          requestId: askId,
+          type: "request",
         });
       });
     },
@@ -1111,16 +979,36 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
       messageHandlers.add(handler);
       return () => messageHandlers.delete(handler);
     },
-  });
+  };
 
   return actor;
 }
 
-const actorInternals = new WeakMap<object, {
-  post(msg: any): void;
-  ask(msg: any): Promise<any>;
-  onMessage(handler: (payload: any) => void): () => void;
-}>();
+const $actorInternals = Symbol("actorInternals");
+
+const blobCache = new Map<string, { blobUrl: string; refCount: number }>();
+
+function acquireBlobUrl(workerScript: string): string {
+  const cached = blobCache.get(workerScript);
+  if (cached) {
+    cached.refCount++;
+    return cached.blobUrl;
+  }
+  const blob = new Blob([workerScript], { type: "application/javascript" });
+  const blobUrl = URL.createObjectURL(blob);
+  blobCache.set(workerScript, { blobUrl, refCount: 1 });
+  return blobUrl;
+}
+
+function releaseBlobUrl(workerScript: string): void {
+  const cached = blobCache.get(workerScript);
+  if (!cached) return;
+  cached.refCount--;
+  if (cached.refCount <= 0) {
+    URL.revokeObjectURL(cached.blobUrl);
+    blobCache.delete(workerScript);
+  }
+}
 
 interface GlobalInboxEntry {
   actor: Actor<any, any, any>;
@@ -1158,12 +1046,12 @@ export const main = {
   outbox: {
     /** Sends a one-way message to the actor. */
     send<FromMain>(actor: Actor<FromMain, any, any>, msg: FromMain): void {
-      actorInternals.get(actor as any)!.post(msg);
+      (actor as any)[$actorInternals].post(msg);
     },
 
     /** Sends a message and awaits the updated state. */
     ask<FromMain, S>(actor: Actor<FromMain, any, S>, msg: FromMain): Promise<S> {
-      return actorInternals.get(actor as any)!.ask(msg);
+      return (actor as any)[$actorInternals].ask(msg);
     },
   },
 
@@ -1177,7 +1065,7 @@ export const main = {
           globalInboxResolver = resolve;
         });
       }
-      return actorInternals.get(actorOrHandler as any)!.onMessage(handler);
+      return (actorOrHandler as any)[$actorInternals].onMessage(handler);
     }) as InboxAPI,
   },
 };

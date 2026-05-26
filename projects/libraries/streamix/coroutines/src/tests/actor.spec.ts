@@ -1,9 +1,9 @@
 import {
-  main,
   actor,
   background,
   channel,
   ContextCancelledError,
+  main,
   otherwise,
   receive,
   select,
@@ -11,19 +11,20 @@ import {
   withCancel,
 } from "@epikodelabs/streamix/coroutines";
 import {
-  idescribe } from "./env.spec";
+  idescribe
+} from "./env.spec";
 
 idescribe("actor", () => {
   let originalWorker: any;
-  let originalLog: typeof console.log;
-  let originalError: typeof console.error;
-  let originalWarn: typeof console.warn;
+  let _originalLog: typeof console.log;
+  let _originalError: typeof console.error;
+  let _originalWarn: typeof console.warn;
 
   beforeAll(() => {
     originalWorker = (globalThis as any).Worker;
-    originalLog = console.log;
-    originalError = console.error;
-    originalWarn = console.warn;
+    _originalLog = console.log;
+    _originalError = console.error;
+    _originalWarn = console.warn;
     (globalThis as any).currentMainTask = undefined;
 
     class MockWorker {
@@ -35,6 +36,8 @@ idescribe("actor", () => {
       private actorRunning = false;
       private workerId = 1;
       private taskId = "";
+      private pendingWorkerRequests = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+      private requestCounter = 0;
 
       constructor(_url: string, _options?: any) {
         this.workerId = Math.floor(Math.random() * 100000);
@@ -44,27 +47,29 @@ idescribe("actor", () => {
         const outbox = {
           send: (payload: any) => {
             const event = {
-              data: { workerId: message.workerId, taskId: message.taskId, type: "worker-message", payload }
+              data: { workerId: message.workerId, taskId: message.taskId, type: "notify", payload }
             } as any;
             this.onmessage?.(event);
             this.listeners["message"]?.forEach(fn => fn(event));
           },
           request: (requestPayload: any) => {
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
+              this.requestCounter += 1;
+              const requestId = message.taskId + ":request:" + this.requestCounter;
+              this.pendingWorkerRequests.set(requestId, { resolve, reject });
+
               setTimeout(() => {
                 const reqEvent = {
                   data: {
                     workerId: message.workerId,
                     taskId: message.taskId,
-                    requestId: message.taskId + ":request:1",
+                    requestId,
                     type: "request",
                     payload: requestPayload,
                   }
                 } as any;
                 this.onmessage?.(reqEvent);
                 this.listeners["message"]?.forEach(fn => fn(reqEvent));
-
-                resolve({ value: 10, message: "Mock response" });
               }, 1);
             });
           },
@@ -89,7 +94,7 @@ idescribe("actor", () => {
         };
       }
 
-      private async runBehaviorLoop(msg: any) {
+      private async runBehaviorLoop(_msg: any) {
         const utils = this.createWorkerUtils({ workerId: this.workerId, taskId: this.taskId });
         const mainTask = (globalThis as any).currentMainTask;
         if (!mainTask) return;
@@ -99,12 +104,10 @@ idescribe("actor", () => {
           if (!envelope) break;
 
           let item = envelope;
-          let isAsk = false;
           let requestId = null;
 
-          if (envelope && typeof envelope === "object" && envelope.__isAsk) {
-            isAsk = true;
-            requestId = envelope.__requestId;
+          if (envelope && typeof envelope === "object" && "requestId" in envelope) {
+            requestId = envelope.requestId;
             item = envelope.msg;
           }
 
@@ -112,15 +115,15 @@ idescribe("actor", () => {
             const result = await Promise.resolve(mainTask(item, this.actorState, utils));
             this.actorState = result;
 
-            if (isAsk) {
+            if (requestId) {
               const event = {
-                data: { workerId: this.workerId, taskId: this.taskId, requestId, type: "ask-response", payload: result }
+                data: { workerId: this.workerId, taskId: this.taskId, requestId, type: "response", payload: result }
               } as any;
               this.onmessage?.(event);
               this.listeners["message"]?.forEach(fn => fn(event));
             }
           } catch (err: any) {
-            if (isAsk) {
+            if (requestId) {
               const event = {
                 data: { workerId: this.workerId, taskId: this.taskId, requestId, type: "error", error: err.message }
               } as any;
@@ -128,7 +131,7 @@ idescribe("actor", () => {
               this.listeners["message"]?.forEach(fn => fn(event));
             } else {
               const event = {
-                data: { workerId: this.workerId, taskId: this.taskId, type: "worker-message", payload: { type: "error", error: err.message } }
+                data: { workerId: this.workerId, taskId: this.taskId, type: "notify", payload: { type: "error", error: err.message } }
               } as any;
               this.onmessage?.(event);
               this.listeners["message"]?.forEach(fn => fn(event));
@@ -154,10 +157,22 @@ idescribe("actor", () => {
           } else if (msg.type === "stop") {
             this.actorRunning = false;
             this.workerInbox.close();
-          } else if (msg.type === "main-message") {
+          } else if (msg.type === "notify") {
             this.workerInbox.send(msg.payload).catch(() => {});
-          } else if (msg.type === "ask") {
-            this.workerInbox.send({ __isAsk: true, __requestId: msg.payload.requestId, msg: msg.payload.msg }).catch(() => {});
+          } else if (msg.type === "request" && msg.requestId) {
+            this.workerInbox.send({ msg: msg.payload, requestId: msg.requestId }).catch(() => {});
+          } else if (msg.type === "request") {
+            this.workerInbox.send(msg.payload).catch(() => {});
+          } else if ((msg.type === "response" || msg.type === "error") && msg.requestId) {
+            const pending = this.pendingWorkerRequests.get(msg.requestId);
+            if (pending) {
+              this.pendingWorkerRequests.delete(msg.requestId);
+              if (msg.type === "response") {
+                pending.resolve(msg.payload);
+              } else {
+                pending.reject(new Error(msg.error || "Mock worker request failed"));
+              }
+            }
           }
         }, 1);
       }
@@ -187,6 +202,9 @@ idescribe("actor", () => {
 
   afterAll(() => {
     (globalThis as any).Worker = originalWorker;
+    console.log = _originalLog;
+    console.error = _originalError;
+    console.warn = _originalWarn;
     delete (globalThis as any).currentMainTask;
   });
 
@@ -330,8 +348,8 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)(42);
-    const result = await main.outbox.ask(a, "go");
+    const a = actor(behavior as any)(42);
+    const result = await main.outbox.ask(a, "go") as any;
 
     expect(result.state).toBe(42);
     expect(result.r1).toBe(1);
@@ -352,7 +370,7 @@ idescribe("actor", () => {
     await new Promise(r => setTimeout(r, 10));
 
     a.stop();
-    await expectAsync(main.outbox.ask(a, a, "y")).toBeRejectedWithError("Actor stopped");
+    await expectAsync(main.outbox.ask(a, "y")).toBeRejectedWithError("Actor stopped");
     await a.finalize();
   });
 
