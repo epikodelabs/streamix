@@ -1,6 +1,7 @@
 // services/image-pipeline.service.ts
 import { computed, Injectable, NgZone, signal } from '@angular/core';
 import {
+    catchError,
     createSubject,
     filter,
     fromPromise,
@@ -53,10 +54,12 @@ export class ImagePipelineService {
   readonly isProcessing = computed(() => this.jobs().some(j => j.state === 'processing'));
 
   private resizeActor = actor<ResizeOutput, any, any, JobProgress, ProcessInput>(
-    (msg: ProcessInput, _state: any, utils: any) => resizeImage(msg, utils)
+    (msg: ProcessInput, _state: any, utils: any) => resizeImage(msg, utils),
+    resizeImage
   )(null!);
   private compressActor = actor<CompressOutput, any, any, JobProgress, ResizeOutput>(
-    (msg: ResizeOutput, _state: any, utils: any) => compressImage(msg, utils)
+    (msg: ResizeOutput, _state: any, utils: any) => compressImage(msg, utils),
+    compressImage
   )(null!);
 
   constructor(private ngZone: NgZone) {
@@ -98,6 +101,18 @@ export class ImagePipelineService {
               fileName: task.file.name,
             };
             return input;
+          }),
+          catchError((err) => {
+            console.error('Read file error:', err);
+            this.ngZone.run(() => {
+              this.jobs.update(list =>
+                list.map(j =>
+                  j.id === task.id
+                    ? { ...j, state: 'error' as const, error: String(err?.message ?? err) }
+                    : j
+                )
+              );
+            });
           })
         )
       ),
@@ -130,21 +145,22 @@ export class ImagePipelineService {
                 )
               );
             });
+          }),
+          catchError((err) => {
+            console.error('Pipeline error:', err);
+            this.ngZone.run(() => {
+              this.jobs.update(list =>
+                list.map(j =>
+                  j.id === input.taskId
+                    ? { ...j, state: 'error' as const, error: String(err?.message ?? err) }
+                    : j
+                )
+              );
+            });
           })
         )
       )
-    ).subscribe({
-      error: (err: any) => {
-        console.error('Pipeline error:', err);
-        this.ngZone.run(() => {
-          this.jobs.update(list =>
-            list.map(j =>
-              j.state === 'processing' ? { ...j, state: 'error' as const, error: String(err?.message ?? err) } : j
-            )
-          );
-        });
-      },
-    });
+    ).subscribe();
   }
 
   uploadFile(file: File) {
