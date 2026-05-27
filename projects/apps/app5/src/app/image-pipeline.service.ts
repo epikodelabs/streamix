@@ -63,11 +63,12 @@ export class ImagePipelineService {
   )('image-compress', null!);
 
   constructor() {
-    main.inbox.listen(this.resizeActor, (progress: JobProgress) => {
-      this.progressStream.next({ id: progress.taskId!, progress });
-    });
+    main.bus.listen('main', (message) => {
+      if (message.topic !== 'progress') {
+        return;
+      }
 
-    main.inbox.listen(this.compressActor, (progress: JobProgress) => {
+      const progress = message.payload as JobProgress;
       this.progressStream.next({ id: progress.taskId!, progress });
     });
 

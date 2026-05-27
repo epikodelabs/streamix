@@ -24,7 +24,7 @@ async function timerBehavior(
     state.counter = msg.initialTime;
     state.timerId = setInterval(() => {
       state.counter--;
-      utils.outbox.send({ tick: state.counter, timestamp: Date.now() });
+      utils.outbox.send('main', 'tick', { tick: state.counter, timestamp: Date.now() });
       if (state.counter <= 0 && state.timerId !== null) {
         clearInterval(state.timerId);
         state.timerId = null;
@@ -32,7 +32,7 @@ async function timerBehavior(
     }, 1000);
 
     // Emit the initial tick immediately
-    utils.outbox.send({ tick: state.counter, timestamp: Date.now() });
+    utils.outbox.send('main', 'tick', { tick: state.counter, timestamp: Date.now() });
   }
 
   if (msg.type === 'stop') {
@@ -64,7 +64,12 @@ export class AppComponent implements OnInit, OnDestroy {
   private unsubscribeMessage!: () => void;
 
   ngOnInit(): void {
-    this.unsubscribeMessage = main.inbox.listen(this.timerActor, (msg: { tick: number; timestamp: number }) => {
+    this.unsubscribeMessage = main.bus.listen('main', (message) => {
+      if (message.topic !== 'tick') {
+        return;
+      }
+
+      const msg = message.payload as { tick: number; timestamp: number };
       this.timerValue = msg.tick;
       console.log('Counting down...', msg.tick);
     });

@@ -10,9 +10,9 @@
  * Communication flow:
  *   UI → Cashier : main.send(cashier, { type: 'order' | 'cancel' | 'close' })
  *   Cashier → Chef : utils.outbox.send('chef', 'cook' | 'cancel', ...)
- *   Chef → Main    : utils.outbox.request(item)       fetches recipe
- *                    utils.outbox.request({type:'bake'}) dispatches to oven
- *                    utils.outbox.send(event)   pushes live events
+ *   Chef → Main    : utils.outbox.request('main', 'recipe', item) fetches recipe
+ *                    utils.outbox.request('main', 'bake', { order, recipe }) dispatches to oven
+ *                    utils.outbox.send('main', topic, event) pushes live events
  */
 import { Injectable } from '@angular/core';
 import { createBehaviorSubject, createSubject } from '@epikodelabs/streamix';
@@ -96,7 +96,7 @@ function checkClosed(state: ChefState, utils: WorkerUtils<any, any, any, Kitchen
   if (state.closing && state.activeTasks === 0 && !state.closedSent) {
     state.closedSent = true;
     const revenue = state.completedCount * 10; // simplified
-    utils.outbox.send({
+    utils.outbox.send('main', 'closed', {
       type: 'closed',
       completed: state.completedCount,
       cancelled: state.cancelledCount,
@@ -122,23 +122,23 @@ const chef = actor(async function chef(
           if (state.cancelledIds.has(order.id)) {
             state.activeTasks--;
             state.cancelledCount++;
-            utils.outbox.send({ type: 'cancelled', order, reason: 'Cancelled before start', oven: 'N/A' } as KitchenEvent);
+            utils.outbox.send('main', 'cancelled', { type: 'cancelled', order, reason: 'Cancelled before start', oven: 'N/A' } as KitchenEvent);
             checkClosed(state, utils);
             return;
           }
 
-          const recipe = await utils.outbox.request(order.item) as Recipe | undefined;
+          const recipe = await utils.outbox.request('main', 'recipe', order.item) as Recipe | undefined;
           if (!recipe) throw new Error(`No recipe for ${order.item}`);
 
-          const bakeResult = await utils.outbox.request({ type: 'bake', order, recipe }) as { ovenId: string; price: number };
+          const bakeResult = await utils.outbox.request('main', 'bake', { order, recipe }) as { ovenId: string; price: number };
           state.activeTasks--;
           state.completedCount++;
-          utils.outbox.send({ type: 'ready', order, oven: bakeResult.ovenId, price: bakeResult.price } as KitchenEvent);
+          utils.outbox.send('main', 'ready', { type: 'ready', order, oven: bakeResult.ovenId, price: bakeResult.price } as KitchenEvent);
           checkClosed(state, utils);
         } catch (err: any) {
           state.activeTasks--;
           state.cancelledCount++;
-          utils.outbox.send({ type: 'cancelled', order, reason: err?.message ?? String(err), oven: 'N/A' } as KitchenEvent);
+          utils.outbox.send('main', 'cancelled', { type: 'cancelled', order, reason: err?.message ?? String(err), oven: 'N/A' } as KitchenEvent);
           checkClosed(state, utils);
         }
       })();
@@ -158,12 +158,12 @@ const chef = actor(async function chef(
 
   return state;
 }, {
-  onRequest: async (payload: unknown) => {
-    if (typeof payload === 'string') {
+  onRequest: async (topic: string, payload: unknown) => {
+    if (topic === 'recipe' && typeof payload === 'string') {
       return recipes.get(payload);
     }
-    const bakeTask = payload as { type: 'bake'; order: Order; recipe: Recipe };
-    if (bakeTask.type === 'bake') {
+    const bakeTask = payload as { order: Order; recipe: Recipe };
+    if (topic === 'bake') {
       const oven = ovens.find(o => !o.busy);
       if (!oven) throw new Error('No free oven');
       oven.busy = true;
@@ -242,7 +242,8 @@ export class KitchenService {
   private destroyed = false;
 
   constructor() {
-    this.onMessageUnsubscribe = main.inbox.listen(chef, (event: KitchenEvent) => {
+    this.onMessageUnsubscribe = main.bus.listen('main', (message) => {
+      const event = message.payload as KitchenEvent;
       this.eventsSubject.next(event);
       this.handleEvent(event);
     });
@@ -363,7 +364,8 @@ export class KitchenService {
     return new Promise((resolve) => {
       let resolved = false;
 
-      const unsub = main.inbox.listen(chef, (event: KitchenEvent) => {
+      const unsub = main.bus.listen('main', (message) => {
+        const event = message.payload as KitchenEvent;
         if (event.type === 'closed' && !resolved) {
           resolved = true;
           unsub();

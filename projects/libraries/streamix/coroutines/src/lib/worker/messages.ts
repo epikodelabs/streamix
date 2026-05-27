@@ -1,5 +1,7 @@
 /**
- * Message envelope exchanged between the main thread and worker instances.
+ * Internal message envelope exchanged between the main thread and worker instances.
+ *
+ * This is coroutine/actor runtime plumbing, not public actor API surface.
  */
 export type WorkerProtocolMessageType =
   | "task"
@@ -22,14 +24,10 @@ export type WorkerProtocolMessage = {
   payload?: any;
   error?: string;
   requestId?: string;
-  /** Actor bus target for routed messages. */
+  /** Direct actor or main-thread request/message target. */
   to?: string | string[];
-  /** Topic for bus-routed or tagged messages. */
+  /** Topic tag for targeted actor requests/messages. */
   topic?: string;
-  /** Serialized function source for worker-backed task runners. */
-  code?: string;
-  /** Serialized helper function sources for worker-backed task runners. */
-  deps?: string[];
 };
 
 /**

@@ -40,11 +40,11 @@ const __createRequestId = (taskId) => {
   return taskId + ':request:' + __requestCounter;
 };
 
-const __requestMain = (workerId, taskId, payload) => {
+const __requestMain = (workerId, taskId, to, topic, payload) => {
   return new Promise((resolve, reject) => {
     const requestId = __createRequestId(taskId);
     __pendingWorkerRequests.set(requestId, { resolve, reject });
-    __postToMain({ workerId, taskId, requestId, type: 'request', payload });
+    __postToMain({ workerId, taskId, requestId, to, topic, type: 'request', payload });
   });
 };
 
@@ -58,22 +58,8 @@ const __enqueueActorInbox = (payload, scope) => {
 
 const __createWorkerUtils = (workerId, taskId) => {
   const outbox = {
-    request: (requestPayload) => __requestMain(workerId, taskId, requestPayload),
-    publish: (topic, messagePayload) =>
-      __postToMain({
-        workerId,
-        taskId,
-        payload: { kind: 'actor-bus', topic, payload: messagePayload },
-        type: 'notify',
-      }),
-    send: (...args) => {
-      if (args.length === 1) {
-        const [messagePayload] = args;
-        __postToMain({ workerId, taskId, payload: messagePayload, type: 'notify' });
-        return;
-      }
-
-      const [to, topic, messagePayload] = args;
+    request: (to, topic, requestPayload) => __requestMain(workerId, taskId, to, topic, requestPayload),
+    send: (to, topic, messagePayload) => {
       __postToMain({
         workerId,
         taskId,

@@ -20,8 +20,20 @@ import type { Actor } from "../worker/types";
 /**
  * Concurrency utils injected into actor workers.
  *
- * Provides channel operations, context control, and select helpers
- * that mirror the main-thread API but run inside the worker scope.
+ * These are the worker-side coroutine primitives available inside
+ * `actor((msg, state, utils) => ...)`.
+ *
+ * They mirror the standalone concurrency API, but are pre-injected into the
+ * actor worker so behaviors can coordinate background tasks without importing
+ * anything from the main thread.
+ *
+ * - `channel(capacity?)`: create a worker-local async channel
+ * - `receive(ch, name?)` / `send(ch, value, name?)`: build `select(...)` cases
+ * - `otherwise(name?)`: default `select(...)` branch
+ * - `select(cases, ctx?)`: race channel operations fairly
+ * - `background()`: root cancellation context
+ * - `withCancel/withTimeout/withDeadline(...)`: derive cancellable contexts
+ * - `ChannelClosedError` / `ContextCancelledError`: worker-side error classes
  */
 export type WorkerConcurrency = {
   channel: typeof channel;
@@ -40,21 +52,13 @@ export type WorkerConcurrency = {
 /**
  * Outbox API exposed to actor workers.
  *
- * This handles main-thread requests plus actor-bus publishing and direct sends.
+ * This handles targeted requests plus direct sends.
  */
 export type WorkerOutbox<Q = any, D = any> = {
-  /** Sends a request to the main thread and awaits a response. */
-  request: (payload: Q) => Promise<D>;
-  /** Broadcasts a bus message to all named actors. */
-  publish: <T = any>(topic: string, payload: T) => void;
-  /**
-   * Sends a one-way message to the main thread, or a direct bus message
-   * to one or more named actor targets.
-   */
-  send: {
-    <T = any>(payload: T): void;
-    <T = any>(to: ActorBusTarget, topic: string, payload: T): void;
-  };
+  /** Sends a request to one named target and awaits a response. Use `"main"` for the source actor's main-thread side. */
+  request: (to: ActorBusTarget, topic: string, payload: Q) => Promise<D>;
+  /** Sends a direct bus message to one or more named actor targets. */
+  send: <T = any>(to: ActorBusTarget, topic: string, payload: T) => void;
 };
 
 /**
@@ -66,8 +70,6 @@ export type WorkerOutbox<Q = any, D = any> = {
 export type WorkerInbox<Incoming = any> = {
   /** Receives the next message routed to this actor, or `undefined` if the inbox closes. */
   listen: (signal?: AbortSignal) => Promise<Incoming | undefined>;
-  /** Backward-compatible alias for `listen`. */
-  receive: (signal?: AbortSignal) => Promise<Incoming | undefined>;
 };
 
 /**
@@ -110,8 +112,8 @@ export type ActorBusHandler<T = any> = (
 /**
  * Main-thread actor bus integrated into the actor messaging surface.
  *
- * Workers send targeted messages through `utils.outbox.send(to, topic, payload)`,
- * while the main thread can publish broadcast through `main.bus.publish`.
+ * Workers send direct messages through `utils.outbox.send(to, topic, payload)`,
+ * while the main thread can publish or send through `main.bus`.
  */
 export interface ActorBus {
   /**
@@ -173,23 +175,28 @@ export interface ActorBehavior<S = any, Q = any, D = any, Incoming = any> {
 }
 
 /**
- * Metadata describing the protocol envelope around an actor message.
+ * Public request/message metadata surfaced to advanced actor hooks.
  *
- * This is surfaced to advanced handlers without exposing the full internal
- * worker-pool protocol as part of the main public API.
+ * This intentionally exposes routing information rather than the full internal
+ * worker protocol.
  */
-export type ActorMessageContext = Pick<
-  WorkerProtocolMessage,
-  "workerId" | "taskId" | "requestId"
->;
+export type ActorMessageContext = {
+  /** Actor name that initiated the request or direct message, when known. */
+  from?: string;
+  /** Target name(s) for direct actor routing. */
+  to?: ActorBusTarget;
+  /** Topic associated with the routed request or message. */
+  topic?: string;
+};
 
 /**
- * Request handler used by `utils.outbox.request()`.
+ * Request handler used by `utils.outbox.request(name, topic, payload)`.
  *
  * Keep this function small, or delegate to a `coroutine(...)` instance via
  * `request: dataWorker.processTask` when data resolution itself is expensive.
  */
 export type ActorRequestHandler<Q = any, D = any> = (
+  topic: string,
   request: Q,
   message: ActorMessageContext
 ) => Promise<D> | D;
@@ -841,24 +848,61 @@ function postActorResponse(
 
 function handleRequest<Q, D>(
   message: WorkerProtocolMessage,
+  sourceActor: Actor,
   options: ActorDefinitionOptions<Q, D, any> | undefined,
   worker: Worker
 ) {
-  const { workerId, taskId, requestId, payload } = message;
+  const { workerId, taskId, requestId, payload, topic } = message;
+  const targets = normalizeActorBusTargets(message.to);
 
-  if (!options?.onRequest) {
+  if (targets.length !== 1) {
     postActorResponse(worker, {
       workerId,
       taskId,
       requestId,
       type: "error",
-      error: "No actor request handler configured",
+      error: "Actor request requires exactly one target",
+    });
+    return;
+  }
+
+  const targetName = targets[0];
+  const handler =
+    targetName === "main"
+      ? options?.onRequest
+      : actorBusRegistrationsById.get(targetName)?.onRequest;
+
+  if (!handler) {
+    postActorResponse(worker, {
+      workerId,
+      taskId,
+      requestId,
+      type: "error",
+      error:
+        targetName === "main"
+          ? "No actor request handler configured"
+          : `No actor request handler configured for "${targetName}"`,
+    });
+    return;
+  }
+
+  if (!topic) {
+    postActorResponse(worker, {
+      workerId,
+      taskId,
+      requestId,
+      type: "error",
+      error: "Actor request requires a topic",
     });
     return;
   }
 
   try {
-    const result = options.onRequest(payload as Q, message);
+    const result = handler(topic, payload as Q, {
+      from: sourceActor.name,
+      to: message.to,
+      topic,
+    });
     Promise.resolve(result)
       .then((resolved) => {
         postActorResponse(worker, {
@@ -1085,7 +1129,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
       pendingRequests.delete(requestId);
       reject(new Error(msg.error ?? "Actor request failed"));
     } else if (type === "request") {
-      handleRequest(msg, options, worker!);
+      handleRequest(msg, actorRef, options, worker!);
     } else if (type === "notify") {
       if (!running) {
         return;
@@ -1124,7 +1168,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   };
 
   actorRef = actor;
-  registerActorBusTarget(name, actorRef);
+  registerActorBusTarget(name, actorRef, options?.onRequest);
 
   (actor as any)[$actorInternals] = {
     stop() {
@@ -1178,6 +1222,7 @@ interface GlobalInboxEntry {
 type ActorBusRegistration = {
   actor: Actor;
   name: string;
+  onRequest?: ActorRequestHandler<any, any>;
 };
 
 let globalInboxQueue: GlobalInboxEntry[] = [];
@@ -1253,7 +1298,11 @@ function unregisterActorBusTarget(idOrActor: string | Actor) {
   actorBusRegistrationsByActor.delete(registration.actor);
 }
 
-function registerActorBusTarget(name: string, actor: Actor) {
+function registerActorBusTarget(
+  name: string,
+  actor: Actor,
+  onRequest?: ActorRequestHandler<any, any>
+) {
   const existingRegistration = actorBusRegistrationsById.get(name);
   if (existingRegistration && existingRegistration.actor !== actor) {
     throw new Error(`Actor name "${name}" is already registered`);
@@ -1264,6 +1313,7 @@ function registerActorBusTarget(name: string, actor: Actor) {
   const registration: ActorBusRegistration = {
     actor,
     name,
+    onRequest,
   };
 
   actorBusRegistrationsById.set(name, registration);
@@ -1407,9 +1457,9 @@ export const main = {
   /**
    * Integrated actor message bus.
    *
-   * Workers send targeted messages through `utils.outbox.send(to, topic, payload)`,
-   * while the main thread can publish to every actor, send directly by name,
-   * or listen to all traffic or direct messages addressed to a specific name.
+   * Workers send directly with `utils.outbox.send(to, topic, payload)`. The
+   * main thread can publish to every actor, send directly by name, or listen
+   * to all traffic or direct messages addressed to a specific name.
    * The main-thread endpoint name is always `"main"`.
    */
   bus: {
