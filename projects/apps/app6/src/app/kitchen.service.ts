@@ -300,7 +300,7 @@ const chef = actor('chef', chefBehavior, {
   cancelledIds: new Set<string>(),
 }, emitKitchenEvent, checkClosed);
 
-registerActorRequestHandler('chef', async (topic: string, payload: unknown) => {
+registerActorRequestHandler('main', async (topic: string, payload: unknown) => {
   if (topic === 'recipe' && typeof payload === 'string') {
     return recipes.get(payload);
   }

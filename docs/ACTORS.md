@@ -272,7 +272,7 @@ const chef = actor("chef", async function chef(msg: any, state: any, utils: any)
   return state;
 }, {});
 
-registerActorRequestHandler("chef", async (topic: string, payload: unknown) => {
+registerActorRequestHandler("main", async (topic: string, payload: unknown) => {
   if (topic === "recipe" && typeof payload === "string") return recipes.get(payload);
 
   const task = payload as { order: Order; recipe: Recipe };
