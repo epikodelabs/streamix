@@ -953,6 +953,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
 
     running = false;
     rejectPendingRequests();
+    clearGlobalInbox(actorRef);
 
     const activeWorker = worker;
     if (!activeWorker) {
@@ -1013,6 +1014,9 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
     } else if (type === "request") {
       handleRequest(msg, config, worker!);
     } else if (type === "notify") {
+      if (!running) {
+        return;
+      }
       handleWorkerMessage(msg, config, messageHandlers);
       pushGlobalInbox(actorRef, payload);
     } else if (type === "stopped") {
@@ -1103,6 +1107,10 @@ function pushGlobalInbox(actor: Actor, payload: any) {
   } else {
     globalInboxQueue.push(entry);
   }
+}
+
+function clearGlobalInbox(actor: Actor) {
+  globalInboxQueue = globalInboxQueue.filter((entry) => entry.actor !== actor);
 }
 
 interface InboxAPI {
