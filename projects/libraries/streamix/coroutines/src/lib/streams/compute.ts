@@ -5,7 +5,7 @@ import { createTaskPool } from "../worker/pool";
 import type { WorkerScript } from "../worker/types";
 
 export interface ComputeRunner<T = any, R = any> {
-  (params: T): Promise<R>;
+  (params: T | Promise<T>): Promise<R>;
   finalize: () => Promise<void>;
 }
 

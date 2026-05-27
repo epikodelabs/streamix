@@ -374,6 +374,26 @@ idescribe("actor", () => {
     await a.finalize();
   });
 
+  it("should reject in-flight requests when stopped", async () => {
+    async function behavior(msg: string, state: number) {
+      if (msg === "wait") {
+        return new Promise<number>(() => {});
+      }
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const a = actor(behavior)(0);
+    const pending = main.outbox.request(a, "wait");
+
+    await new Promise(r => setTimeout(r, 10));
+    a.stop();
+
+    await expectAsync(pending).toBeRejectedWithError("Actor stopped");
+    await a.finalize();
+  });
+
   it("should support factory invocation with config", async () => {
     async function behavior(msg: number, state: number) {
       return state + msg;
@@ -434,6 +454,32 @@ idescribe("actor", () => {
 
     expect(configMessages).toEqual(["ping"]);
     expect(instanceMessages).toEqual(["ping"]);
+    await a.finalize();
+  });
+
+  it("should resolve multiple queued global inbox receives", async () => {
+    async function behavior(msg: string, state: number, utils: any) {
+      if (msg === "double") {
+        utils.outbox.send("first");
+        utils.outbox.send("second");
+      }
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const a = actor(behavior)(0);
+    const first = main.inbox.receive();
+    const second = main.inbox.receive();
+
+    main.outbox.send(a, "double");
+
+    const [entry1, entry2] = await Promise.all([first, second]);
+    expect(entry1.actor).toBe(a);
+    expect(entry1.payload).toBe("first");
+    expect(entry2.actor).toBe(a);
+    expect(entry2.payload).toBe("second");
+
     await a.finalize();
   });
 });

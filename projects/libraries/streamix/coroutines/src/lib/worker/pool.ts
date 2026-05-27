@@ -1,7 +1,7 @@
 import type { CoroutineMessage, PendingTaskMap } from "./messages";
 import { createDefaultMessageHandler } from "./messages";
-import { generateTaskId } from "./utils";
 import type { TaskPool } from "./types";
+import { generateTaskId } from "./utils";
 
 /**
  * Shared worker-script configuration used by both `coroutine` and `actor`.
@@ -32,8 +32,6 @@ let workerIdentifierCounter = 0;
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
-
-
 function createPoolCore(
   name: string,
   maxWorkers: number,
@@ -49,6 +47,13 @@ function createPoolCore(
 
   const getWorkerId = (worker: Worker): number | undefined => {
     return (worker as any).__id;
+  };
+
+  const removeFromIdlePool = (worker: Worker) => {
+    const pooledIndex = workerPool.findIndex((entry) => entry === worker);
+    if (pooledIndex >= 0) {
+      workerPool.splice(pooledIndex, 1);
+    }
   };
 
   const rejectPendingTasksForWorker = (worker: Worker, reason: Error) => {
@@ -102,6 +107,7 @@ function createPoolCore(
     }
     if (isFinalizing) {
       activeWorkers.delete(workerId);
+      removeFromIdlePool(worker);
       worker.terminate();
       return;
     }
@@ -121,16 +127,12 @@ function createPoolCore(
     }
 
     activeWorkers.delete(workerId);
+    removeFromIdlePool(worker);
     worker.terminate();
     rejectPendingTasksForWorker(
       worker,
       reason ?? new Error(`${name} worker ${workerId} failed and was discarded`)
     );
-
-    const pooledIndex = workerPool.findIndex((entry) => entry === worker);
-    if (pooledIndex >= 0) {
-      workerPool.splice(pooledIndex, 1);
-    }
 
     if (createdWorkersCount > 0) {
       createdWorkersCount--;
@@ -162,10 +164,11 @@ function createPoolCore(
       );
     }
 
-    activeWorkers.forEach((worker) => worker.terminate());
+    const workersToTerminate = [...new Set(activeWorkers.values())];
     activeWorkers.clear();
-    while (workerPool.length > 0) {
-      const worker = workerPool.pop()!;
+    workerPool.length = 0;
+
+    for (const worker of workersToTerminate) {
       worker.terminate();
     }
 
@@ -198,7 +201,7 @@ export function createTaskPool<T, R>({
   generateWorkerScript,
   createMessageHandler,
 }: PoolOptions): TaskPool<T, R> {
-  const maxWorkers = (typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined) || 4;
+  const maxWorkers = (typeof navigator !== "undefined" ? navigator.hardwareConcurrency : undefined) || 4;
   let blobUrlCache: string | null = null;
 
   const core = createPoolCore(
@@ -226,7 +229,7 @@ export function createTaskPool<T, R>({
     }
   );
 
-  const assignTask = async (worker: Worker, data: T): Promise<R> => {
+  const submitTask = (worker: Worker, data: T): Promise<R> => {
     const workerId = core.getWorkerId(worker);
     if (workerId === undefined || !core.activeWorkers.has(workerId)) {
       throw new Error(`Worker not found or is not active`);
@@ -243,22 +246,22 @@ export function createTaskPool<T, R>({
     });
   };
 
+  const assignTask = (worker: Worker, data: T): Promise<R> => submitTask(worker, data);
+
   const processTask = async (value: T): Promise<R> => {
     const worker = await core.getIdleWorker();
-    const workerId = core.getWorkerId(worker)!;
-    const taskId = generateTaskId();
     try {
-      return await new Promise<R>((resolve, reject) => {
-        core.pendingMessages.set(taskId, { workerId, resolve, reject });
-        try {
-          worker.postMessage({ workerId, taskId, payload: value, type: "task" });
-        } catch (error) {
-          core.pendingMessages.delete(taskId);
-          reject(toError(error));
-        }
-      });
+      return await submitTask(worker, value);
     } finally {
       core.returnWorker(worker);
+    }
+  };
+
+  const finalize = async () => {
+    await core.finalize();
+    if (blobUrlCache) {
+      URL.revokeObjectURL(blobUrlCache);
+      blobUrlCache = null;
     }
   };
 
@@ -267,10 +270,8 @@ export function createTaskPool<T, R>({
     returnWorker: core.returnWorker,
     discardWorker: core.discardWorker,
     postMessageToWorker: core.postMessageToWorker,
-    finalize: core.finalize,
+    finalize,
     assignTask,
     processTask,
   };
 }
-
-

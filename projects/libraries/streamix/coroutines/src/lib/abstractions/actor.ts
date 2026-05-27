@@ -695,6 +695,27 @@ const __streamixConcurrency = Object.freeze({
 
 
 
+const ACTOR_TERMINATION_TIMEOUT_MS = 100;
+const ACTOR_STOPPED_ERROR_MESSAGE = "Actor stopped";
+
+type PendingActorRequest<S> = {
+  resolve: (value: S) => void;
+  reject: (error: Error) => void;
+};
+
+const toErrorMessage = (
+  error: unknown,
+  fallback = "Actor request failed"
+): string => (error instanceof Error ? error.message : error ? String(error) : fallback);
+
+function postActorResponse(
+  worker: Worker,
+  message: Pick<CoroutineMessage, "workerId" | "taskId" | "requestId"> &
+    ({ type: "response"; payload: unknown } | { type: "error"; error: string })
+) {
+  worker.postMessage(message);
+}
+
 function handleRequest<Q, D>(
   message: CoroutineMessage,
   config: ActorConfig<Q, D, any> | ActorCustomMessageHandlerConfig | undefined,
@@ -703,7 +724,7 @@ function handleRequest<Q, D>(
   const { workerId, taskId, requestId, payload } = message;
 
   if (!config || !("onRequest" in config) || !config.onRequest) {
-    worker.postMessage({
+    postActorResponse(worker, {
       workerId,
       taskId,
       requestId,
@@ -717,7 +738,7 @@ function handleRequest<Q, D>(
     const result = config.onRequest(payload as Q, message);
     Promise.resolve(result)
       .then((resolved) => {
-        worker.postMessage({
+        postActorResponse(worker, {
           workerId,
           taskId,
           requestId,
@@ -726,21 +747,21 @@ function handleRequest<Q, D>(
         });
       })
       .catch((err) => {
-        worker.postMessage({
+        postActorResponse(worker, {
           workerId,
           taskId,
           requestId,
           type: "error",
-          error: err instanceof Error ? err.message : String(err),
+          error: toErrorMessage(err),
         });
       });
   } catch (err) {
-    worker.postMessage({
+    postActorResponse(worker, {
       workerId,
       taskId,
       requestId,
       type: "error",
-      error: err instanceof Error ? err.message : String(err),
+      error: toErrorMessage(err),
     });
   }
 }
@@ -853,18 +874,110 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   });
 
   const blobUrl = acquireBlobUrl(workerScript);
+  const actorWorkerId = 1;
+  const actorTaskId = String(actorWorkerId);
 
   let worker: Worker | null = null;
   let running = false;
   const messageHandlers = new Set<(payload: ToMain) => void>();
   let nextRequestId = 1;
-  const pendingRequests = new Map<string, { resolve: (value: S) => void; reject: (error: Error) => void }>();
+  const pendingRequests = new Map<string, PendingActorRequest<S>>();
+  let shutdownPromise: Promise<void> | null = null;
+  let finishShutdown: (() => void) | null = null;
+  let shouldReleaseBlobUrl = false;
+  let hasReleasedBlobUrl = false;
 
   worker = new Worker(blobUrl, { type: "module" });
-  (worker as any).__id = 1;
+  (worker as any).__id = actorWorkerId;
   running = true;
 
   let actorRef: Actor;
+
+  const releaseWorkerScript = () => {
+    if (!shouldReleaseBlobUrl || hasReleasedBlobUrl) {
+      return;
+    }
+
+    hasReleasedBlobUrl = true;
+    releaseBlobUrl(workerScript);
+  };
+
+  const rejectPendingRequests = (message = ACTOR_STOPPED_ERROR_MESSAGE) => {
+    if (pendingRequests.size === 0) {
+      return;
+    }
+
+    for (const { reject } of pendingRequests.values()) {
+      reject(new Error(message));
+    }
+
+    pendingRequests.clear();
+  };
+
+  const postToWorker = (
+    target: Worker,
+    message: Omit<CoroutineMessage, "workerId">
+  ) => {
+    target.postMessage({
+      workerId: actorWorkerId,
+      ...message,
+    });
+  };
+
+  const shutdown = (releaseBlobUrlOnExit: boolean) => {
+    shouldReleaseBlobUrl ||= releaseBlobUrlOnExit;
+
+    if (shutdownPromise) {
+      releaseWorkerScript();
+      return shutdownPromise;
+    }
+
+    running = false;
+    rejectPendingRequests();
+
+    const activeWorker = worker;
+    if (!activeWorker) {
+      releaseWorkerScript();
+      return Promise.resolve();
+    }
+
+    shutdownPromise = new Promise<void>((resolve) => {
+      let settled = false;
+
+      const finalizeShutdown = () => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        finishShutdown = null;
+        activeWorker.removeEventListener("message", handleMessage);
+        activeWorker.terminate();
+        if (worker === activeWorker) {
+          worker = null;
+        }
+        releaseWorkerScript();
+        resolve();
+      };
+
+      const timeoutId = setTimeout(finalizeShutdown, ACTOR_TERMINATION_TIMEOUT_MS);
+      finishShutdown = () => {
+        clearTimeout(timeoutId);
+        finalizeShutdown();
+      };
+
+      try {
+        postToWorker(activeWorker, {
+          taskId: actorTaskId,
+          type: "stop",
+        });
+      } catch {
+        finishShutdown();
+      }
+    });
+
+    return shutdownPromise;
+  };
 
   const handleMessage = (event: MessageEvent<CoroutineMessage>) => {
     const msg = event.data;
@@ -885,14 +998,15 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
       pushGlobalInbox(actorRef, payload);
     } else if (type === "stopped") {
       running = false;
+      rejectPendingRequests();
+      finishShutdown?.();
     }
   };
 
   worker.addEventListener("message", handleMessage);
 
-  worker.postMessage({
-    workerId: (worker as any).__id,
-    taskId: (worker as any).__id,
+  postToWorker(worker, {
+    taskId: actorTaskId,
     payload: initialState,
     type: "init",
   });
@@ -903,42 +1017,12 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
     },
 
     stop(_reason) {
-      if (!running) return;
-      running = false;
-      if (worker) {
-        worker.postMessage({
-          workerId: (worker as any).__id,
-          taskId: (worker as any).__id,
-          type: "stop",
-        });
-        setTimeout(() => {
-          if (worker) {
-            worker.terminate();
-            worker = null;
-          }
-        }, 100);
-      }
+      if (!running && !worker) return;
+      void shutdown(false);
     },
 
     async finalize() {
-      running = false;
-      if (worker) {
-        worker.postMessage({
-          workerId: (worker as any).__id,
-          taskId: (worker as any).__id,
-          type: "stop",
-        });
-        await new Promise<void>((resolve) =>
-          setTimeout(() => {
-            if (worker) {
-              worker.terminate();
-              worker = null;
-            }
-            resolve();
-          }, 100)
-        );
-      }
-      releaseBlobUrl(workerScript);
+      await shutdown(true);
     },
   };
 
@@ -950,9 +1034,8 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
         console.warn("Actor is not running; message dropped");
         return;
       }
-      worker.postMessage({
-        workerId: (worker as any).__id,
-        taskId: (worker as any).__id,
+      postToWorker(worker, {
+        taskId: actorTaskId,
         payload: msg,
         type: "notify",
       });
@@ -965,9 +1048,8 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
       const id = String(nextRequestId++);
       return new Promise((resolve, reject) => {
         pendingRequests.set(id, { resolve, reject });
-        worker!.postMessage({
-          workerId: (worker as any).__id,
-          taskId: (worker as any).__id,
+        postToWorker(worker!, {
+          taskId: actorTaskId,
           payload: msg,
           requestId: id,
           type: "request",
@@ -1016,13 +1098,13 @@ interface GlobalInboxEntry {
 }
 
 let globalInboxQueue: GlobalInboxEntry[] = [];
-let globalInboxResolver: ((entry: GlobalInboxEntry) => void) | null = null;
+let globalInboxResolvers: Array<(entry: GlobalInboxEntry) => void> = [];
 
 function pushGlobalInbox(actor: Actor, payload: any) {
   const entry = { actor, payload };
-  if (globalInboxResolver) {
-    globalInboxResolver(entry);
-    globalInboxResolver = null;
+  const resolver = globalInboxResolvers.shift();
+  if (resolver) {
+    resolver(entry);
   } else {
     globalInboxQueue.push(entry);
   }
@@ -1062,7 +1144,7 @@ export const main = {
           return Promise.resolve(globalInboxQueue.shift()!);
         }
         return new Promise((resolve) => {
-          globalInboxResolver = resolve;
+          globalInboxResolvers.push(resolve);
         });
       }
       return (actorOrHandler as any)[$actorInternals].onMessage(handler);
