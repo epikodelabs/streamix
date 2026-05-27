@@ -124,7 +124,7 @@ const chef = actor({
     }
     throw new Error(`Unknown request payload: ${JSON.stringify(payload)}`);
   },
-})(async function chefBehavior(
+})(async function chef(
   msg: any,
   state: ChefState,
   utils: WorkerUtils<any, any, any, KitchenEvent>
@@ -186,7 +186,7 @@ const chef = actor({
 });
 
 // ===== CASHIER ACTOR =====
-const cashier = actor(async function cashierBehavior(
+const cashier = actor(async function cashier(
   msg: KitchenMessage,
   state: { closing: boolean },
   utils: WorkerUtils<any, any, any, any>

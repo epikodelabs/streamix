@@ -256,7 +256,7 @@ const chef = actor({
       }
     }
   },
-})(async function chefBehavior(msg: any, state: any, utils: any) {
+})(async function chef(msg: any, state: any, utils: any) {
   if (msg.kind === "actor-bus" && msg.topic === "cook") {
     const order = msg.payload as Order;
     state.activeTasks = (state.activeTasks ?? 0) + 1;
@@ -277,7 +277,7 @@ const chef = actor({
 })("chef", {});
 
 // ===== CASHIER ACTOR =====
-const cashier = actor(async function cashierBehavior(msg: any, state: any, utils: any) {
+const cashier = actor(async function cashier(msg: any, state: any, utils: any) {
   if (msg.type === "runShift") {
     for (const order of msg.orders) utils.bus.send("chef", "cook", order);
     utils.bus.send("chef", "close", null);
