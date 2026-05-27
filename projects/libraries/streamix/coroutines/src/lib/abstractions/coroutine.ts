@@ -9,12 +9,14 @@ import type { Coroutine, CoroutineScript } from "../worker/types";
 export type CoroutineTask<T = any, R = any> = (data: T) => Promise<R> | R;
 
 /**
- * Configuration for plain one-way coroutine workers.
+ * Optional settings for plain one-way coroutine workers.
  */
-export type CoroutineConfig = {
+export type CoroutineOptions = {
   /** Raw helper snippets injected into the worker before task code. */
   helpers?: string[];
 };
+
+type CoroutineDefinitionRest = Function[] | [...Function[], CoroutineOptions];
 
 function createCoroutineImpl<T, R>(
   main: CoroutineTask<T, R>,
@@ -50,22 +52,28 @@ function createCoroutineImpl<T, R>(
  * A coroutine owns one dedicated worker, reuses it across calls, and queues
  * `processTask()` submissions on that worker. The returned `Coroutine` can be
  * used with `.pipe()` in stream pipelines or called directly. Call
- * `.finalize()` when done to terminate the underlying worker.
+ * `.finalize()` when done to terminate the underlying worker. Raw helper
+ * snippets can be provided through an optional trailing options object.
  */
-export function coroutine<T, R>(config: CoroutineConfig): (main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R> & CoroutineScript<T, R>;
-export function coroutine<T, R>(main: CoroutineTask<T, R>, ...functions: Function[]): Coroutine<T, R> & CoroutineScript<T, R>;
 export function coroutine<T, R>(
-  arg1: CoroutineConfig | CoroutineTask<T, R>,
-  ...rest: Function[]
-): Coroutine<T, R> & CoroutineScript<T, R> | ((main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R> & CoroutineScript<T, R>) {
-  if (typeof arg1 === "function") {
-    return createCoroutineImpl(arg1, rest, []);
-  }
+  main: CoroutineTask<T, R>,
+  ...rest: CoroutineDefinitionRest
+): Coroutine<T, R> & CoroutineScript<T, R>;
+export function coroutine<T, R>(
+  main: CoroutineTask<T, R>,
+  ...rest: CoroutineDefinitionRest
+): Coroutine<T, R> & CoroutineScript<T, R> {
+  const last = rest[rest.length - 1];
+  const hasOptions =
+    typeof last === "object" &&
+    last !== null &&
+    typeof last !== "function" &&
+    !Array.isArray(last);
 
-  const helpers = arg1?.helpers || [];
+  const options = (hasOptions ? last : undefined) as CoroutineOptions | undefined;
+  const functions = (hasOptions ? rest.slice(0, -1) : rest) as Function[];
 
-  return (main: CoroutineTask<T, R>, ...functions: Function[]) =>
-    createCoroutineImpl(main, functions, helpers);
+  return createCoroutineImpl(main, functions, options?.helpers || []);
 }
 
 export type { CoroutineScript } from "../worker/types";

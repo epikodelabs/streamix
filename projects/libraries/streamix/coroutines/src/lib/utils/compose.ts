@@ -1,4 +1,4 @@
-import { buildWorkerScript, buildCoroutineWorkerRuntime, createTaskRunner, serializeScript } from "../worker";
+import { buildCoroutineWorkerRuntime, buildWorkerScript, createTaskRunner, serializeScript } from "../worker";
 import type { Coroutine, CoroutineScript, TaskRunner } from "../worker/types";
 
 function isCoroutineScript(value: unknown): value is CoroutineScript {

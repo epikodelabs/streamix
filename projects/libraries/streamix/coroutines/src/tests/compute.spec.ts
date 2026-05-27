@@ -1,4 +1,4 @@
-import { compute } from "@epikodelabs/streamix/coroutines";
+import { compute, computeScript } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe("compute", () => {
@@ -77,6 +77,18 @@ idescribe("compute", () => {
     const result = await pending;
 
     expect(result).toBe(12);
+    await run.finalize();
+  });
+
+  it("should preserve helper snippets when building from a coroutine script", async () => {
+    const run = computeScript<number, number>({
+      helpers: ["function helperScale(x) { return x * 3; }"],
+      main: Function("data", "return helperScale(data);") as (data: number) => number,
+    });
+
+    const result = await run(5);
+
+    expect(result).toBe(15);
     await run.finalize();
   });
 });

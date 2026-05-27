@@ -22,6 +22,10 @@ export type WorkerProtocolMessage = {
   payload?: any;
   error?: string;
   requestId?: string;
+  /** Actor bus target for routed messages. */
+  to?: string | string[];
+  /** Topic for bus-routed or tagged messages. */
+  topic?: string;
   /** Serialized function source for worker-backed task runners. */
   code?: string;
   /** Serialized helper function sources for worker-backed task runners. */

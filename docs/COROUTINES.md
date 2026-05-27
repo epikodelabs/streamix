@@ -143,25 +143,26 @@ const worker = coroutine(
 );
 ```
 
-### Config `helpers`
+### Trailing `helpers` option
 
 Use this for raw worker-side snippets that cannot be expressed as normal functions:
 
 ```ts
-import { coroutine, type CoroutineConfig } from "@epikodelabs/streamix/coroutines";
-
-const config: CoroutineConfig = {
-  helpers: [
-    "const SCALE = 2;",
-    "function injected(value) { return value * SCALE; }",
-  ],
-};
+import { coroutine } from "@epikodelabs/streamix/coroutines";
 
 declare const injected: (value: number) => number;
 
-const worker = coroutine(config)(function task(input: number) {
-  return injected(input);
-});
+const worker = coroutine(
+  function task(input: number) {
+    return injected(input);
+  },
+  {
+    helpers: [
+      "const SCALE = 2;",
+      "function injected(value) { return value * SCALE; }",
+    ],
+  }
+);
 ```
 
 ---
@@ -172,7 +173,7 @@ const worker = coroutine(config)(function task(input: number) {
 - Keep worker code self-contained.
 - Do not rely on variables from outer lexical scope.
 - Pass helper functions explicitly when the worker needs them.
-- Use config `helpers` only for raw injected snippets that cannot be expressed as normal helper functions.
+- Use trailing `helpers` only for raw injected snippets that cannot be expressed as normal helper functions.
 - Call `finalize()` when the coroutine is no longer needed.
 
 ---

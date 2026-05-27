@@ -67,5 +67,25 @@ export function compute<T = any, R = any>(
 export function computeScript<T = any, R = any>(
   script: CoroutineScript<T, R>
 ): ComputeRunner<T, R> {
-  return compute(script.main, ...(script.functions || []));
+  const pool = createTaskPool<T, R>({
+    name: "compute",
+    config: script.helpers?.length ? { helpers: script.helpers } : undefined,
+    main: script.main,
+    functions: script.functions || [],
+    generateWorkerScript: (task, deps, workerConfig) =>
+      buildWorkerScript({
+        helpers: workerConfig?.helpers,
+        main: task,
+        functions: deps,
+        runtime: buildCoroutineWorkerRuntime(),
+      }),
+  });
+
+  const run = async (params: T | Promise<T>): Promise<R> => {
+    const resolved = isPromiseLike(params) ? await params : params;
+    return pool.processTask(resolved);
+  };
+
+  run.finalize = () => pool.finalize();
+  return run;
 }

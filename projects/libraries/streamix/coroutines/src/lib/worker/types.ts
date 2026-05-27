@@ -6,7 +6,7 @@
  */
 export interface CoroutineScript<T = any, R = any> {
   /** Raw worker-side snippets injected before the serialized functions. */
-  imports?: string[];
+  helpers?: string[];
   /** Main task body executed inside the worker. */
   main: (data: T) => R | Promise<R>;
   /** Additional named helper functions serialized alongside `main`. */

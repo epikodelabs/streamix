@@ -305,12 +305,11 @@ idescribe('coroutine', () => {
     }
   });
 
-  it('should support higher-order invocation with undefined config', async () => {
+  it('should support trailing coroutine options', async () => {
     const mainTask = (x: number) => x + 1;
     (globalThis as any).currentMainTask = mainTask;
 
-    const make = (coroutine as any)(undefined) as (m: any) => ReturnType<typeof coroutine>;
-    const co = make(mainTask);
+    const co = coroutine(mainTask, {});
 
     const r = await co.processTask(1);
     expect(r).toBe(2);
