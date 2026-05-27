@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { actor, main, WorkerUtils } from '@epikodelabs/streamix/coroutines';
+import { actor, ActorBusMessage, main, WorkerUtils } from '@epikodelabs/streamix/coroutines';
 
 type TimerMessage =
   | { type: 'start'; initialTime: number }
@@ -12,16 +12,17 @@ type TimerState = {
 };
 
 async function timerBehavior(
-  msg: TimerMessage,
+  msg: any,
   state: TimerState,
   utils: WorkerUtils<any, any, TimerMessage, any>
 ) {
-  if (msg.type === 'start' || msg.type === 'reset') {
+  if (msg.kind === 'actor-bus' && (msg.topic === 'start' || msg.topic === 'reset')) {
+    const payload = msg.payload as { initialTime: number };
     if (state.timerId !== null) {
       clearInterval(state.timerId);
     }
 
-    state.counter = msg.initialTime;
+    state.counter = payload.initialTime;
     state.timerId = setInterval(() => {
       state.counter--;
       utils.outbox.send('main', 'tick', { tick: state.counter, timestamp: Date.now() });
@@ -35,7 +36,7 @@ async function timerBehavior(
     utils.outbox.send('main', 'tick', { tick: state.counter, timestamp: Date.now() });
   }
 
-  if (msg.type === 'stop') {
+  if (msg.kind === 'actor-bus' && msg.topic === 'stop') {
     if (state.timerId !== null) {
       clearInterval(state.timerId);
       state.timerId = null;
@@ -64,7 +65,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private unsubscribeMessage!: () => void;
 
   ngOnInit(): void {
-    this.unsubscribeMessage = main.bus.listen('main', (message) => {
+    this.unsubscribeMessage = main.inbox.subscribe('main', (message: ActorBusMessage<any>) => {
       if (message.topic !== 'tick') {
         return;
       }
@@ -76,13 +77,13 @@ export class AppComponent implements OnInit, OnDestroy {
 
     this.timerStatus = 'Running';
     console.log('Starting timer...');
-    main.send(this.timerActor, { type: 'start', initialTime: 60 });
+    main.outbox.send(this.timerActor, 'start', { initialTime: 60 });
   }
 
   resetTimer() {
     console.log('Resetting...');
     this.timerStatus = 'Resetting';
-    main.send(this.timerActor, { type: 'reset', initialTime: 30 });
+    main.outbox.send(this.timerActor, 'reset', { initialTime: 30 });
     this.timerStatus = 'Running';
   }
 

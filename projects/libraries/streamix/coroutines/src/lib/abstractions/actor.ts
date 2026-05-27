@@ -12,7 +12,7 @@ import {
   withTimeout,
 } from "../utils";
 import { acquireBlobUrl, releaseBlobUrl } from "../worker/blob";
-import type { WorkerProtocolMessage } from "../worker/messages";
+import type { WorkerProtocolHandler, WorkerProtocolMessage } from "../worker/messages";
 import { buildActorWorkerRuntime } from "../worker/runtimes";
 import { buildWorkerScript } from "../worker/script";
 import type { Actor } from "../worker/types";
@@ -64,7 +64,7 @@ export type WorkerOutbox<Q = any, D = any> = {
 /**
  * Inbox API for receiving messages routed to the actor worker.
  *
- * This includes direct messages from `main.send(...)` as well as actor-bus
+ * This includes direct messages from `main.outbox.send(...)` as well as actor-bus
  * deliveries routed through `main.bus`.
  */
 export type WorkerInbox<Incoming = any> = {
@@ -201,15 +201,24 @@ export type ActorRequestHandler<Q = any, D = any> = (
   message: ActorMessageContext
 ) => Promise<D> | D;
 
-type ActorDefinitionOptions<Q = any, D = any, ToMain = any> = {
-  helpers?: string[];
+export type ActorOptions<Q = any, D = any, ToMain = any> = {
   onRequest?: ActorRequestHandler<Q, D>;
   onMessage?: (payload: ToMain, message: ActorMessageContext) => void | Promise<void>;
 };
 
-type ActorDefinitionRest<Q, D, ToMain> =
-  | Function[]
-  | [...Function[], ActorDefinitionOptions<Q, D, ToMain>];
+/**
+ * Escape hatch for advanced actor integrations that need the raw worker
+ * protocol instead of the higher-level `onRequest` / `onMessage` hooks.
+ */
+export type ActorProtocolHandler = WorkerProtocolHandler;
+
+/**
+ * Alternative configuration that replaces the entire main-thread message
+ * handler. When this is used, `onRequest` and `onMessage` are ignored.
+ */
+export type ActorCustomMessageHandlerConfig = {
+  customMessageHandler: ActorProtocolHandler;
+};
 
 /**
  * Creates a typed actor-bus envelope.
@@ -849,7 +858,7 @@ function postActorResponse(
 function handleRequest<Q, D>(
   message: WorkerProtocolMessage,
   sourceActor: Actor,
-  options: ActorDefinitionOptions<Q, D, any> | undefined,
+  options: ActorOptions<Q, D, any> | undefined,
   worker: Worker
 ) {
   const { workerId, taskId, requestId, payload, topic } = message;
@@ -935,8 +944,7 @@ function handleRequest<Q, D>(
 
 function handleWorkerMessage<ToMain>(
   message: WorkerProtocolMessage,
-  options: ActorDefinitionOptions<any, any, ToMain> | undefined,
-  messageHandlers: Set<(payload: ToMain) => void>
+  options: ActorOptions<any, any, ToMain> | undefined
 ) {
   const payload = message.payload as ToMain;
   if (options?.onMessage) {
@@ -944,13 +952,6 @@ function handleWorkerMessage<ToMain>(
       console.warn("options.onMessage failed:", err);
     });
   }
-  messageHandlers.forEach((h) => {
-    try {
-      h(payload);
-    } catch (err) {
-      console.warn("onMessage handler failed:", err);
-    }
-  });
 }
 
 /**
@@ -961,38 +962,50 @@ function handleWorkerMessage<ToMain>(
  *
  * @example
  * ```ts
- * const Counter = actor((msg, state, utils) => state + msg.n);
+ * const Counter = actor((msg, state, utils) => state + msg.payload.n);
  * const counter = Counter("counter", 0);
- * main.send(counter, { n: 1 });
- * const value = await main.outbox.request(counter, { n: 2 });
+ * main.outbox.send(counter, "inc", { n: 1 });
+ * const value = await main.outbox.request(counter, "inc", { n: 2 });
  * ```
  */
 export function actor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   behavior: ActorBehavior<S, Q, D, FromMain>,
-  ...rest: ActorDefinitionRest<Q, D, ToMain>
+  ...functions: Function[]
 ): (name: string, initialState: S) => Actor;
 
-export function actor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
+export function actor<Q = any, D = any, ToMain = any>(
+  config: ActorOptions<Q, D, ToMain> | ActorCustomMessageHandlerConfig,
+): <S = any, FromMain = any>(
   behavior: ActorBehavior<S, Q, D, FromMain>,
-  ...rest: ActorDefinitionRest<Q, D, ToMain>
-): (name: string, initialState: S) => Actor {
-  const last = rest[rest.length - 1];
-  const hasOptions =
-    typeof last === "object" &&
-    last !== null &&
-    typeof last !== "function" &&
-    !Array.isArray(last);
+  ...functions: Function[]
+) => (name: string, initialState: S) => Actor;
 
-  const options = (hasOptions ? last : undefined) as ActorDefinitionOptions<Q, D, ToMain> | undefined;
-  const functions = (hasOptions ? rest.slice(0, -1) : rest) as Function[];
+export function actor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
+  arg1: ActorOptions<Q, D, ToMain> | ActorCustomMessageHandlerConfig | ActorBehavior<S, Q, D, FromMain>,
+  ...rest: Function[]
+): ((name: string, initialState: S) => Actor) | (<S2 = any, FromMain2 = any>(
+  behavior: ActorBehavior<S2, Q, D, FromMain2>,
+  ...functions: Function[]
+) => (name: string, initialState: S2) => Actor) {
+  if (typeof arg1 === "function") {
+    const behavior = arg1 as ActorBehavior<S, Q, D, FromMain>;
+    const functions = rest;
+    return (name: string, initialState: S) =>
+      createActor(name, undefined, behavior, initialState, functions);
+  }
 
-  return (name: string, initialState: S) =>
-    createActor(name, options, behavior, initialState, functions);
+  const config = arg1 as ActorOptions<Q, D, ToMain> | ActorCustomMessageHandlerConfig;
+  return <S2 = any, FromMain2 = any>(
+    behavior: ActorBehavior<S2, Q, D, FromMain2>,
+    ...functions: Function[]
+  ): ((name: string, initialState: S2) => Actor) =>
+      (name: string, initialState: S2) =>
+        createActor(name, config, behavior, initialState, functions);
 }
 
 function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   name: string,
-  options: ActorDefinitionOptions<Q, D, ToMain> | undefined,
+  options: ActorOptions<Q, D, ToMain> | ActorCustomMessageHandlerConfig | undefined,
   behavior: ActorBehavior<S, Q, D, FromMain>,
   initialState: S,
   functions: Function[]
@@ -1002,7 +1015,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   }
 
   const workerScript = buildWorkerScript({
-    helpers: [ACTOR_CONCURRENCY_RUNTIME, ...(options?.helpers || [])],
+    helpers: [ACTOR_CONCURRENCY_RUNTIME],
     main: behavior as any,
     functions,
     runtime: buildActorWorkerRuntime(),
@@ -1014,7 +1027,6 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
 
   let worker: Worker | null = null;
   let running = false;
-  const messageHandlers = new Set<(payload: ToMain) => void>();
   let nextRequestId = 1;
   const pendingRequests = new Map<string, PendingActorRequest<S>>();
   let shutdownPromise: Promise<void> | null = null;
@@ -1070,7 +1082,6 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
     running = false;
     rejectPendingRequests();
     unregisterActorBusTarget(actorRef);
-    clearGlobalInbox(actorRef);
 
     const activeWorker = worker;
     if (!activeWorker) {
@@ -1120,6 +1131,11 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
     const msg = event.data;
     const { type, payload, requestId } = msg;
 
+    if (options && "customMessageHandler" in options) {
+      (options as ActorCustomMessageHandlerConfig).customMessageHandler(event, worker!, new Map());
+      return;
+    }
+
     if (type === "response" && requestId && pendingRequests.has(requestId)) {
       const { resolve } = pendingRequests.get(requestId)!;
       pendingRequests.delete(requestId);
@@ -1138,8 +1154,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
         dispatchActorBusMessage(payload, { fromActor: actorRef });
         return;
       }
-      handleWorkerMessage(msg, options, messageHandlers);
-      pushGlobalInbox(actorRef, payload);
+      handleWorkerMessage(msg, options);
     } else if (type === "stopped") {
       running = false;
       rejectPendingRequests();
@@ -1168,9 +1183,9 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   };
 
   actorRef = actor;
-  registerActorBusTarget(name, actorRef, options?.onRequest);
+  registerActorBusTarget(name, actorRef, options && "onRequest" in options ? options.onRequest : undefined);
 
-  (actor as any)[$actorInternals] = {
+  const internals = {
     stop() {
       return shutdown(true);
     },
@@ -1186,7 +1201,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
       });
     },
 
-    request(msg: FromMain): Promise<S> {
+    request(topic: string, msg: FromMain): Promise<S> {
       if (!worker || !running) {
         return Promise.reject(new Error("Actor stopped"));
       }
@@ -1198,25 +1213,15 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
           payload: msg,
           requestId: id,
           type: "request",
+          topic,
         });
       });
     },
-
-    onMessage(handler: (payload: ToMain) => void): () => void {
-      messageHandlers.add(handler);
-      return () => messageHandlers.delete(handler);
-    },
   };
 
+  actorInternalsMap.set(actor, internals);
+
   return actor;
-}
-
-const $actorInternals = Symbol("actorInternals");
-
-interface GlobalInboxEntry {
-  actor: Actor;
-  name: string;
-  payload: any;
 }
 
 type ActorBusRegistration = {
@@ -1225,26 +1230,12 @@ type ActorBusRegistration = {
   onRequest?: ActorRequestHandler<any, any>;
 };
 
-let globalInboxQueue: GlobalInboxEntry[] = [];
-let globalInboxResolvers: Array<(entry: GlobalInboxEntry) => void> = [];
 const actorBusRegistrationsById = new Map<string, ActorBusRegistration>();
 const actorBusRegistrationsByActor = new Map<Actor, ActorBusRegistration>();
 const actorBusDirectListeners = new Map<string, Set<ActorBusHandler>>();
 const actorBusListeners = new Set<ActorBusHandler>();
 
-function pushGlobalInbox(actor: Actor, payload: any) {
-  const entry = { actor, name: actor.name, payload };
-  const resolver = globalInboxResolvers.shift();
-  if (resolver) {
-    resolver(entry);
-  } else {
-    globalInboxQueue.push(entry);
-  }
-}
-
-function clearGlobalInbox(actor: Actor) {
-  globalInboxQueue = globalInboxQueue.filter((entry) => entry.actor !== actor);
-}
+const actorInternalsMap = new WeakMap<Actor, { stop(): Promise<void>; post(msg: any): void; request(topic: string, msg: any): Promise<any> }>();
 
 function resolveActorTarget(actorOrName: Actor | string): Actor | undefined {
   if (typeof actorOrName !== "string") {
@@ -1252,6 +1243,13 @@ function resolveActorTarget(actorOrName: Actor | string): Actor | undefined {
   }
 
   return actorBusRegistrationsById.get(actorOrName)?.actor;
+}
+
+function resolveActorBusTarget(to: Actor | string | string[]): string | string[] {
+  if (Array.isArray(to)) {
+    return to;
+  }
+  return typeof to === "string" ? to : to.name;
 }
 
 const normalizeActorBusTargets = (to?: ActorBusTarget): string[] => {
@@ -1267,7 +1265,7 @@ const warnAsyncActorBusFailure = (scope: string, error: unknown) => {
 };
 
 function deliverActorBusMessage(actor: Actor, message: ActorBusMessage) {
-  (actor as any)[$actorInternals].post(message);
+  actorInternalsMap.get(actor)?.post(message);
 }
 
 function notifyActorBusSubscribers(message: ActorBusMessage) {
@@ -1322,9 +1320,7 @@ function registerActorBusTarget(
   return () => unregisterActorBusTarget(actor);
 }
 
-function clearActorBus() {
-  actorBusRegistrationsById.clear();
-  actorBusRegistrationsByActor.clear();
+function clearActorBusListeners() {
   actorBusDirectListeners.clear();
   actorBusListeners.clear();
 }
@@ -1376,41 +1372,51 @@ function dispatchActorBusMessage<T = any>(
   }
 }
 
-interface InboxAPI {
-  <ToMain>(actorOrName: Actor | string, handler: (payload: ToMain) => void): () => void;
-  (): Promise<GlobalInboxEntry>;
-}
-
 /**
  * Main-thread communication utility.
  *
- * Mirrors the worker-side `utils` structure:
- * - `main.send(actor, msg)` — fire-and-forget
- * - `main.request(actor, msg)` / `main.outbox.request(actor, msg)` — send and await updated state
- * - `main.stop(actor)` / `main.outbox.stop(actor)` — stop actor and release resources
- * - `main.inbox.listen(actor, handler)` — subscribe to one actor's events
- * - `main.inbox.listen()` — global inbox; await the next message from any actor
+ * Extends the worker-side `utils` structure:
+ * - `main.outbox.send(to, topic, payload)` — fire-and-forget bus message
+ * - `main.outbox.request(to, topic, payload)` — send request and await response
+ * - `main.outbox.stop(actor)` — stop actor and release resources
+ * - `main.inbox.subscribe(handler)` — subscribe to all actor-bus messages
+ * - `main.inbox.subscribe(name, handler)` — subscribe to bus messages for a name
  */
 export const main = {
-  /** Sends a one-way message to the actor. */
-  send<FromMain>(actor: Actor | string, msg: FromMain): void {
-    const target = resolveActorTarget(actor);
-    if (!target) {
-      throw new Error(`Unknown actor target "${String(actor)}"`);
-    }
-
-    (target as any)[$actorInternals].post(msg);
-  },
-
   outbox: {
-    /** Sends a message and awaits the updated state. */
-    request<FromMain, S>(actor: Actor | string, msg: FromMain): Promise<S> {
-      const target = resolveActorTarget(actor);
+    /** Broadcasts a topic payload to every named actor through the actor bus. */
+    publish<T = any>(
+      topic: string,
+      payload: T,
+      options?: ActorBusDispatchOptions
+    ): void {
+      dispatchActorBusMessage(
+        createActorBusMessage(topic, payload, { from: options?.from ?? "main" }),
+        { includeSelf: options?.includeSelf }
+      );
+    },
+
+    /** Sends a one-way bus message to one or more named actor targets. */
+    send<T = any>(
+      to: Actor | string | string[],
+      topic: string,
+      payload: T,
+      options?: Pick<ActorBusDispatchOptions, "from">
+    ): void {
+      dispatchActorBusMessage(
+        createActorBusMessage(topic, payload, { from: options?.from ?? "main", to: resolveActorBusTarget(to) as ActorBusTarget }),
+        {}
+      );
+    },
+
+    /** Sends a request to an actor and awaits the response. */
+    request<Q = any, D = any>(to: Actor | string, topic: string, payload: Q): Promise<D> {
+      const target = resolveActorTarget(to);
       if (!target) {
-        return Promise.reject(new Error(`Unknown actor target "${String(actor)}"`));
+        return Promise.reject(new Error(`Unknown actor target "${String(to)}"`));
       }
 
-      return (target as any)[$actorInternals].request(msg);
+      return actorInternalsMap.get(target)!.request(topic, payload);
     },
 
     /** Stops the actor, terminates its worker, and releases resources. */
@@ -1420,107 +1426,29 @@ export const main = {
         return Promise.reject(new Error(`Unknown actor target "${String(actor)}"`));
       }
 
-      return (target as any)[$actorInternals].stop();
+      return actorInternalsMap.get(target)!.stop();
     },
-  },
-
-  /** Shorthand for `main.outbox.request(actor, msg)`. */
-  request<FromMain, S>(actor: Actor | string, msg: FromMain): Promise<S> {
-    return main.outbox.request(actor, msg);
-  },
-
-  /** Shorthand for `main.outbox.stop(actor)`. */
-  stop(actor: Actor | string): Promise<void> {
-    return main.outbox.stop(actor);
   },
 
   inbox: {
-    listen: ((actorOrName?: any, handler?: any): (() => void) | Promise<GlobalInboxEntry> => {
-      if (actorOrName === undefined) {
-        if (globalInboxQueue.length > 0) {
-          return Promise.resolve(globalInboxQueue.shift()!);
-        }
-        return new Promise((resolve) => {
-          globalInboxResolvers.push(resolve);
-        });
+    subscribe: ((actorOrName?: any, handler?: any): (() => void) => {
+      if (typeof actorOrName === "function") {
+        const fn = actorOrName as ActorBusHandler;
+        actorBusListeners.add(fn);
+        return () => actorBusListeners.delete(fn);
       }
-
-      const target = resolveActorTarget(actorOrName);
-      if (!target) {
-        throw new Error(`Unknown actor target "${String(actorOrName)}"`);
+      const name = actorOrName as string;
+      if (!actorBusDirectListeners.has(name)) {
+        actorBusDirectListeners.set(name, new Set());
       }
+      const set = actorBusDirectListeners.get(name)!;
+      const fn = handler as ActorBusHandler;
+      set.add(fn);
+      return () => set.delete(fn);
+    }) as any,
 
-      return (target as any)[$actorInternals].onMessage(handler);
-    }) as InboxAPI,
+    clear: () => {
+      clearActorBusListeners();
+    },
   },
-
-  /**
-   * Integrated actor message bus.
-   *
-   * Workers send directly with `utils.outbox.send(to, topic, payload)`. The
-   * main thread can publish to every actor, send directly by name, or listen
-   * to all traffic or direct messages addressed to a specific name.
-   * The main-thread endpoint name is always `"main"`.
-   */
-  bus: {
-    publish<T = any>(
-      topic: string,
-      payload: T,
-      options?: ActorBusDispatchOptions
-    ) {
-      dispatchActorBusMessage(
-        createActorBusMessage(topic, payload, { from: options?.from ?? "main" }),
-        { includeSelf: options?.includeSelf }
-      );
-    },
-
-    send<T = any>(
-      to: ActorBusTarget,
-      topic: string,
-      payload: T,
-      options?: Pick<ActorBusDispatchOptions, "from">
-    ) {
-      dispatchActorBusMessage(
-        createActorBusMessage(topic, payload, { from: options?.from ?? "main", to })
-      );
-    },
-
-    dispatch<T = any>(
-      message: ActorBusMessage<T>,
-      options?: Pick<ActorBusDispatchOptions, "includeSelf">
-    ) {
-      dispatchActorBusMessage(message, { includeSelf: options?.includeSelf });
-    },
-
-    listen: ((nameOrHandler: string | ActorBusHandler, maybeHandler?: ActorBusHandler) => {
-      if (typeof nameOrHandler === "function") {
-        actorBusListeners.add(nameOrHandler);
-        return () => {
-          actorBusListeners.delete(nameOrHandler);
-        };
-      }
-
-      const name = nameOrHandler;
-      const handler = maybeHandler!;
-      const handlers = actorBusDirectListeners.get(name) ?? new Set<ActorBusHandler>();
-      handlers.add(handler);
-      actorBusDirectListeners.set(name, handlers);
-
-      return () => {
-        const existing = actorBusDirectListeners.get(name);
-        if (!existing) {
-          return;
-        }
-
-        existing.delete(handler);
-        if (existing.size === 0) {
-          actorBusDirectListeners.delete(name);
-        }
-      };
-    }) as ActorBus["listen"],
-
-    clear() {
-      clearActorBus();
-    },
-  } as ActorBus,
 };

@@ -72,7 +72,6 @@ const __createWorkerUtils = (workerId, taskId) => {
     outbox,
     inbox: {
       listen: (signal) => __workerInbox.receive(signal),
-      receive: (signal) => __workerInbox.receive(signal),
     },
     concurrency: __streamixConcurrency,
   };
@@ -129,7 +128,9 @@ onmessage = async (event) => {
       __actorMailbox.send(payload).catch((error) => {
         console.warn("Actor worker failed to enqueue message", error);
       });
-      __enqueueActorInbox(payload, "Actor worker failed to mirror message to inbox");
+      if (payload && typeof payload === "object" && payload.kind === "actor-bus") {
+        __enqueueActorInbox(payload, "Actor worker failed to mirror bus message to inbox");
+      }
     } else {
       console.warn("Actor worker received main message before init", event.data);
     }
@@ -171,10 +172,9 @@ onmessage = async (event) => {
   }
 
   if (type === "request" && !!requestId) {
-    __actorMailbox.send({ msg: payload, requestId }).catch((error) => {
+    __actorMailbox.send({ msg: payload, requestId, topic }).catch((error) => {
       console.warn("Actor worker failed to enqueue request", error);
     });
-    __enqueueActorInbox(payload, "Actor worker failed to mirror request to inbox");
     return;
   }
 };`;

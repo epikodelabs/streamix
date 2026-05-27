@@ -35,8 +35,8 @@ export interface Coroutine<T = any, R = T> extends TaskRunner<T, R> {}
  *
  * `Actor` is an opaque handle to a persistent behavior loop running in a
  * dedicated worker. Messaging is done through the `main` utility:
- * `main.send(actorOrName, msg)`, `main.outbox.request(actorOrName, msg)`,
- * `main.inbox.listen(actorOrName, handler)`, and `main.bus`.
+ * `main.outbox.send(actorOrName, topic, msg)`, `main.outbox.request(actorOrName, topic, msg)`,
+ * `main.inbox.subscribe(handler)`, and `main.inbox.subscribe(name, handler)`.
  *
  * Lifecycle is managed through the bus — call `main.outbox.stop(actorOrName)`
  * to stop the actor and release resources.

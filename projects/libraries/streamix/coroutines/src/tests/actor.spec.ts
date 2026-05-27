@@ -1,5 +1,6 @@
 import {
   actor,
+  ActorBusMessage,
   background,
   channel,
   ContextCancelledError,
@@ -36,6 +37,7 @@ idescribe("actor", () => {
       listeners: Record<string, ((ev: any) => void)[]> = {};
       terminated = false;
       private workerInbox = channel<any>();
+      private busInbox = channel<any>();
       private actorState: any = undefined;
       private actorRunning = false;
       private workerId = 1;
@@ -86,7 +88,7 @@ idescribe("actor", () => {
         return {
           outbox,
           inbox: {
-            listen: (signal?: AbortSignal) => this.workerInbox.receive(signal),
+            listen: (signal?: AbortSignal) => this.busInbox.receive(signal),
           },
           concurrency: {
             channel,
@@ -164,12 +166,14 @@ idescribe("actor", () => {
           } else if (msg.type === "stop") {
             this.actorRunning = false;
             this.workerInbox.close();
+            this.busInbox.close();
           } else if (msg.type === "notify") {
             this.workerInbox.send(msg.payload).catch(() => {});
+            if (msg.payload && typeof msg.payload === "object" && msg.payload.kind === "actor-bus") {
+              this.busInbox.send(msg.payload).catch(() => {});
+            }
           } else if (msg.type === "request" && msg.requestId) {
-            this.workerInbox.send({ msg: msg.payload, requestId: msg.requestId }).catch(() => {});
-          } else if (msg.type === "request") {
-            this.workerInbox.send(msg.payload).catch(() => {});
+            this.workerInbox.send({ msg: msg.payload, requestId: msg.requestId, topic: msg.topic }).catch(() => {});
           } else if ((msg.type === "response" || msg.type === "error") && msg.requestId) {
             const pending = this.pendingWorkerRequests.get(msg.requestId);
             if (pending) {
@@ -218,12 +222,14 @@ idescribe("actor", () => {
   beforeEach(() => {
     (globalThis as any).currentMainTask = undefined;
     actorCounter = 0;
-    main.bus.clear();
+    main.inbox.clear();
   });
 
   it("should eagerly initialize behavior actor with state", async () => {
-    async function behavior(msg: string, state: number) {
-      return state + (msg === "inc" ? 1 : -1);
+    async function behavior(msg: any, state: number) {
+      if (msg.kind === "actor-bus" && msg.topic === "inc") return state + 1;
+      if (msg.kind === "actor-bus" && msg.topic === "dec") return state - 1;
+      return state;
     }
 
     (globalThis as any).currentMainTask = behavior;
@@ -232,7 +238,7 @@ idescribe("actor", () => {
     await new Promise(r => setTimeout(r, 10));
     expect(a.running).toBe(true);
 
-    main.send(a, "inc");
+    main.outbox.send(a, "inc", undefined);
     await new Promise(r => setTimeout(r, 10));
     expect(a.running).toBe(true);
 
@@ -240,20 +246,20 @@ idescribe("actor", () => {
   });
 
   it("should process multiple sends and update state", async () => {
-    async function behavior(msg: { type: string; n: number }, state: number) {
-      if (msg.type === "add") return state + msg.n;
-      if (msg.type === "sub") return state - msg.n;
+    async function behavior(msg: any, state: number) {
+      if (msg.kind === "actor-bus" && msg.topic === "add") return state + msg.payload.n;
+      if (msg.kind === "actor-bus" && msg.topic === "sub") return state - msg.payload.n;
       return state;
     }
 
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(behavior)(nextActorName(), 10);
-    main.send(a, { type: "add", n: 5 });
-    main.send(a, { type: "sub", n: 3 });
-    main.send(a, { type: "add", n: 2 });
+    main.outbox.send(a, "add", { n: 5 });
+    main.outbox.send(a, "sub", { n: 3 });
+    main.outbox.send(a, "add", { n: 2 });
 
-    const state = await main.outbox.request(a, { type: "add", n: 0 });
+    const state = await main.outbox.request(a, "add", { n: 0 });
     expect(state).toBe(14);
 
     await main.outbox.stop(a);
@@ -268,10 +274,10 @@ idescribe("actor", () => {
 
     const a = actor(behavior)(nextActorName(), 0);
 
-    const s1 = await main.outbox.request(a, 5);
+    const s1 = await main.outbox.request(a, "add", 5);
     expect(s1).toBe(5);
 
-    const s2 = await main.outbox.request(a, 3);
+    const s2 = await main.outbox.request(a, "add", 3);
     expect(s2).toBe(8);
 
     await main.outbox.stop(a);
@@ -280,8 +286,8 @@ idescribe("actor", () => {
   it("should deliver direct bus messages to main listeners", async () => {
     const messages: Array<{ topic: string; payload: string; from?: string }> = [];
 
-    async function behavior(msg: string, state: number, utils: any) {
-      if (msg === "ping") {
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "ping") {
         utils.outbox.send("main", "reply", "pong");
       }
       return state;
@@ -290,11 +296,11 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(behavior)(nextActorName(), 0);
-    const unsubscribe = main.bus.listen("main", (message) => {
+    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       messages.push({ topic: message.topic, payload: message.payload, from: message.from });
     });
 
-    main.send(a, "ping");
+    main.outbox.send(a, "ping", undefined);
     await new Promise(r => setTimeout(r, 20));
 
     expect(messages).toEqual([{ topic: "reply", payload: "pong", from: a.name }]);
@@ -305,8 +311,8 @@ idescribe("actor", () => {
   it("should allow unsubscribing from direct main bus listeners", async () => {
     const messages: string[] = [];
 
-    async function behavior(msg: string, state: number, utils: any) {
-      if (msg === "ping") {
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "ping") {
         utils.outbox.send("main", "reply", "pong");
       }
       return state;
@@ -315,12 +321,12 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(behavior)(nextActorName(), 0);
-    const unsubscribe = main.bus.listen("main", (message) => {
+    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       messages.push(message.payload);
     });
     unsubscribe();
 
-    main.send(a, "ping");
+    main.outbox.send(a, "ping", undefined);
     await new Promise(r => setTimeout(r, 20));
 
     expect(messages).toEqual([]);
@@ -335,7 +341,7 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(behavior)(nextActorName(), 0);
-    main.send(a, "anything");
+    main.outbox.send(a, "anything", undefined);
     await new Promise(r => setTimeout(r, 10));
     expect(a.running).toBe(true);
 
@@ -360,7 +366,7 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(behavior as any)(nextActorName(), 42);
-    const result = await main.outbox.request(a, "go") as any;
+    const result = await main.outbox.request(a, "go", undefined) as any;
 
     expect(result.state).toBe(42);
     expect(result.r1).toBe(1);
@@ -377,11 +383,11 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(behavior)(nextActorName(), 0);
-    main.send(a, "x");
+    main.outbox.send(a, "x", undefined);
     await new Promise(r => setTimeout(r, 10));
 
     await main.outbox.stop(a);
-    await expectAsync(main.outbox.request(a, "y")).toBeRejectedWithError("Actor stopped");
+    await expectAsync(main.outbox.request(a, "y", undefined)).toBeRejectedWithError("Actor stopped");
   });
 
   it("should reject in-flight requests when stopped", async () => {
@@ -395,7 +401,8 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(behavior)(nextActorName(), 0);
-    const pending = main.outbox.request(a, "wait");
+    const pending = main.outbox.request(a, "wait", "wait");
+    pending.catch(() => {}); // prevent unhandled rejection warning
 
     await new Promise(r => setTimeout(r, 10));
     await main.outbox.stop(a);
@@ -403,16 +410,16 @@ idescribe("actor", () => {
     await expectAsync(pending).toBeRejectedWithError("Actor stopped");
   });
 
-  it("should support trailing actor options", async () => {
+  it("should support direct messages and requests", async () => {
     async function behavior(msg: number, state: number) {
       return state + msg;
     }
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior, {})(nextActorName(), 5);
+    const a = actor(behavior)(nextActorName(), 5);
 
-    const state = await main.outbox.request(a, 10);
+    const state = await main.outbox.request(a, "add", 10);
     expect(state).toBe(15);
     await main.outbox.stop(a);
   });
@@ -424,21 +431,23 @@ idescribe("actor", () => {
     });
     const responses: string[] = [];
 
-    async function behavior(msg: string, state: number, utils: any) {
-      const response = await utils.outbox.request("main", "echo", msg);
-      utils.outbox.send("main", "response", response);
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus") {
+        const response = await utils.outbox.request("main", "echo", msg.payload);
+        utils.outbox.send("main", "response", response);
+      }
       return state;
     }
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior, { onRequest })(nextActorName(), 0);
-    const unsubscribe = main.bus.listen("main", (message) => {
+    const a = actor({ onRequest })(behavior)(nextActorName(), 0);
+    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       if (message.topic === "response") {
         responses.push(message.payload);
       }
     });
-    main.send(a, "hello");
+    main.outbox.send(a, "hello", "hello");
     await new Promise(r => setTimeout(r, 20));
 
     expect(onRequest).toHaveBeenCalled();
@@ -451,8 +460,8 @@ idescribe("actor", () => {
     const allMessages: string[] = [];
     const directMessages: string[] = [];
 
-    async function behavior(msg: string, state: number, utils: any) {
-      if (msg === "go") {
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "go") {
         utils.outbox.send("main", "ping", "ping");
       }
       return state;
@@ -461,18 +470,18 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(behavior)(nextActorName(), 0);
-    const unsubscribeAll = main.bus.listen((message) => {
+    const unsubscribeAll = main.inbox.subscribe((message: ActorBusMessage<any>) => {
       if (message.to === "main" && message.topic === "ping") {
         allMessages.push(message.payload);
       }
     });
-    const unsubscribeDirect = main.bus.listen("main", (message) => {
+    const unsubscribeDirect = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       if (message.topic === "ping") {
         directMessages.push(message.payload);
       }
     });
 
-    main.send(a, "go");
+    main.outbox.send(a, "go", undefined);
     await new Promise(r => setTimeout(r, 20));
 
     expect(allMessages).toEqual(["ping"]);
@@ -485,8 +494,8 @@ idescribe("actor", () => {
   it("should deliver multiple direct bus messages to main in order", async () => {
     const seen: string[] = [];
 
-    async function behavior(msg: string, state: number, utils: any) {
-      if (msg === "double") {
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "double") {
         utils.outbox.send("main", "step", "first");
         utils.outbox.send("main", "step", "second");
       }
@@ -496,13 +505,13 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(behavior)("global-source", 0);
-    const unsubscribe = main.bus.listen("main", (message) => {
+    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       if (message.topic === "step") {
         seen.push(message.payload);
       }
     });
 
-    main.send(a, "double");
+    main.outbox.send(a, "double", undefined);
     await new Promise(r => setTimeout(r, 20));
 
     expect(seen).toEqual(["first", "second"]);
@@ -514,8 +523,8 @@ idescribe("actor", () => {
   it("should route worker requests to named actor request handlers", async () => {
     const responses: string[] = [];
 
-    async function requesterBehavior(msg: string, state: number, utils: any) {
-      if (msg === "ask") {
+    async function requesterBehavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "ask") {
         const response = await utils.outbox.request("responder", "greet", "hello");
         utils.outbox.send("main", "response", response);
       }
@@ -529,19 +538,19 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = requesterBehavior;
 
     const requester = actor(requesterBehavior)("requester", 0);
-    const responder = actor(responderBehavior, {
+    const responder = actor({
       onRequest: (topic: string, payload: string) => {
         expect(topic).toBe("greet");
         return payload.toUpperCase();
       },
-    })("responder", 0);
-    const unsubscribe = main.bus.listen("main", (message) => {
+    })(responderBehavior)("responder", 0);
+    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       if (message.topic === "response") {
         responses.push(message.payload);
       }
     });
 
-    main.send(requester, "ask");
+    main.outbox.send(requester, "ask", undefined);
     await new Promise(r => setTimeout(r, 20));
 
     expect(responses).toEqual(["HELLO"]);
@@ -554,7 +563,7 @@ idescribe("actor", () => {
     type State = { role: "sender" | "receiver"; hits: number[] };
 
     async function behavior(msg: unknown, state: State, utils: any) {
-      if (state.role === "sender" && msg === "direct") {
+      if (state.role === "sender" && isActorBusMessage(msg) && msg.topic === "direct") {
         utils.outbox.send("beta", "direct", 7);
         return state;
       }
@@ -575,12 +584,12 @@ idescribe("actor", () => {
     const alpha = actor(behavior)("alpha", { role: "receiver", hits: [] });
     const beta = actor(behavior)("beta", { role: "receiver", hits: [] });
 
-    main.send(senderActor, "direct");
+    main.outbox.send(senderActor, "direct", undefined);
     await new Promise(r => setTimeout(r, 20));
 
     const [alphaState, betaState] = await Promise.all([
-      main.outbox.request<unknown, State>(alpha, "read"),
-      main.outbox.request<unknown, State>(beta, "read"),
+      main.outbox.request<unknown, State>(alpha, "read", undefined),
+      main.outbox.request<unknown, State>(beta, "read", undefined),
     ]);
 
     expect(alphaState.hits).toEqual([]);
@@ -606,12 +615,43 @@ idescribe("actor", () => {
 
     const alpha = actor(behavior)("alpha", { hits: [] });
     const beta = actor(behavior)("beta", { hits: [] });
-    main.bus.publish("announce", "yes");
+    main.outbox.publish("announce", "yes");
     await new Promise(r => setTimeout(r, 20));
 
     const [alphaState, betaState] = await Promise.all([
-      main.outbox.request<unknown, State>("alpha", "read"),
-      main.outbox.request<unknown, State>("beta", "read"),
+      main.outbox.request<unknown, State>("alpha", "read", undefined),
+      main.outbox.request<unknown, State>("beta", "read", undefined),
+    ]);
+
+    expect(alphaState.hits).toEqual(["yes"]);
+    expect(betaState.hits).toEqual(["yes"]);
+
+    await Promise.all([main.outbox.stop(alpha), main.outbox.stop(beta)]);
+  });
+
+  it("should publish from main.outbox to every actor", async () => {
+    type State = { hits: string[] };
+
+    async function behavior(msg: unknown, state: State) {
+      if (isActorBusMessage<string>(msg) && msg.topic === "announce") {
+        return {
+          hits: [...state.hits, msg.payload],
+        };
+      }
+
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const alpha = actor(behavior)("alpha", { hits: [] });
+    const beta = actor(behavior)("beta", { hits: [] });
+    main.outbox.publish<string>("announce", "yes");
+    await new Promise(r => setTimeout(r, 20));
+
+    const [alphaState, betaState] = await Promise.all([
+      main.outbox.request<unknown, State>("alpha", "read", undefined),
+      main.outbox.request<unknown, State>("beta", "read", undefined),
     ]);
 
     expect(alphaState.hits).toEqual(["yes"]);
@@ -623,8 +663,8 @@ idescribe("actor", () => {
   it("should deliver direct bus messages to main by name", async () => {
     const seen: Array<{ topic: string; payload: string; from?: string }> = [];
 
-    async function behavior(msg: string, state: number, utils: any) {
-      if (msg === "report") {
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "report") {
         utils.outbox.send("main", "status", "ready");
       }
       return state;
@@ -633,16 +673,47 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const reporter = actor(behavior)("reporter", 0);
-    const unsubscribe = main.bus.listen("main", (message) => {
+    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       seen.push({ topic: message.topic, payload: message.payload, from: message.from });
     });
 
-    main.send("reporter", "report");
+    main.outbox.send("reporter", "report", undefined);
     await new Promise(r => setTimeout(r, 20));
 
     expect(seen).toEqual([{ topic: "status", payload: "ready", from: "reporter" }]);
 
     unsubscribe();
     await main.outbox.stop(reporter);
+  });
+
+  it("should send direct messages from main.outbox", async () => {
+    type State = { hits: number[] };
+
+    async function behavior(msg: unknown, state: State) {
+      if (isActorBusMessage<number>(msg) && typeof msg.payload === "number") {
+        return {
+          hits: [...state.hits, msg.payload],
+        };
+      }
+
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const alpha = actor(behavior)("alpha", { hits: [] });
+    const beta = actor(behavior)("beta", { hits: [] });
+    main.outbox.send<number>("beta", "hit", 7);
+    await new Promise(r => setTimeout(r, 20));
+
+    const [alphaState, betaState] = await Promise.all([
+      main.outbox.request<unknown, State>("alpha", "read", undefined),
+      main.outbox.request<unknown, State>("beta", "read", undefined),
+    ]);
+
+    expect(alphaState.hits).toEqual([]);
+    expect(betaState.hits).toEqual([7]);
+
+    await Promise.all([main.outbox.stop(alpha), main.outbox.stop(beta)]);
   });
 });

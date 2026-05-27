@@ -10,7 +10,7 @@ import {
     tap,
 } from '@epikodelabs/streamix';
 
-import { actor, main } from '@epikodelabs/streamix/coroutines';
+import { actor, ActorBusMessage, main } from '@epikodelabs/streamix/coroutines';
 import {
     compressImage,
     CompressOutput,
@@ -63,7 +63,7 @@ export class ImagePipelineService {
   )('image-compress', null!);
 
   constructor() {
-    main.bus.listen('main', (message) => {
+    main.inbox.subscribe('main', (message: ActorBusMessage<any>) => {
       if (message.topic !== 'progress') {
         return;
       }
@@ -200,8 +200,8 @@ export class ImagePipelineService {
   }
 
   private async runPipeline(input: ProcessInput): Promise<CompressOutput> {
-    const resized = await main.outbox.request<ProcessInput, ResizeOutput>(this.resizeActor, input);
-    const compressed = await main.outbox.request<ResizeOutput, CompressOutput>(this.compressActor, resized);
+    const resized = await main.outbox.request<ProcessInput, ResizeOutput>(this.resizeActor, 'process', input);
+    const compressed = await main.outbox.request<ResizeOutput, CompressOutput>(this.compressActor, 'process', resized);
     return compressed;
   }
 

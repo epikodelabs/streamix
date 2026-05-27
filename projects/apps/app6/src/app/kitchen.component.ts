@@ -310,8 +310,6 @@ import {
     }
 
     .log-entries {
-      max-height: 300px;
-      overflow-y: auto;
       padding: 10px;
       font-family: 'Courier New', monospace;
       font-size: 0.8rem;
