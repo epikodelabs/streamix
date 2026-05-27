@@ -1,5 +1,5 @@
 // services/image-pipeline.service.ts
-import { computed, Injectable, NgZone, signal } from '@angular/core';
+import { computed, Injectable, signal } from '@angular/core';
 import {
     catchError,
     createSubject,
@@ -62,25 +62,19 @@ export class ImagePipelineService {
     compressImage
   )('image-compress', null!);
 
-  constructor(private ngZone: NgZone) {
+  constructor() {
     main.inbox.listen(this.resizeActor, (progress: JobProgress) => {
-      this.ngZone.run(() => {
-        this.progressStream.next({ id: progress.taskId!, progress });
-      });
+      this.progressStream.next({ id: progress.taskId!, progress });
     });
 
     main.inbox.listen(this.compressActor, (progress: JobProgress) => {
-      this.ngZone.run(() => {
-        this.progressStream.next({ id: progress.taskId!, progress });
-      });
+      this.progressStream.next({ id: progress.taskId!, progress });
     });
 
     this.progressStream.subscribe(({ id, progress }) => {
-      this.ngZone.run(() => {
-        this.jobs.update(list =>
-          list.map(j => (j.id === id ? { ...j, progress, state: 'processing' as const } : j))
-        );
-      });
+      this.jobs.update(list =>
+        list.map(j => (j.id === id ? { ...j, progress, state: 'processing' as const } : j))
+      );
     });
 
     this.fileStream.pipe(
@@ -104,15 +98,13 @@ export class ImagePipelineService {
           }),
           catchError((err) => {
             console.error('Read file error:', err);
-            this.ngZone.run(() => {
-              this.jobs.update(list =>
-                list.map(j =>
-                  j.id === task.id
-                    ? { ...j, state: 'error' as const, error: String(err?.message ?? err) }
-                    : j
-                )
-              );
-            });
+            this.jobs.update(list =>
+              list.map(j =>
+                j.id === task.id
+                  ? { ...j, state: 'error' as const, error: String(err?.message ?? err) }
+                  : j
+              )
+            );
           })
         )
       ),
@@ -136,27 +128,23 @@ export class ImagePipelineService {
               format: input.format,
             };
 
-            this.ngZone.run(() => {
-              this.jobs.update(list =>
-                list.map(j =>
-                  j.id === input.taskId
-                    ? { ...j, state: 'done' as const, resultUrl: url, result, progress: { stage: 'idle' as const, percent: 100 } }
-                    : j
-                )
-              );
-            });
+            this.jobs.update(list =>
+              list.map(j =>
+                j.id === input.taskId
+                  ? { ...j, state: 'done' as const, resultUrl: url, result, progress: { stage: 'idle' as const, percent: 100 } }
+                  : j
+              )
+            );
           }),
           catchError((err) => {
             console.error('Pipeline error:', err);
-            this.ngZone.run(() => {
-              this.jobs.update(list =>
-                list.map(j =>
-                  j.id === input.taskId
-                    ? { ...j, state: 'error' as const, error: String(err?.message ?? err) }
-                    : j
-                )
-              );
-            });
+            this.jobs.update(list =>
+              list.map(j =>
+                j.id === input.taskId
+                  ? { ...j, state: 'error' as const, error: String(err?.message ?? err) }
+                  : j
+              )
+            );
           })
         )
       )
