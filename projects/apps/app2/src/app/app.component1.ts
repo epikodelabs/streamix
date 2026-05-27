@@ -57,7 +57,7 @@ export class AppComponent implements OnInit, OnDestroy {
   timerValue: number = 0;
   timerStatus: string = 'Stopped';
 
-  private timerActor = actor(timerBehavior)('timer', {
+  private timerActor = actor('timer', timerBehavior, {
     counter: 0,
     timerId: null,
   });

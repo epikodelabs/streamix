@@ -16,7 +16,7 @@
  */
 import { Injectable } from '@angular/core';
 import { createBehaviorSubject, createSubject } from '@epikodelabs/streamix';
-import { actor, ActorBusMessage, coroutine, main, WorkerUtils } from '@epikodelabs/streamix/coroutines';
+import { actor, ActorBusMessage, coroutine, main, registerActorRequestHandler, WorkerUtils } from '@epikodelabs/streamix/coroutines';
 
 export type Order = { id: string; item: string; customer: string };
 
@@ -289,25 +289,7 @@ async function chefBehavior(
   return state;
 }
 
-const chef = actor({
-  onRequest: async (topic: string, payload: unknown) => {
-    if (topic === 'recipe' && typeof payload === 'string') {
-      return recipes.get(payload);
-    }
-    if (topic === 'reserve-oven') {
-      return reserveOven();
-    }
-    if (topic === 'release-oven') {
-      const request = payload as { ovenId: string };
-      return { released: releaseReservedOven(request.ovenId) };
-    }
-    const bakeTask = payload as BakeRequest;
-    if (topic === 'bake') {
-      return bakeOnReservedOven(bakeTask);
-    }
-    throw new Error(`Unknown request payload: ${JSON.stringify(payload)}`);
-  },
-})(chefBehavior, emitKitchenEvent, checkClosed)('chef', {
+const chef = actor('chef', chefBehavior, {
   activeTasks: 0,
   completedCount: 0,
   cancelledCount: 0,
@@ -315,11 +297,29 @@ const chef = actor({
   closing: false,
   cancelQueued: false,
   closedSent: false,
-  cancelledIds: new Set(),
+  cancelledIds: new Set<string>(),
+}, emitKitchenEvent, checkClosed);
+
+registerActorRequestHandler('chef', async (topic: string, payload: unknown) => {
+  if (topic === 'recipe' && typeof payload === 'string') {
+    return recipes.get(payload);
+  }
+  if (topic === 'reserve-oven') {
+    return reserveOven();
+  }
+  if (topic === 'release-oven') {
+    const request = payload as { ovenId: string };
+    return { released: releaseReservedOven(request.ovenId) };
+  }
+  const bakeTask = payload as BakeRequest;
+  if (topic === 'bake') {
+    return bakeOnReservedOven(bakeTask);
+  }
+  throw new Error(`Unknown request payload: ${JSON.stringify(payload)}`);
 });
 
 // ===== CASHIER ACTOR =====
-const cashier = actor(async function cashier(
+const cashier = actor('cashier', async function cashier(
   msg: any,
   state: { closing: boolean },
   utils: WorkerUtils<any, any, any, any>
@@ -341,7 +341,7 @@ const cashier = actor(async function cashier(
   }
 
   return state;
-})('cashier', { closing: false });
+}, { closing: false });
 
 @Injectable({ providedIn: 'root' })
 export class KitchenService {

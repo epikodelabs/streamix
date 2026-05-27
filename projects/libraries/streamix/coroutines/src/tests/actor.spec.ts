@@ -8,6 +8,7 @@ import {
   main,
   otherwise,
   receive,
+  registerActorRequestHandler,
   select,
   send,
   withCancel,
@@ -234,7 +235,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)(nextActorName(), 0);
+    const a = actor(nextActorName(), behavior, 0);
     await new Promise(r => setTimeout(r, 10));
     expect(a.running).toBe(true);
 
@@ -254,7 +255,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)(nextActorName(), 10);
+    const a = actor(nextActorName(), behavior, 10);
     main.outbox.send(a, "add", { n: 5 });
     main.outbox.send(a, "sub", { n: 3 });
     main.outbox.send(a, "add", { n: 2 });
@@ -272,7 +273,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)(nextActorName(), 0);
+    const a = actor(nextActorName(), behavior, 0);
 
     const s1 = await main.outbox.request(a, "add", 5);
     expect(s1).toBe(5);
@@ -295,7 +296,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)(nextActorName(), 0);
+    const a = actor(nextActorName(), behavior, 0);
     const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       messages.push({ topic: message.topic, payload: message.payload, from: message.from });
     });
@@ -320,7 +321,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)(nextActorName(), 0);
+    const a = actor(nextActorName(), behavior, 0);
     const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       messages.push(message.payload);
     });
@@ -340,7 +341,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)(nextActorName(), 0);
+    const a = actor(nextActorName(), behavior, 0);
     main.outbox.send(a, "anything", undefined);
     await new Promise(r => setTimeout(r, 10));
     expect(a.running).toBe(true);
@@ -365,7 +366,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior as any)(nextActorName(), 42);
+    const a = actor(nextActorName(), behavior as any, 42);
     const result = await main.outbox.request(a, "go", undefined) as any;
 
     expect(result.state).toBe(42);
@@ -382,7 +383,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)(nextActorName(), 0);
+    const a = actor(nextActorName(), behavior, 0);
     main.outbox.send(a, "x", undefined);
     await new Promise(r => setTimeout(r, 10));
 
@@ -400,7 +401,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)(nextActorName(), 0);
+    const a = actor(nextActorName(), behavior, 0);
     const pending = main.outbox.request(a, "wait", "wait");
     pending.catch(() => {}); // prevent unhandled rejection warning
 
@@ -417,7 +418,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)(nextActorName(), 5);
+    const a = actor(nextActorName(), behavior, 5);
 
     const state = await main.outbox.request(a, "add", 10);
     expect(state).toBe(15);
@@ -441,18 +442,20 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor({ onRequest })(behavior)(nextActorName(), 0);
+    const a = actor(nextActorName(), behavior, 0);
     const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       if (message.topic === "response") {
         responses.push(message.payload);
       }
     });
+    const unregister = registerActorRequestHandler("main", onRequest);
     main.outbox.send(a, "hello", "hello");
     await new Promise(r => setTimeout(r, 20));
 
     expect(onRequest).toHaveBeenCalled();
     expect(responses).toEqual(["HELLO"]);
     unsubscribe();
+    unregister();
     await main.outbox.stop(a);
   });
 
@@ -469,7 +472,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)(nextActorName(), 0);
+    const a = actor(nextActorName(), behavior, 0);
     const unsubscribeAll = main.inbox.subscribe((message: ActorBusMessage<any>) => {
       if (message.to === "main" && message.topic === "ping") {
         allMessages.push(message.payload);
@@ -504,7 +507,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const a = actor(behavior)("global-source", 0);
+    const a = actor("global-source", behavior, 0);
     const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       if (message.topic === "step") {
         seen.push(message.payload);
@@ -537,13 +540,12 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = requesterBehavior;
 
-    const requester = actor(requesterBehavior)("requester", 0);
-    const responder = actor({
-      onRequest: (topic: string, payload: string) => {
-        expect(topic).toBe("greet");
-        return payload.toUpperCase();
-      },
-    })(responderBehavior)("responder", 0);
+    const requester = actor("requester", requesterBehavior, 0);
+    const responder = actor("responder", responderBehavior, 0);
+    registerActorRequestHandler("responder", (topic: string, payload: string) => {
+      expect(topic).toBe("greet");
+      return payload.toUpperCase();
+    });
     const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       if (message.topic === "response") {
         responses.push(message.payload);
@@ -580,9 +582,9 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const senderActor = actor(behavior)("sender", { role: "sender", hits: [] });
-    const alpha = actor(behavior)("alpha", { role: "receiver", hits: [] });
-    const beta = actor(behavior)("beta", { role: "receiver", hits: [] });
+    const senderActor = actor("sender", behavior, { role: "sender", hits: [] });
+    const alpha = actor("alpha", behavior, { role: "receiver", hits: [] });
+    const beta = actor("beta", behavior, { role: "receiver", hits: [] });
 
     main.outbox.send(senderActor, "direct", undefined);
     await new Promise(r => setTimeout(r, 20));
@@ -613,8 +615,8 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const alpha = actor(behavior)("alpha", { hits: [] });
-    const beta = actor(behavior)("beta", { hits: [] });
+    const alpha = actor("alpha", behavior, { hits: [] });
+    const beta = actor("beta", behavior, { hits: [] });
     main.outbox.publish("announce", "yes");
     await new Promise(r => setTimeout(r, 20));
 
@@ -644,8 +646,8 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const alpha = actor(behavior)("alpha", { hits: [] });
-    const beta = actor(behavior)("beta", { hits: [] });
+    const alpha = actor("alpha", behavior, { hits: [] });
+    const beta = actor("beta", behavior, { hits: [] });
     main.outbox.publish<string>("announce", "yes");
     await new Promise(r => setTimeout(r, 20));
 
@@ -672,7 +674,7 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const reporter = actor(behavior)("reporter", 0);
+    const reporter = actor("reporter", behavior, 0);
     const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
       seen.push({ topic: message.topic, payload: message.payload, from: message.from });
     });
@@ -701,8 +703,8 @@ idescribe("actor", () => {
 
     (globalThis as any).currentMainTask = behavior;
 
-    const alpha = actor(behavior)("alpha", { hits: [] });
-    const beta = actor(behavior)("beta", { hits: [] });
+    const alpha = actor("alpha", behavior, { hits: [] });
+    const beta = actor("beta", behavior, { hits: [] });
     main.outbox.send<number>("beta", "hit", 7);
     await new Promise(r => setTimeout(r, 20));
 

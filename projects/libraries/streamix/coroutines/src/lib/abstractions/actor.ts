@@ -12,7 +12,7 @@ import {
   withTimeout,
 } from "../utils";
 import { acquireBlobUrl, releaseBlobUrl } from "../worker/blob";
-import type { WorkerProtocolHandler, WorkerProtocolMessage } from "../worker/messages";
+import type { WorkerProtocolMessage } from "../worker/messages";
 import { buildActorWorkerRuntime } from "../worker/runtimes";
 import { buildWorkerScript } from "../worker/script";
 import type { Actor } from "../worker/types";
@@ -78,13 +78,47 @@ export type WorkerInbox<Incoming = any> = {
 export type ActorBusTarget = string | string[];
 
 /**
+ * Main-thread communication interface.
+ *
+ * `Initiator` describes the public shape of `main` so that consumers can
+ * reference it explicitly rather than deriving it via `typeof main`.
+ */
+export interface Initiator {
+  outbox: {
+    /** Broadcasts a topic payload to every named actor through the actor bus. */
+    publish<T = any>(topic: string, payload: T, options?: ActorBusDispatchOptions): void;
+
+    /** Sends a one-way bus message to one or more named actor targets. */
+    send<T = any>(to: Actor | string | string[], topic: string, payload: T, options?: Pick<ActorBusDispatchOptions, "from">): void;
+
+    /** Sends a request to an actor and awaits the response. */
+    request<Q = any, D = any>(to: Actor | string, topic: string, payload: Q): Promise<D>;
+
+    /** Stops the actor, terminates its worker, and releases resources. */
+    stop(actor: Actor | string): Promise<void>;
+  };
+
+  inbox: {
+    /** Subscribes to all actor-bus messages. */
+    subscribe(handler: ActorBusHandler): () => void;
+    /** Subscribes to bus messages for a specific name. */
+    subscribe(name: string, handler: ActorBusHandler): () => void;
+    /** Clears all global and direct bus listeners. */
+    clear(): void;
+  };
+}
+
+/** Sender name stamped onto actor-bus messages. */
+export type ActorBusSender = string;
+
+/**
  * Structured bus envelope exchanged between actors through a main-thread bus.
  */
 export type ActorBusMessage<T = any> = {
   kind: "actor-bus";
   topic: string;
   payload: T;
-  from?: string;
+  from?: ActorBusSender;
   to?: ActorBusTarget;
 };
 
@@ -95,7 +129,7 @@ export type ActorBusDispatchOptions = {
   /**
    * Stable sender name to stamp onto the routed message.
    */
-  from?: string;
+  from?: ActorBusSender;
   /**
    * Includes the sender during broadcast delivery when `from` is set.
    */
@@ -201,24 +235,32 @@ export type ActorRequestHandler<Q = any, D = any> = (
   message: ActorMessageContext
 ) => Promise<D> | D;
 
-export type ActorOptions<Q = any, D = any, ToMain = any> = {
-  onRequest?: ActorRequestHandler<Q, D>;
-  onMessage?: (payload: ToMain, message: ActorMessageContext) => void | Promise<void>;
-};
+/**
+ * Registry of request handlers looked up by actor name.
+ */
+const actorRequestHandlers = new Map<string, ActorRequestHandler<any, any>>();
 
 /**
- * Escape hatch for advanced actor integrations that need the raw worker
- * protocol instead of the higher-level `onRequest` / `onMessage` hooks.
+ * Registers a main-thread request handler for a target actor name.
+ * Workers call `utils.outbox.request(name, topic, payload)` — the handler
+ * registered for `name` receives the call and returns the response.
+ *
+ * Register `"main"` to handle requests sent to the main thread.
  */
-export type ActorProtocolHandler = WorkerProtocolHandler;
+export function registerActorRequestHandler<Q = any, D = any>(
+  name: string,
+  handler: ActorRequestHandler<Q, D>
+): () => void {
+  actorRequestHandlers.set(name, handler);
+  return () => actorRequestHandlers.delete(name);
+}
 
 /**
- * Alternative configuration that replaces the entire main-thread message
- * handler. When this is used, `onRequest` and `onMessage` are ignored.
+ * Removes a request handler previously registered for a name.
  */
-export type ActorCustomMessageHandlerConfig = {
-  customMessageHandler: ActorProtocolHandler;
-};
+export function unregisterActorRequestHandler(name: string): void {
+  actorRequestHandlers.delete(name);
+}
 
 /**
  * Creates a typed actor-bus envelope.
@@ -855,10 +897,9 @@ function postActorResponse(
   worker.postMessage(message);
 }
 
-function handleRequest<Q, D>(
+function handleRequest<Q>(
   message: WorkerProtocolMessage,
   sourceActor: Actor,
-  options: ActorOptions<Q, D, any> | undefined,
   worker: Worker
 ) {
   const { workerId, taskId, requestId, payload, topic } = message;
@@ -876,10 +917,7 @@ function handleRequest<Q, D>(
   }
 
   const targetName = targets[0];
-  const handler =
-    targetName === "main"
-      ? options?.onRequest
-      : actorBusRegistrationsById.get(targetName)?.onRequest;
+  const handler = actorRequestHandlers.get(targetName);
 
   if (!handler) {
     postActorResponse(worker, {
@@ -887,10 +925,7 @@ function handleRequest<Q, D>(
       taskId,
       requestId,
       type: "error",
-      error:
-        targetName === "main"
-          ? "No actor request handler configured"
-          : `No actor request handler configured for "${targetName}"`,
+      error: `No actor request handler registered for "${targetName}"`,
     });
     return;
   }
@@ -942,18 +977,6 @@ function handleRequest<Q, D>(
   }
 }
 
-function handleWorkerMessage<ToMain>(
-  message: WorkerProtocolMessage,
-  options: ActorOptions<any, any, ToMain> | undefined
-) {
-  const payload = message.payload as ToMain;
-  if (options?.onMessage) {
-    Promise.resolve(options.onMessage(payload, message)).catch((err) => {
-      console.warn("options.onMessage failed:", err);
-    });
-  }
-}
-
 /**
  * Creates an autonomous behavior-mode actor.
  *
@@ -962,62 +985,37 @@ function handleWorkerMessage<ToMain>(
  *
  * @example
  * ```ts
- * const Counter = actor((msg, state, utils) => state + msg.payload.n);
- * const counter = Counter("counter", 0);
+ * const counter = actor("counter", (msg, state, utils) => state + msg.payload.n, 0);
  * main.outbox.send(counter, "inc", { n: 1 });
  * const value = await main.outbox.request(counter, "inc", { n: 2 });
  * ```
  */
-export function actor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
+export function actor<S = any, Q = any, D = any, FromMain = any>(
+  name: string,
   behavior: ActorBehavior<S, Q, D, FromMain>,
-  ...functions: Function[]
-): (name: string, initialState: S) => Actor;
-
-export function actor<Q = any, D = any, ToMain = any>(
-  config: ActorOptions<Q, D, ToMain> | ActorCustomMessageHandlerConfig,
-): <S = any, FromMain = any>(
-  behavior: ActorBehavior<S, Q, D, FromMain>,
-  ...functions: Function[]
-) => (name: string, initialState: S) => Actor;
-
-export function actor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
-  arg1: ActorOptions<Q, D, ToMain> | ActorCustomMessageHandlerConfig | ActorBehavior<S, Q, D, FromMain>,
-  ...rest: Function[]
-): ((name: string, initialState: S) => Actor) | (<S2 = any, FromMain2 = any>(
-  behavior: ActorBehavior<S2, Q, D, FromMain2>,
-  ...functions: Function[]
-) => (name: string, initialState: S2) => Actor) {
-  if (typeof arg1 === "function") {
-    const behavior = arg1 as ActorBehavior<S, Q, D, FromMain>;
-    const functions = rest;
-    return (name: string, initialState: S) =>
-      createActor(name, undefined, behavior, initialState, functions);
-  }
-
-  const config = arg1 as ActorOptions<Q, D, ToMain> | ActorCustomMessageHandlerConfig;
-  return <S2 = any, FromMain2 = any>(
-    behavior: ActorBehavior<S2, Q, D, FromMain2>,
-    ...functions: Function[]
-  ): ((name: string, initialState: S2) => Actor) =>
-      (name: string, initialState: S2) =>
-        createActor(name, config, behavior, initialState, functions);
+  initialState?: S,
+  ...helpers: (Function | string)[]
+): Actor {
+  return createActor(name, behavior, initialState, helpers);
 }
 
-function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
+function createActor<S = any, Q = any, D = any, FromMain = any>(
   name: string,
-  options: ActorOptions<Q, D, ToMain> | ActorCustomMessageHandlerConfig | undefined,
   behavior: ActorBehavior<S, Q, D, FromMain>,
-  initialState: S,
-  functions: Function[]
+  initialState: S | undefined,
+  helpers: (Function | string)[]
 ): Actor {
   if (!name || typeof name !== "string") {
     throw new Error("Actor name must be a non-empty string");
   }
 
+  const functionHelpers = helpers.filter((h): h is Function => typeof h === "function");
+  const stringHelpers = helpers.filter((h): h is string => typeof h === "string");
+
   const workerScript = buildWorkerScript({
-    helpers: [ACTOR_CONCURRENCY_RUNTIME],
+    helpers: [ACTOR_CONCURRENCY_RUNTIME, ...stringHelpers],
     main: behavior as any,
-    functions,
+    functions: functionHelpers,
     runtime: buildActorWorkerRuntime(),
   });
 
@@ -1131,11 +1129,6 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
     const msg = event.data;
     const { type, payload, requestId } = msg;
 
-    if (options && "customMessageHandler" in options) {
-      (options as ActorCustomMessageHandlerConfig).customMessageHandler(event, worker!, new Map());
-      return;
-    }
-
     if (type === "response" && requestId && pendingRequests.has(requestId)) {
       const { resolve } = pendingRequests.get(requestId)!;
       pendingRequests.delete(requestId);
@@ -1145,7 +1138,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
       pendingRequests.delete(requestId);
       reject(new Error(msg.error ?? "Actor request failed"));
     } else if (type === "request") {
-      handleRequest(msg, actorRef, options, worker!);
+      handleRequest(msg, actorRef, worker!);
     } else if (type === "notify") {
       if (!running) {
         return;
@@ -1154,7 +1147,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
         dispatchActorBusMessage(payload, { fromActor: actorRef });
         return;
       }
-      handleWorkerMessage(msg, options);
+      // Non-bus notify payloads are ignored; behaviors receive messages via the inbox listen cycle.
     } else if (type === "stopped") {
       running = false;
       rejectPendingRequests();
@@ -1183,7 +1176,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
   };
 
   actorRef = actor;
-  registerActorBusTarget(name, actorRef, options && "onRequest" in options ? options.onRequest : undefined);
+  registerActorBusTarget(name, actorRef);
 
   const internals = {
     stop() {
@@ -1227,7 +1220,6 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
 type ActorBusRegistration = {
   actor: Actor;
   name: string;
-  onRequest?: ActorRequestHandler<any, any>;
 };
 
 const actorBusRegistrationsById = new Map<string, ActorBusRegistration>();
@@ -1298,8 +1290,7 @@ function unregisterActorBusTarget(idOrActor: string | Actor) {
 
 function registerActorBusTarget(
   name: string,
-  actor: Actor,
-  onRequest?: ActorRequestHandler<any, any>
+  actor: Actor
 ) {
   const existingRegistration = actorBusRegistrationsById.get(name);
   if (existingRegistration && existingRegistration.actor !== actor) {
@@ -1311,7 +1302,6 @@ function registerActorBusTarget(
   const registration: ActorBusRegistration = {
     actor,
     name,
-    onRequest,
   };
 
   actorBusRegistrationsById.set(name, registration);
@@ -1382,7 +1372,7 @@ function dispatchActorBusMessage<T = any>(
  * - `main.inbox.subscribe(handler)` — subscribe to all actor-bus messages
  * - `main.inbox.subscribe(name, handler)` — subscribe to bus messages for a name
  */
-export const main = {
+export const main: Initiator = {
   outbox: {
     /** Broadcasts a topic payload to every named actor through the actor bus. */
     publish<T = any>(

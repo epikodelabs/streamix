@@ -53,14 +53,18 @@ export class ImagePipelineService {
   );
   readonly isProcessing = computed(() => this.jobs().some(j => j.state === 'processing'));
 
-  private resizeActor = actor<ResizeOutput, any, any, JobProgress, ProcessInput>(
+  private resizeActor = actor<ResizeOutput, any, any, ProcessInput>(
+    'image-resize',
     (msg: ProcessInput, _state: any, utils: any) => resizeImage(msg, utils),
+    null!,
     resizeImage
-  )('image-resize', null!);
-  private compressActor = actor<CompressOutput, any, any, JobProgress, ResizeOutput>(
+  );
+  private compressActor = actor<CompressOutput, any, any, ResizeOutput>(
+    'image-compress',
     (msg: ResizeOutput, _state: any, utils: any) => compressImage(msg, utils),
+    null!,
     compressImage
-  )('image-compress', null!);
+  );
 
   constructor() {
     main.inbox.subscribe('main', (message: ActorBusMessage<any>) => {
