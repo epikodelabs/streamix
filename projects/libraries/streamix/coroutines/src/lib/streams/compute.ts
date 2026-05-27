@@ -2,7 +2,7 @@ import { isPromiseLike } from "@epikodelabs/streamix";
 import { buildWorkerScript } from "../worker/script";
 import { buildCoroutineWorkerRuntime } from "../worker/runtimes";
 import { createTaskPool } from "../worker/pool";
-import type { WorkerScript } from "../worker/types";
+import type { CoroutineScript } from "../worker/types";
 
 export interface ComputeRunner<T = any, R = any> {
   (params: T | Promise<T>): Promise<R>;
@@ -54,10 +54,10 @@ export function compute<T = any, R = any>(
 }
 
 /**
- * Creates a compute runner from a `WorkerScript` descriptor.
+ * Creates a compute runner from a `CoroutineScript` descriptor.
  */
 export function computeScript<T = any, R = any>(
-  script: WorkerScript<T, R>
+  script: CoroutineScript<T, R>
 ): ComputeRunner<T, R> {
   return compute(script.main, ...(script.functions || []));
 }

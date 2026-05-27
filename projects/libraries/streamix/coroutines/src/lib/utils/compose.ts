@@ -1,22 +1,22 @@
 import { buildWorkerScript, buildCoroutineWorkerRuntime, createTaskRunner, serializeScript } from "../worker";
-import type { Coroutine, TaskRunner, WorkerScript } from "../worker/types";
+import type { Coroutine, CoroutineScript, TaskRunner } from "../worker/types";
 
-function isWorkerScript(value: unknown): value is WorkerScript {
+function isCoroutineScript(value: unknown): value is CoroutineScript {
   return (
     typeof value === "object" &&
     value !== null &&
-    typeof (value as WorkerScript).main === "function"
+    typeof (value as CoroutineScript).main === "function"
   );
 }
 
 /**
- * Merges multiple `WorkerScript`s into a single composed script suitable for
+ * Merges multiple `CoroutineScript`s into a single composed script suitable for
  * baking into a worker blob via `createTaskPool`.
  *
  * Each stage is wrapped in an IIFE so that dependency function names
  * and internal variables do not collide across stages.
  */
-function mergeWorkerScripts(scripts: WorkerScript[]): {
+function mergeCoroutineScripts(scripts: CoroutineScript[]): {
   main: Function;
   helpers: string[];
   generateScript: (main: Function, helpers?: string[]) => string;
@@ -62,25 +62,25 @@ ${depsSection ? '  ' + depsSection.replace(/\n/g, '\n  ') + '\n' : ''}  return (
 /**
  * Chains multiple coroutines sequentially into a single `Coroutine`.
  *
- * `WorkerScript` inputs (created by `coroutine()`) are merged into one
+ * `CoroutineScript` inputs (created by `coroutine()`) are merged into one
  * worker script so the entire pipeline runs on a single worker per task.
  *
  * `TaskRunner` inputs are chained in the main thread after the worker
  * stage completes.
  */
-export function compose<A, B>(...scripts: [WorkerScript<A, B>]): Coroutine<A, B>;
-export function compose<A, B, C>(...scripts: [WorkerScript<A, B>, WorkerScript<B, C>]): Coroutine<A, C>;
-export function compose<A, B, C, D>(...scripts: [WorkerScript<A, B>, WorkerScript<B, C>, WorkerScript<C, D>]): Coroutine<A, D>;
-export function compose<T = any, R = any>(...scripts: Array<WorkerScript<any, any> | TaskRunner<any, any>>): Coroutine<T, R>;
+export function compose<A, B>(...scripts: [CoroutineScript<A, B>]): Coroutine<A, B>;
+export function compose<A, B, C>(...scripts: [CoroutineScript<A, B>, CoroutineScript<B, C>]): Coroutine<A, C>;
+export function compose<A, B, C, D>(...scripts: [CoroutineScript<A, B>, CoroutineScript<B, C>, CoroutineScript<C, D>]): Coroutine<A, D>;
+export function compose<T = any, R = any>(...scripts: Array<CoroutineScript<any, any> | TaskRunner<any, any>>): Coroutine<T, R>;
 
 export function compose<T = any, R = any>(
-  ...scripts: Array<WorkerScript<any, any> | TaskRunner<any, any>>
+  ...scripts: Array<CoroutineScript<any, any> | TaskRunner<any, any>>
 ): Coroutine<T, R> {
-  const workerScripts: WorkerScript<any, any>[] = [];
+  const workerScripts: CoroutineScript<any, any>[] = [];
   const taskRunners: TaskRunner<any, any>[] = [];
 
   for (const s of scripts) {
-    if (isWorkerScript(s)) {
+    if (isCoroutineScript(s)) {
       workerScripts.push(s);
     } else if (s && typeof (s as TaskRunner).processTask === "function") {
       taskRunners.push(s as TaskRunner);
@@ -90,7 +90,7 @@ export function compose<T = any, R = any>(
   let workerRunner: TaskRunner<T, R> | null = null;
 
   if (workerScripts.length > 0) {
-    const merged = mergeWorkerScripts(workerScripts);
+    const merged = mergeCoroutineScripts(workerScripts);
     workerRunner = createTaskRunner<T, R>({
       name: "compose",
       config: merged.helpers.length > 0 ? { helpers: merged.helpers } : undefined,

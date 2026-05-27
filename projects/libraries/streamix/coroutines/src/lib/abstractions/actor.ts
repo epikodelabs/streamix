@@ -12,11 +12,10 @@ import {
   withTimeout,
   type Channel,
 } from "../utils";
-import {
-  type CoroutineMessage,
-  type WorkerMessageHandler,
-} from "../worker";
-import { type WorkerPoolConfig } from "../worker/pool";
+import type {
+  WorkerProtocolHandler,
+  WorkerProtocolMessage,
+} from "../worker/messages";
 import { buildActorWorkerRuntime } from "../worker/runtimes";
 import { buildWorkerScript } from "../worker/script";
 import type { Actor } from "../worker/types";
@@ -81,6 +80,17 @@ export interface ActorBehavior<S = any, Q = any, D = any, FromMain = any, ToMain
 }
 
 /**
+ * Metadata describing the protocol envelope around an actor message.
+ *
+ * This is surfaced to advanced handlers without exposing the full internal
+ * worker-pool protocol as part of the main public API.
+ */
+export type ActorMessageContext = Pick<
+  WorkerProtocolMessage,
+  "workerId" | "taskId" | "requestId"
+>;
+
+/**
  * Request handler used by `utils.outbox.request()`.
  *
  * Keep this function small, or delegate to a `coroutine(...)` instance via
@@ -88,7 +98,7 @@ export interface ActorBehavior<S = any, Q = any, D = any, FromMain = any, ToMain
  */
 export type ActorRequestHandler<Q = any, D = any> = (
   request: Q,
-  message: CoroutineMessage
+  message: ActorMessageContext
 ) => Promise<D> | D;
 
 /**
@@ -97,18 +107,26 @@ export type ActorRequestHandler<Q = any, D = any> = (
  * `request` resolves `utils.outbox.request(payload)` calls initiated from inside
  * the worker. `onMessage` receives one-way `utils.outbox.send(payload)` traffic.
  */
-export type ActorConfig<Q = any, D = any, ToMain = any> = WorkerPoolConfig & {
+export type ActorConfig<Q = any, D = any, ToMain = any> = {
+  helpers?: string[];
   onRequest?: ActorRequestHandler<Q, D>;
-  onMessage?: (payload: ToMain, message: CoroutineMessage) => void | Promise<void>;
+  onMessage?: (payload: ToMain, message: ActorMessageContext) => void | Promise<void>;
 };
 
 /**
  * Alternative configuration that replaces the entire main-thread message
  * handler. When this is used, `onRequest` and `onMessage` are ignored.
  */
-export type ActorCustomMessageHandlerConfig = WorkerPoolConfig & {
-  customMessageHandler: WorkerMessageHandler;
+export type ActorCustomMessageHandlerConfig = {
+  helpers?: string[];
+  customMessageHandler: ActorProtocolHandler;
 };
+
+/**
+ * Escape hatch for advanced actor integrations that need the raw worker
+ * protocol instead of the higher-level `onRequest` / `onMessage` hooks.
+ */
+export type ActorProtocolHandler = WorkerProtocolHandler;
 
 const ACTOR_CONCURRENCY_RUNTIME = `
 class __streamixChannelClosedError extends Error {
@@ -710,14 +728,14 @@ const toErrorMessage = (
 
 function postActorResponse(
   worker: Worker,
-  message: Pick<CoroutineMessage, "workerId" | "taskId" | "requestId"> &
+  message: Pick<WorkerProtocolMessage, "workerId" | "taskId" | "requestId"> &
     ({ type: "response"; payload: unknown } | { type: "error"; error: string })
 ) {
   worker.postMessage(message);
 }
 
 function handleRequest<Q, D>(
-  message: CoroutineMessage,
+  message: WorkerProtocolMessage,
   config: ActorConfig<Q, D, any> | ActorCustomMessageHandlerConfig | undefined,
   worker: Worker
 ) {
@@ -767,7 +785,7 @@ function handleRequest<Q, D>(
 }
 
 function handleWorkerMessage<ToMain>(
-  message: CoroutineMessage,
+  message: WorkerProtocolMessage,
   config: ActorConfig<any, any, ToMain> | ActorCustomMessageHandlerConfig | undefined,
   messageHandlers: Set<(payload: ToMain) => void>
 ) {
@@ -916,7 +934,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
 
   const postToWorker = (
     target: Worker,
-    message: Omit<CoroutineMessage, "workerId">
+    message: Omit<WorkerProtocolMessage, "workerId">
   ) => {
     target.postMessage({
       workerId: actorWorkerId,
@@ -979,7 +997,7 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
     return shutdownPromise;
   };
 
-  const handleMessage = (event: MessageEvent<CoroutineMessage>) => {
+  const handleMessage = (event: MessageEvent<WorkerProtocolMessage>) => {
     const msg = event.data;
     const { type, payload, requestId } = msg;
 
@@ -1151,5 +1169,3 @@ export const main = {
     }) as InboxAPI,
   },
 };
-
-export type { CoroutineMessage } from "../worker/messages";

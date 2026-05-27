@@ -1,4 +1,4 @@
-import type { CoroutineMessage } from "./messages";
+import type { WorkerProtocolMessage } from "./messages";
 
 /**
  * Task descriptor ready to be baked into a worker blob.
@@ -6,7 +6,7 @@ import type { CoroutineMessage } from "./messages";
  * `main` and `functions` are the single source of truth.
  * String forms are derived on demand via `serializeScript()`.
  */
-export interface WorkerScript<T = any, R = any> {
+export interface CoroutineScript<T = any, R = any> {
   helpers?: string[];
   main: (data: T) => R | Promise<R>;
   functions?: Function[];
@@ -26,10 +26,10 @@ export interface TaskRunner<T = any, R = any> {
  * All pool variants implement this interface.
  */
 export interface WorkerPool {
-  getIdleWorker: () => Promise<Worker>;
-  returnWorker: (worker: Worker) => void;
-  discardWorker: (worker: Worker, reason?: Error) => void;
-  postMessageToWorker: (worker: Worker, message: Omit<CoroutineMessage, "workerId">) => void;
+  acquireWorker: () => Promise<Worker>;
+  releaseWorker: (worker: Worker) => void;
+  disposeWorker: (worker: Worker, reason?: Error) => void;
+  sendToWorker: (worker: Worker, message: Omit<WorkerProtocolMessage, "workerId">) => void;
 }
 
 /**
@@ -38,7 +38,7 @@ export interface WorkerPool {
  * Used internally by `coroutine()` and `compute()`.
  */
 export interface TaskPool<T = any, R = any> extends WorkerPool, TaskRunner<T, R> {
-  assignTask: (worker: Worker, data: T) => Promise<R>;
+  runOnWorker: (worker: Worker, data: T) => Promise<R>;
 }
 
 /**
@@ -49,11 +49,12 @@ export interface TaskPool<T = any, R = any> extends WorkerPool, TaskRunner<T, R>
 export interface Coroutine<T = any, R = T> extends TaskRunner<T, R> {}
 
 /**
- * Long-lived dedicated worker with bidirectional messaging.
+ * Long-lived stateful worker with bidirectional messaging.
  *
  * `Actor` is an opaque handle to a persistent behavior loop running in a
  * dedicated worker. Messaging is done through the `main` utility:
- * `main.send(actor, msg)`, `main.ask(actor, msg)`, `main.receive(actor, handler)`.
+ * `main.outbox.send(actor, msg)`, `main.outbox.request(actor, msg)`,
+ * `main.inbox.receive(actor, handler)`.
  *
  * Unlike `Coroutine`, an actor is not pool-based; it owns exactly one worker.
  */

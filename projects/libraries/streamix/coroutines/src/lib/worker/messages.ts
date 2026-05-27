@@ -1,7 +1,7 @@
 /**
  * Message envelope exchanged between the main thread and worker instances.
  */
-export type CoroutineMessageType =
+export type WorkerProtocolMessageType =
   | "task"
   | "response"
   | "error"
@@ -15,10 +15,10 @@ export type CoroutineMessageType =
  * `taskId` tracks the outer task lifecycle.
  * `requestId` is reserved for nested actor request/response exchanges.
  */
-export type CoroutineMessage = {
+export type WorkerProtocolMessage = {
   workerId: number;
   taskId: string;
-  type: CoroutineMessageType;
+  type: WorkerProtocolMessageType;
   payload?: any;
   error?: string;
   requestId?: string;
@@ -39,8 +39,8 @@ export type PendingTaskMap = Map<
 /**
  * Custom main-thread message handler for worker responses.
  */
-export type WorkerMessageHandler = (
-  event: MessageEvent<CoroutineMessage>,
+export type WorkerProtocolHandler = (
+  event: MessageEvent<WorkerProtocolMessage>,
   worker: Worker,
   pendingTasks: PendingTaskMap
 ) => void;
@@ -50,9 +50,9 @@ export type WorkerMessageHandler = (
  */
 export type DefaultMessageHandlerOptions = {
   /** Called when the worker sends a request message. */
-  onRequest?: (message: CoroutineMessage) => void | Promise<void>;
+  onRequest?: (message: WorkerProtocolMessage) => void | Promise<void>;
   /** Called when the worker sends a one-way message. */
-  onWorkerMessage?: (message: CoroutineMessage) => void | Promise<void>;
+  onWorkerMessage?: (message: WorkerProtocolMessage) => void | Promise<void>;
 };
 
 /**
@@ -63,7 +63,7 @@ export function createDefaultMessageHandler(
   pendingTasks: PendingTaskMap,
   options?: DefaultMessageHandlerOptions
 ) {
-  return (event: MessageEvent<CoroutineMessage>) => {
+  return (event: MessageEvent<WorkerProtocolMessage>) => {
     const msg = event.data;
     const { taskId, payload, error, type, workerId } = msg;
     const pending = pendingTasks.get(taskId);

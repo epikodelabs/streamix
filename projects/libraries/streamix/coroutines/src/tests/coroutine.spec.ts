@@ -5,17 +5,17 @@ import {
     background,
     channel,
     coroutine,
-    createTaskPool,
     otherwise,
     receive,
     select,
     send,
     withCancel,
     withDeadline,
-    withTimeout,
-    type CoroutineMessage
+    withTimeout
 } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
+import { createTaskPool } from "../lib/worker/pool";
+import type { WorkerProtocolMessage } from "../lib/worker/messages";
 
 idescribe('coroutine', () => {
   let originalWorker: any;
@@ -56,7 +56,7 @@ idescribe('coroutine', () => {
         return {
           main: {
             send: (payload: any) => {
-              const event: MessageEvent<CoroutineMessage> = {
+              const event: MessageEvent<WorkerProtocolMessage> = {
                 data: { workerId: message.workerId, taskId: message.taskId, type: "notify", payload }
               } as any;
               this.onmessage?.(event);
@@ -107,13 +107,13 @@ idescribe('coroutine', () => {
               
               // Handle both sync and async results
               Promise.resolve(result).then(finalResult => {
-                const event: MessageEvent<CoroutineMessage> = {
+                const event: MessageEvent<WorkerProtocolMessage> = {
                   data: { ...msg, type: 'response', payload: finalResult }
                 } as any;
                 this.onmessage?.(event);
                 this.listeners['message']?.forEach(fn => fn(event));
               }).catch(err => {
-                const event: MessageEvent<CoroutineMessage> = {
+                const event: MessageEvent<WorkerProtocolMessage> = {
                   data: { ...msg, type: 'error', error: err.message }
                 } as any;
                 this.onmessage?.(event);
@@ -121,7 +121,7 @@ idescribe('coroutine', () => {
               });
               
             } catch (err: any) {
-              const event: MessageEvent<CoroutineMessage> = {
+              const event: MessageEvent<WorkerProtocolMessage> = {
                 data: { ...msg, type: 'error', error: err.message }
               } as any;
               this.onmessage?.(event);
@@ -187,17 +187,17 @@ idescribe('coroutine', () => {
     expect(processed).toEqual([2, 3, 4]); // Fixed expectation: x + 1
   });
 
-  it('should allow assignTask directly to a worker', async () => {
+  it('should allow runOnWorker directly on an acquired worker', async () => {
     const mainTask = (x: number) => x * 2;
     (globalThis as any).currentMainTask = mainTask;
 
     const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
-    const worker = await pool.getIdleWorker();
-    const result = await pool.assignTask(worker, 5);
+    const worker = await pool.acquireWorker();
+    const result = await pool.runOnWorker(worker, 5);
 
     expect(result).toBe(10);
-    pool.returnWorker(worker);
+    pool.releaseWorker(worker);
     await pool.finalize();
   });
 
@@ -223,17 +223,17 @@ idescribe('coroutine', () => {
     const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
     // Get a worker to ensure one is created
-    const worker = await pool.getIdleWorker();
-    pool.returnWorker(worker);
+    const worker = await pool.acquireWorker();
+    pool.releaseWorker(worker);
 
     await pool.finalize();
 
     // After finalize, getting a new worker should work
-    const newWorker = await pool.getIdleWorker();
+    const newWorker = await pool.acquireWorker();
     expect((newWorker as any).__id).toBeGreaterThan(0);
 
     // Clean up
-    pool.returnWorker(newWorker);
+    pool.releaseWorker(newWorker);
     await pool.finalize();
   });
 
@@ -316,8 +316,8 @@ idescribe('coroutine', () => {
       (globalThis as any).currentMainTask = mainTask;
 
       const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
-      const worker = await pool.getIdleWorker();
-      pool.returnWorker(worker);
+      const worker = await pool.acquireWorker();
+      pool.releaseWorker(worker);
       await pool.finalize();
     } finally {
       if (originalDescriptor) {
@@ -364,7 +364,7 @@ idescribe('coroutine', () => {
           if (this.terminated) return;
           if (msg.type !== "task") return;
 
-          const event: MessageEvent<CoroutineMessage> = {
+          const event: MessageEvent<WorkerProtocolMessage> = {
             data: { ...msg, type: "error" } // no `error` field on purpose
           } as any;
 
@@ -402,8 +402,8 @@ idescribe('coroutine', () => {
     }
 
     const pool = createTaskPool({ name: 'test', main: mainTask, functions: [helperNamed, function () { return 2; }], generateWorkerScript: () => '' });
-    const worker = await pool.getIdleWorker();
-    pool.returnWorker(worker);
+    const worker = await pool.acquireWorker();
+    pool.releaseWorker(worker);
     await pool.finalize();
   });
 
@@ -414,7 +414,7 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
     const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
-    const worker = await pool.getIdleWorker();
+    const worker = await pool.acquireWorker();
     const workerId = (worker as any).__id as number;
     const handler = (worker as any).listeners.message[0] as (ev: any) => void;
 
@@ -423,11 +423,11 @@ idescribe('coroutine', () => {
 
     expect(warn).toHaveBeenCalled();
 
-    pool.returnWorker(worker);
+    pool.releaseWorker(worker);
     await pool.finalize();
   });
 
-  it('should queue getIdleWorker requests once max workers are reached', async () => {
+  it('should queue acquireWorker requests once max workers are reached', async () => {
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
     const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
@@ -436,27 +436,27 @@ idescribe('coroutine', () => {
     const acquired: Worker[] = [];
 
     for (let i = 0; i < max; i++) {
-      acquired.push(await pool.getIdleWorker());
+      acquired.push(await pool.acquireWorker());
     }
 
-    const waiting = pool.getIdleWorker();
+    const waiting = pool.acquireWorker();
 
     // Return one worker to satisfy the waiting request.
-    pool.returnWorker(acquired[0]);
+    pool.releaseWorker(acquired[0]);
     const extra = await waiting;
 
     expect((extra as any).__id).toBe((acquired[0] as any).__id);
 
     // Cleanup: return everything to the pool.
     for (const entry of acquired.slice(1)) {
-      pool.returnWorker(entry);
+      pool.releaseWorker(entry);
     }
-    pool.returnWorker(extra);
+    pool.releaseWorker(extra);
 
     await pool.finalize();
   });
 
-  it('should reject queued getIdleWorker requests when finalized', async () => {
+  it('should reject queued acquireWorker requests when finalized', async () => {
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
     const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
@@ -465,10 +465,10 @@ idescribe('coroutine', () => {
     const acquired: Worker[] = [];
 
     for (let i = 0; i < max; i++) {
-      acquired.push(await pool.getIdleWorker());
+      acquired.push(await pool.acquireWorker());
     }
 
-    const waiting = pool.getIdleWorker();
+    const waiting = pool.acquireWorker();
     await pool.finalize();
 
     await expectAsync(waiting).toBeRejectedWithError(/finalized before a worker became available/);
@@ -483,37 +483,37 @@ idescribe('coroutine', () => {
     const acquired: Worker[] = [];
 
     for (let i = 0; i < max; i++) {
-      acquired.push(await pool.getIdleWorker());
+      acquired.push(await pool.acquireWorker());
     }
 
     await pool.finalize();
 
-    const worker = await pool.getIdleWorker();
+    const worker = await pool.acquireWorker();
     expect((worker as any).__id).toBeGreaterThan(0);
 
-    pool.returnWorker(worker);
+    pool.releaseWorker(worker);
     await pool.finalize();
   });
 
-  it('returnWorker warns when workerId is unknown', async () => {
+  it('releaseWorker warns when workerId is unknown', async () => {
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
     const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
     const warn = spyOn(console, "warn");
-    pool.returnWorker({} as Worker);
+    pool.releaseWorker({} as Worker);
 
     expect(warn).toHaveBeenCalled();
 
     await pool.finalize();
   });
 
-  it('assignTask throws when workerId is unknown', async () => {
+  it('runOnWorker throws when workerId is unknown', async () => {
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
     const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
 
-    await expectAsync(pool.assignTask({} as Worker, 1)).toBeRejectedWithError(/not found/i);
+    await expectAsync(pool.runOnWorker({} as Worker, 1)).toBeRejectedWithError(/not found/i);
     await pool.finalize();
   });
 

@@ -1,4 +1,4 @@
-import type { CoroutineMessage, PendingTaskMap } from "./messages";
+import type { WorkerProtocolMessage, PendingTaskMap } from "./messages";
 import { createDefaultMessageHandler } from "./messages";
 import type { TaskPool } from "./types";
 import { generateTaskId } from "./utils";
@@ -24,7 +24,7 @@ type PoolOptions = {
   main: Function;
   functions: Function[];
   generateWorkerScript: (main: Function, functions: Function[], config?: WorkerPoolConfig) => string;
-  createMessageHandler?: (worker: Worker, pendingTasks: PendingTaskMap) => (event: MessageEvent<CoroutineMessage>) => void;
+  createMessageHandler?: (worker: Worker, pendingTasks: PendingTaskMap) => (event: MessageEvent<WorkerProtocolMessage>) => void;
 };
 
 let workerIdentifierCounter = 0;
@@ -82,7 +82,7 @@ function createPoolCore(
     }
   };
 
-  const getIdleWorker = async (): Promise<Worker> => {
+  const acquireWorker = async (): Promise<Worker> => {
     if (isFinalizing) {
       throw new Error(`${name} is finalizing`);
     }
@@ -99,7 +99,7 @@ function createPoolCore(
     return new Promise((resolve, reject) => waitingQueue.push({ resolve, reject }));
   };
 
-  const returnWorker = (worker: Worker): void => {
+  const releaseWorker = (worker: Worker): void => {
     const workerId = getWorkerId(worker);
     if (workerId === undefined || !activeWorkers.has(workerId)) {
       console.warn(`Worker not found.`);
@@ -119,7 +119,7 @@ function createPoolCore(
     }
   };
 
-  const discardWorker = (worker: Worker, reason?: Error): void => {
+  const disposeWorker = (worker: Worker, reason?: Error): void => {
     const workerId = getWorkerId(worker);
     if (workerId === undefined || !activeWorkers.has(workerId)) {
       console.warn(`Worker not found.`);
@@ -141,7 +141,7 @@ function createPoolCore(
     satisfyWaitingQueue();
   };
 
-  const postMessageToWorker = (worker: Worker, message: Omit<CoroutineMessage, "workerId">): void => {
+  const sendToWorker = (worker: Worker, message: Omit<WorkerProtocolMessage, "workerId">): void => {
     const workerId = getWorkerId(worker);
     if (workerId === undefined || !activeWorkers.has(workerId)) {
       throw new Error(`Worker not found or is not active`);
@@ -177,10 +177,10 @@ function createPoolCore(
   };
 
   return {
-    getIdleWorker,
-    returnWorker,
-    discardWorker,
-    postMessageToWorker,
+    acquireWorker,
+    releaseWorker,
+    disposeWorker,
+    sendToWorker,
     finalize,
     pendingMessages,
     activeWorkers,
@@ -246,14 +246,14 @@ export function createTaskPool<T, R>({
     });
   };
 
-  const assignTask = (worker: Worker, data: T): Promise<R> => submitTask(worker, data);
+  const runOnWorker = (worker: Worker, data: T): Promise<R> => submitTask(worker, data);
 
   const processTask = async (value: T): Promise<R> => {
-    const worker = await core.getIdleWorker();
+    const worker = await core.acquireWorker();
     try {
       return await submitTask(worker, value);
     } finally {
-      core.returnWorker(worker);
+      core.releaseWorker(worker);
     }
   };
 
@@ -266,12 +266,12 @@ export function createTaskPool<T, R>({
   };
 
   return {
-    getIdleWorker: core.getIdleWorker,
-    returnWorker: core.returnWorker,
-    discardWorker: core.discardWorker,
-    postMessageToWorker: core.postMessageToWorker,
+    acquireWorker: core.acquireWorker,
+    releaseWorker: core.releaseWorker,
+    disposeWorker: core.disposeWorker,
+    sendToWorker: core.sendToWorker,
     finalize,
-    assignTask,
+    runOnWorker,
     processTask,
   };
 }

@@ -1,7 +1,7 @@
 import { buildWorkerScript } from "../worker/script";
 import { buildCoroutineWorkerRuntime } from "../worker/runtimes";
 import { createTaskRunner } from "../worker/runner";
-import type { Coroutine, WorkerScript } from "../worker/types";
+import type { Coroutine, CoroutineScript } from "../worker/types";
 
 /**
  * Task function executed inside a worker without actor utilities.
@@ -19,7 +19,7 @@ function createCoroutineImpl<T, R>(
   main: CoroutineTask<T, R>,
   functions: Function[],
   helpers: string[]
-): Coroutine<T, R> & WorkerScript<T, R> {
+): Coroutine<T, R> & CoroutineScript<T, R> {
   const runner = createTaskRunner<T, R>({
     name: "coroutine",
     config: helpers.length > 0 ? { helpers } : undefined,
@@ -40,7 +40,7 @@ function createCoroutineImpl<T, R>(
     helpers,
     main,
     functions,
-  } as Coroutine<T, R> & WorkerScript<T, R>;
+  } as Coroutine<T, R> & CoroutineScript<T, R>;
 }
 
 /**
@@ -50,12 +50,12 @@ function createCoroutineImpl<T, R>(
  * or called directly via `.processTask()`. Call `.finalize()` when done
  * to terminate the underlying worker pool.
  */
-export function coroutine<T, R>(config: CoroutineConfig): (main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R> & WorkerScript<T, R>;
-export function coroutine<T, R>(main: CoroutineTask<T, R>, ...functions: Function[]): Coroutine<T, R> & WorkerScript<T, R>;
+export function coroutine<T, R>(config: CoroutineConfig): (main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R> & CoroutineScript<T, R>;
+export function coroutine<T, R>(main: CoroutineTask<T, R>, ...functions: Function[]): Coroutine<T, R> & CoroutineScript<T, R>;
 export function coroutine<T, R>(
   arg1: CoroutineConfig | CoroutineTask<T, R>,
   ...rest: Function[]
-): Coroutine<T, R> & WorkerScript<T, R> | ((main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R> & WorkerScript<T, R>) {
+): Coroutine<T, R> & CoroutineScript<T, R> | ((main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R> & CoroutineScript<T, R>) {
   if (typeof arg1 === "function") {
     return createCoroutineImpl(arg1, rest, []);
   }
@@ -65,3 +65,5 @@ export function coroutine<T, R>(
   return (main: CoroutineTask<T, R>, ...functions: Function[]) =>
     createCoroutineImpl(main, functions, helpers);
 }
+
+export type { CoroutineScript } from "../worker/types";
