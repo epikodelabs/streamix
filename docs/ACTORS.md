@@ -26,6 +26,8 @@ Your behavior runs inside the worker with the signature:
 - `state` is the actor's current state.
 - `utils.outbox.send(payload)` emits a one-way message to the main thread.
 - `utils.outbox.request(payload)` asks the main thread for data and awaits the reply.
+- `utils.bus.publish(topic, payload)` broadcasts to registered actors through the integrated actor bus.
+- `utils.bus.send(to, topic, payload)` targets one or more registered actor ids through the bus.
 - `utils.inbox` is a worker-local channel for internal coordination inside the actor.
 - `utils.concurrency` exposes channels, `select`, timeouts, cancellation, and related helpers inside the worker.
 
@@ -39,18 +41,21 @@ The actor instance itself is intentionally small:
 
 | Member | Type | Description |
 |---|---|---|
+| `name` | property | Stable actor name used for direct addressing |
 | `running` | property | `true` while the actor worker is running |
-| `stop(reason?)` | method | Stop the behavior loop |
-| `finalize()` | method | Terminate the worker and release resources |
 
 Main-thread messaging goes through `main`:
 
 | API | Description |
 |---|---|
-| `main.outbox.send(actor, msg)` | Fire-and-forget message to the actor |
-| `main.outbox.request(actor, msg)` | Send a message and await the updated state |
-| `main.inbox.receive(actor, handler)` | Subscribe to messages sent from the worker via `utils.outbox.send(...)` |
-| `main.inbox.receive()` | Await the next message from any actor |
+| `main.outbox.send(actorOrName, msg)` | Fire-and-forget message to the actor |
+| `main.outbox.request(actorOrName, msg)` | Send a message and await the updated state |
+| `main.outbox.stop(actorOrName)` | Stop the actor and release its worker resources |
+| `main.inbox.listen(actorOrName, handler)` | Subscribe to messages sent from the worker via `utils.outbox.send(...)` |
+| `main.inbox.listen()` | Await the next message from any actor |
+| `main.bus.publish(topic, payload)` | Broadcast to every named actor |
+| `main.bus.send(to, topic, payload)` | Send a bus message to explicit actor ids |
+| `main.bus.listen(...)` | Observe all bus traffic, or only direct messages sent to a name |
 
 ---
 
@@ -67,6 +72,8 @@ main thread -> actor message -> dedicated worker -> behavior(msg, state, utils) 
 5. The behavior returns the next state.
 6. Worker-originated events and requests flow back through `main`.
 
+Bus traffic is routed separately from ordinary worker events. Messages emitted through `utils.bus` are handled by `main.bus`; they do not show up as `main.inbox.listen(actorOrName, handler)` events. The main thread participates in the bus under the reserved name `"main"`.
+
 ---
 
 ## API
@@ -75,14 +82,14 @@ main thread -> actor message -> dedicated worker -> behavior(msg, state, utils) 
 
 ```ts
 const createActor = actor(behavior, ...helpers);
-const counter = createActor(initialState);
+const counter = createActor("counter", initialState);
 ```
 
 ### With config
 
 ```ts
 const createActor = actor(config)(behavior, ...helpers);
-const counter = createActor(initialState);
+const counter = createActor("counter", initialState);
 ```
 
 `config` runs on the main thread and can contain:
@@ -106,7 +113,7 @@ const createCounter = actor(async (msg: Msg, state: number) => {
   return state;
 });
 
-const counter = createCounter(10);
+const counter = createCounter("counter", 10);
 
 main.outbox.send(counter, { type: "inc", n: 5 });
 main.outbox.send(counter, { type: "dec", n: 3 });
@@ -114,7 +121,7 @@ main.outbox.send(counter, { type: "dec", n: 3 });
 const value = await main.outbox.request<Msg, number>(counter, { type: "inc", n: 0 });
 console.log(value); // 12
 
-await counter.finalize();
+await main.outbox.stop(counter);
 ```
 
 ### With helpers
@@ -132,7 +139,7 @@ const createBoundedCounter = actor(
   clamp
 );
 
-const counter = createBoundedCounter(50);
+const counter = createBoundedCounter("bounded-counter", 50);
 ```
 
 ### With config
@@ -152,122 +159,140 @@ const createCounter = actor({
   return state;
 });
 
-const counter = createCounter(0);
+const counter = createCounter("counter", 0);
+```
+
+---
+
+## Actor Bus Example
+
+```ts
+import {
+  actor,
+  isActorBusMessage,
+  main,
+} from "@epikodelabs/streamix/coroutines";
+
+type State = { received: string[] };
+
+const createNode = actor((msg: unknown, state: State, utils) => {
+  if (msg === "announce") {
+    utils.bus.publish("chat", "hello");
+    return state;
+  }
+
+  if (isActorBusMessage<string>(msg) && msg.topic === "chat") {
+    return {
+      received: [...state.received, msg.payload],
+    };
+  }
+
+  return state;
+});
+
+const alpha = createNode("alpha", { received: [] });
+const beta = createNode("beta", { received: [] });
+
+main.bus.listen((message) => {
+  console.log(message.from, message.payload);
+});
+
+main.outbox.send(alpha, "announce");
 ```
 
 ---
 
 ## Kitchen Example
 
-An actor that manages a pizza kitchen with multiple internal oven tasks, cancellations, and recipe lookups. The actor itself still owns one dedicated worker; the extra coordination happens inside that worker through `utils.concurrency`.
+A multi-actor kitchen with a cashier, a chef, and three oven coroutines. The cashier takes orders and forwards them to the chef via the actor bus. The chef requests recipes from the main thread, delegates baking to dedicated oven workers, and emits live events.
 
 ```ts
-import { actor, type WorkerUtils } from "@epikodelabs/streamix/coroutines";
+import { actor, coroutine, main } from "@epikodelabs/streamix/coroutines";
 
 type Order = { id: string; item: string; customer: string };
 type Recipe = { item: string; ingredients: string[]; bakeMs: number };
 
-type KitchenMessage =
-  | { type: "runShift"; orders: Order[] }
-  | { type: "cancel"; orderId: string }
-  | { type: "close" };
+const recipes = new Map<string, Recipe>([
+  ["Margherita", { item: "Margherita", ingredients: ["tomato", "mozzarella"], bakeMs: 3000 }],
+  ["Pepperoni",  { item: "Pepperoni",  ingredients: ["tomato", "mozzarella", "pepperoni"], bakeMs: 3500 }],
+]);
 
-type KitchenEvent =
-  | { type: "started"; order: Order; oven: string }
-  | { type: "ready"; order: Order; oven: string; price: number }
-  | { type: "cancelled"; order: Order; reason: string; oven: string }
-  | { type: "closed"; completed: number; cancelled: number; totalRevenue: number };
+const prices = new Map<string, number>([
+  ["Margherita", 12.99],
+  ["Pepperoni", 14.99],
+]);
 
-type KitchenState = {
-  running: boolean;
-  closing: boolean;
-  cancelledIds: Set<string>;
-  completedCount: number;
-  cancelledCount: number;
-  totalRevenue: number;
-};
+// ===== OVEN COROUTINES =====
+const ovens = [
+  { id: "Oven #1", worker: coroutine(async (task: { order: Order; recipe: Recipe }) => {
+    await new Promise(r => setTimeout(r, task.recipe.bakeMs));
+    return task;
+  }) },
+  { id: "Oven #2", worker: coroutine(async (task: { order: Order; recipe: Recipe }) => {
+    await new Promise(r => setTimeout(r, task.recipe.bakeMs));
+    return task;
+  }) },
+  { id: "Oven #3", worker: coroutine(async (task: { order: Order; recipe: Recipe }) => {
+    await new Promise(r => setTimeout(r, task.recipe.bakeMs));
+    return task;
+  }) },
+];
 
-const kitchen = actor({
-  onRequest: async (item: string): Promise<Recipe> => {
-    return recipes.get(item) ?? { item, ingredients: [], bakeMs: 3000 };
-  },
-})(async function kitchenBehavior(
-  msg: KitchenMessage,
-  state: KitchenState,
-  utils: WorkerUtils<string, Recipe, KitchenMessage, KitchenEvent>
-) {
-  const { channel } = utils.concurrency;
-  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// ===== CHEF ACTOR =====
+const chef = actor({
+  onRequest: async (payload: unknown) => {
+    if (typeof payload === "string") return recipes.get(payload);
 
-  if (msg.type === "runShift" && !state.running) {
-    state.running = true;
-    state.closing = false;
-    state.completedCount = 0;
-    state.cancelledCount = 0;
-    state.totalRevenue = 0;
-    state.cancelledIds.clear();
-
-    const prices = new Map([
-      ["Margherita", 12.99],
-      ["Pepperoni", 14.99],
-      ["Hawaiian", 13.99],
-    ]);
-
-    const orderQueue = channel<Order>(msg.orders.length);
-    for (const order of msg.orders) orderQueue.trySend(order);
-    orderQueue.close();
-
-    const ovenWorker = async (ovenId: string) => {
-      while (!state.closing) {
-        const order = await orderQueue.receive();
-        if (!order) break;
-
-        if (state.cancelledIds.has(order.id)) {
-          state.cancelledCount++;
-          utils.outbox.send({ type: "cancelled", order, reason: "Customer changed mind", oven: ovenId });
-          continue;
-        }
-
-        const recipe = await utils.outbox.request(order.item);
-        utils.outbox.send({ type: "started", order, oven: ovenId });
-
-        await sleep(recipe.bakeMs);
-
-        const price = prices.get(order.item) ?? 10;
-        state.totalRevenue += price;
-        state.completedCount++;
-        utils.outbox.send({ type: "ready", order, oven: ovenId, price });
+    const task = payload as { type: "bake"; order: Order; recipe: Recipe };
+    if (task.type === "bake") {
+      const oven = ovens.find(o => !o.busy);
+      if (!oven) throw new Error("No free oven");
+      oven.busy = true;
+      try {
+        await oven.worker.processTask({ order: task.order, recipe: task.recipe });
+        return { ovenId: oven.id, price: prices.get(task.order.item) ?? 10 };
+      } finally {
+        oven.busy = false;
       }
-    };
+    }
+  },
+})(async function chefBehavior(msg: any, state: any, utils: any) {
+  if (msg.kind === "actor-bus" && msg.topic === "cook") {
+    const order = msg.payload as Order;
+    state.activeTasks = (state.activeTasks ?? 0) + 1;
 
-    Promise.all([ovenWorker("Oven #1"), ovenWorker("Oven #2"), ovenWorker("Oven #3")]).then(() => {
-      utils.outbox.send({
-        type: "closed",
-        completed: state.completedCount,
-        cancelled: state.cancelledCount,
-        totalRevenue: state.totalRevenue,
-      });
-      state.running = false;
-    });
+    (async () => {
+      const recipe = await utils.outbox.request(order.item);
+      const result = await utils.outbox.request({ type: "bake", order, recipe });
+      state.activeTasks--;
+      utils.outbox.send({ type: "ready", order, oven: result.ovenId, price: result.price });
+    })();
   }
 
-  if (msg.type === "cancel") {
-    state.cancelledIds.add(msg.orderId);
-  }
-
-  if (msg.type === "close") {
-    state.closing = true;
+  if (msg.kind === "actor-bus" && msg.topic === "close") {
+    // When closing and no active tasks, emit closed event
   }
 
   return state;
-})({
-  running: false,
-  closing: false,
-  cancelledIds: new Set(),
-  completedCount: 0,
-  cancelledCount: 0,
-  totalRevenue: 0,
-});
+})("chef", {});
+
+// ===== CASHIER ACTOR =====
+const cashier = actor(async function cashierBehavior(msg: any, state: any, utils: any) {
+  if (msg.type === "runShift") {
+    for (const order of msg.orders) utils.bus.send("chef", "cook", order);
+    utils.bus.send("chef", "close", null);
+  }
+  if (msg.type === "cancel") utils.bus.send("chef", "cancel", msg.orderId);
+  if (msg.type === "close") utils.bus.send("chef", "close", null);
+  return state;
+})("cashier", {});
+
+// ===== MAIN THREAD =====
+main.inbox.listen(chef, (event) => console.log("Kitchen event:", event));
+main.outbox.send(cashier, { type: "runShift", orders: [
+  { id: "1", item: "Margherita", customer: "Alice" },
+  { id: "2", item: "Pepperoni",  customer: "Bob" },
+] });
 ```
 
 ---

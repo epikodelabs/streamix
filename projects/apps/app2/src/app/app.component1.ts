@@ -56,7 +56,7 @@ export class AppComponent implements OnInit, OnDestroy {
   timerValue: number = 0;
   timerStatus: string = 'Stopped';
 
-  private timerActor = actor(timerBehavior)({
+  private timerActor = actor(timerBehavior)('timer', {
     counter: 0,
     timerId: null,
   });
@@ -64,7 +64,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private unsubscribeMessage!: () => void;
 
   ngOnInit(): void {
-    this.unsubscribeMessage = main.inbox.receive(this.timerActor, (msg) => {
+    this.unsubscribeMessage = main.inbox.listen(this.timerActor, (msg: { tick: number; timestamp: number }) => {
       this.timerValue = msg.tick;
       console.log('Counting down...', msg.tick);
     });
@@ -83,7 +83,6 @@ export class AppComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.unsubscribeMessage?.();
-    main.outbox.send(this.timerActor, { type: 'stop' });
-    this.timerActor.finalize();
+    main.outbox.stop(this.timerActor);
   }
 }

@@ -59,6 +59,22 @@ const __createWorkerUtils = (workerId, taskId) => {
       receive: (signal) => inbox.receive(signal),
       channel: inbox,
     },
+    bus: {
+      publish: (topic, messagePayload) =>
+        __postToMain({
+          workerId,
+          taskId,
+          payload: { kind: 'actor-bus', topic, payload: messagePayload },
+          type: 'notify',
+        }),
+      send: (to, topic, messagePayload) =>
+        __postToMain({
+          workerId,
+          taskId,
+          payload: { kind: 'actor-bus', to, topic, payload: messagePayload },
+          type: 'notify',
+        }),
+    },
     concurrency: __streamixConcurrency,
     send: (destination, payload) => destination.send(payload),
   };

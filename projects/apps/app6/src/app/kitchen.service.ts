@@ -1,20 +1,22 @@
 /**
  * Kitchen Simulation Service — Actor-based Pizza Bakery Demo
  *
- * Orchestrates a multi-stage pizza kitchen using a dedicated Web Worker actor
- * (`headChef`). The actor runs a persistent behavior loop that manages an
- * internal order queue and dispatches orders to three concurrent oven workers.
+ * Architecture:
+ *   • Cashier actor  : receives orders, forwards to chef via actor bus
+ *   • Chef actor     : receives orders from cashier, requests recipes and
+ *                      oven bakes from main thread, emits lifecycle events
+ *   • Oven coroutines: 3 dedicated workers for actual baking
  *
  * Communication flow:
- *   • Main thread → Worker : `main.outbox.send(actor, {type:'runShift',orders})`
- *                            `main.outbox.send(actor, {type:'cancel',orderId})`
- *                            `main.outbox.send(actor, {type:'close'})`
- *   • Worker → Main thread : `utils.outbox.send(event)` pushes live events
- *   • Worker → Main thread : `utils.outbox.request(item)` fetches recipes
+ *   UI → Cashier : main.outbox.send(cashier, { type: 'order' | 'cancel' | 'close' })
+ *   Cashier → Chef : utils.bus.send('chef', 'cook' | 'cancel', ...)
+ *   Chef → Main    : utils.outbox.request(item)       fetches recipe
+ *                    utils.outbox.request({type:'bake'}) dispatches to oven
+ *                    utils.outbox.send(event)          pushes live events
  */
 import { Injectable } from '@angular/core';
 import { createBehaviorSubject, createSubject } from '@epikodelabs/streamix';
-import { actor, main, WorkerUtils } from '@epikodelabs/streamix/coroutines';
+import { actor, coroutine, main, WorkerUtils } from '@epikodelabs/streamix/coroutines';
 
 export type Order = { id: string; item: string; customer: string };
 
@@ -50,15 +52,6 @@ export type KitchenStats = {
   active: number;
 };
 
-export type KitchenWorkerState = {
-  running: boolean;
-  closing: boolean;
-  cancelledIds: Set<string>;
-  completedCount: number;
-  cancelledCount: number;
-  totalRevenue: number;
-};
-
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const recipes = new Map<string, Recipe>([
@@ -69,153 +62,152 @@ const recipes = new Map<string, Recipe>([
   ['Diavola', { item: 'Diavola', ingredients: ['tomato', 'mozzarella', 'spicy salami', 'chili'], bakeMs: 3800 }],
 ]);
 
-// ===== HEAD CHEF ACTOR =====
-// The chef runs inside a dedicated worker. It maintains mutable state that
-// background oven workers capture by reference, so commands (cancel / close)
-// are visible to them immediately.
+const prices = new Map<string, number>([
+  ['Margherita', 12.99],
+  ['Pepperoni', 14.99],
+  ['Hawaiian', 13.99],
+  ['Quattro Formaggi', 15.99],
+  ['Diavola', 16.99],
+]);
 
-const headChef = actor({
-  onRequest: async (item: string): Promise<Recipe> => {
-    await delay(500);
-    const recipe = recipes.get(item);
-    if (!recipe) throw new Error(`No recipe for ${item}`);
-    return recipe;
-  },
-})(async function kitchenBehavior(
-  msg: KitchenMessage,
-  state: KitchenWorkerState,
-  utils: WorkerUtils<string, Recipe, KitchenMessage, KitchenEvent>
-) {
-  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-  const { channel, background, withTimeout } = utils.concurrency;
+// ===== OVEN COROUTINES =====
+async function ovenBakeTask(task: { order: Order; recipe: Recipe }) {
+  await new Promise(r => setTimeout(r, task.recipe.bakeMs));
+  return task;
+}
 
-  if (msg.type === 'runShift' && !state.running) {
-    state.running = true;
-    state.closing = false;
-    state.completedCount = 0;
-    state.cancelledCount = 0;
-    state.totalRevenue = 0;
-    state.cancelledIds.clear();
+const ovens = [
+  { id: 'Oven #1', worker: coroutine(ovenBakeTask), busy: false },
+  { id: 'Oven #2', worker: coroutine(ovenBakeTask), busy: false },
+  { id: 'Oven #3', worker: coroutine(ovenBakeTask), busy: false },
+];
 
-    // ---- Prices live inside the worker (closures are not serialized) ----
-    const prices = new Map<string, number>([
-      ['Margherita', 12.99],
-      ['Pepperoni', 14.99],
-      ['Hawaiian', 13.99],
-      ['Quattro Formaggi', 15.99],
-      ['Diavola', 16.99],
-    ]);
+// ===== CHEF ACTOR =====
+interface ChefState {
+  activeTasks: number;
+  completedCount: number;
+  cancelledCount: number;
+  closing: boolean;
+  closedSent: boolean;
+  cancelledIds: Set<string>;
+}
 
-    // ---- Order queue ----
-    const orderQueue = channel<Order>(msg.orders.length);
-    for (const order of msg.orders) {
-      orderQueue.trySend(order);
+function checkClosed(state: ChefState, utils: WorkerUtils<any, any, any, KitchenEvent>) {
+  if (state.closing && state.activeTasks === 0 && !state.closedSent) {
+    state.closedSent = true;
+    const revenue = state.completedCount * 10; // simplified
+    utils.outbox.send({
+      type: 'closed',
+      completed: state.completedCount,
+      cancelled: state.cancelledCount,
+      totalRevenue: revenue,
+    } as KitchenEvent);
+  }
+}
+
+const chef = actor({
+  onRequest: async (payload: unknown) => {
+    if (typeof payload === 'string') {
+      return recipes.get(payload);
     }
-    orderQueue.close();
+    const bakeTask = payload as { type: 'bake'; order: Order; recipe: Recipe };
+    if (bakeTask.type === 'bake') {
+      const oven = ovens.find(o => !o.busy);
+      if (!oven) throw new Error('No free oven');
+      oven.busy = true;
+      try {
+        await oven.worker.processTask({ order: bakeTask.order, recipe: bakeTask.recipe });
+        return { ovenId: oven.id, price: prices.get(bakeTask.order.item) ?? 10 };
+      } finally {
+        oven.busy = false;
+      }
+    }
+    throw new Error(`Unknown request payload: ${JSON.stringify(payload)}`);
+  },
+})(async function chefBehavior(
+  msg: any,
+  state: ChefState,
+  utils: WorkerUtils<any, any, any, KitchenEvent>
+) {
+  // Handle bus messages from cashier
+  if (msg.kind === 'actor-bus') {
+    if (msg.topic === 'cook') {
+      const order = msg.payload as Order;
+      state.activeTasks++;
 
-    // ---- Oven worker ----
-    const ovenWorker = async (ovenId: string) => {
-      while (!state.closing) {
-        const [pollCtx, pollCancel] = withTimeout(background(), 100);
-        let order: Order | undefined;
+      // Fire-and-forget cooking task
+      (async () => {
         try {
-          order = await orderQueue.receive(pollCtx.signal);
-        } catch {
-          // timeout — loop around and check closing
-        } finally {
-          pollCancel();
-        }
-
-        if (!order) {
-          if (orderQueue.closed) break;
-          continue;
-        }
-
-        if (state.closing) break;
-
-        // Pre-check cancellation
-        if (state.cancelledIds.has(order.id)) {
-          state.cancelledCount++;
-          utils.outbox.send({ type: 'cancelled', order, reason: 'Customer changed mind', oven: ovenId });
-          continue;
-        }
-
-        // Fetch recipe from main thread
-        const recipe = await utils.outbox.request(order.item);
-
-        utils.outbox.send({ type: 'started', order, oven: ovenId });
-
-        // Bake stage by stage
-        const stages = [
-          { name: '🥣 Preparing dough', ms: recipe.bakeMs / 3 },
-          { name: '🔥 Baking in oven', ms: recipe.bakeMs / 3 },
-          { name: '✨ Finishing touches', ms: recipe.bakeMs / 3 },
-        ];
-
-        let wasCancelled = false;
-
-        for (const stage of stages) {
-          utils.outbox.send({ type: 'stage', order, stage: stage.name, oven: ovenId });
-
-          const deadline = Date.now() + stage.ms;
-          while (Date.now() < deadline) {
-            if (state.cancelledIds.has(order.id)) {
-              wasCancelled = true;
-              break;
-            }
-            await sleep(Math.min(50, deadline - Date.now()));
+          if (state.cancelledIds.has(order.id)) {
+            state.activeTasks--;
+            state.cancelledCount++;
+            utils.outbox.send({ type: 'cancelled', order, reason: 'Cancelled before start', oven: 'N/A' } as KitchenEvent);
+            checkClosed(state, utils);
+            return;
           }
 
-          if (wasCancelled) break;
-        }
+          const recipe = await utils.outbox.request(order.item) as Recipe | undefined;
+          if (!recipe) throw new Error(`No recipe for ${order.item}`);
 
-        if (wasCancelled) {
+          const bakeResult = await utils.outbox.request({ type: 'bake', order, recipe }) as { ovenId: string; price: number };
+          state.activeTasks--;
+          state.completedCount++;
+          utils.outbox.send({ type: 'ready', order, oven: bakeResult.ovenId, price: bakeResult.price } as KitchenEvent);
+          checkClosed(state, utils);
+        } catch (err: any) {
+          state.activeTasks--;
           state.cancelledCount++;
-          utils.outbox.send({ type: 'cancelled', order, reason: 'Customer changed mind', oven: ovenId });
-          continue;
+          utils.outbox.send({ type: 'cancelled', order, reason: err?.message ?? String(err), oven: 'N/A' } as KitchenEvent);
+          checkClosed(state, utils);
         }
+      })();
+    }
 
-        // Done!
-        const price = prices.get(order.item) ?? 10;
-        state.totalRevenue += price;
-        state.completedCount++;
-        utils.outbox.send({ type: 'ready', order, oven: ovenId, price });
-      }
-    };
+    if (msg.topic === 'cancel') {
+      state.cancelledIds.add(msg.payload as string);
+    }
 
-    // Run ovens in background — when they finish, push the closed event
-    Promise.all([
-      ovenWorker('Oven #1'),
-      ovenWorker('Oven #2'),
-      ovenWorker('Oven #3'),
-    ]).then(() => {
-      utils.outbox.send({
-        type: 'closed',
-        completed: state.completedCount,
-        cancelled: state.cancelledCount,
-        totalRevenue: state.totalRevenue,
-      });
-      state.running = false;
-    });
-  }
+    if (msg.topic === 'close') {
+      state.closing = true;
+      checkClosed(state, utils);
+    }
 
-  if (msg.type === 'cancel') {
-    state.cancelledIds.add(msg.orderId);
-  }
-
-  if (msg.type === 'close') {
-    state.closing = true;
+    return state;
   }
 
   return state;
-})({
-  running: false,
-  closing: false,
-  cancelledIds: new Set(),
+})('chef', {
+  activeTasks: 0,
   completedCount: 0,
   cancelledCount: 0,
-  totalRevenue: 0,
+  closing: false,
+  closedSent: false,
+  cancelledIds: new Set(),
 });
+
+// ===== CASHIER ACTOR =====
+const cashier = actor(async function cashierBehavior(
+  msg: KitchenMessage,
+  state: { closing: boolean },
+  utils: WorkerUtils<any, any, any, any>
+) {
+  if (msg.type === 'runShift') {
+    for (const order of msg.orders) {
+      utils.bus.send('chef', 'cook', order);
+    }
+    utils.bus.send('chef', 'close', null);
+  }
+
+  if (msg.type === 'cancel') {
+    utils.bus.send('chef', 'cancel', msg.orderId);
+  }
+
+  if (msg.type === 'close') {
+    utils.bus.send('chef', 'close', null);
+  }
+
+  return state;
+})('cashier', { closing: false });
 
 @Injectable({ providedIn: 'root' })
 export class KitchenService {
@@ -250,7 +242,7 @@ export class KitchenService {
   private destroyed = false;
 
   constructor() {
-    this.onMessageUnsubscribe = main.inbox.receive(headChef, (event: KitchenEvent) => {
+    this.onMessageUnsubscribe = main.inbox.listen(chef, (event: KitchenEvent) => {
       this.eventsSubject.next(event);
       this.handleEvent(event);
     });
@@ -371,7 +363,7 @@ export class KitchenService {
     return new Promise((resolve) => {
       let resolved = false;
 
-      const unsub = main.inbox.receive(headChef, (event: KitchenEvent) => {
+      const unsub = main.inbox.listen(chef, (event: KitchenEvent) => {
         if (event.type === 'closed' && !resolved) {
           resolved = true;
           unsub();
@@ -386,7 +378,7 @@ export class KitchenService {
         }
       });
 
-      main.outbox.send(headChef, { type: 'runShift', orders });
+      main.outbox.send(cashier, { type: 'runShift', orders });
     });
   }
 
@@ -466,7 +458,7 @@ export class KitchenService {
   cancelOrder(orderId: string) {
     if (!this.running) return;
 
-    main.outbox.send(headChef, { type: 'cancel', orderId });
+    main.outbox.send(cashier, { type: 'cancel', orderId });
     this.logSubject.next(`🚫 Cancellation requested for order ${orderId}`);
   }
 
@@ -474,7 +466,7 @@ export class KitchenService {
     if (!this.running) return;
 
     this.fullDayClosing = true;
-    main.outbox.send(headChef, { type: 'close' });
+    main.outbox.send(cashier, { type: 'close' });
     this.logSubject.next('🚨 Kitchen closing requested — active ovens finish, queued orders are cancelled');
   }
 
@@ -510,7 +502,11 @@ export class KitchenService {
     this.onMessageUnsubscribe?.();
     this.onMessageUnsubscribe = null;
 
-    await headChef.finalize();
+    await Promise.all([
+      main.outbox.stop(cashier),
+      main.outbox.stop(chef),
+      ...ovens.map(o => o.worker.finalize()),
+    ]);
   }
 
   isRunning() {

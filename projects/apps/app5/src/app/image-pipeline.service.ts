@@ -56,20 +56,20 @@ export class ImagePipelineService {
   private resizeActor = actor<ResizeOutput, any, any, JobProgress, ProcessInput>(
     (msg: ProcessInput, _state: any, utils: any) => resizeImage(msg, utils),
     resizeImage
-  )(null!);
+  )('image-resize', null!);
   private compressActor = actor<CompressOutput, any, any, JobProgress, ResizeOutput>(
     (msg: ResizeOutput, _state: any, utils: any) => compressImage(msg, utils),
     compressImage
-  )(null!);
+  )('image-compress', null!);
 
   constructor(private ngZone: NgZone) {
-    main.inbox.receive(this.resizeActor, (progress: JobProgress) => {
+    main.inbox.listen(this.resizeActor, (progress: JobProgress) => {
       this.ngZone.run(() => {
         this.progressStream.next({ id: progress.taskId!, progress });
       });
     });
 
-    main.inbox.receive(this.compressActor, (progress: JobProgress) => {
+    main.inbox.listen(this.compressActor, (progress: JobProgress) => {
       this.ngZone.run(() => {
         this.progressStream.next({ id: progress.taskId!, progress });
       });
@@ -217,8 +217,8 @@ export class ImagePipelineService {
   }
 
   ngOnDestroy() {
-    this.resizeActor.finalize();
-    this.compressActor.finalize();
+    main.outbox.stop(this.resizeActor);
+    main.outbox.stop(this.compressActor);
     this.fileStream.complete();
     this.progressStream.complete();
     this.clearAll();
