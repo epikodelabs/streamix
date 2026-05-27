@@ -78,20 +78,30 @@ Messages emitted through `utils.outbox.send(name, topic, payload)` are routed as
 ### Basic
 
 ```ts
-const createActor = actor(behavior, ...helpers);
-const counter = createActor("counter", initialState);
+const counter = actor("counter", behavior, initialState);
 ```
 
-### With config
+### With helpers
+
+Helper functions passed after `initialState` are serialized into the worker.
 
 ```ts
-const createActor = actor({
-  onRequest: async (topic, payload) => { ... },
-})(behavior, ...helpers);
-const counter = createActor("counter", initialState);
+const counter = actor("counter", behavior, initialState, helper1, helper2);
 ```
 
-`onRequest` runs on the main thread and handles `utils.outbox.request(name, topic, payload)` calls originating from workers. Helper functions passed after the behavior are serialized into the worker.
+### With request handler
+
+Worker requests made via `utils.outbox.request("main", topic, payload)` are handled on the main thread through the request-handler registry:
+
+```ts
+import { actor, main, registerActorRequestHandler } from "@epikodelabs/streamix/coroutines";
+
+const counter = actor("counter", behavior, initialState);
+
+registerActorRequestHandler("main", async (topic, payload) => {
+  // handle worker requests here
+});
+```
 
 ---
 
@@ -100,13 +110,11 @@ const counter = createActor("counter", initialState);
 ```ts
 import { actor, main } from "@epikodelabs/streamix/coroutines";
 
-const createCounter = actor(async (msg: any, state: number) => {
+const counter = actor("counter", async (msg: any, state: number) => {
   if (msg.kind === "actor-bus" && msg.topic === "inc") return state + msg.payload.n;
   if (msg.kind === "actor-bus" && msg.topic === "dec") return state - msg.payload.n;
   return state;
-});
-
-const counter = createCounter("counter", 10);
+}, 10);
 
 main.outbox.send(counter, "inc", { n: 5 });
 main.outbox.send(counter, "dec", { n: 3 });
@@ -124,35 +132,35 @@ function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
 
-const createBoundedCounter = actor(
+const counter = actor("bounded-counter",
   async function boundedCounter(msg: any, state: number) {
     const n = msg.kind === "actor-bus" ? msg.payload.n : 0;
     const next = msg.topic === "inc" ? state + n : state - n;
     return clamp(next, 0, 100);
   },
+  50,
   clamp
 );
-
-const counter = createBoundedCounter("bounded-counter", 50);
 ```
 
-### With config
+### With request handler
 
 ```ts
-const createCounter = actor({
-  onRequest: async (_topic: string, query: string) => {
-    const res = await fetch(query);
-    return res.json();
+const counter = actor("counter",
+  async (msg: any, state: number, utils) => {
+    if (msg.kind === "actor-bus" && msg.topic === "fetch") {
+      const data = await utils.outbox.request("main", "fetch", msg.payload.query);
+      return data.count;
+    }
+    return state;
   },
-})(async (msg: any, state: number, utils) => {
-  if (msg.kind === "actor-bus" && msg.topic === "fetch") {
-    const data = await utils.outbox.request("main", "fetch", msg.payload.query);
-    return data.count;
-  }
-  return state;
-});
+  0
+);
 
-const counter = createCounter("counter", 0);
+registerActorRequestHandler("main", async (_topic: string, query: string) => {
+  const res = await fetch(query);
+  return res.json();
+});
 ```
 
 ---
@@ -168,7 +176,7 @@ import {
 
 type State = { received: string[] };
 
-const createNode = actor((msg: unknown, state: State, utils) => {
+const alpha = actor("alpha", (msg: unknown, state: State, utils) => {
   if (isActorBusMessage<string>(msg) && msg.topic === "announce") {
     utils.outbox.send("beta", "chat", "hello");
     return state;
@@ -181,10 +189,22 @@ const createNode = actor((msg: unknown, state: State, utils) => {
   }
 
   return state;
-});
+}, { received: [] });
 
-const alpha = createNode("alpha", { received: [] });
-const beta = createNode("beta", { received: [] });
+const beta = actor("beta", (msg: unknown, state: State, utils) => {
+  if (isActorBusMessage<string>(msg) && msg.topic === "announce") {
+    utils.outbox.send("beta", "chat", "hello");
+    return state;
+  }
+
+  if (isActorBusMessage<string>(msg) && msg.topic === "chat") {
+    return {
+      received: [...state.received, msg.payload],
+    };
+  }
+
+  return state;
+}, { received: [] });
 
 main.inbox.subscribe((message) => {
   console.log(message.from, message.payload);
@@ -200,7 +220,7 @@ main.outbox.send(alpha, "announce", undefined);
 A multi-actor kitchen with a cashier, a chef, and three oven coroutines. The cashier takes orders and forwards them to the chef via the actor bus. The chef requests recipes from the main thread, delegates baking to dedicated oven workers, and emits live events.
 
 ```ts
-import { actor, coroutine, main } from "@epikodelabs/streamix/coroutines";
+import { actor, coroutine, main, registerActorRequestHandler } from "@epikodelabs/streamix/coroutines";
 
 type Order = { id: string; item: string; customer: string };
 type Recipe = { item: string; ingredients: string[]; bakeMs: number };
@@ -232,24 +252,7 @@ const ovens = [
 ];
 
 // ===== CHEF ACTOR =====
-const chef = actor({
-  onRequest: async (topic: string, payload: unknown) => {
-    if (topic === "recipe" && typeof payload === "string") return recipes.get(payload);
-
-    const task = payload as { order: Order; recipe: Recipe };
-    if (topic === "bake") {
-      const oven = ovens.find(o => !o.busy);
-      if (!oven) throw new Error("No free oven");
-      oven.busy = true;
-      try {
-        await oven.worker.processTask({ order: task.order, recipe: task.recipe });
-        return { ovenId: oven.id, price: prices.get(task.order.item) ?? 10 };
-      } finally {
-        oven.busy = false;
-      }
-    }
-  },
-})(async function chef(msg: any, state: any, utils: any) {
+const chef = actor("chef", async function chef(msg: any, state: any, utils: any) {
   if (msg.kind === "actor-bus" && msg.topic === "cook") {
     const order = msg.payload as Order;
     state.activeTasks = (state.activeTasks ?? 0) + 1;
@@ -267,10 +270,27 @@ const chef = actor({
   }
 
   return state;
-})("chef", {});
+}, {});
+
+registerActorRequestHandler("chef", async (topic: string, payload: unknown) => {
+  if (topic === "recipe" && typeof payload === "string") return recipes.get(payload);
+
+  const task = payload as { order: Order; recipe: Recipe };
+  if (topic === "bake") {
+    const oven = ovens.find(o => !o.busy);
+    if (!oven) throw new Error("No free oven");
+    oven.busy = true;
+    try {
+      await oven.worker.processTask({ order: task.order, recipe: task.recipe });
+      return { ovenId: oven.id, price: prices.get(task.order.item) ?? 10 };
+    } finally {
+      oven.busy = false;
+    }
+  }
+});
 
 // ===== CASHIER ACTOR =====
-const cashier = actor(async function cashier(msg: any, state: any, utils: any) {
+const cashier = actor("cashier", async function cashier(msg: any, state: any, utils: any) {
   if (msg.kind === "actor-bus" && msg.topic === "runShift") {
     for (const order of msg.payload.orders) utils.outbox.send("chef", "cook", order);
     utils.outbox.send("chef", "close", null);
@@ -282,7 +302,7 @@ const cashier = actor(async function cashier(msg: any, state: any, utils: any) {
     utils.outbox.send("chef", "close", null);
   }
   return state;
-})("cashier", {});
+}, {});
 
 // ===== MAIN THREAD =====
 main.inbox.subscribe("main", (message) => {
