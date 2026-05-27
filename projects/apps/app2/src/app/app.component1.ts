@@ -71,13 +71,13 @@ export class AppComponent implements OnInit, OnDestroy {
 
     this.timerStatus = 'Running';
     console.log('Starting timer...');
-    main.outbox.send(this.timerActor, { type: 'start', initialTime: 60 });
+    main.send(this.timerActor, { type: 'start', initialTime: 60 });
   }
 
   resetTimer() {
     console.log('Resetting...');
     this.timerStatus = 'Resetting';
-    main.outbox.send(this.timerActor, { type: 'reset', initialTime: 30 });
+    main.send(this.timerActor, { type: 'reset', initialTime: 30 });
     this.timerStatus = 'Running';
   }
 

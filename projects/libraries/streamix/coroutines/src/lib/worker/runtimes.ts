@@ -48,8 +48,15 @@ const __requestMain = (workerId, taskId, payload) => {
   });
 };
 
+const __workerInbox = __streamixConcurrency.channel();
+
+const __enqueueActorInbox = (payload, scope) => {
+  __workerInbox.send(payload).catch((error) => {
+    console.warn(scope, error);
+  });
+};
+
 const __createWorkerUtils = (workerId, taskId) => {
-  const inbox = __streamixConcurrency.channel();
   const outbox = {
     request: (requestPayload) => __requestMain(workerId, taskId, requestPayload),
     publish: (topic, messagePayload) =>
@@ -59,37 +66,29 @@ const __createWorkerUtils = (workerId, taskId) => {
         payload: { kind: 'actor-bus', topic, payload: messagePayload },
         type: 'notify',
       }),
-    send: (to, topic, messagePayload) =>
+    send: (...args) => {
+      if (args.length === 1) {
+        const [messagePayload] = args;
+        __postToMain({ workerId, taskId, payload: messagePayload, type: 'notify' });
+        return;
+      }
+
+      const [to, topic, messagePayload] = args;
       __postToMain({
         workerId,
         taskId,
         payload: { kind: 'actor-bus', to, topic, payload: messagePayload },
         type: 'notify',
-      }),
-    sendTo: (to, topic, messagePayload) =>
-      __postToMain({
-        workerId,
-        taskId,
-        payload: { kind: 'actor-bus', to, topic, payload: messagePayload },
-        type: 'notify',
-      }),
+      });
+    },
   };
   return {
     outbox,
     inbox: {
-      listen: (signal) => inbox.receive(signal),
-      receive: (signal) => inbox.receive(signal),
-      channel: inbox,
+      listen: (signal) => __workerInbox.receive(signal),
+      receive: (signal) => __workerInbox.receive(signal),
     },
     concurrency: __streamixConcurrency,
-    send: (messagePayload) => __postToMain({ workerId, taskId, payload: messagePayload, type: 'notify' }),
-    request: outbox.request,
-    bus: {
-      publish: outbox.publish,
-      send: outbox.send,
-    },
-    publish: outbox.publish,
-    sendTo: outbox.sendTo,
   };
 };
 
@@ -132,6 +131,7 @@ const __runBehaviorLoop = async (workerId, taskId) => {
   }
 
   __actorMailbox.close();
+  __workerInbox.close();
   __postToMain({ workerId, taskId, type: "stopped" });
 };
 
@@ -143,6 +143,7 @@ onmessage = async (event) => {
       __actorMailbox.send(payload).catch((error) => {
         console.warn("Actor worker failed to enqueue message", error);
       });
+      __enqueueActorInbox(payload, "Actor worker failed to mirror message to inbox");
     } else {
       console.warn("Actor worker received main message before init", event.data);
     }
@@ -179,6 +180,7 @@ onmessage = async (event) => {
   if (type === "stop") {
     __actorRunning = false;
     __actorMailbox.close();
+    __workerInbox.close();
     return;
   }
 
@@ -186,6 +188,7 @@ onmessage = async (event) => {
     __actorMailbox.send({ msg: payload, requestId }).catch((error) => {
       console.warn("Actor worker failed to enqueue request", error);
     });
+    __enqueueActorInbox(payload, "Actor worker failed to mirror request to inbox");
     return;
   }
 };`;

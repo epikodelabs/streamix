@@ -9,10 +9,10 @@
  *
  * Communication flow:
  *   UI → Cashier : main.send(cashier, { type: 'order' | 'cancel' | 'close' })
- *   Cashier → Chef : utils.bus.send('chef', 'cook' | 'cancel', ...)
+ *   Cashier → Chef : utils.outbox.send('chef', 'cook' | 'cancel', ...)
  *   Chef → Main    : utils.outbox.request(item)       fetches recipe
  *                    utils.outbox.request({type:'bake'}) dispatches to oven
- *                    utils.send(event)          pushes live events
+ *                    utils.outbox.send(event)   pushes live events
  */
 import { Injectable } from '@angular/core';
 import { createBehaviorSubject, createSubject } from '@epikodelabs/streamix';
@@ -96,7 +96,7 @@ function checkClosed(state: ChefState, utils: WorkerUtils<any, any, any, Kitchen
   if (state.closing && state.activeTasks === 0 && !state.closedSent) {
     state.closedSent = true;
     const revenue = state.completedCount * 10; // simplified
-    utils.send({
+    utils.outbox.send({
       type: 'closed',
       completed: state.completedCount,
       cancelled: state.cancelledCount,
@@ -122,7 +122,7 @@ const chef = actor(async function chef(
           if (state.cancelledIds.has(order.id)) {
             state.activeTasks--;
             state.cancelledCount++;
-            utils.send({ type: 'cancelled', order, reason: 'Cancelled before start', oven: 'N/A' } as KitchenEvent);
+            utils.outbox.send({ type: 'cancelled', order, reason: 'Cancelled before start', oven: 'N/A' } as KitchenEvent);
             checkClosed(state, utils);
             return;
           }
@@ -133,12 +133,12 @@ const chef = actor(async function chef(
           const bakeResult = await utils.outbox.request({ type: 'bake', order, recipe }) as { ovenId: string; price: number };
           state.activeTasks--;
           state.completedCount++;
-          utils.send({ type: 'ready', order, oven: bakeResult.ovenId, price: bakeResult.price } as KitchenEvent);
+          utils.outbox.send({ type: 'ready', order, oven: bakeResult.ovenId, price: bakeResult.price } as KitchenEvent);
           checkClosed(state, utils);
         } catch (err: any) {
           state.activeTasks--;
           state.cancelledCount++;
-          utils.send({ type: 'cancelled', order, reason: err?.message ?? String(err), oven: 'N/A' } as KitchenEvent);
+          utils.outbox.send({ type: 'cancelled', order, reason: err?.message ?? String(err), oven: 'N/A' } as KitchenEvent);
           checkClosed(state, utils);
         }
       })();
@@ -193,17 +193,17 @@ const cashier = actor(async function cashier(
 ) {
   if (msg.type === 'runShift') {
     for (const order of msg.orders) {
-      utils.bus.send('chef', 'cook', order);
+      utils.outbox.send('chef', 'cook', order);
     }
-    utils.bus.send('chef', 'close', null);
+    utils.outbox.send('chef', 'close', null);
   }
 
   if (msg.type === 'cancel') {
-    utils.bus.send('chef', 'cancel', msg.orderId);
+    utils.outbox.send('chef', 'cancel', msg.orderId);
   }
 
   if (msg.type === 'close') {
-    utils.bus.send('chef', 'close', null);
+    utils.outbox.send('chef', 'close', null);
   }
 
   return state;

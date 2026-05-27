@@ -288,7 +288,7 @@ idescribe("actor", () => {
 
     async function behavior(msg: string, state: number, utils: any) {
       if (msg === "ping") {
-        utils.send("pong");
+        utils.outbox.send("pong");
       }
       return state;
     }
@@ -310,7 +310,7 @@ idescribe("actor", () => {
 
     async function behavior(msg: string, state: number, utils: any) {
       if (msg === "ping") {
-        utils.send("pong");
+        utils.outbox.send("pong");
       }
       return state;
     }
@@ -425,7 +425,7 @@ idescribe("actor", () => {
 
     async function behavior(msg: string, state: number, utils: any) {
       const response = await utils.outbox.request(msg);
-      utils.send(response);
+      utils.outbox.send(response);
       return state;
     }
 
@@ -445,7 +445,7 @@ idescribe("actor", () => {
 
     async function behavior(msg: string, state: number, utils: any) {
       if (msg === "go") {
-        utils.send("ping");
+        utils.outbox.send("ping");
       }
       return state;
     }
@@ -468,8 +468,8 @@ idescribe("actor", () => {
   it("should resolve multiple queued global inbox receives", async () => {
     async function behavior(msg: string, state: number, utils: any) {
       if (msg === "double") {
-        utils.send("first");
-        utils.send("second");
+        utils.outbox.send("first");
+        utils.outbox.send("second");
       }
       return state;
     }
@@ -500,7 +500,7 @@ idescribe("actor", () => {
 
     async function behavior(msg: unknown, state: State, utils: any) {
       if (state.role === "publisher" && msg === "emit") {
-        utils.bus.publish("greet", "hello");
+        utils.outbox.publish("greet", "hello");
         return state;
       }
 
@@ -536,12 +536,12 @@ idescribe("actor", () => {
     await Promise.all([main.outbox.stop(publisher), main.outbox.stop(receiver)]);
   });
 
-  it("should target explicit actors through utils.bus.send", async () => {
+  it("should target explicit actors through utils.outbox.send", async () => {
     type State = { role: "sender" | "receiver"; hits: number[] };
 
     async function behavior(msg: unknown, state: State, utils: any) {
       if (state.role === "sender" && msg === "direct") {
-        utils.bus.send("beta", "direct", 7);
+        utils.outbox.send("beta", "direct", 7);
         return state;
       }
 
@@ -611,7 +611,7 @@ idescribe("actor", () => {
 
     async function behavior(msg: string, state: number, utils: any) {
       if (msg === "report") {
-        utils.bus.send("main", "status", "ready");
+        utils.outbox.send("main", "status", "ready");
       }
       return state;
     }

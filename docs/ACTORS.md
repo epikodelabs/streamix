@@ -22,13 +22,13 @@ Your behavior runs inside the worker with the signature:
 (msg, state, utils) => nextState
 ```
 
-- `msg` is the message sent from the main thread.
+- `msg` is the next message addressed to the actor, whether it came from `main.send(...)` or from actor-bus routing.
 - `state` is the actor's current state.
-- `utils.send(payload)` emits a one-way message to the main thread.
+- `utils.outbox.send(payload)` emits a one-way message to the main thread.
 - `utils.outbox.request(payload)` asks the main thread for data and awaits the reply.
-- `utils.bus.publish(topic, payload)` broadcasts to registered actors through the integrated actor bus.
-- `utils.bus.send(to, topic, payload)` targets one or more registered actor names through the bus.
-- `utils.inbox` is a worker-local channel for internal coordination inside the actor.
+- `utils.outbox.publish(topic, payload)` broadcasts to registered actors through the integrated actor bus.
+- `utils.outbox.send(to, topic, payload)` targets one or more registered actor names through the bus.
+- `utils.inbox` mirrors the actor's inbound message stream so worker-local background tasks can also listen to actor-bound messages.
 - `utils.concurrency` exposes channels, `select`, timeouts, cancellation, and related helpers inside the worker.
 
 `utils` exists only inside the worker. The main thread does not call it directly.
@@ -51,7 +51,7 @@ Main-thread messaging goes through `main`:
 | `main.send(actorOrName, msg)` | Fire-and-forget message to the actor |
 | `main.outbox.request(actorOrName, msg)` | Send a message and await the updated state |
 | `main.outbox.stop(actorOrName)` | Stop the actor and release its worker resources |
-| `main.inbox.listen(actorOrName, handler)` | Subscribe to messages sent from the worker via `utils.send(...)` |
+| `main.inbox.listen(actorOrName, handler)` | Subscribe to messages sent from the worker via `utils.outbox.send(...)` |
 | `main.inbox.listen()` | Await the next message from any actor |
 | `main.bus.publish(topic, payload)` | Broadcast to every named actor |
 | `main.bus.send(to, topic, payload)` | Send a bus message to explicit actor ids |
@@ -72,7 +72,7 @@ main thread -> actor message -> dedicated worker -> behavior(msg, state, utils) 
 5. The behavior returns the next state.
 6. Worker-originated events and requests flow back through `main`.
 
-Bus traffic is routed separately from ordinary worker events. Messages emitted through `utils.bus` are handled by `main.bus`; they do not show up as `main.inbox.listen(actorOrName, handler)` events. The main thread participates in the bus under the reserved name `"main"`.
+Bus traffic is routed separately from ordinary worker events. Messages emitted through `utils.outbox.publish(...)` or `utils.outbox.send(name, topic, payload)` are handled by `main.bus`; they do not show up as `main.inbox.listen(actorOrName, handler)` events. The main thread participates in the bus under the reserved name `"main"`.
 
 ---
 
@@ -95,7 +95,7 @@ const counter = createActor("counter", initialState);
 `options` runs on the main thread and can contain:
 
 - `onRequest`: handles `utils.outbox.request(...)` calls originating from the worker
-- `onMessage`: receives one-way `utils.send(...)` traffic from the worker
+- `onMessage`: receives one-way `utils.outbox.send(payload)` traffic from the worker
 - `helpers`: raw worker-side helper snippets
 
 ---
@@ -177,7 +177,7 @@ type State = { received: string[] };
 
 const createNode = actor((msg: unknown, state: State, utils) => {
   if (msg === "announce") {
-    utils.bus.publish("chat", "hello");
+    utils.outbox.publish("chat", "hello");
     return state;
   }
 
@@ -248,7 +248,7 @@ const chef = actor(async function chef(msg: any, state: any, utils: any) {
       const recipe = await utils.outbox.request(order.item);
       const result = await utils.outbox.request({ type: "bake", order, recipe });
       state.activeTasks--;
-      utils.send({ type: "ready", order, oven: result.ovenId, price: result.price });
+      utils.outbox.send({ type: "ready", order, oven: result.ovenId, price: result.price });
     })();
   }
 
@@ -279,11 +279,11 @@ const chef = actor(async function chef(msg: any, state: any, utils: any) {
 // ===== CASHIER ACTOR =====
 const cashier = actor(async function cashier(msg: any, state: any, utils: any) {
   if (msg.type === "runShift") {
-    for (const order of msg.orders) utils.bus.send("chef", "cook", order);
-    utils.bus.send("chef", "close", null);
+    for (const order of msg.orders) utils.outbox.send("chef", "cook", order);
+    utils.outbox.send("chef", "close", null);
   }
-  if (msg.type === "cancel") utils.bus.send("chef", "cancel", msg.orderId);
-  if (msg.type === "close") utils.bus.send("chef", "close", null);
+  if (msg.type === "cancel") utils.outbox.send("chef", "cancel", msg.orderId);
+  if (msg.type === "close") utils.outbox.send("chef", "close", null);
   return state;
 })("cashier", {});
 
@@ -308,7 +308,7 @@ main.send(cashier, { type: "runShift", orders: [
 | Stateful message loop | no | yes |
 | Main-thread messaging | no | yes via `main.outbox` / `main.inbox` |
 | Worker-to-main request handler | no | yes via `utils.outbox.request(...)` |
-| One-way events to main | no | yes via `utils.send(...)` |
+| One-way events to main | no | yes via `utils.outbox.send(...)` |
 | Worker-side channels and select | no | yes via `utils.concurrency` |
 
 If you need pooled compute across multiple workers, use `compute(...)`.
