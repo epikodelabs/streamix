@@ -24,10 +24,10 @@ Your behavior runs inside the worker with the signature:
 
 - `msg` is the message sent from the main thread.
 - `state` is the actor's current state.
-- `utils.outbox.send(payload)` emits a one-way message to the main thread.
+- `utils.send(payload)` emits a one-way message to the main thread.
 - `utils.outbox.request(payload)` asks the main thread for data and awaits the reply.
 - `utils.bus.publish(topic, payload)` broadcasts to registered actors through the integrated actor bus.
-- `utils.bus.send(to, topic, payload)` targets one or more registered actor ids through the bus.
+- `utils.bus.send(to, topic, payload)` targets one or more registered actor names through the bus.
 - `utils.inbox` is a worker-local channel for internal coordination inside the actor.
 - `utils.concurrency` exposes channels, `select`, timeouts, cancellation, and related helpers inside the worker.
 
@@ -48,10 +48,10 @@ Main-thread messaging goes through `main`:
 
 | API | Description |
 |---|---|
-| `main.outbox.send(actorOrName, msg)` | Fire-and-forget message to the actor |
+| `main.send(actorOrName, msg)` | Fire-and-forget message to the actor |
 | `main.outbox.request(actorOrName, msg)` | Send a message and await the updated state |
 | `main.outbox.stop(actorOrName)` | Stop the actor and release its worker resources |
-| `main.inbox.listen(actorOrName, handler)` | Subscribe to messages sent from the worker via `utils.outbox.send(...)` |
+| `main.inbox.listen(actorOrName, handler)` | Subscribe to messages sent from the worker via `utils.send(...)` |
 | `main.inbox.listen()` | Await the next message from any actor |
 | `main.bus.publish(topic, payload)` | Broadcast to every named actor |
 | `main.bus.send(to, topic, payload)` | Send a bus message to explicit actor ids |
@@ -78,24 +78,24 @@ Bus traffic is routed separately from ordinary worker events. Messages emitted t
 
 ## API
 
-### Without config
+### Basic
 
 ```ts
 const createActor = actor(behavior, ...helpers);
 const counter = createActor("counter", initialState);
 ```
 
-### With config
+### With trailing options
 
 ```ts
-const createActor = actor(config)(behavior, ...helpers);
+const createActor = actor(behavior, ...helpers, options);
 const counter = createActor("counter", initialState);
 ```
 
-`config` runs on the main thread and can contain:
+`options` runs on the main thread and can contain:
 
 - `onRequest`: handles `utils.outbox.request(...)` calls originating from the worker
-- `onMessage`: receives one-way `utils.outbox.send(...)` traffic from the worker
+- `onMessage`: receives one-way `utils.send(...)` traffic from the worker
 - `helpers`: raw worker-side helper snippets
 
 ---
@@ -115,8 +115,8 @@ const createCounter = actor(async (msg: Msg, state: number) => {
 
 const counter = createCounter("counter", 10);
 
-main.outbox.send(counter, { type: "inc", n: 5 });
-main.outbox.send(counter, { type: "dec", n: 3 });
+main.send(counter, { type: "inc", n: 5 });
+main.send(counter, { type: "dec", n: 3 });
 
 const value = await main.outbox.request<Msg, number>(counter, { type: "inc", n: 0 });
 console.log(value); // 12
@@ -142,21 +142,21 @@ const createBoundedCounter = actor(
 const counter = createBoundedCounter("bounded-counter", 50);
 ```
 
-### With config
+### With trailing options
 
 ```ts
-const createCounter = actor({
-  onRequest: async (query: string) => {
-    const res = await fetch(query);
-    return res.json();
-  },
-  onMessage: (event) => console.log("Worker says:", event),
-})(async (msg: Msg, state: number, utils) => {
+const createCounter = actor(async (msg: Msg, state: number, utils) => {
   if ((msg as any).type === "fetch") {
     const data = await utils.outbox.request((msg as any).query);
     return data.count;
   }
   return state;
+}, {
+  onRequest: async (query: string) => {
+    const res = await fetch(query);
+    return res.json();
+  },
+  onMessage: (event) => console.log("Worker says:", event),
 });
 
 const counter = createCounter("counter", 0);
@@ -197,7 +197,7 @@ main.bus.listen((message) => {
   console.log(message.from, message.payload);
 });
 
-main.outbox.send(alpha, "announce");
+main.send(alpha, "announce");
 ```
 
 ---
@@ -239,7 +239,25 @@ const ovens = [
 ];
 
 // ===== CHEF ACTOR =====
-const chef = actor({
+const chef = actor(async function chef(msg: any, state: any, utils: any) {
+  if (msg.kind === "actor-bus" && msg.topic === "cook") {
+    const order = msg.payload as Order;
+    state.activeTasks = (state.activeTasks ?? 0) + 1;
+
+    (async () => {
+      const recipe = await utils.outbox.request(order.item);
+      const result = await utils.outbox.request({ type: "bake", order, recipe });
+      state.activeTasks--;
+      utils.send({ type: "ready", order, oven: result.ovenId, price: result.price });
+    })();
+  }
+
+  if (msg.kind === "actor-bus" && msg.topic === "close") {
+    // When closing and no active tasks, emit closed event
+  }
+
+  return state;
+}, {
   onRequest: async (payload: unknown) => {
     if (typeof payload === "string") return recipes.get(payload);
 
@@ -256,24 +274,6 @@ const chef = actor({
       }
     }
   },
-})(async function chef(msg: any, state: any, utils: any) {
-  if (msg.kind === "actor-bus" && msg.topic === "cook") {
-    const order = msg.payload as Order;
-    state.activeTasks = (state.activeTasks ?? 0) + 1;
-
-    (async () => {
-      const recipe = await utils.outbox.request(order.item);
-      const result = await utils.outbox.request({ type: "bake", order, recipe });
-      state.activeTasks--;
-      utils.outbox.send({ type: "ready", order, oven: result.ovenId, price: result.price });
-    })();
-  }
-
-  if (msg.kind === "actor-bus" && msg.topic === "close") {
-    // When closing and no active tasks, emit closed event
-  }
-
-  return state;
 })("chef", {});
 
 // ===== CASHIER ACTOR =====
@@ -289,7 +289,7 @@ const cashier = actor(async function cashier(msg: any, state: any, utils: any) {
 
 // ===== MAIN THREAD =====
 main.inbox.listen(chef, (event) => console.log("Kitchen event:", event));
-main.outbox.send(cashier, { type: "runShift", orders: [
+main.send(cashier, { type: "runShift", orders: [
   { id: "1", item: "Margherita", customer: "Alice" },
   { id: "2", item: "Pepperoni",  customer: "Bob" },
 ] });
@@ -308,7 +308,7 @@ main.outbox.send(cashier, { type: "runShift", orders: [
 | Stateful message loop | no | yes |
 | Main-thread messaging | no | yes via `main.outbox` / `main.inbox` |
 | Worker-to-main request handler | no | yes via `utils.outbox.request(...)` |
-| One-way events to main | no | yes via `utils.outbox.send(...)` |
+| One-way events to main | no | yes via `utils.send(...)` |
 | Worker-side channels and select | no | yes via `utils.concurrency` |
 
 If you need pooled compute across multiple workers, use `compute(...)`.

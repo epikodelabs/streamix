@@ -50,31 +50,46 @@ const __requestMain = (workerId, taskId, payload) => {
 
 const __createWorkerUtils = (workerId, taskId) => {
   const inbox = __streamixConcurrency.channel();
+  const outbox = {
+    request: (requestPayload) => __requestMain(workerId, taskId, requestPayload),
+    publish: (topic, messagePayload) =>
+      __postToMain({
+        workerId,
+        taskId,
+        payload: { kind: 'actor-bus', topic, payload: messagePayload },
+        type: 'notify',
+      }),
+    send: (to, topic, messagePayload) =>
+      __postToMain({
+        workerId,
+        taskId,
+        payload: { kind: 'actor-bus', to, topic, payload: messagePayload },
+        type: 'notify',
+      }),
+    sendTo: (to, topic, messagePayload) =>
+      __postToMain({
+        workerId,
+        taskId,
+        payload: { kind: 'actor-bus', to, topic, payload: messagePayload },
+        type: 'notify',
+      }),
+  };
   return {
-    outbox: {
-      send: (messagePayload) => __postToMain({ workerId, taskId, payload: messagePayload, type: 'notify' }),
-      request: (requestPayload) => __requestMain(workerId, taskId, requestPayload),
-      publish: (topic, messagePayload) =>
-        __postToMain({
-          workerId,
-          taskId,
-          payload: { kind: 'actor-bus', topic, payload: messagePayload },
-          type: 'notify',
-        }),
-      sendTo: (to, topic, messagePayload) =>
-        __postToMain({
-          workerId,
-          taskId,
-          payload: { kind: 'actor-bus', to, topic, payload: messagePayload },
-          type: 'notify',
-        }),
-    },
+    outbox,
     inbox: {
+      listen: (signal) => inbox.receive(signal),
       receive: (signal) => inbox.receive(signal),
       channel: inbox,
     },
     concurrency: __streamixConcurrency,
-    send: (destination, payload) => destination.send(payload),
+    send: (messagePayload) => __postToMain({ workerId, taskId, payload: messagePayload, type: 'notify' }),
+    request: outbox.request,
+    bus: {
+      publish: outbox.publish,
+      send: outbox.send,
+    },
+    publish: outbox.publish,
+    sendTo: outbox.sendTo,
   };
 };
 

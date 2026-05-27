@@ -6,7 +6,7 @@
  */
 export interface CoroutineScript<T = any, R = any> {
   /** Raw worker-side snippets injected before the serialized functions. */
-  helpers?: string[];
+  imports?: string[];
   /** Main task body executed inside the worker. */
   main: (data: T) => R | Promise<R>;
   /** Additional named helper functions serialized alongside `main`. */
@@ -35,7 +35,7 @@ export interface Coroutine<T = any, R = T> extends TaskRunner<T, R> {}
  *
  * `Actor` is an opaque handle to a persistent behavior loop running in a
  * dedicated worker. Messaging is done through the `main` utility:
- * `main.outbox.send(actorOrName, msg)`, `main.outbox.request(actorOrName, msg)`,
+ * `main.send(actorOrName, msg)`, `main.outbox.request(actorOrName, msg)`,
  * `main.inbox.listen(actorOrName, handler)`, and `main.bus`.
  *
  * Lifecycle is managed through the bus — call `main.outbox.stop(actorOrName)`

@@ -8,11 +8,11 @@
  *   • Oven coroutines: 3 dedicated workers for actual baking
  *
  * Communication flow:
- *   UI → Cashier : main.outbox.send(cashier, { type: 'order' | 'cancel' | 'close' })
- *   Cashier → Chef : utils.outbox.sendTo('chef', 'cook' | 'cancel', ...)
+ *   UI → Cashier : main.send(cashier, { type: 'order' | 'cancel' | 'close' })
+ *   Cashier → Chef : utils.bus.send('chef', 'cook' | 'cancel', ...)
  *   Chef → Main    : utils.outbox.request(item)       fetches recipe
  *                    utils.outbox.request({type:'bake'}) dispatches to oven
- *                    utils.outbox.send(event)          pushes live events
+ *                    utils.send(event)          pushes live events
  */
 import { Injectable } from '@angular/core';
 import { createBehaviorSubject, createSubject } from '@epikodelabs/streamix';
@@ -96,7 +96,7 @@ function checkClosed(state: ChefState, utils: WorkerUtils<any, any, any, Kitchen
   if (state.closing && state.activeTasks === 0 && !state.closedSent) {
     state.closedSent = true;
     const revenue = state.completedCount * 10; // simplified
-    utils.outbox.send({
+    utils.send({
       type: 'closed',
       completed: state.completedCount,
       cancelled: state.cancelledCount,
@@ -105,26 +105,7 @@ function checkClosed(state: ChefState, utils: WorkerUtils<any, any, any, Kitchen
   }
 }
 
-const chef = actor({
-  onRequest: async (payload: unknown) => {
-    if (typeof payload === 'string') {
-      return recipes.get(payload);
-    }
-    const bakeTask = payload as { type: 'bake'; order: Order; recipe: Recipe };
-    if (bakeTask.type === 'bake') {
-      const oven = ovens.find(o => !o.busy);
-      if (!oven) throw new Error('No free oven');
-      oven.busy = true;
-      try {
-        await oven.worker.processTask({ order: bakeTask.order, recipe: bakeTask.recipe });
-        return { ovenId: oven.id, price: prices.get(bakeTask.order.item) ?? 10 };
-      } finally {
-        oven.busy = false;
-      }
-    }
-    throw new Error(`Unknown request payload: ${JSON.stringify(payload)}`);
-  },
-})(async function chef(
+const chef = actor(async function chef(
   msg: any,
   state: ChefState,
   utils: WorkerUtils<any, any, any, KitchenEvent>
@@ -141,7 +122,7 @@ const chef = actor({
           if (state.cancelledIds.has(order.id)) {
             state.activeTasks--;
             state.cancelledCount++;
-            utils.outbox.send({ type: 'cancelled', order, reason: 'Cancelled before start', oven: 'N/A' } as KitchenEvent);
+            utils.send({ type: 'cancelled', order, reason: 'Cancelled before start', oven: 'N/A' } as KitchenEvent);
             checkClosed(state, utils);
             return;
           }
@@ -152,12 +133,12 @@ const chef = actor({
           const bakeResult = await utils.outbox.request({ type: 'bake', order, recipe }) as { ovenId: string; price: number };
           state.activeTasks--;
           state.completedCount++;
-          utils.outbox.send({ type: 'ready', order, oven: bakeResult.ovenId, price: bakeResult.price } as KitchenEvent);
+          utils.send({ type: 'ready', order, oven: bakeResult.ovenId, price: bakeResult.price } as KitchenEvent);
           checkClosed(state, utils);
         } catch (err: any) {
           state.activeTasks--;
           state.cancelledCount++;
-          utils.outbox.send({ type: 'cancelled', order, reason: err?.message ?? String(err), oven: 'N/A' } as KitchenEvent);
+          utils.send({ type: 'cancelled', order, reason: err?.message ?? String(err), oven: 'N/A' } as KitchenEvent);
           checkClosed(state, utils);
         }
       })();
@@ -176,6 +157,25 @@ const chef = actor({
   }
 
   return state;
+}, {
+  onRequest: async (payload: unknown) => {
+    if (typeof payload === 'string') {
+      return recipes.get(payload);
+    }
+    const bakeTask = payload as { type: 'bake'; order: Order; recipe: Recipe };
+    if (bakeTask.type === 'bake') {
+      const oven = ovens.find(o => !o.busy);
+      if (!oven) throw new Error('No free oven');
+      oven.busy = true;
+      try {
+        await oven.worker.processTask({ order: bakeTask.order, recipe: bakeTask.recipe });
+        return { ovenId: oven.id, price: prices.get(bakeTask.order.item) ?? 10 };
+      } finally {
+        oven.busy = false;
+      }
+    }
+    throw new Error(`Unknown request payload: ${JSON.stringify(payload)}`);
+  },
 })('chef', {
   activeTasks: 0,
   completedCount: 0,
@@ -193,17 +193,17 @@ const cashier = actor(async function cashier(
 ) {
   if (msg.type === 'runShift') {
     for (const order of msg.orders) {
-      utils.outbox.sendTo('chef', 'cook', order);
+      utils.bus.send('chef', 'cook', order);
     }
-    utils.outbox.sendTo('chef', 'close', null);
+    utils.bus.send('chef', 'close', null);
   }
 
   if (msg.type === 'cancel') {
-    utils.outbox.sendTo('chef', 'cancel', msg.orderId);
+    utils.bus.send('chef', 'cancel', msg.orderId);
   }
 
   if (msg.type === 'close') {
-    utils.outbox.sendTo('chef', 'close', null);
+    utils.bus.send('chef', 'close', null);
   }
 
   return state;
@@ -378,7 +378,7 @@ export class KitchenService {
         }
       });
 
-      main.outbox.send(cashier, { type: 'runShift', orders });
+      main.send(cashier, { type: 'runShift', orders });
     });
   }
 
@@ -458,7 +458,7 @@ export class KitchenService {
   cancelOrder(orderId: string) {
     if (!this.running) return;
 
-    main.outbox.send(cashier, { type: 'cancel', orderId });
+    main.send(cashier, { type: 'cancel', orderId });
     this.logSubject.next(`🚫 Cancellation requested for order ${orderId}`);
   }
 
@@ -466,7 +466,7 @@ export class KitchenService {
     if (!this.running) return;
 
     this.fullDayClosing = true;
-    main.outbox.send(cashier, { type: 'close' });
+    main.send(cashier, { type: 'close' });
     this.logSubject.next('🚨 Kitchen closing requested — active ovens finish, queued orders are cancelled');
   }
 
