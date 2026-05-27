@@ -77,6 +77,12 @@ idescribe("actor", () => {
               }, 1);
             });
           },
+          publish: (topic: string, payload: any) => {
+            outbox.send({ kind: "actor-bus", topic, payload });
+          },
+          sendTo: (to: string | string[], topic: string, payload: any) => {
+            outbox.send({ kind: "actor-bus", to, topic, payload });
+          },
         };
         return {
           outbox,
@@ -84,15 +90,6 @@ idescribe("actor", () => {
             receive: (signal?: AbortSignal) => this.workerInbox.receive(signal),
             channel: this.workerInbox,
           },
-          bus: {
-            publish: (topic: string, payload: any) => {
-              outbox.send({ kind: "actor-bus", topic, payload });
-            },
-            send: (to: string | string[], topic: string, payload: any) => {
-              outbox.send({ kind: "actor-bus", to, topic, payload });
-            },
-          },
-          get main() { return outbox; },
           concurrency: {
             channel,
             receive,
@@ -501,7 +498,7 @@ idescribe("actor", () => {
 
     async function behavior(msg: unknown, state: State, utils: any) {
       if (state.role === "publisher" && msg === "emit") {
-        utils.bus.publish("greet", "hello");
+        utils.outbox.publish("greet", "hello");
         return state;
       }
 
@@ -537,12 +534,12 @@ idescribe("actor", () => {
     await Promise.all([main.outbox.stop(publisher), main.outbox.stop(receiver)]);
   });
 
-  it("should target explicit actors through utils.bus.send", async () => {
+  it("should target explicit actors through utils.outbox.sendTo", async () => {
     type State = { role: "sender" | "receiver"; hits: number[] };
 
     async function behavior(msg: unknown, state: State, utils: any) {
       if (state.role === "sender" && msg === "direct") {
-        utils.bus.send("beta", "direct", 7);
+        utils.outbox.sendTo("beta", "direct", 7);
         return state;
       }
 
@@ -612,7 +609,7 @@ idescribe("actor", () => {
 
     async function behavior(msg: string, state: number, utils: any) {
       if (msg === "report") {
-        utils.bus.send("main", "status", "ready");
+        utils.outbox.sendTo("main", "status", "ready");
       }
       return state;
     }

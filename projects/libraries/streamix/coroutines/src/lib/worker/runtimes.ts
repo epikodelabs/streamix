@@ -54,12 +54,6 @@ const __createWorkerUtils = (workerId, taskId) => {
     outbox: {
       send: (messagePayload) => __postToMain({ workerId, taskId, payload: messagePayload, type: 'notify' }),
       request: (requestPayload) => __requestMain(workerId, taskId, requestPayload),
-    },
-    inbox: {
-      receive: (signal) => inbox.receive(signal),
-      channel: inbox,
-    },
-    bus: {
       publish: (topic, messagePayload) =>
         __postToMain({
           workerId,
@@ -67,13 +61,17 @@ const __createWorkerUtils = (workerId, taskId) => {
           payload: { kind: 'actor-bus', topic, payload: messagePayload },
           type: 'notify',
         }),
-      send: (to, topic, messagePayload) =>
+      sendTo: (to, topic, messagePayload) =>
         __postToMain({
           workerId,
           taskId,
           payload: { kind: 'actor-bus', to, topic, payload: messagePayload },
           type: 'notify',
         }),
+    },
+    inbox: {
+      receive: (signal) => inbox.receive(signal),
+      channel: inbox,
     },
     concurrency: __streamixConcurrency,
     send: (destination, payload) => destination.send(payload),

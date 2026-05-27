@@ -49,6 +49,10 @@ export type WorkerOutbox<Q = any, D = any, ToMain = any> = {
   send: (payload: ToMain) => void;
   /** Sends a request to the main thread and awaits a response. */
   request: (payload: Q) => Promise<D>;
+  /** Broadcasts a topic payload to the actor bus. */
+  publish: <T = any>(topic: string, payload: T) => void;
+  /** Sends a topic payload to one or more explicit actor ids. */
+  sendTo: <T = any>(to: ActorBusTarget, topic: string, payload: T) => void;
 };
 
 /**
@@ -101,8 +105,8 @@ export type ActorBusHandler<T = any> = (
 /**
  * Main-thread actor bus integrated into the actor messaging surface.
  *
- * Workers publish through `utils.bus`, and the main thread routes those
- * envelopes through `main.bus`.
+ * Workers publish through `utils.outbox.publish` / `utils.outbox.sendTo`,
+ * and the main thread routes those envelopes through `main.bus`.
  */
 export interface ActorBus {
   /**
@@ -143,23 +147,12 @@ export interface ActorBus {
 }
 
 /**
- * Worker-side helper for publishing actor-bus messages.
- */
-export type WorkerBus = {
-  /** Broadcasts a topic payload to the actor bus. */
-  publish: <T = any>(topic: string, payload: T) => void;
-  /** Sends a topic payload to one or more explicit actor ids. */
-  send: <T = any>(to: ActorBusTarget, topic: string, payload: T) => void;
-};
-
-/**
  * Utility functions available to actor workers.
  */
 export type WorkerUtils<Q = any, D = any, FromMain = any, ToMain = any> = {
   concurrency: WorkerConcurrency;
   outbox: WorkerOutbox<Q, D, ToMain>;
   inbox: WorkerInbox<FromMain>;
-  bus: WorkerBus;
 };
 
 /**
@@ -1454,10 +1447,10 @@ export const main = {
   /**
    * Integrated actor message bus.
    *
-   * Workers publish through `utils.bus`, while the main thread can publish to
-   * every actor, send directly by name, or listen to all traffic or direct
-   * messages addressed to a specific name. The main-thread endpoint name is
-   * always `"main"`.
+   * Workers publish through `utils.outbox.publish` / `utils.outbox.sendTo`,
+   * while the main thread can publish to every actor, send directly by name,
+   * or listen to all traffic or direct messages addressed to a specific name.
+   * The main-thread endpoint name is always `"main"`.
    */
   bus: {
     publish<T = any>(

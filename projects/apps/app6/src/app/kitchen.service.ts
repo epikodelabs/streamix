@@ -9,7 +9,7 @@
  *
  * Communication flow:
  *   UI → Cashier : main.outbox.send(cashier, { type: 'order' | 'cancel' | 'close' })
- *   Cashier → Chef : utils.bus.send('chef', 'cook' | 'cancel', ...)
+ *   Cashier → Chef : utils.outbox.sendTo('chef', 'cook' | 'cancel', ...)
  *   Chef → Main    : utils.outbox.request(item)       fetches recipe
  *                    utils.outbox.request({type:'bake'}) dispatches to oven
  *                    utils.outbox.send(event)          pushes live events
@@ -193,17 +193,17 @@ const cashier = actor(async function cashierBehavior(
 ) {
   if (msg.type === 'runShift') {
     for (const order of msg.orders) {
-      utils.bus.send('chef', 'cook', order);
+      utils.outbox.sendTo('chef', 'cook', order);
     }
-    utils.bus.send('chef', 'close', null);
+    utils.outbox.sendTo('chef', 'close', null);
   }
 
   if (msg.type === 'cancel') {
-    utils.bus.send('chef', 'cancel', msg.orderId);
+    utils.outbox.sendTo('chef', 'cancel', msg.orderId);
   }
 
   if (msg.type === 'close') {
-    utils.bus.send('chef', 'close', null);
+    utils.outbox.sendTo('chef', 'close', null);
   }
 
   return state;
