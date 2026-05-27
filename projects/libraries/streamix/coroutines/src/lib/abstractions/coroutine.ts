@@ -1,6 +1,6 @@
-import { buildWorkerScript } from "../worker/script";
-import { buildCoroutineWorkerRuntime } from "../worker/runtimes";
 import { createTaskRunner } from "../worker/runner";
+import { buildCoroutineWorkerRuntime } from "../worker/runtimes";
+import { buildWorkerScript } from "../worker/script";
 import type { Coroutine, CoroutineScript } from "../worker/types";
 
 /**
@@ -12,6 +12,7 @@ export type CoroutineTask<T = any, R = any> = (data: T) => Promise<R> | R;
  * Configuration for plain one-way coroutine workers.
  */
 export type CoroutineConfig = {
+  /** Raw helper snippets injected into the worker before task code. */
   helpers?: string[];
 };
 
@@ -44,11 +45,12 @@ function createCoroutineImpl<T, R>(
 }
 
 /**
- * Creates a SIMD coroutine — one task baked into the worker blob.
+ * Creates a reusable coroutine task runner with its worker script baked once.
  *
- * The returned `Coroutine` can be used with `.pipe()` in stream pipelines
- * or called directly via `.processTask()`. Call `.finalize()` when done
- * to terminate the underlying worker pool.
+ * A coroutine owns one dedicated worker, reuses it across calls, and queues
+ * `processTask()` submissions on that worker. The returned `Coroutine` can be
+ * used with `.pipe()` in stream pipelines or called directly. Call
+ * `.finalize()` when done to terminate the underlying worker.
  */
 export function coroutine<T, R>(config: CoroutineConfig): (main: CoroutineTask<T, R>, ...functions: Function[]) => Coroutine<T, R> & CoroutineScript<T, R>;
 export function coroutine<T, R>(main: CoroutineTask<T, R>, ...functions: Function[]): Coroutine<T, R> & CoroutineScript<T, R>;

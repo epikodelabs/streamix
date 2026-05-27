@@ -22,9 +22,9 @@ export type WorkerProtocolMessage = {
   payload?: any;
   error?: string;
   requestId?: string;
-  /** Serialized function source (used by generic pools). */
+  /** Serialized function source for worker-backed task runners. */
   code?: string;
-  /** Serialized helper function sources (used by generic pools). */
+  /** Serialized helper function sources for worker-backed task runners. */
   deps?: string[];
 };
 

@@ -14,14 +14,13 @@ import {
     withTimeout
 } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
-import { createTaskPool } from "../lib/worker/pool";
-import type { WorkerProtocolMessage } from "../lib/worker/messages";
 
 idescribe('coroutine', () => {
   let originalWorker: any;
   let originalLog: typeof console.log;
   let originalError: typeof console.error;
   let originalWarn: typeof console.warn;
+  let mockWorkerCreations = 0;
 
   beforeAll(() => {
     // Store the original Worker
@@ -41,7 +40,9 @@ idescribe('coroutine', () => {
       terminated = false;
       private workerInbox = channel<any>();
 
-      constructor(_url: string, _options?: any) {}
+      constructor(_url: string, _options?: any) {
+        mockWorkerCreations++;
+      }
 
       private handleDataRequest(_requestPayload: any): Promise<any> {
         return new Promise((resolve) => {
@@ -56,7 +57,7 @@ idescribe('coroutine', () => {
         return {
           main: {
             send: (payload: any) => {
-              const event: MessageEvent<WorkerProtocolMessage> = {
+              const event: MessageEvent<any> = {
                 data: { workerId: message.workerId, taskId: message.taskId, type: "notify", payload }
               } as any;
               this.onmessage?.(event);
@@ -107,13 +108,13 @@ idescribe('coroutine', () => {
               
               // Handle both sync and async results
               Promise.resolve(result).then(finalResult => {
-                const event: MessageEvent<WorkerProtocolMessage> = {
+                const event: MessageEvent<any> = {
                   data: { ...msg, type: 'response', payload: finalResult }
                 } as any;
                 this.onmessage?.(event);
                 this.listeners['message']?.forEach(fn => fn(event));
               }).catch(err => {
-                const event: MessageEvent<WorkerProtocolMessage> = {
+                const event: MessageEvent<any> = {
                   data: { ...msg, type: 'error', error: err.message }
                 } as any;
                 this.onmessage?.(event);
@@ -121,7 +122,7 @@ idescribe('coroutine', () => {
               });
               
             } catch (err: any) {
-              const event: MessageEvent<WorkerProtocolMessage> = {
+              const event: MessageEvent<any> = {
                 data: { ...msg, type: 'error', error: err.message }
               } as any;
               this.onmessage?.(event);
@@ -165,6 +166,7 @@ idescribe('coroutine', () => {
   beforeEach(() => {
     // Reset before each test
     (globalThis as any).currentMainTask = undefined;
+    mockWorkerCreations = 0;
   });
 
   it('should process tasks and return results', async () => {
@@ -187,20 +189,6 @@ idescribe('coroutine', () => {
     expect(processed).toEqual([2, 3, 4]); // Fixed expectation: x + 1
   });
 
-  it('should allow runOnWorker directly on an acquired worker', async () => {
-    const mainTask = (x: number) => x * 2;
-    (globalThis as any).currentMainTask = mainTask;
-
-    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
-
-    const worker = await pool.acquireWorker();
-    const result = await pool.runOnWorker(worker, 5);
-
-    expect(result).toBe(10);
-    pool.releaseWorker(worker);
-    await pool.finalize();
-  });
-
   it('should process multiple tasks in sequence', async () => {
     const mainTask = (x: number) => x * 2; // Fixed: consistent task logic
     (globalThis as any).currentMainTask = mainTask;
@@ -214,27 +202,18 @@ idescribe('coroutine', () => {
     ]);
 
     expect(results).toEqual([2, 4, 6]); // Fixed expectation: x * 2
+    expect(mockWorkerCreations).toBe(1);
   });
 
   it('should finalize and terminate all workers', async () => {
     const mainTask = (x: number) => x * 2;
     (globalThis as any).currentMainTask = mainTask;
 
-    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
+    const co = coroutine(mainTask);
 
-    // Get a worker to ensure one is created
-    const worker = await pool.acquireWorker();
-    pool.releaseWorker(worker);
-
-    await pool.finalize();
-
-    // After finalize, getting a new worker should work
-    const newWorker = await pool.acquireWorker();
-    expect((newWorker as any).__id).toBeGreaterThan(0);
-
-    // Clean up
-    pool.releaseWorker(newWorker);
-    await pool.finalize();
+    const result = await co.processTask(2);
+    expect(result).toBe(4);
+    await co.finalize();
   });
 
   it('should throw error from processTask directly', async () => {
@@ -315,10 +294,10 @@ idescribe('coroutine', () => {
       const mainTask = (x: number) => x + 1;
       (globalThis as any).currentMainTask = mainTask;
 
-      const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
-      const worker = await pool.acquireWorker();
-      pool.releaseWorker(worker);
-      await pool.finalize();
+      const co = coroutine(mainTask);
+      const result = await co.processTask(1);
+      expect(result).toBe(2);
+      await co.finalize();
     } finally {
       if (originalDescriptor) {
         Object.defineProperty(navigator, "hardwareConcurrency", originalDescriptor);
@@ -364,7 +343,7 @@ idescribe('coroutine', () => {
           if (this.terminated) return;
           if (msg.type !== "task") return;
 
-          const event: MessageEvent<WorkerProtocolMessage> = {
+          const event: MessageEvent<any> = {
             data: { ...msg, type: "error" } // no `error` field on purpose
           } as any;
 
@@ -401,120 +380,43 @@ idescribe('coroutine', () => {
       return 1;
     }
 
-    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [helperNamed, function () { return 2; }], generateWorkerScript: () => '' });
-    const worker = await pool.acquireWorker();
-    pool.releaseWorker(worker);
-    await pool.finalize();
+    const co = coroutine(mainTask, helperNamed, function () { return 2; });
+    await co.processTask(1);
+    await co.finalize();
   });
 
-  it('should ignore response/error messages when no pending task exists', async () => {
-    const warn = spyOn(console, "warn");
+  it('should reject queued processTask requests when finalized', async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(navigator, "hardwareConcurrency");
 
-    const mainTask = (x: number) => x;
+    let releaseFirstTask!: () => void;
+    const mainTask = (x: number) => {
+      if (x === 1) {
+        return new Promise<number>((resolve) => {
+          releaseFirstTask = () => resolve(1);
+        });
+      }
+      return x;
+    };
     (globalThis as any).currentMainTask = mainTask;
-    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
+    const co = coroutine(mainTask);
 
-    const worker = await pool.acquireWorker();
-    const workerId = (worker as any).__id as number;
-    const handler = (worker as any).listeners.message[0] as (ev: any) => void;
+    try {
+      Object.defineProperty(navigator, "hardwareConcurrency", { value: 1, configurable: true });
 
-    handler({ data: { type: "response", workerId, taskId: "missing", payload: 1 } });
-    handler({ data: { type: "error", workerId, taskId: "missing", error: "nope" } });
+      const active = co.processTask(1);
+      const queued = co.processTask(2);
 
-    expect(warn).toHaveBeenCalled();
+      await new Promise(r => setTimeout(r, 10));
+      await co.finalize();
 
-    pool.releaseWorker(worker);
-    await pool.finalize();
-  });
-
-  it('should queue acquireWorker requests once max workers are reached', async () => {
-    const mainTask = (x: number) => x;
-    (globalThis as any).currentMainTask = mainTask;
-    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
-
-    const max = (navigator as any).hardwareConcurrency || 4;
-    const acquired: Worker[] = [];
-
-    for (let i = 0; i < max; i++) {
-      acquired.push(await pool.acquireWorker());
+      await expectAsync(active).toBeRejectedWithError(/finalized before the worker task completed/);
+      await expectAsync(queued).toBeRejectedWithError(/finalized before a worker became available/);
+    } finally {
+      releaseFirstTask?.();
+      if (originalDescriptor) {
+        Object.defineProperty(navigator, "hardwareConcurrency", originalDescriptor);
+      }
     }
-
-    const waiting = pool.acquireWorker();
-
-    // Return one worker to satisfy the waiting request.
-    pool.releaseWorker(acquired[0]);
-    const extra = await waiting;
-
-    expect((extra as any).__id).toBe((acquired[0] as any).__id);
-
-    // Cleanup: return everything to the pool.
-    for (const entry of acquired.slice(1)) {
-      pool.releaseWorker(entry);
-    }
-    pool.releaseWorker(extra);
-
-    await pool.finalize();
-  });
-
-  it('should reject queued acquireWorker requests when finalized', async () => {
-    const mainTask = (x: number) => x;
-    (globalThis as any).currentMainTask = mainTask;
-    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
-
-    const max = (navigator as any).hardwareConcurrency || 4;
-    const acquired: Worker[] = [];
-
-    for (let i = 0; i < max; i++) {
-      acquired.push(await pool.acquireWorker());
-    }
-
-    const waiting = pool.acquireWorker();
-    await pool.finalize();
-
-    await expectAsync(waiting).toBeRejectedWithError(/finalized before a worker became available/);
-  });
-
-  it('should allow reusing the pool after finalize even when max workers were created', async () => {
-    const mainTask = (x: number) => x;
-    (globalThis as any).currentMainTask = mainTask;
-    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
-
-    const max = (navigator as any).hardwareConcurrency || 4;
-    const acquired: Worker[] = [];
-
-    for (let i = 0; i < max; i++) {
-      acquired.push(await pool.acquireWorker());
-    }
-
-    await pool.finalize();
-
-    const worker = await pool.acquireWorker();
-    expect((worker as any).__id).toBeGreaterThan(0);
-
-    pool.releaseWorker(worker);
-    await pool.finalize();
-  });
-
-  it('releaseWorker warns when workerId is unknown', async () => {
-    const mainTask = (x: number) => x;
-    (globalThis as any).currentMainTask = mainTask;
-    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
-
-    const warn = spyOn(console, "warn");
-    pool.releaseWorker({} as Worker);
-
-    expect(warn).toHaveBeenCalled();
-
-    await pool.finalize();
-  });
-
-  it('runOnWorker throws when workerId is unknown', async () => {
-    const mainTask = (x: number) => x;
-    (globalThis as any).currentMainTask = mainTask;
-    const pool = createTaskPool({ name: 'test', main: mainTask, functions: [], generateWorkerScript: () => '' });
-
-    await expectAsync(pool.runOnWorker({} as Worker, 1)).toBeRejectedWithError(/not found/i);
-    await pool.finalize();
   });
 
   it('finalize is safe when called before any worker is created', async () => {

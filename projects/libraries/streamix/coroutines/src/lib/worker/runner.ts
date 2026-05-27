@@ -1,33 +1,174 @@
-import { createTaskPool } from "./pool";
-import type { WorkerPoolConfig } from "./pool";
-import type { TaskPool, TaskRunner } from "./types";
+import { acquireBlobUrl, releaseBlobUrl } from "./blob";
+import { createDefaultMessageHandler } from "./messages";
+import type { PendingTaskMap, WorkerProtocolMessage } from "./messages";
+import type { TaskRunner } from "./types";
+import { generateTaskId } from "./utils";
 
 /**
- * Internal helper that wires `createTaskPool` with a `TaskRunner` facade.
- *
- * Both `coroutine()` and `actor()` use this instead of calling `createTaskPool`
- * directly, keeping the abstraction layer free of pool internals.
+ * Shared worker-script configuration for task runners.
  */
-export function createTaskRunner<T, R>(options: {
+export type WorkerScriptConfig = {
+  /**
+   * Raw worker-side snippets injected before serialized helper/task functions.
+   */
+  helpers?: string[];
+};
+
+type QueuedTask<T, R> = {
+  value: T;
+  resolve: (value: R) => void;
+  reject: (error: Error) => void;
+};
+
+type TaskRunnerOptions = {
   name: string;
+  config?: WorkerScriptConfig;
   main: Function;
   functions: Function[];
-  config?: WorkerPoolConfig;
-  generateWorkerScript: (main: Function, functions: Function[], config?: WorkerPoolConfig) => string;
-  createMessageHandler?: (worker: Worker, pendingTasks: any) => (event: MessageEvent<any>) => void;
-}): TaskRunner<T, R> & { pool: TaskPool<T, R> } {
-  const pool = createTaskPool<T, R>({
-    name: options.name,
-    config: options.config,
-    main: options.main,
-    functions: options.functions,
-    generateWorkerScript: options.generateWorkerScript,
-    createMessageHandler: options.createMessageHandler,
-  });
+  generateWorkerScript: (main: Function, functions: Function[], config?: WorkerScriptConfig) => string;
+  createMessageHandler?: (worker: Worker, pendingTasks: PendingTaskMap) => (event: MessageEvent<WorkerProtocolMessage>) => void;
+};
+
+let workerIdentifierCounter = 0;
+
+const toError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
+/**
+ * Internal dedicated-worker task executor used by `coroutine()` and `compose()`.
+ *
+ * A runner owns one reusable worker instance, queues calls to `processTask()`,
+ * and exposes only the high-level `TaskRunner` contract.
+ */
+export function createTaskRunner<T, R>({
+  name,
+  config,
+  main,
+  functions,
+  generateWorkerScript,
+  createMessageHandler,
+}: TaskRunnerOptions): TaskRunner<T, R> {
+  const queuedTasks: Array<QueuedTask<T, R>> = [];
+  const pendingMessages: PendingTaskMap = new Map();
+  const runnerWorkerId = ++workerIdentifierCounter;
+  const runnerTaskId = String(runnerWorkerId);
+  const workerScript = generateWorkerScript(main, functions, config);
+  const blobUrl = acquireBlobUrl(workerScript);
+
+  let worker: Worker | null = null;
+  let workerMessageHandler: ((event: MessageEvent<WorkerProtocolMessage>) => void) | null = null;
+  let isProcessing = false;
+  let isFinalizing = false;
+  let hasReleasedBlobUrl = false;
+
+  const releaseWorkerScript = () => {
+    if (hasReleasedBlobUrl) {
+      return;
+    }
+
+    hasReleasedBlobUrl = true;
+    releaseBlobUrl(workerScript);
+  };
+
+  const getWorker = (): Worker => {
+    if (worker) {
+      return worker;
+    }
+
+    const nextWorker = new Worker(blobUrl, { type: "module" });
+    workerMessageHandler = createMessageHandler
+      ? createMessageHandler(nextWorker, pendingMessages)
+      : createDefaultMessageHandler(nextWorker, pendingMessages);
+    nextWorker.addEventListener("message", workerMessageHandler);
+    (nextWorker as any).__id = runnerWorkerId;
+    worker = nextWorker;
+    return nextWorker;
+  };
+
+  const submitTask = (worker: Worker, data: T): Promise<R> => {
+    const taskId = generateTaskId() || runnerTaskId;
+    return new Promise<R>((resolve, reject) => {
+      pendingMessages.set(taskId, { workerId: runnerWorkerId, resolve, reject });
+      try {
+        worker.postMessage({ workerId: runnerWorkerId, taskId, payload: data, type: "task" });
+      } catch (error) {
+        pendingMessages.delete(taskId);
+        reject(toError(error));
+      }
+    });
+  };
+
+  const drainQueue = async (): Promise<void> => {
+    if (isProcessing || isFinalizing) {
+      return;
+    }
+
+    const nextTask = queuedTasks.shift();
+    if (!nextTask) {
+      return;
+    }
+
+    isProcessing = true;
+
+    try {
+      const activeWorker = getWorker();
+      const result = await submitTask(activeWorker, nextTask.value);
+      nextTask.resolve(result);
+    } catch (error) {
+      nextTask.reject(toError(error));
+    } finally {
+      isProcessing = false;
+      if (!isFinalizing) {
+        void drainQueue();
+      }
+    }
+  };
+
+  const processTask = (value: T): Promise<R> => {
+    if (isFinalizing) {
+      return Promise.reject(new Error(`${name} is finalizing`));
+    }
+
+    return new Promise<R>((resolve, reject) => {
+      queuedTasks.push({ value, resolve, reject });
+      void drainQueue();
+    });
+  };
+
+  const finalize = async () => {
+    if (isFinalizing) {
+      return;
+    }
+
+    isFinalizing = true;
+
+    while (queuedTasks.length > 0) {
+      queuedTasks.shift()!.reject(
+        new Error(`${name} finalized before a worker became available`)
+      );
+    }
+
+    pendingMessages.forEach(({ reject }) => {
+      reject(new Error(`${name} finalized before the worker task completed`));
+    });
+    pendingMessages.clear();
+
+    if (worker) {
+      if (workerMessageHandler) {
+        worker.removeEventListener("message", workerMessageHandler);
+      }
+      worker.terminate();
+      worker = null;
+    }
+
+    workerMessageHandler = null;
+    isProcessing = false;
+    isFinalizing = false;
+    releaseWorkerScript();
+  };
 
   return {
-    processTask: pool.processTask,
-    finalize: pool.finalize,
-    pool,
+    finalize,
+    processTask,
   };
 }

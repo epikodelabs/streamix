@@ -1,43 +1,71 @@
 # Streamix Actors
 
-`actor(...)` creates an **autonomous worker** that runs a persistent behavior loop. The worker eagerly initializes with state and processes messages via `post()` (fire-and-forget) or `ask()` (request-response).
+`actor(...)` creates a long-lived, stateful worker that runs a persistent behavior loop.
 
-Because workers are isolated, the behavior has no direct access to the main thread — instead, `utils` is injected as the third argument **inside the worker only**:
+An actor owns one dedicated worker. It does not come from the compute pool, and it is not a coroutine with extra messaging layered on top.
 
-- `utils.outbox` — send messages **from worker to main**: `send(payload)` emits one-way events the main thread receives via `main.inbox.receive()`; `request(payload)` calls the main-thread `config.onRequest` handler and awaits the result.
-- `utils.inbox` — a standalone channel **inside the worker** for internal coordination. It is *not* automatically wired to `actor.post()`; messages from main arrive as the behavior's `msg` argument.
-- `utils.concurrency` — coordinate async work *inside the worker*: channels, select, contexts, and timeouts.
+Use `actor(...)` when you need:
+- worker state that evolves over time
+- messages sent from main to worker
+- events or requests sent from worker back to main
+- worker-local concurrency primitives such as channels, select, and cancellation
 
-> **You cannot use `utils.inbox` or `utils.outbox` from the main thread.**
-> On the main thread, use `actor.post()`, `actor.ask()`, and `actor.onMessage()` instead.
+For one-shot or queued task execution on a single dedicated worker, use `coroutine(...)`. For pooled throughput across multiple workers, use `compute(...)`.
 
-Use `actor(...)` when you need a **stateful, long-lived worker** that responds to messages over time. For one-shot background computation, use `coroutine(...)` instead.
+---
+
+## Worker-side model
+
+Your behavior runs inside the worker with the signature:
+
+```ts
+(msg, state, utils) => nextState
+```
+
+- `msg` is the message sent from the main thread.
+- `state` is the actor's current state.
+- `utils.outbox.send(payload)` emits a one-way message to the main thread.
+- `utils.outbox.request(payload)` asks the main thread for data and awaits the reply.
+- `utils.inbox` is a worker-local channel for internal coordination inside the actor.
+- `utils.concurrency` exposes channels, `select`, timeouts, cancellation, and related helpers inside the worker.
+
+`utils` exists only inside the worker. The main thread does not call it directly.
+
+---
+
+## Main-thread model
+
+The actor instance itself is intentionally small:
+
+| Member | Type | Description |
+|---|---|---|
+| `running` | property | `true` while the actor worker is running |
+| `stop(reason?)` | method | Stop the behavior loop |
+| `finalize()` | method | Terminate the worker and release resources |
+
+Main-thread messaging goes through `main`:
+
+| API | Description |
+|---|---|
+| `main.outbox.send(actor, msg)` | Fire-and-forget message to the actor |
+| `main.outbox.request(actor, msg)` | Send a message and await the updated state |
+| `main.inbox.receive(actor, handler)` | Subscribe to messages sent from the worker via `utils.outbox.send(...)` |
+| `main.inbox.receive()` | Await the next message from any actor |
 
 ---
 
 ## How it works
 
-```
-Main thread                              Worker
-────────────────────────────             ────────────────────────────────────
-                                          
-const counter = actor(counterBehavior);   async function counterBehavior(msg, state, utils) {
-                                            // update state
-                                            return newState;
-                                          }
-
-const c = counter(0);                     let state = initialState;
-                                          // behavior loop starts
-
-c.post("inc");                  ───msg──► state = await counterBehavior("inc", state, utils);
-
-const s = await c.ask("dec");   ◄─state── state = await counterBehavior("dec", state, utils);
-                                          // return state
+```text
+main thread -> actor message -> dedicated worker -> behavior(msg, state, utils) -> next state
 ```
 
-The **behavior function** is serialized and runs entirely inside the **worker**. It receives `(msg, state, utils)` and returns the new state. The `utils` parameter is the only way the worker can reach back to main.
-
-The **config object** (`onRequest`, `onMessage`) is code that runs on the **main thread** and reacts to messages arriving from the worker.
+1. You define a behavior function.
+2. `actor(...)` serializes that behavior into a worker script.
+3. One dedicated worker is created for the actor instance.
+4. Messages from the main thread are fed into the behavior loop.
+5. The behavior returns the next state.
+6. Worker-originated events and requests flow back through `main`.
 
 ---
 
@@ -47,28 +75,21 @@ The **config object** (`onRequest`, `onMessage`) is code that runs on the **main
 
 ```ts
 const createActor = actor(behavior, ...helpers);
-const actor = createActor(initialState);
+const counter = createActor(initialState);
 ```
 
 ### With config
 
 ```ts
 const createActor = actor(config)(behavior, ...helpers);
-const actor = createActor(initialState);
+const counter = createActor(initialState);
 ```
 
-### Instance API
+`config` runs on the main thread and can contain:
 
-| Member | Type | Description |
-|--------|------|-------------|
-| Member | Type | Description |
-|--------|------|-------------|
-| `post(msg)` | method | Fire-and-forget message to the actor mailbox (received as `msg` in the behavior) |
-| `ask(msg)` | method | Send a message and await the **updated state** |
-| `stop()` | method | Stop the behavior loop |
-| `finalize()` | method | Terminate the worker and release resources |
-| `onMessage(handler)` | method | Subscribe to one-way messages sent from the worker via `utils.outbox.send()`; returns unsubscribe function |
-| `running` | property | `true` while the behavior loop is active |
+- `onRequest`: handles `utils.outbox.request(...)` calls originating from the worker
+- `onMessage`: receives one-way `utils.outbox.send(...)` traffic from the worker
+- `helpers`: raw worker-side helper snippets
 
 ---
 
@@ -90,8 +111,8 @@ const counter = createCounter(10);
 main.outbox.send(counter, { type: "inc", n: 5 });
 main.outbox.send(counter, { type: "dec", n: 3 });
 
-const value = await main.outbox.ask(counter, { type: "inc", n: 0 });
-console.log(value); // → 12
+const value = await main.outbox.request<Msg, number>(counter, { type: "inc", n: 0 });
+console.log(value); // 12
 
 await counter.finalize();
 ```
@@ -99,12 +120,17 @@ await counter.finalize();
 ### With helpers
 
 ```ts
-const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+function clamp(v: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, v));
+}
 
-const createBoundedCounter = actor(async (msg: Msg, state: number, _utils, clampFn: typeof clamp) => {
-  const next = msg.type === "inc" ? state + msg.n : state - msg.n;
-  return clampFn(next, 0, 100);
-}, clamp);
+const createBoundedCounter = actor(
+  async function boundedCounter(msg: Msg, state: number) {
+    const next = msg.type === "inc" ? state + msg.n : state - msg.n;
+    return clamp(next, 0, 100);
+  },
+  clamp
+);
 
 const counter = createBoundedCounter(50);
 ```
@@ -119,8 +145,8 @@ const createCounter = actor({
   },
   onMessage: (event) => console.log("Worker says:", event),
 })(async (msg: Msg, state: number, utils) => {
-  if (msg.type === "fetch") {
-    const data = await utils.outbox.request(msg.query);
+  if ((msg as any).type === "fetch") {
+    const data = await utils.outbox.request((msg as any).query);
     return data.count;
   }
   return state;
@@ -133,10 +159,10 @@ const counter = createCounter(0);
 
 ## Kitchen Example
 
-An actor that manages a pizza kitchen with multiple ovens, cancellations, and recipe lookups. Background oven workers capture state by reference so that `cancel` and `close` commands are visible immediately.
+An actor that manages a pizza kitchen with multiple internal oven tasks, cancellations, and recipe lookups. The actor itself still owns one dedicated worker; the extra coordination happens inside that worker through `utils.concurrency`.
 
 ```ts
-import { actor, WorkerUtils } from "@epikodelabs/streamix/coroutines";
+import { actor, type WorkerUtils } from "@epikodelabs/streamix/coroutines";
 
 type Order = { id: string; item: string; customer: string };
 type Recipe = { item: string; ingredients: string[]; bakeMs: number };
@@ -170,8 +196,8 @@ const kitchen = actor({
   state: KitchenState,
   utils: WorkerUtils<string, Recipe, KitchenMessage, KitchenEvent>
 ) {
-  const { channel, background, withTimeout } = utils.concurrency;
-  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const { channel } = utils.concurrency;
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   if (msg.type === "runShift" && !state.running) {
     state.running = true;
@@ -242,12 +268,6 @@ const kitchen = actor({
   cancelledCount: 0,
   totalRevenue: 0,
 });
-
-kitchen.onMessage((event) => {
-  if (event.type === "ready") console.log(`✅ ${event.order.item} ready!`);
-});
-
-kitchen.post({ type: "runShift", orders: morningOrders });
 ```
 
 ---
@@ -256,11 +276,14 @@ kitchen.post({ type: "runShift", orders: morningOrders });
 
 | | `coroutine(...)` | `actor(...)` |
 |---|---|---|
-| Runs in a Worker | ✓ | ✓ |
-| One-shot task | ✓ | — |
-| Stateful message loop | — | ✓ |
-| Main-thread messaging | — | ✓ `main.outbox.send()` / `main.outbox.ask()` / `main.inbox.receive()` |
-| Main-thread `request` handler | — | ✓ `utils.outbox.request(q)` |
-| One-way events to main | — | ✓ `utils.outbox.send(payload)` |
-| Worker-side channels & select | — | ✓ `utils.concurrency` |
-| Worker model | Pool (SIMD) | Single dedicated worker |
+| Runs in a Worker | yes | yes |
+| Worker model | Single dedicated worker | Single dedicated worker |
+| Pooled throughput | no | no |
+| One-shot task processing | yes | no |
+| Stateful message loop | no | yes |
+| Main-thread messaging | no | yes via `main.outbox` / `main.inbox` |
+| Worker-to-main request handler | no | yes via `utils.outbox.request(...)` |
+| One-way events to main | no | yes via `utils.outbox.send(...)` |
+| Worker-side channels and select | no | yes via `utils.concurrency` |
+
+If you need pooled compute across multiple workers, use `compute(...)`.

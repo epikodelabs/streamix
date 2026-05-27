@@ -2,13 +2,15 @@
 
 `@epikodelabs/streamix/coroutines` runs CPU-heavy work in Web Workers without blocking the main thread.
 
-A **coroutine** is a background task runner created from your function. It generates a worker script (as a blob), manages a pool of Web Workers, and exposes a direct task runner via `processTask(...)`.
+A `coroutine(...)` is a background task runner created from your function. It generates a worker script, starts one dedicated worker for that script on demand, and exposes a direct task API through `processTask(...)`.
 
 Use `coroutine(...)` when you need:
 - background computation
 - direct task execution through `processTask(...)`
-- one-off worker execution through `compute(...)`
+- reuse of the same dedicated worker across many calls
 - sequential pipeline composition through `compose(...)`
+
+Use `compute(...)` when you need pooled throughput instead of a single dedicated worker.
 
 If you need worker/main-thread messaging, use `actor(...)` instead. See [ACTORS.md](./ACTORS.md).
 
@@ -16,16 +18,16 @@ If you need worker/main-thread messaging, use `actor(...)` instead. See [ACTORS.
 
 ## What a coroutine is
 
-```
-Your function ──► blob script ──► WorkerPool (internal) ──► TaskRunner
+```text
+your function -> worker script -> one dedicated worker -> processTask(...)
 ```
 
 1. You provide a task function.
-2. The coroutine factory turns it into a Web Worker script (blob URL).
-3. An internal `WorkerPool` creates and reuses workers from that blob.
-4. The returned object is a `TaskRunner` — call `processTask(data)` directly.
+2. The coroutine factory turns it into a worker script.
+3. The coroutine creates one reusable worker for that script.
+4. Calls to `processTask(data)` are queued and executed on that worker.
 
-A **worker** is a single Web Worker thread — an implementation detail managed by the internal pool. `Coroutine` does **not** expose pool methods.
+A `Coroutine` is not a pool and does not expose worker lifecycle primitives. If you need a worker pool, use `compute(...)`.
 
 ---
 
@@ -52,6 +54,7 @@ const primes = coroutine(function findPrimes(limit: number) {
 });
 
 const values = await primes.processTask(10_000);
+await primes.finalize();
 ```
 
 ---
@@ -66,9 +69,19 @@ Run one task and get one result:
 const result = await primes.processTask(10_000);
 ```
 
+Calls are queued onto the coroutine's dedicated worker.
+
+### `finalize()`
+
+Terminate the dedicated worker and reject any queued or in-flight work:
+
+```ts
+await primes.finalize();
+```
+
 ### `compute(...)`
 
-Offload a function to a dedicated worker pool without managing `coroutine()` yourself. `compute` creates a **SIMD pool** — the task is baked into the worker blob once and shared by every worker.
+Offload a function to a dedicated worker pool. `compute(...)` bakes the task into one worker script and lets multiple workers reuse that same script for throughput.
 
 ```ts
 import { compute } from "@epikodelabs/streamix/coroutines";
@@ -78,14 +91,14 @@ const run = compute(function square(value: number) {
 });
 
 const result = await run(7); // 49
-await run.finalize();        // terminate workers when done
+await run.finalize();        // terminate the pool when done
 ```
 
 The pool is created when `compute(...)` is called. Workers are spawned lazily as tasks arrive, up to `navigator.hardwareConcurrency` (or 4 as fallback).
 
 ### `compose(...)`
 
-Chain coroutines sequentially — the output of each becomes the input of the next:
+Chain coroutines sequentially so the output of each stage becomes the input of the next:
 
 ```ts
 import { compose, coroutine } from "@epikodelabs/streamix/coroutines";
@@ -100,15 +113,16 @@ const project = coroutine(function project(input: { value: number }) {
 
 const pipeline = compose(decode, project);
 const result = await pipeline.processTask('{"value":42}');
+await pipeline.finalize();
 ```
 
-Each coroutine in the chain keeps its own worker pool. `compose` does not create new workers or blobs — it reuses the pools you provide.
+When `compose(...)` receives `CoroutineScript` inputs, it merges them into one worker script and runs the pipeline inside one dedicated worker task. When it receives generic `TaskRunner` inputs, those stages are executed sequentially on the main thread side by calling each runner.
 
 ---
 
 ## Helpers
 
-There are two ways to give a worker extra functions.
+There are two ways to give a worker extra code.
 
 ### Positional helper functions
 
@@ -159,6 +173,7 @@ const worker = coroutine(config)(function task(input: number) {
 - Do not rely on variables from outer lexical scope.
 - Pass helper functions explicitly when the worker needs them.
 - Use config `helpers` only for raw injected snippets that cannot be expressed as normal helper functions.
+- Call `finalize()` when the coroutine is no longer needed.
 
 ---
 
@@ -169,5 +184,6 @@ Use `actor(...)` when the worker needs:
 - one-way worker-to-main events
 - one-way main-to-worker messages
 - worker-local concurrency primitives plus a main-thread bridge
+- long-lived state that evolves over time
 
 See [ACTORS.md](./ACTORS.md).

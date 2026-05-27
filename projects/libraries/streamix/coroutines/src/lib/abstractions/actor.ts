@@ -16,6 +16,7 @@ import type {
   WorkerProtocolHandler,
   WorkerProtocolMessage,
 } from "../worker/messages";
+import { acquireBlobUrl, releaseBlobUrl } from "../worker/blob";
 import { buildActorWorkerRuntime } from "../worker/runtimes";
 import { buildWorkerScript } from "../worker/script";
 import type { Actor } from "../worker/types";
@@ -1085,30 +1086,6 @@ function createActor<S = any, Q = any, D = any, ToMain = any, FromMain = any>(
 }
 
 const $actorInternals = Symbol("actorInternals");
-
-const blobCache = new Map<string, { blobUrl: string; refCount: number }>();
-
-function acquireBlobUrl(workerScript: string): string {
-  const cached = blobCache.get(workerScript);
-  if (cached) {
-    cached.refCount++;
-    return cached.blobUrl;
-  }
-  const blob = new Blob([workerScript], { type: "application/javascript" });
-  const blobUrl = URL.createObjectURL(blob);
-  blobCache.set(workerScript, { blobUrl, refCount: 1 });
-  return blobUrl;
-}
-
-function releaseBlobUrl(workerScript: string): void {
-  const cached = blobCache.get(workerScript);
-  if (!cached) return;
-  cached.refCount--;
-  if (cached.refCount <= 0) {
-    URL.revokeObjectURL(cached.blobUrl);
-    blobCache.delete(workerScript);
-  }
-}
 
 interface GlobalInboxEntry {
   actor: Actor;

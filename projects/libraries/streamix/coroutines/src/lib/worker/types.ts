@@ -1,5 +1,3 @@
-import type { WorkerProtocolMessage } from "./messages";
-
 /**
  * Task descriptor ready to be baked into a worker blob.
  *
@@ -7,8 +5,11 @@ import type { WorkerProtocolMessage } from "./messages";
  * String forms are derived on demand via `serializeScript()`.
  */
 export interface CoroutineScript<T = any, R = any> {
+  /** Raw worker-side snippets injected before the serialized functions. */
   helpers?: string[];
+  /** Main task body executed inside the worker. */
   main: (data: T) => R | Promise<R>;
+  /** Additional named helper functions serialized alongside `main`. */
   functions?: Function[];
 }
 
@@ -16,35 +17,16 @@ export interface CoroutineScript<T = any, R = any> {
  * Base contract for anything that can process a task and be finalized.
  */
 export interface TaskRunner<T = any, R = any> {
+  /** Submits one value for worker-side processing. */
   processTask: (data: T) => Promise<R>;
+  /** Terminates the underlying worker resources. */
   finalize: () => Promise<void>;
 }
 
 /**
- * Low-level worker lifecycle management.
+ * Plain background-task runner backed by one dedicated worker.
  *
- * All pool variants implement this interface.
- */
-export interface WorkerPool {
-  acquireWorker: () => Promise<Worker>;
-  releaseWorker: (worker: Worker) => void;
-  disposeWorker: (worker: Worker, reason?: Error) => void;
-  sendToWorker: (worker: Worker, message: Omit<WorkerProtocolMessage, "workerId">) => void;
-}
-
-/**
- * Specialized pool with a task baked into the worker blob.
- *
- * Used internally by `coroutine()` and `compute()`.
- */
-export interface TaskPool<T = any, R = any> extends WorkerPool, TaskRunner<T, R> {
-  runOnWorker: (worker: Worker, data: T) => Promise<R>;
-}
-
-/**
- * Plain background-task runner backed by a worker pool.
- *
- * Created by `coroutine(mainTask)` or used as input to `compute(script)`.
+ * Created by `coroutine(mainTask)` and accepted by `compose(...)`.
  */
 export interface Coroutine<T = any, R = T> extends TaskRunner<T, R> {}
 
@@ -56,7 +38,7 @@ export interface Coroutine<T = any, R = T> extends TaskRunner<T, R> {}
  * `main.outbox.send(actor, msg)`, `main.outbox.request(actor, msg)`,
  * `main.inbox.receive(actor, handler)`.
  *
- * Unlike `Coroutine`, an actor is not pool-based; it owns exactly one worker.
+ * Unlike `Coroutine`, an actor owns exactly one worker.
  */
 export interface Actor {
   /** `true` while the behavior loop is running. */

@@ -1,156 +1,146 @@
-import type { WorkerProtocolMessage, PendingTaskMap } from "./messages";
+import { acquireBlobUrl, releaseBlobUrl } from "./blob";
 import { createDefaultMessageHandler } from "./messages";
-import type { TaskPool } from "./types";
+import type { PendingTaskMap, WorkerProtocolMessage } from "./messages";
+import type { WorkerScriptConfig } from "./runner";
+import type { TaskRunner } from "./types";
 import { generateTaskId } from "./utils";
-
-/**
- * Shared worker-script configuration used by both `coroutine` and `actor`.
- */
-export type WorkerPoolConfig = {
-  /**
-   * Raw worker-side snippets injected before serialized helper/task functions.
-   */
-  helpers?: string[];
-};
-
-type WaitingWorkerRequest = {
-  resolve: (entry: Worker) => void;
-  reject: (error: Error) => void;
-};
 
 type PoolOptions = {
   name: string;
-  config?: WorkerPoolConfig;
+  config?: WorkerScriptConfig;
   main: Function;
   functions: Function[];
-  generateWorkerScript: (main: Function, functions: Function[], config?: WorkerPoolConfig) => string;
+  generateWorkerScript: (main: Function, functions: Function[], config?: WorkerScriptConfig) => string;
   createMessageHandler?: (worker: Worker, pendingTasks: PendingTaskMap) => (event: MessageEvent<WorkerProtocolMessage>) => void;
 };
 
-let workerIdentifierCounter = 0;
-
-const toError = (error: unknown): Error =>
-  error instanceof Error ? error : new Error(String(error));
-
-function createPoolCore(
-  name: string,
-  maxWorkers: number,
-  createWorker: () => Promise<Worker>
-) {
-  const workerPool: Worker[] = [];
-  const waitingQueue: WaitingWorkerRequest[] = [];
+/**
+ * Internal compute-only worker pool.
+ *
+ * Unlike `createTaskRunner()`, this abstraction can create multiple workers
+ * for the same baked task and lend them to queued compute submissions.
+ */
+export function createTaskPool<T, R>({
+  name,
+  config,
+  main,
+  functions,
+  generateWorkerScript,
+  createMessageHandler,
+}: PoolOptions): TaskRunner<T, R> {
+  const maxWorkers =
+    (typeof navigator !== "undefined" ? navigator.hardwareConcurrency : undefined) || 4;
+  const idleWorkers: Worker[] = [];
+  const waitingQueue: Array<{ resolve: (worker: Worker) => void; reject: (error: Error) => void }> = [];
   const activeWorkers = new Map<number, Worker>();
   const pendingMessages: PendingTaskMap = new Map();
+  const workerScript = generateWorkerScript(main, functions, config);
+  const blobUrl = acquireBlobUrl(workerScript);
 
   let createdWorkersCount = 0;
   let isFinalizing = false;
+  let nextWorkerId = 0;
 
   const getWorkerId = (worker: Worker): number | undefined => {
     return (worker as any).__id;
   };
 
-  const removeFromIdlePool = (worker: Worker) => {
-    const pooledIndex = workerPool.findIndex((entry) => entry === worker);
-    if (pooledIndex >= 0) {
-      workerPool.splice(pooledIndex, 1);
+  const removeFromIdleWorkers = (worker: Worker) => {
+    const idleIndex = idleWorkers.findIndex((entry) => entry === worker);
+    if (idleIndex >= 0) {
+      idleWorkers.splice(idleIndex, 1);
     }
   };
 
-  const rejectPendingTasksForWorker = (worker: Worker, reason: Error) => {
-    const workerId = getWorkerId(worker);
-    const taskIds = [...pendingMessages.entries()]
-      .filter(([, pending]) => pending.workerId === workerId)
-      .map(([taskId]) => taskId);
+  const createWorker = async (): Promise<Worker> => {
+    const workerId = ++nextWorkerId;
+    const worker = new Worker(blobUrl, { type: "module" });
+    const messageHandler = createMessageHandler
+      ? createMessageHandler(worker, pendingMessages)
+      : createDefaultMessageHandler(worker, pendingMessages);
 
-    for (const taskId of taskIds) {
-      pendingMessages.get(taskId)?.reject(reason);
-      pendingMessages.delete(taskId);
-    }
+    worker.addEventListener("message", messageHandler);
+    (worker as any).__id = workerId;
+    activeWorkers.set(workerId, worker);
+    return worker;
   };
 
-  const satisfyWaitingQueue = () => {
-    while (!isFinalizing && waitingQueue.length > 0 && createdWorkersCount < maxWorkers) {
-      const pending = waitingQueue.shift()!;
-      createdWorkersCount++;
-      createWorker().then(
-        pending.resolve,
-        (error) => {
-          createdWorkersCount--;
-          pending.reject(toError(error));
-        }
-      );
-    }
-  };
-
-  const acquireWorker = async (): Promise<Worker> => {
+  const checkoutWorker = async (): Promise<Worker> => {
     if (isFinalizing) {
       throw new Error(`${name} is finalizing`);
     }
-    if (workerPool.length > 0) return workerPool.shift()!;
+
+    if (idleWorkers.length > 0) {
+      return idleWorkers.shift()!;
+    }
+
     if (createdWorkersCount < maxWorkers) {
       createdWorkersCount++;
       try {
         return await createWorker();
       } catch (error) {
         createdWorkersCount--;
-        throw toError(error);
+        throw error instanceof Error ? error : new Error(String(error));
       }
     }
+
     return new Promise((resolve, reject) => waitingQueue.push({ resolve, reject }));
   };
 
-  const releaseWorker = (worker: Worker): void => {
+  const checkinWorker = (worker: Worker): void => {
     const workerId = getWorkerId(worker);
     if (workerId === undefined || !activeWorkers.has(workerId)) {
-      console.warn(`Worker not found.`);
+      console.warn("Worker not found.");
       return;
     }
+
     if (isFinalizing) {
       activeWorkers.delete(workerId);
-      removeFromIdlePool(worker);
+      removeFromIdleWorkers(worker);
       worker.terminate();
       return;
     }
-    if (waitingQueue.length > 0) {
-      const pending = waitingQueue.shift()!;
-      pending.resolve(worker);
-    } else {
-      workerPool.push(worker);
-    }
-  };
 
-  const disposeWorker = (worker: Worker, reason?: Error): void => {
-    const workerId = getWorkerId(worker);
-    if (workerId === undefined || !activeWorkers.has(workerId)) {
-      console.warn(`Worker not found.`);
+    if (waitingQueue.length > 0) {
+      waitingQueue.shift()!.resolve(worker);
       return;
     }
 
-    activeWorkers.delete(workerId);
-    removeFromIdlePool(worker);
-    worker.terminate();
-    rejectPendingTasksForWorker(
-      worker,
-      reason ?? new Error(`${name} worker ${workerId} failed and was discarded`)
-    );
-
-    if (createdWorkersCount > 0) {
-      createdWorkersCount--;
-    }
-
-    satisfyWaitingQueue();
+    idleWorkers.push(worker);
   };
 
-  const sendToWorker = (worker: Worker, message: Omit<WorkerProtocolMessage, "workerId">): void => {
+  const submitTask = (worker: Worker, data: T): Promise<R> => {
     const workerId = getWorkerId(worker);
     if (workerId === undefined || !activeWorkers.has(workerId)) {
-      throw new Error(`Worker not found or is not active`);
+      throw new Error("Worker not found or is not active");
     }
-    worker.postMessage({ ...message, workerId });
+
+    const taskId = generateTaskId();
+    return new Promise<R>((resolve, reject) => {
+      pendingMessages.set(taskId, { workerId, resolve, reject });
+      try {
+        worker.postMessage({ workerId, taskId, payload: data, type: "task" });
+      } catch (error) {
+        pendingMessages.delete(taskId);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  };
+
+  const processTask = async (value: T): Promise<R> => {
+    const worker = await checkoutWorker();
+    try {
+      return await submitTask(worker, value);
+    } finally {
+      checkinWorker(worker);
+    }
   };
 
   const finalize = async () => {
-    if (isFinalizing) return;
+    if (isFinalizing) {
+      return;
+    }
+
     isFinalizing = true;
 
     pendingMessages.forEach(({ reject }) => {
@@ -166,112 +156,20 @@ function createPoolCore(
 
     const workersToTerminate = [...new Set(activeWorkers.values())];
     activeWorkers.clear();
-    workerPool.length = 0;
+    idleWorkers.length = 0;
 
     for (const worker of workersToTerminate) {
       worker.terminate();
+      releaseBlobUrl(workerScript);
     }
 
     createdWorkersCount = 0;
     isFinalizing = false;
+    releaseBlobUrl(workerScript);
   };
 
   return {
-    acquireWorker,
-    releaseWorker,
-    disposeWorker,
-    sendToWorker,
-    finalize,
-    pendingMessages,
-    activeWorkers,
-    getWorkerId,
-  };
-}
-
-/**
- * Creates a specialized worker pool with a task baked into the worker blob.
- *
- * Internal — used by `compute()` and `actor()`.
- */
-export function createTaskPool<T, R>({
-  name,
-  config,
-  main,
-  functions,
-  generateWorkerScript,
-  createMessageHandler,
-}: PoolOptions): TaskPool<T, R> {
-  const maxWorkers = (typeof navigator !== "undefined" ? navigator.hardwareConcurrency : undefined) || 4;
-  let blobUrlCache: string | null = null;
-
-  const core = createPoolCore(
-    name,
-    maxWorkers,
-    async () => {
-      const workerId = ++workerIdentifierCounter;
-      const workerBody = generateWorkerScript(main, functions, config);
-
-      if (!blobUrlCache) {
-        const blob = new Blob([workerBody], { type: "application/javascript" });
-        blobUrlCache = URL.createObjectURL(blob);
-      }
-
-      const worker = new Worker(blobUrlCache, { type: "module" });
-      const messageHandler = createMessageHandler
-        ? createMessageHandler(worker, core.pendingMessages)
-        : createDefaultMessageHandler(worker, core.pendingMessages);
-
-      worker.addEventListener("message", messageHandler);
-      (worker as any).__id = workerId;
-      core.activeWorkers.set(workerId, worker);
-
-      return worker;
-    }
-  );
-
-  const submitTask = (worker: Worker, data: T): Promise<R> => {
-    const workerId = core.getWorkerId(worker);
-    if (workerId === undefined || !core.activeWorkers.has(workerId)) {
-      throw new Error(`Worker not found or is not active`);
-    }
-    const taskId = generateTaskId();
-    return new Promise<R>((resolve, reject) => {
-      core.pendingMessages.set(taskId, { workerId, resolve, reject });
-      try {
-        worker.postMessage({ workerId, taskId, payload: data, type: "task" });
-      } catch (error) {
-        core.pendingMessages.delete(taskId);
-        reject(toError(error));
-      }
-    });
-  };
-
-  const runOnWorker = (worker: Worker, data: T): Promise<R> => submitTask(worker, data);
-
-  const processTask = async (value: T): Promise<R> => {
-    const worker = await core.acquireWorker();
-    try {
-      return await submitTask(worker, value);
-    } finally {
-      core.releaseWorker(worker);
-    }
-  };
-
-  const finalize = async () => {
-    await core.finalize();
-    if (blobUrlCache) {
-      URL.revokeObjectURL(blobUrlCache);
-      blobUrlCache = null;
-    }
-  };
-
-  return {
-    acquireWorker: core.acquireWorker,
-    releaseWorker: core.releaseWorker,
-    disposeWorker: core.disposeWorker,
-    sendToWorker: core.sendToWorker,
-    finalize,
-    runOnWorker,
     processTask,
+    finalize,
   };
 }

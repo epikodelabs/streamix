@@ -11,7 +11,7 @@ function isCoroutineScript(value: unknown): value is CoroutineScript {
 
 /**
  * Merges multiple `CoroutineScript`s into a single composed script suitable for
- * baking into a worker blob via `createTaskPool`.
+ * baking into a worker blob via `createTaskRunner`.
  *
  * Each stage is wrapped in an IIFE so that dependency function names
  * and internal variables do not collide across stages.
@@ -63,7 +63,7 @@ ${depsSection ? '  ' + depsSection.replace(/\n/g, '\n  ') + '\n' : ''}  return (
  * Chains multiple coroutines sequentially into a single `Coroutine`.
  *
  * `CoroutineScript` inputs (created by `coroutine()`) are merged into one
- * worker script so the entire pipeline runs on a single worker per task.
+ * worker script so the entire pipeline runs inside one dedicated worker task.
  *
  * `TaskRunner` inputs are chained in the main thread after the worker
  * stage completes.
