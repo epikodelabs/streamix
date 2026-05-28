@@ -1,7 +1,20 @@
 import { CommonModule } from '@angular/common';
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { Subscription } from '@epikodelabs/streamix';
-import { Patch, WorkerDomService } from './worker-dom.service';
+import { createBlock, mount, patch, list, withKey, remove, type VNode } from 'blockdom';
+import { WorkerDomService } from './worker-dom.service';
+
+// ===== BLOCKDOM BLOCKS =====
+// Compiled once. Dynamic parts are filled at render time.
+
+const CellBlock = createBlock(`<div block-attribute-0="class" block-attribute-1="data-key"><block-text-2/></div>`);
+const RowBlock = createBlock(`<div class="grid-row"><block-child-0/></div>`);
+const GridBlock = createBlock(`
+  <div class="worker-dom-root">
+    <div class="stats-bar"><block-text-0/></div>
+    <div class="grid-container"><block-child-0/></div>
+  </div>
+`);
 
 @Component({
   selector: 'app-worker-dom',
@@ -47,24 +60,16 @@ import { Patch, WorkerDomService } from './worker-dom.service';
           <span class="stat-value">{{ lastStats.generation }}</span>
         </div>
         <div class="stat">
-          <span class="stat-label">VDOM Nodes</span>
-          <span class="stat-value">{{ lastStats.vdomNodes }}</span>
+          <span class="stat-label">Cells</span>
+          <span class="stat-value">{{ lastStats.nodeCount }}</span>
         </div>
         <div class="stat">
-          <span class="stat-label">Render</span>
+          <span class="stat-label">Blockdom Render</span>
           <span class="stat-value">{{ lastStats.renderTime }}ms</span>
         </div>
-        <div class="stat">
-          <span class="stat-label">Diff</span>
-          <span class="stat-value">{{ lastStats.diffTime }}ms</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Patches</span>
-          <span class="stat-value">{{ lastStats.patchCount }}</span>
-        </div>
-        <div class="stat activity" [class.busy]="patching">
+        <div class="stat activity" [class.busy]="rendering">
           <span class="stat-label">Status</span>
-          <span class="stat-value">{{ patching ? 'patching' : 'idle' }}</span>
+          <span class="stat-value">{{ rendering ? 'rendering' : 'idle' }}</span>
         </div>
       </div>
 
@@ -74,12 +79,16 @@ import { Patch, WorkerDomService } from './worker-dom.service';
 
       <div class="explanation">
         <p>
-          <strong>How it works:</strong> The entire grid state and virtual DOM live inside a
-          Web Worker actor. When you click a cell, press Step, or toggle Auto-run, a message
-          goes to the worker. The worker updates state, renders a new VDOM, diffs it against
-          the previous tree, and sends only the <em>patches</em> back to the main thread.
-          The component above applies those patches to the real DOM container—no full re-render,
-          no Angular change detection for the grid itself.
+          <strong>How it works:</strong> The Game of Life state lives inside a
+          Web Worker actor. When you click a cell, press Step, or toggle Auto-run,
+          a message goes to the worker. The worker updates state and sends the raw
+          grid back to the main thread.
+        </p>
+        <p>
+          The main thread uses <strong>Blockdom</strong> — a fast block-based virtual DOM
+          library — to render the grid. Blockdom compiles the grid template once,
+          then efficiently patches only the dynamic parts (cell classes and text)
+          on every state update.
         </p>
       </div>
     </div>
@@ -218,12 +227,7 @@ import { Patch, WorkerDomService } from './worker-dom.service';
       color: #eee;
     }
 
-    .explanation em {
-      color: #ffd700;
-      font-style: normal;
-    }
-
-    /* Deep styles for worker-rendered DOM */
+    /* Deep styles for Blockdom-rendered DOM */
     ::ng-deep .worker-dom-root {
       display: flex;
       flex-direction: column;
@@ -282,31 +286,24 @@ import { Patch, WorkerDomService } from './worker-dom.service';
 export class WorkerDomComponent implements OnInit, OnDestroy {
   @ViewChild('domRoot', { static: true }) domRootRef!: ElementRef<HTMLDivElement>;
 
-  lastStats: { generation: number; vdomNodes: number; renderTime: number; diffTime: number; patchCount: number } | null = null;
-  patching = false;
+  lastStats: { generation: number; renderTime: number; nodeCount: number } | null = null;
+  rendering = false;
   autoRunning = false;
   autoInterval = 200;
 
   private subs: Subscription[] = [];
-  private nodeMap = new Map<string, Node>();
+  private currentTree: VNode | null = null;
   private autoTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(public service: WorkerDomService) {}
 
   ngOnInit() {
     this.subs.push(
-      this.service.patches$.subscribe((msg) => {
-        this.lastStats = msg.stats;
-        this.patching = true;
-        // Use requestAnimationFrame to batch patch application to the next frame
-        requestAnimationFrame(() => {
-          this.applyPatches(msg.patches);
-          this.patching = false;
-        });
+      this.service.state$.subscribe((msg) => {
+        this.renderGrid(msg.grid, msg.generation);
       })
     );
 
-    // Default grid
     this.initGrid(20, 30);
   }
 
@@ -316,12 +313,19 @@ export class WorkerDomComponent implements OnInit, OnDestroy {
       sub.unsubscribe();
     }
     this.subs = [];
+    if (this.currentTree) {
+      remove(this.currentTree);
+      this.currentTree = null;
+    }
     this.service.ngOnDestroy();
   }
 
   initGrid(rows: number, cols: number) {
     this.stopAuto();
-    this.clearDOM();
+    if (this.currentTree) {
+      remove(this.currentTree);
+      this.currentTree = null;
+    }
     this.service.init(rows, cols);
   }
 
@@ -365,116 +369,56 @@ export class WorkerDomComponent implements OnInit, OnDestroy {
     }
   }
 
-  private clearDOM() {
-    const root = this.domRootRef.nativeElement;
-    root.innerHTML = '';
-    this.nodeMap.clear();
-  }
+  private renderGrid(grid: boolean[][], generation: number) {
+    const start = performance.now();
+    this.rendering = true;
 
-  private applyPatches(patches: Patch[]) {
-    const root = this.domRootRef.nativeElement;
+    const rows = grid.length;
+    const cols = grid[0]?.length ?? 0;
+    const aliveCount = grid.reduce((sum, row) => sum + row.filter(Boolean).length, 0);
 
-    for (const patch of patches) {
-      try {
-        switch (patch.op) {
-          case 'createElement': {
-            const el = document.createElement(patch.tag);
-            this.applyProps(el, patch.props);
-            this.insertNode(el, patch.parentKey, patch.index, root);
-            this.nodeMap.set(patch.key, el);
-            break;
-          }
-          case 'createText': {
-            const text = document.createTextNode(patch.content);
-            this.insertNode(text, patch.parentKey, patch.index, root);
-            this.nodeMap.set(patch.key, text);
-            break;
-          }
-          case 'remove': {
-            const node = this.nodeMap.get(patch.key);
-            if (node && node.parentNode) {
-              node.parentNode.removeChild(node);
-            }
-            this.nodeMap.delete(patch.key);
-            break;
-          }
-          case 'setText': {
-            const textNode = this.nodeMap.get(patch.key);
-            if (textNode) {
-              textNode.textContent = patch.content;
-            }
-            break;
-          }
-          case 'setProp': {
-            const el = this.nodeMap.get(patch.key) as HTMLElement | undefined;
-            if (el && el.nodeType === Node.ELEMENT_NODE) {
-              this.setProp(el, patch.name, patch.value);
-            }
-            break;
-          }
-          case 'removeProp': {
-            const el2 = this.nodeMap.get(patch.key) as HTMLElement | undefined;
-            if (el2 && el2.nodeType === Node.ELEMENT_NODE) {
-              this.removeProp(el2, patch.name);
-            }
-            break;
-          }
-          case 'move': {
-            const moving = this.nodeMap.get(patch.key);
-            if (moving) {
-              this.insertNode(moving, patch.parentKey, patch.index, root);
-            }
-            break;
-          }
-        }
-      } catch (err) {
-        console.warn('Patch failed:', patch, err);
+    // Build cell blocks with keys
+    const cellBlocks: VNode[][] = [];
+    for (let r = 0; r < rows; r++) {
+      const rowCells: VNode[] = [];
+      for (let c = 0; c < cols; c++) {
+        const alive = grid[r][c];
+        const block = CellBlock([
+          alive ? 'cell alive' : 'cell',
+          `cell-${r}-${c}`,
+          alive ? '●' : '',
+        ]);
+        rowCells.push(withKey(block, `cell-${r}-${c}`));
       }
+      cellBlocks.push(rowCells);
     }
-  }
 
-  private insertNode(node: Node, parentKey: string | null, index: number, fallbackRoot: HTMLElement) {
-    const parent = parentKey ? (this.nodeMap.get(parentKey) as HTMLElement | undefined) : fallbackRoot;
-    if (!parent) return;
+    // Build row blocks with keyed cell lists
+    const rowBlocks: VNode[] = [];
+    for (let r = 0; r < rows; r++) {
+      const block = RowBlock([], [list(cellBlocks[r])]);
+      rowBlocks.push(withKey(block, `row-${r}`));
+    }
 
-    if (index >= parent.childNodes.length) {
-      parent.appendChild(node);
+    // Build grid tree
+    const tree = GridBlock(
+      [`Generation: ${generation} | Alive: ${aliveCount} / ${rows * cols}`],
+      [list(rowBlocks)]
+    );
+
+    if (this.currentTree) {
+      patch(this.currentTree, tree);
     } else {
-      parent.insertBefore(node, parent.childNodes[index]);
+      mount(tree, this.domRootRef.nativeElement);
+      this.currentTree = tree;
     }
-  }
 
-  private applyProps(el: HTMLElement, props: Record<string, any>) {
-    for (const [name, value] of Object.entries(props)) {
-      this.setProp(el, name, value);
-    }
-  }
-
-  private setProp(el: HTMLElement, name: string, value: any) {
-    if (name === 'className') {
-      el.className = String(value);
-    } else if (name === 'style' && typeof value === 'object') {
-      Object.assign(el.style, value);
-    } else if (name.startsWith('data-')) {
-      el.setAttribute(name, String(value));
-    } else if (name in el && name !== 'list' && name !== 'form' && name !== 'type') {
-      (el as any)[name] = value;
-    } else {
-      el.setAttribute(name, String(value));
-    }
-  }
-
-  private removeProp(el: HTMLElement, name: string) {
-    if (name === 'className') {
-      el.className = '';
-    } else if (name === 'style') {
-      el.removeAttribute('style');
-    } else if (name.startsWith('data-')) {
-      el.removeAttribute(name);
-    } else if (name in el) {
-      (el as any)[name] = '';
-    } else {
-      el.removeAttribute(name);
-    }
+    const renderTime = performance.now() - start;
+    this.lastStats = {
+      generation,
+      renderTime: Math.round(renderTime * 100) / 100,
+      nodeCount: rows * cols,
+    };
+    this.rendering = false;
   }
 }
