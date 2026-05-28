@@ -36,13 +36,14 @@ ${depsSection ? '  ' + depsSection.replace(/\n/g, '\n  ') + '\n' : ''}  return (
     .reduce((acc, body, i) => `${acc}${i > 0 ? '\n\n' : ''}${body}`, '');
 
   const composedMain = new Function(
-    "data",
-    `
-    let result = data;
-    ${scripts.map((_, i) => `result = __stage${i}(result);`).reduce((acc, line, i) => `${acc}${i > 0 ? '\n    ' : ''}${line}`, '')}
-    return result;
-    `
-  ) as (data: any) => any;
+    `return async function(data) {
+      let result = data;
+      ${scripts
+        .map((_, i) => `result = await __stage${i}(result);`)
+        .reduce((acc, line, i) => `${acc}${i > 0 ? "\n      " : ""}${line}`, "")}
+      return result;
+    };`
+  )() as (data: any) => Promise<any>;
 
   const generateScript = (task: Function, taskHelpers?: string[]) => {
     const allHelpers = Array.from(

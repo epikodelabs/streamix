@@ -38,6 +38,21 @@ idescribe("compose", () => {
     await composed.finalize();
   });
 
+  it("should await async coroutine stages before passing values to the next stage", async () => {
+    const c1 = coroutine(async (x: number) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return x + 1;
+    });
+    const c2 = coroutine((x: number) => x * 2);
+
+    const composed = compose(c1, c2);
+
+    const result = await composed.processTask(3);
+    expect(result).toBe(8);
+
+    await composed.finalize();
+  });
+
   it("should propagate errors from inner coroutine", async () => {
     const c1 = coroutine((x: number) => x + 1);
     const c2 = coroutine((x: number) => {
