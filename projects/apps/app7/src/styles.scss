@@ -352,11 +352,36 @@ button {
 
 /* Territory shading */
 .board-cell.territory-user {
-  background: #b8d4a0;
+  background: #c4dcb0;
 }
 
 .board-cell.territory-rival {
-  background: #d4b8a0;
+  background: #dcc4b0;
+}
+
+/* Territory markers — small stone dots inside empty territory cells */
+.board-cell.territory-user::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 28%;
+  height: 28%;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(47, 93, 141, 0.45);
+  pointer-events: none;
+}
+
+.board-cell.territory-rival::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 28%;
+  height: 28%;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(31, 24, 20, 0.45);
+  pointer-events: none;
 }
 
 /* Last move marker */
