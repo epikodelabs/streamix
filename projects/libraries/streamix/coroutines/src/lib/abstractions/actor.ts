@@ -101,8 +101,6 @@ export interface Initiator {
   inbox: {
     /** Subscribes to all actor-bus messages. */
     subscribe(handler: ActorBusHandler): () => void;
-    /** Subscribes to bus messages for a specific name. */
-    subscribe(name: string, handler: ActorBusHandler): () => void;
     /** Clears all global and direct bus listeners. */
     clear(): void;
   };
@@ -1370,8 +1368,12 @@ function dispatchActorBusMessage<T = any>(
  * - `main.outbox.request(to, topic, payload)` — send request and await response
  * - `main.outbox.stop(actor)` — stop actor and release resources
  * - `main.inbox.subscribe(handler)` — subscribe to all actor-bus messages
- * - `main.inbox.subscribe(name, handler)` — subscribe to bus messages for a name
  */
+const subscribeMainInbox: Initiator["inbox"]["subscribe"] = (handler) => {
+  actorBusListeners.add(handler);
+  return () => actorBusListeners.delete(handler);
+};
+
 export const main: Initiator = {
   outbox: {
     /** Broadcasts a topic payload to every named actor through the actor bus. */
@@ -1421,21 +1423,7 @@ export const main: Initiator = {
   },
 
   inbox: {
-    subscribe: ((actorOrName?: any, handler?: any): (() => void) => {
-      if (typeof actorOrName === "function") {
-        const fn = actorOrName as ActorBusHandler;
-        actorBusListeners.add(fn);
-        return () => actorBusListeners.delete(fn);
-      }
-      const name = actorOrName as string;
-      if (!actorBusDirectListeners.has(name)) {
-        actorBusDirectListeners.set(name, new Set());
-      }
-      const set = actorBusDirectListeners.get(name)!;
-      const fn = handler as ActorBusHandler;
-      set.add(fn);
-      return () => set.delete(fn);
-    }) as any,
+    subscribe: subscribeMainInbox,
 
     clear: () => {
       clearActorBusListeners();

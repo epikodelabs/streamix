@@ -305,7 +305,7 @@ const cashier = actor("cashier", async function cashier(msg: any, state: any, ut
 }, {});
 
 // ===== MAIN THREAD =====
-main.inbox.subscribe("main", (message) => {
+main.inbox.subscribe((message) => {
   if (message.topic === "ready") {
     console.log("Kitchen event:", message.payload);
   }

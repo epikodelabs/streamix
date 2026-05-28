@@ -297,8 +297,10 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(nextActorName(), behavior, 0);
-    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
-      messages.push({ topic: message.topic, payload: message.payload, from: message.from });
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main") {
+        messages.push({ topic: message.topic, payload: message.payload, from: message.from });
+      }
     });
 
     main.outbox.send(a, "ping", undefined);
@@ -309,7 +311,7 @@ idescribe("actor", () => {
     await main.outbox.stop(a);
   });
 
-  it("should allow unsubscribing from direct main bus listeners", async () => {
+  it("should allow unsubscribing from main bus listeners", async () => {
     const messages: string[] = [];
 
     async function behavior(msg: any, state: number, utils: any) {
@@ -322,8 +324,10 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(nextActorName(), behavior, 0);
-    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
-      messages.push(message.payload);
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main") {
+        messages.push(message.payload);
+      }
     });
     unsubscribe();
 
@@ -443,8 +447,8 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(nextActorName(), behavior, 0);
-    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
-      if (message.topic === "response") {
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main" && message.topic === "response") {
         responses.push(message.payload);
       }
     });
@@ -459,7 +463,7 @@ idescribe("actor", () => {
     await main.outbox.stop(a);
   });
 
-  it("should keep global and direct main bus listeners independent", async () => {
+  it("should keep multiple main bus listeners independent", async () => {
     const allMessages: string[] = [];
     const directMessages: string[] = [];
 
@@ -478,8 +482,8 @@ idescribe("actor", () => {
         allMessages.push(message.payload);
       }
     });
-    const unsubscribeDirect = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
-      if (message.topic === "ping") {
+    const unsubscribeDirect = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main" && message.topic === "ping") {
         directMessages.push(message.payload);
       }
     });
@@ -508,8 +512,8 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor("global-source", behavior, 0);
-    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
-      if (message.topic === "step") {
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main" && message.topic === "step") {
         seen.push(message.payload);
       }
     });
@@ -546,8 +550,8 @@ idescribe("actor", () => {
       expect(topic).toBe("greet");
       return payload.toUpperCase();
     });
-    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
-      if (message.topic === "response") {
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main" && message.topic === "response") {
         responses.push(message.payload);
       }
     });
@@ -631,6 +635,29 @@ idescribe("actor", () => {
     await Promise.all([main.outbox.stop(alpha), main.outbox.stop(beta)]);
   });
 
+  it("should deliver published bus messages to global main inbox listeners", async () => {
+    const seen: Array<{ topic: string; payload: string; from?: string }> = [];
+
+    async function behavior(msg: unknown, state: number) {
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const alpha = actor("alpha", behavior, 0);
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      seen.push({ topic: message.topic, payload: message.payload, from: message.from });
+    });
+
+    main.outbox.publish("announce", "yes");
+    await new Promise(r => setTimeout(r, 20));
+
+    expect(seen).toEqual([{ topic: "announce", payload: "yes", from: "main" }]);
+
+    unsubscribe();
+    await main.outbox.stop(alpha);
+  });
+
   it("should publish from main.outbox to every actor", async () => {
     type State = { hits: string[] };
 
@@ -662,7 +689,7 @@ idescribe("actor", () => {
     await Promise.all([main.outbox.stop(alpha), main.outbox.stop(beta)]);
   });
 
-  it("should deliver direct bus messages to main by name", async () => {
+  it("should deliver direct bus messages to main", async () => {
     const seen: Array<{ topic: string; payload: string; from?: string }> = [];
 
     async function behavior(msg: any, state: number, utils: any) {
@@ -675,8 +702,10 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const reporter = actor("reporter", behavior, 0);
-    const unsubscribe = main.inbox.subscribe("main", (message: ActorBusMessage<any>) => {
-      seen.push({ topic: message.topic, payload: message.payload, from: message.from });
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main") {
+        seen.push({ topic: message.topic, payload: message.payload, from: message.from });
+      }
     });
 
     main.outbox.send("reporter", "report", undefined);
