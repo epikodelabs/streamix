@@ -2,9 +2,9 @@
   --ink: #201912;
   --paper: #efe3c7;
   --paper-deep: #d7be90;
-  --wood: #b58445;
+  --wood: #c49a5e;
   --wood-dark: #7a5123;
-  --line: rgba(58, 35, 13, 0.5);
+  --line: #4a3728;
   --shadow: rgba(24, 13, 4, 0.22);
   --user: #2f5d8d;
   --user-glow: rgba(47, 93, 141, 0.24);
@@ -49,14 +49,13 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.75fr);
   gap: 18px;
-  align-items: stretch;
+  align-items: start;
   margin-bottom: 20px;
 }
 
 .hero-copy,
 .rules-card,
 .toolbar,
-.dashboard,
 .board-stage,
 .notes {
   border: 1px solid rgba(94, 61, 27, 0.22);
@@ -185,7 +184,7 @@ button {
 .center-panel {
   border-radius: 24px;
   padding: 20px 18px;
-  min-height: 146px;
+  min-height: 160px;
 }
 
 .score-panel {
@@ -208,7 +207,9 @@ button {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  gap: 8px;
   color: var(--ink);
+  text-align: center;
 }
 
 .panel-label {
@@ -218,10 +219,15 @@ button {
   opacity: 0.78;
 }
 
-.score-panel strong,
-.center-panel strong {
+.score-panel strong {
   font-family: "Palatino Linotype", Georgia, serif;
   font-size: clamp(1.8rem, 3vw, 2.6rem);
+}
+
+.center-panel strong {
+  font-family: "Palatino Linotype", Georgia, serif;
+  font-size: clamp(1.2rem, 2.2vw, 1.7rem);
+  line-height: 1.3;
 }
 
 .panel-meta {
@@ -241,7 +247,6 @@ button {
 }
 
 .board-frame {
-  --size: 11;
   background:
     linear-gradient(180deg, rgba(255, 246, 215, 0.62), rgba(207, 161, 92, 0.26)),
     linear-gradient(135deg, #c08a42, #a96f2d);
@@ -257,108 +262,129 @@ button {
   -webkit-user-select: none;
 }
 
+/* ===== Board Grid ===== */
 .board-grid {
-  --size: 11;
   display: grid;
-  grid-template-columns: repeat(var(--size), minmax(0, 1fr));
-  grid-template-rows: repeat(var(--size), minmax(0, 1fr));
+  /* grid-template set inline via JS */
   gap: 1px;
   width: min(76vw, 700px);
   aspect-ratio: 1;
   margin: 0 auto;
-  padding: 14px;
-  border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(241, 202, 136, 0.78), rgba(193, 137, 54, 0.84)),
-    repeating-linear-gradient(
-      90deg,
-      transparent 0,
-      transparent calc((100% / var(--size)) - 1px),
-      rgba(98, 62, 23, 0.08) calc((100% / var(--size)) - 1px),
-      rgba(98, 62, 23, 0.08) calc(100% / var(--size))
-    );
-  box-shadow:
-    inset 0 0 0 1px rgba(84, 54, 23, 0.16),
-    0 14px 32px rgba(74, 44, 16, 0.24);
+  border: 2px solid var(--line);
+  border-radius: 4px;
+  background: var(--line);
+  box-shadow: 0 14px 32px rgba(74, 44, 16, 0.24);
 }
 
+/* ===== Cell ===== */
 .board-cell {
   position: relative;
   appearance: none;
   border: 0;
   padding: 0;
-  background: transparent;
+  background: var(--wood);
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  border-radius: 4px;
   cursor: default;
 }
 
-.board-cell::before {
+/* Intersection dot for empty cells */
+.board-cell:not(.user):not(.rival)::before {
   content: "";
   position: absolute;
   inset: 50% auto auto 50%;
-  width: 86%;
-  height: 86%;
+  width: 14%;
+  height: 14%;
   transform: translate(-50%, -50%);
   border-radius: 999px;
-  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
-  opacity: 0;
+  background: rgba(74, 55, 40, 0.35);
+  transition: opacity 120ms ease, transform 120ms ease;
 }
 
+/* Star point (hoshi) */
+.board-cell.hoshi::before {
+  width: 22%;
+  height: 22%;
+  background: rgba(74, 55, 40, 0.55);
+}
+
+/* Hide dot when stone is present */
+.board-cell.user::before,
+.board-cell.rival::before {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 82%;
+  height: 82%;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 180ms ease, opacity 180ms ease;
+  opacity: 1;
+  box-shadow: 0 6px 14px rgba(23, 12, 5, 0.22);
+}
+
+.board-cell.user::before {
+  background: radial-gradient(circle at 30% 30%, #8abae8, #2f5d8d 58%, #1a3a5c 100%);
+}
+
+.board-cell.rival::before {
+  background: radial-gradient(circle at 30% 30%, #6d5d54, #1f1814 58%, #0a0806 100%);
+}
+
+/* Interactive / hover */
 .board-cell.interactive {
   cursor: pointer;
 }
 
-.board-cell:disabled {
-  opacity: 1;
-}
-
 .board-cell.interactive:hover::before {
-  opacity: 0.28;
-  background: rgba(180, 63, 30, 0.18);
-}
-
-.board-cell.user::before,
-.board-cell.rival::before {
   opacity: 1;
-  box-shadow: 0 10px 18px rgba(23, 12, 5, 0.18);
+  transform: translate(-50%, -50%) scale(1.15);
+  background: rgba(180, 63, 30, 0.22);
 }
 
-.board-cell.user::before {
-  background: radial-gradient(circle at 30% 30%, #7cadde, #2f5d8d 64%, #21486f 100%);
+.board-cell.user.interactive:hover::before,
+.board-cell.rival.interactive:hover::before {
+  transform: translate(-50%, -50%) scale(1.08);
+  background: radial-gradient(circle at 30% 30%, #a8d0f0, #4a7fb8 58%, #2a5580 100%);
 }
 
-.board-cell.rival::before {
-  background: radial-gradient(circle at 30% 30%, #5d4d44, #1f1814 64%, #070505 100%);
-}
-
+/* Territory shading */
 .board-cell.territory-user {
-  box-shadow: inset 0 0 0 999px rgba(47, 93, 141, 0.12);
+  background: #b8d4a0;
 }
 
 .board-cell.territory-rival {
-  box-shadow: inset 0 0 0 999px rgba(31, 24, 20, 0.12);
+  background: #d4b8a0;
 }
 
+/* Last move marker */
 .board-cell.last-move::after {
   content: "";
   position: absolute;
   inset: 17%;
   border-radius: 999px;
-  border: 2px solid rgba(255, 246, 215, 0.92);
-  box-shadow: 0 0 0 1px rgba(84, 54, 23, 0.26);
+  border: 2.5px solid rgba(255, 246, 215, 0.95);
+  box-shadow: 0 0 0 1px rgba(84, 54, 23, 0.3);
+  pointer-events: none;
 }
 
-.ghost-grid {
-  opacity: 0.36;
+/* Captured / removed stone animation hint */
+@keyframes place-stone {
+  from {
+    transform: translate(-50%, -50%) scale(0.3);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
 }
 
-.board-cell.ghost::before {
-  opacity: 0.18;
-  background: rgba(84, 54, 23, 0.18);
+.board-cell.user::before,
+.board-cell.rival::before {
+  animation: place-stone 220ms ease-out;
 }
 
 .notes {
@@ -413,9 +439,5 @@ button {
 
   .board-frame {
     padding: 10px;
-  }
-
-  .board-grid {
-    padding: 8px;
   }
 }

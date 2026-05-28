@@ -241,49 +241,70 @@ function countStones(board: number[][]): Record<PlayerId, number> {
 function computeTerritory(board: number[][]): number[][] {
   const size = board.length;
   const territory = createBoard(size);
+  const open = new Set<string>(); // empty cells reachable from the board edge
+
+  // Flood-fill from all empty cells on the border
+  const stack: [number, number][] = [];
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      if (board[r][c] === 0 && (r === 0 || r === size - 1 || c === 0 || c === size - 1)) {
+        const key = groupKey(r, c);
+        if (!open.has(key)) {
+          open.add(key);
+          stack.push([r, c]);
+        }
+      }
+    }
+  }
+
+  while (stack.length > 0) {
+    const [r, c] = stack.pop()!;
+    for (const [nr, nc] of neighbors(size, r, c)) {
+      if (board[nr][nc] === 0) {
+        const key = groupKey(nr, nc);
+        if (!open.has(key)) {
+          open.add(key);
+          stack.push([nr, nc]);
+        }
+      }
+    }
+  }
+
+  // Any empty cell not in 'open' is enclosed — determine its owner
   const seen = new Set<string>();
-
-  for (let row = 0; row < size; row++) {
-    for (let col = 0; col < size; col++) {
-      if (board[row][col] !== 0) {
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      if (board[r][c] !== 0 || open.has(groupKey(r, c)) || seen.has(groupKey(r, c))) {
         continue;
       }
 
-      const originKey = groupKey(row, col);
-      if (seen.has(originKey)) {
-        continue;
-      }
-
-      const stack: [number, number][] = [[row, col]];
       const region: [number, number][] = [];
       const borderOwners = new Set<number>();
-      seen.add(originKey);
+      const regionStack: [number, number][] = [[r, c]];
+      seen.add(groupKey(r, c));
 
-      while (stack.length > 0) {
-        const [currentRow, currentCol] = stack.pop()!;
-        region.push([currentRow, currentCol]);
+      while (regionStack.length > 0) {
+        const [cr, cc] = regionStack.pop()!;
+        region.push([cr, cc]);
 
-        for (const [nextRow, nextCol] of neighbors(size, currentRow, currentCol)) {
-          const value = board[nextRow][nextCol];
-          if (value === 0) {
-            const key = groupKey(nextRow, nextCol);
+        for (const [nr, nc] of neighbors(size, cr, cc)) {
+          if (board[nr][nc] === 0) {
+            const key = groupKey(nr, nc);
             if (!seen.has(key)) {
               seen.add(key);
-              stack.push([nextRow, nextCol]);
+              regionStack.push([nr, nc]);
             }
-            continue;
+          } else {
+            borderOwners.add(board[nr][nc]);
           }
-          borderOwners.add(value);
         }
       }
 
-      if (borderOwners.size !== 1) {
-        continue;
-      }
-
-      const owner = [...borderOwners][0];
-      for (const [territoryRow, territoryCol] of region) {
-        territory[territoryRow][territoryCol] = owner;
+      if (borderOwners.size === 1) {
+        const owner = [...borderOwners][0];
+        for (const [tr, tc] of region) {
+          territory[tr][tc] = owner;
+        }
       }
     }
   }
