@@ -30,6 +30,7 @@ type RivalThinkPayload = {
   board: number[][];
   size: number;
   turnId: number;
+  legalMoves: MovePayload[];
 };
 
 type RivalMovePayload = {
@@ -50,6 +51,7 @@ type InternalGameState = {
   message: string;
   lastMove: { row: number; col: number; player: PlayerId } | null;
   turnId: number;
+  koHash: string | null;
 };
 
 type PlacementResult =
@@ -97,6 +99,7 @@ function createInternalState(size: number): InternalGameState {
     message: 'Your move. Surround rival groups to capture them.',
     lastMove: null,
     turnId: 0,
+    koHash: null,
   };
 }
 
@@ -123,6 +126,10 @@ function neighbors(size: number, row: number, col: number): [number, number][] {
 
 function groupKey(row: number, col: number): string {
   return `${row}:${col}`;
+}
+
+function boardHash(board: number[][]): string {
+  return board.map((row) => row.join('')).join('|');
 }
 
 function collectGroup(board: number[][], row: number, col: number): {
@@ -170,7 +177,13 @@ function removeGroup(board: number[][], cells: [number, number][]): void {
   }
 }
 
-function tryPlaceStone(board: number[][], row: number, col: number, player: PlayerId): PlacementResult {
+function tryPlaceStone(
+  board: number[][],
+  row: number,
+  col: number,
+  player: PlayerId,
+  koHash?: string | null
+): PlacementResult {
   const size = board.length;
   if (!inBounds(size, row, col)) {
     return { ok: false, board, reason: 'That point is outside the board.' };
@@ -217,6 +230,17 @@ function tryPlaceStone(board: number[][], row: number, col: number, player: Play
     };
   }
 
+  if (koHash) {
+    const newHash = boardHash(nextBoard);
+    if (newHash === koHash) {
+      return {
+        ok: false,
+        board,
+        reason: 'Ko — repeating the immediate board position is not allowed.',
+      };
+    }
+  }
+
   return {
     ok: true,
     board: nextBoard,
@@ -241,9 +265,8 @@ function countStones(board: number[][]): Record<PlayerId, number> {
 function computeTerritory(board: number[][]): number[][] {
   const size = board.length;
   const territory = createBoard(size);
-  const open = new Set<string>(); // empty cells reachable from the board edge
+  const open = new Set<string>();
 
-  // Flood-fill from all empty cells on the border
   const stack: [number, number][] = [];
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
@@ -270,7 +293,6 @@ function computeTerritory(board: number[][]): number[][] {
     }
   }
 
-  // Any empty cell not in 'open' is enclosed — determine its owner
   const seen = new Set<string>();
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
@@ -342,6 +364,24 @@ function countLegalMoves(board: number[][], player: PlayerId): number {
   }
 
   return total;
+}
+
+function computeLegalMovesList(board: number[][], player: PlayerId, koHash: string | null): MovePayload[] {
+  const size = board.length;
+  const moves: MovePayload[] = [];
+
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      if (board[r][c] !== 0) {
+        continue;
+      }
+      if (tryPlaceStone(board, r, c, player, koHash).ok) {
+        moves.push({ row: r, col: c });
+      }
+    }
+  }
+
+  return moves;
 }
 
 function scoreBoard(board: number[][], captures: Record<PlayerId, number>) {
@@ -444,75 +484,129 @@ function scheduleRival(
   utils: WorkerUtils<any, any, any, any>,
   state: InternalGameState
 ): void {
+  const legalMoves = computeLegalMovesList(state.board, 'rival', state.koHash);
   utils.outbox.send('territory-rival', 'think', {
     board: cloneBoard(state.board),
     size: state.size,
     turnId: state.turnId,
+    legalMoves,
   } as RivalThinkPayload);
 }
 
-function libertiesAfterMove(board: number[][], row: number, col: number): number {
+function countLibertiesOfMove(board: number[][], row: number, col: number): number {
   return collectGroup(board, row, col).liberties;
 }
 
-function scoreMove(board: number[][], row: number, col: number, player: PlayerId): number {
-  const attempt = tryPlaceStone(board, row, col, player);
-  if (!attempt.ok) {
-    return Number.NEGATIVE_INFINITY;
+function getPositionBonus(row: number, col: number, size: number): number {
+  const q = Math.floor((size - 1) / 4);
+  const m = Math.floor((size - 1) / 2);
+
+  const hoshiPositions = [
+    [q, q],
+    [q, size - 1 - q],
+    [size - 1 - q, q],
+    [size - 1 - q, size - 1 - q],
+    [m, m],
+  ];
+
+  let minHoshiDist = Infinity;
+  for (const [hr, hc] of hoshiPositions) {
+    const d = Math.abs(row - hr) + Math.abs(col - hc);
+    if (d < minHoshiDist) minHoshiDist = d;
   }
 
-  const size = board.length;
-  const center = (size - 1) / 2;
-  const distance = Math.abs(row - center) + Math.abs(col - center);
-  let friendlyEdges = 0;
-  let enemyEdges = 0;
-  const friendlyStone = playerToStone(player);
-  const enemyStone = playerToStone(otherPlayer(player));
+  const edgeDist = Math.min(row, col, size - 1 - row, size - 1 - col);
 
-  for (const [neighborRow, neighborCol] of neighbors(size, row, col)) {
-    const value = board[neighborRow][neighborCol];
-    if (value === friendlyStone) friendlyEdges++;
-    if (value === enemyStone) enemyEdges++;
-  }
-
-  const followUpLiberties = libertiesAfterMove(attempt.board, row, col);
-
-  return (
-    attempt.captured * 120 +
-    friendlyEdges * 11 +
-    enemyEdges * 9 +
-    followUpLiberties * 7 -
-    distance * 1.4 +
-    Math.random() * 3
-  );
+  return edgeDist * 3 + Math.max(0, 4 - minHoshiDist) * 5;
 }
 
-function chooseRivalMove(board: number[][]): MovePayload | null {
+function getConnectionScore(board: number[][], row: number, col: number, player: PlayerId): number {
   const size = board.length;
-  let bestMove: MovePayload | null = null;
-  let bestScore = Number.NEGATIVE_INFINITY;
+  const stone = playerToStone(player);
+  let friendly = 0;
+  let enemy = 0;
 
-  for (let row = 0; row < size; row++) {
-    for (let col = 0; col < size; col++) {
-      if (board[row][col] !== 0) {
-        continue;
-      }
+  for (const [nr, nc] of neighbors(size, row, col)) {
+    const val = board[nr][nc];
+    if (val === stone) friendly++;
+    else if (val !== 0) enemy++;
+  }
 
-      const score = scoreMove(board, row, col, 'rival');
-      if (score > bestScore) {
-        bestScore = score;
-        bestMove = { row, col };
+  return friendly * 4 + enemy * 3;
+}
+
+function getEnclosureScore(board: number[][], row: number, col: number, player: PlayerId): number {
+  const size = board.length;
+  const stone = playerToStone(player);
+  let score = 0;
+
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const r = row + dr;
+      const c = col + dc;
+      if (r < 0 || r >= size || c < 0 || c >= size) continue;
+      if (board[r][c] === stone) score += 2;
+    }
+  }
+
+  return score;
+}
+
+function simulateOpponentResponse(board: number[][], currentPlayer: PlayerId, size: number): number {
+  const opponent = otherPlayer(currentPlayer);
+  let bestScore = 0;
+
+  const step = size <= 11 ? 1 : 2;
+  for (let r = 0; r < size; r += step) {
+    for (let c = 0; c < size; c += step) {
+      if (board[r][c] !== 0) continue;
+      const attempt = tryPlaceStone(board, r, c, opponent);
+      if (attempt.ok) {
+        const score = attempt.captured * 100 + countLibertiesOfMove(attempt.board, r, c) * 10;
+        if (score > bestScore) bestScore = score;
       }
     }
   }
 
-  return Number.isFinite(bestScore) ? bestMove : null;
+  return bestScore;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+function evaluateMove(board: number[][], move: MovePayload, size: number, player: PlayerId): number {
+  const attempt = tryPlaceStone(board, move.row, move.col, player);
+  if (!attempt.ok) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const nextBoard = attempt.board;
+
+  const captureScore = attempt.captured * 150;
+  const safetyScore = countLibertiesOfMove(nextBoard, move.row, move.col) * 20;
+  const positionScore = getPositionBonus(move.row, move.col, size) * 30;
+  const connectionScore = getConnectionScore(nextBoard, move.row, move.col, player) * 25;
+  const enclosureScore = getEnclosureScore(nextBoard, move.row, move.col, player) * 15;
+
+  const opponentThreat = simulateOpponentResponse(nextBoard, player, size);
+
+  return captureScore + safetyScore + positionScore + connectionScore + enclosureScore - opponentThreat * 0.6;
+}
+
+function chooseRivalMove(board: number[][], legalMoves: MovePayload[], size: number): MovePayload | null {
+  if (!legalMoves || legalMoves.length === 0) {
+    return null;
+  }
+
+  let bestMove: MovePayload | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const candidate of legalMoves) {
+    const score = evaluateMove(board, candidate, size, 'rival');
+    if (score > bestScore) {
+      bestScore = score;
+      bestMove = candidate;
+    }
+  }
+
+  return bestMove;
 }
 
 async function userActorBehavior(
@@ -553,8 +647,7 @@ async function rivalActorBehavior(
   }
 
   const payload = message.payload as RivalThinkPayload;
-  await sleep(220 + Math.floor(Math.random() * 260));
-  const move = chooseRivalMove(payload.board);
+  const move = chooseRivalMove(payload.board, payload.legalMoves, payload.size);
 
   utils.outbox.send('territory-game', 'rival-response', {
     turnId: payload.turnId,
@@ -596,7 +689,7 @@ async function gameActorBehavior(
     }
 
     const payload = message.payload as MovePayload;
-    const placed = tryPlaceStone(state.board, payload.row, payload.col, 'user');
+    const placed = tryPlaceStone(state.board, payload.row, payload.col, 'user', state.koHash);
     if (!placed.ok) {
       const nextState = {
         ...state,
@@ -624,6 +717,7 @@ async function gameActorBehavior(
         player: 'user',
       },
       turnId: state.turnId + 1,
+      koHash: boardHash(state.board),
     };
 
     nextState = maybeFinishGame(nextState);
@@ -680,7 +774,7 @@ async function gameActorBehavior(
       return nextState;
     }
 
-    const placed = tryPlaceStone(state.board, payload.move.row, payload.move.col, 'rival');
+    const placed = tryPlaceStone(state.board, payload.move.row, payload.move.col, 'rival', state.koHash);
     if (!placed.ok) {
       let nextState: InternalGameState = {
         ...state,
@@ -714,6 +808,7 @@ async function gameActorBehavior(
         col: payload.move.col,
         player: 'rival',
       },
+      koHash: boardHash(state.board),
     };
 
     nextState = maybeFinishGame(nextState);
@@ -734,11 +829,10 @@ const rivalActor = actor(
   'territory-rival',
   rivalActorBehavior,
   { decisions: 0 },
-  sleep,
   chooseRivalMove,
-  scoreMove,
+  evaluateMove,
+  simulateOpponentResponse,
   tryPlaceStone,
-  libertiesAfterMove,
   collectGroup,
   groupKey,
   cloneBoard,
@@ -746,7 +840,11 @@ const rivalActor = actor(
   playerToStone,
   otherPlayer,
   inBounds,
-  removeGroup
+  removeGroup,
+  countLibertiesOfMove,
+  getPositionBonus,
+  getConnectionScore,
+  getEnclosureScore
 );
 
 const gameActor = actor(
@@ -763,11 +861,13 @@ const gameActor = actor(
   groupKey,
   collectGroup,
   removeGroup,
+  boardHash,
   tryPlaceStone,
   countStones,
   computeTerritory,
   countTerritory,
   countLegalMoves,
+  computeLegalMovesList,
   scoreBoard,
   determineWinner,
   createPublicState,
