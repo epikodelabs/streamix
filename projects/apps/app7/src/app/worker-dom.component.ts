@@ -1,20 +1,20 @@
 import { CommonModule } from '@angular/common';
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { Subscription } from '@epikodelabs/streamix';
-import { createBlock, mount, patch, list, withKey, remove, type VNode } from 'blockdom';
+import { block, mount, patch } from 'million';
+import { h } from 'million/jsx-runtime';
+import type { AbstractBlock, VElement } from 'million';
 import { WorkerDomService } from './worker-dom.service';
 
-// ===== BLOCKDOM BLOCKS =====
-// Compiled once. Dynamic parts are filled at render time.
+// ===== MILLION.JS BLOCK =====
+// One compiled block per cell. Static structure, dynamic props.
 
-const CellBlock = createBlock(`<div block-attribute-0="class" block-attribute-1="data-key"><block-text-2/></div>`);
-const RowBlock = createBlock(`<div class="grid-row"><block-child-0/></div>`);
-const GridBlock = createBlock(`
-  <div class="worker-dom-root">
-    <div class="stats-bar"><block-text-0/></div>
-    <div class="grid-container"><block-child-0/></div>
-  </div>
-`);
+const Cell = block(((props: { alive: boolean; r: number; c: number }) => {
+  return h('div', {
+    className: props.alive ? 'cell alive' : 'cell',
+    'data-key': `cell-${props.r}-${props.c}`,
+  }, props.alive ? '●' : '') as VElement;
+}) as any);
 
 @Component({
   selector: 'app-worker-dom',
@@ -64,7 +64,7 @@ const GridBlock = createBlock(`
           <span class="stat-value">{{ lastStats.nodeCount }}</span>
         </div>
         <div class="stat">
-          <span class="stat-label">Blockdom Render</span>
+          <span class="stat-label">Million Render</span>
           <span class="stat-value">{{ lastStats.renderTime }}ms</span>
         </div>
         <div class="stat activity" [class.busy]="rendering">
@@ -85,10 +85,10 @@ const GridBlock = createBlock(`
           grid back to the main thread.
         </p>
         <p>
-          The main thread uses <strong>Blockdom</strong> — a fast block-based virtual DOM
-          library — to render the grid. Blockdom compiles the grid template once,
-          then efficiently patches only the dynamic parts (cell classes and text)
-          on every state update.
+          The main thread uses <strong>Million.js</strong> — a fast virtual DOM
+          library — to render the grid. Each cell is a compiled Million block.
+          On every state update, only cells that changed are patched, keeping the
+          DOM sync minimal and fast.
         </p>
       </div>
     </div>
@@ -227,7 +227,7 @@ const GridBlock = createBlock(`
       color: #eee;
     }
 
-    /* Deep styles for Blockdom-rendered DOM */
+    /* Styles for Million-rendered DOM */
     ::ng-deep .worker-dom-root {
       display: flex;
       flex-direction: column;
@@ -242,17 +242,12 @@ const GridBlock = createBlock(`
     }
 
     ::ng-deep .grid-container {
-      display: flex;
-      flex-direction: column;
+      display: grid;
+      grid-template-columns: repeat(var(--cols, 30), 16px);
       gap: 1px;
       background: #0f3460;
       padding: 2px;
       border-radius: 4px;
-    }
-
-    ::ng-deep .grid-row {
-      display: flex;
-      gap: 1px;
     }
 
     ::ng-deep .cell {
@@ -292,7 +287,10 @@ export class WorkerDomComponent implements OnInit, OnDestroy {
   autoInterval = 200;
 
   private subs: Subscription[] = [];
-  private currentTree: VNode | null = null;
+  private cellBlocks: AbstractBlock[][] = [];
+  private prevGrid: boolean[][] = [];
+  private gridContainer: HTMLElement | null = null;
+  private statsEl: HTMLElement | null = null;
   private autoTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(public service: WorkerDomService) {}
@@ -313,19 +311,13 @@ export class WorkerDomComponent implements OnInit, OnDestroy {
       sub.unsubscribe();
     }
     this.subs = [];
-    if (this.currentTree) {
-      remove(this.currentTree);
-      this.currentTree = null;
-    }
+    this.clearBlocks();
     this.service.ngOnDestroy();
   }
 
   initGrid(rows: number, cols: number) {
     this.stopAuto();
-    if (this.currentTree) {
-      remove(this.currentTree);
-      this.currentTree = null;
-    }
+    this.clearBlocks();
     this.service.init(rows, cols);
   }
 
@@ -369,6 +361,14 @@ export class WorkerDomComponent implements OnInit, OnDestroy {
     }
   }
 
+  private clearBlocks() {
+    this.cellBlocks = [];
+    this.prevGrid = [];
+    this.gridContainer = null;
+    this.statsEl = null;
+    this.domRootRef.nativeElement.innerHTML = '';
+  }
+
   private renderGrid(grid: boolean[][], generation: number) {
     const start = performance.now();
     this.rendering = true;
@@ -377,41 +377,18 @@ export class WorkerDomComponent implements OnInit, OnDestroy {
     const cols = grid[0]?.length ?? 0;
     const aliveCount = grid.reduce((sum, row) => sum + row.filter(Boolean).length, 0);
 
-    // Build cell blocks with keys
-    const cellBlocks: VNode[][] = [];
-    for (let r = 0; r < rows; r++) {
-      const rowCells: VNode[] = [];
-      for (let c = 0; c < cols; c++) {
-        const alive = grid[r][c];
-        const block = CellBlock([
-          alive ? 'cell alive' : 'cell',
-          `cell-${r}-${c}`,
-          alive ? '●' : '',
-        ]);
-        rowCells.push(withKey(block, `cell-${r}-${c}`));
-      }
-      cellBlocks.push(rowCells);
-    }
-
-    // Build row blocks with keyed cell lists
-    const rowBlocks: VNode[] = [];
-    for (let r = 0; r < rows; r++) {
-      const block = RowBlock([], [list(cellBlocks[r])]);
-      rowBlocks.push(withKey(block, `row-${r}`));
-    }
-
-    // Build grid tree
-    const tree = GridBlock(
-      [`Generation: ${generation} | Alive: ${aliveCount} / ${rows * cols}`],
-      [list(rowBlocks)]
-    );
-
-    if (this.currentTree) {
-      patch(this.currentTree, tree);
+    // First render: create container, stats bar, and mount all cells
+    if (!this.gridContainer) {
+      this.buildContainer(grid, generation, rows, cols, aliveCount);
     } else {
-      mount(tree, this.domRootRef.nativeElement);
-      this.currentTree = tree;
+      // Update: patch only changed cells and update stats text
+      this.patchGrid(grid, rows, cols);
+      if (this.statsEl) {
+        this.statsEl.textContent = `Generation: ${generation} | Alive: ${aliveCount} / ${rows * cols}`;
+      }
     }
+
+    this.prevGrid = grid.map((row) => row.slice());
 
     const renderTime = performance.now() - start;
     this.lastStats = {
@@ -420,5 +397,57 @@ export class WorkerDomComponent implements OnInit, OnDestroy {
       nodeCount: rows * cols,
     };
     this.rendering = false;
+  }
+
+  private buildContainer(
+    grid: boolean[][],
+    generation: number,
+    rows: number,
+    cols: number,
+    aliveCount: number
+  ) {
+    const root = this.domRootRef.nativeElement;
+    root.innerHTML = '';
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'worker-dom-root';
+
+    this.statsEl = document.createElement('div');
+    this.statsEl.className = 'stats-bar';
+    this.statsEl.textContent = `Generation: ${generation} | Alive: ${aliveCount} / ${rows * cols}`;
+    wrapper.appendChild(this.statsEl);
+
+    this.gridContainer = document.createElement('div');
+    this.gridContainer.className = 'grid-container';
+    this.gridContainer.style.setProperty('--cols', String(cols));
+    wrapper.appendChild(this.gridContainer);
+
+    root.appendChild(wrapper);
+
+    this.cellBlocks = [];
+    for (let r = 0; r < rows; r++) {
+      const rowBlocks: AbstractBlock[] = [];
+      for (let c = 0; c < cols; c++) {
+        const block = Cell({ alive: grid[r][c], r, c });
+        mount(block, this.gridContainer);
+        rowBlocks.push(block);
+      }
+      this.cellBlocks.push(rowBlocks);
+    }
+  }
+
+  private patchGrid(grid: boolean[][], rows: number, cols: number) {
+    const hasPrev = this.prevGrid.length > 0;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const alive = grid[r][c];
+        if (!hasPrev || alive !== this.prevGrid[r]?.[c]) {
+          const oldBlock = this.cellBlocks[r][c];
+          const newBlock = Cell({ alive, r, c });
+          patch(oldBlock, newBlock);
+        }
+      }
+    }
   }
 }
