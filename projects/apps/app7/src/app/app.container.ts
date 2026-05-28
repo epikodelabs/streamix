@@ -1,0 +1,49 @@
+import { Component } from '@angular/core';
+import { RouterOutlet } from '@angular/router';
+import { CommonModule } from '@angular/common';
+
+@Component({
+  selector: 'app-container',
+  standalone: true,
+  imports: [RouterOutlet, CommonModule],
+  template: `
+    <div class="container">
+      <header>
+        <h1>🧬 Worker DOM</h1>
+        <p>VDOM diffing in a Web Worker, synced to the real DOM</p>
+      </header>
+      <main>
+        <router-outlet></router-outlet>
+      </main>
+    </div>
+  `,
+  styles: [`
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    header {
+      margin: 20px 0;
+      text-align: center;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 2rem;
+      color: #00d4aa;
+    }
+    header p {
+      margin: 5px 0 0;
+      color: #aaa;
+      font-size: 0.9rem;
+    }
+    main {
+      width: 100%;
+      max-width: 1200px;
+      padding: 0 20px 40px;
+      box-sizing: border-box;
+    }
+  `],
+})
+export class ContainerComponent {}
