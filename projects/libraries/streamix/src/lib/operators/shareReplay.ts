@@ -23,8 +23,20 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
   let isConnected = false;
   let output: ReplaySubject<T> | undefined;
   let resolvedSize: number | undefined;
-  
+  let sourceIterator: AsyncIterator<T> | null = null;
+  let subscriberCount = 0;
+
+  const disconnect = () => {
+    if (sourceIterator) {
+      const it = sourceIterator;
+      sourceIterator = null;
+      isConnected = false;
+      void it.return?.().catch(() => {});
+    }
+  };
+
   const connectSource = (source: AsyncIterator<T>) => {
+    sourceIterator = source;
     isConnected = true;
     void (async () => {
       try {
@@ -37,6 +49,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       } catch (err) {
         output!.error(err);
       } finally {
+        sourceIterator = null;
         if (output && !output.completed()) output.complete();
       }
     })();
@@ -67,6 +80,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       return outputIterator;
     };
 
+    subscriberCount++;
     void ensureOutputIterator();
 
     const iterator: AsyncIterator<T> = {
@@ -76,9 +90,10 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       },
 
       async return(value?: any) {
-        // Do NOT complete the shared output subject when a single consumer unsubscribes.
-        // The shared subject is owned by the source connection, not by individual consumers.
-        // Completing it would terminate the multicast for all other active consumers.
+        subscriberCount--;
+        if (subscriberCount === 0 && isConnected) {
+          disconnect();
+        }
         const it = await ensureOutputIterator();
         return it.return ? it.return(value) : DONE;
       },

@@ -34,8 +34,8 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
   ...args: any[]
 ) {
   // Normalize parameters immediately and synchronously to prevent execution pipeline lag
-  const normalizedInputs = (args.length === 1 && Array.isArray(args[0])) 
-    ? (args[0] as (Stream<unknown> | Promise<unknown>)[]) 
+  const normalizedInputs = (args.length === 1 && Array.isArray(args[0]))
+    ? (args[0] as (Stream<unknown> | Promise<unknown>)[])
     : (args as (Stream<unknown> | Promise<unknown>)[]);
 
   return createPushOperator<T, [T, ...R]>("withLatestFrom", (source, output) => {
@@ -74,9 +74,9 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
         // Post-warming check to ensure downstream didn't unsubscribe during the initialization microtasks
         if (abortController.signal.aborted) return;
 
-        // 4. Synchronous optimization lookahead hook
+                // 4. Drain any buffered source values silently (they arrived before auxiliaries had values)
         const sourceWithSyncPull = source as AsyncIterator<T> & { __tryNext?: () => IteratorResult<T> | null };
-        if (hasValue.length > 0 && sourceWithSyncPull.__tryNext) {
+        if (sourceWithSyncPull.__tryNext) {
           while (true) {
             let buffered: IteratorResult<T> | null;
             try {
@@ -104,7 +104,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
           if (nextEvent.done || abortController.signal.aborted) break;
 
           const ev = nextEvent.value;
-          
+
           // Handle inner or stream propagation errors cleanly
           if (ev.type === 'error') {
             if (!isSettled) {

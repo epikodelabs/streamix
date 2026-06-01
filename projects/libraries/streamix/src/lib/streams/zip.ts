@@ -24,13 +24,40 @@ export function zip<T extends readonly unknown[] = any[]>(
 
     try {
       while (true) {
-        const results = await Promise.all(iterators.map(it => it.next()));
-        if (results.some(r => r.done)) break;
-        yield results.map(r => r.value) as unknown as T;
+        // Pull from all iterators; if any completes, cancel the rest immediately
+        const results = await Promise.allSettled(iterators.map(it => it.next()));
+
+        let completed = false;
+        const values: T[number][] = [];
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          if (r.status === 'rejected') {
+            // Propagate first rejection, cancel others first
+            await Promise.all(iterators.map((it, j) =>
+              j !== i ? it.return?.(undefined).catch(() => { }) : Promise.resolve()
+            ));
+            throw r.reason;
+          }
+          if (r.value.done) {
+            completed = true;
+            break;
+          }
+          values.push(r.value.value);
+        }
+
+        if (completed) {
+          // Cancel any pending iterators that haven't resolved yet
+          await Promise.all(
+            iterators.map(it => it.return?.(undefined).catch(() => { }))
+          );
+          break;
+        }
+
+        yield values as unknown as T;
       }
     } finally {
       await Promise.all(
-        iterators.map(it => (typeof it.return === 'function' ? it.return(undefined).catch(() => {}) : Promise.resolve()))
+        iterators.map(it => (typeof it.return === 'function' ? it.return(undefined).catch(() => { }) : Promise.resolve()))
       );
     }
   };

@@ -15,8 +15,20 @@ import { createSubject, type Subject } from '../subjects';
 export function share<T = any>() {
   let shared: Subject<T> | undefined;
   let isConnected = false;
+  let sourceIterator: AsyncIterator<T> | null = null;
+  let subscriberCount = 0;
+
+  const disconnect = () => {
+    if (sourceIterator) {
+      const it = sourceIterator;
+      sourceIterator = null;
+      isConnected = false;
+      void it.return?.().catch(() => {});
+    }
+  };
 
   const connect = (source: AsyncIterator<T>) => {
+    sourceIterator = source;
     isConnected = true;
     void (async () => {
       try {
@@ -46,14 +58,16 @@ export function share<T = any>() {
       Promise.resolve(source.return()).catch(() => {});
     }
 
+    subscriberCount++;
     const outputIterator = shared[Symbol.asyncIterator]();
     const baseReturn = outputIterator.return?.bind(outputIterator);
     const baseThrow = outputIterator.throw?.bind(outputIterator);
 
     (outputIterator as any).return = async (value?: any) => {
-      // Do NOT complete the shared subject when a single consumer unsubscribes.
-      // The shared subject is owned by the source connection, not by individual consumers.
-      // Completing it would terminate the multicast for all other active consumers.
+      subscriberCount--;
+      if (subscriberCount === 0 && isConnected) {
+        disconnect();
+      }
       return baseReturn ? baseReturn(value) : DONE;
     };
 

@@ -1,11 +1,11 @@
 import {
-    createOperator,
-    DONE,
-    isPromiseLike,
-    NEXT,
-    type MaybePromise,
-    type Operator,
-    type Stream,
+  createOperator,
+  DONE,
+  isPromiseLike,
+  NEXT,
+  type MaybePromise,
+  type Operator,
+  type Stream,
 } from "../abstractions";
 import { fromAny } from '../converters';
 
@@ -98,7 +98,8 @@ export const expand = <T = any>(
             return DONE;
           }
 
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          // Yield to microtask queue to avoid starving the event loop
+          await new Promise<void>((resolve) => queueMicrotask(resolve));
         }
       },
 

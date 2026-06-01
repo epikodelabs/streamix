@@ -23,7 +23,7 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const catchError = <T = any>(
-  handler: (error: any) => MaybePromise<void> = () => {}
+  handler: (error: any) => MaybePromise<void> = (error) => { console.warn('Unhandled stream error caught by catchError:', error); }
 ) =>
   createOperator<T, T>('catchError', function (this: Operator, source) {
     let errorCaughtAndHandled = false;

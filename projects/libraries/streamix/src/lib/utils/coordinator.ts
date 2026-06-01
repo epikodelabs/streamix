@@ -118,7 +118,7 @@ export function createAsyncCoordinator(
   let waitingResolve: ((v: any) => void) | null = null;
   let isDraining = false;
   let iteratorReturned = false;
-  let activeCount = sources.length;
+    let activeCount = sources.length;
 
   const allDone = () => activeCount === 0;
 
@@ -232,7 +232,7 @@ export function createAsyncCoordinator(
     if (isDraining || iteratorReturned) return;
     isDraining = true;
 
-    try {
+            try {
       for (let i = 0; i < sourceList.length; i++) {
         if (!sourceList[i] || completed[i]) continue;
 
@@ -350,11 +350,20 @@ export function createAsyncCoordinator(
         throw new Error('Cannot add source to returned coordinator');
       }
 
-      const index = sourceList.length;
-      sourceList.push(source);
-      completed.push(false);
-      pulling.push(false);
-      pendingPulls.push(false);
+      // Reuse a freed slot to prevent unbounded sparse array growth
+      let index = sourceList.indexOf(null);
+      if (index >= 0) {
+        sourceList[index] = source;
+        completed[index] = false;
+        pulling[index] = false;
+        pendingPulls[index] = false;
+      } else {
+        index = sourceList.length;
+        sourceList.push(source);
+        completed.push(false);
+        pulling.push(false);
+        pendingPulls.push(false);
+      }
       activeCount++;
 
       // Wire up push notification
@@ -382,11 +391,13 @@ export function createAsyncCoordinator(
       if (!completed[index]) {
         activeCount--;
       }
+      
       completed[index] = true;
       pulling[index] = false;
       pendingPulls[index] = false;
       sourceList[index] = null;
 
+      
       // Call return on the source
       try {
         await source.return?.();

@@ -19,12 +19,8 @@ export function range(start: MaybePromise<number>, count: MaybePromise<number>, 
     const resolvedStart = isPromiseLike(start) ? await start : start;
     const resolvedCount = isPromiseLike(count) ? await count : count;
     const resolvedStep = isPromiseLike(step) ? await step : step;
-    const end = resolvedStart + resolvedCount * resolvedStep;
-
-    let current = resolvedStart;
-    while (resolvedStep > 0 ? current < end : current > end) {
-      yield current;
-      current += resolvedStep;
+    for (let i = 0; i < resolvedCount; i++) {
+      yield resolvedStart + i * resolvedStep;
     }
   });
 }
