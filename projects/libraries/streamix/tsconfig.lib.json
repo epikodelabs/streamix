@@ -6,7 +6,6 @@
     "declarationMap": true,
     "inlineSources": true,
     "lib": ["dom", "es2022"],
-    "paths": {},
     "types": []
   },
   "files": ["src/public-api.ts"],
