@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.46
+
+- Reworked coroutines into a first-class concurrency layer for streamix: `compute()` now makes worker-pool offloading practical for real workloads, `compose()` lets whole background pipelines run as one unit, and `actor()` adds long-lived stateful workers with structured messaging.
+- Centralized default upstream teardown propagation in `createOperator(...)`, so simple operators across the core and companion packages no longer need redundant passthrough `return()` / `throw()` methods.
+- Restored library typecheck path resolution by keeping the package-level TypeScript path aliases active during `tsconfig.lib.json` builds.
+
 ## 2.0.45
 
 Added the `actor` coroutine API and shipped follow-up fixes across coroutine primitives, worker lifecycle handling, networking streams, and documentation. Updated stream retry semantics, added transactional `commit(...)`, removed the hidden raw-iterator hook, and bumped the test runner dependency.

@@ -22,11 +22,44 @@ Small bundle, pull-based execution, and a familiar operator API.
   </a>
 </div>
 
+## ⭐ Star the Public Docs Repo
 
-## Give a Star on GitHub
+If streamix helps you, please give the public docs/site repo a star so we know this work matters to developers:
+https://github.com/epikodelabs/epikodelabs.github.io
 
-If streamix helps you, please give it a star: https://github.com/epikodelabs/streamix
+💬 Join GitHub Discussions: https://github.com/orgs/epikodelabs/discussions
 
+## 🚀 What's new?
+
+The coroutine layer is one of the strongest parts of the library right now:
+
+- `compute()` runs heavy work through a reusable worker pool for better throughput.
+- `compose()` lets you fuse coroutine stages into one worker-side pipeline instead of bouncing values across the main thread.
+- `actor()` gives you long-lived stateful workers with inbox/outbox messaging, requests, and background coordination utilities.
+
+If you are evaluating streamix for browser-side concurrency, start here:
+
+- `@epikodelabs/streamix/coroutines`
+- `Heavy Computation` demo below## ⭐ Star the Public Docs Repo
+
+If streamix helps you, please give the public docs/site repo a star so we know this work matters to developers:
+https://github.com/epikodelabs/epikodelabs.github.io
+
+💬 Join GitHub Discussions: https://github.com/orgs/epikodelabs/discussions
+
+## 🚀 What's new?
+
+The coroutine layer is one of the strongest parts of the library right now:
+
+- `compute()` runs heavy work through a reusable worker pool for better throughput.
+- `compose()` lets you fuse coroutine stages into one worker-side pipeline instead of bouncing values across the main thread.
+- `actor()` gives you long-lived stateful workers with inbox/outbox messaging, requests, and background coordination utilities.
+
+If you are evaluating streamix for browser-side concurrency, start here:
+
+- `@epikodelabs/streamix/coroutines`
+- `Heavy Computation` already on Stackblitz
+- `Actor-based game` stateful worker messaging patterns, coming soon via Discussions
 
 ## ✨ Why Streamix
 
@@ -239,9 +272,7 @@ const onlyPrime = () =>
           if (result.done) return DONE;
           if (isPrime(result.value)) return NEXT(result.value);
         }
-      },
-      return: source.return?.bind(source),
-      throw: source.throw?.bind(source),
+      }
     };
   });
 ```
@@ -445,9 +476,8 @@ This enables:
 ## 📚 Documentation and resources
 
 - [API Documentation](https://epikodelabs.github.io/streamix)
-- [Blog: Exploring streamix](https://medium.com/p/00d5467f0c01)
-- [streamix 2.0 Updates](https://medium.com/p/a1eb9e7ce1d7)
-- [Reactive Programming Guide](https://medium.com/p/0bfc206ad41c)
+- [streamix: A Generator-Driven, Pull-Based Reactive Core with Familiar Rx-Style Operators](https://medium.com/p/a1eb9e7ce1d7)
+- [streamix vs redux-saga: Two Very Different Takes on Async Control](https://medium.com/p/0bfc206ad41c)
 
 
 ## 🤝 Contributing
@@ -468,7 +498,7 @@ GNU AGPL v3 or later
 
 <p align="center">
   <strong>Get started</strong><br>
-  <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> -
-  <a href="https://epikodelabs.github.io">View on GitHub</a> -
-  <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a>
+  <a href="https://www.npmjs.com/package/@epikodelabs/streamix">📦 Install from NPM</a> -
+  <a href="https://github.com/epikodelabs/streamix">🧭 View Streamix Repo</a> -
+  <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">📝 Give Feedback</a>
 </p>
