@@ -11,6 +11,7 @@ describe('catchError', () => {
   it('should handle errors from a stream and not propagate them', (done) => {
     subject = createSubject();
     const error = new Error("Unhandled exception.");
+    let errorCalled = false;
 
     const streamWithCatchError = subject
       .pipe(
@@ -19,9 +20,10 @@ describe('catchError', () => {
       );
 
     streamWithCatchError.subscribe({
-      next: value => console.log(value),
+      error: () => { errorCalled = true; },
       complete: () => {
         expect(handlerMock).toHaveBeenCalled();
+        expect(errorCalled).toBeFalse();
         done();
       }
     });
@@ -37,7 +39,6 @@ describe('catchError', () => {
     const streamWithoutCatchError = subject.pipe(map(() => { throw error; }));
 
     streamWithoutCatchError.subscribe({
-      next: value => console.log(value),
       error: (err) => {
         expect(err).toBe(error);
         expect(handlerMock).not.toHaveBeenCalled();
@@ -77,6 +78,46 @@ describe('catchError', () => {
 
     expect(await streamIterator.next()).toEqual({ done: true, value: undefined });
   });
+
+  it('should not trigger exception when catchError handles error from subject.error', async () => {
+    const error = new Error('Subject error.');
+    subject = createSubject<number>();
+    const streamWithCatchError = subject.pipe(
+      catchError(handlerMock)
+    );
+    const streamIterator = streamWithCatchError[Symbol.asyncIterator]();
+
+    subject.next(1);
+    expect(await streamIterator.next()).toEqual({ done: false, value: 1 });
+
+    subject.error(error);
+    const result = await streamIterator.next();
+
+    expect(result.done).toBeTrue();
+    expect(result.value).toBeUndefined();
+    expect(handlerMock).toHaveBeenCalledTimes(1);
+    expect(handlerMock).toHaveBeenCalledWith(error);
+  });
+
+  it('should not call subscriber error callback when catchError handles subject.error', (done) => {
+    const error = new Error('Subject error.');
+    subject = createSubject<number>();
+    let errorCalled = false;
+
+    const streamWithCatchError = subject.pipe(
+      catchError(handlerMock)
+    );
+
+    streamWithCatchError.subscribe({
+      error: () => { errorCalled = true; },
+      complete: () => {
+        expect(handlerMock).toHaveBeenCalledTimes(1);
+        expect(errorCalled).toBeFalse();
+        done();
+      }
+    });
+
+    subject.next(1);
+    subject.error(error);
+  });
 });
-
-
