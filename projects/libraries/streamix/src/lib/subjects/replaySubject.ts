@@ -198,14 +198,16 @@ export function createReplaySubject<T = any>(
     query: () => firstValueFrom(self),
     [Symbol.asyncIterator]: () => {
       const listener = createAsyncPushable<T>();
-      listeners.add(listener);
 
       // Replay buffered values
       forEachReplay((value) => listener.push(value));
 
-      if (isCompleted) {
-        if (completionInfo?.kind === 'error') listener.error(completionInfo.error);
-        else listener.complete();
+      if (!isCompleted) {
+        listeners.add(listener);
+      } else if (completionInfo?.kind === 'error') {
+        listener.error(completionInfo.error);
+      } else {
+        listener.complete();
       }
 
       const originalReturn = listener.return!.bind(listener);

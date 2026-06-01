@@ -54,22 +54,6 @@ export const catchError = <T = any>(
 
           throw error;
         }
-      },
-
-      async return(value?: any) {
-        completed = true;
-        try {
-          await source.return?.(value);
-        } catch {}
-        return DONE;
-      },
-
-      async throw(err: any) {
-        completed = true;
-        try {
-          await source.return?.();
-        } catch {}
-        throw err;
       }
     };
   });

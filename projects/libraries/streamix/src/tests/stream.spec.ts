@@ -1,4 +1,4 @@
-import { createAsyncIterator, createStream, createSubject, createSubscription, DONE, from, isStreamLike, map } from '@epikodelabs/streamix';
+import { createAsyncIterator, createStream, createSubject, createSubscription, DONE, from, isStreamLike, map, startWith, toArray } from '@epikodelabs/streamix';
 
 describe('stream', () => {
   it('allows base streams to be consumed with for-await', async () => {
@@ -272,6 +272,62 @@ describe('stream', () => {
         done();
       }, 0);
     }, 0);
+  });
+
+  it('propagates early unsubscribe upstream for createOperator wrappers without custom return', (done) => {
+    let cleaned = false;
+
+    const stream = createStream('startWith-cleanup', async function* (signal) {
+      try {
+        yield 1;
+        await new Promise<void>((resolve) =>
+          signal?.addEventListener('abort', () => resolve(), { once: true })
+        );
+      } finally {
+        cleaned = true;
+      }
+    });
+
+    let subscription: any;
+    subscription = stream.pipe(startWith(0)).subscribe({
+      next: () => {
+        void subscription.unsubscribe();
+      },
+      complete: () => {}
+    });
+
+    setTimeout(() => {
+      expect(cleaned).toBeTrue();
+      done();
+    }, 0);
+  });
+
+  it('propagates iterator return upstream for terminal operators without custom return', (done) => {
+    let cleaned = false;
+
+    const stream = createStream('toArray-cleanup', async function* (signal) {
+      try {
+        yield 10;
+        await new Promise<void>((resolve) =>
+          signal?.addEventListener('abort', () => resolve(), { once: true })
+        );
+      } finally {
+        cleaned = true;
+      }
+    });
+
+    void (async () => {
+      const iterator = stream.pipe(toArray<number>())[Symbol.asyncIterator]();
+      const pending = iterator.next();
+      await Promise.resolve();
+      await iterator.return?.();
+      await pending.catch(() => undefined);
+
+      setTimeout(() => {
+        expect(cleaned).toBeTrue();
+        done();
+      }, 0);
+    })();
   });
 });
 

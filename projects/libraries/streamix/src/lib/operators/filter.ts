@@ -32,10 +32,11 @@ export const filter = <T = any>(
           if (result.done) return DONE;
 
           const value = result.value;
+          const currentIndex = index++;
           let shouldInclude = false;
 
           if (typeof predicateOrValue === 'function') {
-            const predicateResult = (predicateOrValue as (value: T, index: number) => MaybePromise<boolean>)(value, index);
+            const predicateResult = (predicateOrValue as (value: T, index: number) => MaybePromise<boolean>)(value, currentIndex);
             shouldInclude = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
           } else if (Array.isArray(predicateOrValue)) {
             shouldInclude = predicateOrValue.includes(value);
@@ -44,20 +45,11 @@ export const filter = <T = any>(
           }
 
           if (shouldInclude) {
-            index++;
             return NEXT(value);
           }
 
           // value should be dropped, continue loop
         }
-      },
-      async return() {
-        await source.return?.();
-        return DONE;
-      },
-      async throw(err: any) {
-        await source.return?.();
-        throw err;
-      },
+      }
     };
   });

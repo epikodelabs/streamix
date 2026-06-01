@@ -107,4 +107,19 @@ describe('filter', () => {
       error: done.fail,
     });
   });
+
+  it('should advance predicate index for every source value, including filtered ones', async () => {
+    const indices: number[] = [];
+    const values: number[] = [];
+
+    for await (const value of from([1, 2, 3]).pipe(filter((current, index) => {
+      indices.push(index);
+      return current === 3;
+    }))) {
+      values.push(value);
+    }
+
+    expect(indices).toEqual([0, 1, 2]);
+    expect(values).toEqual([3]);
+  });
 });

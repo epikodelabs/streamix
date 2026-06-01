@@ -136,6 +136,28 @@ describe('observeOn', () => {
 
     expect(values).toEqual([]);
   });
+
+  it('should fall back to setTimeout when idle scheduling is requested without requestIdleCallback', async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    const setTimeoutSpy = spyOn(globalThis, 'setTimeout').and.callFake(
+      ((fn: any, ms?: any, ...rest: any[]) =>
+        (originalSetTimeout as any)(fn, ms, ...rest)) as any
+    );
+    (globalThis as any).requestIdleCallback = undefined;
+
+    const values: number[] = [];
+    const stream = createStream('idle-fallback', async function* () {
+      yield 1;
+      yield 2;
+    });
+
+    for await (const value of stream.pipe(observeOn('idle'))) {
+      values.push(value);
+    }
+
+    expect(values).toEqual([1, 2]);
+    expect(setTimeoutSpy).toHaveBeenCalled();
+  });
 });
 
 

@@ -59,22 +59,6 @@ export const take = <T = any>(count: MaybePromise<number>) =>
         }
 
         return NEXT(result.value);
-      },
-
-      async return(value?: any) {
-        done = true;
-        try {
-          await source.return?.(value);
-        } catch {}
-        return DONE;
-      },
-
-      async throw(err: any) {
-        done = true;
-        try {
-          await source.return?.();
-        } catch {}
-        throw err;
       }
     };
   });

@@ -25,37 +25,119 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
     const outputIterator = output[Symbol.asyncIterator]();
     let pendingCount = 0;
     let allDoneResolve: (() => void) | null = null;
+    let stopped = false;
+    const pendingCancels = new Set<() => void>();
 
     const waitForPending = (): Promise<void> => {
       if (pendingCount === 0) return Promise.resolve();
       return new Promise<void>((resolve) => { allDoneResolve = resolve; });
     };
 
+    const settlePending = () => {
+      pendingCount--;
+      if (pendingCount === 0 && allDoneResolve) {
+        allDoneResolve();
+        allDoneResolve = null;
+      }
+    };
+
     void (async () => {
       try {
         const contextValue = isPromiseLike(context) ? await context : context;
         const schedule = contextValue === 'microtask'
-          ? (fn: () => void) => queueMicrotask(fn)
+          ? (fn: () => void) => {
+              let settled = false;
+              const cancel = () => {
+                if (settled) return;
+                settled = true;
+                settlePending();
+              };
+              queueMicrotask(() => {
+                if (settled || stopped) return;
+                settled = true;
+                try {
+                  fn();
+                } finally {
+                  settlePending();
+                }
+              });
+              return cancel;
+            }
           : contextValue === 'macrotask'
-            ? (fn: () => void) => setTimeout(fn, 0)
-            : (fn: () => void) => requestIdleCallback(fn);
+            ? (fn: () => void) => {
+                let settled = false;
+                const timeoutId = setTimeout(() => {
+                  if (settled || stopped) return;
+                  settled = true;
+                  try {
+                    fn();
+                  } finally {
+                    settlePending();
+                  }
+                }, 0);
+
+                return () => {
+                  if (settled) return;
+                  settled = true;
+                  clearTimeout(timeoutId);
+                  settlePending();
+                };
+              }
+            : (fn: () => void) => {
+                let settled = false;
+                const fallback = () => {
+                  const timeoutId = setTimeout(() => {
+                    if (settled || stopped) return;
+                    settled = true;
+                    try {
+                      fn();
+                    } finally {
+                      settlePending();
+                    }
+                  }, 0);
+
+                  return () => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timeoutId);
+                    settlePending();
+                  };
+                };
+
+                if (typeof requestIdleCallback !== 'function') {
+                  return fallback();
+                }
+
+                const idleId = requestIdleCallback(() => {
+                  if (settled || stopped) return;
+                  settled = true;
+                  try {
+                    fn();
+                  } finally {
+                    settlePending();
+                  }
+                });
+
+                return () => {
+                  if (settled) return;
+                  settled = true;
+                  if (typeof cancelIdleCallback === 'function') {
+                    cancelIdleCallback(idleId);
+                  }
+                  settlePending();
+                };
+              };
 
         while (true) {
           const result = await source.next();
           if (result.done) break;
           pendingCount++;
           const capturedResult = result;
-          schedule(() => {
-            try {
-              output.next(capturedResult.value);
-            } finally {
-              pendingCount--;
-              if (pendingCount === 0 && allDoneResolve) {
-                allDoneResolve();
-                allDoneResolve = null;
-              }
-            }
+          const cancel = schedule(() => {
+            pendingCancels.delete(cancel);
+            output.next(capturedResult.value);
           });
+          pendingCancels.add(cancel);
         }
 
         // Wait for all scheduled emissions before completing
@@ -85,6 +167,11 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
 
       async return(value?: any) {
         completed = true;
+        stopped = true;
+        for (const cancel of pendingCancels) {
+          cancel();
+        }
+        pendingCancels.clear();
         try {
           await source.return?.(value);
         } catch {}
@@ -94,6 +181,11 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
 
       async throw(err: any) {
         completed = true;
+        stopped = true;
+        for (const cancel of pendingCancels) {
+          cancel();
+        }
+        pendingCancels.clear();
         try {
           await source.return?.();
         } catch {}

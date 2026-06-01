@@ -1,4 +1,4 @@
-import { catchError, endWith, finalize, from, startWith, tap } from '@epikodelabs/streamix';
+import { catchError, createStream, endWith, finalize, from, startWith, tap } from '@epikodelabs/streamix';
 
 describe('tap', () => {
   it('should perform side effects for each emission', (done) => {
@@ -26,6 +26,34 @@ describe('tap', () => {
       },
       error: done.fail,
     });
+  });
+
+  it('should propagate early unsubscribe upstream', (done) => {
+    let cleaned = false;
+
+    const stream = createStream('tap-cleanup', async function* (signal) {
+      try {
+        yield 1;
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+      } finally {
+        cleaned = true;
+      }
+    });
+
+    let subscription: ReturnType<typeof stream.subscribe>;
+    subscription = stream.pipe(tap(() => {})).subscribe({
+      next: () => {
+        void subscription.unsubscribe();
+      },
+      complete: () => {}
+    });
+
+    setTimeout(() => {
+      expect(cleaned).toBeTrue();
+      done();
+    }, 0);
   });
 });
 

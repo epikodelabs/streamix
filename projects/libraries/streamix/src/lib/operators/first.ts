@@ -63,16 +63,6 @@ export const first = <T = any>(predicate?: (value: T) => MaybePromise<boolean>) 
 
           // predicate doesn't match, continue loop
         }
-      },
-
-      return: async () => {
-        await stopSource();
-        return DONE;
-      },
-
-      throw: async (err: any) => {
-        await stopSource();
-        throw err;
-      },
+      }
     };
   });

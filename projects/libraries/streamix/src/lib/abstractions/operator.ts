@@ -83,7 +83,35 @@ export function createOperator<T = any, R = T>(
   return {
     name,
     type: 'operator',
-    apply: transformFn
+    apply(source) {
+      const iterator = transformFn(source);
+
+      if (typeof iterator.return !== 'function') {
+        iterator.return = async (value?: any) => {
+          try {
+            if (typeof source.return === 'function') {
+              await source.return(value);
+            }
+          } catch {}
+          return DONE;
+        };
+      }
+
+      if (typeof iterator.throw !== 'function') {
+        iterator.throw = async (err?: any) => {
+          try {
+            if (typeof source.throw === 'function') {
+              await source.throw(err);
+            } else {
+              await source.return?.();
+            }
+          } catch {}
+          throw err;
+        };
+      }
+
+      return iterator;
+    }
   };
 }
 

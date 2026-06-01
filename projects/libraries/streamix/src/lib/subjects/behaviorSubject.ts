@@ -172,16 +172,15 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     query: () => firstValueFrom(self),
     [Symbol.asyncIterator]: () => {
       const listener = createAsyncPushable<T>();
-      listeners.add(listener);
 
       // Replay current value only if the subject is still alive.
       if (!isCompleted) {
+        listeners.add(listener);
         listener.push(latestValue);
-      }
-
-      if (isCompleted) {
-        if (completionInfo?.kind === 'error') listener.error(completionInfo.error);
-        else listener.complete();
+      } else if (completionInfo?.kind === 'error') {
+        listener.error(completionInfo.error);
+      } else {
+        listener.complete();
       }
 
       const originalReturn = listener.return!.bind(listener);

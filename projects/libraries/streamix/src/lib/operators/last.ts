@@ -47,22 +47,6 @@ export const last = <T = any>(
 
           // continue consuming values
         }
-      },
-
-      async return(value?: any) {
-        finished = true;
-        try {
-          await source.return?.(value);
-        } catch {}
-        return DONE;
-      },
-
-      async throw(err: any) {
-        finished = true;
-        try {
-          await source.return?.();
-        } catch {}
-        throw err;
       }
     };
   });

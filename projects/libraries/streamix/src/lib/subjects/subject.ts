@@ -170,12 +170,14 @@ export function createSubject<T = any>(): Subject<T> {
     subscribe,
     query: () => firstValueFrom(self),
     [Symbol.asyncIterator]: () => {
-       const listener = createAsyncPushable<T>();
-       listeners.add(listener);
-       if (isCompleted) {
-         if (completionInfo?.kind === 'error') listener.error(completionInfo.error);
-         else listener.complete();
-       }
+      const listener = createAsyncPushable<T>();
+      if (!isCompleted) {
+        listeners.add(listener);
+      } else if (completionInfo?.kind === 'error') {
+        listener.error(completionInfo.error);
+      } else {
+        listener.complete();
+      }
        
        const originalReturn = listener.return!.bind(listener);
        const originalThrow = listener.throw!.bind(listener);
