@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+lib/
+out/
+coverage/
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# IDEs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Testing
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+.cache/
+
+# Package managers
+.pnpm-store/
+.yarn/
+.yarn-cache/
+
+# Bundlers
+.parcel-cache/
+.next/
+.nuxt/
+.svelte-kit/
+
+# Vite
+vite.config.ts.timestamp-*
+
+# Local npm links
+*.tgz
+
+# Wails
+frontend/dist/
+wailsjs/
+
+# Generated docs (optional)
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
+# Coverage reports
+coverage-final.json

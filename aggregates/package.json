@@ -1,0 +1,4 @@
+{
+  "module": "../fesm2022/epikodelabs-streamix-aggregates.mjs",
+  "typings": "../types/epikodelabs-streamix-aggregates.d.ts"
+}

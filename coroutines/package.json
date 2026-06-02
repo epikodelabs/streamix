@@ -1,0 +1,4 @@
+{
+  "module": "../fesm2022/epikodelabs-streamix-coroutines.mjs",
+  "typings": "../types/epikodelabs-streamix-coroutines.d.ts"
+}
