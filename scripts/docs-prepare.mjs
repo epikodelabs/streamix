@@ -42,17 +42,20 @@ function escapeRegExp(value) {
 ensureDir(distRoot);
 ensureDir(apiRoot);
 
-const readmePath = path.join(repoRoot, 'README.md');
-if (!fs.existsSync(readmePath)) {
-  throw new Error('README.md not found in repository root.');
-}
-
+const introPath = path.join(docsRoot, 'INTRODUCTION.md');
 const indexPath = path.join(distRoot, 'index.md');
-copyFile(readmePath, indexPath);
+
+if (!fs.existsSync(introPath)) {
+  throw new Error('docs/INTRODUCTION.md not found. index.md must be generated from INTRODUCTION.md.');
+}
+copyFile(introPath, indexPath);
 
 if (fs.existsSync(docsRoot)) {
   for (const fileName of listMarkdownFiles(docsRoot)) {
     if (fileName.toLowerCase() === 'readme.md') {
+      continue;
+    }
+    if (fileName.toLowerCase() === 'introduction.md') {
       continue;
     }
     copyFile(path.join(docsRoot, fileName), path.join(distRoot, fileName));

@@ -1,8 +1,7 @@
-import { defineConfig } from 'vitepress';
+import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   base: '/streamix/',
-  lang: 'en-US',
   title: 'streamix',
   description: 'Reactive library documentation',
   mpa: true,
@@ -14,6 +13,7 @@ export default defineConfig({
       { text: 'Home', link: '/' },
       { text: 'Pricing', link: '/PRICING' },
       { text: 'Changelog', link: '/CHANGELOG' },
+      { text: 'API Reference', link: '/api/' },
       {
         text: 'Legal',
         items: [
@@ -22,8 +22,7 @@ export default defineConfig({
           { text: 'Refund Policy', link: '/REFUND-POLICY' }
         ]
       },
-      { text: 'API Reference', link: '/api/' },
-      { text: 'GitHub', link: 'https://github.com/epikodelabs/streamix' }
+      { text: 'GitHub', link: 'https://github.com/epikodelabs/streamix-community' }
     ],
 
     sidebar: {
@@ -73,7 +72,7 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/epikodelabs/streamix' }
+      { icon: 'github', link: 'https://github.com/epikodelabs/streamix-community' }
     ],
 
     footer: {

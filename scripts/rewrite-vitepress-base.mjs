@@ -27,15 +27,17 @@ function processDirectory(dir) {
           
           // Simple but effective replacements
           let updated = content
+            // Collapse duplicated base paths from repeated or pre-based rewrites
+            .replace(/\/streamix\/streamix\//g, basePath)
             // Handle /assets/ paths with both single and double quotes
-            .replace(/"\/assets\//g, `"${basePath}assets/`)
+            .replace(/"\/(?!streamix\/)assets\//g, `"${basePath}assets/`)
             // Handle root files with both single and double quotes
-            .replace(/"\/(hashmap\.json|manifest\.webmanifest|vp-icons\.css)/g, `"${basePath}$1`)
-            .replace(/'(\/(hashmap\.json|manifest\.webmanifest|vp-icons\.css))/g, `'${basePath}$1`)
+            .replace(/"\/(?!streamix\/)(hashmap\.json|manifest\.webmanifest|vp-icons\.css)/g, `"${basePath}$1`)
+            .replace(/'\/(?!streamix\/)(hashmap\.json|manifest\.webmanifest|vp-icons\.css)/g, `'${basePath}$1`)
             // Handle CSS url() paths
-            .replace(/url\(\//g, `url(${basePath}`)
+            .replace(/url\(\s*\/(?!streamix\/)/g, `url(${basePath}`)
             // Handle /@vite/ paths with both single and double quotes
-            .replace(/"\/@vite\//g, `"${basePath}@vite/`);
+            .replace(/"\/(?!streamix\/)@vite\//g, `"${basePath}@vite/`);
           
           // Also handle any other absolute paths that might have been missed
           // This catches things like /some-file.js, /another-path, etc.
