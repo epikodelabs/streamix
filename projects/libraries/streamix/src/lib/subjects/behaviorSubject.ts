@@ -3,6 +3,7 @@ import {
     createSubscription,
     isPromiseLike,
     pipeSourceThrough,
+    streamToArray,
     Subscription,
     type MaybePromise,
     type Operator,
@@ -30,6 +31,7 @@ export type BehaviorSubject<T = any> = Stream<T> & {
   subscribe(): Subscription;
   subscribe(callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription;
   query: () => Promise<T>;
+  toArray: () => Promise<T[]>;
 };
 
 /**
@@ -170,6 +172,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     },
     subscribe,
     query: () => firstValueFrom(self),
+    toArray: () => streamToArray(self),
     [Symbol.asyncIterator]: () => {
       const listener = createAsyncPushable<T>();
 

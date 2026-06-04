@@ -3,6 +3,7 @@ import {
   createSubscription,
   isPromiseLike,
   pipeSourceThrough,
+  streamToArray,
   Subscription,
   type MaybePromise,
   type Operator,
@@ -169,6 +170,7 @@ export function createSubject<T = any>(): Subject<T> {
     },
     subscribe,
     query: () => firstValueFrom(self),
+    toArray: () => streamToArray(self),
     [Symbol.asyncIterator]: () => {
       const listener = createAsyncPushable<T>();
       if (!isCompleted) {

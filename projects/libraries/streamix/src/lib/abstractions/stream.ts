@@ -11,11 +11,12 @@ import { createSubscription, type Subscription } from "./subscription";
  * @template T The type of values emitted by the stream.
  */
 export type Stream<T = any> = AsyncIterable<T> & {
-  type: "stream" | "subject";
+  type: string;
   name?: string;
   pipe: OperatorChain<T>;
   subscribe(callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription;
   query: () => Promise<T>;
+  toArray: () => Promise<T[]>;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 };
 
@@ -37,6 +38,23 @@ export const isStreamLike = <T = unknown>(
     typeof v[Symbol.asyncIterator] === "function"
   );
 };
+
+export async function streamToArray<T>(stream: Stream<T>): Promise<T[]> {
+  const iterator = stream[Symbol.asyncIterator]();
+  const result: T[] = [];
+  try {
+    while (true) {
+      const next = await iterator.next();
+      if (next.done) break;
+      result.push(next.value);
+    }
+    return result;
+  } finally {
+    try {
+      await iterator.return?.();
+    } catch {}
+  }
+}
 
 function waitForAbort(signal: AbortSignal): Promise<void> {
 
@@ -268,6 +286,7 @@ export function createStream<T>(
     pipe,
     subscribe: wrappedSubscribe,
     query: () => firstValueFrom(self),
+    toArray: () => streamToArray(self),
     [Symbol.asyncIterator]: () => {
       const factory = createAsyncIterator({ 
         register: (receiver) => wrappedSubscribe(receiver) 
@@ -336,6 +355,7 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
     pipe: (...nextOps: Operator<any, any>[]) => pipeSourceThrough<TOut, any>(pipedStream, nextOps),
     subscribe: (cb) => registerReceiver(createReceiver(cb)),
     query: () => firstValueFrom(pipedStream),
+    toArray: () => streamToArray(pipedStream),
     [Symbol.asyncIterator]: () => {
       const iterator = applyOperators(getSourceIterator(source));
       const publicIterator: AsyncIterator<TOut> = {

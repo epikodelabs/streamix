@@ -329,6 +329,48 @@ describe('stream', () => {
       }, 0);
     })();
   });
+
+  it('toArray() collects all emitted values into a promise', async () => {
+    const stream = from([1, 2, 3]);
+    const result = await stream.toArray();
+    expect(result).toEqual([1, 2, 3]);
+  });
+
+  it('toArray() returns an empty array for an empty stream', async () => {
+    const stream = from([]);
+    const result = await stream.toArray();
+    expect(result).toEqual([]);
+  });
+
+  it('toArray() propagates errors from the stream', async () => {
+    const expectedError = new Error('toArray error');
+    const stream = createStream<number>('error-stream', async function* () {
+      yield 1;
+      throw expectedError;
+    });
+
+    try {
+      await stream.toArray();
+      fail('toArray should have thrown');
+    } catch (err) {
+      expect(err).toBe(expectedError);
+    }
+  });
+
+  it('toArray() cleans up the iterator on completion', async () => {
+    let cleaned = false;
+    const stream = createStream<number>('toArray-method-cleanup', async function* (_signal) {
+      try {
+        yield 1;
+        yield 2;
+      } finally {
+        cleaned = true;
+      }
+    });
+
+    await stream.toArray();
+    expect(cleaned).toBeTrue();
+  });
 });
 
 

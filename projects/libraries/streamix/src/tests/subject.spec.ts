@@ -428,4 +428,43 @@ describe('createSubject', () => {
 
     expect(completes).toBe(1);
   });
+
+  it('toArray() collects all emitted values from a subject', async () => {
+    const subject = createSubject<number>();
+    const promise = subject.toArray();
+
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
+
+    const result = await promise;
+    expect(result).toEqual([1, 2, 3]);
+  });
+
+  it('toArray() returns an empty array for a completed subject with no values', async () => {
+    const subject = createSubject<number>();
+    const promise = subject.toArray();
+
+    subject.complete();
+
+    const result = await promise;
+    expect(result).toEqual([]);
+  });
+
+  it('toArray() propagates errors from a subject', async () => {
+    const subject = createSubject<number>();
+    const expectedError = new Error('subject toArray error');
+    const promise = subject.toArray();
+
+    subject.next(1);
+    subject.error(expectedError);
+
+    try {
+      await promise;
+      fail('toArray should have thrown');
+    } catch (err) {
+      expect(err).toBe(expectedError);
+    }
+  });
 });
