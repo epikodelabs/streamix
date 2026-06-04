@@ -1,7 +1,6 @@
 import { bootstrapApplication } from '@angular/platform-browser';
-
+import { AppComponent } from './app/app.component';
 import { appConfig } from './app/app.config';
-import { ContainerComponent } from './app/app.container';
 
-bootstrapApplication(ContainerComponent, appConfig)
-  .catch((err) => console.warn(err));
+bootstrapApplication(AppComponent, appConfig)
+  .catch((err) => console.error(err));
