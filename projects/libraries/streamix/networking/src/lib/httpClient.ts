@@ -370,6 +370,26 @@ export const useHeader = (name: string, value: string): Middleware => {
 };
 
 /**
+ * Removes headers from the request context by name.
+ *
+ * This is useful for stripping default headers (like `Content-Type`) that
+ * would otherwise trigger a CORS preflight on simple GET requests.
+ */
+export const useStripHeaders = (...names: string[]): Middleware => {
+  return (next) => async (context) => {
+    const cleaned: Record<string, string> = {};
+    const toRemove = names.map((n) => n.toLowerCase());
+    for (const [key, value] of Object.entries(context.headers)) {
+      if (!toRemove.includes(key.toLowerCase())) {
+        cleaned[key] = value;
+      }
+    }
+    context.headers = cleaned;
+    return await next(context);
+  };
+};
+
+/**
  * Appends query parameters to the request URL.
  */
 export const useParams = (data: Record<string, any>): Middleware => {

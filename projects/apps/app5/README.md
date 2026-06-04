@@ -8,10 +8,10 @@ Interactive networking demo using real public APIs — no local server required.
 |------|-----|-----------|
 | GET /posts | JSONPlaceholder | `readJson` + `useTimeout` + `useFallback` |
 | POST /posts | JSONPlaceholder | `readJson` + `useHeader` |
-| GET /users | Reqres.in | `readJson` + `useTimeout` |
+| GET /users | JSONPlaceholder | `readJson` + `useTimeout` |
 | GET /pokemon | PokeAPI | `readJson` |
 | GET /random dog | Dog CEO API | `readJson` |
-| 404 Not Found | httpbin.org | `catchError` |
+| 404 Not Found | JSONPlaceholder | `catchError` |
 | Redirects | httpbin.org | `useRedirect` |
 | Timeout | httpbin.org | `useTimeout` + `catchError` |
 

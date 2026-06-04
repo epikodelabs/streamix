@@ -12,7 +12,7 @@
   <div class="app">
     <header class="header">
       <h1>🌐 HTTP Client Demo</h1>
-      <p class="subtitle">Streamix networking operators against real public APIs</p>
+      <p class="subtitle">Streamix networking operators with real public APIs</p>
     </header>
 
     <main class="grid">
@@ -21,7 +21,7 @@
           <h2>GET /posts</h2>
           <span class="badge">readJson</span>
         </div>
-        <p class="tooltip">Fetches posts from JSONPlaceholder using readJson parser.</p>
+        <p class="tooltip">Parses JSON response from JSONPlaceholder into structured objects.</p>
         <button data-action="fetch-posts">Run Request</button>
         <pre class="output" data-output="posts"></pre>
       </section>
@@ -31,7 +31,7 @@
           <h2>POST /posts</h2>
           <span class="badge">readJson</span>
         </div>
-        <p class="tooltip">Creates a new post on JSONPlaceholder with a JSON body.</p>
+        <p class="tooltip">Creates a post with a JSON body and parses the JSON response.</p>
         <button data-action="create-post">Run Request</button>
         <pre class="output" data-output="create"></pre>
       </section>
@@ -39,9 +39,9 @@
       <section class="card">
         <div class="card-header">
           <h2>GET /users</h2>
-          <span class="badge">readJson + timeout</span>
+          <span class="badge">readText</span>
         </div>
-        <p class="tooltip">Fetches users from Reqres.in with a 5-second timeout.</p>
+        <p class="tooltip">Reads the raw response body as plain text instead of parsing JSON.</p>
         <button data-action="fetch-users">Run Request</button>
         <pre class="output" data-output="users"></pre>
       </section>
@@ -51,7 +51,7 @@
           <h2>GET /pokemon</h2>
           <span class="badge">readJson</span>
         </div>
-        <p class="tooltip">Queries PokeAPI for Pikachu data — a fun real-world API.</p>
+        <p class="tooltip">Queries PokeAPI and parses the structured Pokémon data as JSON.</p>
         <button data-action="fetch-pokemon">Run Request</button>
         <pre class="output" data-output="pokemon"></pre>
       </section>
@@ -59,9 +59,9 @@
       <section class="card">
         <div class="card-header">
           <h2>GET /random dog</h2>
-          <span class="badge">readJson</span>
+          <span class="badge">readJson → readBlob</span>
         </div>
-        <p class="tooltip">Fetches a random dog image URL from Dog CEO API.</p>
+        <p class="tooltip">Fetches a JSON URL from Dog CEO, then streams the actual image as a Blob.</p>
         <button data-action="fetch-dog">Run Request</button>
         <div class="image-output" data-output="dog"></div>
       </section>
@@ -69,9 +69,9 @@
       <section class="card">
         <div class="card-header">
           <h2>404 Not Found</h2>
-          <span class="badge">catchError</span>
+          <span class="badge">readText + catchError</span>
         </div>
-        <p class="tooltip">Requests a non-existent endpoint and catches the error gracefully.</p>
+        <p class="tooltip">Requests a missing endpoint and catches the HTTP error gracefully.</p>
         <button data-action="test-404">Run Request</button>
         <pre class="output" data-output="404"></pre>
       </section>
@@ -79,9 +79,9 @@
       <section class="card">
         <div class="card-header">
           <h2>Redirects</h2>
-          <span class="badge">useRedirect</span>
+          <span class="badge">useRedirect + readStatus</span>
         </div>
-        <p class="tooltip">Follows HTTP redirects using httpbin.org redirect test.</p>
+        <p class="tooltip">Follows 3 redirects then reads the final HTTP status and headers metadata.</p>
         <button data-action="test-redirect">Run Request</button>
         <pre class="output" data-output="redirect"></pre>
       </section>
@@ -89,9 +89,9 @@
       <section class="card">
         <div class="card-header">
           <h2>Timeout</h2>
-          <span class="badge">useTimeout + catchError</span>
+          <span class="badge">useTimeout + readArrayBuffer</span>
         </div>
-        <p class="tooltip">Requests a delayed endpoint with a 1-second timeout to trigger catchError.</p>
+        <p class="tooltip">Sets a 1 ms timeout and requests an ArrayBuffer response to trigger abort.</p>
         <button data-action="test-timeout">Run Request</button>
         <pre class="output" data-output="timeout"></pre>
       </section>
