@@ -1,169 +1,52 @@
-import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, signal } from '@angular/core';
-import {
-  catchError,
-  concatMap,
-  createSubject,
-  fromPromise,
-  map,
-  tap,
-} from '@epikodelabs/streamix';
-import { compute } from '@epikodelabs/streamix/coroutines';
+import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { createBehaviorSubject, tap } from '@epikodelabs/streamix';
+import { onAnimationFrame } from '@epikodelabs/streamix/dom';
+import type { Subscription } from '@epikodelabs/streamix';
 
-export interface TextTask {
-  id: string;
-  fileName: string;
-  content: string;
-}
-
-export interface TextResult {
-  words: number;
-  lines: number;
-  chars: number;
-  topWords: [string, number][];
-  readingTimeMinutes: number;
-}
-
-export interface Job {
-  id: string;
-  fileName: string;
-  state: 'queued' | 'processing' | 'done' | 'error';
-  progress: number;
-  originalSize: number;
-  result?: TextResult;
-  error?: string;
-}
-
-function countWords(text: string): number {
-  const matches = text.match(/\b[\w']+\b/g);
-  return matches ? matches.length : 0;
-}
-
-function getTopWords(text: string): [string, number][] {
-  const words = text.toLowerCase().match(/\b[\w']{3,}\b/g) || [];
-  const stopWords = new Set([
-    'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'day', 'get', 'has', 'him', 'his', 'how', 'its', 'may', 'new', 'now', 'old', 'see', 'two', 'who', 'boy', 'did', 'she', 'use', 'her', 'way', 'many', 'would', 'there', 'their', 'what', 'said', 'each', 'which', 'she', 'do', 'how', 'their', 'if', 'will', 'up', 'other', 'about', 'out', 'many', 'then', 'them', 'these', 'so', 'some', 'her', 'would', 'make', 'like', 'into', 'him', 'has', 'two', 'more', 'very', 'what', 'know', 'just', 'first', 'also', 'after', 'back', 'other', 'many', 'than', 'only', 'those', 'come', 'day', 'most', 'us', 'over', 'think', 'where', 'being', 'every', 'great', 'might', 'shall', 'still', 'those', 'while', 'this', 'that', 'with', 'from', 'they', 'have', 'been', 'were', 'said', 'time', 'than', 'them', 'into', 'just', 'like', 'over', 'also', 'back', 'only', 'know', 'take', 'year', 'good', 'some', 'come', 'make', 'well', 'work', 'life', 'even', 'more', 'here', 'look', 'down', 'most', 'long', 'last', 'find', 'give', 'does', 'made', 'part', 'such', 'keep', 'call', 'came', 'need', 'feel', 'seem', 'turn', 'hand', 'head', 'help', 'home', 'side', 'both', 'five', 'once', 'same', 'must', 'name', 'left', 'each', 'done', 'open', 'case', 'show', 'live', 'play', 'went', 'told', 'seen', 'hear', 'talk', 'soon', 'read', 'stop', 'face', 'fact', 'land', 'line', 'kind', 'next', 'word', 'came', 'went', 'told', 'knew', 'seen', 'got', 'got', 'get', 'let', 'put', 'say', 'she', 'try', 'way', 'own', 'say', 'too', 'old', 'tell', 'very', 'when', 'much', 'want', 'here', 'look', 'down', 'most', 'long', 'last', 'find', 'give', 'does', 'made', 'part', 'such', 'keep', 'call', 'came', 'need', 'feel', 'seem', 'turn', 'hand', 'head', 'help', 'home', 'side', 'both', 'five', 'once', 'same', 'must', 'name', 'left', 'each', 'done', 'open', 'case', 'show', 'live', 'play', 'went', 'told', 'seen', 'hear', 'talk', 'soon', 'read', 'stop', 'face', 'fact', 'land', 'line', 'kind', 'next', 'word', 'came', 'went', 'told', 'knew', 'seen'
-  ]);
-  const freq = new Map<string, number>();
-  for (const w of words) {
-    if (stopWords.has(w)) continue;
-    freq.set(w, (freq.get(w) || 0) + 1);
-  }
-  return [...freq.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
-}
-
-function analyzeText(data: TextTask): TextResult {
-  const text = data.content;
-  const lines = text.split(/\r?\n/).length;
-  const chars = text.length;
-  const words = countWords(text);
-  const topWords = getTopWords(text);
-  const readingTimeMinutes = Math.ceil(words / 200);
-  return { words, lines, chars, topWords, readingTimeMinutes };
-}
+type Weather = 'sunny' | 'rainy';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule],
   template: `
     <div class="app">
       <header class="header">
-        <h1>📝 Text Analyzer</h1>
-        <p class="subtitle">Batch text processing with Web Worker coroutines</p>
+        <h1>🌈 Cartoon Landscape</h1>
+        <p class="subtitle">Three.js scene powered by Streamix animation frames</p>
       </header>
 
-      <section class="toolbar">
-        <div class="stats" *ngIf="jobs().length">
-          <span class="pill">{{ jobs().length }} files</span>
-          <span class="pill done" *ngIf="doneCount()">{{ doneCount() }} done</span>
-          <span class="pill" *ngIf="totalWords() > 0">{{ totalWords() | number }} words</span>
-        </div>
-        <button class="btn btn-ghost" *ngIf="jobs().length" (click)="clearAll()">Clear all</button>
-      </section>
+      <div class="controls">
+        <button
+          [class.active]="weather.value === 'sunny'"
+          (click)="setWeather('sunny')"
+        >☀️ Sunshine</button>
+        <button
+          [class.active]="weather.value === 'rainy'"
+          (click)="setWeather('rainy')"
+        >🌧️ Rain</button>
+      </div>
 
-      <section
-        class="dropzone"
-        [class.dragover]="dragOver()"
-        (dragover)="onDragOver($event)"
-        (dragleave)="onDragLeave($event)"
-        (drop)="onDrop($event)"
-        (click)="fileInput.click()"
-      >
-        <input #fileInput type="file" multiple accept=".txt,.md,.csv,.json" hidden (change)="onFiles($event)" />
-        <div class="dropzone-content">
-          <div class="icon">📁</div>
-          <p><strong>Drop text files here</strong> or click to browse</p>
-          <p class="hint">TXT, MD, CSV, JSON · Processed in parallel via workers</p>
-        </div>
-      </section>
+      <div class="canvas-wrap">
+        <canvas #canvas></canvas>
+        <div class="overlay-badge">{{ weather.value === 'sunny' ? 'Sunny · 24°C' : 'Rainy · 16°C' }}</div>
+      </div>
 
-      <section class="results" *ngIf="jobs().length">
-        <div class="result-card" *ngFor="let job of jobs()" [class.done]="job.state === 'done'" [class.error]="job.state === 'error'">
-          <div class="result-header">
-            <span class="filename" [title]="job.fileName">{{ job.fileName }}</span>
-            <span class="status">{{ job.state }}</span>
-          </div>
-
-          <div class="progress" *ngIf="job.state === 'processing'">
-            <div class="progress-bar" [style.width.%]="job.progress"></div>
-          </div>
-
-          <div class="result-body" *ngIf="job.state === 'done' && job.result">
-            <div class="metrics">
-              <div class="metric">
-                <span class="metric-value">{{ job.result.words | number }}</span>
-                <span class="metric-label">Words</span>
-              </div>
-              <div class="metric">
-                <span class="metric-value">{{ job.result.lines | number }}</span>
-                <span class="metric-label">Lines</span>
-              </div>
-              <div class="metric">
-                <span class="metric-value">{{ job.result.chars | number }}</span>
-                <span class="metric-label">Chars</span>
-              </div>
-              <div class="metric">
-                <span class="metric-value">{{ job.result.readingTimeMinutes }} min</span>
-                <span class="metric-label">Read time</span>
-              </div>
-            </div>
-
-            <div class="top-words" *ngIf="job.result.topWords.length">
-              <span class="top-label">Top words</span>
-              <div class="top-list">
-                <span class="top-item" *ngFor="let tw of job.result.topWords">
-                  {{ tw[0] }} <strong>{{ tw[1] }}</strong>
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div class="error-body" *ngIf="job.state === 'error'">
-            <span>⚠️ {{ job.error }}</span>
-          </div>
-        </div>
-      </section>
-
-      <footer class="footer" *ngIf="jobs().length">
-        <p>Powered by <strong>Streamix Coroutines</strong> · Worker-parallel text analysis</p>
+      <footer class="footer">
+        <p>Powered by <strong>Streamix</strong> · Reactive Three.js rendering</p>
       </footer>
     </div>
   `,
   styles: [`
     :host {
-      --bg: #0f1117;
-      --surface: #181b24;
-      --surface-hover: #1e2230;
-      --border: #2a2f3f;
-      --text: #e2e5ec;
-      --text-muted: #8b92a8;
-      --accent: #5b8cff;
-      --accent-hover: #4a7aee;
-      --success: #3ddc84;
-      --error: #ff5f5f;
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --border: #e2e4e9;
+      --text: #1a1d26;
+      --text-muted: #6b7280;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
       --radius: 12px;
       display: block;
       min-height: 100vh;
@@ -172,197 +55,444 @@ function analyzeText(data: TextTask): TextResult {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
 
-    .app { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+    .app { max-width: 1100px; margin: 0 auto; padding: 24px; }
 
-    .header { text-align: center; margin-bottom: 28px; }
-    .header h1 { font-size: 2rem; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.5px; }
-    .subtitle { color: var(--text-muted); font-size: 0.95rem; margin: 0; }
+    .header { text-align: center; margin-bottom: 20px; }
+    .header h1 { font-size: 1.9rem; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.5px; }
+    .subtitle { color: var(--text-muted); font-size: 0.9rem; margin: 0; }
 
-    .toolbar {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 16px; gap: 12px; flex-wrap: wrap;
+    .controls {
+      display: flex; justify-content: center; gap: 10px; margin-bottom: 16px;
     }
-    .stats { display: flex; gap: 8px; flex-wrap: wrap; }
-    .pill {
-      background: var(--surface); border: 1px solid var(--border);
-      padding: 4px 12px; border-radius: 999px; font-size: 0.8rem; color: var(--text-muted);
+    .controls button {
+      background: var(--surface); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 20px; border-radius: 20px; cursor: pointer; font-size: 0.9rem;
+      font-weight: 500; transition: all 0.15s;
     }
-    .pill.done { color: var(--success); border-color: rgba(61,220,132,0.3); }
+    .controls button:hover { border-color: var(--accent); background: var(--surface); }
+    .controls button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
-    .btn {
-      cursor: pointer; border: none; border-radius: 8px; padding: 8px 16px;
-      font-size: 0.85rem; font-weight: 500; transition: background 0.15s, transform 0.05s;
+    .canvas-wrap {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #87CEEB;
+      aspect-ratio: 16 / 9;
     }
-    .btn:active { transform: scale(0.97); }
-    .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
-    .btn-ghost:hover { background: var(--surface-hover); color: var(--text); }
-
-    .dropzone {
-      border: 2px dashed var(--border); border-radius: var(--radius);
-      background: var(--surface); padding: 48px 24px; text-align: center;
-      cursor: pointer; transition: border-color 0.2s, background 0.2s;
+    .canvas-wrap canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
     }
-    .dropzone:hover, .dropzone.dragover {
-      border-color: var(--accent); background: rgba(91,140,255,0.05);
-    }
-    .dropzone-content .icon { font-size: 2.5rem; margin-bottom: 12px; }
-    .dropzone-content p { margin: 4px 0; color: var(--text); }
-    .dropzone-content .hint { font-size: 0.8rem; color: var(--text-muted); }
-
-    .results {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 20px; margin-top: 28px;
-    }
-    .result-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); overflow: hidden;
-      transition: transform 0.15s, box-shadow 0.15s;
-    }
-    .result-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
-
-    .result-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 16px; background: var(--bg); border-bottom: 1px solid var(--border);
-    }
-    .filename { font-weight: 500; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
-    .status { font-size: 0.75rem; text-transform: capitalize; color: var(--accent); }
-    .result-card.done .status { color: var(--success); }
-    .result-card.error .status { color: var(--error); }
-
-    .progress {
-      height: 4px; background: var(--bg); margin: 0 16px;
-    }
-    .progress-bar {
-      height: 100%; background: var(--accent); border-radius: 2px;
-      transition: width 0.3s ease;
+    .overlay-badge {
+      position: absolute;
+      top: 12px; right: 12px;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(4px);
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text);
+      pointer-events: none;
     }
 
-    .result-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-    .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-    .metric {
-      background: var(--bg); border: 1px solid var(--border);
-      border-radius: 8px; padding: 10px; text-align: center;
-    }
-    .metric-value { display: block; font-size: 1.1rem; font-weight: 700; color: var(--accent); }
-    .metric-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-
-    .top-words { display: flex; flex-direction: column; gap: 6px; }
-    .top-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-    .top-list { display: flex; flex-wrap: wrap; gap: 6px; }
-    .top-item {
-      background: rgba(91,140,255,0.12); color: var(--accent);
-      padding: 3px 10px; border-radius: 4px; font-size: 0.8rem;
-    }
-    .top-item strong { margin-left: 4px; color: var(--text); }
-
-    .error-body {
-      padding: 16px; color: var(--error); font-size: 0.85rem;
-    }
-
-    .footer { text-align: center; margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--border); }
+    .footer { text-align: center; margin-top: 24px; }
     .footer p { color: var(--text-muted); font-size: 0.8rem; margin: 0; }
     .footer strong { color: var(--accent); }
   `],
 })
-export class AppComponent implements OnDestroy {
-  jobs = signal<Job[]>([]);
-  dragOver = signal(false);
-  doneCount = signal(0);
-  totalWords = signal(0);
+export class AppComponent implements OnInit, OnDestroy {
+  @ViewChild('canvas') canvasRef!: ElementRef<HTMLCanvasElement>;
 
-  private taskSubject = createSubject<TextTask>();
-  private runner = compute(analyzeText, countWords, getTopWords);
+  weather = createBehaviorSubject<Weather>('sunny');
 
-  constructor() {
-    this.taskSubject.pipe(
-      tap((task) => {
-        this.jobs.update(list =>
-          list.map(j => (j.id === task.id ? { ...j, state: 'processing' as const, progress: 10 } : j))
-        );
-      }),
-      concatMap((task) =>
-        fromPromise(this.runner(task)).pipe(
-          map((result) => ({ task, result })),
-          tap(({ task: t, result }) => {
-            this.jobs.update(list =>
-              list.map(j =>
-                j.id === t.id
-                  ? { ...j, state: 'done' as const, progress: 100, result }
-                  : j
-              )
-            );
-            this.doneCount.update(c => c + 1);
-            this.totalWords.update(w => w + result.words);
-          }),
-          catchError((err) => {
-            this.jobs.update(list =>
-              list.map(j =>
-                j.id === task.id
-                  ? { ...j, state: 'error' as const, error: String(err?.message ?? err) }
-                  : j
-              )
-            );
-          })
-        )
-      )
+  private renderer!: THREE.WebGLRenderer;
+  private scene!: THREE.Scene;
+  private camera!: THREE.PerspectiveCamera;
+  private controls!: OrbitControls;
+
+  private sunGroup!: THREE.Group;
+  private rainSystem!: THREE.Points;
+  private rainGeo!: THREE.BufferGeometry;
+  private rainCount = 2000;
+  private rainSpeed: Float32Array = new Float32Array(this.rainCount);
+
+  private clouds: THREE.Group[] = [];
+  private trees: THREE.Group[] = [];
+  private flowers: THREE.Mesh[] = [];
+
+  private animSub!: Subscription;
+  private weatherSub!: Subscription;
+
+  private clock = new THREE.Clock();
+
+  ngOnInit(): void {
+    // Weather reaction — toggle scene elements
+    this.weatherSub = this.weather.pipe(
+      tap((w) => this.applyWeather(w)),
     ).subscribe();
   }
 
-  onFiles(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    if (input.files) {
-      Array.from(input.files).forEach(f => this.uploadFile(f));
-      input.value = '';
-    }
-  }
-
-  onDragOver(e: DragEvent): void {
-    e.preventDefault();
-    e.stopPropagation();
-    this.dragOver.set(true);
-  }
-
-  onDragLeave(e: DragEvent): void {
-    e.preventDefault();
-    e.stopPropagation();
-    this.dragOver.set(false);
-  }
-
-  onDrop(e: DragEvent): void {
-    e.preventDefault();
-    e.stopPropagation();
-    this.dragOver.set(false);
-    if (e.dataTransfer?.files) {
-      Array.from(e.dataTransfer.files).forEach(f => this.uploadFile(f));
-    }
-  }
-
-  clearAll(): void {
-    this.jobs.set([]);
-    this.doneCount.set(0);
-    this.totalWords.set(0);
+  ngAfterViewInit(): void {
+    this.initScene();
+    this.startLoop();
   }
 
   ngOnDestroy(): void {
-    this.runner.finalize();
+    this.animSub?.unsubscribe();
+    this.weatherSub?.unsubscribe();
+    this.controls?.dispose();
+    this.renderer?.dispose();
+    this.rainGeo?.dispose();
   }
 
-  private async uploadFile(file: File): Promise<void> {
-    const id = crypto.randomUUID();
-    const text = await file.text();
-
-    this.jobs.update(list => [
-      ...list,
-      {
-        id,
-        fileName: file.name,
-        state: 'queued',
-        progress: 0,
-        originalSize: file.size,
-      },
-    ]);
-
-    this.taskSubject.next({ id, fileName: file.name, content: text });
+  setWeather(w: Weather): void {
+    this.weather.next(w);
   }
+
+  private initScene(): void {
+    const canvas = this.canvasRef.nativeElement;
+    const wrap = canvas.parentElement!;
+    const width = wrap.clientWidth;
+    const height = wrap.clientHeight;
+
+    // Renderer
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    this.renderer.setSize(width, height);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // Scene
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x87CEEB);
+    this.scene.fog = new THREE.Fog(0x87CEEB, 20, 90);
+
+    // Camera
+    this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 200);
+    this.camera.position.set(0, 12, 35);
+
+    // Controls
+    this.controls = new OrbitControls(this.camera, canvas);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.05;
+    this.controls.maxPolarAngle = Math.PI / 2 - 0.05;
+    this.controls.minDistance = 10;
+    this.controls.maxDistance = 70;
+    this.controls.target.set(0, 3, 0);
+
+    // Lights
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    this.scene.add(ambient);
+
+    const sunLight = new THREE.DirectionalLight(0xfff5e1, 1.2);
+    sunLight.position.set(15, 25, 10);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.set(2048, 2048);
+    sunLight.shadow.camera.near = 0.5;
+    sunLight.shadow.camera.far = 80;
+    sunLight.shadow.camera.left = -30;
+    sunLight.shadow.camera.right = 30;
+    sunLight.shadow.camera.top = 30;
+    sunLight.shadow.camera.bottom = -30;
+    this.scene.add(sunLight);
+
+    const hemi = new THREE.HemisphereLight(0x87CEEB, 0x66BB6A, 0.4);
+    this.scene.add(hemi);
+
+    // Ground
+    const groundGeo = new THREE.CircleGeometry(60, 64);
+    const groundMat = new THREE.MeshToonMaterial({ color: 0x66BB6A });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    this.scene.add(ground);
+
+    // Hills (low-poly cartoon mounds)
+    const hillPositions = [
+      { x: -12, z: -8, s: 4, h: 3 },
+      { x: 10, z: -12, s: 5, h: 4 },
+      { x: -6, z: -18, s: 6, h: 5 },
+      { x: 14, z: -5, s: 3.5, h: 2.5 },
+      { x: -18, z: 2, s: 5, h: 3.5 },
+      { x: 20, z: 5, s: 4, h: 3 },
+      { x: 0, z: -22, s: 7, h: 6 },
+    ];
+
+    for (const hp of hillPositions) {
+      const hillGeo = new THREE.SphereGeometry(hp.s, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+      const hillMat = new THREE.MeshToonMaterial({ color: 0x81C784 });
+      const hill = new THREE.Mesh(hillGeo, hillMat);
+      hill.position.set(hp.x, -hp.h * 0.3, hp.z);
+      hill.scale.y = hp.h / hp.s;
+      hill.receiveShadow = true;
+      hill.castShadow = true;
+      this.scene.add(hill);
+    }
+
+    // Trees
+    const treeSpots = [
+      { x: -8, z: 2 }, { x: -5, z: 6 }, { x: 7, z: 4 },
+      { x: 11, z: -2 }, { x: -12, z: -4 }, { x: 4, z: 8 },
+      { x: -3, z: -6 }, { x: 15, z: 6 }, { x: -16, z: 8 },
+    ];
+
+    for (const spot of treeSpots) {
+      const tree = this.makeTree();
+      tree.position.set(spot.x, 0, spot.z);
+      const scale = 0.7 + Math.random() * 0.5;
+      tree.scale.setScalar(scale);
+      tree.rotation.y = Math.random() * Math.PI * 2;
+      this.scene.add(tree);
+      this.trees.push(tree);
+    }
+
+    // Flowers
+    for (let i = 0; i < 30; i++) {
+      const flower = this.makeFlower();
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 3 + Math.random() * 22;
+      flower.position.set(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+      flower.rotation.y = Math.random() * Math.PI * 2;
+      this.scene.add(flower);
+      this.flowers.push(flower);
+    }
+
+    // Sun
+    this.sunGroup = new THREE.Group();
+    const sunGeo = new THREE.SphereGeometry(2.5, 32, 32);
+    const sunMat = new THREE.MeshToonMaterial({
+      color: 0xFFEB3B,
+      emissive: 0xFFB300,
+      emissiveIntensity: 0.8,
+    });
+    const sunMesh = new THREE.Mesh(sunGeo, sunMat);
+    this.sunGroup.add(sunMesh);
+
+    // Sun glow (larger transparent sphere)
+    const glowGeo = new THREE.SphereGeometry(4, 32, 32);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0xFFEB3B,
+      transparent: true,
+      opacity: 0.15,
+    });
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    this.sunGroup.add(glow);
+
+    // Sun rays (thin cones)
+    for (let i = 0; i < 8; i++) {
+      const rayGeo = new THREE.ConeGeometry(0.15, 3, 8);
+      const rayMat = new THREE.MeshToonMaterial({ color: 0xFFEB3B, transparent: true, opacity: 0.5 });
+      const ray = new THREE.Mesh(rayGeo, rayMat);
+      const a = (i / 8) * Math.PI * 2;
+      ray.position.set(Math.cos(a) * 4.5, Math.sin(a) * 4.5, 0);
+      ray.rotation.z = a - Math.PI / 2;
+      this.sunGroup.add(ray);
+    }
+
+    this.sunGroup.position.set(18, 18, -12);
+    this.scene.add(this.sunGroup);
+
+    // Clouds
+    const cloudSpots = [
+      { x: -10, y: 14, z: -8 },
+      { x: 8, y: 16, z: -15 },
+      { x: -5, y: 15, z: -20 },
+      { x: 14, y: 13, z: -5 },
+      { x: -18, y: 14, z: -12 },
+    ];
+
+    for (const cs of cloudSpots) {
+      const cloud = this.makeCloud();
+      cloud.position.set(cs.x, cs.y, cs.z);
+      this.scene.add(cloud);
+      this.clouds.push(cloud);
+    }
+
+    // Rain
+    this.buildRain();
+
+    // Resize handler
+    window.addEventListener('resize', this.onResize);
+  }
+
+  private makeTree(): THREE.Group {
+    const group = new THREE.Group();
+
+    // Trunk
+    const trunkGeo = new THREE.CylinderGeometry(0.2, 0.35, 2, 8);
+    const trunkMat = new THREE.MeshToonMaterial({ color: 0x8D6E63 });
+    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+    trunk.position.y = 1;
+    trunk.castShadow = true;
+    group.add(trunk);
+
+    // Foliage (3 stacked cones)
+    const foliageMat = new THREE.MeshToonMaterial({ color: 0x43A047 });
+    const layers = [
+      { r: 1.4, h: 1.8, y: 2.4 },
+      { r: 1.1, h: 1.6, y: 3.2 },
+      { r: 0.7, h: 1.2, y: 3.9 },
+    ];
+    for (const layer of layers) {
+      const geo = new THREE.ConeGeometry(layer.r, layer.h, 8);
+      const mesh = new THREE.Mesh(geo, foliageMat);
+      mesh.position.y = layer.y;
+      mesh.castShadow = true;
+      group.add(mesh);
+    }
+
+    return group;
+  }
+
+  private makeFlower(): THREE.Mesh {
+    const geo = new THREE.SphereGeometry(0.15, 8, 8);
+    const colors = [0xFF5252, 0xFFEB3B, 0xE040FB, 0xFF9800, 0x448AFF];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const mat = new THREE.MeshToonMaterial({ color });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = 0.15;
+    return mesh;
+  }
+
+  private makeCloud(): THREE.Group {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshToonMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.95 });
+
+    const blobs = [
+      { x: 0, y: 0, z: 0, r: 1.2 },
+      { x: 1, y: 0.1, z: 0, r: 0.9 },
+      { x: -0.9, y: 0.05, z: 0.2, r: 0.85 },
+      { x: 0.3, y: 0.4, z: -0.1, r: 0.7 },
+      { x: -0.3, y: 0.3, z: 0.3, r: 0.6 },
+    ];
+
+    for (const b of blobs) {
+      const geo = new THREE.SphereGeometry(b.r, 12, 10);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(b.x, b.y, b.z);
+      group.add(mesh);
+    }
+
+    return group;
+  }
+
+  private buildRain(): void {
+    this.rainGeo = new THREE.BufferGeometry();
+    const positions = new Float32Array(this.rainCount * 3);
+
+    for (let i = 0; i < this.rainCount; i++) {
+      positions[i * 3] = (Math.random() - 0.5) * 50;
+      positions[i * 3 + 1] = Math.random() * 25 + 5;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 40;
+      this.rainSpeed[i] = 0.15 + Math.random() * 0.25;
+    }
+
+    this.rainGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const rainMat = new THREE.PointsMaterial({
+      color: 0xB3E5FC,
+      size: 0.12,
+      transparent: true,
+      opacity: 0.7,
+    });
+
+    this.rainSystem = new THREE.Points(this.rainGeo, rainMat);
+    this.rainSystem.visible = false;
+    this.scene.add(this.rainSystem);
+  }
+
+  private applyWeather(w: Weather): void {
+    if (!this.scene) return;
+
+    const sunny = w === 'sunny';
+
+    // Sky
+    this.scene.background = new THREE.Color(sunny ? 0x87CEEB : 0x607D8B);
+    this.scene.fog!.color.set(sunny ? 0x87CEEB : 0x607D8B);
+
+    // Sun visibility
+    this.sunGroup.visible = sunny;
+
+    // Rain visibility
+    this.rainSystem.visible = !sunny;
+
+    // Ground color
+    const ground = this.scene.children.find(
+      (c) => c instanceof THREE.Mesh && (c.geometry as THREE.CircleGeometry)?.parameters?.radius === 60
+    ) as THREE.Mesh | undefined;
+    if (ground) {
+      (ground.material as THREE.MeshToonMaterial).color.set(sunny ? 0x66BB6A : 0x558B2F);
+    }
+
+    // Flowers perk up in sun
+    for (const flower of this.flowers) {
+      flower.scale.y = sunny ? 1 : 0.6;
+    }
+  }
+
+  private startLoop(): void {
+    this.animSub = onAnimationFrame().pipe(
+      tap(() => {
+        const time = this.clock.getElapsedTime();
+
+        // Animate sun gentle pulse
+        if (this.sunGroup.visible) {
+          const s = 1 + Math.sin(time * 1.5) * 0.04;
+          this.sunGroup.scale.setScalar(s);
+          this.sunGroup.rotation.z = time * 0.1;
+        }
+
+        // Animate clouds drifting
+        for (let i = 0; i < this.clouds.length; i++) {
+          const cloud = this.clouds[i];
+          cloud.position.x += Math.sin(time * 0.2 + i * 1.5) * 0.015;
+        }
+
+        // Animate rain
+        if (this.rainSystem.visible) {
+          const positions = this.rainGeo.attributes['position'].array as Float32Array;
+          for (let i = 0; i < this.rainCount; i++) {
+            positions[i * 3 + 1] -= this.rainSpeed[i];
+            if (positions[i * 3 + 1] < 0) {
+              positions[i * 3 + 1] = 22 + Math.random() * 8;
+            }
+          }
+          this.rainGeo.attributes['position'].needsUpdate = true;
+        }
+
+        // Gentle flower sway
+        for (let i = 0; i < this.flowers.length; i++) {
+          const f = this.flowers[i];
+          f.position.x += Math.sin(time * 2 + i) * 0.002;
+        }
+
+        // Tree gentle sway in rain
+        if (this.weather.value === 'rainy') {
+          for (let i = 0; i < this.trees.length; i++) {
+            this.trees[i].rotation.z = Math.sin(time * 3 + i) * 0.015;
+          }
+        } else {
+          for (const tree of this.trees) {
+            tree.rotation.z *= 0.95;
+          }
+        }
+
+        this.controls.update();
+        this.renderer.render(this.scene, this.camera);
+      }),
+    ).subscribe();
+  }
+
+  private onResize = (): void => {
+    if (!this.renderer || !this.camera) return;
+    const wrap = this.canvasRef.nativeElement.parentElement!;
+    const w = wrap.clientWidth;
+    const h = wrap.clientHeight;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h);
+  };
 }

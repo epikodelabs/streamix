@@ -1,16 +1,36 @@
-# App 3 — Text Analyzer
+# App 3 — Cartoon Landscape
 
-Batch text processing with Web Worker coroutines.
+Interactive 3D cartoon landscape built with **Three.js** and animated via **Streamix** reactive streams.
 
-## What it demonstrates
+## Features
 
-- **`compute`** — runs `analyzeText`, `countWords`, and `getTopWords` in parallel workers
-- **`concatMap`** + **`fromPromise`** — sequential task pipeline
-- **`catchError`** — graceful error handling in streams
-- **Drag & drop** — file upload with reactive stream tracking
+- **Three.js scene** — low-poly cartoon hills, trees, flowers, clouds, and a glowing sun
+- **Weather toggle** — switch between ☀️ sunshine and 🌧️ rain
+- **Streamix `onAnimationFrame`** — render loop driven by reactive animation frames
+- **Streamix `createBehaviorSubject`** — weather state as a reactive subject
+- **OrbitControls** — click and drag to orbit the camera around the scene
+- **Dynamic effects** — rain particles, sun pulse, cloud drift, tree sway, flower bounce
 
-## Run
+## Scene elements
+
+| Element | Style |
+|---------|-------|
+| Hills | Low-poly `MeshToonMaterial` spheres, cel-shaded |
+| Trees | Cylinder trunks + stacked cone foliage |
+| Flowers | Tiny colored spheres scattered across the ground |
+| Clouds | Clusters of white spheres drifting slowly |
+| Sun | Yellow sphere with glow halo and radiating rays |
+| Rain | `THREE.Points` particle system with 2,000 droplets |
+
+## Running
 
 ```bash
-ng serve app3
+npx ng serve app3
 ```
+
+Then open `http://localhost:4202` (port may vary).
+
+## Weather modes
+
+- **Sunshine** — bright blue sky, visible sun, flowers perked up, green grass
+- **Rain** — gray sky, rain particles falling, trees sway in wind, flowers droop
