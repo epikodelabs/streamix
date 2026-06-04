@@ -1,251 +1,177 @@
-import { catchError } from '@epikodelabs/streamix';
 import {
-  createHttpClient,
-  readChunks,
-  readFull,
-  readJson,
-  readNdjsonChunk,
-  readText,
-  useAccept,
-  useBase,
-  useFallback,
-  useHeader,
-  useLogger,
-  useRedirect,
-  useTimeout,
-} from '@epikodelabs/streamix/networking';
+  filter,
+  fromEvent,
+  map,
+  merge,
+  tap,
+} from '@epikodelabs/streamix';
+import { onAnimationFrame, onIntersection } from '@epikodelabs/streamix/dom';
 
-async function fetchData() {
-  const client = createHttpClient();
-
-  client
-    .withDefaults(useBase('http://localhost:3000'))
-    .withDefaults(useAccept('application/json'))
-    .withDefaults(useLogger())
-    .withDefaults(useTimeout(5000))
-    .withDefaults(
-      useFallback((error, context) => {
-        console.error('Request failed:', error);
-        return context;
-      }),
-    );
-
-  const responseStream = client.get('/data', readJson);
-
-  try {
-    for await (const value of responseStream) {
-      console.log('Received data:', value);
-    }
-  } catch (error) {
-    console.error('An unexpected error occurred:', error);
-  }
+/* ─── 1. Header scroll shadow ─── */
+const header = document.querySelector('.site-header') as HTMLElement;
+if (header) {
+  fromEvent(window, 'scroll')
+    .pipe(
+      map(() => window.scrollY > 20),
+      filter((scrolled) => scrolled !== header.classList.contains('scrolled')),
+      tap((scrolled) => header.classList.toggle('scrolled', scrolled))
+    )
+    .subscribe();
 }
 
-async function postData() {
-  const client = createHttpClient();
-
-  client
-    .withDefaults(useBase('http://localhost:3000'))
-    .withDefaults(useLogger())
-    .withDefaults(
-      useFallback((error, context) => {
-        console.error('Post request failed:', error);
-        return context;
-      }),
-    );
-
-  const responseStream = client.post(
-    '/items',
-    {
-      body: { name: 'example', value: 42 },
-    },
-    readText,
-  );
-
-  try {
-    for await (const value of responseStream) {
-      console.log('Post response:', value);
-    }
-  } catch (error) {
-    console.error('Post request error', error);
-  }
+/* ─── 2. Hero parallax + text reveal ─── */
+const heroMedia = document.querySelector('.hero-media img') as HTMLImageElement;
+// Parallax on scroll
+if (heroMedia) {
+  onAnimationFrame()
+    .pipe(
+      map(() => {
+        const scrollY = window.scrollY;
+        const scale = 1.08 + scrollY * 0.00015;
+        const translateY = scrollY * 0.3;
+        heroMedia.style.transform = `scale(${scale}) translateY(${translateY}px)`;
+      })
+    )
+    .subscribe();
 }
 
-async function testBinary() {
-  const client = createHttpClient();
-  client.withDefaults(useBase('http://localhost:3000'));
-  const responseStream = client.get('/binary', readFull);
-  try {
-    for await (const value of responseStream) {
-      console.log('Binary data:', value);
-    }
-  } catch (error) {
-    console.error('Binary test error', error);
-  }
-}
+// Character-by-character text reveal
+const animateTextElements = document.querySelectorAll('.animate-text');
+animateTextElements.forEach((el) => {
+  const text = el.textContent || '';
+  el.innerHTML = '';
 
-async function testNotFound() {
-  const client = createHttpClient();
-  client.withDefaults(useBase('http://localhost:3000'));
-  const responseStream = client
-    .get('/not-found', readText)
-    .pipe(catchError(() => console.log('Not found as expected')));
-  try {
-    for await (const value of responseStream) {
-      console.log('Not found response:', value);
-    }
-  } catch (error) {
-    console.error('Not found test error', error);
-  }
-}
-
-async function testRedirect() {
-  const client = createHttpClient();
-  client.withDefaults(useBase('http://localhost:3000'));
-  client.withDefaults(useRedirect(2));
-
-  const responseStream = client.get('/auto-redirect', readJson);
-  try {
-    for await (const value of responseStream) {
-      console.log('Redirect response:', value);
-    }
-  } catch (error) {
-    console.error('Redirect test error', error);
-  }
-}
-
-async function testManualRedirect() {
-  const client = createHttpClient();
-  client.withDefaults(useBase('http://localhost:3000'));
-  client.withDefaults(useRedirect(2));
-
-  const responseStream = client.get('/manual-redirect', readJson);
-  try {
-    for await (const value of responseStream) {
-      console.log('Redirect response:', value);
-    }
-  } catch (error) {
-    console.error('Redirect test error', error);
-  }
-}
-
-async function testTimeout() {
-  const client = createHttpClient();
-  client.withDefaults(useBase('http://localhost:3000'));
-  client.withDefaults(useTimeout(1000));
-  const responseStream = client
-    .get('/timeout', readText)
-    .pipe(catchError(() => console.log('Timeout as expected')));
-  try {
-    for await (const value of responseStream) {
-      console.error('Error timeout response:', value);
-    }
-  } catch (error) {
-    console.log('Timeout', error);
-  }
-}
-
-async function testOllama() {
-  const client = createHttpClient();
-
-  client
-    .withDefaults(useBase('http://localhost:11434')) // Ollama server
-    .withDefaults(useLogger())
-    .withDefaults(useHeader('Content-Type', 'application/json'))
-    .withDefaults(useAccept('application/json'))
-    .withDefaults(
-      useFallback((error, context) => {
-        console.error('Ollama request failed:', error);
-        return context;
-      }),
-    );
-
-  const responseStream = client.post(
-    '/api/generate',
-    {
-      body: { model: 'phi3:latest', prompt: 'What is the capital of France?' },
-    },
-    readChunks(readNdjsonChunk),
-  );
-  let fullResponse = '';
-
-  try {
-    for await (const value of responseStream) {
-      if (value && value?.chunk?.response) {
-        fullResponse += value.chunk.response;
-      }
-    }
-    console.log(fullResponse);
-  } catch (error) {
-    console.error('Ollama request error:', error);
-  }
-}
-
-let typingQueue: (() => void)[] = [];
-
-function typeEffectOutput(message: string, isError: boolean = false) {
-  const outputContainer = document.getElementById('output');
-  if (!outputContainer) return;
-
-  const outputElement = document.createElement('div');
-  outputElement.style.whiteSpace = 'pre-wrap'; // Ensure line breaks
-  outputElement.style.color = isError ? 'red' : 'green';
-  outputElement.style.marginBottom = '10px'; // Add some spacing between rows
-  outputContainer.appendChild(outputElement);
-
-  let index = 0;
-  const typingSpeed = 10; // Adjust typing speed here
-
-  function type() {
-    if (index < message.length) {
-      outputElement.innerText += message.charAt(index);
-      index++;
-      setTimeout(type, typingSpeed);
-    } else {
-      // Once typing finishes, call the next message in the queue (if any)
-      const nextMessage = typingQueue.shift();
-      if (nextMessage) {
-        nextMessage();
-      }
-    }
-  }
-
-  typingQueue.push(type); // Add the typing function to the queue
-  if (typingQueue.length === 1) {
-    // If it's the first message, start typing
-    typingQueue[0]();
-  }
-}
-
-console.log = (...args: any[]) => {
-  args.forEach((arg) => {
-    const message =
-      typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg);
-    typeEffectOutput(message, false);
+  text.split('').forEach((char) => {
+    const span = document.createElement('span');
+    span.textContent = char === ' ' ? '\u00A0' : char;
+    span.style.transitionDelay = `${Math.random() * 0.4}s`;
+    el.appendChild(span);
   });
+
+  onIntersection(el, { threshold: 0.3 })
+    .pipe(
+      filter((visible) => visible),
+      tap(() => el.classList.add('visible'))
+    )
+    .subscribe();
+});
+
+/* ─── 3. Scroll reveal ─── */
+const revealElements = document.querySelectorAll('.reveal');
+revealElements.forEach((el, index) => {
+  (el as HTMLElement).style.transitionDelay = `${index * 0.06}s`;
+
+  onIntersection(el, { threshold: 0.15 })
+    .pipe(
+      filter((visible) => visible),
+      tap(() => el.classList.add('visible'))
+    )
+    .subscribe();
+});
+
+/* ─── 4. Destination carousel ─── */
+const slides = document.querySelectorAll('.showcase-slide') as NodeListOf<HTMLElement>;
+const dots = document.querySelectorAll('.showcase-dots .dot') as NodeListOf<HTMLButtonElement>;
+let currentSlide = 0;
+let autoAdvance: ReturnType<typeof setInterval>;
+
+const goToSlide = (index: number) => {
+  slides[currentSlide].classList.remove('active');
+  dots[currentSlide].classList.remove('active');
+  currentSlide = index;
+  slides[currentSlide].classList.add('active');
+  dots[currentSlide].classList.add('active');
 };
 
-console.error = (...args: any[]) => {
-  args.forEach((arg) => {
-    const message =
-      typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg);
-    typeEffectOutput(message, true);
-  });
+const nextSlide = () => goToSlide((currentSlide + 1) % slides.length);
+
+const startAutoAdvance = () => {
+  autoAdvance = setInterval(nextSlide, 5000);
 };
 
-// You can also add a container in HTML for the output to appear
-document.body.innerHTML +=
-  '<div id="output" style="font-family: monospace; padding: 20px;"></div>';
+const stopAutoAdvance = () => clearInterval(autoAdvance);
 
-(async () => {
-  await testOllama();
-  await fetchData();
-  await postData();
-  await testBinary();
-  await testNotFound();
-  await testRedirect();
-  await testManualRedirect();
-  await testTimeout();
-})();
+dots.forEach((dot, i) => {
+  fromEvent(dot, 'click')
+    .pipe(
+      tap(() => {
+        stopAutoAdvance();
+        goToSlide(i);
+        startAutoAdvance();
+      })
+    )
+    .subscribe();
+});
 
+startAutoAdvance();
 
+/* ─── 5. Post card hover tilt (subtle) ─── */
+const postCards = document.querySelectorAll('.post-card');
+postCards.forEach((card) => {
+  const el = card as HTMLElement;
+
+  fromEvent(el, 'mousemove')
+    .pipe(
+      map((e: Event) => {
+        const ev = e as MouseEvent;
+        const rect = el.getBoundingClientRect();
+        const x = (ev.clientX - rect.left) / rect.width - 0.5;
+        const y = (ev.clientY - rect.top) / rect.height - 0.5;
+        return { x, y };
+      }),
+      tap(({ x, y }) => {
+        el.style.transform = `translateY(-6px) perspective(800px) rotateX(${-y * 4}deg) rotateY(${x * 4}deg)`;
+      })
+    )
+    .subscribe();
+
+  fromEvent(el, 'mouseleave')
+    .pipe(
+      tap(() => {
+        el.style.transform = '';
+      })
+    )
+    .subscribe();
+});
+
+/* ─── 6. Newsletter focus effects ─── */
+const newsletterInput = document.querySelector('.newsletter-form input') as HTMLInputElement;
+const newsletterBtn = document.querySelector('.newsletter-form button') as HTMLButtonElement;
+
+if (newsletterInput) {
+  merge(
+    fromEvent(newsletterInput, 'focus').pipe(tap(() => {
+      newsletterInput.style.borderColor = 'var(--accent)';
+    })),
+    fromEvent(newsletterInput, 'blur').pipe(tap(() => {
+      newsletterInput.style.borderColor = '';
+    }))
+  ).subscribe();
+}
+
+if (newsletterBtn) {
+  fromEvent(newsletterBtn, 'mouseenter')
+    .pipe(tap(() => newsletterBtn.style.transform = 'translateY(-2px)'))
+    .subscribe();
+
+  fromEvent(newsletterBtn, 'mouseleave')
+    .pipe(tap(() => newsletterBtn.style.transform = ''))
+    .subscribe();
+}
+
+/* ─── 7. Smooth anchor scroll offset for fixed header ─── */
+document.querySelectorAll('a[href^="#"]').forEach((link) => {
+  fromEvent(link, 'click')
+    .pipe(
+      tap((e) => {
+        e.preventDefault();
+        const href = (link as HTMLAnchorElement).getAttribute('href');
+        const target = document.querySelector(href!);
+        if (target) {
+          const y = target.getBoundingClientRect().top + window.scrollY - 80;
+          window.scrollTo({ top: y, behavior: 'smooth' });
+        }
+      })
+    )
+    .subscribe();
+});

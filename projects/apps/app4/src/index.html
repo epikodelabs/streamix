@@ -1,13 +1,179 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>App4</title>
-  <base href="/">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wanderlust — Travel Journal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
 </head>
 <body>
-  <app-root></app-root>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="#" class="logo">Wanderlust</a>
+      <nav class="main-nav">
+        <a href="#destinations">Destinations</a>
+        <a href="#journal">Journal</a>
+        <a href="#tips">Tips</a>
+        <a href="#newsletter" class="nav-cta">Subscribe</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="hero-media">
+      <img src="https://images.unsplash.com/photo-1506905925346-21bda4d32df4" alt="Mountain landscape" />
+      <div class="hero-overlay"></div>
+    </div>
+    <div class="hero-content">
+      <p class="hero-eyebrow animate-text">The Travel Journal</p>
+      <h1 class="hero-title animate-text">Wander Far, <br />Live Fully</h1>
+      <p class="hero-lead animate-text">
+        Stories from the road less traveled — remote peaks, hidden coastlines, and the people who make places unforgettable.
+      </p>
+      <a href="#destinations" class="hero-cta animate-text">Explore Destinations</a>
+    </div>
+    <div class="scroll-hint">
+      <span class="scroll-line"></span>
+    </div>
+  </section>
+
+  <section class="destinations" id="destinations">
+    <div class="section-header reveal">
+      <span class="section-label">Featured</span>
+      <h2>Destinations</h2>
+      <p>Hand-picked places that will take your breath away.</p>
+    </div>
+
+    <div class="destination-showcase reveal">
+      <div class="showcase-stage">
+        <div class="showcase-slide active">
+          <img src="https://images.unsplash.com/photo-1433086966358-54859d0ed716" alt="Waterfall in green forest" />
+          <div class="slide-caption">
+            <span class="slide-tag">Pacific Northwest</span>
+            <h3>Multnomah Falls</h3>
+            <p>A two-tiered waterfall cascading through lush Columbia River Gorge rainforest.</p>
+          </div>
+        </div>
+        <div class="showcase-slide">
+          <img src="https://images.unsplash.com/photo-1521747116042-5a810fda9664" alt="Golden Gate Bridge" />
+          <div class="slide-caption">
+            <span class="slide-tag">North America</span>
+            <h3>San Francisco</h3>
+            <p>The Golden Gate Bridge at golden hour — fog rolling in from the Pacific.</p>
+          </div>
+        </div>
+        <div class="showcase-slide">
+          <img src="https://images.unsplash.com/photo-1514282401047-d79a71a590e8" alt="Maldives overwater bungalows" />
+          <div class="slide-caption">
+            <span class="slide-tag">Indian Ocean</span>
+            <h3>Maldives</h3>
+            <p>Overwater villas above crystalline lagoons — the ultimate escape into turquoise tranquility.</p>
+          </div>
+        </div>
+      </div>
+      <div class="showcase-dots">
+        <button class="dot active" data-index="0"></button>
+        <button class="dot" data-index="1"></button>
+        <button class="dot" data-index="2"></button>
+      </div>
+    </div>
+  </section>
+
+  <section class="journal" id="journal">
+    <div class="section-header reveal">
+      <span class="section-label">Journal</span>
+      <h2>Latest Stories</h2>
+      <p>Field notes, photography, and reflections from recent journeys.</p>
+    </div>
+
+    <div class="posts-grid">
+      <article class="post-card reveal">
+        <div class="post-image">
+          <img src="https://images.unsplash.com/photo-1500530855697-b586d89ba3ee" alt="Alpine peaks" />
+        </div>
+        <div class="post-body">
+          <span class="post-date">March 2025</span>
+          <h3>Above the Cloud Line</h3>
+          <p>A solo trek through the Swiss Alps taught me that the best views demand the hardest climbs.</p>
+          <a href="#" class="read-more">Read story →</a>
+        </div>
+      </article>
+
+      <article class="post-card reveal">
+        <div class="post-image">
+          <img src="https://images.unsplash.com/photo-1507525428034-b723cf961d3e" alt="Tropical beach" />
+        </div>
+        <div class="post-body">
+          <span class="post-date">February 2025</span>
+          <h3>The Quiet Shores of Thailand</h3>
+          <p>Far from the tourist trail, untouched beaches and warm turquoise shallows await.</p>
+          <a href="#" class="read-more">Read story →</a>
+        </div>
+      </article>
+
+      <article class="post-card reveal">
+        <div class="post-image">
+          <img src="https://images.unsplash.com/photo-1512453979798-5ea266f8880c" alt="Hot air balloons" />
+        </div>
+        <div class="post-body">
+          <span class="post-date">January 2025</span>
+          <h3>Dawn in Cappadocia</h3>
+          <p>Hundreds of hot air balloons rising over fairy chimneys at sunrise — a surreal spectacle.</p>
+          <a href="#" class="read-more">Read story →</a>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="tips" id="tips">
+    <div class="tips-inner">
+      <div class="section-header reveal">
+        <span class="section-label">Essentials</span>
+        <h2>Travel Tips</h2>
+        <p>Wisdom gathered from years on the road.</p>
+      </div>
+
+      <ul class="tips-list">
+        <li class="reveal">Pack only what you need — every extra kilogram is a burden on the trail.</li>
+        <li class="reveal">Learn "hello" and "thank you" in the local language. It opens more doors than you imagine.</li>
+        <li class="reveal">Travel insurance is not optional. Neither is a backup of your passport.</li>
+        <li class="reveal">Wake up early. The best light, the quietest streets, the most authentic moments happen at dawn.</li>
+        <li class="reveal">Eat where the locals eat. If the menu has photos, walk on.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="newsletter" id="newsletter">
+    <div class="newsletter-inner reveal">
+      <div class="newsletter-content">
+        <h2>Join the Journey</h2>
+        <p>One email per month. No spam, no noise — just stories, photography, and travel inspiration.</p>
+      </div>
+      <form class="newsletter-form">
+        <input type="email" placeholder="your@email.com" />
+        <button type="submit">Subscribe</button>
+      </form>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="logo">Wanderlust</span>
+        <p>Travel deeper. Stay curious.</p>
+      </div>
+      <div class="footer-links">
+        <a href="#">Instagram</a>
+        <a href="#">Twitter</a>
+        <a href="#">YouTube</a>
+      </div>
+    </div>
+    <p class="footer-copy">&copy; 2025 Wanderlust Journal. All rights reserved.</p>
+  </footer>
+
+
 </body>
 </html>
