@@ -110,6 +110,7 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
     createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
 
   subject.name = "onIdle";
+  subject.type = "stream";
   return subject;
 }
 

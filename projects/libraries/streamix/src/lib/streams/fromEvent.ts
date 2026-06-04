@@ -79,5 +79,6 @@ export function fromEvent(target: MaybePromise<EventTarget>, event: MaybePromise
   };
 
   subject.name = 'fromEvent';
+  subject.type = "stream";
   return subject;
 }

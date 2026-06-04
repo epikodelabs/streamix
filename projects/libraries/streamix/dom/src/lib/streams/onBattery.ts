@@ -137,6 +137,7 @@ export function onBattery(): Stream<BatteryState> {
     createAsyncIterator({ register: (receiver: Receiver<BatteryState>) => subject.subscribe(receiver) })();
 
   subject.name = "onBattery";
+  subject.type = "stream";
   return subject;
 }
 

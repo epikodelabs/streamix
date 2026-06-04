@@ -124,6 +124,7 @@ export function onFullscreen(): Stream<boolean> {
     createAsyncIterator({ register: (receiver: Receiver<boolean>) => subject.subscribe(receiver) })();
 
   subject.name = "onFullscreen";
+  subject.type = "stream";
   return subject;
 }
 

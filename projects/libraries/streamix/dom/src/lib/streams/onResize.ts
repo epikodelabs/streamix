@@ -22,8 +22,7 @@ export function onResize(
   element: MaybePromise<HTMLElement>
 ): Stream<{ width: number; height: number }> {
   const subject = createSubject<{ width: number; height: number }>();
-  subject.name = "onResize";
-
+  
   let subscriberCount = 0;
   let active = false;
 
@@ -158,6 +157,8 @@ export function onResize(
   subject[Symbol.asyncIterator] = () =>
     createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
 
+  subject.name = "onResize";
+  subject.type = "stream";
   return subject;
 }
 

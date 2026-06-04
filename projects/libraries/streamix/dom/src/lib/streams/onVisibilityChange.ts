@@ -21,7 +21,6 @@ import { createAsyncIterator, createSubject, type Receiver, type Stream } from "
  */
 export function onVisibilityChange(): Stream<DocumentVisibilityState> {
   const subject = createSubject<DocumentVisibilityState>();
-  subject.name = "onVisibilityChange";
 
   let subscriberCount = 0;
   let stopped = true;
@@ -100,6 +99,8 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
   subject[Symbol.asyncIterator] = () =>
     createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
 
+  subject.name = "onVisibilityChange";
+  subject.type = "stream";
   return subject;
 }
 

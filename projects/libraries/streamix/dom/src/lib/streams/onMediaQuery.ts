@@ -23,7 +23,6 @@ export function onMediaQuery(
   query: MaybePromise<string>
 ): Stream<boolean> {
   const subject = createSubject<boolean>();
-  subject.name = 'onMediaQuery';
 
   let subscriberCount = 0;
   let active = false;
@@ -139,6 +138,8 @@ export function onMediaQuery(
   subject[Symbol.asyncIterator] = () =>
     createAsyncIterator({ register: (r: Receiver<any>) => subject.subscribe(r) })();
 
+  subject.name = 'onMediaQuery';
+  subject.type = "stream";
   return subject;
 }
 

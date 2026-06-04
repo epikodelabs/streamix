@@ -138,6 +138,7 @@ export function onAnimationFrame(): Stream<number> {
     createAsyncIterator({ register: (receiver: Receiver<number>) => subject.subscribe(receiver) })();
 
   subject.name = "onAnimationFrame";
+  subject.type = "stream";
   return subject;
 }
 

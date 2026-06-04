@@ -24,7 +24,6 @@ export function onMutation(
   options?: MaybePromise<MutationObserverInit>
 ): Stream<MutationRecord[]> {
   const subject = createSubject<MutationRecord[]>();
-  subject.name = "onMutation";
 
   let subscriberCount = 0;
   let stopped = true;
@@ -113,6 +112,8 @@ export function onMutation(
   subject[Symbol.asyncIterator] = () =>
     createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
 
+  subject.name = "onMutation";
+  subject.type = "stream";
   return subject;
 }
 

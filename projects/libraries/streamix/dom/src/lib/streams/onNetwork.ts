@@ -32,7 +32,7 @@ export type NetworkState = {
  */
 export function onNetwork(): Stream<NetworkState> {
   const subject = createSubject<NetworkState>();
-  subject.name = "onNetwork";
+
 
   let subscriberCount = 0;
   let stopped = true;
@@ -121,6 +121,8 @@ export function onNetwork(): Stream<NetworkState> {
   subject[Symbol.asyncIterator] = () =>
     createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
 
+  subject.name = "onNetwork";
+  subject.type = "stream";
   return subject;
 }
 

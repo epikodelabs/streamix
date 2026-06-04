@@ -28,7 +28,6 @@ export type ViewportState = {
  */
 export function onViewportChange(): Stream<ViewportState> {
   const subject = createSubject<ViewportState>();
-  subject.name = "onViewportChange";
 
   let subscriberCount = 0;
   let stopped = true;
@@ -133,7 +132,9 @@ export function onViewportChange(): Stream<ViewportState> {
 
   subject[Symbol.asyncIterator] = () =>
     createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
-
+  
+  subject.name = "onViewportChange";
+  subject.type = "stream";
   return subject;
 }
 

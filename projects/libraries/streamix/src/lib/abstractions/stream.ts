@@ -187,6 +187,8 @@ export function createStream<T>(
     // Create new run state
     const abortController = new AbortController();
     const subject = createSubject<T>();
+    subject.name = name;
+    subject.type = 'stream';
     const run: ActiveRun = { subject, abortController, subscriberCount: 0 };
     
     // activeRun = run; // Caller handles this

@@ -16,7 +16,6 @@ import { createAsyncIterator, createSubject, type Receiver, type Stream } from "
  */
 export function onOrientation(): Stream<"portrait" | "landscape"> {
   const subject = createSubject<"portrait" | "landscape">();
-  subject.name = "onOrientation";
 
   let subscriberCount = 0;
   let stopped = true;
@@ -123,6 +122,8 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
   subject[Symbol.asyncIterator] = () =>
     createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
 
+  subject.name = "onOrientation";
+  subject.type = "stream";
   return subject;
 }
 
