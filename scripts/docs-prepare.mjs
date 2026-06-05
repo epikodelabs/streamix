@@ -41,6 +41,18 @@ function escapeRegExp(value) {
 
 ensureDir(distRoot);
 ensureDir(apiRoot);
+ensureDir(path.join(distRoot, 'public'));
+
+const presentationPaths = [
+  path.join(repoRoot, 'presentation.gif'),
+  path.join(repoRoot, 'projects', 'libraries', 'streamix', 'presentation.gif')
+];
+for (const src of presentationPaths) {
+  if (fs.existsSync(src)) {
+    copyFile(src, path.join(distRoot, 'public', 'presentation.gif'));
+    break;
+  }
+}
 
 const introPath = path.join(docsRoot, 'INTRODUCTION.md');
 const indexPath = path.join(distRoot, 'index.md');
