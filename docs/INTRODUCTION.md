@@ -4,7 +4,10 @@
   <img src="https://epikodelabs.github.io/streamix/LOGO.png" alt="streamix Logo" width="420">
 </p>
 
-<br>
+<p align="center">
+  <strong>Reactive streams built on async generators.</strong><br>
+  Small bundle. Pull-based execution. Familiar operator API.
+</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@epikodelabs%2Fstreamix">
@@ -28,7 +31,7 @@ Small bundle, pull-based execution, and a familiar operator API.
 
 ## ⭐ Support the Project
 
-If streamix helps you, please give the public docs repo a star so we know this work matters to developers:
+If streamix helps you, please give the public community repo a star so we know this work matters to you:
 
 - [Star on GitHub](https://github.com/epikodelabs/streamix-community)
 - [Join GitHub Discussions](https://github.com/epikodelabs/streamix-community/discussions)
@@ -42,12 +45,6 @@ The coroutine layer is one of the strongest parts of the library right now:
 - **`compute()`** — runs heavy work through a reusable worker pool for better throughput.
 - **`compose()`** — fuses coroutine stages into one worker-side pipeline instead of bouncing values across the main thread.
 - **`actor()`** — gives you long-lived stateful workers with inbox/outbox messaging, requests, and background coordination utilities.
-
-If you are evaluating streamix for browser-side concurrency, start here:
-
-- `@epikodelabs/streamix/coroutines`
-- [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz) on StackBlitz
-- `Actor-based game` — stateful worker messaging patterns, coming soon via Discussions
 
 ---
 
