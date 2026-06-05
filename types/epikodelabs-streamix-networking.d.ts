@@ -150,6 +150,13 @@ declare const useRedirect: (maxRedirects?: number) => Middleware;
  */
 declare const useHeader: (name: string, value: string) => Middleware;
 /**
+ * Removes headers from the request context by name.
+ *
+ * This is useful for stripping default headers (like `Content-Type`) that
+ * would otherwise trigger a CORS preflight on simple GET requests.
+ */
+declare const useStripHeaders: (...names: string[]) => Middleware;
+/**
  * Appends query parameters to the request URL.
  */
 declare const useParams: (data: Record<string, any>) => Middleware;
@@ -390,5 +397,5 @@ type WebSocketStream<T = any> = Stream<T> & {
  */
 declare function webSocket<T = any>(url: MaybePromise<string>, factory?: (url: string) => MaybePromise<WebSocket>): WebSocketStream<T>;
 
-export { createHttpClient, jsonp, readArrayBuffer, readBase64Chunk, readBinaryChunk, readBlob, readChunks, readCsvChunk, readFull, readJson, readJsonChunk, readNdjsonChunk, readStatus, readText, readTextChunk, useAccept, useBase, useCustom, useFallback, useHeader, useLogger, useOauth, useParams, useRedirect, useRetry, useTimeout, webSocket };
+export { createHttpClient, jsonp, readArrayBuffer, readBase64Chunk, readBinaryChunk, readBlob, readChunks, readCsvChunk, readFull, readJson, readJsonChunk, readNdjsonChunk, readStatus, readText, readTextChunk, useAccept, useBase, useCustom, useFallback, useHeader, useLogger, useOauth, useParams, useRedirect, useRetry, useStripHeaders, useTimeout, webSocket };
 export type { ChunkData, Context, HttpClient, HttpOptions, HttpStream, Middleware, ParserFunction, WebSocketStream };

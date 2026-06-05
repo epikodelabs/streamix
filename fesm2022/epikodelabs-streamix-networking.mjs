@@ -204,6 +204,25 @@ const useHeader = (name, value) => {
     };
 };
 /**
+ * Removes headers from the request context by name.
+ *
+ * This is useful for stripping default headers (like `Content-Type`) that
+ * would otherwise trigger a CORS preflight on simple GET requests.
+ */
+const useStripHeaders = (...names) => {
+    return (next) => async (context) => {
+        const cleaned = {};
+        const toRemove = names.map((n) => n.toLowerCase());
+        for (const [key, value] of Object.entries(context.headers)) {
+            if (!toRemove.includes(key.toLowerCase())) {
+                cleaned[key] = value;
+            }
+        }
+        context.headers = cleaned;
+        return await next(context);
+    };
+};
+/**
  * Appends query parameters to the request URL.
  */
 const useParams = (data) => {
@@ -1049,5 +1068,5 @@ function webSocket(url, factory = (u) => new WebSocket(u)) {
  * Generated bundle index. Do not edit.
  */
 
-export { createHttpClient, jsonp, readArrayBuffer, readBase64Chunk, readBinaryChunk, readBlob, readChunks, readCsvChunk, readFull, readJson, readJsonChunk, readNdjsonChunk, readStatus, readText, readTextChunk, useAccept, useBase, useCustom, useFallback, useHeader, useLogger, useOauth, useParams, useRedirect, useRetry, useTimeout, webSocket };
+export { createHttpClient, jsonp, readArrayBuffer, readBase64Chunk, readBinaryChunk, readBlob, readChunks, readCsvChunk, readFull, readJson, readJsonChunk, readNdjsonChunk, readStatus, readText, readTextChunk, useAccept, useBase, useCustom, useFallback, useHeader, useLogger, useOauth, useParams, useRedirect, useRetry, useStripHeaders, useTimeout, webSocket };
 //# sourceMappingURL=epikodelabs-streamix-networking.mjs.map

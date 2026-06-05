@@ -114,11 +114,12 @@ declare function createSubscription(onUnsubscribe?: () => MaybePromise): Subscri
  * @template T The type of values emitted by the stream.
  */
 type Stream<T = any> = AsyncIterable<T> & {
-    type: "stream" | "subject";
+    type: string;
     name?: string;
     pipe: OperatorChain<T>;
     subscribe(callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription;
     query: () => Promise<T>;
+    toArray: () => Promise<T[]>;
     [Symbol.asyncIterator](): AsyncIterator<T>;
 };
 /**
@@ -129,6 +130,7 @@ type Stream<T = any> = AsyncIterable<T> & {
  * @returns {boolean} True if the value is a Stream.
  */
 declare const isStreamLike: <T = unknown>(value: unknown) => value is Stream<T>;
+declare function streamToArray<T>(stream: Stream<T>): Promise<T[]>;
 /**
  * Creates a multicast {@link Stream} from an async generator factory.
  *
@@ -1478,12 +1480,35 @@ declare function from<T = any>(source: MaybePromise<AsyncIterable<T> | Iterable<
  * such as mouse clicks, keyboard presses, or custom events. The stream
  * will emit a new event object each time the event is dispatched.
  *
- * @template {Event} T The type of the event to listen for. Defaults to a generic `Event`.
- * @param {EventTarget | PromiseLike<EventTarget>} target The event target to listen to (e.g., a DOM element, `window`, or `document`).
- * @param {string | PromiseLike<string>} event The name of the event to listen for (e.g., 'click', 'keydown').
- * @returns {Stream<T>} A stream that emits the event objects as they occur.
+ * The stream handles:
+ * - Promise-based resolution of both target and event name
+ * - Automatic cleanup when the last subscriber unsubscribes
+ * - Multicast to multiple subscribers
+ * - Proper error propagation if event listener setup fails
+ *
+ * @template T The type of the event to listen for.
+ * @param target The event target to listen to (e.g., a DOM element, `window`, or `document`).
+ *               Can be a direct EventTarget or a Promise that resolves to one.
+ * @param event The name of the event to listen for (e.g., 'click', 'keydown').
+ *              Can be a direct string or a Promise that resolves to one.
+ * @param options Optional event listener options (e.g., `{ once: false, passive: true }`).
+ * @returns A stream that emits the event objects as they occur.
+ *
+ * @example
+ * // Basic usage
+ * const clicks = fromEvent(document.getElementById('myButton'), 'click');
+ * clicks.subscribe(console.log);
+ *
+ * @example
+ * // With async target (e.g., waiting for DOM element)
+ * const asyncButton = waitForElement('#myButton');
+ * const clicks = fromEvent(asyncButton, 'click');
+ *
+ * @example
+ * // With custom event
+ * const customEvents = fromEvent(window, 'my-custom-event');
  */
-declare function fromEvent(target: MaybePromise<EventTarget>, event: MaybePromise<string>): Stream<Event>;
+declare function fromEvent<T extends Event = Event>(target: MaybePromise<EventTarget>, event: MaybePromise<string>, options?: AddEventListenerOptions | boolean): Stream<T>;
 
 /**
  * Creates a stream from a value, promise, or a cancelable asynchronous factory.
@@ -1686,6 +1711,7 @@ type BehaviorSubject<T = any> = Stream<T> & {
     subscribe(): Subscription;
     subscribe(callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription;
     query: () => Promise<T>;
+    toArray: () => Promise<T[]>;
 };
 /**
  * Create a `BehaviorSubject` seeded with `initialValue`.
@@ -1738,6 +1764,7 @@ type ReplaySubject<T = any> = Subject<T> & {
     subscribe(): Subscription;
     subscribe(callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>): Subscription;
     query: () => Promise<T>;
+    toArray: () => Promise<T[]>;
 };
 /**
  * Create a `ReplaySubject` with an optional capacity of buffered items.
@@ -1946,5 +1973,5 @@ declare function createAsyncIterator<T>(opts: {
     __pushError?: (err: any) => void;
 };
 
-export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
+export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
 export type { AsyncCoordinator, AsyncIteratorResult, AsyncIteratorYieldResult, AsyncPushable, BehaviorSubject, ExpandOptions, ForkOption, GroupItem, MaybePromise, Operator, OperatorChain, PendingError, QueueItem, Receiver, ReleaseFn, ReplaySubject, RunnerEvent, Semaphore, SimpleLock, Stream, StrictReceiver, Subject, Subscription };

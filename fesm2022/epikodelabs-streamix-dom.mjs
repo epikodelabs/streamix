@@ -111,6 +111,7 @@ function onAnimationFrame() {
      * ---------------------------------------------------------------------- */
     subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (receiver) => subject.subscribe(receiver) })();
     subject.name = "onAnimationFrame";
+    subject.type = "stream";
     return subject;
 }
 
@@ -220,6 +221,7 @@ function onBattery() {
      * ---------------------------------------------------------------------- */
     subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (receiver) => subject.subscribe(receiver) })();
     subject.name = "onBattery";
+    subject.type = "stream";
     return subject;
 }
 
@@ -324,6 +326,7 @@ function onFullscreen() {
      * ---------------------------------------------------------------------- */
     subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (receiver) => subject.subscribe(receiver) })();
     subject.name = "onFullscreen";
+    subject.type = "stream";
     return subject;
 }
 
@@ -415,6 +418,7 @@ function onIdle(timeout) {
      * ---------------------------------------------------------------------- */
     subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (receiver) => subject.subscribe(receiver) })();
     subject.name = "onIdle";
+    subject.type = "stream";
     return subject;
 }
 
@@ -552,7 +556,6 @@ function onIntersection(element, options) {
  */
 function onMediaQuery(query) {
     const subject = createSubject();
-    subject.name = 'onMediaQuery';
     let subscriberCount = 0;
     let active = false;
     let mql = null;
@@ -648,6 +651,8 @@ function onMediaQuery(query) {
     /* Async iteration support                            */
     /* -------------------------------------------------- */
     subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (r) => subject.subscribe(r) })();
+    subject.name = 'onMediaQuery';
+    subject.type = "stream";
     return subject;
 }
 
@@ -672,7 +677,6 @@ function onMediaQuery(query) {
  */
 function onMutation(element, options) {
     const subject = createSubject();
-    subject.name = "onMutation";
     let subscriberCount = 0;
     let stopped = true;
     let resolvedElement = null;
@@ -742,6 +746,8 @@ function onMutation(element, options) {
      * Async iteration support
      * ---------------------------------------------------------------------- */
     subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (receiver) => subject.subscribe(receiver) })();
+    subject.name = "onMutation";
+    subject.type = "stream";
     return subject;
 }
 
@@ -765,7 +771,6 @@ function onMutation(element, options) {
  */
 function onNetwork() {
     const subject = createSubject();
-    subject.name = "onNetwork";
     let subscriberCount = 0;
     let stopped = true;
     let connection = null;
@@ -831,6 +836,8 @@ function onNetwork() {
      * Async iteration support
      * ---------------------------------------------------------------------- */
     subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (receiver) => subject.subscribe(receiver) })();
+    subject.name = "onNetwork";
+    subject.type = "stream";
     return subject;
 }
 
@@ -850,7 +857,6 @@ function onNetwork() {
  */
 function onOrientation() {
     const subject = createSubject();
-    subject.name = "onOrientation";
     let subscriberCount = 0;
     let stopped = true;
     let orientation = null;
@@ -928,6 +934,8 @@ function onOrientation() {
      * Async iteration support
      * ---------------------------------------------------------------------- */
     subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (receiver) => subject.subscribe(receiver) })();
+    subject.name = "onOrientation";
+    subject.type = "stream";
     return subject;
 }
 
@@ -951,7 +959,6 @@ function onOrientation() {
  */
 function onResize(element) {
     const subject = createSubject();
-    subject.name = "onResize";
     let subscriberCount = 0;
     let active = false;
     let resolvedElement = null;
@@ -1064,6 +1071,8 @@ function onResize(element) {
     /* Async iteration support                            */
     /* -------------------------------------------------- */
     subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (receiver) => subject.subscribe(receiver) })();
+    subject.name = "onResize";
+    subject.type = "stream";
     return subject;
 }
 
@@ -1084,7 +1093,6 @@ function onResize(element) {
  */
 function onViewportChange() {
     const subject = createSubject();
-    subject.name = "onViewportChange";
     let subscriberCount = 0;
     let stopped = true;
     let target = null;
@@ -1167,6 +1175,8 @@ function onViewportChange() {
      * Async iteration support
      * ---------------------------------------------------------------------- */
     subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (receiver) => subject.subscribe(receiver) })();
+    subject.name = "onViewportChange";
+    subject.type = "stream";
     return subject;
 }
 
@@ -1191,7 +1201,6 @@ function onViewportChange() {
  */
 function onVisibilityChange() {
     const subject = createSubject();
-    subject.name = "onVisibilityChange";
     let subscriberCount = 0;
     let stopped = true;
     const getState = () => {
@@ -1251,6 +1260,8 @@ function onVisibilityChange() {
      * Async iteration support
      * ---------------------------------------------------------------------- */
     subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (receiver) => subject.subscribe(receiver) })();
+    subject.name = "onVisibilityChange";
+    subject.type = "stream";
     return subject;
 }
 

@@ -1255,6 +1255,7 @@ function createBehaviorSubject(initialValue) {
         },
         subscribe,
         query: () => firstValueFrom(self),
+        toArray: () => streamToArray(self),
         [Symbol.asyncIterator]: () => {
             const listener = createAsyncPushable();
             // Replay current value only if the subject is still alive.
@@ -1447,6 +1448,7 @@ function createReplaySubject(capacity = Infinity) {
         },
         subscribe,
         query: () => firstValueFrom(self),
+        toArray: () => streamToArray(self),
         [Symbol.asyncIterator]: () => {
             const listener = createAsyncPushable();
             // Replay buffered values
@@ -1609,6 +1611,7 @@ function createSubject() {
         },
         subscribe,
         query: () => firstValueFrom(self),
+        toArray: () => streamToArray(self),
         [Symbol.asyncIterator]: () => {
             const listener = createAsyncPushable();
             if (!isCompleted) {
@@ -1701,6 +1704,25 @@ const isStreamLike = (value) => {
     return ((v.type === "stream" || v.type === "subject") &&
         typeof v[Symbol.asyncIterator] === "function");
 };
+async function streamToArray(stream) {
+    const iterator = stream[Symbol.asyncIterator]();
+    const result = [];
+    try {
+        while (true) {
+            const next = await iterator.next();
+            if (next.done)
+                break;
+            result.push(next.value);
+        }
+        return result;
+    }
+    finally {
+        try {
+            await iterator.return?.();
+        }
+        catch { }
+    }
+}
 function waitForAbort(signal) {
     if (signal.aborted)
         return Promise.resolve();
@@ -1807,6 +1829,8 @@ function createStream(name, generatorFn) {
         // Create new run state
         const abortController = new AbortController();
         const subject = createSubject();
+        subject.name = name;
+        subject.type = 'stream';
         const run = { subject, abortController, subscriberCount: 0 };
         // activeRun = run; // Caller handles this
         void (async () => {
@@ -1894,6 +1918,7 @@ function createStream(name, generatorFn) {
         pipe,
         subscribe: wrappedSubscribe,
         query: () => firstValueFrom(self),
+        toArray: () => streamToArray(self),
         [Symbol.asyncIterator]: () => {
             const factory = createAsyncIterator({
                 register: (receiver) => wrappedSubscribe(receiver)
@@ -1946,6 +1971,7 @@ function pipeSourceThrough(source, operators) {
         pipe: (...nextOps) => pipeSourceThrough(pipedStream, nextOps),
         subscribe: (cb) => registerReceiver(createReceiver(cb)),
         query: () => firstValueFrom(pipedStream),
+        toArray: () => streamToArray(pipedStream),
         [Symbol.asyncIterator]: () => {
             const iterator = applyOperators(getSourceIterator(source));
             const publicIterator = {
@@ -2408,21 +2434,43 @@ function from(source) {
  * such as mouse clicks, keyboard presses, or custom events. The stream
  * will emit a new event object each time the event is dispatched.
  *
- * @template {Event} T The type of the event to listen for. Defaults to a generic `Event`.
- * @param {EventTarget | PromiseLike<EventTarget>} target The event target to listen to (e.g., a DOM element, `window`, or `document`).
- * @param {string | PromiseLike<string>} event The name of the event to listen for (e.g., 'click', 'keydown').
- * @returns {Stream<T>} A stream that emits the event objects as they occur.
+ * The stream handles:
+ * - Promise-based resolution of both target and event name
+ * - Automatic cleanup when the last subscriber unsubscribes
+ * - Multicast to multiple subscribers
+ * - Proper error propagation if event listener setup fails
+ *
+ * @template T The type of the event to listen for.
+ * @param target The event target to listen to (e.g., a DOM element, `window`, or `document`).
+ *               Can be a direct EventTarget or a Promise that resolves to one.
+ * @param event The name of the event to listen for (e.g., 'click', 'keydown').
+ *              Can be a direct string or a Promise that resolves to one.
+ * @param options Optional event listener options (e.g., `{ once: false, passive: true }`).
+ * @returns A stream that emits the event objects as they occur.
+ *
+ * @example
+ * // Basic usage
+ * const clicks = fromEvent(document.getElementById('myButton'), 'click');
+ * clicks.subscribe(console.log);
+ *
+ * @example
+ * // With async target (e.g., waiting for DOM element)
+ * const asyncButton = waitForElement('#myButton');
+ * const clicks = fromEvent(asyncButton, 'click');
+ *
+ * @example
+ * // With custom event
+ * const customEvents = fromEvent(window, 'my-custom-event');
  */
-function fromEvent(target, event) {
-    const subject = createSubject(); // Create a subject to emit event values.
+function fromEvent(target, event, options) {
+    const subject = createSubject();
     let subscriberCount = 0;
     let listening = false;
     let resolvedTarget = null;
     let resolvedEvent = null;
-    const originalSubscribe = subject.subscribe; // Capture original subscribe method.
     const listener = (ev) => {
         if (!subject.completed()) {
-            subject.next(ev); // Emit the event directly into the subject's stream
+            subject.next(ev);
         }
     };
     const start = async () => {
@@ -2432,7 +2480,7 @@ function fromEvent(target, event) {
         if (!isPromiseLike(target) && !isPromiseLike(event)) {
             resolvedTarget = target;
             resolvedEvent = event;
-            resolvedTarget.addEventListener(resolvedEvent, listener);
+            resolvedTarget.addEventListener(resolvedEvent, listener, options);
             return;
         }
         const targetValue = isPromiseLike(target) ? await target : target;
@@ -2441,18 +2489,19 @@ function fromEvent(target, event) {
             return;
         resolvedTarget = targetValue;
         resolvedEvent = eventValue;
-        resolvedTarget.addEventListener(resolvedEvent, listener);
+        resolvedTarget.addEventListener(resolvedEvent, listener, options);
     };
     const stop = () => {
         if (!listening)
             return;
         listening = false;
         if (resolvedTarget && resolvedEvent) {
-            resolvedTarget.removeEventListener(resolvedEvent, listener);
+            resolvedTarget.removeEventListener(resolvedEvent, listener, options);
         }
         resolvedTarget = null;
         resolvedEvent = null;
     };
+    const originalSubscribe = subject.subscribe;
     subject.subscribe = (callback) => {
         const subscription = originalSubscribe.call(subject, callback);
         if (++subscriberCount === 1) {
@@ -2467,7 +2516,9 @@ function fromEvent(target, event) {
         };
         return subscription;
     };
+    subject[Symbol.asyncIterator] = () => createAsyncIterator({ register: (receiver) => subject.subscribe(receiver) })();
     subject.name = 'fromEvent';
+    subject.type = "stream";
     return subject;
 }
 
@@ -6372,5 +6423,5 @@ const createSemaphore = (initialCount) => {
  * Generated bundle index. Do not edit.
  */
 
-export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
+export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
 //# sourceMappingURL=epikodelabs-streamix.mjs.map
