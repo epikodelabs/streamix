@@ -28,7 +28,7 @@ import { ImagePipelineService } from './image-pipeline.service';
           ⚙️ Settings
           <span class="chevron" [class.open]="showSettings()">▼</span>
         </button>
-        <div class="settings-body" [@expand]="showSettings() ? 'open' : 'closed'">
+        <div class="settings-body" [class.collapsed]="!showSettings()">
           <div class="field">
             <label>Max width</label>
             <input type="range" min="200" max="3000" step="100"
@@ -188,6 +188,11 @@ import { ImagePipelineService } from './image-pipeline.service';
       display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
       gap: 16px; padding: 16px; background: var(--surface);
       border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius) var(--radius);
+      transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease;
+      max-height: 400px; opacity: 1; overflow: hidden;
+    }
+    .settings-body.collapsed {
+      max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0;
     }
     .field { display: flex; flex-direction: column; gap: 6px; }
     .field label { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; }

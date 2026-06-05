@@ -67,7 +67,7 @@ export class ImagePipelineService {
   );
 
   constructor() {
-    main.inbox.subscribe('main', (message: ActorBusMessage<any>) => {
+    main.inbox.subscribe((message: ActorBusMessage<any>) => {
       if (message.topic !== 'progress') {
         return;
       }

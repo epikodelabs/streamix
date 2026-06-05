@@ -121,7 +121,7 @@ const __runBehaviorLoop = async (workerId, taskId) => {
 };
 
 onmessage = async (event) => {
-  const { workerId, taskId, payload, type, requestId, error } = event.data;
+  const { workerId, taskId, payload, type, requestId, error, topic } = event.data;
 
   if (type === "notify") {
     if (__actorRunning) {
