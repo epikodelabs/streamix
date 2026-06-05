@@ -376,7 +376,7 @@ export class KitchenService {
   private destroyed = false;
 
   constructor() {
-    this.onMessageUnsubscribe = main.inbox.subscribe('main', (message: ActorBusMessage<any>) => {
+    this.onMessageUnsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
       if (message.from !== 'chef') {
         return;
       }
@@ -502,7 +502,7 @@ export class KitchenService {
     return new Promise((resolve) => {
       let resolved = false;
 
-      const unsub = main.inbox.subscribe('main', (message: ActorBusMessage<any>) => {
+      const unsub = main.inbox.subscribe((message: ActorBusMessage<any>) => {
         if (message.from !== 'chef') {
           return;
         }
