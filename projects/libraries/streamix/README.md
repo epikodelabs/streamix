@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="presentation.gif" alt="streamix presentation" width="100%">
-</p>
-
 <br>
 
 <p align="center">
@@ -26,6 +22,12 @@
   <a href="https://github.com/epikodelabs/streamix/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg?style=flat-square" alt="License">
   </a>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="https://epikodelabs.github.io/streamix/presentation.gif" alt="streamix presentation" width="100%">
 </p>
 
 ---

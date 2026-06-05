@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="presentation.gif" alt="streamix presentation" width="100%">
-</p>
-
 <br>
 
 <p align="center">
@@ -28,212 +24,123 @@
   </a>
 </p>
 
----
 
-## ✨ What is streamix?
+<br>
 
-**streamix** is a reactive streams library for TypeScript and JavaScript built on top of async generators. It gives you a familiar, RxJS-like operator API while keeping the runtime small and the execution model pull-based—values are computed only when the consumer asks for them.
-
-Whether you are building a dashboard, a CLI tool, or a browser app with heavy background work, streamix normalizes async operations into an iterator-first workflow that is predictable, testable, and memory-friendly.
-
-### Highlights
-
-- 🔄 **Pull-based execution** — values are computed on demand, not pushed
-- ⏱️ **Async iterator first** — designed for `for await...of`
-- 🧩 **Familiar operators** — `map`, `filter`, `switchMap`, `debounce`, `scan`, and many more
-- 🧪 **`query()` for promises** — await the first emitted value and auto-unsubscribe
-- 🧵 **Coroutines & actors** — offload heavy work to Web Workers with `compute()`, `compose()`, and `actor()`
-- 🌐 **Optional add-ons** — HTTP client, WebSocket helpers, and DOM observation utilities
+<p align="center">
+  <img src="https://epikodelabs.github.io/streamix/presentation.gif" alt="streamix presentation" width="100%">
+</p>
 
 ---
 
-## 📦 Installation
+## 🧭 About This Repository
+
+This is the **streamix solution repository** — a monorepo that contains the core reactive-streams library, optional add-on modules, demo applications, documentation sources, and build tooling.
+
+If you are looking for the library documentation and API reference, see:
+- **[Library README](./projects/libraries/streamix/README.md)** — package-level install and usage
+- **[Live Documentation](https://epikodelabs.github.io/streamix)** — full docs site
+
+---
+
+## 📁 Solution Structure
+
+```
+streamix/
+├── projects/
+│   ├── libraries/
+│   │   └── streamix/           # Core npm package (@epikodelabs/streamix)
+│   │       ├── src/            # Streams, operators, subjects
+│   │       ├── aggregates/     # Aggregate operators (average, min/max, etc.)
+│   │       ├── coroutines/     # Web Worker coroutines & actors
+│   │       ├── dom/            # DOM observation utilities
+│   │       ├── networking/     # HTTP client, WebSocket, JSONP
+│   │       └── presentation.gif
+│   └── apps/
+│       ├── app1 .. app8/       # Demo & test applications
+├── docs/                       # VitePress documentation source
+├── scripts/                    # Build, SEO, and docs automation
+├── dist/                       # Build output & VitePress site
+├── README.md                   # ← You are here
+└── package.json                # Workspace scripts & dependencies
+```
+
+---
+
+## 🚀 Quick Start for Contributors
+
+### Prerequisites
+
+- Node.js (LTS recommended)
+- npm or pnpm
+
+### Install dependencies
 
 ```bash
-npm install @epikodelabs/streamix
+npm install
 ```
+
+### Build the library
 
 ```bash
-yarn add @epikodelabs/streamix
+npm run build
 ```
+
+### Run tests
 
 ```bash
-pnpm add @epikodelabs/streamix
+npm test
+# or with coverage
+npm run jasmine:coverage
 ```
+
+### Serve a demo app
+
+```bash
+ng serve app1
+```
+
+### Build documentation
+
+```bash
+npm run docs:build
+```
+
+The static site is output to `dist/.vitepress/dist/`.
 
 ---
 
-## ⚡ Quick Start
+## 📦 Packages in This Solution
 
-### Stream from a range
-
-```typescript
-import { range, map, filter, take } from '@epikodelabs/streamix';
-
-const potionRecipe = range(1, 20).pipe(
-  map(i => ({
-    name: ['Dragon Scale', 'Phoenix Tear', 'Unicorn Hair', 'Mermaid Kelp'][i % 4],
-    power: i * 10,
-    rarity: i % 3 === 0 ? 'legendary' : 'common'
-  })),
-  filter(item => item.rarity === 'legendary'),
-  map(item => `✨ ${item.name} (${item.power} power)`),
-  take(5)
-);
-
-for await (const ingredient of potionRecipe) {
-  console.log('Adding to cauldron:', ingredient);
-}
-```
-
-### React to DOM events
-
-```typescript
-import { fromEvent, debounce, filter, switchMap, map, startWith } from '@epikodelabs/streamix';
-
-const jokeStream = fromEvent(searchInput, 'input').pipe(
-  map(e => (e.target as HTMLInputElement).value.trim()),
-  debounce(400),
-  filter(term => term.length > 1),
-  switchMap(term =>
-    fromPromise(
-      fetch(`https://icanhazdadjoke.com/search?term=${encodeURIComponent(term)}`, {
-        headers: { Accept: 'application/json' }
-      })
-        .then(r => r.json())
-        .then(data => data.results.slice(0, 5))
-        .catch(() => [{ joke: 'No jokes found... that\'s not funny 😢' }])
-    )
-  ),
-  startWith([])
-);
-
-for await (const jokes of jokeStream) {
-  renderJokes(jokes);
-}
-```
-
-### Query a single value
-
-```typescript
-import { interval, take } from '@epikodelabs/streamix';
-
-const firstTick = await interval(1000).pipe(take(1)).query();
-console.log(firstTick); // → 0
-```
+| Package | Path | Description |
+|---------|------|-------------|
+| `@epikodelabs/streamix` | `projects/libraries/streamix/src` | Core reactive streams |
+| `@epikodelabs/streamix/aggregates` | `projects/libraries/streamix/aggregates` | Aggregate operators |
+| `@epikodelabs/streamix/coroutines` | `projects/libraries/streamix/coroutines` | Web Worker utilities |
+| `@epikodelabs/streamix/dom` | `projects/libraries/streamix/dom` | DOM observers |
+| `@epikodelabs/streamix/networking` | `projects/libraries/streamix/networking` | HTTP / WebSocket |
 
 ---
 
-## 🧠 Core Concepts
+## 🛠️ Scripts Reference
 
-### Streams
-
-Streams are async generators you can iterate with `for await...of`:
-
-```typescript
-import { createStream } from '@epikodelabs/streamix';
-
-async function* countdown() {
-  for (let i = 10; i > 0; i--) {
-    yield `T-${i}...`;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  yield '🚀 Launch!';
-}
-
-const launchStream = createStream('countdown', countdown);
-
-for await (const msg of launchStream) {
-  console.log(msg);
-}
-```
-
-### Subjects
-
-Manually control emissions when you need an imperative source:
-
-```typescript
-import { createSubject } from '@epikodelabs/streamix';
-
-const chat = createSubject<string>();
-
-for await (const msg of chat) {
-  console.log('New message:', msg);
-}
-
-chat.next('Hey! 👋');
-chat.next('Anyone here?');
-chat.complete();
-```
-
-### Coroutines
-
-Run heavy work off the main thread with a worker pool:
-
-```typescript
-import { compute } from '@epikodelabs/streamix/coroutines';
-
-const primes = compute(async function* () {
-  let n = 2;
-  while (true) {
-    while (!isPrime(n)) n++;
-    yield n++;
-  }
-});
-
-for await (const p of primes.pipe(take(10))) {
-  console.log('Prime:', p);
-}
-```
+| Script | What it does |
+|--------|--------------|
+| `npm run build` | Build the Angular/library workspace |
+| `npm test` | Run the testify test suite |
+| `npm run jasmine` | Run tests headlessly in Chrome |
+| `npm run docs:build` | Full docs pipeline (prepare → generate → build) |
+| `npm run docs:prepare` | Copy markdown & assets into `dist/` |
+| `npm run clean` | Auto-fix ESLint issues |
+| `npm run minify` | Minify bundles & regenerate types |
 
 ---
 
-## 📁 Monorepo Structure
+## 💬 Community & Feedback
 
-```
-projects/libraries/streamix/
-├── src/           # Core library (streams, operators, subjects)
-├── aggregates/    # Aggregate operators (average, min/max, etc.)
-├── coroutines/    # Web Worker coroutines and actors
-├── dom/           # DOM observation utilities (onResize, etc.)
-└── networking/    # HTTP client, WebSocket, JSONP
-```
-
----
-
-## 🚀 What's New?
-
-The coroutine layer is one of the strongest parts of the library right now:
-
-- **`compute()`** — runs heavy work through a reusable worker pool.
-- **`compose()`** — fuses coroutine stages into a single worker-side pipeline.
-- **`actor()`** — long-lived stateful workers with inbox/outbox messaging and background coordination.
-
-If you are evaluating streamix for browser-side concurrency, start with `@epikodelabs/streamix/coroutines`.
-
----
-
-## 🎬 Live Demos
-
-- [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
-- [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
-- [Travel Blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w)
-
----
-
-## 📚 Documentation
-
-- [Full Documentation](https://epikodelabs.github.io/streamix)
-- [Medium: A Generator-Driven, Pull-Based Reactive Core](https://medium.com/p/a1eb9e7ce1d7)
-- [Medium: streamix vs redux-saga](https://medium.com/p/0bfc206ad41c)
-
----
-
-## 💬 Community
-
-- Give the [public docs repo](https://github.com/epikodelabs/epikodelabs.github.io) a ⭐ if streamix helps you.
-- Join [GitHub Discussions](https://github.com/orgs/epikodelabs/discussions) for questions and ideas.
-- [Share your feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
+- ⭐ Star the [public docs repo](https://github.com/epikodelabs/epikodelabs.github.io) if streamix helps you.
+- Join [GitHub Discussions](https://github.com/orgs/epikodelabs/discussions).
+- [Share feedback](https://forms.gle/CDLvoXZqMMyp4VKu9).
 
 ---
 
