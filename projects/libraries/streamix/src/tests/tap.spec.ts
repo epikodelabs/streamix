@@ -28,6 +28,24 @@ describe('tap', () => {
     });
   });
 
+  it('should await async side effects', async () => {
+    const delays: number[] = [];
+    const start = Date.now();
+
+    const stream = from([1, 2, 3]).pipe(
+      tap(async (value) => {
+        await new Promise(r => setTimeout(r, 20));
+        delays.push(value);
+      })
+    );
+
+    await stream.toArray();
+
+    const elapsed = Date.now() - start;
+    expect(delays).toEqual([1, 2, 3]);
+    expect(elapsed).toBeGreaterThanOrEqual(50);
+  });
+
   it('should propagate early unsubscribe upstream', (done) => {
     let cleaned = false;
 

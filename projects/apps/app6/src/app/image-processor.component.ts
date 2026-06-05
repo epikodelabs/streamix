@@ -26,6 +26,9 @@ import { ImagePipelineService } from './image-pipeline.service';
             }
           </div>
         }
+        @if (pipeline.doneCount()) {
+          <button class="btn btn-primary" (click)="pipeline.downloadAll()">⬇ Download all</button>
+        }
         @if (pipeline.jobs().length) {
           <button class="btn btn-ghost" (click)="pipeline.clearAll()">Clear all</button>
         }

@@ -5,7 +5,6 @@ import {
     combineLatest,
     createSubject,
     debounce,
-    delay,
     filter,
     finalize,
     fromEvent,
@@ -407,12 +406,14 @@ interface Metric {
       padding: 10px;
       max-height: 200px;
       overflow-y: auto;
+      scrollbar-width: none;
       font-family: 'Courier New', monospace;
       font-size: 0.8rem;
       display: flex;
       flex-direction: column;
       gap: 4px;
     }
+    .log-panel::-webkit-scrollbar { display: none; }
     .log-entry { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px solid rgba(42,47,63,0.5); }
     .log-entry:last-child { border-bottom: none; }
     .log-time { color: var(--text-muted); min-width: 70px; }
@@ -533,6 +534,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     this.juliaGenerating = true;
     this.juliaProgress = 0;
     this.juliaElapsed = 0;
+    this.cdr.detectChanges();
     const startTime = performance.now();
 
     const maxIterations = 60;
@@ -575,8 +577,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         return { i, r, g, b };
       }),
       bufferCount(batchSize),
-      delay(0),
-      tap((batch: Array<{ i: number; r: number; g: number; b: number }>) => {
+      tap(async (batch: Array<{ i: number; r: number; g: number; b: number }>) => {
         for (const p of batch) {
           const idx = p.i * 4;
           data[idx] = p.r;
@@ -586,8 +587,10 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         }
         pixelsDone += batch.length;
         this.juliaProgress = (pixelsDone / (width * height)) * 100;
-        this.cdr.detectChanges();
         ctx.putImageData(imageData, 0, 0);
+        this.cdr.detectChanges();
+
+        await new Promise<void>((r) => requestAnimationFrame(() => r()));
       }),
       finalize(() => {
         this.juliaElapsed = performance.now() - startTime;
