@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import {
     bufferCount,
@@ -29,7 +29,7 @@ interface Metric {
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule],
+  imports: [DecimalPipe],
   template: `
     <div class="app">
       <header class="header">
@@ -46,12 +46,14 @@ interface Metric {
           </div>
           <p class="tooltip">Auto-updating dashboard. No interaction needed — watch metrics drift and the sparkline redraw every 800 ms.</p>
           <div class="metrics">
-            <div class="metric" *ngFor="let m of metrics">
-              <span class="metric-name">{{ m.name }}</span>
-              <span class="metric-value" [class.up]="m.trend === 'up'" [class.down]="m.trend === 'down'">
-                {{ m.value | number:'1.0-1' }} {{ m.unit }}
-              </span>
-            </div>
+            @for (m of metrics; track m.name) {
+              <div class="metric">
+                <span class="metric-name">{{ m.name }}</span>
+                <span class="metric-value" [class.up]="m.trend === 'up'" [class.down]="m.trend === 'down'">
+                  {{ m.value | number:'1.0-1' }} {{ m.unit }}
+                </span>
+              </div>
+            }
           </div>
           <div class="sparkline">
             <svg viewBox="0 0 100 30" preserveAspectRatio="none">
@@ -78,10 +80,12 @@ interface Metric {
             <span>Debounced: {{ debouncedSearchCount }}</span>
           </div>
           <div class="search-results">
-            <div class="result-item" *ngFor="let r of searchResults">
-              🔍 {{ r }}
-            </div>
-            <div class="empty" *ngIf="!searchResults.length">Waiting for input...</div>
+            @for (r of searchResults; track r) {
+              <div class="result-item">🔍 {{ r }}</div>
+            }
+            @if (!searchResults.length) {
+              <div class="empty">Waiting for input...</div>
+            }
           </div>
         </section>
 
@@ -98,13 +102,19 @@ interface Metric {
             <button (click)="emitClick('C')">Emit C</button>
           </div>
           <div class="buffer-batches">
-            <div class="batch" *ngFor="let batch of batches; let i = index">
-              <span class="batch-label">Batch {{ i + 1 }}</span>
-              <div class="batch-items">
-                <span class="batch-item" *ngFor="let item of batch">{{ item }}</span>
+            @for (batch of batches; track $index; let i = $index) {
+              <div class="batch">
+                <span class="batch-label">Batch {{ i + 1 }}</span>
+                <div class="batch-items">
+                  @for (item of batch; track $index) {
+                    <span class="batch-item">{{ item }}</span>
+                  }
+                </div>
               </div>
-            </div>
-            <div class="empty" *ngIf="!batches.length">Click buttons to emit events...</div>
+            }
+            @if (!batches.length) {
+              <div class="empty">Click buttons to emit events...</div>
+            }
           </div>
         </section>
 
@@ -162,16 +172,20 @@ interface Metric {
           <p class="tooltip">Click Generate to render a Julia set fractal pixel-by-pixel using reactive stream operators.</p>
           <div class="julia-controls">
             <button (click)="drawJulia()" [disabled]="juliaGenerating">Generate</button>
-            <span class="julia-meta" *ngIf="juliaElapsed > 0">Elapsed: {{ juliaElapsed | number:'1.0-0' }} ms</span>
+            @if (juliaElapsed > 0) {
+              <span class="julia-meta">Elapsed: {{ juliaElapsed | number:'1.0-0' }} ms</span>
+            }
           </div>
           <div class="julia-canvas-wrap">
             <canvas #juliaCanvas width="150" height="150"></canvas>
-            <div class="julia-overlay" *ngIf="juliaGenerating">
-              <div class="julia-progress-bar">
-                <div class="julia-progress-fill" [style.width.%]="juliaProgress"></div>
+            @if (juliaGenerating) {
+              <div class="julia-overlay">
+                <div class="julia-progress-bar">
+                  <div class="julia-progress-fill" [style.width.%]="juliaProgress"></div>
+                </div>
+                <span class="julia-progress-text">{{ juliaProgress | number:'1.0-0' }}%</span>
               </div>
-              <span class="julia-progress-text">{{ juliaProgress | number:'1.0-0' }}%</span>
-            </div>
+            }
           </div>
         </section>
 
@@ -183,11 +197,15 @@ interface Metric {
           </div>
           <p class="tooltip">Throttled log stream. Events appear automatically as internal streams produce values.</p>
           <div class="log-panel">
-            <div class="log-entry" *ngFor="let entry of logEntries" [class]="entry.type">
-              <span class="log-time">{{ entry.time }}</span>
-              <span class="log-msg">{{ entry.message }}</span>
-            </div>
-            <div class="empty" *ngIf="!logEntries.length">No activity yet...</div>
+            @for (entry of logEntries; track $index) {
+              <div class="log-entry" [class]="entry.type">
+                <span class="log-time">{{ entry.time }}</span>
+                <span class="log-msg">{{ entry.message }}</span>
+              </div>
+            }
+            @if (!logEntries.length) {
+              <div class="empty">No activity yet...</div>
+            }
           </div>
         </section>
       </main>
@@ -574,6 +592,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
       finalize(() => {
         this.juliaElapsed = performance.now() - startTime;
         this.juliaGenerating = false;
+        this.cdr.detectChanges();
       })
     ).subscribe();
 
@@ -604,6 +623,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         this.sparklinePoints = this.sparklineHistory
           .map((v, i) => `${i * (100 / (this.sparklineHistory.length - 1 || 1))},${30 - ((v - min) / range) * 28}`)
           .join(' ');
+        this.cdr.detectChanges();
       })
     ).subscribe();
     this.subscriptions.push(s);
@@ -619,7 +639,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
 
     // Raw counter
     const rawSub = value$.pipe(
-      tap(() => this.rawSearchCount++)
+      tap(() => { this.rawSearchCount++; this.cdr.detectChanges(); })
     ).subscribe();
     this.subscriptions.push(rawSub);
 
@@ -627,10 +647,11 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     const resultSub = value$.pipe(
       debounce(400),
       filter(q => q.length > 1),
-      tap(() => this.debouncedSearchCount++),
+      tap(() => { this.debouncedSearchCount++; this.cdr.detectChanges(); }),
       tap((query: string) => {
         this.searchResults.unshift(`Matched "${query}" (${Math.floor(Math.random() * 50)} results)`);
         if (this.searchResults.length > 5) this.searchResults.pop();
+        this.cdr.detectChanges();
       })
     ).subscribe();
     this.subscriptions.push(resultSub);
@@ -642,6 +663,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
       tap((batch: string[]) => {
         this.batches.unshift(batch);
         if (this.batches.length > 8) this.batches.pop();
+        this.cdr.detectChanges();
       })
     ).subscribe();
     this.subscriptions.push(s);
@@ -650,7 +672,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
   private initCombinedStream(): void {
     const s = combineLatest(this.streamA, this.streamB).pipe(
       map(([a, b]) => (a * b) / 100),
-      tap(v => this.combinedValue = v)
+      tap(v => { this.combinedValue = v; this.cdr.detectChanges(); })
     ).subscribe();
     this.subscriptions.push(s);
   }
@@ -705,5 +727,6 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     const time = new Date().toLocaleTimeString();
     this.logEntries.unshift({ time, message, type });
     if (this.logEntries.length > 40) this.logEntries.pop();
+    this.cdr.detectChanges();
   }
 }

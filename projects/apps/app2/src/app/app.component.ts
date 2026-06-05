@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { compute } from '@epikodelabs/streamix/coroutines';
@@ -103,7 +103,7 @@ const juliaBatchWorker = (params: BatchParams): Pixel[] => {
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [DecimalPipe, FormsModule],
   template: `
     <div class="app">
       <header class="header">
@@ -123,11 +123,12 @@ const juliaBatchWorker = (params: BatchParams): Pixel[] => {
           <div class="settings-body">
             <div class="preset-row">
               <span class="label">Presets:</span>
-              <button
-                *ngFor="let p of presets"
-                [class.active]="selectedPreset === p.name"
-                (click)="loadPreset(p)"
-              >{{ p.name }}</button>
+              @for (p of presets; track p.name) {
+                <button
+                  [class.active]="selectedPreset === p.name"
+                  (click)="loadPreset(p)"
+                >{{ p.name }}</button>
+              }
             </div>
 
             <div class="c-row">
@@ -143,7 +144,9 @@ const juliaBatchWorker = (params: BatchParams): Pixel[] => {
             <div class="palette-row">
               <span class="label">Palette</span>
               <select [(ngModel)]="palette" (change)="drawJulia()">
-                <option *ngFor="let p of palettes" [value]="p">{{ p }}</option>
+                @for (p of palettes; track p) {
+                  <option [value]="p">{{ p }}</option>
+                }
               </select>
               <button class="reset" (click)="reset()">Reset</button>
             </div>
@@ -160,17 +163,21 @@ const juliaBatchWorker = (params: BatchParams): Pixel[] => {
 
           <div class="julia-controls">
             <button (click)="drawJulia()" [disabled]="generating">{{ generating ? 'Rendering…' : 'Generate' }}</button>
-            <span class="julia-meta" *ngIf="elapsed > 0">Elapsed: {{ elapsed | number:'1.0-0' }} ms</span>
+            @if (elapsed > 0) {
+              <span class="julia-meta">Elapsed: {{ elapsed | number:'1.0-0' }} ms</span>
+            }
           </div>
 
           <div class="julia-canvas-wrap">
             <canvas #juliaCanvas width="1000" height="1000"></canvas>
-            <div class="julia-overlay" *ngIf="generating">
-              <div class="julia-progress-bar">
-                <div class="julia-progress-fill" [style.width.%]="progress"></div>
+            @if (generating) {
+              <div class="julia-overlay">
+                <div class="julia-progress-bar">
+                  <div class="julia-progress-fill" [style.width.%]="progress"></div>
+                </div>
+                <span class="julia-progress-text">{{ progress | number:'1.0-0' }}%</span>
               </div>
-              <span class="julia-progress-text">{{ progress | number:'1.0-0' }}%</span>
-            </div>
+            }
           </div>
         </section>
       </main>
@@ -428,6 +435,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     if (!signal.aborted) {
       this.elapsed = performance.now() - start;
       this.generating = false;
+      this.cdr.detectChanges();
     }
   }
 }

@@ -20,9 +20,7 @@
             "outputPath": "dist/apps/app1",
             "index": "projects/apps/app1/src/index.html",
             "browser": "projects/apps/app1/src/main.ts",
-            "polyfills": [
-              "zone.js"
-            ],
+            "polyfills": [],
             "tsConfig": "projects/apps/app1/tsconfig.app.json",
             "inlineStyleLanguage": "scss",
             "assets": [
@@ -115,9 +113,7 @@
             "outputPath": "dist/app2",
             "index": "projects/apps/app2/src/index.html",
             "browser": "projects/apps/app2/src/main.ts",
-            "polyfills": [
-              "zone.js"
-            ],
+            "polyfills": [],
             "tsConfig": "projects/apps/app2/tsconfig.app.json",
             "inlineStyleLanguage": "scss",
             "assets": [
@@ -210,9 +206,7 @@
             "outputPath": "dist/app3",
             "index": "projects/apps/app3/src/index.html",
             "browser": "projects/apps/app3/src/main.ts",
-            "polyfills": [
-              "zone.js"
-            ],
+            "polyfills": [],
             "tsConfig": "projects/apps/app3/tsconfig.app.json",
             "inlineStyleLanguage": "scss",
             "assets": [
@@ -305,9 +299,7 @@
             "outputPath": "dist/app4",
             "index": "projects/apps/app4/src/index.html",
             "browser": "projects/apps/app4/src/main.ts",
-            "polyfills": [
-              "zone.js"
-            ],
+            "polyfills": [],
             "tsConfig": "projects/apps/app4/tsconfig.app.json",
             "inlineStyleLanguage": "scss",
             "assets": [
@@ -400,9 +392,7 @@
             "outputPath": "dist/apps/app5",
             "index": "projects/apps/app5/src/index.html",
             "browser": "projects/apps/app5/src/main.ts",
-            "polyfills": [
-              "zone.js"
-            ],
+            "polyfills": [],
             "tsConfig": "projects/apps/app5/tsconfig.app.json",
             "inlineStyleLanguage": "scss",
             "assets": [
@@ -495,9 +485,7 @@
             "outputPath": "dist/apps/app6",
             "index": "projects/apps/app6/src/index.html",
             "browser": "projects/apps/app6/src/main.ts",
-            "polyfills": [
-              "zone.js"
-            ],
+            "polyfills": [],
             "tsConfig": "projects/apps/app6/tsconfig.app.json",
             "inlineStyleLanguage": "scss",
             "assets": [

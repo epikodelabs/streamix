@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { Component, OnDestroy, signal } from '@angular/core';
 import { FileSizePipe } from './file-size.pipe';
 import { ImagePipelineService } from './image-pipeline.service';
@@ -6,7 +6,7 @@ import { ImagePipelineService } from './image-pipeline.service';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FileSizePipe],
+  imports: [DecimalPipe, FileSizePipe],
   template: `
     <div class="app">
       <header class="header">
@@ -15,12 +15,20 @@ import { ImagePipelineService } from './image-pipeline.service';
       </header>
 
       <section class="toolbar">
-        <div class="stats" *ngIf="pipeline.jobs().length">
-          <span class="pill">{{ pipeline.jobs().length }} files</span>
-          <span class="pill done" *ngIf="pipeline.doneCount()">{{ pipeline.doneCount() }} done</span>
-          <span class="pill saved" *ngIf="pipeline.totalSaved() > 0">{{ pipeline.totalSaved() | filesize }} saved</span>
-        </div>
-        <button class="btn btn-ghost" *ngIf="pipeline.jobs().length" (click)="pipeline.clearAll()">Clear all</button>
+        @if (pipeline.jobs().length) {
+          <div class="stats">
+            <span class="pill">{{ pipeline.jobs().length }} files</span>
+            @if (pipeline.doneCount()) {
+              <span class="pill done">{{ pipeline.doneCount() }} done</span>
+            }
+            @if (pipeline.totalSaved() > 0) {
+              <span class="pill saved">{{ pipeline.totalSaved() | filesize }} saved</span>
+            }
+          </div>
+        }
+        @if (pipeline.jobs().length) {
+          <button class="btn btn-ghost" (click)="pipeline.clearAll()">Clear all</button>
+        }
       </section>
 
       <section class="settings">
@@ -86,44 +94,60 @@ import { ImagePipelineService } from './image-pipeline.service';
         </div>
       </section>
 
-      <section class="gallery" *ngIf="pipeline.jobs().length">
-        <div class="card" *ngFor="let job of pipeline.jobs()" [class.done]="job.state === 'done'" [class.error]="job.state === 'error'">
-          <button class="card-close" (click)="pipeline.removeJob(job.id); $event.stopPropagation()">×</button>
+      @if (pipeline.jobs().length) {
+        <section class="gallery">
+          @for (job of pipeline.jobs(); track job.id) {
+            <div class="card" [class.done]="job.state === 'done'" [class.error]="job.state === 'error'">
+              <button class="card-close" (click)="pipeline.removeJob(job.id); $event.stopPropagation()">×</button>
 
-          <div class="card-preview">
-            <img [src]="job.resultUrl ?? job.originalUrl" [class.original]="!job.resultUrl" loading="lazy" />
-            <div class="overlay" *ngIf="job.state === 'processing'">
-              <div class="spinner"></div>
-              <span class="stage">{{ job.progress.stage }} {{ job.progress.percent }}%</span>
-            </div>
-            <div class="overlay error-overlay" *ngIf="job.state === 'error'">
-              <span>⚠️ {{ job.error }}</span>
-            </div>
-          </div>
+              <div class="card-preview">
+                <img [src]="job.resultUrl ?? job.originalUrl" [class.original]="!job.resultUrl" loading="lazy" />
+                @if (job.state === 'processing') {
+                  <div class="overlay">
+                    <div class="spinner"></div>
+                    <span class="stage">{{ job.progress.stage }} {{ job.progress.percent }}%</span>
+                  </div>
+                }
+                @if (job.state === 'error') {
+                  <div class="overlay error-overlay">
+                    <span>⚠️ {{ job.error }}</span>
+                  </div>
+                }
+              </div>
 
-          <div class="card-info">
-            <p class="filename" [title]="job.fileName">{{ job.fileName }}</p>
-            <div class="metrics" *ngIf="job.state === 'done' && job.result">
-              <span class="metric">{{ job.originalSize | filesize }}</span>
-              <span class="arrow">→</span>
-              <span class="metric">{{ job.result.finalSize | filesize }}</span>
-              <span class="badge saved">-{{ job.result.saved | filesize }}</span>
-              <span class="badge">{{ job.result.width }}×{{ job.result.height }}</span>
+              <div class="card-info">
+                <p class="filename" [title]="job.fileName">{{ job.fileName }}</p>
+                @if (job.state === 'done' && job.result) {
+                  <div class="metrics">
+                    <span class="metric">{{ job.originalSize | filesize }}</span>
+                    <span class="arrow">→</span>
+                    <span class="metric">{{ job.result.finalSize | filesize }}</span>
+                    <span class="badge saved">-{{ job.result.saved | filesize }}</span>
+                    <span class="badge">{{ job.result.width }}×{{ job.result.height }}</span>
+                  </div>
+                }
+                @if (job.state !== 'done') {
+                  <div class="metrics">
+                    <span class="metric">{{ job.originalSize | filesize }}</span>
+                    <span class="status">{{ job.state }}</span>
+                  </div>
+                }
+                @if (job.resultUrl) {
+                  <a class="btn btn-sm btn-primary" [href]="job.resultUrl" [download]="'processed-' + job.fileName">
+                    ⬇ Download
+                  </a>
+                }
+              </div>
             </div>
-            <div class="metrics" *ngIf="job.state !== 'done'">
-              <span class="metric">{{ job.originalSize | filesize }}</span>
-              <span class="status">{{ job.state }}</span>
-            </div>
-            <a *ngIf="job.resultUrl" class="btn btn-sm btn-primary" [href]="job.resultUrl" [download]="'processed-' + job.fileName">
-              ⬇ Download
-            </a>
-          </div>
-        </div>
-      </section>
+          }
+        </section>
+      }
 
-      <footer class="footer" *ngIf="pipeline.jobs().length">
-        <p>Powered by <strong>Streamix Coroutines</strong> · Web Worker SIMD pipeline</p>
-      </footer>
+      @if (pipeline.jobs().length) {
+        <footer class="footer">
+          <p>Powered by <strong>Streamix Coroutines</strong> · Web Worker SIMD pipeline</p>
+        </footer>
+      }
     </div>
   `,
   styles: [`

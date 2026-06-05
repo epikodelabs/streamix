@@ -401,21 +401,21 @@ export class KitchenComponent implements OnInit, OnDestroy {
     this.subs.add(
       this.kitchen.ovens$.subscribe((ovens: OvenState[]) => {
         this.ovens = ovens;
-        this.cdr.markForCheck();
+        this.cdr.detectChanges();
       })
     );
 
     this.subs.add(
       this.kitchen.cancellableOrders$.subscribe((orders: Order[]) => {
         this.cancellableOrders = orders;
-        this.cdr.markForCheck();
+        this.cdr.detectChanges();
       })
     );
 
     this.subs.add(
       this.kitchen.stats$.subscribe((stats: KitchenStats) => {
         this.stats = stats;
-        this.cdr.markForCheck();
+        this.cdr.detectChanges();
       })
     );
 
@@ -426,7 +426,7 @@ export class KitchenComponent implements OnInit, OnDestroy {
         if (this.logEntries.length > 200) {
           this.logEntries.shift();
         }
-        this.cdr.markForCheck();
+        this.cdr.detectChanges();
       })
     );
 
@@ -434,7 +434,7 @@ export class KitchenComponent implements OnInit, OnDestroy {
 
     this.runningInterval = setInterval(() => {
       this.updateRunningState();
-      this.cdr.markForCheck();
+      this.cdr.detectChanges();
     }, 250);
   }
 
@@ -452,33 +452,33 @@ export class KitchenComponent implements OnInit, OnDestroy {
   async runShift(orders: Order[]) {
     this.kitchen.resetState();
     this.logEntries = [];
-    this.cdr.markForCheck();
+    this.cdr.detectChanges();
 
     await this.kitchen.runShift(orders);
 
     this.updateRunningState();
-    this.cdr.markForCheck();
+    this.cdr.detectChanges();
   }
 
   async runFullDay() {
     this.kitchen.resetState();
     this.logEntries = [];
-    this.cdr.markForCheck();
+    this.cdr.detectChanges();
 
     await this.kitchen.runFullDay();
 
     this.updateRunningState();
-    this.cdr.markForCheck();
+    this.cdr.detectChanges();
   }
 
   cancelOrder(orderId: string) {
     this.kitchen.cancelOrder(orderId);
-    this.cdr.markForCheck();
+    this.cdr.detectChanges();
   }
 
   closeKitchen() {
     this.kitchen.closeKitchen();
-    this.cdr.markForCheck();
+    this.cdr.detectChanges();
   }
 
   private updateRunningState() {
