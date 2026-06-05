@@ -8,6 +8,8 @@ Interactive 3D cartoon landscape built with **Three.js** and animated via **Stre
 - **Weather toggle** — switch between ☀️ sunshine and 🌧️ rain
 - **Streamix `onAnimationFrame`** — render loop driven by reactive animation frames
 - **Streamix `createBehaviorSubject`** — weather state as a reactive subject
+- **Streamix `onResize`** — canvas resize via ResizeObserver stream
+- **Streamix `fromEvent` + `throttle` + `map`** — mouse parallax camera shift
 - **OrbitControls** — click and drag to orbit the camera around the scene
 - **Dynamic effects** — rain particles, sun pulse, cloud drift, tree sway, flower bounce
 

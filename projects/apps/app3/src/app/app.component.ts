@@ -1,8 +1,8 @@
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { createBehaviorSubject, tap } from '@epikodelabs/streamix';
-import { onAnimationFrame } from '@epikodelabs/streamix/dom';
+import { createBehaviorSubject, fromEvent, map, tap, throttle } from '@epikodelabs/streamix';
+import { onAnimationFrame, onResize } from '@epikodelabs/streamix/dom';
 import type { Subscription } from '@epikodelabs/streamix';
 
 type Weather = 'sunny' | 'rainy';
@@ -125,8 +125,12 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private animSub!: Subscription;
   private weatherSub!: Subscription;
+  private resizeSub!: Subscription;
+  private mouseSub!: Subscription;
 
   private clock = new THREE.Clock();
+  private baseCamPos!: THREE.Vector3;
+  private parallaxTarget = { x: 0, y: 0 };
 
   ngOnInit(): void {
     // Weather reaction — toggle scene elements
@@ -143,6 +147,8 @@ export class AppComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.animSub?.unsubscribe();
     this.weatherSub?.unsubscribe();
+    this.resizeSub?.unsubscribe();
+    this.mouseSub?.unsubscribe();
     this.controls?.dispose();
     this.renderer?.dispose();
     this.rainGeo?.dispose();
@@ -314,8 +320,32 @@ export class AppComponent implements OnInit, OnDestroy {
     // Rain
     this.buildRain();
 
-    // Resize handler
-    window.addEventListener('resize', this.onResize);
+    // Resize handler via reactive stream
+    this.resizeSub = onResize(wrap).pipe(
+      tap(({ width, height }) => {
+        this.camera.aspect = width / height;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(width, height);
+      })
+    ).subscribe();
+
+    // Mouse parallax
+    this.mouseSub = fromEvent(canvas, 'mousemove').pipe(
+      throttle(50),
+      map((e: Event) => {
+        const me = e as MouseEvent;
+        const rect = canvas.getBoundingClientRect();
+        const x = (me.clientX - rect.left) / rect.width - 0.5;
+        const y = (me.clientY - rect.top) / rect.height - 0.5;
+        return { x, y };
+      }),
+      tap(({ x, y }) => {
+        this.parallaxTarget.x = x * 4;
+        this.parallaxTarget.y = -y * 2;
+      })
+    ).subscribe();
+
+    this.baseCamPos = this.camera.position.clone();
   }
 
   private makeTree(): THREE.Group {
@@ -438,6 +468,12 @@ export class AppComponent implements OnInit, OnDestroy {
       tap(() => {
         const time = this.clock.getElapsedTime();
 
+        // Smooth parallax interpolation
+        if (this.baseCamPos) {
+          this.camera.position.x += (this.baseCamPos.x + this.parallaxTarget.x - this.camera.position.x) * 0.05;
+          this.camera.position.y += (this.baseCamPos.y + this.parallaxTarget.y - this.camera.position.y) * 0.05;
+        }
+
         // Animate sun gentle pulse
         if (this.sunGroup.visible) {
           const s = 1 + Math.sin(time * 1.5) * 0.04;
@@ -485,14 +521,4 @@ export class AppComponent implements OnInit, OnDestroy {
       }),
     ).subscribe();
   }
-
-  private onResize = (): void => {
-    if (!this.renderer || !this.camera) return;
-    const wrap = this.canvasRef.nativeElement.parentElement!;
-    const w = wrap.clientWidth;
-    const h = wrap.clientHeight;
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w, h);
-  };
 }
