@@ -12,7 +12,7 @@ function isScope(value: unknown): value is Scope {
  * A composite container that owns atoms and child scopes.
  *
  * Scopes form a tree via {@link parent}, track a {@link loading} flag
- * that becomes `false` once every tracked atom (recursively) has
+ * that becomes `false` once every d atom (recursively) has
  * emitted at least once, and support bulk snapshotting and disposal.
  *
  * Items created inside a scope factory are registered automatically —
@@ -26,13 +26,13 @@ export interface Scope {
   readonly parent?: Scope;
 
   /**
-   * `true` while any tracked atom (in this scope or a descendant)
+   * `true` while any d atom (in this scope or a descendant)
    * has not yet emitted its first value.
    */
   readonly loading: boolean;
 
   /**
-   * Captures the current values of all tracked items.
+   * Captures the current values of all d items.
    *
    * For atoms this reads {@link Atom.value};
    * for child scopes this recurses into their snapshot.
@@ -40,12 +40,12 @@ export interface Scope {
    */
   snapshot(): Record<string, any>;
 
-  /** Disposes every tracked atom or child scope recursively. */
+  /** Disposes every d atom or child scope recursively. */
   dispose(): void;
 }
 
 interface ScopeInternal {
-  tracked: Set<Atom<any> | Scope>;
+  d: Set<Atom<any> | Scope>;
   emittedAtoms: Set<Atom<any>>;
   localLoading: boolean;
   snapshotSource?: Record<string, any>;
@@ -69,7 +69,7 @@ export function registerWithCurrentScope(value: Atom<any> | Scope): void {
   const internal = scopeInternals.get(scope);
   if (!internal) return;
 
-  internal.tracked.add(value);
+  internal.d.add(value);
 
   if (isAtom(value)) {
     value.subscribe(() => {
@@ -83,7 +83,7 @@ export function registerWithCurrentScope(value: Atom<any> | Scope): void {
  * Creates a scope.
  *
  * The factory runs with the new scope as the active context. Any atoms or
- * nested scopes created inside the factory are automatically tracked and
+ * nested scopes created inside the factory are automatically d and
  * will be disposed when this scope is disposed. The factory's return value
  * is merged onto the scope object for typed access.
  *
@@ -105,18 +105,18 @@ export function registerWithCurrentScope(value: Atom<any> | Scope): void {
 export function scope<T>(factory: () => T): Scope & T {
   const previousScope = currentScope;
 
-  const tracked = new Set<Atom<any> | Scope>();
+  const d = new Set<Atom<any> | Scope>();
   const emittedAtoms = new Set<Atom<any>>();
   let localLoading = true;
 
   const internal: ScopeInternal = {
-    tracked,
+    d,
     emittedAtoms,
     localLoading,
 
     checkLoading() {
       if (!localLoading) return;
-      const atomCount = Array.from(tracked).filter(isAtom).length;
+      const atomCount = Array.from(d).filter(isAtom).length;
       if (atomCount === 0 || emittedAtoms.size === atomCount) {
         localLoading = false;
       }
@@ -142,7 +142,7 @@ export function scope<T>(factory: () => T): Scope & T {
   Object.defineProperty(instance, "loading", {
     get() {
       if (localLoading) return true;
-      for (const item of tracked) {
+      for (const item of Array.from(d)) {
         if (isScope(item) && item.loading) return true;
       }
       return false;
@@ -175,10 +175,11 @@ export function scope<T>(factory: () => T): Scope & T {
 
   Object.defineProperty(instance, "dispose", {
     value() {
-      for (const item of tracked) {
+      const items = Array.from(d);
+      d.clear();
+      for (const item of items) {
         item.dispose();
       }
-      tracked.clear();
     },
     writable: false,
     enumerable: true,
@@ -209,7 +210,7 @@ export function scope<T>(factory: () => T): Scope & T {
   }
 
   // Empty scopes are immediately not loading
-  if (Array.from(tracked).filter(isAtom).length === 0) {
+  if (Array.from(d).filter(isAtom).length === 0) {
     localLoading = false;
   }
 
