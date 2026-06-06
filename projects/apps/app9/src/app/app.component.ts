@@ -1,626 +1,367 @@
-import { JsonPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, OnDestroy, inject } from '@angular/core';
-import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/streamix';
+import { promiseAtom, scope, writableAtom } from '@epikodelabs/streamix';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [JsonPipe],
   template: `
-    <div class="app">
-      <header class="header">
-        <h1>🧪 Atoms &amp; Scopes</h1>
-        <p class="subtitle">Multi-step wizard demo — reactive state with tree loading</p>
+    <div class="universe">
+      <!-- Animated background mesh -->
+      <div class="mesh">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+      </div>
+
+      <!-- Header -->
+      <header>
+        <div class="badge">Reactive Laboratory</div>
+        <h1>Atoms &amp; Scopes</h1>
+        <p class="subtitle">Watch state flow through the tree in real time</p>
       </header>
 
-      <div class="layout">
-        <!-- Main wizard panel -->
-        <main class="wizard">
-          <!-- Step indicator -->
-          <nav class="steps">
-            @for (name of stepNames; track $index; let i = $index) {
-              <div class="step" [class.active]="i === wizardScope.step.value" [class.done]="i < wizardScope.step.value">
-                <span class="step-number">{{ i + 1 }}</span>
-                <span class="step-name">{{ name }}</span>
-                @if (stepLoading[i]) {
-                  <span class="step-spinner"></span>
-                }
-              </div>
-            }
-          </nav>
+      <!-- Main stage -->
+      <main class="stage">
 
-          <!-- Wizard loading overlay -->
-          @if (wizardLoading) {
-            <div class="wizard-loading">
-              <div class="spinner"></div>
-              <span>Wizard initializing…</span>
+        <!-- Left: The Form -->
+        <section class="specimen" [style.transform]="'translateX(' + (-wizard.step.value * 110) + '%)'">
+
+          <!-- Step 0: Personal -->
+          <div class="slide">
+            <h2>Identity</h2>
+            <div class="field">
+              <label [class.lit]="personal.name.value">Codename</label>
+              <input
+                [value]="personal.name.value"
+                (input)="personal.name.set($any($event.target).value); cdr.detectChanges()"
+                placeholder="Enter codename"
+              />
+              <div class="pulse-bar" [style.width.%]="personal.name.value.length * 5"></div>
             </div>
-          }
+            <div class="field">
+              <label [class.lit]="personal.email.value">Channel</label>
+              <input
+                [value]="personal.email.value"
+                (input)="personal.email.set($any($event.target).value); cdr.detectChanges()"
+                placeholder="secure@node.net"
+              />
+              <div class="pulse-bar" [style.width.%]="personal.email.value.length * 3"></div>
+            </div>
+          </div>
 
-          <!-- Step 1: Personal -->
-          @if (wizardScope.step.value === 0) {
-            <section class="step-panel">
-              <h2>Personal Information</h2>
-              <div class="field">
-                <label>Full Name</label>
-                <input
-                  type="text"
-                  [value]="personalScope.name.value"
-                  (input)="personalScope.name.set($any($event.target).value); cdr.detectChanges()"
-                  placeholder="Enter your name"
-                />
-                @if (!personalScope.name.value) {
-                  <span class="hint">Required</span>
-                }
-              </div>
-              <div class="field">
-                <label>Email</label>
-                <input
-                  type="email"
-                  [value]="personalScope.email.value"
-                  (input)="personalScope.email.set($any($event.target).value); cdr.detectChanges()"
-                  placeholder="you@example.com"
-                />
-                @if (!personalScope.email.value) {
-                  <span class="hint">Required</span>
-                }
-              </div>
-            </section>
-          }
-
-          <!-- Step 2: Address -->
-          @if (wizardScope.step.value === 1) {
-            <section class="step-panel">
-              <h2>Address</h2>
-              @if (addressLoading) {
-                <div class="panel-loading">
-                  <div class="spinner small"></div>
-                  <span>Loading country list…</span>
-                </div>
-              }
-              <div class="field">
-                <label>Street</label>
-                <input
-                  type="text"
-                  [value]="addressScope.street.value"
-                  (input)="addressScope.street.set($any($event.target).value); cdr.detectChanges()"
-                  placeholder="123 Main St"
-                />
-              </div>
-              <div class="field">
-                <label>City</label>
-                <input
-                  type="text"
-                  [value]="addressScope.city.value"
-                  (input)="addressScope.city.set($any($event.target).value); cdr.detectChanges()"
-                  placeholder="New York"
-                />
-              </div>
-              <div class="field">
-                <label>Country</label>
+          <!-- Step 1: Address -->
+          <div class="slide">
+            <h2>Location</h2>
+            <div class="field">
+              <label [class.lit]="address.street.value">Sector</label>
+              <input
+                [value]="address.street.value"
+                (input)="address.street.set($any($event.target).value); cdr.detectChanges()"
+                placeholder="Sector 7-G"
+              />
+            </div>
+            <div class="field">
+              <label [class.lit]="address.country.value">Zone</label>
+              @if (wizard.async.loading) {
+                <div class="loading-pulse">Scanning zones…</div>
+              } @else {
                 <select
-                  [value]="addressScope.country.value"
-                  (change)="addressScope.country.set($any($event.target).value); cdr.detectChanges()"
+                  [value]="address.country.value"
+                  (change)="address.country.set($any($event.target).value); cdr.detectChanges()"
                 >
-                  <option value="">Select a country</option>
-                  @for (c of wizardScope.async.countries.value; track c) {
+                  <option value="">Select zone</option>
+                  @for (c of wizard.async.countries.value; track c) {
                     <option [value]="c">{{ c }}</option>
                   }
                 </select>
-                @if (wizardScope.async.countries.value.length === 0) {
-                  <span class="hint">Loading countries…</span>
-                }
-              </div>
-            </section>
-          }
-
-          <!-- Step 3: Preferences -->
-          @if (wizardScope.step.value === 2) {
-            <section class="step-panel">
-              <h2>Preferences</h2>
-              <div class="field row">
-                <label class="toggle">
-                  <input
-                    type="checkbox"
-                    [checked]="preferencesScope.notifications.value"
-                    (change)="preferencesScope.notifications.set($any($event.target).checked); cdr.detectChanges()"
-                  />
-                  <span class="toggle-slider"></span>
-                  <span>Enable notifications</span>
-                </label>
-              </div>
-              <div class="field">
-                <label>Theme</label>
-                <div class="radio-group">
-                  <label class="radio">
-                    <input
-                      type="radio"
-                      name="theme"
-                      value="dark"
-                      [checked]="preferencesScope.theme.value === 'dark'"
-                      (change)="preferencesScope.theme.set('dark'); cdr.detectChanges()"
-                    />
-                    <span>Dark</span>
-                  </label>
-                  <label class="radio">
-                    <input
-                      type="radio"
-                      name="theme"
-                      value="light"
-                      [checked]="preferencesScope.theme.value === 'light'"
-                      (change)="preferencesScope.theme.set('light'); cdr.detectChanges()"
-                    />
-                    <span>Light</span>
-                  </label>
-                  <label class="radio">
-                    <input
-                      type="radio"
-                      name="theme"
-                      value="auto"
-                      [checked]="preferencesScope.theme.value === 'auto'"
-                      (change)="preferencesScope.theme.set('auto'); cdr.detectChanges()"
-                    />
-                    <span>Auto</span>
-                  </label>
-                </div>
-              </div>
-            </section>
-          }
-
-          <!-- Navigation -->
-          <div class="nav">
-            <button
-              class="btn secondary"
-              (click)="goBack()"
-              [disabled]="wizardScope.step.value === 0"
-            >Back</button>
-
-            @if (wizardScope.step.value < totalSteps - 1) {
-              <button
-                class="btn primary"
-                (click)="goNext()"
-                [disabled]="!canAdvance()"
-              >Next</button>
-            } @else {
-              <button
-                class="btn primary"
-                (click)="submit()"
-                [disabled]="!canSubmit()"
-              >Submit</button>
-            }
-          </div>
-
-          <!-- Submission result -->
-          @if (submitted) {
-            <div class="success-banner">
-              ✅ Form submitted! Check the snapshot panel for the captured state tree.
-            </div>
-          }
-        </main>
-
-        <!-- Sidebar: state inspector -->
-        <aside class="inspector">
-          <div class="inspector-card">
-            <h3>🔍 State Inspector</h3>
-
-            <div class="inspector-section">
-              <h4>Wizard Loading</h4>
-              <div class="loading-bar">
-                <div class="loading-fill" [style.width.%]="wizardLoading ? 30 : 100"></div>
-              </div>
-              <span class="loading-label">{{ wizardLoading ? 'Loading…' : 'Ready' }}</span>
-            </div>
-
-            <div class="inspector-section">
-              <h4>Step Loading</h4>
-              @for (name of stepNames; track $index; let i = $index) {
-                <div class="loading-row">
-                  <span>{{ name }}</span>
-                  <span [class]="stepLoading[i] ? 'status-loading' : 'status-ready'">
-                    {{ stepLoading[i] ? 'loading' : 'ready' }}
-                  </span>
-                </div>
               }
             </div>
+          </div>
 
-            <div class="inspector-section">
-              <h4>Live Snapshot</h4>
-              <pre class="snapshot">{{ snapshotJson }}</pre>
+          <!-- Step 2: Preferences -->
+          <div class="slide">
+            <h2>Configuration</h2>
+            <div class="field row">
+              <label class="toggle">
+                <input
+                  type="checkbox"
+                  [checked]="preferences.notifications.value"
+                  (change)="preferences.notifications.set($any($event.target).checked); cdr.detectChanges()"
+                />
+                <span class="toggle-glow" [class.on]="preferences.notifications.value"></span>
+                <span>Signal beacon</span>
+              </label>
             </div>
-
-            <div class="inspector-section">
-              <h4>Atom Values</h4>
-              <div class="atom-row"><span>name</span><code>{{ personalScope.name.value | json }}</code></div>
-              <div class="atom-row"><span>email</span><code>{{ personalScope.email.value | json }}</code></div>
-              <div class="atom-row"><span>street</span><code>{{ addressScope.street.value | json }}</code></div>
-              <div class="atom-row"><span>city</span><code>{{ addressScope.city.value | json }}</code></div>
-              <div class="atom-row"><span>country</span><code>{{ addressScope.country.value | json }}</code></div>
-              <div class="atom-row"><span>notifications</span><code>{{ preferencesScope.notifications.value | json }}</code></div>
-              <div class="atom-row"><span>theme</span><code>{{ preferencesScope.theme.value | json }}</code></div>
+            <div class="field">
+              <label>Interface</label>
+              <div class="radio-group">
+                @for (opt of ['dark','light','auto']; track opt) {
+                  <label class="radio">
+                    <input
+                      type="radio"
+                      name="theme"
+                      [value]="opt"
+                      [checked]="preferences.theme.value === opt"
+                      (change)="preferences.theme.set(opt); cdr.detectChanges()"
+                    />
+                    <span class="radio-glow" [class.on]="preferences.theme.value === opt"></span>
+                    <span>{{ opt }}</span>
+                  </label>
+                }
+              </div>
             </div>
           </div>
-        </aside>
-      </div>
+
+        </section>
+
+        <!-- Right: The Scope Tree Visualization -->
+        <section class="readout">
+          <h3>Live Scope Tree</h3>
+
+          <div class="tree">
+            <!-- Wizard root -->
+            <div class="node scope-root" [class.loading]="wizard.loading">
+              <span class="dot"></span>
+              <span class="label">wizard</span>
+              <span class="status">{{ wizard.loading ? 'syncing' : 'ready' }}</span>
+            </div>
+
+            <div class="branch">
+              <!-- Step atom -->
+              <div class="node atom" [class.pulse]="true">
+                <span class="dot"></span>
+                <span class="label">step</span>
+                <span class="value">{{ wizard.step.value }}</span>
+              </div>
+
+              <!-- Personal scope -->
+              <div class="node scope" [class.loading]="personal.loading">
+                <span class="dot"></span>
+                <span class="label">personal</span>
+              </div>
+              <div class="branch">
+                <div class="node atom" [class.pulse]="personal.name.value">
+                  <span class="dot"></span>
+                  <span class="label">name</span>
+                  <span class="value truncate">{{ personal.name.value || '—' }}</span>
+                </div>
+                <div class="node atom" [class.pulse]="personal.email.value">
+                  <span class="dot"></span>
+                  <span class="label">email</span>
+                  <span class="value truncate">{{ personal.email.value || '—' }}</span>
+                </div>
+              </div>
+
+              <!-- Address scope -->
+              <div class="node scope" [class.loading]="address.loading">
+                <span class="dot"></span>
+                <span class="label">address</span>
+              </div>
+              <div class="branch">
+                <div class="node atom" [class.pulse]="address.street.value">
+                  <span class="dot"></span>
+                  <span class="label">street</span>
+                  <span class="value truncate">{{ address.street.value || '—' }}</span>
+                </div>
+                <div class="node atom" [class.pulse]="address.country.value">
+                  <span class="dot"></span>
+                  <span class="label">country</span>
+                  <span class="value truncate">{{ address.country.value || '—' }}</span>
+                </div>
+              </div>
+
+              <!-- Preferences scope -->
+              <div class="node scope" [class.loading]="preferences.loading">
+                <span class="dot"></span>
+                <span class="label">preferences</span>
+              </div>
+              <div class="branch">
+                <div class="node atom" [class.pulse]="preferences.notifications.value">
+                  <span class="dot"></span>
+                  <span class="label">notifications</span>
+                  <span class="value">{{ preferences.notifications.value }}</span>
+                </div>
+                <div class="node atom" [class.pulse]="true">
+                  <span class="dot"></span>
+                  <span class="label">theme</span>
+                  <span class="value">{{ preferences.theme.value }}</span>
+                </div>
+              </div>
+
+              <!-- Async scope -->
+              <div class="node scope" [class.loading]="wizard.async.loading">
+                <span class="dot"></span>
+                <span class="label">async</span>
+              </div>
+              <div class="branch">
+                <div class="node atom" [class.pulse]="!wizard.async.loading">
+                  <span class="dot"></span>
+                  <span class="label">countries</span>
+                  <span class="value">{{ wizard.async.countries.value.length }} zones</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Snapshot terminal -->
+          <div class="terminal">
+            <div class="terminal-header">snapshot()</div>
+            <pre>{{ snapshot }}</pre>
+          </div>
+
+        </section>
+      </main>
+
+      <!-- Navigation -->
+      <footer class="nav">
+        <button
+          (click)="wizard.step.set(wizard.step.value - 1); cdr.detectChanges()"
+          [disabled]="wizard.step.value === 0"
+        >← Back</button>
+        <div class="step-dots">
+          @for (_ of [0,1,2]; track $index; let i = $index) {
+            <span [class.on]="i === wizard.step.value"></span>
+          }
+        </div>
+        <button
+          (click)="wizard.step.set(wizard.step.value + 1); cdr.detectChanges()"
+          [disabled]="wizard.step.value === 2"
+        >Next →</button>
+      </footer>
+
     </div>
   `,
   styles: [`
     :host {
-      --bg: #0f1117;
-      --surface: #181b24;
-      --surface-hover: #1e2230;
-      --border: #2a2f3f;
-      --text: #e2e5ec;
-      --text-muted: #8b92a8;
-      --accent: #5b8cff;
-      --accent-hover: #4a7aee;
-      --success: #3ddc84;
-      --warning: #f5a623;
-      --error: #ff5f5f;
-      --radius: 12px;
       display: block;
       min-height: 100vh;
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #050508;
+      color: #e8eaf0;
+      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+      overflow-x: hidden;
     }
 
-    .app { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+    /* ── Animated mesh background ── */
+    .universe { position: relative; min-height: 100vh; padding: 32px 24px 80px; }
+    .mesh { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+    .orb { position: absolute; border-radius: 50%; filter: blur(80px); opacity: .25; animation: float 20s ease-in-out infinite; }
+    .orb-1 { width: 600px; height: 600px; background: radial-gradient(circle, #5b8cff 0%, transparent 70%); top: -10%; left: -10%; animation-delay: 0s; }
+    .orb-2 { width: 500px; height: 500px; background: radial-gradient(circle, #c084fc 0%, transparent 70%); bottom: -10%; right: -10%; animation-delay: -7s; }
+    .orb-3 { width: 400px; height: 400px; background: radial-gradient(circle, #3ddc84 0%, transparent 70%); top: 40%; left: 40%; animation-delay: -14s; }
+    @keyframes float { 0%,100% { transform: translate(0,0) scale(1); } 33% { transform: translate(30px,-30px) scale(1.1); } 66% { transform: translate(-20px,20px) scale(.95); } }
 
-    .header { text-align: center; margin-bottom: 28px; }
-    .header h1 { font-size: 2rem; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.5px; }
-    .subtitle { color: var(--text-muted); font-size: 0.95rem; margin: 0; }
+    /* ── Header ── */
+    header { position: relative; z-index: 1; text-align: center; margin-bottom: 32px; }
+    .badge { display: inline-block; font-size: .65rem; text-transform: uppercase; letter-spacing: .15em; padding: 4px 12px; border: 1px solid rgba(91,140,255,.3); border-radius: 999px; color: #5b8cff; margin-bottom: 10px; }
+    h1 { font-size: 1.6rem; font-weight: 600; margin: 0; letter-spacing: -1px; }
+    .subtitle { font-size: .85rem; color: #6b7090; margin: 6px 0 0; font-family: system-ui, sans-serif; }
 
-    .layout {
-      display: grid;
-      grid-template-columns: 1fr 360px;
-      gap: 24px;
-      align-items: start;
-    }
-    @media (max-width: 900px) {
-      .layout { grid-template-columns: 1fr; }
-    }
+    /* ── Stage ── */
+    .stage { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 960px; margin: 0 auto; }
+    @media (max-width: 800px) { .stage { grid-template-columns: 1fr; } }
 
-    .wizard {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
+    /* ── Specimen (form) ── */
+    .specimen { display: flex; gap: 24px; transition: transform .5s cubic-bezier(.4,0,.2,1); will-change: transform; }
+    .slide { min-width: 100%; flex-shrink: 0; background: rgba(255,255,255,.03); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.06); border-radius: 16px; padding: 24px; }
+    .slide h2 { font-size: .9rem; text-transform: uppercase; letter-spacing: .1em; color: #8b92a8; margin: 0 0 16px; }
 
-    .steps {
-      display: flex;
-      gap: 8px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    .step {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 14px;
-      border-radius: 999px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      font-size: 0.85rem;
-      transition: all 0.2s;
-    }
-    .step.active { border-color: var(--accent); background: rgba(91,140,255,0.12); }
-    .step.done { border-color: var(--success); background: rgba(61,220,132,0.1); }
-    .step-number {
-      width: 22px; height: 22px;
-      border-radius: 50%;
-      background: var(--border);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.75rem; font-weight: 600;
-    }
-    .step.active .step-number { background: var(--accent); color: #fff; }
-    .step.done .step-number { background: var(--success); color: #000; }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: #6b7090; margin-bottom: 6px; transition: color .3s; }
+    .field label.lit { color: #5b8cff; }
+    .field input, .field select { width: 100%; background: rgba(0,0,0,.2); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 12px 14px; color: #e8eaf0; font-family: inherit; font-size: .9rem; outline: none; transition: border-color .2s, box-shadow .2s; box-sizing: border-box; }
+    .field input:focus, .field select:focus { border-color: rgba(91,140,255,.4); box-shadow: 0 0 0 3px rgba(91,140,255,.08); }
+    .pulse-bar { height: 2px; background: linear-gradient(90deg, #5b8cff, #c084fc); border-radius: 2px; margin-top: 4px; transition: width .3s ease; opacity: .6; }
+    .loading-pulse { padding: 12px; color: #8b92a8; font-size: .85rem; animation: textPulse 1.5s ease-in-out infinite; }
+    @keyframes textPulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
 
-    .step-spinner {
-      width: 14px; height: 14px;
-      border: 2px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
+    .field.row { display: flex; align-items: center; }
+    .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; font-family: system-ui, sans-serif; font-size: .85rem; }
+    .toggle input { display: none; width: auto; }
+    .toggle-glow { width: 36px; height: 20px; background: rgba(255,255,255,.08); border-radius: 10px; position: relative; transition: background .3s; }
+    .toggle-glow::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #8b92a8; border-radius: 50%; transition: transform .3s, background .3s; }
+    .toggle-glow.on { background: rgba(61,220,132,.2); }
+    .toggle-glow.on::after { transform: translateX(16px); background: #3ddc84; }
 
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .radio-group { display: flex; gap: 8px; }
+    .radio { display: flex; align-items: center; gap: 6px; cursor: pointer; font-family: system-ui, sans-serif; font-size: .85rem; padding: 8px 12px; background: rgba(0,0,0,.15); border: 1px solid rgba(255,255,255,.06); border-radius: 8px; }
+    .radio input { display: none; width: auto; }
+    .radio-glow { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.15); position: relative; transition: border-color .3s; }
+    .radio-glow.on { border-color: #5b8cff; }
+    .radio-glow.on::after { content: ''; position: absolute; inset: 2px; background: #5b8cff; border-radius: 50%; }
 
-    .wizard-loading {
-      display: flex; flex-direction: column; align-items: center; gap: 12px;
-      padding: 40px; color: var(--text-muted); font-size: 0.9rem;
-    }
-    .spinner {
-      width: 36px; height: 36px;
-      border: 3px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    .spinner.small { width: 20px; height: 20px; border-width: 2px; }
+    /* ── Readout (tree) ── */
+    .readout { background: rgba(255,255,255,.02); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.06); border-radius: 16px; padding: 20px; }
+    .readout h3 { font-size: .7rem; text-transform: uppercase; letter-spacing: .12em; color: #6b7090; margin: 0 0 14px; }
 
-    .step-panel {
-      display: flex; flex-direction: column; gap: 16px;
-    }
-    .step-panel h2 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+    .tree { font-size: .75rem; }
+    .branch { margin-left: 16px; padding-left: 12px; border-left: 1px solid rgba(255,255,255,.06); }
+    .node { display: flex; align-items: center; gap: 8px; padding: 5px 0; transition: opacity .3s; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.15); flex-shrink: 0; transition: all .3s; }
+    .scope-root .dot { background: #5b8cff; box-shadow: 0 0 8px rgba(91,140,255,.4); }
+    .scope .dot { background: rgba(139,146,168,.4); }
+    .atom .dot { background: #3ddc84; }
+    .node.loading .dot { animation: dotPulse 1s ease-in-out infinite; background: #f5a623; }
+    .node.pulse .dot { box-shadow: 0 0 6px currentColor; }
+    @keyframes dotPulse { 0%,100% { opacity: .4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.3); } }
 
-    .panel-loading {
-      display: flex; align-items: center; gap: 10px;
-      padding: 16px; background: var(--bg); border-radius: 8px;
-      color: var(--text-muted); font-size: 0.85rem;
-    }
+    .label { color: #8b92a8; min-width: 80px; }
+    .value { color: #5b8cff; margin-left: auto; font-size: .7rem; }
+    .truncate { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status { font-size: .65rem; margin-left: auto; color: #6b7090; text-transform: uppercase; }
 
-    .field {
-      display: flex; flex-direction: column; gap: 6px;
-    }
-    .field.row { flex-direction: row; align-items: center; gap: 10px; }
-    .field label { font-size: 0.85rem; color: var(--text-muted); font-weight: 500; }
-    .field input[type="text"], .field input[type="email"], .field select {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 14px;
-      color: var(--text);
-      font-size: 0.95rem;
-      outline: none;
-    }
-    .field input:focus, .field select:focus { border-color: var(--accent); }
-    .field select { cursor: pointer; }
-    .hint { font-size: 0.75rem; color: var(--warning); }
+    .terminal { margin-top: 16px; background: rgba(0,0,0,.25); border-radius: 10px; overflow: hidden; }
+    .terminal-header { padding: 8px 12px; font-size: .65rem; text-transform: uppercase; letter-spacing: .08em; color: #6b7090; border-bottom: 1px solid rgba(255,255,255,.06); }
+    .terminal pre { margin: 0; padding: 12px; font-size: .7rem; color: #8b92a8; overflow: auto; max-height: 160px; }
 
-    .toggle {
-      display: flex; align-items: center; gap: 10px;
-      cursor: pointer; font-size: 0.9rem;
-    }
-    .toggle input { display: none; }
-    .toggle-slider {
-      width: 40px; height: 22px;
-      background: var(--border);
-      border-radius: 11px;
-      position: relative;
-      transition: background 0.2s;
-    }
-    .toggle-slider::after {
-      content: '';
-      position: absolute;
-      top: 2px; left: 2px;
-      width: 18px; height: 18px;
-      background: #fff;
-      border-radius: 50%;
-      transition: transform 0.2s;
-    }
-    .toggle input:checked + .toggle-slider { background: var(--accent); }
-    .toggle input:checked + .toggle-slider::after { transform: translateX(18px); }
-
-    .radio-group { display: flex; gap: 12px; flex-wrap: wrap; }
-    .radio {
-      display: flex; align-items: center; gap: 6px;
-      cursor: pointer; font-size: 0.9rem;
-      padding: 8px 12px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-    }
-    .radio input { accent-color: var(--accent); }
-
-    .nav {
-      display: flex; justify-content: space-between; gap: 12px;
-      padding-top: 12px; border-top: 1px solid var(--border);
-    }
-    .btn {
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      font-weight: 500;
-      cursor: pointer;
-      border: none;
-      transition: all 0.15s;
-    }
-    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn.primary { background: var(--accent); color: #fff; }
-    .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
-    .btn.secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
-    .btn.secondary:hover:not(:disabled) { border-color: var(--accent); }
-
-    .success-banner {
-      padding: 14px 18px;
-      background: rgba(61,220,132,0.1);
-      border: 1px solid rgba(61,220,132,0.3);
-      border-radius: 8px;
-      color: var(--success);
-      font-size: 0.9rem;
-    }
-
-    .inspector {}
-    .inspector-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
-      position: sticky;
-      top: 24px;
-    }
-    .inspector-card h3 { margin: 0; font-size: 1rem; font-weight: 600; }
-
-    .inspector-section {}
-    .inspector-section h4 { margin: 0 0 10px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
-
-    .loading-bar {
-      height: 6px;
-      background: var(--bg);
-      border-radius: 3px;
-      overflow: hidden;
-    }
-    .loading-fill {
-      height: 100%;
-      background: var(--accent);
-      border-radius: 3px;
-      transition: width 0.3s ease;
-    }
-    .loading-label { font-size: 0.8rem; color: var(--text-muted); margin-top: 6px; display: block; }
-
-    .loading-row {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 6px 0;
-      border-bottom: 1px solid rgba(42,47,63,0.5);
-      font-size: 0.85rem;
-    }
-    .loading-row:last-child { border-bottom: none; }
-    .status-loading { color: var(--warning); font-size: 0.75rem; }
-    .status-ready { color: var(--success); font-size: 0.75rem; }
-
-    .snapshot {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px;
-      font-size: 0.75rem;
-      font-family: 'Courier New', monospace;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-      color: var(--text-muted);
-      max-height: 240px;
-      overflow-y: auto;
-    }
-
-    .atom-row {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 5px 0;
-      border-bottom: 1px solid rgba(42,47,63,0.3);
-      font-size: 0.8rem;
-    }
-    .atom-row:last-child { border-bottom: none; }
-    .atom-row code {
-      background: var(--bg);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 0.75rem;
-      color: var(--accent);
-    }
+    /* ── Footer nav ── */
+    .nav { position: fixed; bottom: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: center; gap: 20px; padding: 16px; background: linear-gradient(to top, rgba(5,5,8,.9), transparent); z-index: 10; }
+    .nav button { padding: 10px 24px; border-radius: 10px; border: 1px solid rgba(91,140,255,.3); background: rgba(91,140,255,.08); color: #5b8cff; font-family: inherit; font-size: .85rem; cursor: pointer; transition: all .2s; }
+    .nav button:hover:not(:disabled) { background: rgba(91,140,255,.15); }
+    .nav button:disabled { opacity: .3; cursor: not-allowed; }
+    .step-dots { display: flex; gap: 6px; }
+    .step-dots span { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.15); transition: all .3s; }
+    .step-dots span.on { background: #5b8cff; box-shadow: 0 0 6px rgba(91,140,255,.5); transform: scale(1.3); }
   `]
 })
 export class AppComponent implements OnDestroy {
   readonly cdr = inject(ChangeDetectorRef);
 
-  // Simulated async fetch for country list (resolves after 1.5s)
-  private loadCountries = () =>
-    new Promise<string[]>(resolve =>
-      setTimeout(() =>
-        resolve(['United States', 'Canada', 'United Kingdom', 'Germany', 'France', 'Japan', 'Australia']),
-        1500
-      )
-    );
-
-  // Scopes — initialized at declaration so TypeScript infers types.
-  readonly personalScope = scope(() => ({
+  readonly personal = scope(() => ({
     name: writableAtom(''),
     email: writableAtom(''),
   }));
 
-  readonly addressScope = scope(() => ({
+  readonly address = scope(() => ({
     street: writableAtom(''),
-    city: writableAtom(''),
     country: writableAtom(''),
   }));
 
-  readonly preferencesScope = scope(() => ({
+  readonly preferences = scope(() => ({
     notifications: writableAtom(true),
     theme: writableAtom('dark'),
   }));
 
-  readonly wizardScope = scope(() => ({
+  readonly wizard = scope(() => ({
     step: writableAtom(0),
-    personal: this.personalScope,
-    address: this.addressScope,
-    preferences: this.preferencesScope,
+    personal: this.personal,
+    address: this.address,
+    preferences: this.preferences,
     async: scope(() => ({
-      countries: promiseAtom(this.loadCountries, [] as string[]),
+      countries: promiseAtom(
+        () => new Promise<string[]>(r => setTimeout(() => r(['US','CA','UK','DE','FR']), 1500)),
+        [] as string[]
+      ),
     })),
   }));
 
-  // UI state
-  totalSteps = 3;
-  stepNames = ['Personal', 'Address', 'Preferences'];
-  snapshotJson = '{}';
-  wizardLoading = true;
-  addressLoading = true;
-  stepLoading = [false, true, false];
-  submitted = false;
-
-  private subscriptions: Subscription[] = [];
-
-  constructor() {
-    // Only async data needs a subscription — when the promise resolves
-    // no user event triggers change detection, so we watch the atom.
-    this.subscriptions.push(
-      this.wizardScope.async.countries.subscribe(() => this.cdr.detectChanges())
-    );
-
-    this.startLoadingPoller();
-  }
-
-  ngOnDestroy(): void {
-    this.subscriptions.forEach(s => s.unsubscribe());
-    this.wizardScope.dispose();
-  }
-
-  /**
-   * Polls scope loading state and snapshot so the inspector stays live.
-   * In a real app this would be driven by atom subscriptions; here we
-   * poll for simplicity to show the tree-level loading behaviour.
-   */
-  private startLoadingPoller(): void {
-    const tick = () => {
-      const asyncLoading = this.wizardScope.async.loading;
-      this.wizardLoading = asyncLoading;
-      this.addressLoading = asyncLoading;
-      this.stepLoading = [false, asyncLoading, false];
-      this.snapshotJson = JSON.stringify(this.wizardScope.snapshot(), null, 2);
-      this.cdr.detectChanges();
-    };
-
-    // Poll every 100 ms for smooth loading indicator updates
-    const intervalId = setInterval(tick, 100);
-
-    // Stop polling after 5 seconds when everything should be loaded
-    setTimeout(() => clearInterval(intervalId), 5000);
-  }
-
-  goBack(): void {
-    this.wizardScope.step.set(this.wizardScope.step.value - 1);
+  snapshot = '{}';
+  private timer = setInterval(() => {
+    this.snapshot = JSON.stringify(this.wizard.snapshot(), null, 2);
     this.cdr.detectChanges();
-  }
+  }, 100);
 
-  goNext(): void {
-    this.wizardScope.step.set(this.wizardScope.step.value + 1);
-    this.cdr.detectChanges();
-  }
-
-  canAdvance(): boolean {
-    const step = this.wizardScope.step.value;
-    if (step === 0) {
-      return !!this.personalScope.name.value && !!this.personalScope.email.value;
-    }
-    if (step === 1) {
-      return !!this.addressScope.street.value && !!this.addressScope.city.value && !!this.addressScope.country.value;
-    }
-    return true;
-  }
-
-  canSubmit(): boolean {
-    return this.canAdvance() && this.wizardScope.step.value === this.totalSteps - 1;
-  }
-
-  submit(): void {
-    this.submitted = true;
-    console.log('Wizard snapshot:', this.wizardScope.snapshot());
-    this.cdr.detectChanges();
+  ngOnDestroy() {
+    clearInterval(this.timer);
+    this.wizard.dispose();
   }
 }
