@@ -19,7 +19,7 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
           <!-- Step indicator -->
           <nav class="steps">
             @for (name of stepNames; track $index; let i = $index) {
-              <div class="step" [class.active]="i === currentStep" [class.done]="i < currentStep">
+              <div class="step" [class.active]="i === wizardScope.step.value" [class.done]="i < wizardScope.step.value">
                 <span class="step-number">{{ i + 1 }}</span>
                 <span class="step-name">{{ name }}</span>
                 @if (stepLoading[i]) {
@@ -38,18 +38,18 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
           }
 
           <!-- Step 1: Personal -->
-          @if (currentStep === 0) {
+          @if (wizardScope.step.value === 0) {
             <section class="step-panel">
               <h2>Personal Information</h2>
               <div class="field">
                 <label>Full Name</label>
                 <input
                   type="text"
-                  [value]="nameValue"
-                  (input)="onNameInput($any($event.target).value)"
+                  [value]="personalScope.name.value"
+                  (input)="personalScope.name.set($any($event.target).value); cdr.detectChanges()"
                   placeholder="Enter your name"
                 />
-                @if (!nameValue) {
+                @if (!personalScope.name.value) {
                   <span class="hint">Required</span>
                 }
               </div>
@@ -57,11 +57,11 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
                 <label>Email</label>
                 <input
                   type="email"
-                  [value]="emailValue"
-                  (input)="onEmailInput($any($event.target).value)"
+                  [value]="personalScope.email.value"
+                  (input)="personalScope.email.set($any($event.target).value); cdr.detectChanges()"
                   placeholder="you@example.com"
                 />
-                @if (!emailValue) {
+                @if (!personalScope.email.value) {
                   <span class="hint">Required</span>
                 }
               </div>
@@ -69,7 +69,7 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
           }
 
           <!-- Step 2: Address -->
-          @if (currentStep === 1) {
+          @if (wizardScope.step.value === 1) {
             <section class="step-panel">
               <h2>Address</h2>
               @if (addressLoading) {
@@ -82,8 +82,8 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
                 <label>Street</label>
                 <input
                   type="text"
-                  [value]="streetValue"
-                  (input)="onStreetInput($any($event.target).value)"
+                  [value]="addressScope.street.value"
+                  (input)="addressScope.street.set($any($event.target).value); cdr.detectChanges()"
                   placeholder="123 Main St"
                 />
               </div>
@@ -91,20 +91,23 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
                 <label>City</label>
                 <input
                   type="text"
-                  [value]="cityValue"
-                  (input)="onCityInput($any($event.target).value)"
+                  [value]="addressScope.city.value"
+                  (input)="addressScope.city.set($any($event.target).value); cdr.detectChanges()"
                   placeholder="New York"
                 />
               </div>
               <div class="field">
                 <label>Country</label>
-                <select [value]="countryValue" (change)="onCountryChange($any($event.target).value)">
+                <select
+                  [value]="addressScope.country.value"
+                  (change)="addressScope.country.set($any($event.target).value); cdr.detectChanges()"
+                >
                   <option value="">Select a country</option>
-                  @for (c of countriesList; track c) {
+                  @for (c of wizardScope.async.countries.value; track c) {
                     <option [value]="c">{{ c }}</option>
                   }
                 </select>
-                @if (countriesList.length === 0) {
+                @if (wizardScope.async.countries.value.length === 0) {
                   <span class="hint">Loading countries…</span>
                 }
               </div>
@@ -112,15 +115,15 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
           }
 
           <!-- Step 3: Preferences -->
-          @if (currentStep === 2) {
+          @if (wizardScope.step.value === 2) {
             <section class="step-panel">
               <h2>Preferences</h2>
               <div class="field row">
                 <label class="toggle">
                   <input
                     type="checkbox"
-                    [checked]="notificationsValue"
-                    (change)="onNotificationsChange($any($event.target).checked)"
+                    [checked]="preferencesScope.notifications.value"
+                    (change)="preferencesScope.notifications.set($any($event.target).checked); cdr.detectChanges()"
                   />
                   <span class="toggle-slider"></span>
                   <span>Enable notifications</span>
@@ -134,8 +137,8 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
                       type="radio"
                       name="theme"
                       value="dark"
-                      [checked]="themeValue === 'dark'"
-                      (change)="onThemeChange('dark')"
+                      [checked]="preferencesScope.theme.value === 'dark'"
+                      (change)="preferencesScope.theme.set('dark'); cdr.detectChanges()"
                     />
                     <span>Dark</span>
                   </label>
@@ -144,8 +147,8 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
                       type="radio"
                       name="theme"
                       value="light"
-                      [checked]="themeValue === 'light'"
-                      (change)="onThemeChange('light')"
+                      [checked]="preferencesScope.theme.value === 'light'"
+                      (change)="preferencesScope.theme.set('light'); cdr.detectChanges()"
                     />
                     <span>Light</span>
                   </label>
@@ -154,8 +157,8 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
                       type="radio"
                       name="theme"
                       value="auto"
-                      [checked]="themeValue === 'auto'"
-                      (change)="onThemeChange('auto')"
+                      [checked]="preferencesScope.theme.value === 'auto'"
+                      (change)="preferencesScope.theme.set('auto'); cdr.detectChanges()"
                     />
                     <span>Auto</span>
                   </label>
@@ -169,10 +172,10 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
             <button
               class="btn secondary"
               (click)="goBack()"
-              [disabled]="currentStep === 0"
+              [disabled]="wizardScope.step.value === 0"
             >Back</button>
 
-            @if (currentStep < totalSteps - 1) {
+            @if (wizardScope.step.value < totalSteps - 1) {
               <button
                 class="btn primary"
                 (click)="goNext()"
@@ -227,13 +230,13 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
 
             <div class="inspector-section">
               <h4>Atom Values</h4>
-              <div class="atom-row"><span>name</span><code>{{ nameValue | json }}</code></div>
-              <div class="atom-row"><span>email</span><code>{{ emailValue | json }}</code></div>
-              <div class="atom-row"><span>street</span><code>{{ streetValue | json }}</code></div>
-              <div class="atom-row"><span>city</span><code>{{ cityValue | json }}</code></div>
-              <div class="atom-row"><span>country</span><code>{{ countryValue | json }}</code></div>
-              <div class="atom-row"><span>notifications</span><code>{{ notificationsValue | json }}</code></div>
-              <div class="atom-row"><span>theme</span><code>{{ themeValue | json }}</code></div>
+              <div class="atom-row"><span>name</span><code>{{ personalScope.name.value | json }}</code></div>
+              <div class="atom-row"><span>email</span><code>{{ personalScope.email.value | json }}</code></div>
+              <div class="atom-row"><span>street</span><code>{{ addressScope.street.value | json }}</code></div>
+              <div class="atom-row"><span>city</span><code>{{ addressScope.city.value | json }}</code></div>
+              <div class="atom-row"><span>country</span><code>{{ addressScope.country.value | json }}</code></div>
+              <div class="atom-row"><span>notifications</span><code>{{ preferencesScope.notifications.value | json }}</code></div>
+              <div class="atom-row"><span>theme</span><code>{{ preferencesScope.theme.value | json }}</code></div>
             </div>
           </div>
         </aside>
@@ -504,7 +507,7 @@ import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/str
   `]
 })
 export class AppComponent implements OnDestroy {
-  private cdr = inject(ChangeDetectorRef);
+  readonly cdr = inject(ChangeDetectorRef);
 
   // Simulated async fetch for country list (resolves after 1.5s)
   private loadCountries = () =>
@@ -516,24 +519,23 @@ export class AppComponent implements OnDestroy {
     );
 
   // Scopes — initialized at declaration so TypeScript infers types.
-  // No manual type annotations needed; scope() returns Scope & T automatically.
-  private personalScope = scope(() => ({
+  readonly personalScope = scope(() => ({
     name: writableAtom(''),
     email: writableAtom(''),
   }));
 
-  private addressScope = scope(() => ({
+  readonly addressScope = scope(() => ({
     street: writableAtom(''),
     city: writableAtom(''),
     country: writableAtom(''),
   }));
 
-  private preferencesScope = scope(() => ({
+  readonly preferencesScope = scope(() => ({
     notifications: writableAtom(true),
     theme: writableAtom('dark'),
   }));
 
-  private wizardScope = scope(() => ({
+  readonly wizardScope = scope(() => ({
     step: writableAtom(0),
     personal: this.personalScope,
     address: this.addressScope,
@@ -544,7 +546,6 @@ export class AppComponent implements OnDestroy {
   }));
 
   // UI state
-  currentStep = 0;
   totalSteps = 3;
   stepNames = ['Personal', 'Address', 'Preferences'];
   snapshotJson = '{}';
@@ -553,57 +554,21 @@ export class AppComponent implements OnDestroy {
   stepLoading = [false, true, false];
   submitted = false;
 
-  // Bound values for inputs
-  nameValue = '';
-  emailValue = '';
-  streetValue = '';
-  cityValue = '';
-  countryValue = '';
-  countriesList: string[] = [];
-  notificationsValue = true;
-  themeValue = 'dark';
-
   private subscriptions: Subscription[] = [];
 
   constructor() {
-    this.setupSubscriptions();
+    // Only async data needs a subscription — when the promise resolves
+    // no user event triggers change detection, so we watch the atom.
+    this.subscriptions.push(
+      this.wizardScope.async.countries.subscribe(() => this.cdr.detectChanges())
+    );
+
     this.startLoadingPoller();
   }
 
   ngOnDestroy(): void {
     this.subscriptions.forEach(s => s.unsubscribe());
     this.wizardScope.dispose();
-  }
-
-  private setupSubscriptions(): void {
-    // Subscribe to atoms to drive Angular UI updates
-    this.subscriptions.push(
-      this.personalScope.name.subscribe(v => { this.nameValue = v; this.cdr.detectChanges(); })
-    );
-    this.subscriptions.push(
-      this.personalScope.email.subscribe(v => { this.emailValue = v; this.cdr.detectChanges(); })
-    );
-    this.subscriptions.push(
-      this.addressScope.street.subscribe(v => { this.streetValue = v; this.cdr.detectChanges(); })
-    );
-    this.subscriptions.push(
-      this.addressScope.city.subscribe(v => { this.cityValue = v; this.cdr.detectChanges(); })
-    );
-    this.subscriptions.push(
-      this.addressScope.country.subscribe(v => { this.countryValue = v; this.cdr.detectChanges(); })
-    );
-    this.subscriptions.push(
-      this.wizardScope.async.countries.subscribe(v => { this.countriesList = v; this.cdr.detectChanges(); })
-    );
-    this.subscriptions.push(
-      this.preferencesScope.notifications.subscribe(v => { this.notificationsValue = v; this.cdr.detectChanges(); })
-    );
-    this.subscriptions.push(
-      this.preferencesScope.theme.subscribe(v => { this.themeValue = v; this.cdr.detectChanges(); })
-    );
-    this.subscriptions.push(
-      this.wizardScope.step.subscribe(v => { this.currentStep = v; this.cdr.detectChanges(); })
-    );
   }
 
   /**
@@ -613,9 +578,6 @@ export class AppComponent implements OnDestroy {
    */
   private startLoadingPoller(): void {
     const tick = () => {
-      // Only the async scope (countries list) drives loading indicators.
-      // Writable atoms notify their scope subscribers immediately on
-      // creation, so form scopes are never stuck in loading state.
       const asyncLoading = this.wizardScope.async.loading;
       this.wizardLoading = asyncLoading;
       this.addressLoading = asyncLoading;
@@ -629,68 +591,35 @@ export class AppComponent implements OnDestroy {
 
     // Stop polling after 5 seconds when everything should be loaded
     setTimeout(() => clearInterval(intervalId), 5000);
-
-    // Also update on every atom change via a combined listener
-    const allAtoms = [
-      this.personalScope.name,
-      this.personalScope.email,
-      this.addressScope.street,
-      this.addressScope.city,
-      this.addressScope.country,
-      this.wizardScope.async.countries,
-      this.preferencesScope.notifications,
-      this.preferencesScope.theme,
-      this.wizardScope.step,
-    ];
-
-    const updateSnapshot = () => {
-      this.snapshotJson = JSON.stringify(this.wizardScope.snapshot(), null, 2);
-      this.cdr.detectChanges();
-    };
-
-    for (const a of allAtoms) {
-      this.subscriptions.push(a.subscribe(updateSnapshot));
-    }
   }
 
-  // Input handlers — call .set() directly on writable atoms
-  onNameInput(value: string): void { this.personalScope.name.set(value); }
-  onEmailInput(value: string): void { this.personalScope.email.set(value); }
-  onStreetInput(value: string): void { this.addressScope.street.set(value); }
-  onCityInput(value: string): void { this.addressScope.city.set(value); }
-  onCountryChange(value: string): void { this.addressScope.country.set(value); }
-  onNotificationsChange(checked: boolean): void { this.preferencesScope.notifications.set(checked); }
-  onThemeChange(value: string): void { this.preferencesScope.theme.set(value); }
-
   goBack(): void {
-    if (this.currentStep > 0) {
-      this.wizardScope.step.set(this.currentStep - 1);
-    }
+    this.wizardScope.step.set(this.wizardScope.step.value - 1);
+    this.cdr.detectChanges();
   }
 
   goNext(): void {
-    if (this.currentStep < this.totalSteps - 1) {
-      this.wizardScope.step.set(this.currentStep + 1);
-    }
+    this.wizardScope.step.set(this.wizardScope.step.value + 1);
+    this.cdr.detectChanges();
   }
 
   canAdvance(): boolean {
-    if (this.currentStep === 0) {
-      return !!this.nameValue && !!this.emailValue;
+    const step = this.wizardScope.step.value;
+    if (step === 0) {
+      return !!this.personalScope.name.value && !!this.personalScope.email.value;
     }
-    if (this.currentStep === 1) {
-      return !!this.streetValue && !!this.cityValue && !!this.countryValue;
+    if (step === 1) {
+      return !!this.addressScope.street.value && !!this.addressScope.city.value && !!this.addressScope.country.value;
     }
     return true;
   }
 
   canSubmit(): boolean {
-    return this.canAdvance() && this.currentStep === this.totalSteps - 1;
+    return this.canAdvance() && this.wizardScope.step.value === this.totalSteps - 1;
   }
 
   submit(): void {
     this.submitted = true;
-    // Snapshot captures the entire tree
     console.log('Wizard snapshot:', this.wizardScope.snapshot());
     this.cdr.detectChanges();
   }
