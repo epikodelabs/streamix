@@ -6,7 +6,7 @@ import { createOperator, NEXT, type Operator } from "../abstractions";
  *
  * This operator is a powerful tool for comparing consecutive values in a stream.
  * It maintains an internal state to remember the last value it received. For
- * each new value, it creates a tuple of `[previousValue, currentValue]` and
+ * each new value, it creates a tuple of `[prior, currentValue]` and
  * emits it to the output stream.
  *
  * The very first value emitted will have `undefined` as its "previous" value.

@@ -1,6 +1,5 @@
 import type { Stream } from "../abstractions/stream";
 import { createSubscription, type Subscription } from "../abstractions/subscription";
-import { createSubject } from "../subjects/subject";
 import { registerWithCurrentScope } from "./scope";
 
 export interface Atom<T = any> {
@@ -8,7 +7,7 @@ export interface Atom<T = any> {
 
   get(): T;
   readonly value: T;
-  readonly previousValue: T;
+  readonly prior: T;
 
   readonly disposed: boolean;
 
@@ -21,7 +20,9 @@ export interface WritableAtom<T = any> extends Atom<T> {
   set(value: T): void;
 }
 
-export function atom<T>(stream: Stream<T>, initialValue: T): Atom<T> {
+let activeFormula: { dependencies: Set<Atom<any>> } | null = null;
+
+export function flow<T>(stream: Stream<T>, initialValue: T): Atom<T> {
   let current = initialValue;
   let previous = initialValue;
   let disposed = false;
@@ -49,14 +50,20 @@ export function atom<T>(stream: Stream<T>, initialValue: T): Atom<T> {
 
     get() {
       if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
       return current;
     },
 
     get value() {
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
       return current;
     },
 
-    get previousValue() {
+    get prior() {
       return previous;
     },
 
@@ -82,7 +89,7 @@ export function atom<T>(stream: Stream<T>, initialValue: T): Atom<T> {
   return instance;
 }
 
-export function writableAtom<T>(initialValue: T): WritableAtom<T> {
+export function atom<T>(initialValue: T): WritableAtom<T> {
   let current = initialValue;
   let previous = initialValue;
   let disposed = false;
@@ -98,14 +105,20 @@ export function writableAtom<T>(initialValue: T): WritableAtom<T> {
 
     get() {
       if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
       return current;
     },
 
     get value() {
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
       return current;
     },
 
-    get previousValue() {
+    get prior() {
       return previous;
     },
 
@@ -149,22 +162,22 @@ export function writableAtom<T>(initialValue: T): WritableAtom<T> {
 }
 
 /**
- * Creates a derived atom from a set of dependencies.
+ * Creates a derived atom with automatic dependency tracking.
  *
- * The factory is re-evaluated synchronously whenever any dependency changes.
- * The result is itself an atom — it can be subscribed to, snapshotted, and
- * disposed like any other.
+ * The factory is re-evaluated synchronously whenever any atom read inside it
+ * changes. Dependencies are discovered automatically — no manual array is
+ * required. The result is itself an atom — it can be subscribed to,
+ * snapshotted, and disposed like any other.
  *
- * @param deps - Atoms whose changes should trigger re-computation.
- * @param fn - Pure function that reads dep values and returns the derived value.
+ * @param fn - Pure function that reads atom values and returns the derived value.
  * @returns A derived atom.
  *
  * @example
  * ```ts
  * const app = scope(() => {
- *   const first = writableAtom('Ada');
- *   const last = writableAtom('Lovelace');
- *   const full = computed([first, last], () => `${first.value} ${last.value}`);
+ *   const first = atom('Ada');
+ *   const last = atom('Lovelace');
+ *   const full = derived(() => `${first.value} ${last.value}`);
  *   return { first, last, full };
  * });
  *
@@ -172,22 +185,47 @@ export function writableAtom<T>(initialValue: T): WritableAtom<T> {
  * console.log(app.full.value); // 'Grace Lovelace'
  * ```
  */
-export function computed<T>(deps: Atom<any>[], fn: () => T): Atom<T> {
-  let current = fn();
-  let previous = current;
+export function derived<T>(fn: () => T): Atom<T> {
+  let current: T;
+  let previous: T;
   let disposed = false;
   const subs = new Set<(value: T) => void>();
+  const dependencies = new Set<Atom<any>>();
+  let unsubscribers: Subscription[] = [];
 
-  const unsubscribers = deps.map((dep) =>
-    dep.subscribe(() => {
-      if (disposed) return;
-      const next = fn();
-      if (Object.is(current, next)) return;
-      previous = current;
-      current = next;
-      for (const cb of subs) cb(next);
-    })
-  );
+  const run = (): T => {
+    unsubscribers.forEach((u) => u.unsubscribe());
+    unsubscribers = [];
+    dependencies.clear();
+
+    const prev = activeFormula;
+    activeFormula = context;
+    const result = fn();
+    activeFormula = prev;
+
+    for (const dep of dependencies) {
+      unsubscribers.push(
+        dep.subscribe(() => {
+          if (disposed) return;
+          const next = run();
+          if (Object.is(current, next)) return;
+          previous = current;
+          current = next;
+          for (const cb of subs) cb(next);
+        })
+      );
+    }
+
+    return result;
+  };
+
+  const context = {
+    dependencies,
+    run,
+  };
+
+  current = run();
+  previous = current;
 
   const instance: Atom<T> = {
     type: "atom",
@@ -198,14 +236,20 @@ export function computed<T>(deps: Atom<any>[], fn: () => T): Atom<T> {
 
     get() {
       if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
       return current;
     },
 
     get value() {
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
       return current;
     },
 
-    get previousValue() {
+    get prior() {
       return previous;
     },
 
@@ -226,51 +270,11 @@ export function computed<T>(deps: Atom<any>[], fn: () => T): Atom<T> {
 
   registerWithCurrentScope(instance);
 
-  // Notify scope subscribers immediately so computed atoms are
+  // Notify scope subscribers immediately so derived atoms are
   // considered "ready" — their value is already available.
   for (const cb of subs) {
     cb(current);
   }
 
   return instance;
-}
-
-/**
- * Creates an atom from a promise factory.
- *
- * The atom starts with `initialValue` and updates when the promise resolves.
- * If the promise rejects, the atom stays at `initialValue` and the optional
- * `onError` callback is invoked.
- *
- * @param factory - Function that returns a promise.
- * @param initialValue - Value used before the promise resolves.
- * @param onError - Optional callback invoked if the promise rejects.
- * @returns An atom that tracks the promise result.
- *
- * @example
- * ```ts
- * const data = promiseAtom(() => fetch('/api/user').then(r => r.json()), {});
- * // scope.loading is true until the fetch completes
- * ```
- */
-export function promiseAtom<T>(
-  factory: () => Promise<T>,
-  initialValue: T,
-  onError?: (error: any) => void
-): Atom<T> {
-  const subject = createSubject<T>();
-
-  factory().then(
-    (value) => {
-      subject.next(value);
-      subject.complete();
-    },
-    (err) => {
-      if (onError) onError(err);
-      subject.next(initialValue);
-      subject.complete();
-    }
-  );
-
-  return atom(subject, initialValue);
 }

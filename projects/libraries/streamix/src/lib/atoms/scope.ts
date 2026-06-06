@@ -1,7 +1,7 @@
 import type { Atom } from "./atom";
 
 function isAtom(value: unknown): value is Atom<any> {
-  return typeof value === "object" && value !== null && "previousValue" in value;
+  return typeof value === "object" && value !== null && "prior" in value;
 }
 
 function isScope(value: unknown): value is Scope {
@@ -109,8 +109,8 @@ export function registerWithCurrentScope(value: Atom<any> | Scope): void {
  * @example
  * ```ts
  * const app = scope(() => {
- *   const count = atom(counterStream, 0);
- *   const label = atom(labelStream, 'hello');
+ *   const count = flow(counterStream, 0);
+ *   const label = flow(labelStream, 'hello');
  *   return { count, label };
  * });
  *
@@ -123,7 +123,7 @@ export function registerWithCurrentScope(value: Atom<any> | Scope): void {
  * // Nested scopes and loading
  * const parent = scope(() => {
  *   const child = scope(() => ({
- *     value: atom(delayedStream, 0)
+ *     value: flow(delayedStream, 0)
  *   }));
  *   return { child };
  * });

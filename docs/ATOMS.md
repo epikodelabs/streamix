@@ -2,14 +2,14 @@
 
 Lightweight reactive state for Streamix.
 
-**Atoms** are stream-connected state nodes.
+**Atoms** are reactive state nodes.
 **Scopes** are tree-shaped containers that own atoms and child scopes, track lifecycle, and expose a unified snapshot of state.
 
 ---
 
 ## Design
 
-* **Atoms are stream-connected state nodes** — created from a stream and updated automatically on emissions.
+* **Atoms are reactive state nodes** — `atom` for writable values, `flow` for stream-backed values, `derived` for derived values.
 * **Scopes form a tree** — each scope owns atoms and nested scopes created within its factory.
 * **Loading state** — `scope.loading` is `true` until every tracked atom (recursively) has emitted at least once.
 * **Implicit registration** — items are tracked automatically via execution context; no manual wiring required.
@@ -22,11 +22,11 @@ Lightweight reactive state for Streamix.
 ```
 app (loading)
 ├── header (loading)
-│   └── title = atom(titleStream, '')
+│   └── title = flow(titleStream, '')
 ├── main (loading)
-│   ├── count = atom(counterStream, 0)
-│   └── label = atom(labelStream, 'hello')
-└── footer = atom(footerStream, '')
+│   ├── count = atom(0)
+│   └── label = flow(labelStream, 'hello')
+└── footer = flow(footerStream, '')
 ```
 
 Only returned values define the public shape:
@@ -41,32 +41,26 @@ Internal tracking remains separate from public structure.
 
 ## API
 
-### `atom(stream, initialValue)`
+### `atom(initialValue)`
 
-Creates a reactive state node connected to a stream.
+Creates a writable reactive state node.
 
 ```ts
-const source = createSubject<number>();
-const count = atom(source, 0);
+const count = atom(0);
 ```
 
 ```ts
-count.value;         // current value
-count.previousValue; // previous value
+count.value;   // current value
+count.prior;   // previous value
+count.set(10); // update value
 ```
 
 Subscribe to changes:
 
 ```ts
 const sub = count.subscribe(v => console.log(v));
-source.next(10);
+count.set(10);
 sub.unsubscribe();
-```
-
-Update manually:
-
-```ts
-count.update(n => n + 1);
 ```
 
 Dispose:
@@ -77,14 +71,68 @@ count.dispose();
 
 ---
 
+### `flow(stream, initialValue)`
+
+Creates a reactive state node connected to a stream.
+
+```ts
+const source = createSubject<number>();
+const count = flow(source, 0);
+```
+
+```ts
+count.value;         // current value
+count.prior;         // previous value
+```
+
+Subscribe to changes:
+
+```ts
+const sub = count.subscribe(v => console.log(v));
+source.next(10);
+sub.unsubscribe();
+```
+
+Dispose:
+
+```ts
+count.dispose();
+```
+
+---
+
+### `derived(factory)`
+
+Creates a derived atom with automatic dependency tracking.
+
+```ts
+const first = atom('Ada');
+const last = atom('Lovelace');
+const full = derived(() => `${first.value} ${last.value}`);
+```
+
+```ts
+full.value; // 'Ada Lovelace'
+first.set('Grace');
+full.value; // 'Grace Lovelace'
+```
+
+Dispose:
+
+```ts
+full.dispose();
+```
+
+---
+
 ### `scope(factory)`
 
 Creates a scoped reactive tree. All atoms and nested scopes created inside are automatically tracked.
 
 ```ts
 const app = scope(() => {
-  const count = atom(counterStream, 0);
-  const label = atom(labelStream, 'hello');
+  const count = atom(0);
+  const label = flow(labelStream, 'hello');
 
   return { count, label };
 });
@@ -122,8 +170,8 @@ root.dispose(); // disposes full tree
 
 ```ts
 const app = scope(() => {
-  const a = atom(streamA, 0);
-  const b = atom(streamB, '');
+  const a = flow(streamA, 0);
+  const b = flow(streamB, '');
 
   return { a, b };
 });
