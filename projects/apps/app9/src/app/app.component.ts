@@ -1,8 +1,6 @@
-import { Component, ChangeDetectorRef, OnDestroy, inject } from '@angular/core';
 import { JsonPipe } from '@angular/common';
-import { Subscription } from '@epikodelabs/streamix';
-import { writableAtom, promiseAtom, scope } from '@epikodelabs/streamix';
-import type { Atom, Scope, WritableAtom } from '@epikodelabs/streamix';
+import { ChangeDetectorRef, Component, OnDestroy, inject } from '@angular/core';
+import { Subscription, promiseAtom, scope, writableAtom } from '@epikodelabs/streamix';
 
 @Component({
   selector: 'app-root',
@@ -517,17 +515,33 @@ export class AppComponent implements OnDestroy {
       )
     );
 
-  // Scopes
-  private personalScope!: Scope & { name: WritableAtom<string>; email: WritableAtom<string> };
-  private addressScope!: Scope & { street: WritableAtom<string>; city: WritableAtom<string>; country: WritableAtom<string> };
-  private preferencesScope!: Scope & { notifications: WritableAtom<boolean>; theme: WritableAtom<string> };
-  private wizardScope!: Scope & {
-    step: WritableAtom<number>;
-    personal: Scope;
-    address: Scope;
-    preferences: Scope;
-    async: Scope & { countries: Atom<string[]> };
-  };
+  // Scopes — initialized at declaration so TypeScript infers types.
+  // No manual type annotations needed; scope() returns Scope & T automatically.
+  private personalScope = scope(() => ({
+    name: writableAtom(''),
+    email: writableAtom(''),
+  }));
+
+  private addressScope = scope(() => ({
+    street: writableAtom(''),
+    city: writableAtom(''),
+    country: writableAtom(''),
+  }));
+
+  private preferencesScope = scope(() => ({
+    notifications: writableAtom(true),
+    theme: writableAtom('dark'),
+  }));
+
+  private wizardScope = scope(() => ({
+    step: writableAtom(0),
+    personal: this.personalScope,
+    address: this.addressScope,
+    preferences: this.preferencesScope,
+    async: scope(() => ({
+      countries: promiseAtom(this.loadCountries, [] as string[]),
+    })),
+  }));
 
   // UI state
   currentStep = 0;
@@ -552,7 +566,6 @@ export class AppComponent implements OnDestroy {
   private subscriptions: Subscription[] = [];
 
   constructor() {
-    this.buildScopes();
     this.setupSubscriptions();
     this.startLoadingPoller();
   }
@@ -560,40 +573,6 @@ export class AppComponent implements OnDestroy {
   ngOnDestroy(): void {
     this.subscriptions.forEach(s => s.unsubscribe());
     this.wizardScope.dispose();
-  }
-
-  private buildScopes(): void {
-    const self = this;
-
-    // Personal scope — writable atoms, no subjects needed
-    this.personalScope = scope(() => ({
-      name: writableAtom(''),
-      email: writableAtom(''),
-    })) as any;
-
-    // Address scope — form fields only (user input, not async)
-    this.addressScope = scope(() => ({
-      street: writableAtom(''),
-      city: writableAtom(''),
-      country: writableAtom(''),
-    })) as any;
-
-    // Preferences scope
-    this.preferencesScope = scope(() => ({
-      notifications: writableAtom(true),
-      theme: writableAtom('dark'),
-    })) as any;
-
-    // Root wizard scope — nests form scopes and the async data scope
-    this.wizardScope = scope(() => ({
-      step: writableAtom(0),
-      personal: self.personalScope,
-      address: self.addressScope,
-      preferences: self.preferencesScope,
-      async: scope(() => ({
-        countries: promiseAtom(self.loadCountries, [] as string[]),
-      })),
-    })) as any;
   }
 
   private setupSubscriptions(): void {
