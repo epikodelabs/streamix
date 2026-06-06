@@ -171,23 +171,28 @@ chat.complete();
 
 ### Atoms & Scopes
 
-**Atoms** are read-only reactive values backed by streams. **Scopes** group atoms and child scopes, snapshot them, and dispose them recursively — with zero manual bookkeeping.
+**Atoms** are read-only reactive values backed by streams. **Scopes** group atoms and child scopes, act as combine-latest streams, and dispose them recursively — with zero manual bookkeeping.
 
 ```typescript
 import { atom, createSubject, scope } from '@epikodelabs/streamix';
 
 const counter = createSubject<number>();
+const label = createSubject<string>();
 
 const app = scope(() => {
   const count = atom(counter, 0);
-  const doubled = atom(counter.pipe(map(n => n * 2)), 0);
-  return { count, doubled };
+  const name = atom(label, 'guest');
+  return { count, name };
 });
 
-console.log(app.count.value);     // 0
+console.log(app.count.value); // 0
+console.log(app.loading);     // true
+
 counter.next(5);
-console.log(app.count.value);     // 5
-console.log(app.doubled.value);   // 10
+label.next('admin');
+
+console.log(app.count.value); // 5
+console.log(app.loading);     // false
 
 app.dispose(); // cleans up both atoms automatically
 ```

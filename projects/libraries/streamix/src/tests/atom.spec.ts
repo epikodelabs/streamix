@@ -76,19 +76,5 @@ describe('atom', () => {
     expect(() => subject.next(1)).not.toThrow();
   });
 
-  it('should update via function', () => {
-    const subject = createSubject<number>();
-    const a = atom(subject, 5);
-    a.update(v => v * 2);
-    expect(a.value).toBe(10);
-    a.dispose();
-  });
 
-  it('should ignore update after disposal', () => {
-    const subject = createSubject<number>();
-    const a = atom(subject, 5);
-    a.dispose();
-    a.update(v => v * 2);
-    expect(a.disposed).toBeTrue();
-  });
 });

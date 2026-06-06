@@ -37,7 +37,7 @@ describe('scope', () => {
       const b = atom(s2, 2);
       return { a, b };
     });
-    expect(s.snapshot()).toEqual([1, 2]);
+    expect(s.snapshot()).toEqual({ a: 1, b: 2 });
     s.dispose();
   });
 
@@ -76,7 +76,7 @@ describe('scope', () => {
       });
       return { child };
     });
-    expect(s.snapshot()).toEqual([[42]]);
+    expect(s.snapshot()).toEqual({ child: { a: 42 } });
     s.dispose();
   });
 
@@ -103,5 +103,68 @@ describe('scope', () => {
     expect(s.b.value).toBe(20);
 
     s.dispose();
+  });
+
+  describe('loading', () => {
+    it('should be false for an empty scope', () => {
+      const s = scope(() => {});
+      expect(s.loading).toBeFalse();
+      s.dispose();
+    });
+
+    it('should be true until all atoms have emitted', async () => {
+      const s1 = createSubject<number>();
+      const s2 = createSubject<string>();
+      const s = scope(() => {
+        const a = atom(s1, 0);
+        const b = atom(s2, '');
+        return { a, b };
+      });
+
+      expect(s.loading).toBeTrue();
+
+      s1.next(1);
+      await delay();
+      expect(s.loading).toBeTrue();
+
+      s2.next('x');
+      await delay();
+      expect(s.loading).toBeFalse();
+
+      s.dispose();
+    });
+
+    it('should track recursive loading through nested scopes', async () => {
+      const subject = createSubject<number>();
+      const parent = scope(() => {
+        const child = scope(() => {
+          const a = atom(subject, 0);
+          return { a };
+        });
+        return { child };
+      });
+
+      expect(parent.loading).toBeTrue();
+
+      subject.next(1);
+      await delay();
+      expect(parent.loading).toBeFalse();
+
+      parent.dispose();
+    });
+
+    it('should become false when atom emits', async () => {
+      const subject = createSubject<number>();
+      const s = scope(() => {
+        const a = atom(subject, 0);
+        return { a };
+      });
+
+      expect(s.loading).toBeTrue();
+      subject.next(1);
+      await delay();
+      expect(s.loading).toBeFalse();
+      s.dispose();
+    });
   });
 });

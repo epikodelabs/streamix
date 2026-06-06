@@ -1,13 +1,6 @@
 import type { Stream } from "../abstractions/stream";
+import { createSubscription, type Subscription } from "../abstractions/subscription";
 import { registerWithCurrentScope } from "./scope";
-
-/**
- * A handle returned by {@link Atom.subscribe} that allows unsubscribing.
- */
-export interface Subscription {
-  /** Removes the associated callback from the atom's subscribers. */
-  unsubscribe(): void;
-}
 
 /**
  * A read-only reactive value backed by a stream.
@@ -15,7 +8,10 @@ export interface Subscription {
  * Atoms suppress duplicate values (by identity), notify subscribers
  * synchronously on every real change, and cannot exist without a stream.
  */
-export interface Atom<T> {
+export interface Atom<T = any> {
+  /** Runtime type identifier. */
+  readonly type: "atom";
+
   /** Returns the current value, or throws if the atom has been disposed. */
   get(): T;
 
@@ -27,9 +23,6 @@ export interface Atom<T> {
 
   /** Registers a callback invoked on every change. */
   subscribe(callback: (value: T) => void): Subscription;
-
-  /** Applies a transformation to the current value and updates the atom. */
-  update(fn: (value: T) => T): void;
 
   /** Permanently disables the atom, drops all subscribers and unsubscribes from the source stream. */
   dispose(): void;
@@ -77,6 +70,8 @@ export function atom<T>(stream: Stream<T>, initialValue: T): Atom<T> {
   });
 
   const instance: Atom<T> = {
+    type: "atom",
+
     get disposed() {
       return disposed;
     },
@@ -96,28 +91,12 @@ export function atom<T>(stream: Stream<T>, initialValue: T): Atom<T> {
       return previous;
     },
 
-    update(fn) {
-      if (disposed) return;
-
-      const next = fn(current);
-      if (Object.is(current, next)) return;
-
-      previous = current;
-      current = next;
-
-      for (const cb of subs) {
-        cb(next);
-      }
-    },
-
     subscribe(callback) {
       subs.add(callback);
 
-      return {
-        unsubscribe() {
-          subs.delete(callback);
-        }
-      };
+      return createSubscription(() => {
+        subs.delete(callback);
+      });
     },
 
     dispose() {
