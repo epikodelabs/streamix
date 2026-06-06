@@ -44,6 +44,7 @@ Whether you are building a dashboard, a CLI tool, or a browser app with heavy ba
 - ⏱️ **Async iterator first** — designed for `for await...of`
 - 🧩 **Familiar operators** — `map`, `filter`, `switchMap`, `debounce`, `scan`, and many more
 - 🧪 **`query()` for promises** — await the first emitted value and auto-unsubscribe
+- ⚛️ **Atoms & Scopes** — stream-backed reactive values with automatic lifecycle management
 - 🧵 **Coroutines & actors** — offload heavy work to Web Workers with `compute()`, `compose()`, and `actor()`
 - 🌐 **Optional add-ons** — HTTP client, WebSocket helpers, and DOM observation utilities
 
@@ -166,6 +167,29 @@ for await (const msg of chat) {
 chat.next('Hey! 👋');
 chat.next('Anyone here?');
 chat.complete();
+```
+
+### Atoms & Scopes
+
+**Atoms** are read-only reactive values backed by streams. **Scopes** group atoms and child scopes, snapshot them, and dispose them recursively — with zero manual bookkeeping.
+
+```typescript
+import { atom, createSubject, scope } from '@epikodelabs/streamix';
+
+const counter = createSubject<number>();
+
+const app = scope(() => {
+  const count = atom(counter, 0);
+  const doubled = atom(counter.pipe(map(n => n * 2)), 0);
+  return { count, doubled };
+});
+
+console.log(app.count.value);     // 0
+counter.next(5);
+console.log(app.count.value);     // 5
+console.log(app.doubled.value);   // 10
+
+app.dispose(); // cleans up both atoms automatically
 ```
 
 ### Coroutines
