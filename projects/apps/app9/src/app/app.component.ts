@@ -1,8 +1,8 @@
 import { Component, ChangeDetectorRef, OnDestroy, inject } from '@angular/core';
 import { JsonPipe } from '@angular/common';
-import { createSubject, interval, map, Subscription } from '@epikodelabs/streamix';
-import { atom, scope } from '@epikodelabs/streamix';
-import type { Atom, Scope } from '@epikodelabs/streamix';
+import { interval, map, Subscription } from '@epikodelabs/streamix';
+import { atom, writableAtom, scope } from '@epikodelabs/streamix';
+import type { Atom, Scope, WritableAtom } from '@epikodelabs/streamix';
 
 @Component({
   selector: 'app-root',
@@ -508,27 +508,17 @@ import type { Atom, Scope } from '@epikodelabs/streamix';
 export class AppComponent implements OnDestroy {
   private cdr = inject(ChangeDetectorRef);
 
-  // Subjects for form fields
-  private nameSubject = createSubject<string>();
-  private emailSubject = createSubject<string>();
-  private streetSubject = createSubject<string>();
-  private citySubject = createSubject<string>();
-  private countrySubject = createSubject<string>();
-  private notificationsSubject = createSubject<boolean>();
-  private themeSubject = createSubject<string>();
-  private stepSubject = createSubject<number>();
-
   // Simulated async stream for country list (emits after 1.5s)
   private countriesStream = interval(1500).pipe(
     map(() => ['United States', 'Canada', 'United Kingdom', 'Germany', 'France', 'Japan', 'Australia'])
   );
 
   // Scopes
-  private personalScope!: Scope & { name: Atom<string>; email: Atom<string> };
-  private addressScope!: Scope & { street: Atom<string>; city: Atom<string>; country: Atom<string>; countries: Atom<string[]> };
-  private preferencesScope!: Scope & { notifications: Atom<boolean>; theme: Atom<string> };
+  private personalScope!: Scope & { name: WritableAtom<string>; email: WritableAtom<string> };
+  private addressScope!: Scope & { street: WritableAtom<string>; city: WritableAtom<string>; country: WritableAtom<string> };
+  private preferencesScope!: Scope & { notifications: WritableAtom<boolean>; theme: WritableAtom<string> };
   private wizardScope!: Scope & {
-    step: Atom<number>;
+    step: WritableAtom<number>;
     personal: Scope;
     address: Scope;
     preferences: Scope;
@@ -542,7 +532,7 @@ export class AppComponent implements OnDestroy {
   snapshotJson = '{}';
   wizardLoading = true;
   addressLoading = true;
-  stepLoading = [true, true, true];
+  stepLoading = [false, true, false];
   submitted = false;
 
   // Bound values for inputs
@@ -571,28 +561,28 @@ export class AppComponent implements OnDestroy {
   private buildScopes(): void {
     const self = this;
 
-    // Personal scope — atoms register here automatically
+    // Personal scope — writable atoms, no subjects needed
     this.personalScope = scope(() => ({
-      name: atom(self.nameSubject, ''),
-      email: atom(self.emailSubject, ''),
+      name: writableAtom(''),
+      email: writableAtom(''),
     })) as any;
 
     // Address scope — form fields only (user input, not async)
     this.addressScope = scope(() => ({
-      street: atom(self.streetSubject, ''),
-      city: atom(self.citySubject, ''),
-      country: atom(self.countrySubject, ''),
+      street: writableAtom(''),
+      city: writableAtom(''),
+      country: writableAtom(''),
     })) as any;
 
     // Preferences scope
     this.preferencesScope = scope(() => ({
-      notifications: atom(self.notificationsSubject, true),
-      theme: atom(self.themeSubject, 'dark'),
+      notifications: writableAtom(true),
+      theme: writableAtom('dark'),
     })) as any;
 
     // Root wizard scope — nests form scopes and the async data scope
     this.wizardScope = scope(() => ({
-      step: atom(self.stepSubject, 0),
+      step: writableAtom(0),
       personal: self.personalScope,
       address: self.addressScope,
       preferences: self.preferencesScope,
@@ -641,8 +631,8 @@ export class AppComponent implements OnDestroy {
   private startLoadingPoller(): void {
     const tick = () => {
       // Only the async scope (countries list) drives loading indicators.
-      // Form scopes contain subject-backed atoms that never emit until
-      // user interaction, so their .loading would stay true forever.
+      // Writable atoms notify their scope subscribers immediately on
+      // creation, so form scopes are never stuck in loading state.
       const asyncLoading = this.wizardScope.async.loading;
       this.wizardLoading = asyncLoading;
       this.addressLoading = asyncLoading;
@@ -680,24 +670,24 @@ export class AppComponent implements OnDestroy {
     }
   }
 
-  // Input handlers — emit into subjects, which drives atoms
-  onNameInput(value: string): void { this.nameSubject.next(value); }
-  onEmailInput(value: string): void { this.emailSubject.next(value); }
-  onStreetInput(value: string): void { this.streetSubject.next(value); }
-  onCityInput(value: string): void { this.citySubject.next(value); }
-  onCountryChange(value: string): void { this.countrySubject.next(value); }
-  onNotificationsChange(checked: boolean): void { this.notificationsSubject.next(checked); }
-  onThemeChange(value: string): void { this.themeSubject.next(value); }
+  // Input handlers — call .set() directly on writable atoms
+  onNameInput(value: string): void { this.personalScope.name.set(value); }
+  onEmailInput(value: string): void { this.personalScope.email.set(value); }
+  onStreetInput(value: string): void { this.addressScope.street.set(value); }
+  onCityInput(value: string): void { this.addressScope.city.set(value); }
+  onCountryChange(value: string): void { this.addressScope.country.set(value); }
+  onNotificationsChange(checked: boolean): void { this.preferencesScope.notifications.set(checked); }
+  onThemeChange(value: string): void { this.preferencesScope.theme.set(value); }
 
   goBack(): void {
     if (this.currentStep > 0) {
-      this.stepSubject.next(this.currentStep - 1);
+      this.wizardScope.step.set(this.currentStep - 1);
     }
   }
 
   goNext(): void {
     if (this.currentStep < this.totalSteps - 1) {
-      this.stepSubject.next(this.currentStep + 1);
+      this.wizardScope.step.set(this.currentStep + 1);
     }
   }
 
