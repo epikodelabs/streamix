@@ -22,10 +22,46 @@ export interface WritableAtom<T = any> extends Atom<T> {
 
 let activeFormula: { dependencies: Set<Atom<any>> } | null = null;
 
+/* ── Glitch-free propagation ── */
+
+let propagationDepth = 0;
+let deferredNotifications = new Set<() => void>();
+
+function flushDeferred() {
+  const notifications = Array.from(deferredNotifications);
+  deferredNotifications = new Set();
+  for (const notify of notifications) {
+    notify();
+  }
+}
+
+function runWithPropagation(fn: () => void) {
+  propagationDepth++;
+  try {
+    fn();
+  } finally {
+    propagationDepth--;
+    if (propagationDepth === 0 && deferredNotifications.size > 0) {
+      flushDeferred();
+    }
+  }
+}
+
+function notifyDerivedSubscribers(notify: () => void) {
+  if (propagationDepth > 0) {
+    deferredNotifications.add(notify);
+  } else {
+    notify();
+  }
+}
+
+/* ── flow ── */
+
 export function flow<T>(stream: Stream<T>, initialValue: T): Atom<T> {
   let current = initialValue;
   let previous = initialValue;
   let disposed = false;
+  let hasEmitted = false;
 
   const subs = new Set<(value: T) => void>();
 
@@ -33,12 +69,15 @@ export function flow<T>(stream: Stream<T>, initialValue: T): Atom<T> {
     if (disposed) return;
     if (Object.is(current, value)) return;
 
+    hasEmitted = true;
     previous = current;
     current = value;
 
-    for (const cb of Array.from(subs)) {
-      cb(value);
-    }
+    runWithPropagation(() => {
+      for (const cb of Array.from(subs)) {
+        cb(value);
+      }
+    });
   });
 
   const instance: Atom<T> = {
@@ -86,8 +125,18 @@ export function flow<T>(stream: Stream<T>, initialValue: T): Atom<T> {
 
   registerWithCurrentScope(instance);
 
+  // If the stream emitted synchronously during subscription, the scope's
+  // loading callback missed it because it hadn't subscribed yet. Replay it.
+  if (hasEmitted) {
+    for (const cb of Array.from(subs)) {
+      cb(current);
+    }
+  }
+
   return instance;
 }
+
+/* ── atom ── */
 
 export function atom<T>(initialValue: T): WritableAtom<T> {
   let current = initialValue;
@@ -137,9 +186,11 @@ export function atom<T>(initialValue: T): WritableAtom<T> {
       previous = current;
       current = value;
 
-      for (const cb of Array.from(subs)) {
-        cb(value);
-      }
+      runWithPropagation(() => {
+        for (const cb of Array.from(subs)) {
+          cb(value);
+        }
+      });
     },
 
     dispose() {
@@ -160,6 +211,8 @@ export function atom<T>(initialValue: T): WritableAtom<T> {
 
   return instance;
 }
+
+/* ── derived ── */
 
 /**
  * Creates a derived atom with automatic dependency tracking.
@@ -189,31 +242,57 @@ export function derived<T>(fn: () => T): Atom<T> {
   let current: T;
   let previous: T;
   let disposed = false;
+  let running = false;
   const subs = new Set<(value: T) => void>();
   const dependencies = new Set<Atom<any>>();
-  let unsubscribers: Subscription[] = [];
+  const depSubscriptions = new Map<Atom<any>, Subscription>();
+
+  const notify = () => {
+    for (const cb of Array.from(subs)) cb(current);
+  };
 
   const run = (): T => {
-    unsubscribers.forEach((u) => u.unsubscribe());
-    unsubscribers = [];
+    if (running) {
+      throw new Error("Circular dependency detected in derived()");
+    }
+
+    const oldDeps = new Set(depSubscriptions.keys());
     dependencies.clear();
 
+    running = true;
     const prev = activeFormula;
     activeFormula = context;
-    const result = fn();
-    activeFormula = prev;
+    let result: T;
+    try {
+      result = fn();
+    } finally {
+      activeFormula = prev;
+      running = false;
+    }
 
+    // Unsubscribe from removed deps
+    for (const dep of oldDeps) {
+      if (!dependencies.has(dep)) {
+        depSubscriptions.get(dep)?.unsubscribe();
+        depSubscriptions.delete(dep);
+      }
+    }
+
+    // Subscribe to new deps
     for (const dep of dependencies) {
-      unsubscribers.push(
-        dep.subscribe(() => {
-          if (disposed) return;
-          const next = run();
-          if (Object.is(current, next)) return;
-          previous = current;
-          current = next;
-          for (const cb of Array.from(subs)) cb(next);
-        })
-      );
+      if (!depSubscriptions.has(dep)) {
+        depSubscriptions.set(
+          dep,
+          dep.subscribe(() => {
+            if (disposed) return;
+            const next = run();
+            if (Object.is(current, next)) return;
+            previous = current;
+            current = next;
+            notifyDerivedSubscribers(notify);
+          })
+        );
+      }
     }
 
     return result;
@@ -263,7 +342,10 @@ export function derived<T>(fn: () => T): Atom<T> {
     dispose() {
       if (disposed) return;
       disposed = true;
-      unsubscribers.forEach((u) => u.unsubscribe());
+      for (const sub of depSubscriptions.values()) {
+        sub.unsubscribe();
+      }
+      depSubscriptions.clear();
       subs.clear();
     }
   };

@@ -1,11 +1,12 @@
 import type { Atom } from "./atom";
+import type { Subscription } from "../abstractions/subscription";
 
 function isAtom(value: unknown): value is Atom<any> {
-  return typeof value === "object" && value !== null && "prior" in value;
+  return typeof value === "object" && value !== null && (value as any).type === "atom";
 }
 
 function isScope(value: unknown): value is Scope {
-  return typeof value === "object" && value !== null && "snapshot" in value && "dispose" in value;
+  return typeof value === "object" && value !== null && (value as any).type === "scope";
 }
 
 /**
@@ -29,7 +30,7 @@ function isScope(value: unknown): value is Scope {
  *
  * **Disposal**
  *
- * {@link dispose} tears down every tracked atom and child scope recursively.
+ * {@link dispose} tears down every tracked atom or child scope recursively.
  * After disposal the scope should not be used.
  *
  * All tracking happens automatically — no manual bookkeeping is required.
@@ -66,6 +67,7 @@ interface ScopeInternal {
   localLoading: boolean;
   snapshotSource?: Record<string, any>;
   checkLoading(): void;
+  loadingSubscriptions: Subscription[];
 }
 
 const scopeInternals = new WeakMap<Scope, ScopeInternal>();
@@ -88,10 +90,11 @@ export function registerWithCurrentScope(value: Atom<any> | Scope): void {
   internal.tracked.add(value);
 
   if (isAtom(value)) {
-    value.subscribe(() => {
+    const sub = value.subscribe(() => {
       internal.emittedAtoms.add(value);
       internal.checkLoading();
     });
+    internal.loadingSubscriptions.push(sub);
   }
 }
 
@@ -144,6 +147,7 @@ export function scope<T>(factory: () => T): Scope & T {
     tracked,
     emittedAtoms,
     localLoading,
+    loadingSubscriptions: [],
 
     checkLoading() {
       if (!localLoading) return;
@@ -173,7 +177,7 @@ export function scope<T>(factory: () => T): Scope & T {
       const result: Record<string, any> = {};
       for (const [key, value] of Object.entries(source)) {
         if (isAtom(value)) {
-          result[key] = value.value;
+          result[key] = value.disposed ? undefined : value.value;
         } else if (isScope(value)) {
           result[key] = value.snapshot();
         } else {
@@ -184,10 +188,16 @@ export function scope<T>(factory: () => T): Scope & T {
     },
 
     dispose() {
+      for (const sub of internal.loadingSubscriptions) {
+        sub.unsubscribe();
+      }
+      internal.loadingSubscriptions.length = 0;
       for (const item of Array.from(tracked)) {
         item.dispose();
       }
       tracked.clear();
+      emittedAtoms.clear();
+      internal.snapshotSource = undefined;
     }
   };
 
@@ -212,6 +222,17 @@ export function scope<T>(factory: () => T): Scope & T {
     !Array.isArray(result)
   ) {
     internal.snapshotSource = result as Record<string, any>;
+  }
+
+  // Warn about properties that would overwrite Scope methods
+  if (typeof result === "object" && result !== null && !Array.isArray(result)) {
+    for (const key of Object.keys(result)) {
+      if (key in instance) {
+        console.warn(
+          `Scope factory property "${key}" conflicts with the Scope interface and will overwrite it.`
+        );
+      }
+    }
   }
 
   // Empty scopes are immediately not loading
