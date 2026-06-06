@@ -1,5 +1,6 @@
 import type { Stream } from "../abstractions/stream";
 import { createSubscription, type Subscription } from "../abstractions/subscription";
+import { createSubject } from "../subjects/subject";
 import { registerWithCurrentScope } from "./scope";
 
 export interface Atom<T = any> {
@@ -145,4 +146,44 @@ export function writableAtom<T>(initialValue: T): WritableAtom<T> {
   }
 
   return instance;
+}
+
+/**
+ * Creates an atom from a promise factory.
+ *
+ * The atom starts with `initialValue` and updates when the promise resolves.
+ * If the promise rejects, the atom stays at `initialValue` and the optional
+ * `onError` callback is invoked.
+ *
+ * @param factory - Function that returns a promise.
+ * @param initialValue - Value used before the promise resolves.
+ * @param onError - Optional callback invoked if the promise rejects.
+ * @returns An atom that tracks the promise result.
+ *
+ * @example
+ * ```ts
+ * const data = promiseAtom(() => fetch('/api/user').then(r => r.json()), {});
+ * // scope.loading is true until the fetch completes
+ * ```
+ */
+export function promiseAtom<T>(
+  factory: () => Promise<T>,
+  initialValue: T,
+  onError?: (error: any) => void
+): Atom<T> {
+  const subject = createSubject<T>();
+
+  factory().then(
+    (value) => {
+      subject.next(value);
+      subject.complete();
+    },
+    (err) => {
+      if (onError) onError(err);
+      subject.next(initialValue);
+      subject.complete();
+    }
+  );
+
+  return atom(subject, initialValue);
 }

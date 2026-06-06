@@ -1,7 +1,7 @@
 import { Component, ChangeDetectorRef, OnDestroy, inject } from '@angular/core';
 import { JsonPipe } from '@angular/common';
-import { interval, map, Subscription } from '@epikodelabs/streamix';
-import { atom, writableAtom, scope } from '@epikodelabs/streamix';
+import { Subscription } from '@epikodelabs/streamix';
+import { writableAtom, promiseAtom, scope } from '@epikodelabs/streamix';
 import type { Atom, Scope, WritableAtom } from '@epikodelabs/streamix';
 
 @Component({
@@ -508,10 +508,14 @@ import type { Atom, Scope, WritableAtom } from '@epikodelabs/streamix';
 export class AppComponent implements OnDestroy {
   private cdr = inject(ChangeDetectorRef);
 
-  // Simulated async stream for country list (emits after 1.5s)
-  private countriesStream = interval(1500).pipe(
-    map(() => ['United States', 'Canada', 'United Kingdom', 'Germany', 'France', 'Japan', 'Australia'])
-  );
+  // Simulated async fetch for country list (resolves after 1.5s)
+  private loadCountries = () =>
+    new Promise<string[]>(resolve =>
+      setTimeout(() =>
+        resolve(['United States', 'Canada', 'United Kingdom', 'Germany', 'France', 'Japan', 'Australia']),
+        1500
+      )
+    );
 
   // Scopes
   private personalScope!: Scope & { name: WritableAtom<string>; email: WritableAtom<string> };
@@ -587,7 +591,7 @@ export class AppComponent implements OnDestroy {
       address: self.addressScope,
       preferences: self.preferencesScope,
       async: scope(() => ({
-        countries: atom(self.countriesStream, [] as string[]),
+        countries: promiseAtom(self.loadCountries, [] as string[]),
       })),
     })) as any;
   }
