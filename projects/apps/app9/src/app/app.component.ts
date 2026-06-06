@@ -1,14 +1,13 @@
-import { DecimalPipe } from '@angular/common';
+import { DecimalPipe, JsonPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, OnDestroy, inject } from '@angular/core';
-import { atom, derived, fromPromise, scope } from '@epikodelabs/streamix';
-import { flow } from '../../../../libraries/streamix/src/lib/atoms/atom';
+import { atom, derived, flow, fromPromise, scope } from '@epikodelabs/streamix';
 
-type Tab = 'tree' | 'events' | 'snapshot';
+type Tab = 'tree' | 'state';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [DecimalPipe],
+  imports: [DecimalPipe, JsonPipe],
   template: `
     <div class="universe">
       <!-- Animated background mesh -->
@@ -42,7 +41,7 @@ type Tab = 'tree' | 'events' | 'snapshot';
               <label [class.lit]="personal.name.value">Codename</label>
               <input
                 [value]="personal.name.value"
-                (input)="personal.name.set($any($event.target).value); cdr.detectChanges()"
+                (input)="personal.name.set($any($event.target).value)"
                 placeholder="Enter codename"
               />
               <div class="pulse-bar" [style.width.%]="personal.name.value.length * 5"></div>
@@ -51,7 +50,7 @@ type Tab = 'tree' | 'events' | 'snapshot';
               <label [class.lit]="personal.email.value">Channel</label>
               <input
                 [value]="personal.email.value"
-                (input)="personal.email.set($any($event.target).value); cdr.detectChanges()"
+                (input)="personal.email.set($any($event.target).value)"
                 placeholder="secure@node.net"
               />
               <div class="pulse-bar" [style.width.%]="personal.email.value.length * 3"></div>
@@ -65,7 +64,7 @@ type Tab = 'tree' | 'events' | 'snapshot';
               <label [class.lit]="address.street.value">Sector</label>
               <input
                 [value]="address.street.value"
-                (input)="address.street.set($any($event.target).value); cdr.detectChanges()"
+                (input)="address.street.set($any($event.target).value)"
                 placeholder="Sector 7-G"
               />
             </div>
@@ -76,7 +75,7 @@ type Tab = 'tree' | 'events' | 'snapshot';
               } @else {
                 <select
                   [value]="address.country.value"
-                  (change)="address.country.set($any($event.target).value); cdr.detectChanges()"
+                  (change)="address.country.set($any($event.target).value)"
                 >
                   <option value="">Select zone</option>
                   @for (c of wizard.async.countries.value; track c) {
@@ -95,7 +94,7 @@ type Tab = 'tree' | 'events' | 'snapshot';
                 <input
                   type="checkbox"
                   [checked]="preferences.notifications.value"
-                  (change)="preferences.notifications.set($any($event.target).checked); cdr.detectChanges()"
+                  (change)="preferences.notifications.set($any($event.target).checked)"
                 />
                 <span class="toggle-glow" [class.on]="preferences.notifications.value"></span>
                 <span>Signal beacon</span>
@@ -111,7 +110,7 @@ type Tab = 'tree' | 'events' | 'snapshot';
                       name="theme"
                       [value]="opt"
                       [checked]="preferences.theme.value === opt"
-                      (change)="preferences.theme.set(opt); cdr.detectChanges()"
+                      (change)="preferences.theme.set(opt)"
                     />
                     <span class="radio-glow" [class.on]="preferences.theme.value === opt"></span>
                     <span>{{ opt }}</span>
@@ -128,7 +127,7 @@ type Tab = 'tree' | 'events' | 'snapshot';
       <aside class="sidebar" [class.collapsed]="sidebarCollapsed">
         <div class="sidebar-header">
           <span class="sidebar-title">🔬 Reactive Lab</span>
-          <button class="sidebar-toggle" (click)="sidebarCollapsed = !sidebarCollapsed; cdr.detectChanges()">
+          <button class="sidebar-toggle" (click)="sidebarCollapsed = !sidebarCollapsed">
             {{ sidebarCollapsed ? '◀' : '▶' }}
           </button>
         </div>
@@ -139,7 +138,7 @@ type Tab = 'tree' | 'events' | 'snapshot';
             @for (t of tabs; track t) {
               <button
                 [class.active]="activeTab === t"
-                (click)="activeTab = t; cdr.detectChanges()"
+                (click)="activeTab = t"
               >{{ t }}</button>
             }
           </div>
@@ -223,21 +222,10 @@ type Tab = 'tree' | 'events' | 'snapshot';
             </div>
           }
 
-          <!-- Events tab -->
-          @if (activeTab === 'events') {
+          <!-- State tab -->
+          @if (activeTab === 'state') {
             <div class="tab-panel">
-              <div class="log">
-                @for (e of events; track $index) {
-                  <div class="log-line">{{ e }}</div>
-                }
-              </div>
-            </div>
-          }
-
-          <!-- Snapshot tab -->
-          @if (activeTab === 'snapshot') {
-            <div class="tab-panel">
-              <pre class="snapshot">{{ snapshot }}</pre>
+              <pre class="snapshot">{{ state.value | json }}</pre>
             </div>
           }
         }
@@ -246,7 +234,7 @@ type Tab = 'tree' | 'events' | 'snapshot';
       <!-- Navigation -->
       <footer class="nav">
         <button
-          (click)="wizard.step.set(wizard.step.value - 1); cdr.detectChanges()"
+          (click)="wizard.step.set(wizard.step.value - 1)"
           [disabled]="wizard.step.value === 0"
         >← Back</button>
         <div class="step-dots">
@@ -255,7 +243,7 @@ type Tab = 'tree' | 'events' | 'snapshot';
           }
         </div>
         <button
-          (click)="wizard.step.set(wizard.step.value + 1); cdr.detectChanges()"
+          (click)="wizard.step.set(wizard.step.value + 1)"
           [disabled]="wizard.step.value === 2"
         >Next →</button>
       </footer>
@@ -411,30 +399,24 @@ export class AppComponent implements OnDestroy {
     return (score / 4) * 100;
   });
 
-  sidebarCollapsed = false;
-  activeTab: Tab = 'tree';
-  readonly tabs: Tab[] = ['tree', 'events', 'snapshot'];
-
-  snapshot = '{}';
-  events: string[] = [];
-
   // Single derived snapshot — auto-tracks every atom in the wizard tree
   readonly state = derived(() => ({
     ...this.wizard.snapshot(),
     completeness: this.completeness.value,
   }));
 
+  sidebarCollapsed = false;
+  activeTab: Tab = 'tree';
+  readonly tabs: Tab[] = ['tree', 'state'];
+
   constructor() {
-    this.state.subscribe((s) => {
-      this.snapshot = JSON.stringify(s, null, 2);
-      this.events.unshift(`${new Date().toLocaleTimeString()}  Δ  →  ${JSON.stringify(s)}`);
-      if (this.events.length > 12) this.events.pop();
-      this.cdr.detectChanges();
-    });
+    // Async atoms update outside Angular's zone — trigger CD manually
+    this.state.subscribe(() => this.cdr.detectChanges());
   }
 
   ngOnDestroy() {
     this.state.dispose();
+    this.completeness.dispose();
     this.wizard.dispose();
   }
 }

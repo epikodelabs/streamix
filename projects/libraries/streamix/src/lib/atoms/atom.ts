@@ -36,7 +36,7 @@ export function flow<T>(stream: Stream<T>, initialValue: T): Atom<T> {
     previous = current;
     current = value;
 
-    for (const cb of subs) {
+    for (const cb of Array.from(subs)) {
       cb(value);
     }
   });
@@ -137,7 +137,7 @@ export function atom<T>(initialValue: T): WritableAtom<T> {
       previous = current;
       current = value;
 
-      for (const cb of subs) {
+      for (const cb of Array.from(subs)) {
         cb(value);
       }
     },
@@ -154,7 +154,7 @@ export function atom<T>(initialValue: T): WritableAtom<T> {
 
   // Notify scope subscribers immediately so writable atoms are
   // considered "ready" — their value is already available.
-  for (const cb of subs) {
+  for (const cb of Array.from(subs)) {
     cb(current);
   }
 
@@ -211,7 +211,7 @@ export function derived<T>(fn: () => T): Atom<T> {
           if (Object.is(current, next)) return;
           previous = current;
           current = next;
-          for (const cb of subs) cb(next);
+          for (const cb of Array.from(subs)) cb(next);
         })
       );
     }
@@ -272,7 +272,7 @@ export function derived<T>(fn: () => T): Atom<T> {
 
   // Notify scope subscribers immediately so derived atoms are
   // considered "ready" — their value is already available.
-  for (const cb of subs) {
+  for (const cb of Array.from(subs)) {
     cb(current);
   }
 
