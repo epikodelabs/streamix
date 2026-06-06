@@ -149,6 +149,93 @@ export function writableAtom<T>(initialValue: T): WritableAtom<T> {
 }
 
 /**
+ * Creates a derived atom from a set of dependencies.
+ *
+ * The factory is re-evaluated synchronously whenever any dependency changes.
+ * The result is itself an atom — it can be subscribed to, snapshotted, and
+ * disposed like any other.
+ *
+ * @param deps - Atoms whose changes should trigger re-computation.
+ * @param fn - Pure function that reads dep values and returns the derived value.
+ * @returns A derived atom.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const first = writableAtom('Ada');
+ *   const last = writableAtom('Lovelace');
+ *   const full = computed([first, last], () => `${first.value} ${last.value}`);
+ *   return { first, last, full };
+ * });
+ *
+ * app.first.set('Grace');
+ * console.log(app.full.value); // 'Grace Lovelace'
+ * ```
+ */
+export function computed<T>(deps: Atom<any>[], fn: () => T): Atom<T> {
+  let current = fn();
+  let previous = current;
+  let disposed = false;
+  const subs = new Set<(value: T) => void>();
+
+  const unsubscribers = deps.map((dep) =>
+    dep.subscribe(() => {
+      if (disposed) return;
+      const next = fn();
+      if (Object.is(current, next)) return;
+      previous = current;
+      current = next;
+      for (const cb of subs) cb(next);
+    })
+  );
+
+  const instance: Atom<T> = {
+    type: "atom",
+
+    get disposed() {
+      return disposed;
+    },
+
+    get() {
+      if (disposed) throw new Error("Atom has been disposed");
+      return current;
+    },
+
+    get value() {
+      return current;
+    },
+
+    get previousValue() {
+      return previous;
+    },
+
+    subscribe(callback) {
+      subs.add(callback);
+      return createSubscription(() => {
+        subs.delete(callback);
+      });
+    },
+
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      unsubscribers.forEach((u) => u.unsubscribe());
+      subs.clear();
+    }
+  };
+
+  registerWithCurrentScope(instance);
+
+  // Notify scope subscribers immediately so computed atoms are
+  // considered "ready" — their value is already available.
+  for (const cb of subs) {
+    cb(current);
+  }
+
+  return instance;
+}
+
+/**
  * Creates an atom from a promise factory.
  *
  * The atom starts with `initialValue` and updates when the promise resolves.

@@ -1,4 +1,4 @@
-import { atom, createSubject, writableAtom, promiseAtom } from '@epikodelabs/streamix';
+import { atom, createSubject, writableAtom, computed, promiseAtom } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -157,5 +157,69 @@ describe('promiseAtom', () => {
     expect(a.value).toBe('fallback');
     expect(errors).toEqual(['fail']);
     a.dispose();
+  });
+});
+
+
+describe('computed', () => {
+  it('should compute an initial value', () => {
+    const a = writableAtom(2);
+    const b = writableAtom(3);
+    const sum = computed([a, b], () => a.value + b.value);
+
+    expect(sum.value).toBe(5);
+    sum.dispose();
+  });
+
+  it('should recompute when a dependency changes', () => {
+    const a = writableAtom(1);
+    const doubled = computed([a], () => a.value * 2);
+    const values: number[] = [];
+    doubled.subscribe(v => values.push(v));
+
+    a.set(5);
+    expect(doubled.value).toBe(10);
+    expect(values).toEqual([10]);
+
+    a.set(7);
+    expect(doubled.value).toBe(14);
+    expect(values).toEqual([10, 14]);
+
+    doubled.dispose();
+  });
+
+  it('should suppress duplicate values', () => {
+    const a = writableAtom(1);
+    const doubled = computed([a], () => a.value * 2);
+    const values: number[] = [];
+    doubled.subscribe(v => values.push(v));
+
+    a.set(2);
+    a.set(2); // same underlying value, computed result unchanged
+    expect(values).toEqual([4]);
+
+    doubled.dispose();
+  });
+
+  it('should track previousValue', () => {
+    const a = writableAtom(10);
+    const inc = computed([a], () => a.value + 1);
+
+    expect(inc.previousValue).toBe(11);
+    a.set(20);
+    expect(inc.value).toBe(21);
+    expect(inc.previousValue).toBe(11);
+
+    inc.dispose();
+  });
+
+  it('should clean up dependency subscriptions on dispose', () => {
+    const a = writableAtom(1);
+    const doubled = computed([a], () => a.value * 2);
+    doubled.dispose();
+
+    // Should not throw or affect the computed after disposal
+    a.set(99);
+    expect(doubled.value).toBe(2);
   });
 });
