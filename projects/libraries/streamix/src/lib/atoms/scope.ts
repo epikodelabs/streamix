@@ -1,217 +1,145 @@
 import type { Atom } from "./atom";
 
-function isAtom(value: unknown): value is Atom<any> {
-  return typeof value === "object" && value !== null && "previousValue" in value;
-}
-
-function isScope(value: unknown): value is Scope {
-  return typeof value === "object" && value !== null && "snapshot" in value && "dispose" in value;
-}
-
-/**
- * A composite container that owns atoms and child scopes.
- *
- * Scopes form a tree via {@link parent}, track a {@link loading} flag
- * that becomes `false` once every d atom (recursively) has
- * emitted at least once, and support bulk snapshotting and disposal.
- *
- * Items created inside a scope factory are registered automatically —
- * no manual bookkeeping is required.
- */
 export interface Scope {
-  /** Runtime type identifier. */
-  readonly type: "scope";
+  type: "scope";
 
-  /** The scope that was active when this one was created, if any. */
-  readonly parent?: Scope;
+  name?: string;
+  parent?: Scope;
 
-  /**
-   * `true` while any d atom (in this scope or a descendant)
-   * has not yet emitted its first value.
-   */
-  readonly loading: boolean;
+  loading: boolean;
 
-  /**
-   * Captures the current values of all d items.
-   *
-   * For atoms this reads {@link Atom.value};
-   * for child scopes this recurses into their snapshot.
-   * Non-atom/scope values are passed through as-is.
-   */
   snapshot(): Record<string, any>;
 
-  /** Disposes every d atom or child scope recursively. */
   dispose(): void;
 }
 
+type Node = Atom<any> | Scope;
+
 interface ScopeInternal {
-  d: Set<Atom<any> | Scope>;
-  emittedAtoms: Set<Atom<any>>;
-  localLoading: boolean;
-  snapshotSource?: Record<string, any>;
-  checkLoading(): void;
+  nodes: Map<string, Node>;
+  atoms: Set<Atom<any>>;
+  scopes: Set<Scope>;
+  emitted: Set<Atom<any>>;
 }
 
-const scopeInternals = new WeakMap<Scope, ScopeInternal>();
+const internals = new WeakMap<Scope, ScopeInternal>();
 
 let currentScope: Scope | undefined;
 
-/** @internal Returns the scope currently executing its factory. */
 export function getCurrentScope(): Scope | undefined {
   return currentScope;
 }
 
-/** @internal Registers a value with the scope that is currently active. */
-export function registerWithCurrentScope(value: Atom<any> | Scope): void {
+function isAtom(value: any): value is Atom<any> {
+  return value?.type === "atom";
+}
+
+function isScope(value: any): value is Scope {
+  return value?.type === "scope";
+}
+
+export function registerWithCurrentScope(node: Node, name?: string): void {
   const scope = currentScope;
   if (!scope) return;
 
-  const internal = scopeInternals.get(scope);
+  const internal = internals.get(scope);
   if (!internal) return;
 
-  internal.d.add(value);
+  const key = name ?? (node as any).name ?? `${internal.nodes.size}`;
 
-  if (isAtom(value)) {
-    value.subscribe(() => {
-      internal.emittedAtoms.add(value);
-      internal.checkLoading();
+  internal.nodes.set(key, node);
+
+  if (isAtom(node)) {
+    internal.atoms.add(node);
+
+    node.subscribe(() => {
+      internal.emitted.add(node);
     });
+  }
+
+  if (isScope(node)) {
+    internal.scopes.add(node);
   }
 }
 
-/**
- * Creates a scope.
- *
- * The factory runs with the new scope as the active context. Any atoms or
- * nested scopes created inside the factory are automatically d and
- * will be disposed when this scope is disposed. The factory's return value
- * is merged onto the scope object for typed access.
- *
- * @param factory - Setup function that creates atoms and nested scopes.
- * @returns A scope object merged with the factory's return value.
- *
- * @example
- * ```ts
- * const app = scope(() => {
- *   const count = atom(counterStream, 0);
- *   const label = atom(labelStream, 'hello');
- *   return { count, label };
- * });
- *
- * console.log(app.count.value);
- * app.dispose(); // disposes count and label
- * ```
- */
 export function scope<T>(factory: () => T): Scope & T {
-  const previousScope = currentScope;
+  const parent = currentScope;
 
-  const d = new Set<Atom<any> | Scope>();
-  const emittedAtoms = new Set<Atom<any>>();
-  let localLoading = true;
+  const instance: Scope = {
+    type: "scope",
+    parent,
 
-  const internal: ScopeInternal = {
-    d,
-    emittedAtoms,
-    localLoading,
+    get loading() {
+      const internal = internals.get(instance)!;
 
-    checkLoading() {
-      if (!localLoading) return;
-      const atomCount = Array.from(d).filter(isAtom).length;
-      if (atomCount === 0 || emittedAtoms.size === atomCount) {
-        localLoading = false;
+      // still waiting for first emission
+      if (internal.atoms.size === 0) return false;
+
+      for (const atom of internal.atoms) {
+        if (!internal.emitted.has(atom)) return true;
       }
+
+      return false;
+    },
+
+    snapshot() {
+      const internal = internals.get(instance)!;
+
+      const result: Record<string, any> = {};
+
+      for (const [key, node] of internal.nodes) {
+        if (isAtom(node)) {
+          result[key] = node.value;
+        } else if (isScope(node)) {
+          result[key] = node.snapshot();
+        } else {
+          result[key] = node;
+        }
+      }
+
+      return result;
+    },
+
+    dispose() {
+      const internal = internals.get(instance)!;
+
+      for (const node of internal.nodes.values()) {
+        node.dispose();
+      }
+
+      internal.nodes.clear();
+      internal.atoms.clear();
+      internal.scopes.clear();
+      internal.emitted.clear();
     }
   };
 
-  const instance = {} as Scope;
+  const internal: ScopeInternal = {
+    nodes: new Map(),
+    atoms: new Set(),
+    scopes: new Set(),
+    emitted: new Set()
+  };
 
-  Object.defineProperty(instance, "type", {
-    value: "scope",
-    writable: false,
-    enumerable: true,
-    configurable: true
-  });
-
-  Object.defineProperty(instance, "parent", {
-    value: previousScope,
-    writable: false,
-    enumerable: true,
-    configurable: true
-  });
-
-  Object.defineProperty(instance, "loading", {
-    get() {
-      if (localLoading) return true;
-      for (const item of Array.from(d)) {
-        if (isScope(item) && item.loading) return true;
-      }
-      return false;
-    },
-    enumerable: true,
-    configurable: true
-  });
-
-  Object.defineProperty(instance, "snapshot", {
-    value() {
-      const source = internal.snapshotSource;
-      if (!source) return {};
-
-      const result: Record<string, any> = {};
-      for (const [key, value] of Object.entries(source)) {
-        if (isAtom(value)) {
-          result[key] = value.value;
-        } else if (isScope(value)) {
-          result[key] = value.snapshot();
-        } else {
-          result[key] = value;
-        }
-      }
-      return result;
-    },
-    writable: false,
-    enumerable: true,
-    configurable: true
-  });
-
-  Object.defineProperty(instance, "dispose", {
-    value() {
-      const items = Array.from(d);
-      d.clear();
-      for (const item of items) {
-        item.dispose();
-      }
-    },
-    writable: false,
-    enumerable: true,
-    configurable: true
-  });
-
-  scopeInternals.set(instance, internal);
+  internals.set(instance, internal);
 
   currentScope = instance;
 
   let result: T;
+
   try {
     result = factory();
   } finally {
-    currentScope = previousScope;
+    currentScope = parent;
   }
 
-  if (currentScope) {
-    registerWithCurrentScope(instance);
-  }
-
-  if (
-    typeof result === "object" &&
-    result !== null &&
-    !Array.isArray(result)
-  ) {
-    internal.snapshotSource = result as Record<string, any>;
-  }
-
-  // Empty scopes are immediately not loading
-  if (Array.from(d).filter(isAtom).length === 0) {
-    localLoading = false;
+  // register returned API (optional explicit structure)
+  if (result && typeof result === "object") {
+    for (const [key, value] of Object.entries(result as any)) {
+      if (isAtom(value) || isScope(value)) {
+        registerWithCurrentScope(value, key);
+      }
+    }
   }
 
   return Object.assign(instance, result);

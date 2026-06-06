@@ -687,6 +687,69 @@
         }
       }
     },
+    "app9": {
+      "projectType": "application",
+      "root": "projects/apps/app9",
+      "sourceRoot": "projects/apps/app9/src",
+      "architect": {
+        "build": {
+          "builder": "@angular-devkit/build-angular:application",
+          "options": {
+            "outputPath": "dist/apps/app9",
+            "index": "projects/apps/app9/src/index.html",
+            "browser": "projects/apps/app9/src/main.ts",
+            "polyfills": [],
+            "tsConfig": "projects/apps/app9/tsconfig.app.json",
+            "inlineStyleLanguage": "scss",
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "projects/apps/app9/public"
+              }
+            ],
+            "styles": [
+              "projects/apps/app9/src/styles.scss"
+            ],
+            "scripts": []
+          },
+          "configurations": {
+            "production": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "2kB",
+                  "maximumError": "4kB"
+                }
+              ],
+              "outputHashing": "all"
+            },
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular-devkit/build-angular:dev-server",
+          "configurations": {
+            "production": {
+              "buildTarget": "app9:build:production"
+            },
+            "development": {
+              "buildTarget": "app9:build:development"
+            }
+          },
+          "defaultConfiguration": "development"
+        }
+      }
+    },
     "streamix": {
       "projectType": "library",
       "root": "projects/libraries/streamix",
