@@ -1,13 +1,21 @@
 # Atoms & Scopes
 
-Lightweight reactive state for Streamix. **Atoms** are read-only values backed by streams. **Scopes** are tree-shaped containers that own atoms and child scopes, track a `loading` state, and manage lifecycles automatically.
+Lightweight reactive state for Streamix.
+
+**Atoms** are stream-connected state nodes.
+**Scopes** are tree-shaped containers that own atoms and child scopes, track lifecycle, and expose a unified snapshot of state.
+
+---
 
 ## Design
 
-- **Atoms are stream-backed** — you cannot create an atom without a stream. Its value updates automatically as the stream emits.
-- **Scopes are trees** — a scope can contain atoms and nested scopes. Items created inside a factory are tracked in tree order.
-- **Loading state** — `scope.loading` is `true` until every tracked atom (recursively) has emitted at least once.
-- **No infrastructure noise** — no names, no manual `register()`, no `getCurrentScope()`. Factory return values are merged onto the scope for direct access.
+* **Atoms are stream-connected state nodes** — created from a stream and updated automatically on emissions.
+* **Scopes form a tree** — each scope owns atoms and nested scopes created within its factory.
+* **Loading state** — `scope.loading` is `true` until every tracked atom (recursively) has emitted at least once.
+* **Implicit registration** — items are tracked automatically via execution context; no manual wiring required.
+* **Public API is explicit** — only values returned from the factory are exposed on the scope object.
+
+---
 
 ## Tree model
 
@@ -19,131 +27,136 @@ app (loading)
 │   ├── count = atom(counterStream, 0)
 │   └── label = atom(labelStream, 'hello')
 └── footer = atom(footerStream, '')
-
-return { header, main, footer }
 ```
 
-Atoms and scopes are tracked in creation order. `snapshot()` walks the tree depth-first and `dispose()` tears it down recursively.
+Only returned values define the public shape:
+
+```ts
+return { header, main, footer };
+```
+
+Internal tracking remains separate from public structure.
+
+---
 
 ## API
 
 ### `atom(stream, initialValue)`
 
-Creates a reactive atom attached to a stream.
+Creates a reactive state node connected to a stream.
 
-```typescript
-import { atom, createSubject } from '@epikodelabs/streamix';
-
+```ts
 const source = createSubject<number>();
 const count = atom(source, 0);
+```
 
-console.log(count.value);         // 0
-source.next(5);
-console.log(count.value);         // 5
-console.log(count.previousValue); // 0
+```ts
+count.value;         // current value
+count.previousValue; // previous value
 ```
 
 Subscribe to changes:
 
-```typescript
+```ts
 const sub = count.subscribe(v => console.log(v));
-source.next(10); // logs 10
+source.next(10);
 sub.unsubscribe();
 ```
 
-Update via transformation:
+Update manually:
 
-```typescript
-count.update(n => n + 1); // count.value === 11
+```ts
+count.update(n => n + 1);
 ```
 
-Dispose when done:
+Dispose:
 
-```typescript
+```ts
 count.dispose();
-count.disposed; // true
 ```
+
+---
 
 ### `scope(factory)`
 
-Creates a scope. The factory's return value is merged onto the scope so you can access atoms and child scopes directly. Every atom or nested scope created inside the factory is automatically tracked and disposed recursively.
+Creates a scoped reactive tree. All atoms and nested scopes created inside are automatically tracked.
 
-```typescript
-import { atom, createSubject, scope } from '@epikodelabs/streamix';
-
-const counterStream = createSubject<number>();
-const labelStream = createSubject<string>();
-
+```ts
 const app = scope(() => {
   const count = atom(counterStream, 0);
   const label = atom(labelStream, 'hello');
+
   return { count, label };
 });
+```
 
-// Typed access via merged return value
-console.log(app.count.value);  // 0
-console.log(app.label.value);  // 'hello'
+Access:
 
-// Dispose everything at once
+```ts
+app.count.value;
 app.dispose();
 ```
 
-#### Nested scopes
+---
 
-Child scopes created inside a factory are automatically tracked by their parent.
+## Nested scopes
 
-```typescript
+```ts
 const root = scope(() => {
   const header = scope(() => {});
-  const main   = scope(() => {});
+  const main = scope(() => {});
+
   return { header, main };
 });
-
-root.dispose(); // disposes root + header + main
 ```
 
-#### Loading flag
+```ts
+root.dispose(); // disposes full tree
+```
 
-`scope.loading` is `true` while any tracked atom (in this scope or a descendant) has not yet emitted its first value.
+---
 
-```typescript
-const s1 = createSubject<number>();
-const s2 = createSubject<string>();
+## Loading flag
 
+`scope.loading` is `true` until all atoms in the tree emit at least once.
+
+```ts
 const app = scope(() => {
-  const count = atom(s1, 0);
-  const label = atom(s2, '');
-  return { count, label };
+  const a = atom(streamA, 0);
+  const b = atom(streamB, '');
+
+  return { a, b };
 });
-
-console.log(app.loading); // true
-
-s1.next(1);
-console.log(app.loading); // true — label still loading
-
-s2.next('x');
-console.log(app.loading); // false
 ```
 
-#### Snapshots
-
-`snapshot()` returns an array with the current value of every tracked item in creation order. For nested scopes it recurses.
-
-```typescript
-const app = scope(() => {
-  const child = scope(() => {
-    const a = atom(createSubject<number>(), 42);
-    return { a };
-  });
-  const b = atom(createSubject<number>(), 10);
-  return { child, b };
-});
-
-console.log(app.snapshot()); // [[42], 10]
+```ts
+app.loading; // true until both emit
 ```
 
-## What Scopes Do NOT Do
+---
 
-- **No manual registration** — atoms and scopes are captured automatically inside the factory.
-- **No `batch()`** — atoms update synchronously; compose them with standard stream operators if you need coordination.
-- **No tree navigation helpers** — the scope interface is intentionally minimal: `loading`, `snapshot`, and `dispose`.
+## Snapshots
+
+`snapshot()` returns a deep object representing current state.
+
+```ts
+app.snapshot();
+```
+
+Example:
+
+```ts
+{
+  header: { title: "" },
+  main: { count: 0, label: "hello" }
+}
+```
+
+---
+
+## What Scopes do NOT do
+
+* No manual registration — tracking is implicit
+* No query/navigation API — structure is defined at creation time
+* No batching — updates are synchronous and stream-driven
+* No hidden mutation of public API shape

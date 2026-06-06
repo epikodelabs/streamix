@@ -527,7 +527,13 @@ export class AppComponent implements OnDestroy {
   private personalScope!: Scope & { name: Atom<string>; email: Atom<string> };
   private addressScope!: Scope & { street: Atom<string>; city: Atom<string>; country: Atom<string>; countries: Atom<string[]> };
   private preferencesScope!: Scope & { notifications: Atom<boolean>; theme: Atom<string> };
-  private wizardScope!: Scope & { step: Atom<number>; personal: Scope; address: Scope; preferences: Scope };
+  private wizardScope!: Scope & {
+    step: Atom<number>;
+    personal: Scope;
+    address: Scope;
+    preferences: Scope;
+    async: Scope & { countries: Atom<string[]> };
+  };
 
   // UI state
   currentStep = 0;
@@ -571,12 +577,11 @@ export class AppComponent implements OnDestroy {
       email: atom(self.emailSubject, ''),
     })) as any;
 
-    // Address scope — includes async-loaded countries list
+    // Address scope — form fields only (user input, not async)
     this.addressScope = scope(() => ({
       street: atom(self.streetSubject, ''),
       city: atom(self.citySubject, ''),
       country: atom(self.countrySubject, ''),
-      countries: atom(self.countriesStream, [] as string[]),
     })) as any;
 
     // Preferences scope
@@ -585,12 +590,15 @@ export class AppComponent implements OnDestroy {
       theme: atom(self.themeSubject, 'dark'),
     })) as any;
 
-    // Root wizard scope — nests the three step scopes
+    // Root wizard scope — nests form scopes and the async data scope
     this.wizardScope = scope(() => ({
       step: atom(self.stepSubject, 0),
       personal: self.personalScope,
       address: self.addressScope,
       preferences: self.preferencesScope,
+      async: scope(() => ({
+        countries: atom(self.countriesStream, [] as string[]),
+      })),
     })) as any;
   }
 
@@ -612,7 +620,7 @@ export class AppComponent implements OnDestroy {
       this.addressScope.country.subscribe(v => { this.countryValue = v; this.cdr.detectChanges(); })
     );
     this.subscriptions.push(
-      this.addressScope.countries.subscribe(v => { this.countriesList = v; this.cdr.detectChanges(); })
+      this.wizardScope.async.countries.subscribe(v => { this.countriesList = v; this.cdr.detectChanges(); })
     );
     this.subscriptions.push(
       this.preferencesScope.notifications.subscribe(v => { this.notificationsValue = v; this.cdr.detectChanges(); })
@@ -632,13 +640,13 @@ export class AppComponent implements OnDestroy {
    */
   private startLoadingPoller(): void {
     const tick = () => {
-      this.wizardLoading = this.wizardScope.loading;
-      this.addressLoading = this.addressScope.loading;
-      this.stepLoading = [
-        this.personalScope.loading,
-        this.addressScope.loading,
-        this.preferencesScope.loading,
-      ];
+      // Only the async scope (countries list) drives loading indicators.
+      // Form scopes contain subject-backed atoms that never emit until
+      // user interaction, so their .loading would stay true forever.
+      const asyncLoading = this.wizardScope.async.loading;
+      this.wizardLoading = asyncLoading;
+      this.addressLoading = asyncLoading;
+      this.stepLoading = [false, asyncLoading, false];
       this.snapshotJson = JSON.stringify(this.wizardScope.snapshot(), null, 2);
       this.cdr.detectChanges();
     };
@@ -656,7 +664,7 @@ export class AppComponent implements OnDestroy {
       this.addressScope.street,
       this.addressScope.city,
       this.addressScope.country,
-      this.addressScope.countries,
+      this.wizardScope.async.countries,
       this.preferencesScope.notifications,
       this.preferencesScope.theme,
       this.wizardScope.step,

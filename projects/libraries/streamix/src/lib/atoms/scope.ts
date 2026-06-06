@@ -1,145 +1,222 @@
 import type { Atom } from "./atom";
 
+function isAtom(value: unknown): value is Atom<any> {
+  return typeof value === "object" && value !== null && "previousValue" in value;
+}
+
+function isScope(value: unknown): value is Scope {
+  return typeof value === "object" && value !== null && "snapshot" in value && "dispose" in value;
+}
+
+/**
+ * A composite container that owns atoms and child scopes.
+ *
+ * Scopes form a tree via {@link parent}. Each scope automatically tracks
+ * every {@link Atom} and nested `Scope` created inside its factory.
+ *
+ * **Loading state**
+ *
+ * A scope's {@link loading} flag is `true` until every atom in its entire
+ * subtree has emitted at least once. Inner scopes can resolve independently;
+ * the outer scope waits for everything. Empty scopes (no atoms) are
+ * immediately `false`.
+ *
+ * **Snapshot**
+ *
+ * {@link snapshot} walks the factory's return object, reading atom values
+ * and recursing into child scopes. Non-atom/scope values are passed through
+ * unchanged.
+ *
+ * **Disposal**
+ *
+ * {@link dispose} tears down every tracked atom and child scope recursively.
+ * After disposal the scope should not be used.
+ *
+ * All tracking happens automatically — no manual bookkeeping is required.
+ */
 export interface Scope {
-  type: "scope";
+  /** Discriminator for runtime type checks. */
+  readonly type: "scope";
 
-  name?: string;
-  parent?: Scope;
+  /** The scope that was active when this one was created, if any. */
+  readonly parent?: Scope;
 
-  loading: boolean;
+  /**
+   * `true` while any tracked atom (in this scope or a descendant)
+   * has not yet emitted its first value.
+   */
+  readonly loading: boolean;
 
+  /**
+   * Captures the current values of all tracked items.
+   *
+   * For atoms this reads {@link Atom.value};
+   * for child scopes this recurses into their snapshot.
+   * Non-atom/scope values are passed through as-is.
+   */
   snapshot(): Record<string, any>;
 
+  /** Disposes every tracked atom or child scope recursively. */
   dispose(): void;
 }
 
-type Node = Atom<any> | Scope;
-
 interface ScopeInternal {
-  nodes: Map<string, Node>;
-  atoms: Set<Atom<any>>;
-  scopes: Set<Scope>;
-  emitted: Set<Atom<any>>;
+  tracked: Set<Atom<any> | Scope>;
+  emittedAtoms: Set<Atom<any>>;
+  localLoading: boolean;
+  snapshotSource?: Record<string, any>;
+  checkLoading(): void;
 }
 
-const internals = new WeakMap<Scope, ScopeInternal>();
+const scopeInternals = new WeakMap<Scope, ScopeInternal>();
 
 let currentScope: Scope | undefined;
 
+/** @internal Returns the scope currently executing its factory. */
 export function getCurrentScope(): Scope | undefined {
   return currentScope;
 }
 
-function isAtom(value: any): value is Atom<any> {
-  return value?.type === "atom";
-}
-
-function isScope(value: any): value is Scope {
-  return value?.type === "scope";
-}
-
-export function registerWithCurrentScope(node: Node, name?: string): void {
+/** @internal Registers a value with the scope that is currently active. */
+export function registerWithCurrentScope(value: Atom<any> | Scope): void {
   const scope = currentScope;
   if (!scope) return;
 
-  const internal = internals.get(scope);
+  const internal = scopeInternals.get(scope);
   if (!internal) return;
 
-  const key = name ?? (node as any).name ?? `${internal.nodes.size}`;
+  internal.tracked.add(value);
 
-  internal.nodes.set(key, node);
-
-  if (isAtom(node)) {
-    internal.atoms.add(node);
-
-    node.subscribe(() => {
-      internal.emitted.add(node);
+  if (isAtom(value)) {
+    value.subscribe(() => {
+      internal.emittedAtoms.add(value);
+      internal.checkLoading();
     });
-  }
-
-  if (isScope(node)) {
-    internal.scopes.add(node);
   }
 }
 
+/**
+ * Creates a scope.
+ *
+ * The factory runs with the new scope as the active context. Any atoms or
+ * nested scopes created inside the factory are automatically tracked and
+ * will be disposed when this scope is disposed. The factory's return value
+ * is merged onto the scope object for typed access.
+ *
+ * @param factory - Setup function that creates atoms and nested scopes.
+ * @returns A scope object merged with the factory's return value.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = atom(counterStream, 0);
+ *   const label = atom(labelStream, 'hello');
+ *   return { count, label };
+ * });
+ *
+ * console.log(app.count.value);
+ * app.dispose(); // disposes count and label
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Nested scopes and loading
+ * const parent = scope(() => {
+ *   const child = scope(() => ({
+ *     value: atom(delayedStream, 0)
+ *   }));
+ *   return { child };
+ * });
+ *
+ * console.log(parent.loading); // true until delayedStream emits
+ * ```
+ *
+ * @see {@link Atom}
+ */
 export function scope<T>(factory: () => T): Scope & T {
-  const parent = currentScope;
+  const previousScope = currentScope;
+
+  const tracked = new Set<Atom<any> | Scope>();
+  const emittedAtoms = new Set<Atom<any>>();
+  let localLoading = true;
+
+  const internal: ScopeInternal = {
+    tracked,
+    emittedAtoms,
+    localLoading,
+
+    checkLoading() {
+      if (!localLoading) return;
+      const atomCount = Array.from(tracked).filter(isAtom).length;
+      if (atomCount === 0 || emittedAtoms.size === atomCount) {
+        localLoading = false;
+      }
+    }
+  };
 
   const instance: Scope = {
     type: "scope",
-    parent,
+    parent: previousScope,
 
     get loading() {
-      const internal = internals.get(instance)!;
-
-      // still waiting for first emission
-      if (internal.atoms.size === 0) return false;
-
-      for (const atom of internal.atoms) {
-        if (!internal.emitted.has(atom)) return true;
+      if (localLoading) return true;
+      for (const item of Array.from(tracked)) {
+        if (isScope(item) && item.loading) return true;
       }
-
       return false;
     },
 
     snapshot() {
-      const internal = internals.get(instance)!;
+      const source = internal.snapshotSource;
+      if (!source) return {};
 
       const result: Record<string, any> = {};
-
-      for (const [key, node] of internal.nodes) {
-        if (isAtom(node)) {
-          result[key] = node.value;
-        } else if (isScope(node)) {
-          result[key] = node.snapshot();
+      for (const [key, value] of Object.entries(source)) {
+        if (isAtom(value)) {
+          result[key] = value.value;
+        } else if (isScope(value)) {
+          result[key] = value.snapshot();
         } else {
-          result[key] = node;
+          result[key] = value;
         }
       }
-
       return result;
     },
 
     dispose() {
-      const internal = internals.get(instance)!;
-
-      for (const node of internal.nodes.values()) {
-        node.dispose();
+      for (const item of Array.from(tracked)) {
+        item.dispose();
       }
-
-      internal.nodes.clear();
-      internal.atoms.clear();
-      internal.scopes.clear();
-      internal.emitted.clear();
+      tracked.clear();
     }
   };
 
-  const internal: ScopeInternal = {
-    nodes: new Map(),
-    atoms: new Set(),
-    scopes: new Set(),
-    emitted: new Set()
-  };
-
-  internals.set(instance, internal);
+  scopeInternals.set(instance, internal);
 
   currentScope = instance;
 
   let result: T;
-
   try {
     result = factory();
   } finally {
-    currentScope = parent;
+    currentScope = previousScope;
   }
 
-  // register returned API (optional explicit structure)
-  if (result && typeof result === "object") {
-    for (const [key, value] of Object.entries(result as any)) {
-      if (isAtom(value) || isScope(value)) {
-        registerWithCurrentScope(value, key);
-      }
-    }
+  if (currentScope) {
+    registerWithCurrentScope(instance);
+  }
+
+  if (
+    typeof result === "object" &&
+    result !== null &&
+    !Array.isArray(result)
+  ) {
+    internal.snapshotSource = result as Record<string, any>;
+  }
+
+  // Empty scopes are immediately not loading
+  if (Array.from(tracked).filter(isAtom).length === 0) {
+    localLoading = false;
   }
 
   return Object.assign(instance, result);
