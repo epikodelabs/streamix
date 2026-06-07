@@ -38,28 +38,33 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
       const resolved = fromAny<T>(source as any);
       return resolved[Symbol.asyncIterator]() as AsyncIterator<T>;
     });
-    const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));
 
-    const activeIterators: AsyncIterator<T>[] = [];
-
-    for (let i = 0; i < initialResults.length; i++) {
-      const settled = initialResults[i];
-      if (settled.status === 'rejected') {
-        throw settled.reason;
-      }
-
-      const result = settled.value;
-      if (result.done) {
-        continue;
-      }
-
-      yield result.value;
-      activeIterators.push(iterators[i]);
-    }
-
-    const coordinator = createAsyncCoordinator(activeIterators);
+    // Track coordinator so the outer finally can clean it up even if it was
+    // created before an early return/throw.
+    let coordinator: ReturnType<typeof createAsyncCoordinator> | null = null;
 
     try {
+      const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));
+
+      const activeIterators: AsyncIterator<T>[] = [];
+
+      for (let i = 0; i < initialResults.length; i++) {
+        const settled = initialResults[i];
+        if (settled.status === 'rejected') {
+          throw settled.reason;
+        }
+
+        const result = settled.value;
+        if (result.done) {
+          continue;
+        }
+
+        yield result.value;
+        activeIterators.push(iterators[i]);
+      }
+
+      coordinator = createAsyncCoordinator(activeIterators);
+
       while (true) {
         const result = await coordinator.next();
         if (result.done) break;
@@ -73,7 +78,19 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
         }
       }
     } finally {
-      await coordinator.return?.();
+      // coordinator.return() cleans up iterators that were handed to it.
+      // For iterators that never made it into activeIterators (completed on
+      // first pull), call return() directly so no iterator leaks.
+      if (coordinator) {
+        await coordinator.return?.();
+      } else {
+        // Early exit before coordinator was created — clean up all iterators.
+        await Promise.all(
+          iterators.map((it) => {
+            try { return Promise.resolve(it.return?.()).catch(() => {}); } catch { return Promise.resolve(); }
+          })
+        );
+      }
     }
   };
 
