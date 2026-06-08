@@ -4,7 +4,7 @@
 
 ### Atoms Evolution — Subject Replacement
 
-This release introduces `atoms` and `scopes`, completing the atoms API as a full replacement for imperative Subjects.
+This release introduces `asyncAtom` and `iterate`, completing the atoms API as a full replacement for imperative Subjects.
 
 - **`asyncAtom()`** — Creates a hot atom without an initial value, similar to a Subject. No replay by default.
 - **`asyncAtom({ capacity: n })`** — Replays the last `n` values to late subscribers (like ReplaySubject).
@@ -20,6 +20,17 @@ This release introduces `atoms` and `scopes`, completing the atoms API as a full
 | `createReplaySubject(capacity)` | `asyncAtom({ capacity })` |
 
 Subjects remain available for backward compatibility but are now considered legacy. New code should prefer atoms for reactive state management.
+
+### Cumulative Bug Fixes and Improvements
+
+Since 2.0.46, the following fixes and improvements have been accumulated across the codebase:
+
+- **`atom.ts`** — Added `asyncAtom` for hot atoms without initial value, with optional bounded/infinite replay capacity. Added `iterate()` to convert any atom to an async iterable. Fixed TypeScript errors and improved disposal handling.
+- **`scope.ts`** — Improved lifecycle tracking and disposal of nested scopes and atoms.
+- **`derived.ts`** — Fixed circular dependency detection and improved dependency tracking with snapshotting of subscriber arrays.
+- **Documentation** — Updated ATOMS.md, README.md, and INTRODUCTION.md with atoms examples, migration table, and new API documentation.
+- **Tests** — Added comprehensive test coverage for `asyncAtom` behaviors including replay, disposal, and edge cases.
+- **Build** — Fixed TypeScript compilation errors and ensured all entry points build cleanly.
 
 ---
 
