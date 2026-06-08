@@ -6,7 +6,12 @@
   "keywords": [
     "RxJS-inspired",
     "reactive programming",
-    "data streams"
+    "data streams",
+    "atoms",
+    "scopes",
+    "async iterators",
+    "subjects",
+    "state management"
   ],
   "dependencies": {
     "tslib": "^2.8.1"
