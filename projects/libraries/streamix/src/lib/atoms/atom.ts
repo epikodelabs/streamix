@@ -113,13 +113,6 @@ function runWithPropagation(fn: () => void) {
   }
 }
 
-function notifyDerivedSubscribers(notify: () => void) {
-  if (propagationDepth > 0) {
-    deferredNotifications.add(notify);
-  } else {
-    notify();
-  }
-}
 
 function getStateValue<T>(state: AtomState<T>): T {
   if (state.tag === "value") return state.current;
@@ -246,7 +239,10 @@ export function atom<T>(initialValue: T): Atom<T> {
 
     get disposed() { return state.tag === "disposed"; },
     get error() { return state.tag === "error" ? state.current : null; },
-    get() { return getStateValue(state); },
+    get() {
+      if (activeFormula) activeFormula.dependencies.add(instance);
+      return getStateValue(state);
+    },
 
     get value() {
       if (activeFormula) activeFormula.dependencies.add(instance);
@@ -515,7 +511,9 @@ export function derived<T>(fn: () => T): AtomBase<T> {
               });
             } else {
               state = { tag: "error", current: next.error, previous: prevValue };
-              notifyDerivedSubscribers(() => notifyResultSubscribers(next));
+              runWithPropagation(() => {
+                notifyResultSubscribers(next);
+              });
             }
           })
         );
@@ -539,7 +537,10 @@ export function derived<T>(fn: () => T): AtomBase<T> {
 
     get disposed() { return state.tag === "disposed"; },
     get error() { return state.tag === "error" ? state.current : null; },
-    get() { return getStateValue(state); },
+    get() {
+      if (activeFormula) activeFormula.dependencies.add(instance);
+      return getStateValue(state);
+    },
 
     get value() {
       if (activeFormula) activeFormula.dependencies.add(instance);
