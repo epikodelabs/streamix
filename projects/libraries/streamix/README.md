@@ -171,31 +171,55 @@ chat.complete();
 
 ### Atoms & Scopes
 
-**Atoms** are read-only reactive values backed by streams. **Scopes** group atoms and child scopes, act as combine-latest streams, and dispose them recursively — with zero manual bookkeeping.
+**Atoms** are reactive state nodes — `atom` for writable values, `asyncAtom` for hot values without initial state (like Subjects), `derived` for computed values, and `flow` for stream-backed values. **Scopes** group atoms and child scopes, act as combine-latest streams, and dispose them recursively — with zero manual bookkeeping.
 
 ```typescript
-import { atom, createSubject, scope } from '@epikodelabs/streamix';
+import { atom, asyncAtom, derived, scope } from '@epikodelabs/streamix';
 
-const counter = createSubject<number>();
-const label = createSubject<string>();
+// Writable atom with initial value
+const count = atom(0);
+
+// Hot atom without initial value (like Subject)
+const events = asyncAtom<string>();
+
+// Derived atom with automatic dependency tracking
+const doubled = derived(() => count.value * 2);
 
 const app = scope(() => {
-  const count = atom(counter, 0);
-  const name = atom(label, 'guest');
-  return { count, name };
+  return { count, events, doubled };
 });
 
-console.log(app.count.value); // 0
-console.log(app.loading);     // true
+count.set(5);
+events.set('hello');
 
-counter.next(5);
-label.next('admin');
+console.log(app.count.value);    // 5
+console.log(app.doubled.value);  // 10
 
-console.log(app.count.value); // 5
-console.log(app.loading);     // false
-
-app.dispose(); // cleans up both atoms automatically
+app.dispose(); // cleans up all atoms automatically
 ```
+
+**Async iteration with `iterate`:**
+
+```typescript
+import { atom, iterate } from '@epikodelabs/streamix';
+
+const a = atom(0);
+setTimeout(() => a.set(1), 10);
+setTimeout(() => a.set(2), 20);
+setTimeout(() => a.dispose(), 30);
+
+for await (const value of iterate(a)) {
+  console.log(value); // 0, 1, 2
+}
+```
+
+**Migration from Subjects to Atoms:**
+
+| Subject | Atom Equivalent |
+|---------|-----------------|
+| `createSubject()` | `asyncAtom()` |
+| `createBehaviorSubject(initial)` | `atom(initial)` |
+| `createReplaySubject(capacity)` | `asyncAtom({ capacity })` |
 
 ### Coroutines
 
@@ -234,7 +258,27 @@ projects/libraries/streamix/
 
 ## 🚀 What's New?
 
-The coroutine layer is one of the strongest parts of the library right now:
+### v2.1.0 — Atoms Evolution
+
+The atoms API is now a complete replacement for imperative Subjects:
+
+- **`asyncAtom()`** — hot atom without initial value (like Subject)
+- **`asyncAtom({ capacity: n })`** — replay last `n` values (like ReplaySubject)
+- **`iterate(atom)`** — convert any atom to async iterable
+
+**Migration from Subjects to Atoms:**
+
+| Subject | Atom Equivalent |
+|---------|-----------------|
+| `createSubject()` | `asyncAtom()` |
+| `createBehaviorSubject(initial)` | `atom(initial)` |
+| `createReplaySubject(capacity)` | `asyncAtom({ capacity })` |
+
+Subjects remain available for backward compatibility but are now considered legacy.
+
+### Coroutines
+
+The coroutine layer is one of the strongest parts of the library:
 
 - **`compute()`** — runs heavy work through a reusable worker pool.
 - **`compose()`** — fuses coroutine stages into a single worker-side pipeline.

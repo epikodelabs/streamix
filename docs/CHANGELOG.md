@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.1.0
+
+### Atoms Evolution — Subject Replacement
+
+This release introduces `asyncAtom` and `iterate`, completing the atoms API as a full replacement for imperative Subjects.
+
+- **`asyncAtom()`** — Creates a hot atom without an initial value, similar to a Subject. No replay by default.
+- **`asyncAtom({ capacity: n })`** — Replays the last `n` values to late subscribers (like ReplaySubject).
+- **`asyncAtom({ capacity: Infinity })`** — Replays all values to late subscribers.
+- **`iterate(atom)`** — Converts any atom into an async iterable, enabling `for await...of` loops over reactive state.
+
+**Migration from Subjects to Atoms:**
+
+| Subject Pattern | Atom Equivalent |
+|-----------------|-----------------|
+| `createSubject()` | `asyncAtom()` |
+| `createBehaviorSubject(initial)` | `atom(initial)` |
+| `createReplaySubject(capacity)` | `asyncAtom({ capacity })` |
+
+Subjects remain available for backward compatibility but are now considered legacy. New code should prefer atoms for reactive state management.
+
+---
+
 ## 2.0.46
 
 - Reworked coroutines into a first-class concurrency layer for streamix: `compute()` now makes worker-pool offloading practical for real workloads, `compose()` lets whole background pipelines run as one unit, and `actor()` adds long-lived stateful workers with structured messaging.
