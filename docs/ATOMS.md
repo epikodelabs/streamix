@@ -71,6 +71,38 @@ count.dispose();
 
 ---
 
+### `asyncAtom(options?)`
+
+Creates a hot atom without an initial value, similar to a Subject. Supports optional replay to late subscribers.
+
+```ts
+const count = asyncAtom<number>();           // no replay (like Subject)
+const replay = asyncAtom<number>({ capacity: 3 });  // replay last 3 values
+const all = asyncAtom<number>({ capacity: Infinity }); // replay all values
+```
+
+```ts
+count.set(10);
+count.value;   // 10
+count.prior;   // undefined (no initial value)
+```
+
+Subscribe to changes (late subscribers may receive replayed values based on capacity):
+
+```ts
+const sub = count.subscribe(v => console.log(v));
+count.set(10);
+sub.unsubscribe();
+```
+
+Dispose:
+
+```ts
+count.dispose();
+```
+
+---
+
 ### `flow(stream, initialValue)`
 
 Creates a reactive state node connected to a stream.
@@ -121,6 +153,25 @@ Dispose:
 
 ```ts
 full.dispose();
+```
+
+---
+
+### `iterate(atom)`
+
+Creates an async iterable from any atom. Yields the current value immediately, then yields subsequent values whenever the atom emits. Completes when the atom is disposed.
+
+```ts
+import { atom, iterate } from '@epikodelabs/streamix';
+
+const a = atom(0);
+setTimeout(() => a.set(1), 10);
+setTimeout(() => a.set(2), 20);
+setTimeout(() => a.dispose(), 30);
+
+for await (const value of iterate(a)) {
+  console.log(value); // 0, 1, 2
+}
 ```
 
 ---
