@@ -97,8 +97,8 @@ export function fromEvent<T extends Event = Event>(
       void start();
     }
 
-    const originalOnUnsubscribe = subscription.onUnsubscribe;
-    subscription.onUnsubscribe = () => {
+    const originalOnUnsubscribe = subscription.teardown;
+    subscription.teardown = () => {
       if (--subscriberCount === 0) {
         stop();
       }

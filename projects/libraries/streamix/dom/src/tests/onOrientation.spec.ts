@@ -260,7 +260,7 @@ idescribe('onOrientation', () => {
     expect(true).toBe(true);
   });
 
-  it('handles onUnsubscribe errors gracefully', async () => {
+  it('handles teardown errors gracefully', async () => {
     const stream = onOrientation();
     const removeListenerSpy = window.screen.orientation.removeEventListener as jasmine.Spy;
     

@@ -1,5 +1,6 @@
 import {
-    createAsyncCoordinator, DONE
+    createAsyncCoordinator, DONE,
+    NEXT
 } from "@epikodelabs/streamix";
 
 describe("runner", () => {
@@ -43,7 +44,7 @@ describe("runner", () => {
             __tryNext: () => {
                 if (!pushed) {
                     pushed = true;
-                    return { done: false, value: "sync-val" };
+                    return NEXT('sync-val');
                 }
                 return { done: true };
             },

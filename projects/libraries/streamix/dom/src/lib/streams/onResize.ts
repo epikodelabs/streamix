@@ -135,11 +135,11 @@ export function onResize(
           stop();
         }
 
-        // Some DOM specs expect the onUnsubscribe callback to run synchronously.
-        const onUnsubscribe = sub.onUnsubscribe;
-        sub.onUnsubscribe = undefined;
+        // Some DOM specs expect the teardown callback to run synchronously.
+        const teardown = sub.teardown;
+        sub.teardown = undefined;
         try {
-          onUnsubscribe?.();
+          teardown?.();
         } catch {
         }
       }

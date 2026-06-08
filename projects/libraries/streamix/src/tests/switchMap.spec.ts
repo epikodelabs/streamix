@@ -4,6 +4,7 @@ import {
   DONE,
   EMPTY,
   from,
+  NEXT,
   of,
   switchMap,
 } from '@epikodelabs/streamix';
@@ -501,7 +502,7 @@ describe('switchMap', () => {
 
     const sourceIterator: any = {
       __tryNext() {
-        if (buffer.length > 0) return { done: false, value: buffer.shift()! };
+        if (buffer.length > 0) return NEXT(buffer.shift());
         if (done) return DONE;
         return null;
       },
@@ -517,7 +518,7 @@ describe('switchMap', () => {
           next: async () => {
             if (yielded) return new Promise<IteratorResult<number>>(() => {});
             yielded = true;
-            return { done: false, value: 1 };
+            return NEXT(1);
           },
           return: async () => {
             innerClosed++;
@@ -528,7 +529,7 @@ describe('switchMap', () => {
       })()
     ).apply(sourceIterator as any);
 
-    expect(await iterator.next()).toEqual({ done: false, value: 1 });
+    expect(await iterator.next()).toEqual(NEXT(1));
     await iterator.return?.();
     done = true;
     sourceIterator.__onPush?.();
@@ -543,7 +544,7 @@ describe('switchMap', () => {
 
     const sourceIterator: any = {
       __tryNext() {
-        if (buffer.length > 0) return { done: false, value: buffer.shift()! };
+        if (buffer.length > 0) return NEXT(buffer.shift()!);
         if (done) return DONE;
         return null;
       },
@@ -559,7 +560,7 @@ describe('switchMap', () => {
           next: async () => {
             if (yielded) return new Promise<IteratorResult<number>>(() => {});
             yielded = true;
-            return { done: false, value: 1 };
+            return NEXT(1);
           },
           return: async () => {
             innerClosed++;
@@ -570,7 +571,7 @@ describe('switchMap', () => {
       })()
     ).apply(sourceIterator as any);
 
-    expect(await iterator.next()).toEqual({ done: false, value: 1 });
+    expect(await iterator.next()).toEqual(NEXT(1));
 
     await expectAsync((iterator as any).throw(new Error("stop"))).toBeRejectedWithError("stop");
     done = true;
@@ -599,7 +600,7 @@ describe('switchMap', () => {
     const sourceIterator: any = {
       __tryNext() {
         if (buffer.length > 0) {
-          return { done: false, value: buffer.shift()! };
+          return NEXT(buffer.shift()!);
         }
         if (done) {
           return DONE;
@@ -667,7 +668,7 @@ describe('switchMap', () => {
     const sourceIterator: AsyncIterator<number> = {
       next: async () => {
         calls++;
-        if (calls === 1) return { done: false, value: 1 };
+        if (calls === 1) return NEXT(1);
         throw new Error("source boom");
       }
     };
@@ -748,7 +749,7 @@ describe('switchMap', () => {
     const sourceIterator: any = {
       __tryNext() {
         calls++;
-        if (calls === 1) return { done: false, value: 1 };
+        if (calls === 1) return NEXT(1);
         throw new Error("tryNext boom");
       },
       next: async () => {

@@ -94,8 +94,8 @@ export function onMutation(
 
     scheduleStart();
 
-    const o = sub.onUnsubscribe;
-    sub.onUnsubscribe = () => {
+    const o = sub.teardown;
+    sub.teardown = () => {
       if (--subscriberCount === 0) {
         stop();
       }

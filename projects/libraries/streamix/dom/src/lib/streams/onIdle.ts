@@ -91,8 +91,8 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
 
     scheduleStart();
 
-    const originalOnUnsubscribe = subscription.onUnsubscribe;
-    subscription.onUnsubscribe = () => {
+    const originalOnUnsubscribe = subscription.teardown;
+    subscription.teardown = () => {
       if (--subscriberCount === 0) {
         stopLoop();
       }

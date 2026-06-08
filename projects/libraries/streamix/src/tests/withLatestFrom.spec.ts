@@ -1,8 +1,8 @@
 import {
-  createStream,
-  createSubject,
-  from,
-  withLatestFrom,
+    createStream,
+    createSubject,
+    from,
+    withLatestFrom,
 } from '@epikodelabs/streamix';
 
 const scheduler = {
@@ -389,7 +389,7 @@ describe('withLatestFrom', () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 
-  it('should call original onUnsubscribe callback when unsubscribing', async () => {
+  it('should call original teardown callback when unsubscribing', async () => {
     const main$ = createSubject<number>();
     const aux$ = createSubject<string>();
 
@@ -402,9 +402,9 @@ describe('withLatestFrom', () => {
       error: () => {},
     });
 
-    // Set a custom onUnsubscribe handler
-    const originalOnUnsubscribe = subscription.onUnsubscribe;
-    subscription.onUnsubscribe = () => {
+    // Set a custom teardown handler
+    const originalOnUnsubscribe = subscription.teardown;
+    subscription.teardown = () => {
       unsubscribeCalled = true;
       originalOnUnsubscribe?.call(subscription);
     };

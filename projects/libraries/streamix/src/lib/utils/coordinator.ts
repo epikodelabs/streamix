@@ -6,7 +6,7 @@
  *
  * @module coordinator
  */
-import { DONE } from "../abstractions";
+import { DONE, NEXT } from "../abstractions";
 
 /**
 
@@ -123,7 +123,7 @@ export function createAsyncCoordinator(
 
   function pushEvent(event: RunnerEvent<any>, sourceIndex: number) {
     queue.push({
-      result: { done: false, value: event },
+      result: NEXT(event),
       sourceIndex
     });
   }

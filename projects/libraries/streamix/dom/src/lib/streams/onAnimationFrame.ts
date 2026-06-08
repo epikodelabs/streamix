@@ -115,11 +115,11 @@ export function onAnimationFrame(): Stream<number> {
           stopLoop();
         }
 
-        // Some specs expect onUnsubscribe to run synchronously.
-        const onUnsubscribe = subscription.onUnsubscribe;
-        subscription.onUnsubscribe = undefined;
+        // Some specs expect teardown to run synchronously.
+        const teardown = subscription.teardown;
+        subscription.teardown = undefined;
         try {
-          onUnsubscribe?.();
+          teardown?.();
         } catch {
         }
       }

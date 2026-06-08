@@ -1,6 +1,7 @@
 import {
   createAsyncPushable,
   DONE,
+  NEXT,
 } from '@epikodelabs/streamix';
 
 describe('createAsyncPushable', () => {
@@ -19,11 +20,11 @@ describe('createAsyncPushable', () => {
 
     const firstPull = pushable.next();
     await pushable.push(1);
-    expect(await firstPull).toEqual({ done: false, value: 1 });
+    expect(await firstPull).toEqual(NEXT(1));
 
     const secondPull = pushable.next();
     await pushable.push(2);
-    expect(await secondPull).toEqual({ done: false, value: 2 });
+    expect(await secondPull).toEqual(NEXT(2));
 
     const donePull = pushable.next();
     pushable.complete();
@@ -40,7 +41,7 @@ describe('createAsyncPushable', () => {
     const result = pushable.push(123);
     expect(result).toBeUndefined();
 
-    expect(await pushable.next()).toEqual({ done: false, value: 123 });
+    expect(await pushable.next()).toEqual(NEXT(123));
 
     pushable.complete();
     expect(await pushable.next()).toEqual(DONE);

@@ -1,8 +1,9 @@
 import {
-    createOperator,
-    DONE,
-    type Operator,
-    type Stream
+  createOperator,
+  DONE,
+  NEXT,
+  type Operator,
+  type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
@@ -55,7 +56,7 @@ export function takeUntil<T = any, N = any>(
             case 'value':
               if (event.sourceIndex === 0) {
                 // Source value - forward it (preserving dropped flag)
-                return { done: false, value: event.value };
+                return NEXT(event.value);
               }
               // Notifier emitted - stop immediately
               isDone = true;
@@ -93,7 +94,7 @@ export function takeUntil<T = any, N = any>(
           switch (event.type) {
             case 'value':
               if (event.sourceIndex === 0) {
-                return { done: false, value: event.value };
+                return NEXT(event.value);
               }
               isDone = true;
               // Can't await in sync method, but we can schedule cleanup

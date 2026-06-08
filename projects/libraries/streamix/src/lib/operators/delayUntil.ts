@@ -1,8 +1,9 @@
 import {
-    createOperator,
-    DONE,
-    type Operator,
-    type Stream
+  createOperator,
+  DONE,
+  NEXT,
+  type Operator,
+  type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
@@ -80,7 +81,7 @@ export function delayUntil<T = any, N = any>(
       if (event.sourceIndex === 1) {
         if (gateOpened) {
           // Gate is open - forward immediately
-          return { done: false, value: event.value };
+          return NEXT(event.value);
         } else {
           // Gate is closed - buffer
           buffer.push(event.value);

@@ -200,7 +200,7 @@ idescribe('onBattery', () => {
     expect(addListenerCalled).toBe(false);
   });
 
-  it('handles onUnsubscribe errors gracefully', async () => {
+  it('handles teardown errors gracefully', async () => {
     const battery = {
       charging: true,
       level: 1,

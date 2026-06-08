@@ -1,4 +1,4 @@
-import { createAsyncIterator, createStream, createSubject, createSubscription, DONE, from, isStreamLike, map, startWith, toArray } from '@epikodelabs/streamix';
+import { createAsyncIterator, createStream, createSubject, createSubscription, DONE, from, isStreamLike, map, NEXT, startWith, toArray } from '@epikodelabs/streamix';
 
 describe('stream', () => {
   it('allows base streams to be consumed with for-await', async () => {
@@ -170,7 +170,7 @@ describe('stream', () => {
     // push a value into the underlying receiver
     registered[0].next(42);
 
-    expect(await pending).toEqual({ done: false, value: 42 });
+    expect(await pending).toEqual(NEXT(42));
 
     // push another value and then a completion; completion must wait until buffered values are consumed
     registered[0].next(7);
@@ -178,7 +178,7 @@ describe('stream', () => {
 
     // next() should return the buffered value 7, then subsequent next() should indicate completion
     const r2 = await it.next();
-    expect(r2).toEqual({ done: false, value: 7 });
+    expect(r2).toEqual(NEXT(7));
 
     const r3 = await it.next();
     expect(r3).toEqual(DONE);
@@ -200,11 +200,11 @@ describe('stream', () => {
 
     // __tryNext should return the first buffered value synchronously
     const maybe = it.__tryNext?.();
-    expect(maybe).toEqual({ done: false, value: 1 });
+    expect(maybe).toEqual(NEXT(1));
 
     // and we can drain the remaining via normal next()
     const rest = await it.next();
-    expect(rest).toEqual({ done: false, value: 2 });
+    expect(rest).toEqual(NEXT(2));
   });
 
   it('isStreamLike recognizes streams and non-streams', () => {

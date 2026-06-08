@@ -345,7 +345,7 @@ idescribe('onResize', () => {
     else delete (globalThis as any).ResizeObserver;
   });
 
-  it('handles onUnsubscribe errors gracefully', async () => {
+  it('handles teardown errors gracefully', async () => {
     const div = document.createElement('div');
     document.body.appendChild(div);
 

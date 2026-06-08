@@ -120,8 +120,8 @@ export function onMediaQuery(
 
     scheduleStart();
 
-    const prev = sub.onUnsubscribe;
-    sub.onUnsubscribe = () => {
+    const prev = sub.teardown;
+    sub.teardown = () => {
       if (--subscriberCount === 0) {
         stop();
       }

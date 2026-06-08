@@ -290,13 +290,13 @@ idescribe("onFullscreen", () => {
     );
   });
 
-  it("calls original onUnsubscribe callback", () => {
+  it("calls original teardown callback", () => {
     const stream = onFullscreen();
     let onUnsubscribeCalled = false;
     
     const sub = stream.subscribe(() => {});
-    const originalOnUnsubscribe = sub.onUnsubscribe;
-    sub.onUnsubscribe = () => {
+    const originalOnUnsubscribe = sub.teardown;
+    sub.teardown = () => {
       originalOnUnsubscribe?.call(sub);
       onUnsubscribeCalled = true;
     };
@@ -399,7 +399,7 @@ idescribe("onFullscreen", () => {
     sub.unsubscribe();
   });
 
-  it('handles onUnsubscribe errors gracefully', async () => {
+  it('handles teardown errors gracefully', async () => {
     const stream = onFullscreen();
     const sub = stream.subscribe();
 

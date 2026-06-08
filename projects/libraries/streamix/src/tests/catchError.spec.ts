@@ -1,4 +1,4 @@
-import { catchError, createSubject, map, type Subject } from '@epikodelabs/streamix';
+import { catchError, createSubject, map, NEXT, type Subject } from '@epikodelabs/streamix';
 
 describe('catchError', () => {
   let subject: Subject;
@@ -66,7 +66,7 @@ describe('catchError', () => {
     const streamIterator = streamWithCatchError[Symbol.asyncIterator]();
 
     subject.next(1);
-    expect(await streamIterator.next()).toEqual({ done: false, value: 1 });
+    expect(await streamIterator.next()).toEqual(NEXT(1));
 
     subject.next(2);
     const result = await streamIterator.next();
@@ -88,7 +88,7 @@ describe('catchError', () => {
     const streamIterator = streamWithCatchError[Symbol.asyncIterator]();
 
     subject.next(1);
-    expect(await streamIterator.next()).toEqual({ done: false, value: 1 });
+    expect(await streamIterator.next()).toEqual(NEXT(1));
 
     subject.error(error);
     const result = await streamIterator.next();

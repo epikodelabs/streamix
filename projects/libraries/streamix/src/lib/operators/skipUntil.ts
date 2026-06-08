@@ -1,8 +1,9 @@
 import {
-    createOperator,
-    DONE,
-    type Operator,
-    type Stream
+  createOperator,
+  DONE,
+  NEXT,
+  type Operator,
+  type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
@@ -72,7 +73,7 @@ export function skipUntil<T = any, N = any>(
       }
 
       if (gateOpened) {
-        return { done: false, value: event.value };
+        return NEXT(event.value);
       }
 
       // Gate not yet open — skip this value and continue waiting.

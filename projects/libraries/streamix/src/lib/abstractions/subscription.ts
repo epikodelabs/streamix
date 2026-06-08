@@ -53,7 +53,7 @@ export type Subscription = {
    *
    * Any errors thrown by this callback are caught internally.
    */
-  onUnsubscribe?: () => MaybePromise;
+  teardown?: () => MaybePromise;
 };
 
 /**
@@ -64,11 +64,11 @@ export type Subscription = {
  * - Proper execution of cleanup logic
  * - Consistent error handling during teardown
  *
- * @param onUnsubscribe Optional cleanup callback executed on first unsubscribe
+ * @param teardown Optional cleanup callback executed on first unsubscribe
  * @returns {Subscription} A new Subscription object
  */
 export function createSubscription(
-  onUnsubscribe?: () => MaybePromise
+  teardown?: () => MaybePromise
 ): Subscription {
   /** Internal mutable subscription state */
   let _unsubscribed = false;
@@ -86,14 +86,14 @@ export function createSubscription(
      *
      * This method:
      * 1. Marks the subscription as unsubscribed
-     * 2. Executes the `onUnsubscribe` callback (if present)
+     * 2. Executes the `teardown` callback (if present)
      * 3. Suppresses and logs any errors thrown during cleanup
      */
     unsubscribe: async function (): Promise<void> {
       if (!_unsubscribed) {
         _unsubscribed = true;
         try {
-          await this.onUnsubscribe?.();
+          await this.teardown?.();
         } catch (err) {
           console.error("Error during unsubscribe callback:", err);
         }
@@ -103,6 +103,6 @@ export function createSubscription(
     /**
      * Cleanup callback executed when unsubscribing.
      */
-    onUnsubscribe
+    teardown: teardown
   };
 }
