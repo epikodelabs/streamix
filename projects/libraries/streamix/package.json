@@ -1,7 +1,7 @@
 {
   "name": "@epikodelabs/streamix",
   "version": "2.0.47",
-  "description": "Reactive TypeScript library",
+  "description": "Pull-based reactive streams with coroutines and async iterators",
   "license": "AGPL-3.0-or-later",
   "keywords": [
     "RxJS-inspired",
