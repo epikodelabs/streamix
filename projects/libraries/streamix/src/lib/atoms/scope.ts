@@ -1,10 +1,22 @@
-import type { Atom } from "./atom";
 import type { Subscription } from "../abstractions/subscription";
+import type { AtomBase } from "./atom";
 
-function isAtom(value: unknown): value is Atom<any> {
+/**
+ * Checks whether a value is an atom.
+ *
+ * @param value - The value to check.
+ * @returns `true` if the value is an atom, otherwise `false`.
+ */
+function isAtom(value: unknown): value is AtomBase<any> {
   return typeof value === "object" && value !== null && (value as any).type === "atom";
 }
 
+/**
+ * Checks whether a value is a scope.
+ *
+ * @param value - The value to check.
+ * @returns `true` if the value is a scope, otherwise `false`.
+ */
 function isScope(value: unknown): value is Scope {
   return typeof value === "object" && value !== null && (value as any).type === "scope";
 }
@@ -13,7 +25,7 @@ function isScope(value: unknown): value is Scope {
  * A composite container that owns atoms and child scopes.
  *
  * Scopes form a tree via {@link parent}. Each scope automatically tracks
- * every {@link Atom} and nested `Scope` created inside its factory.
+ * every {@link AtomBase} and nested `Scope` created inside its factory.
  *
  * **Loading state**
  *
@@ -51,7 +63,7 @@ export interface Scope {
   /**
    * Captures the current values of all tracked items.
    *
-   * For atoms this reads {@link Atom.value};
+   * For atoms this reads {@link AtomBase.value};
    * for child scopes this recurses into their snapshot.
    * Non-atom/scope values are passed through as-is.
    */
@@ -62,8 +74,8 @@ export interface Scope {
 }
 
 interface ScopeInternal {
-  tracked: Set<Atom<any> | Scope>;
-  emittedAtoms: Set<Atom<any>>;
+  tracked: Set<AtomBase<any> | Scope>;
+  emittedAtoms: Set<AtomBase<any>>;
   localLoading: boolean;
   snapshotSource?: Record<string, any>;
   checkLoading(): void;
@@ -72,6 +84,7 @@ interface ScopeInternal {
 
 const scopeInternals = new WeakMap<Scope, ScopeInternal>();
 
+/** The scope currently executing its factory, if any. */
 let currentScope: Scope | undefined;
 
 /** @internal Returns the scope currently executing its factory. */
@@ -80,7 +93,7 @@ export function getCurrentScope(): Scope | undefined {
 }
 
 /** @internal Registers a value with the scope that is currently active. */
-export function registerWithCurrentScope(value: Atom<any> | Scope): void {
+export function registerWithCurrentScope(value: AtomBase<any> | Scope): void {
   const scope = currentScope;
   if (!scope) return;
 
@@ -134,13 +147,13 @@ export function registerWithCurrentScope(value: Atom<any> | Scope): void {
  * console.log(parent.loading); // true until delayedStream emits
  * ```
  *
- * @see {@link Atom}
+ * @see {@link AtomBase}
  */
 export function scope<T>(factory: () => T): Scope & T {
   const previousScope = currentScope;
 
-  const tracked = new Set<Atom<any> | Scope>();
-  const emittedAtoms = new Set<Atom<any>>();
+  const tracked = new Set<AtomBase<any> | Scope>();
+  const emittedAtoms = new Set<AtomBase<any>>();
   let localLoading = true;
 
   const internal: ScopeInternal = {

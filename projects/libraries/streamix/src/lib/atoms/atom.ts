@@ -2,31 +2,83 @@ import type { Stream } from "../abstractions/stream";
 import { createSubscription, type Subscription } from "../abstractions/subscription";
 import { registerWithCurrentScope } from "./scope";
 
-export interface Atom<T = any> {
+/**
+ * Base interface for all atoms.
+ *
+ * Atoms are reactive values that can be read, subscribed to, and disposed.
+ * They automatically track dependencies for derived atoms and participate in
+ * scope-based lifecycle management.
+ *
+ * @template T The type of the value held by this atom.
+ */
+export interface AtomBase<T = any> {
+  /** Discriminator for runtime type checks. */
   type: "atom";
 
+  /**
+   * Reads the current value.
+   *
+   * When called inside a {@link derived} factory, this atom is automatically
+   * registered as a dependency.
+   *
+   * @returns The current value.
+   * @throws {Error} If the atom has been disposed.
+   */
   get(): T;
+
+  /**
+   * The current value.
+   *
+   * When accessed inside a {@link derived} factory, this atom is automatically
+   * registered as a dependency.
+   */
   readonly value: T;
+
+  /** The previous value (before the most recent change). */
   readonly prior: T;
 
+  /** Whether the atom has been disposed. */
   readonly disposed: boolean;
 
+  /**
+   * Subscribes to value changes.
+   *
+   * The callback is invoked synchronously whenever the atom's value changes.
+   *
+   * @param callback - Function called with the new value.
+   * @returns A subscription that can be used to unsubscribe.
+   */
   subscribe(callback: (value: T) => void): Subscription;
 
+  /** Disposes the atom, clearing all subscriptions and resources. */
   dispose(): void;
 }
 
-export interface WritableAtom<T = any> extends Atom<T> {
+/**
+ * Writable atom that extends {@link AtomBase} with a {@link set} method.
+ *
+ * @template T The type of the value held by this atom.
+ */
+export interface Atom<T = any> extends AtomBase<T> {
+  /**
+   * Updates the atom's value and notifies subscribers.
+   *
+   * If the new value is the same as the current value (using `Object.is`),
+   * no notification occurs.
+   *
+   * @param value - The new value to set.
+   */
   set(value: T): void;
 }
 
-let activeFormula: { dependencies: Set<Atom<any>> } | null = null;
+let activeFormula: { dependencies: Set<AtomBase<any>> } | null = null;
 
 /* ── Glitch-free propagation ── */
 
 let propagationDepth = 0;
 let deferredNotifications = new Set<() => void>();
 
+/** Flushes all deferred notifications that were queued during propagation. */
 function flushDeferred() {
   const notifications = Array.from(deferredNotifications);
   deferredNotifications = new Set();
@@ -35,6 +87,14 @@ function flushDeferred() {
   }
 }
 
+/**
+ * Runs a function inside a propagation context.
+ *
+ * Notifications are deferred until the outermost propagation completes,
+ * ensuring glitch-free updates where derived atoms see a consistent state.
+ *
+ * @param fn - The function to run.
+ */
 function runWithPropagation(fn: () => void) {
   propagationDepth++;
   try {
@@ -47,6 +107,11 @@ function runWithPropagation(fn: () => void) {
   }
 }
 
+/**
+ * Notifies derived subscribers, deferring if inside a propagation.
+ *
+ * @param notify - Callback that performs the actual notification.
+ */
 function notifyDerivedSubscribers(notify: () => void) {
   if (propagationDepth > 0) {
     deferredNotifications.add(notify);
@@ -57,7 +122,26 @@ function notifyDerivedSubscribers(notify: () => void) {
 
 /* ── flow ── */
 
-export function flow<T>(stream: Stream<T>, initialValue: T): Atom<T> {
+/**
+ * Creates an atom backed by a stream.
+ *
+ * The atom's value is updated whenever the stream emits. The initial value is
+ * used until the first emission. If the stream emits synchronously during
+ * subscription, the value is replayed to scope subscribers.
+ *
+ * @param stream - The stream to subscribe to.
+ * @param initialValue - The starting value before any stream emission.
+ * @returns An atom that reflects the stream's latest value.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = flow(counterStream, 0);
+ *   return { count };
+ * });
+ * ```
+ */
+export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
   let current = initialValue;
   let previous = initialValue;
   let disposed = false;
@@ -80,7 +164,7 @@ export function flow<T>(stream: Stream<T>, initialValue: T): Atom<T> {
     });
   });
 
-  const instance: Atom<T> = {
+  const instance: AtomBase<T> = {
     type: "atom",
 
     get disposed() {
@@ -138,14 +222,34 @@ export function flow<T>(stream: Stream<T>, initialValue: T): Atom<T> {
 
 /* ── atom ── */
 
-export function atom<T>(initialValue: T): WritableAtom<T> {
+/**
+ * Creates a writable atom with an initial value.
+ *
+ * Writable atoms can be updated via {@link Atom.set} and automatically notify
+ * subscribers on change. They participate in scope tracking and dependency
+ * discovery for derived atoms.
+ *
+ * @param initialValue - The starting value.
+ * @returns A writable atom.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = atom(0);
+ *   count.set(5);
+ *   console.log(count.value); // 5
+ *   return { count };
+ * });
+ * ```
+ */
+export function atom<T>(initialValue: T): Atom<T> {
   let current = initialValue;
   let previous = initialValue;
   let disposed = false;
 
   const subs = new Set<(value: T) => void>();
 
-  const instance: WritableAtom<T> = {
+  const instance: Atom<T> = {
     type: "atom",
 
     get disposed() {
@@ -238,14 +342,14 @@ export function atom<T>(initialValue: T): WritableAtom<T> {
  * console.log(app.full.value); // 'Grace Lovelace'
  * ```
  */
-export function derived<T>(fn: () => T): Atom<T> {
+export function derived<T>(fn: () => T): AtomBase<T> {
   let current: T;
   let previous: T;
   let disposed = false;
   let running = false;
   const subs = new Set<(value: T) => void>();
-  const dependencies = new Set<Atom<any>>();
-  const depSubscriptions = new Map<Atom<any>, Subscription>();
+  const dependencies = new Set<AtomBase<any>>();
+  const depSubscriptions = new Map<AtomBase<any>, Subscription>();
 
   const notify = () => {
     for (const cb of Array.from(subs)) cb(current);
@@ -306,7 +410,7 @@ export function derived<T>(fn: () => T): Atom<T> {
   current = run();
   previous = current;
 
-  const instance: Atom<T> = {
+  const instance: AtomBase<T> = {
     type: "atom",
 
     get disposed() {
