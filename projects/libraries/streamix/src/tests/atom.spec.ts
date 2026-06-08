@@ -1,5 +1,5 @@
 import { createSubject } from '@epikodelabs/streamix';
-import { atom, flow, derived } from '../lib/atoms/atom';
+import { asyncAtom, atom, derived, flow } from '../lib/atoms/atom';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -232,5 +232,160 @@ describe('derived', () => {
 
     outer.dispose();
     inner.dispose();
+  });
+});
+
+describe('asyncAtom', () => {
+  it('should have no initial value', () => {
+    const a = asyncAtom<number>();
+    expect(a.value).toBeUndefined();
+    expect(a.prior).toBeUndefined();
+    a.dispose();
+  });
+
+  it('should update via set', () => {
+    const a = asyncAtom<number>();
+    const values: number[] = [];
+    a.subscribe(v => values.push(v));
+
+    a.set(10);
+    expect(a.value).toBe(10);
+    expect(a.prior).toBeUndefined();
+    expect(values).toEqual([10]);
+
+    a.set(20);
+    expect(a.value).toBe(20);
+    expect(values).toEqual([10, 20]);
+
+    a.dispose();
+  });
+
+  it('should suppress duplicate values', () => {
+    const a = asyncAtom<number>();
+    const values: number[] = [];
+    a.subscribe(v => values.push(v));
+
+    a.set(5);
+    a.set(5);
+    expect(values).toEqual([5]);
+
+    a.dispose();
+  });
+
+  it('should throw after disposal', () => {
+    const a = asyncAtom<number>();
+    a.dispose();
+    expect(() => a.get()).toThrowError(/disposed/);
+  });
+
+  it('should not replay values to late subscribers by default', () => {
+    const a = asyncAtom<number>();
+
+    a.set(1);
+    a.set(2);
+
+    const values: number[] = [];
+    a.subscribe(v => values.push(v));
+
+    expect(values).toEqual([]);
+    a.dispose();
+  });
+
+  it('should replay values to late subscribers with capacity', () => {
+    const a = asyncAtom<number>({ capacity: 3 });
+
+    a.set(1);
+    a.set(2);
+    a.set(3);
+    a.set(4);
+
+    const values: number[] = [];
+    a.subscribe(v => values.push(v));
+
+    // Should replay last 3 values
+    expect(values).toEqual([2, 3, 4]);
+    a.dispose();
+  });
+
+  it('should replay all values with infinite capacity', () => {
+    const a = asyncAtom<number>({ capacity: Infinity });
+
+    a.set(1);
+    a.set(2);
+    a.set(3);
+
+    const values: number[] = [];
+    a.subscribe(v => values.push(v));
+
+    expect(values).toEqual([1, 2, 3]);
+    a.dispose();
+  });
+
+  it('should track prior after updates', () => {
+    const a = asyncAtom<number>();
+
+    a.set(10);
+    expect(a.prior).toBeUndefined();
+
+    a.set(20);
+    expect(a.prior).toBe(10);
+
+    a.set(30);
+    expect(a.prior).toBe(20);
+
+    a.dispose();
+  });
+
+  it('should clean up subscriptions on dispose', () => {
+    const a = asyncAtom<number>();
+    const values: number[] = [];
+    a.subscribe(v => values.push(v));
+
+    a.set(1);
+    a.dispose();
+
+    // Should not throw when setting after disposal
+    a.set(2);
+    expect(values).toEqual([1]);
+  });
+
+  it('should not receive values after unsubscribe', () => {
+    const a = asyncAtom<number>();
+    const values: number[] = [];
+    const sub = a.subscribe(v => values.push(v));
+
+    a.set(1);
+    sub.unsubscribe();
+    a.set(2);
+
+    expect(values).toEqual([1]);
+    a.dispose();
+  });
+
+  it('should handle capacity of 0 (no replay)', () => {
+    const a = asyncAtom<number>({ capacity: 0 });
+
+    a.set(1);
+    a.set(2);
+
+    const values: number[] = [];
+    a.subscribe(v => values.push(v));
+
+    expect(values).toEqual([]);
+    a.dispose();
+  });
+
+  it('should handle capacity of 1 (only last value)', () => {
+    const a = asyncAtom<number>({ capacity: 1 });
+
+    a.set(1);
+    a.set(2);
+    a.set(3);
+
+    const values: number[] = [];
+    a.subscribe(v => values.push(v));
+
+    expect(values).toEqual([3]);
+    a.dispose();
   });
 });

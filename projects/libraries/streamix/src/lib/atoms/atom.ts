@@ -316,6 +316,167 @@ export function atom<T>(initialValue: T): Atom<T> {
   return instance;
 }
 
+/* ── asyncAtom ── */
+
+/**
+ * Options for creating an async atom.
+ */
+export interface AsyncAtomOptions {
+  /**
+   * Maximum number of values to replay to late subscribers.
+   * Defaults to `0` (no replay). Use `Infinity` for unlimited replay.
+   */
+  capacity?: number;
+}
+
+/**
+ * Async atom that buffers emissions and optionally replays them to late subscribers.
+ * Unlike {@link atom}, async atoms do not require an initial value.
+ *
+ * @template T The type of the value held by this atom.
+ */
+export interface AsyncAtom<T = any> extends AtomBase<T> {
+  /**
+   * Updates the atom's value and notifies subscribers.
+   *
+   * If the new value is the same as the current value (using `Object.is`),
+   * no notification occurs.
+   *
+   * @param value - The new value to set.
+   */
+  set(value: T): void;
+}
+
+/**
+ * Creates an async atom with optional replay capacity.
+ *
+ * Async atoms are hot atoms that do not require an initial value.
+ * Values are pushed via {@link AsyncAtom.set}. Late subscribers can
+ * receive buffered values based on the configured capacity.
+ *
+ * @param options - Configuration options.
+ * @returns An async atom.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = asyncAtom<number>();
+ *   count.set(5);
+ *   console.log(count.value); // 5
+ *   return { count };
+ * });
+ * ```
+ */
+export function asyncAtom<T>(): AsyncAtom<T>;
+export function asyncAtom<T>(options: AsyncAtomOptions): AsyncAtom<T>;
+export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
+  const capacity = options?.capacity ?? 0;
+  const isFiniteCapacity = capacity !== Infinity && capacity > 0;
+  const replay: T[] = [];
+  let replayHead = 0;
+
+  let current: T = undefined as any;
+  let previous: T = undefined as any;
+  let hasValue = false;
+  let disposed = false;
+
+  const subs = new Set<(value: T) => void>();
+
+  const pushReplay = (value: T) => {
+    if (capacity <= 0) return;
+    if (!isFiniteCapacity) {
+      replay.push(value);
+      return;
+    }
+    if (replay.length < capacity) {
+      replay.push(value);
+    } else {
+      replay[replayHead] = value;
+      replayHead = (replayHead + 1) % capacity;
+    }
+  };
+
+  const forEachReplay = (fn: (value: T) => void) => {
+    if (capacity <= 0) return;
+    if (!isFiniteCapacity) {
+      for (const value of replay) fn(value);
+      return;
+    }
+    const size = replay.length;
+    const start = size < capacity ? 0 : replayHead;
+    for (let i = 0; i < size; i++) {
+      fn(replay[(start + i) % capacity]);
+    }
+  };
+
+  const instance: AsyncAtom<T> = {
+    type: "atom",
+
+    get disposed() {
+      return disposed;
+    },
+
+    get() {
+      if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
+      return current;
+    },
+
+    get value() {
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
+      return current;
+    },
+
+    get prior() {
+      return previous;
+    },
+
+    subscribe(callback) {
+      subs.add(callback);
+
+      // Replay buffered values to late subscribers
+      forEachReplay((value) => callback(value));
+
+      return createSubscription(() => {
+        subs.delete(callback);
+      });
+    },
+
+    set(value) {
+      if (disposed) return;
+      if (hasValue && Object.is(current, value)) return;
+
+      previous = current;
+      current = value;
+      hasValue = true;
+      pushReplay(value);
+
+      runWithPropagation(() => {
+        for (const cb of Array.from(subs)) {
+          cb(value);
+        }
+      });
+    },
+
+    dispose() {
+      if (disposed) return;
+
+      disposed = true;
+      subs.clear();
+      replay.length = 0;
+      replayHead = 0;
+    }
+  };
+
+  registerWithCurrentScope(instance);
+
+  return instance;
+}
+
 /* ── derived ── */
 
 /**
