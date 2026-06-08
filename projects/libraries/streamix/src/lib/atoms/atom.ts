@@ -625,3 +625,86 @@ export function derived<T>(fn: () => T): AtomBase<T> {
 
   return instance;
 }
+
+/* ── iterate ── */
+
+/**
+ * Creates an async iterable from an atom.
+ *
+ * Yields the current value immediately, then yields subsequent values
+ * whenever the atom emits. The iterable completes when the atom is disposed.
+ *
+ * @param atom - The atom to iterate over.
+ * @returns An async iterable that yields atom values.
+ *
+ * @example
+ * ```ts
+ * const a = atom(0);
+ * setTimeout(() => a.set(1), 10);
+ * setTimeout(() => a.set(2), 20);
+ * setTimeout(() => a.dispose(), 30);
+ *
+ * for await (const value of iterate(a)) {
+ *   console.log(value); // 0, 1, 2
+ * }
+ * ```
+ */
+export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<T> {
+      const buffer: T[] = [];
+      let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
+      let done = false;
+
+      // Push current value immediately
+      buffer.push(atom.value);
+
+      const subscription = atom.subscribe((value) => {
+        if (done) return;
+        if (resolveNext) {
+          resolveNext({ value, done: false });
+          resolveNext = null;
+        } else {
+          buffer.push(value);
+        }
+      });
+
+      // Track disposal
+      const checkDisposed = () => {
+        if (atom.disposed && !done) {
+          done = true;
+          if (resolveNext) {
+            resolveNext({ value: undefined as any, done: true });
+            resolveNext = null;
+          }
+        }
+      };
+
+      // Poll for disposal since we can't directly observe it
+      const disposeInterval = setInterval(checkDisposed, 0);
+
+      return {
+        async next(): Promise<IteratorResult<T>> {
+          if (done) {
+            return { value: undefined as any, done: true };
+          }
+
+          if (buffer.length > 0) {
+            return { value: buffer.shift()!, done: false };
+          }
+
+          return new Promise<IteratorResult<T>>((resolve) => {
+            resolveNext = resolve;
+          });
+        },
+
+        async return(): Promise<IteratorResult<T>> {
+          done = true;
+          clearInterval(disposeInterval);
+          subscription.unsubscribe();
+          return { value: undefined as any, done: true };
+        },
+      };
+    },
+  };
+}
