@@ -4,14 +4,15 @@
   "description": "Pull-based reactive streams with coroutines and async iterators",
   "license": "AGPL-3.0-or-later",
   "keywords": [
-    "RxJS-inspired",
+    "RxJS-like APIs",
     "reactive programming",
-    "data streams",
+    "streams",
     "atoms",
     "scopes",
-    "async iterators",
-    "subjects",
-    "state management"
+    "iterators",
+    "operators",
+    "coroutines",
+    "actors"
   ],
   "dependencies": {
     "tslib": "^2.8.1"

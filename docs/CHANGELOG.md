@@ -1,36 +1,35 @@
 # Changelog
 
+Got it. Here's the rewritten changelog entry:
+
+---
+
 ## 2.0.47
 
-### Atoms Evolution — Subject Replacement
+### Atoms & Scopes
 
-This release introduces `asyncAtom` and `iterate`, completing the atoms API as a full replacement for imperative Subjects.
+This release introduces a complete reactive state layer as a first-class replacement for imperative Subjects.
 
-- **`asyncAtom()`** — Creates a hot atom without an initial value, similar to a Subject. No replay by default.
-- **`asyncAtom({ capacity: n })`** — Replays the last `n` values to late subscribers (like ReplaySubject).
-- **`asyncAtom({ capacity: Infinity })`** — Replays all values to late subscribers.
-- **`iterate(atom)`** — Converts any atom into an async iterable, enabling `for await...of` loops over reactive state.
+**New primitives:**
 
-**Migration from Subjects to Atoms:**
+- **`atom(initial)`** — writable reactive value with a known initial value. Replaces `createBehaviorSubject`.
+- **`asyncAtom()`** — writable atom without an initial value. Replaces `createSubject`.
+- **`asyncAtom({ capacity: n })`** — same, but replays the last `n` values to late subscribers. Replaces `createReplaySubject`.
+- **`derived(factory)`** — read-only atom with automatic dependency tracking. Re-evaluates when any dependency changes.
+- **`flow(stream, initial)`** — read-only atom driven by an external stream.
+- **`iterate(atom)`** — converts any atom into an async iterable for `for await...of` loops.
+- **`scope(factory)`** — tree-shaped container that owns atoms and child scopes, tracks loading state, and exposes a typed snapshot of reactive state.
 
-| Subject Pattern | Atom Equivalent |
-|-----------------|-----------------|
-| `createSubject()` | `asyncAtom()` |
+**Migration from Subjects:**
+
+| Before | After |
+|--------|-------|
+| `createSubject<T>()` | `asyncAtom<T>()` |
 | `createBehaviorSubject(initial)` | `atom(initial)` |
-| `createReplaySubject(capacity)` | `asyncAtom({ capacity })` |
+| `createReplaySubject(n)` | `asyncAtom<T>({ capacity: n })` |
 
-Subjects remain available for backward compatibility but are now considered legacy. New code should prefer atoms for reactive state management.
+Subjects remain available for backward compatibility but are now considered legacy. New code should prefer atoms.
 
-### Cumulative Bug Fixes and Improvements
-
-Since 2.0.46, the following fixes and improvements have been accumulated across the codebase:
-
-- **`atom.ts`** — Added `asyncAtom` for hot atoms without initial value, with optional bounded/infinite replay capacity. Added `iterate()` to convert any atom to an async iterable. Fixed TypeScript errors and improved disposal handling.
-- **`scope.ts`** — Improved lifecycle tracking and disposal of nested scopes and atoms.
-- **`derived.ts`** — Fixed circular dependency detection and improved dependency tracking with snapshotting of subscriber arrays.
-- **Documentation** — Updated ATOMS.md, README.md, and INTRODUCTION.md with atoms examples, migration table, and new API documentation.
-- **Tests** — Added comprehensive test coverage for `asyncAtom` behaviors including replay, disposal, and edge cases.
-- **Build** — Fixed TypeScript compilation errors and ensured all entry points build cleanly.
 
 ---
 

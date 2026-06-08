@@ -24,29 +24,31 @@
   </a>
 </p>
 
-<br>
-
-<p align="center">
-  <img src="https://epikodelabs.github.io/streamix/presentation.gif" alt="streamix presentation" width="100%">
-</p>
-
 ---
 
 ## ✨ What is streamix?
 
-**streamix** is a reactive streams library for TypeScript and JavaScript built on top of async generators. It gives you a familiar, RxJS-like operator API while keeping the runtime small and the execution model pull-based—values are computed only when the consumer asks for them.
+**streamix** is a reactive runtime for TypeScript and JavaScript that unifies reactive state, lifecycle management, asynchronous workflows, and browser-side concurrency under a single async-iterable execution model.
 
-Whether you are building a dashboard, a CLI tool, or a browser app with heavy background work, streamix normalizes async operations into an iterator-first workflow that is predictable, testable, and memory-friendly.
+Built on top of async generators, streamix combines:
+
+* ⚛️ **Atoms** for reactive state
+* 🌳 **Scopes** for lifecycle management
+* 🧵 **Coroutines** for background computation
+* 🎭 **Actors** for isolated stateful workers
+* 🔄 **Streams** for asynchronous composition
+
+Whether you are building a dashboard, CLI tool, browser application, or computation-heavy workflow, streamix provides a consistent model for managing values, events, state, and concurrency.
 
 ### Highlights
 
-- 🔄 **Pull-based execution** — values are computed on demand, not pushed
-- ⏱️ **Async iterator first** — designed for `for await...of`
-- 🧩 **Familiar operators** — `map`, `filter`, `switchMap`, `debounce`, `scan`, and many more
-- 🧪 **`query()` for promises** — await the first emitted value and auto-unsubscribe
-- ⚛️ **Atoms & Scopes** — stream-backed reactive values with automatic lifecycle management
-- 🧵 **Coroutines & actors** — offload heavy work to Web Workers with `compute()`, `compose()`, and `actor()`
-- 🌐 **Optional add-ons** — HTTP client, WebSocket helpers, and DOM observation utilities
+* ⚛️ **Atoms & Scopes** — reactive state with automatic dependency tracking and lifecycle management
+* 🧵 **Coroutines & Actors** — browser-side concurrency powered by Web Workers
+* 🔄 **Pull-based Streams** — values are computed only when consumers request them
+* 🧩 **Familiar Operators** — `map`, `filter`, `switchMap`, `debounce`, `scan`, and many more
+* ⏱️ **Async Iterator First** — designed around `for await...of`
+* 🧪 **`query()` for promises** — await the next emitted value with automatic cleanup
+* 🌐 **Optional add-ons** — HTTP client, WebSocket helpers, and DOM observation utilities
 
 ---
 
@@ -68,7 +70,52 @@ pnpm add @epikodelabs/streamix
 
 ## ⚡ Quick Start
 
-### Stream from a range
+### Reactive State with Atoms
+
+```typescript
+import { atom, derived } from '@epikodelabs/streamix';
+
+const count = atom(0);
+
+const doubled = derived(() => count.value * 2);
+
+count.set(5);
+
+console.log(doubled.value); // 10
+```
+
+### Scope-Based Lifecycle
+
+```typescript
+import { atom, scope } from '@epikodelabs/streamix';
+
+const app = scope(() => {
+  const count = atom(0);
+
+  return { count };
+});
+
+app.count.set(10);
+
+app.dispose();
+```
+
+### Browser-Side Concurrency
+
+```typescript
+import { compute } from '@epikodelabs/streamix/coroutines';
+
+const primes = compute(async function* () {
+  let n = 2;
+
+  while (true) {
+    while (!isPrime(n)) n++;
+    yield n++;
+  }
+});
+```
+
+### Stream Processing
 
 ```typescript
 import { range, map, filter, take } from '@epikodelabs/streamix';
@@ -89,49 +136,95 @@ for await (const ingredient of potionRecipe) {
 }
 ```
 
-### React to DOM events
-
-```typescript
-import { fromEvent, debounce, filter, switchMap, map, startWith } from '@epikodelabs/streamix';
-
-const jokeStream = fromEvent(searchInput, 'input').pipe(
-  map(e => (e.target as HTMLInputElement).value.trim()),
-  debounce(400),
-  filter(term => term.length > 1),
-  switchMap(term =>
-    fromPromise(
-      fetch(`https://icanhazdadjoke.com/search?term=${encodeURIComponent(term)}`, {
-        headers: { Accept: 'application/json' }
-      })
-        .then(r => r.json())
-        .then(data => data.results.slice(0, 5))
-        .catch(() => [{ joke: 'No jokes found... that\'s not funny 😢' }])
-    )
-  ),
-  startWith([])
-);
-
-for await (const jokes of jokeStream) {
-  renderJokes(jokes);
-}
-```
-
-### Query a single value
-
-```typescript
-import { interval, take } from '@epikodelabs/streamix';
-
-const firstTick = await interval(1000).pipe(take(1)).query();
-console.log(firstTick); // → 0
-```
-
 ---
 
 ## 🧠 Core Concepts
 
-### Streams
+### ⚛️ Atoms & Scopes
 
-Streams are async generators you can iterate with `for await...of`:
+Atoms are the primary reactive primitive in streamix.
+
+* `atom()` — writable reactive value
+* `asyncAtom()` — hot reactive value without initial state
+* `derived()` — computed reactive value
+* `flow()` — stream-backed reactive value
+
+Scopes provide lifecycle management and automatic disposal.
+
+```typescript
+import { atom, asyncAtom, derived, scope } from '@epikodelabs/streamix';
+
+const count = atom(0);
+const events = asyncAtom<string>();
+
+const doubled = derived(() => count.value * 2);
+
+const app = scope(() => ({
+  count,
+  events,
+  doubled
+}));
+
+count.set(5);
+events.set('hello');
+
+console.log(app.doubled.value);
+
+app.dispose();
+```
+
+**Async iteration with `iterate()`:**
+
+```typescript
+import { atom, iterate } from '@epikodelabs/streamix';
+
+const a = atom(0);
+
+for await (const value of iterate(a)) {
+  console.log(value);
+}
+```
+
+**Migration from Subjects to Atoms:**
+
+| Subject                          | Atom Equivalent           |
+| -------------------------------- | ------------------------- |
+| `createSubject()`                | `asyncAtom()`             |
+| `createBehaviorSubject(initial)` | `atom(initial)`           |
+| `createReplaySubject(capacity)`  | `asyncAtom({ capacity })` |
+
+---
+
+### 🧵 Coroutines & Actors
+
+Run computations away from the main thread using a worker pool.
+
+```typescript
+import { compute } from '@epikodelabs/streamix/coroutines';
+
+const primes = compute(async function* () {
+  let n = 2;
+
+  while (true) {
+    while (!isPrime(n)) n++;
+    yield n++;
+  }
+});
+```
+
+Coroutines support:
+
+* `compute()` — worker-backed async generators
+* `compose()` — worker-side pipeline fusion
+* `actor()` — long-lived stateful workers
+
+Actors provide isolated state, inbox/outbox messaging, and background coordination.
+
+---
+
+### 🔄 Streams
+
+Streams are async generators that compose naturally through operators.
 
 ```typescript
 import { createStream } from '@epikodelabs/streamix';
@@ -141,6 +234,7 @@ async function* countdown() {
     yield `T-${i}...`;
     await new Promise(r => setTimeout(r, 500));
   }
+
   yield '🚀 Launch!';
 }
 
@@ -151,106 +245,32 @@ for await (const msg of launchStream) {
 }
 ```
 
-### Subjects
+Streams are pull-based by default, meaning work is performed only when values are consumed.
 
-Manually control emissions when you need an imperative source:
+---
+
+### Legacy Subjects
+
+Subjects remain available for backward compatibility.
 
 ```typescript
 import { createSubject } from '@epikodelabs/streamix';
 
 const chat = createSubject<string>();
-
-for await (const msg of chat) {
-  console.log('New message:', msg);
-}
-
-chat.next('Hey! 👋');
-chat.next('Anyone here?');
-chat.complete();
 ```
 
-### Atoms & Scopes
-
-**Atoms** are reactive state nodes — `atom` for writable values, `asyncAtom` for hot values without initial state (like Subjects), `derived` for computed values, and `flow` for stream-backed values. **Scopes** group atoms and child scopes, act as combine-latest streams, and dispose them recursively — with zero manual bookkeeping.
-
-```typescript
-import { atom, asyncAtom, derived, scope } from '@epikodelabs/streamix';
-
-// Writable atom with initial value
-const count = atom(0);
-
-// Hot atom without initial value (like Subject)
-const events = asyncAtom<string>();
-
-// Derived atom with automatic dependency tracking
-const doubled = derived(() => count.value * 2);
-
-const app = scope(() => {
-  return { count, events, doubled };
-});
-
-count.set(5);
-events.set('hello');
-
-console.log(app.count.value);    // 5
-console.log(app.doubled.value);  // 10
-
-app.dispose(); // cleans up all atoms automatically
-```
-
-**Async iteration with `iterate`:**
-
-```typescript
-import { atom, iterate } from '@epikodelabs/streamix';
-
-const a = atom(0);
-setTimeout(() => a.set(1), 10);
-setTimeout(() => a.set(2), 20);
-setTimeout(() => a.dispose(), 30);
-
-for await (const value of iterate(a)) {
-  console.log(value); // 0, 1, 2
-}
-```
-
-**Migration from Subjects to Atoms:**
-
-| Subject | Atom Equivalent |
-|---------|-----------------|
-| `createSubject()` | `asyncAtom()` |
-| `createBehaviorSubject(initial)` | `atom(initial)` |
-| `createReplaySubject(capacity)` | `asyncAtom({ capacity })` |
-
-### Coroutines
-
-Run heavy work off the main thread with a worker pool:
-
-```typescript
-import { compute } from '@epikodelabs/streamix/coroutines';
-
-const primes = compute(async function* () {
-  let n = 2;
-  while (true) {
-    while (!isPrime(n)) n++;
-    yield n++;
-  }
-});
-
-for await (const p of primes.pipe(take(10))) {
-  console.log('Prime:', p);
-}
-```
+New applications should generally prefer Atoms.
 
 ---
 
 ## 📁 Monorepo Structure
 
-```
+```text
 projects/libraries/streamix/
-├── src/           # Core library (streams, operators, subjects)
-├── aggregates/    # Aggregate operators (average, min/max, etc.)
-├── coroutines/    # Web Worker coroutines and actors
-├── dom/           # DOM observation utilities (onResize, etc.)
+├── src/           # Core runtime (atoms, streams, scopes, operators)
+├── aggregates/    # Aggregate operators
+├── coroutines/    # Coroutines and actors
+├── dom/           # DOM observation utilities
 └── networking/    # HTTP client, WebSocket, JSONP
 ```
 
@@ -262,27 +282,19 @@ projects/libraries/streamix/
 
 The atoms API is now a complete replacement for imperative Subjects:
 
-- **`asyncAtom()`** — hot atom without initial value (like Subject)
-- **`asyncAtom({ capacity: n })`** — replay last `n` values (like ReplaySubject)
-- **`iterate(atom)`** — convert any atom to async iterable
+* **`asyncAtom()`** — hot atom without initial value
+* **`asyncAtom({ capacity: n })`** — replay last `n` values
+* **`iterate(atom)`** — convert any atom to async iterable
 
-**Migration from Subjects to Atoms:**
-
-| Subject | Atom Equivalent |
-|---------|-----------------|
-| `createSubject()` | `asyncAtom()` |
-| `createBehaviorSubject(initial)` | `atom(initial)` |
-| `createReplaySubject(capacity)` | `asyncAtom({ capacity })` |
-
-Subjects remain available for backward compatibility but are now considered legacy.
+Subjects remain available for compatibility but are now considered legacy.
 
 ### Coroutines
 
 The coroutine layer is one of the strongest parts of the library:
 
-- **`compute()`** — runs heavy work through a reusable worker pool.
-- **`compose()`** — fuses coroutine stages into a single worker-side pipeline.
-- **`actor()`** — long-lived stateful workers with inbox/outbox messaging and background coordination.
+* **`compute()`** — reusable worker-pool execution
+* **`compose()`** — worker-side pipeline fusion
+* **`actor()`** — long-lived stateful workers
 
 If you are evaluating streamix for browser-side concurrency, start with `@epikodelabs/streamix/coroutines`.
 
@@ -290,35 +302,28 @@ If you are evaluating streamix for browser-side concurrency, start with `@epikod
 
 ## 🎬 Live Demos
 
-- [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
-- [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
-- [Travel Blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w)
+* [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
+* [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
+* [Travel Blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w)
 
 ---
 
 ## 📚 Documentation
 
-- [Full Documentation](https://epikodelabs.github.io/streamix)
-- [Medium: A Generator-Driven, Pull-Based Reactive Core](https://medium.com/p/a1eb9e7ce1d7)
-- [Medium: streamix vs redux-saga](https://medium.com/p/0bfc206ad41c)
+* [Full Documentation](https://epikodelabs.github.io/streamix)
+* [Medium: A Generator-Driven, Pull-Based Reactive Core](https://medium.com/p/a1eb9e7ce1d7)
+* [Medium: streamix vs redux-saga](https://medium.com/p/0bfc206ad41c)
 
 ---
 
 ## 💬 Community
 
-- Give the [public docs repo](https://github.com/epikodelabs/epikodelabs.github.io) a ⭐ if streamix helps you.
-- Join [GitHub Discussions](https://github.com/orgs/epikodelabs/discussions) for questions and ideas.
-- [Share your feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
+* Give the [public docs repo](https://github.com/epikodelabs/epikodelabs.github.io) a ⭐ if streamix helps you.
+* Join [GitHub Discussions](https://github.com/orgs/epikodelabs/discussions) for questions and ideas.
+* [Share your feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
 
 ---
 
 ## 📜 License
 
 GNU AGPL v3 or later
-
-<p align="center">
-  <br>
-  <a href="https://www.npmjs.com/package/@epikodelabs/streamix">📦 Install from NPM</a> &nbsp;•&nbsp;
-  <a href="https://github.com/epikodelabs/streamix">🧭 View Source</a> &nbsp;•&nbsp;
-  <a href="https://epikodelabs.github.io/streamix">📖 Read Docs</a>
-</p>
