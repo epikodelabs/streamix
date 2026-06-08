@@ -93,7 +93,7 @@ type Subscription = {
      *
      * Any errors thrown by this callback are caught internally.
      */
-    onUnsubscribe?: () => MaybePromise;
+    teardown?: () => MaybePromise;
 };
 /**
  * Creates a new `Subscription` instance.
@@ -103,10 +103,10 @@ type Subscription = {
  * - Proper execution of cleanup logic
  * - Consistent error handling during teardown
  *
- * @param onUnsubscribe Optional cleanup callback executed on first unsubscribe
+ * @param teardown Optional cleanup callback executed on first unsubscribe
  * @returns {Subscription} A new Subscription object
  */
-declare function createSubscription(onUnsubscribe?: () => MaybePromise): Subscription;
+declare function createSubscription(teardown?: () => MaybePromise): Subscription;
 
 /**
  * A Stream is an async iterable with additional methods for piping, subscribing, and querying values.
@@ -187,12 +187,16 @@ declare function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, an
  */
 type MaybePromise<T = any> = (T | Promise<T>);
 /**
- * Type guard that checks whether a value behaves like a promise.
+ * Type guard that checks whether a value behaves like a promise (thenable).
  *
  * We avoid relying on `instanceof Promise` so that promise-like values from
  * different realms or custom thenables are still treated correctly.
+ *
+ * Note: the return type is `PromiseLike<unknown>` (not `Promise<unknown>`)
+ * because any object with a `.then()` method satisfies this check, not just
+ * native Promise instances.
  */
-declare const isPromiseLike: (value: unknown) => value is Promise<unknown>;
+declare const isPromiseLike: (value: unknown) => value is PromiseLike<unknown>;
 /**
  * A constant representing a completed stream result.
  *
@@ -240,34 +244,72 @@ type Operator<T = any, R = T> = {
     apply: (source: AsyncIterator<T>) => AsyncIterator<R>;
 };
 /**
+ * Type guard to check if a value is an Operator.
+ *
+ * @param value The value to check.
+ * @returns True if the value is an Operator.
+ */
+declare const isOperator: (value: unknown) => value is Operator;
+/**
  * Creates a reusable stream operator.
  *
  * This factory function simplifies the creation of operators by bundling a name and a
  * transformation function into a single `Operator` object.
  *
+ * The returned operator automatically fills in missing `return()` and `throw()` methods
+ * on the produced iterator so that downstream consumers can always clean up properly:
+ *
+ * - **Default `return()`**: Forwards to `source.return()` (if present) and returns the
+ *   caller-supplied value or the source's return value. Errors from `source.return()` are
+ *   logged as warnings rather than silently swallowed.
+ * - **Default `throw()`**: Forwards to `source.throw()` (if present). If the source
+ *   handles the throw and returns a non-done result, that result is forwarded. Otherwise
+ *   the source is cleaned up via `source.return()` and the original error is re-thrown.
+ *
  * @template T The type of the value the operator will consume.
  * @template R The type of the value the operator will produce.
  * @param name The name of the operator, for identification and debugging.
  * @param transformFn The transformation function that defines the operator's logic.
+ *   Receives the operator instance as `this`, allowing access to `this.name` etc.
  * @returns A new `Operator` object with the specified name and transformation function.
  */
-declare function createOperator<T = any, R = T>(name: string, transformFn: (source: AsyncIterator<T>) => AsyncIterator<R>): Operator<T, R>;
+declare function createOperator<T = any, R = T>(name: string, transformFn: (this: Operator<T, R>, source: AsyncIterator<T>) => AsyncIterator<R>): Operator<T, R>;
 /**
- * Creates a push operator where `setup` receives the source iterator and a pre-created output.
- * `setup` may return an optional cleanup callback that is invoked when the downstream cancels
- * iteration (`return()` / `throw()`).
+ * Creates a push operator where `setup` receives the source iterator and a pre-created output
+ * pushable. `setup` may return an optional cleanup callback that is invoked when the downstream
+ * cancels iteration (`return()` / `throw()`).
+ *
+ * The setup function is guarded by a cancellation gate: once the operator is cancelled (via
+ * `return()` or `throw()` on the output), any further pushes to the output are silently ignored.
+ * This prevents pushes to a completed/closed output after teardown.
+ *
+ * @template T The type of values consumed by the operator.
+ * @template R The type of values produced by the operator.
+ * @param name The name of the operator, for debugging.
+ * @param setup A function that receives the source iterator and an output pushable.
+ *   May return a cleanup function to be called on cancellation.
  */
-declare function createPushOperator<T, R = T>(name: string, setup: (source: AsyncIterator<T>, output: AsyncPushable<R>) => () => MaybePromise<void>): Operator<T, R>;
+declare function createPushOperator<T, R = T>(name: string, setup: (source: AsyncIterator<T>, output: AsyncPushable<R>) => (() => MaybePromise<void>) | void): Operator<T, R>;
+/**
+ * Recursive conditional type that computes the output type of a chain of operators.
+ *
+ * Walks the operator array left-to-right, threading each operator's output type
+ * into the next operator's input type. Returns `Stream<T>` for an empty chain,
+ * and falls back to `Stream<any>` if type inference is exhausted.
+ *
+ * @template T The initial stream value type.
+ * @template Ops The tuple of operators to apply.
+ */
+type PipeResult<T, Ops extends readonly Operator<any, any>[]> = Ops extends [] ? Stream<T> : Ops extends [Operator<T, infer A>, ...infer Rest] ? Rest extends Operator<any, any>[] ? PipeResult<A, Rest> : Stream<any> : Stream<any>;
 /**
  * A type representing a chain of stream operators.
  *
- * This type uses function overloading to provide strong type safety for a sequence
- * of operators. Each overload correctly infers the final stream's type by tracking the
- * output of one operator as the input of the next.
+ * Uses function overloading to provide strong type safety for a sequence
+ * of operators (up to 16). Beyond 16 operators, the recursive `PipeResult`
+ * type is used as a fallback so that type safety is preserved as long as
+ * TypeScript can infer the chain.
  *
  * @template T The initial type of the stream.
- * @internal This interface is primarily for internal type-checking and should not be
- * used directly by consumers.
  */
 interface OperatorChain<T> {
     (): Stream<T>;
@@ -287,8 +329,308 @@ interface OperatorChain<T> {
     <A, B, C, D, E, F, G, H, I, J, K, L, M, N>(op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>, op5: Operator<D, E>, op6: Operator<E, F>, op7: Operator<F, G>, op8: Operator<G, H>, op9: Operator<H, I>, op10: Operator<I, J>, op11: Operator<J, K>, op12: Operator<K, L>, op13: Operator<L, M>, op14: Operator<M, N>): Stream<N>;
     <A, B, C, D, E, F, G, H, I, J, K, L, M, N, O>(op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>, op5: Operator<D, E>, op6: Operator<E, F>, op7: Operator<F, G>, op8: Operator<G, H>, op9: Operator<H, I>, op10: Operator<I, J>, op11: Operator<J, K>, op12: Operator<K, L>, op13: Operator<L, M>, op14: Operator<M, N>, op15: Operator<N, O>): Stream<O>;
     <A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P>(op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>, op5: Operator<D, E>, op6: Operator<E, F>, op7: Operator<F, G>, op8: Operator<G, H>, op9: Operator<H, I>, op10: Operator<I, J>, op11: Operator<J, K>, op12: Operator<K, L>, op13: Operator<L, M>, op14: Operator<M, N>, op15: Operator<N, O>, op16: Operator<O, P>): Stream<P>;
-    (...operators: Operator<any, any>[]): Stream<any>;
+    /**
+     * Fallback for chains longer than 16 operators.
+     * Uses the recursive PipeResult type to preserve type safety
+     * as long as TypeScript can resolve the conditional type.
+     */
+    <Ops extends Operator<any, any>[]>(...operators: Ops & ValidateChain<T, Ops>): PipeResult<T, Ops>;
 }
+/**
+ * Helper type that validates a chain of operators has matching input/output types.
+ *
+ * Produces a type error (by making the parameter type `never`) when an operator's
+ * input type doesn't match the preceding operator's output type.
+ *
+ * @internal
+ */
+type ValidateChain<T, Ops extends readonly Operator<any, any>[]> = Ops extends [Operator<T, infer A>, ...infer Rest] ? Rest extends Operator<any, any>[] ? [Operator<T, A>, ...ValidateChain<A, Rest>] : [Operator<T, A>] : [];
+
+/**
+ * Base interface for all atoms.
+ *
+ * Atoms are reactive values that can be read, subscribed to, and disposed.
+ * They automatically track dependencies for derived atoms and participate in
+ * scope-based lifecycle management.
+ *
+ * @template T The type of the value held by this atom.
+ */
+interface AtomBase<T = any> {
+    /** Discriminator for runtime type checks. */
+    type: "atom";
+    /**
+     * Reads the current value.
+     *
+     * When called inside a {@link derived} factory, this atom is automatically
+     * registered as a dependency.
+     *
+     * @returns The current value.
+     * @throws {Error} If the atom has been disposed.
+     */
+    get(): T;
+    /**
+     * The current value.
+     *
+     * When accessed inside a {@link derived} factory, this atom is automatically
+     * registered as a dependency.
+     */
+    readonly value: T;
+    /** The previous value (before the most recent change). */
+    readonly prior: T;
+    /** Whether the atom has been disposed. */
+    readonly disposed: boolean;
+    /**
+     * Subscribes to value changes.
+     *
+     * The callback is invoked synchronously whenever the atom's value changes.
+     *
+     * @param callback - Function called with the new value.
+     * @returns A subscription that can be used to unsubscribe.
+     */
+    subscribe(callback: (value: T) => void): Subscription;
+    /** Disposes the atom, clearing all subscriptions and resources. */
+    dispose(): void;
+}
+/**
+ * Writable atom that extends {@link AtomBase} with a {@link set} method.
+ *
+ * @template T The type of the value held by this atom.
+ */
+interface Atom<T = any> extends AtomBase<T> {
+    /**
+     * Updates the atom's value and notifies subscribers.
+     *
+     * If the new value is the same as the current value (using `Object.is`),
+     * no notification occurs.
+     *
+     * @param value - The new value to set.
+     */
+    set(value: T): void;
+}
+/**
+ * Creates an atom backed by a stream.
+ *
+ * The atom's value is updated whenever the stream emits. The initial value is
+ * used until the first emission. If the stream emits synchronously during
+ * subscription, the value is replayed to scope subscribers.
+ *
+ * @param stream - The stream to subscribe to.
+ * @param initialValue - The starting value before any stream emission.
+ * @returns An atom that reflects the stream's latest value.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = flow(counterStream, 0);
+ *   return { count };
+ * });
+ * ```
+ */
+declare function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T>;
+/**
+ * Creates a writable atom with an initial value.
+ *
+ * Writable atoms can be updated via {@link Atom.set} and automatically notify
+ * subscribers on change. They participate in scope tracking and dependency
+ * discovery for derived atoms.
+ *
+ * @param initialValue - The starting value.
+ * @returns A writable atom.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = atom(0);
+ *   count.set(5);
+ *   console.log(count.value); // 5
+ *   return { count };
+ * });
+ * ```
+ */
+declare function atom<T>(initialValue: T): Atom<T>;
+/**
+ * Options for creating an async atom.
+ */
+interface AsyncAtomOptions {
+    /**
+     * Maximum number of values to replay to late subscribers.
+     * Defaults to `0` (no replay). Use `Infinity` for unlimited replay.
+     */
+    capacity?: number;
+}
+/**
+ * Async atom that buffers emissions and optionally replays them to late subscribers.
+ * Unlike {@link atom}, async atoms do not require an initial value.
+ *
+ * @template T The type of the value held by this atom.
+ */
+interface AsyncAtom<T = any> extends AtomBase<T> {
+    /**
+     * Updates the atom's value and notifies subscribers.
+     *
+     * If the new value is the same as the current value (using `Object.is`),
+     * no notification occurs.
+     *
+     * @param value - The new value to set.
+     */
+    set(value: T): void;
+}
+/**
+ * Creates an async atom with optional replay capacity.
+ *
+ * Async atoms are hot atoms that do not require an initial value.
+ * Values are pushed via {@link AsyncAtom.set}. Late subscribers can
+ * receive buffered values based on the configured capacity.
+ *
+ * @param options - Configuration options.
+ * @returns An async atom.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = asyncAtom<number>();
+ *   count.set(5);
+ *   console.log(count.value); // 5
+ *   return { count };
+ * });
+ * ```
+ */
+declare function asyncAtom<T>(): AsyncAtom<T>;
+declare function asyncAtom<T>(options: AsyncAtomOptions): AsyncAtom<T>;
+/**
+ * Creates a derived atom with automatic dependency tracking.
+ *
+ * The factory is re-evaluated synchronously whenever any atom read inside it
+ * changes. Dependencies are discovered automatically — no manual array is
+ * required. The result is itself an atom — it can be subscribed to,
+ * snapshotted, and disposed like any other.
+ *
+ * @param fn - Pure function that reads atom values and returns the derived value.
+ * @returns A derived atom.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const first = atom('Ada');
+ *   const last = atom('Lovelace');
+ *   const full = derived(() => `${first.value} ${last.value}`);
+ *   return { first, last, full };
+ * });
+ *
+ * app.first.set('Grace');
+ * console.log(app.full.value); // 'Grace Lovelace'
+ * ```
+ */
+declare function derived<T>(fn: () => T): AtomBase<T>;
+/**
+ * Creates an async iterable from an atom.
+ *
+ * Yields the current value immediately, then yields subsequent values
+ * whenever the atom emits. The iterable completes when the atom is disposed.
+ *
+ * @param atom - The atom to iterate over.
+ * @returns An async iterable that yields atom values.
+ *
+ * @example
+ * ```ts
+ * const a = atom(0);
+ * setTimeout(() => a.set(1), 10);
+ * setTimeout(() => a.set(2), 20);
+ * setTimeout(() => a.dispose(), 30);
+ *
+ * for await (const value of iterate(a)) {
+ *   console.log(value); // 0, 1, 2
+ * }
+ * ```
+ */
+declare function iterate<T>(atom: AtomBase<T>): AsyncIterable<T>;
+
+/**
+ * A composite container that owns atoms and child scopes.
+ *
+ * Scopes form a tree via {@link parent}. Each scope automatically tracks
+ * every {@link AtomBase} and nested `Scope` created inside its factory.
+ *
+ * **Loading state**
+ *
+ * A scope's {@link loading} flag is `true` until every atom in its entire
+ * subtree has emitted at least once. Inner scopes can resolve independently;
+ * the outer scope waits for everything. Empty scopes (no atoms) are
+ * immediately `false`.
+ *
+ * **Snapshot**
+ *
+ * {@link snapshot} walks the factory's return object, reading atom values
+ * and recursing into child scopes. Non-atom/scope values are passed through
+ * unchanged.
+ *
+ * **Disposal**
+ *
+ * {@link dispose} tears down every tracked atom or child scope recursively.
+ * After disposal the scope should not be used.
+ *
+ * All tracking happens automatically — no manual bookkeeping is required.
+ */
+interface Scope {
+    /** Discriminator for runtime type checks. */
+    readonly type: "scope";
+    /** The scope that was active when this one was created, if any. */
+    readonly parent?: Scope;
+    /**
+     * `true` while any tracked atom (in this scope or a descendant)
+     * has not yet emitted its first value.
+     */
+    readonly loading: boolean;
+    /**
+     * Captures the current values of all tracked items.
+     *
+     * For atoms this reads {@link AtomBase.value};
+     * for child scopes this recurses into their snapshot.
+     * Non-atom/scope values are passed through as-is.
+     */
+    snapshot(): Record<string, any>;
+    /** Disposes every tracked atom or child scope recursively. */
+    dispose(): void;
+}
+/**
+ * Creates a scope.
+ *
+ * The factory runs with the new scope as the active context. Any atoms or
+ * nested scopes created inside the factory are automatically tracked and
+ * will be disposed when this scope is disposed. The factory's return value
+ * is merged onto the scope object for typed access.
+ *
+ * @param factory - Setup function that creates atoms and nested scopes.
+ * @returns A scope object merged with the factory's return value.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = flow(counterStream, 0);
+ *   const label = flow(labelStream, 'hello');
+ *   return { count, label };
+ * });
+ *
+ * console.log(app.count.value);
+ * app.dispose(); // disposes count and label
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Nested scopes and loading
+ * const parent = scope(() => {
+ *   const child = scope(() => ({
+ *     value: flow(delayedStream, 0)
+ *   }));
+ *   return { child };
+ * });
+ *
+ * console.log(parent.loading); // true until delayedStream emits
+ * ```
+ *
+ * @see {@link AtomBase}
+ */
+declare function scope<T>(factory: () => T): Scope & T;
 
 /**
  * Converts a `Stream` into an async generator, yielding each emitted value.
@@ -677,7 +1019,7 @@ declare const filter: <T = any>(predicateOrValue: ((value: T, index: number) => 
  * It can be synchronous or return a Promise.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-declare const finalize: <T = any>(callback: () => MaybePromise<T>) => Operator<T, T>;
+declare const finalize: <T = any>(callback: () => MaybePromise<void>) => Operator<T, T>;
 
 /**
  * Creates a stream operator that emits only the first element from the source stream
@@ -1064,7 +1406,7 @@ declare const skipWhile: <T = any>(predicate: (value: T, index: number) => Maybe
  *
  * This operator is a powerful tool for comparing consecutive values in a stream.
  * It maintains an internal state to remember the last value it received. For
- * each new value, it creates a tuple of `[previousValue, currentValue]` and
+ * each new value, it creates a tuple of `[prior, currentValue]` and
  * emits it to the output stream.
  *
  * The very first value emitted will have `undefined` as its "previous" value.
@@ -1776,6 +2118,7 @@ type ReplaySubject<T = any> = Subject<T> & {
 declare function createReplaySubject<T = any>(capacity?: number): ReplaySubject<T>;
 
 /**
+
  * Event emitted by the coordinator for each source.
  *
  * - `value`: A value was emitted from a source.
@@ -1973,5 +2316,5 @@ declare function createAsyncIterator<T>(opts: {
     __pushError?: (err: any) => void;
 };
 
-export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
-export type { AsyncCoordinator, AsyncIteratorResult, AsyncIteratorYieldResult, AsyncPushable, BehaviorSubject, ExpandOptions, ForkOption, GroupItem, MaybePromise, Operator, OperatorChain, PendingError, QueueItem, Receiver, ReleaseFn, ReplaySubject, RunnerEvent, Semaphore, SimpleLock, Stream, StrictReceiver, Subject, Subscription };
+export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncAtom, asyncPull, atom, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, derived, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, flow, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isOperator, isPromiseLike, isStreamLike, iterate, last, lastValueFrom, loop, map, merge, mergeMap, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, scope, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
+export type { AsyncAtom, AsyncAtomOptions, AsyncCoordinator, AsyncIteratorResult, AsyncIteratorYieldResult, AsyncPushable, AtomBase as Atom, BehaviorSubject, ExpandOptions, ForkOption, GroupItem, MaybePromise, Operator, OperatorChain, PendingError, PipeResult, QueueItem, Receiver, ReleaseFn, ReplaySubject, RunnerEvent, Scope, Semaphore, SimpleLock, Stream, StrictReceiver, Subject, Subscription, ValidateChain, Atom as WritableAtom };

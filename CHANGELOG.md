@@ -1,13 +1,5 @@
 # Changelog
 
-## 2.0.47
-
-Added `toArray()` to all stream and subject types, shipped `useStripHeaders` in networking, normalized DOM factory metadata, and rewrote the README.
-- **`fromEvent`** — Added `Symbol.asyncIterator` support via `createAsyncIterator`, a generic type parameter, optional `options` for `addEventListener`, and expanded JSDoc.
-- **`networking`** — Added `useStripHeaders(...names)` middleware for removing headers from the request context (e.g., to avoid CORS preflights on simple GETs).
-- **`dom`** — Added `subject.type = "stream"` to all DOM observation factories and normalized `subject.name` assignment order.
-- **`coroutines`** — Worker `onmessage` now destructures `topic` from incoming actor messages.
-
 ## 2.0.46
 
 - Reworked coroutines into a first-class concurrency layer for streamix: `compute()` now makes worker-pool offloading practical for real workloads, `compose()` lets whole background pipelines run as one unit, and `actor()` adds long-lived stateful workers with structured messaging.

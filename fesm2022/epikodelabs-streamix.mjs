@@ -242,10 +242,14 @@ function createAsyncPushable() {
 }
 
 /**
- * Type guard that checks whether a value behaves like a promise.
+ * Type guard that checks whether a value behaves like a promise (thenable).
  *
  * We avoid relying on `instanceof Promise` so that promise-like values from
  * different realms or custom thenables are still treated correctly.
+ *
+ * Note: the return type is `PromiseLike<unknown>` (not `Promise<unknown>`)
+ * because any object with a `.then()` method satisfies this check, not just
+ * native Promise instances.
  */
 const isPromiseLike = (value) => !!value && typeof value.then === 'function';
 /**
@@ -264,72 +268,138 @@ const DONE = Object.freeze({ done: true, value: undefined });
  */
 const NEXT = (value) => ({ done: false, value });
 /**
+ * Type guard to check if a value is an Operator.
+ *
+ * @param value The value to check.
+ * @returns True if the value is an Operator.
+ */
+const isOperator = (value) => !!value &&
+    typeof value === 'object' &&
+    value.type === 'operator' &&
+    typeof value.apply === 'function';
+/**
  * Creates a reusable stream operator.
  *
  * This factory function simplifies the creation of operators by bundling a name and a
  * transformation function into a single `Operator` object.
  *
+ * The returned operator automatically fills in missing `return()` and `throw()` methods
+ * on the produced iterator so that downstream consumers can always clean up properly:
+ *
+ * - **Default `return()`**: Forwards to `source.return()` (if present) and returns the
+ *   caller-supplied value or the source's return value. Errors from `source.return()` are
+ *   logged as warnings rather than silently swallowed.
+ * - **Default `throw()`**: Forwards to `source.throw()` (if present). If the source
+ *   handles the throw and returns a non-done result, that result is forwarded. Otherwise
+ *   the source is cleaned up via `source.return()` and the original error is re-thrown.
+ *
  * @template T The type of the value the operator will consume.
  * @template R The type of the value the operator will produce.
  * @param name The name of the operator, for identification and debugging.
  * @param transformFn The transformation function that defines the operator's logic.
+ *   Receives the operator instance as `this`, allowing access to `this.name` etc.
  * @returns A new `Operator` object with the specified name and transformation function.
  */
 function createOperator(name, transformFn) {
-    return {
+    const op = {
         name,
         type: 'operator',
         apply(source) {
-            const iterator = transformFn(source);
+            const iterator = transformFn.call(op, source);
             if (typeof iterator.return !== 'function') {
                 iterator.return = async (value) => {
                     try {
                         if (typeof source.return === 'function') {
-                            await source.return(value);
+                            const result = await source.return(value);
+                            // If the source produced a meaningful return value, forward it
+                            if (result != null && result.done)
+                                return result;
                         }
                     }
-                    catch { }
-                    return DONE;
+                    catch (err) {
+                        console.warn(`Operator '${name}': source.return() threw during cleanup:`, err);
+                    }
+                    return { done: true, value };
                 };
             }
             if (typeof iterator.throw !== 'function') {
                 iterator.throw = async (err) => {
                     try {
                         if (typeof source.throw === 'function') {
-                            await source.throw(err);
-                        }
-                        else {
-                            await source.return?.();
+                            const result = await source.throw(err);
+                            // Source handled the throw — forward its result
+                            if (result.done)
+                                return DONE;
+                            // Cast the result to IteratorResult<R> since the operator transforms T → R
+                            // The value may need transformation, but we're just forwarding it
+                            return result;
                         }
                     }
-                    catch { }
+                    catch (sourceErr) {
+                        // source.throw() re-threw or threw a different error.
+                        // Fall through to cleanup + re-throw the original error.
+                        if (sourceErr !== err) {
+                            console.warn(`Operator '${name}': source.throw() threw an unexpected error:`, sourceErr);
+                        }
+                    }
+                    // Source doesn't support throw, or couldn't handle it — clean up
+                    try {
+                        if (typeof source.return === 'function') {
+                            await source.return();
+                        }
+                    }
+                    catch (cleanupErr) {
+                        console.warn(`Operator '${name}': source.return() threw during throw cleanup:`, cleanupErr);
+                    }
                     throw err;
                 };
             }
             return iterator;
         }
     };
+    return op;
 }
 /**
- * Creates a push operator where `setup` receives the source iterator and a pre-created output.
- * `setup` may return an optional cleanup callback that is invoked when the downstream cancels
- * iteration (`return()` / `throw()`).
+ * Creates a push operator where `setup` receives the source iterator and a pre-created output
+ * pushable. `setup` may return an optional cleanup callback that is invoked when the downstream
+ * cancels iteration (`return()` / `throw()`).
+ *
+ * The setup function is guarded by a cancellation gate: once the operator is cancelled (via
+ * `return()` or `throw()` on the output), any further pushes to the output are silently ignored.
+ * This prevents pushes to a completed/closed output after teardown.
+ *
+ * @template T The type of values consumed by the operator.
+ * @template R The type of values produced by the operator.
+ * @param name The name of the operator, for debugging.
+ * @param setup A function that receives the source iterator and an output pushable.
+ *   May return a cleanup function to be called on cancellation.
  */
 function createPushOperator(name, setup) {
     return createOperator(name, function (source) {
         const output = createAsyncPushable();
+        let cancelled = false;
+        // Wrap output.push with a cancellation gate so that the setup function
+        // cannot push values after the operator has been torn down.
+        const originalPush = output.push.bind(output);
+        output.push = (value) => {
+            if (cancelled)
+                return output;
+            return originalPush(value);
+        };
         const cleanup = setup(source, output);
         let cleanupCalled = false;
         const runCleanup = async () => {
             if (cleanupCalled)
                 return;
             cleanupCalled = true;
+            cancelled = true;
             if (!cleanup)
                 return;
             try {
                 await cleanup();
             }
-            catch {
+            catch (err) {
+                console.warn(`Operator '${name}': cleanup function threw:`, err);
             }
         };
         const baseReturn = output.return?.bind(output);
@@ -337,20 +407,26 @@ function createPushOperator(name, setup) {
         output.return = async (value) => {
             await runCleanup();
             try {
-                await source.return?.();
+                if (typeof source.return === 'function')
+                    await source.return();
             }
-            catch { }
-            if (!output.completed())
+            catch (err) {
+                console.warn(`Operator '${name}': source.return() threw during output.return():`, err);
+            }
+            if (typeof output.completed === 'function' && !output.completed())
                 output.complete();
             return baseReturn ? baseReturn(value) : DONE;
         };
         output.throw = async (err) => {
             await runCleanup();
             try {
-                await source.return?.();
+                if (typeof source.return === 'function')
+                    await source.return();
             }
-            catch { }
-            if (!output.completed())
+            catch (cleanupErr) {
+                console.warn(`Operator '${name}': source.return() threw during output.throw():`, cleanupErr);
+            }
+            if (typeof output.completed === 'function' && !output.completed())
                 output.error(err);
             if (baseThrow)
                 return baseThrow(err);
@@ -359,7 +435,6 @@ function createPushOperator(name, setup) {
         return output;
     });
 }
-;
 
 /**
  * Create a strict receiver from a callback or receiver object.
@@ -708,7 +783,7 @@ function createAsyncCoordinator(sources = []) {
     const allDone = () => activeCount === 0;
     function pushEvent(event, sourceIndex) {
         queue.push({
-            result: { done: false, value: event },
+            result: NEXT(event),
             sourceIndex
         });
     }
@@ -882,9 +957,12 @@ function createAsyncCoordinator(sources = []) {
                 if (!s?.return)
                     return Promise.resolve();
                 try {
-                    return Promise.resolve(s.return()).catch(() => { });
+                    return Promise.resolve(s.return()).catch((err) => {
+                        console.log('Coordinator source return error', err);
+                    });
                 }
-                catch {
+                catch (err) {
+                    console.log('Coordinator source return error', err);
                     return Promise.resolve();
                 }
             };
@@ -955,8 +1033,8 @@ function createAsyncCoordinator(sources = []) {
             try {
                 await source.return?.();
             }
-            catch {
-                // Ignore cleanup errors
+            catch (err) {
+                console.log('Coordinator removeSource error', err);
             }
             // Notify in case we're waiting and all sources are now done
             notify();
@@ -1058,7 +1136,9 @@ function createAsyncIterator(opts) {
             const unsubscribePromise = sub?.unsubscribe();
             sub = null;
             if (unsubscribePromise && isPromiseLike(unsubscribePromise)) {
-                unsubscribePromise.catch(() => { });
+                unsubscribePromise.catch((err) => {
+                    console.log('AsyncIterator handleDone error', err);
+                });
             }
         };
         const iterator = {
@@ -1073,7 +1153,9 @@ function createAsyncIterator(opts) {
                 try {
                     await unsubscribePromise;
                 }
-                catch { }
+                catch (err) {
+                    console.log('AsyncIterator return error', err);
+                }
                 return Promise.resolve(DONE);
             },
             async throw(err) {
@@ -1089,7 +1171,9 @@ function createAsyncIterator(opts) {
                 try {
                     await unsubscribePromise;
                 }
-                catch { }
+                catch (e) {
+                    console.log('AsyncIterator throw error', e);
+                }
                 return Promise.reject(err);
             }
         };
@@ -1651,10 +1735,10 @@ function createSubject() {
  * - Proper execution of cleanup logic
  * - Consistent error handling during teardown
  *
- * @param onUnsubscribe Optional cleanup callback executed on first unsubscribe
+ * @param teardown Optional cleanup callback executed on first unsubscribe
  * @returns {Subscription} A new Subscription object
  */
-function createSubscription(onUnsubscribe) {
+function createSubscription(teardown) {
     /** Internal mutable subscription state */
     let _unsubscribed = false;
     return {
@@ -1669,14 +1753,14 @@ function createSubscription(onUnsubscribe) {
          *
          * This method:
          * 1. Marks the subscription as unsubscribed
-         * 2. Executes the `onUnsubscribe` callback (if present)
+         * 2. Executes the `teardown` callback (if present)
          * 3. Suppresses and logs any errors thrown during cleanup
          */
         unsubscribe: async function () {
             if (!_unsubscribed) {
                 _unsubscribed = true;
                 try {
-                    await this.onUnsubscribe?.();
+                    await this.teardown?.();
                 }
                 catch (err) {
                     console.error("Error during unsubscribe callback:", err);
@@ -1686,7 +1770,7 @@ function createSubscription(onUnsubscribe) {
         /**
          * Cleanup callback executed when unsubscribing.
          */
-        onUnsubscribe
+        teardown: teardown
     };
 }
 
@@ -1736,7 +1820,22 @@ async function drainIterator(iterator, getReceivers, signal) {
         const receivers = getReceivers();
         for (const { receiver, subscription } of receivers) {
             if (!subscription.unsubscribed) {
-                receiver.next?.(result.value);
+                try {
+                    const ret = receiver.next?.(result.value);
+                    // Fire async callbacks without blocking the source.
+                    // Per-subscriber backpressure is handled by the receiver's own
+                    // buffering (e.g. Subject's AsyncPushable queue).
+                    if (isPromiseLike(ret)) {
+                        ret.catch((err) => {
+                            console.log('Subscriber callback error', err);
+                            receiver.error?.(err);
+                        });
+                    }
+                }
+                catch (err) {
+                    console.log('Subscriber callback error', err);
+                    receiver.error?.(err);
+                }
             }
         }
         return false;
@@ -1997,6 +2096,720 @@ function pipeSourceThrough(source, operators) {
     };
     return pipedStream;
 }
+
+/**
+ * Checks whether a value is an atom.
+ *
+ * @param value - The value to check.
+ * @returns `true` if the value is an atom, otherwise `false`.
+ */
+function isAtom(value) {
+    return typeof value === "object" && value !== null && value.type === "atom";
+}
+/**
+ * Checks whether a value is a scope.
+ *
+ * @param value - The value to check.
+ * @returns `true` if the value is a scope, otherwise `false`.
+ */
+function isScope(value) {
+    return typeof value === "object" && value !== null && value.type === "scope";
+}
+const scopeInternals = new WeakMap();
+/** The scope currently executing its factory, if any. */
+let currentScope;
+/** @internal Returns the scope currently executing its factory. */
+function getCurrentScope() {
+    return currentScope;
+}
+/** @internal Registers a value with the scope that is currently active. */
+function registerWithCurrentScope(value) {
+    const scope = currentScope;
+    if (!scope)
+        return;
+    const internal = scopeInternals.get(scope);
+    if (!internal)
+        return;
+    internal.tracked.add(value);
+    if (isAtom(value)) {
+        const sub = value.subscribe(() => {
+            internal.emittedAtoms.add(value);
+            internal.checkLoading();
+        });
+        internal.loadingSubscriptions.push(sub);
+    }
+}
+/**
+ * Creates a scope.
+ *
+ * The factory runs with the new scope as the active context. Any atoms or
+ * nested scopes created inside the factory are automatically tracked and
+ * will be disposed when this scope is disposed. The factory's return value
+ * is merged onto the scope object for typed access.
+ *
+ * @param factory - Setup function that creates atoms and nested scopes.
+ * @returns A scope object merged with the factory's return value.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = flow(counterStream, 0);
+ *   const label = flow(labelStream, 'hello');
+ *   return { count, label };
+ * });
+ *
+ * console.log(app.count.value);
+ * app.dispose(); // disposes count and label
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Nested scopes and loading
+ * const parent = scope(() => {
+ *   const child = scope(() => ({
+ *     value: flow(delayedStream, 0)
+ *   }));
+ *   return { child };
+ * });
+ *
+ * console.log(parent.loading); // true until delayedStream emits
+ * ```
+ *
+ * @see {@link AtomBase}
+ */
+function scope(factory) {
+    const previousScope = currentScope;
+    const tracked = new Set();
+    const emittedAtoms = new Set();
+    let localLoading = true;
+    const internal = {
+        tracked,
+        emittedAtoms,
+        localLoading,
+        loadingSubscriptions: [],
+        checkLoading() {
+            if (!localLoading)
+                return;
+            const atomCount = Array.from(tracked).filter(isAtom).length;
+            if (atomCount === 0 || emittedAtoms.size === atomCount) {
+                localLoading = false;
+            }
+        }
+    };
+    const instance = {
+        type: "scope",
+        parent: previousScope,
+        get loading() {
+            if (localLoading)
+                return true;
+            for (const item of Array.from(tracked)) {
+                if (isScope(item) && item.loading)
+                    return true;
+            }
+            return false;
+        },
+        snapshot() {
+            const source = internal.snapshotSource;
+            if (!source)
+                return {};
+            const result = {};
+            for (const [key, value] of Object.entries(source)) {
+                if (isAtom(value)) {
+                    result[key] = value.disposed ? undefined : value.value;
+                }
+                else if (isScope(value)) {
+                    result[key] = value.snapshot();
+                }
+                else {
+                    result[key] = value;
+                }
+            }
+            return result;
+        },
+        dispose() {
+            for (const sub of internal.loadingSubscriptions) {
+                sub.unsubscribe();
+            }
+            internal.loadingSubscriptions.length = 0;
+            for (const item of Array.from(tracked)) {
+                item.dispose();
+            }
+            tracked.clear();
+            emittedAtoms.clear();
+            internal.snapshotSource = undefined;
+        }
+    };
+    scopeInternals.set(instance, internal);
+    currentScope = instance;
+    let result;
+    try {
+        result = factory();
+    }
+    finally {
+        currentScope = previousScope;
+    }
+    if (currentScope) {
+        registerWithCurrentScope(instance);
+    }
+    if (typeof result === "object" &&
+        result !== null &&
+        !Array.isArray(result)) {
+        internal.snapshotSource = result;
+    }
+    // Warn about properties that would overwrite Scope methods
+    if (typeof result === "object" && result !== null && !Array.isArray(result)) {
+        for (const key of Object.keys(result)) {
+            if (key in instance) {
+                console.warn(`Scope factory property "${key}" conflicts with the Scope interface and will overwrite it.`);
+            }
+        }
+    }
+    // Empty scopes are immediately not loading
+    if (Array.from(tracked).filter(isAtom).length === 0) {
+        localLoading = false;
+    }
+    return Object.assign(instance, result);
+}
+
+let activeFormula = null;
+/* ── Glitch-free propagation ── */
+let propagationDepth = 0;
+let deferredNotifications = new Set();
+/** Flushes all deferred notifications that were queued during propagation. */
+function flushDeferred() {
+    const notifications = Array.from(deferredNotifications);
+    deferredNotifications = new Set();
+    for (const notify of notifications) {
+        notify();
+    }
+}
+/**
+ * Runs a function inside a propagation context.
+ *
+ * Notifications are deferred until the outermost propagation completes,
+ * ensuring glitch-free updates where derived atoms see a consistent state.
+ *
+ * @param fn - The function to run.
+ */
+function runWithPropagation(fn) {
+    propagationDepth++;
+    try {
+        fn();
+    }
+    finally {
+        propagationDepth--;
+        if (propagationDepth === 0 && deferredNotifications.size > 0) {
+            flushDeferred();
+        }
+    }
+}
+/**
+ * Notifies derived subscribers, deferring if inside a propagation.
+ *
+ * @param notify - Callback that performs the actual notification.
+ */
+function notifyDerivedSubscribers(notify) {
+    if (propagationDepth > 0) {
+        deferredNotifications.add(notify);
+    }
+    else {
+        notify();
+    }
+}
+/* ── flow ── */
+/**
+ * Creates an atom backed by a stream.
+ *
+ * The atom's value is updated whenever the stream emits. The initial value is
+ * used until the first emission. If the stream emits synchronously during
+ * subscription, the value is replayed to scope subscribers.
+ *
+ * @param stream - The stream to subscribe to.
+ * @param initialValue - The starting value before any stream emission.
+ * @returns An atom that reflects the stream's latest value.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = flow(counterStream, 0);
+ *   return { count };
+ * });
+ * ```
+ */
+function flow(stream, initialValue) {
+    let current = initialValue;
+    let previous = initialValue;
+    let disposed = false;
+    let hasEmitted = false;
+    const subs = new Set();
+    const streamSub = stream.subscribe((value) => {
+        if (disposed)
+            return;
+        if (Object.is(current, value))
+            return;
+        hasEmitted = true;
+        previous = current;
+        current = value;
+        runWithPropagation(() => {
+            for (const cb of Array.from(subs)) {
+                cb(value);
+            }
+        });
+    });
+    const instance = {
+        type: "atom",
+        get disposed() {
+            return disposed;
+        },
+        get() {
+            if (disposed)
+                throw new Error("Atom has been disposed");
+            if (activeFormula) {
+                activeFormula.dependencies.add(instance);
+            }
+            return current;
+        },
+        get value() {
+            if (activeFormula) {
+                activeFormula.dependencies.add(instance);
+            }
+            return current;
+        },
+        get prior() {
+            return previous;
+        },
+        subscribe(callback) {
+            subs.add(callback);
+            return createSubscription(() => {
+                subs.delete(callback);
+            });
+        },
+        dispose() {
+            if (disposed)
+                return;
+            disposed = true;
+            subs.clear();
+            streamSub.unsubscribe();
+        }
+    };
+    registerWithCurrentScope(instance);
+    // If the stream emitted synchronously during subscription, the scope's
+    // loading callback missed it because it hadn't subscribed yet. Replay it.
+    if (hasEmitted) {
+        for (const cb of Array.from(subs)) {
+            cb(current);
+        }
+    }
+    return instance;
+}
+/* ── atom ── */
+/**
+ * Creates a writable atom with an initial value.
+ *
+ * Writable atoms can be updated via {@link Atom.set} and automatically notify
+ * subscribers on change. They participate in scope tracking and dependency
+ * discovery for derived atoms.
+ *
+ * @param initialValue - The starting value.
+ * @returns A writable atom.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = atom(0);
+ *   count.set(5);
+ *   console.log(count.value); // 5
+ *   return { count };
+ * });
+ * ```
+ */
+function atom(initialValue) {
+    let current = initialValue;
+    let previous = initialValue;
+    let disposed = false;
+    const subs = new Set();
+    const instance = {
+        type: "atom",
+        get disposed() {
+            return disposed;
+        },
+        get() {
+            if (disposed)
+                throw new Error("Atom has been disposed");
+            if (activeFormula) {
+                activeFormula.dependencies.add(instance);
+            }
+            return current;
+        },
+        get value() {
+            if (activeFormula) {
+                activeFormula.dependencies.add(instance);
+            }
+            return current;
+        },
+        get prior() {
+            return previous;
+        },
+        subscribe(callback) {
+            subs.add(callback);
+            return createSubscription(() => {
+                subs.delete(callback);
+            });
+        },
+        set(value) {
+            if (disposed)
+                return;
+            if (Object.is(current, value))
+                return;
+            previous = current;
+            current = value;
+            runWithPropagation(() => {
+                for (const cb of Array.from(subs)) {
+                    cb(value);
+                }
+            });
+        },
+        dispose() {
+            if (disposed)
+                return;
+            disposed = true;
+            subs.clear();
+        }
+    };
+    registerWithCurrentScope(instance);
+    // Notify scope subscribers immediately so writable atoms are
+    // considered "ready" — their value is already available.
+    for (const cb of Array.from(subs)) {
+        cb(current);
+    }
+    return instance;
+}
+function asyncAtom(options) {
+    const capacity = options?.capacity ?? 0;
+    const isFiniteCapacity = capacity !== Infinity && capacity > 0;
+    const replay = [];
+    let replayHead = 0;
+    let current = undefined;
+    let previous = undefined;
+    let hasValue = false;
+    let disposed = false;
+    const subs = new Set();
+    const pushReplay = (value) => {
+        if (capacity <= 0)
+            return;
+        if (!isFiniteCapacity) {
+            replay.push(value);
+            return;
+        }
+        if (replay.length < capacity) {
+            replay.push(value);
+        }
+        else {
+            replay[replayHead] = value;
+            replayHead = (replayHead + 1) % capacity;
+        }
+    };
+    const forEachReplay = (fn) => {
+        if (capacity <= 0)
+            return;
+        if (!isFiniteCapacity) {
+            for (const value of replay)
+                fn(value);
+            return;
+        }
+        const size = replay.length;
+        const start = size < capacity ? 0 : replayHead;
+        for (let i = 0; i < size; i++) {
+            fn(replay[(start + i) % capacity]);
+        }
+    };
+    const instance = {
+        type: "atom",
+        get disposed() {
+            return disposed;
+        },
+        get() {
+            if (disposed)
+                throw new Error("Atom has been disposed");
+            if (activeFormula) {
+                activeFormula.dependencies.add(instance);
+            }
+            return current;
+        },
+        get value() {
+            if (activeFormula) {
+                activeFormula.dependencies.add(instance);
+            }
+            return current;
+        },
+        get prior() {
+            return previous;
+        },
+        subscribe(callback) {
+            subs.add(callback);
+            // Replay buffered values to late subscribers
+            forEachReplay((value) => callback(value));
+            return createSubscription(() => {
+                subs.delete(callback);
+            });
+        },
+        set(value) {
+            if (disposed)
+                return;
+            if (hasValue && Object.is(current, value))
+                return;
+            previous = current;
+            current = value;
+            hasValue = true;
+            pushReplay(value);
+            runWithPropagation(() => {
+                for (const cb of Array.from(subs)) {
+                    cb(value);
+                }
+            });
+        },
+        dispose() {
+            if (disposed)
+                return;
+            disposed = true;
+            subs.clear();
+            replay.length = 0;
+            replayHead = 0;
+        }
+    };
+    registerWithCurrentScope(instance);
+    return instance;
+}
+/* ── derived ── */
+/**
+ * Creates a derived atom with automatic dependency tracking.
+ *
+ * The factory is re-evaluated synchronously whenever any atom read inside it
+ * changes. Dependencies are discovered automatically — no manual array is
+ * required. The result is itself an atom — it can be subscribed to,
+ * snapshotted, and disposed like any other.
+ *
+ * @param fn - Pure function that reads atom values and returns the derived value.
+ * @returns A derived atom.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const first = atom('Ada');
+ *   const last = atom('Lovelace');
+ *   const full = derived(() => `${first.value} ${last.value}`);
+ *   return { first, last, full };
+ * });
+ *
+ * app.first.set('Grace');
+ * console.log(app.full.value); // 'Grace Lovelace'
+ * ```
+ */
+function derived(fn) {
+    let current;
+    let previous;
+    let disposed = false;
+    let running = false;
+    const subs = new Set();
+    const dependencies = new Set();
+    const depSubscriptions = new Map();
+    const notify = () => {
+        for (const cb of Array.from(subs))
+            cb(current);
+    };
+    const run = () => {
+        if (running) {
+            throw new Error("Circular dependency detected in derived()");
+        }
+        const oldDeps = new Set(depSubscriptions.keys());
+        dependencies.clear();
+        running = true;
+        const prev = activeFormula;
+        activeFormula = context;
+        let result;
+        try {
+            result = fn();
+        }
+        finally {
+            activeFormula = prev;
+            running = false;
+        }
+        // Unsubscribe from removed deps
+        for (const dep of oldDeps) {
+            if (!dependencies.has(dep)) {
+                depSubscriptions.get(dep)?.unsubscribe();
+                depSubscriptions.delete(dep);
+            }
+        }
+        // Subscribe to new deps
+        for (const dep of dependencies) {
+            if (!depSubscriptions.has(dep)) {
+                depSubscriptions.set(dep, dep.subscribe(() => {
+                    if (disposed)
+                        return;
+                    const next = run();
+                    if (Object.is(current, next))
+                        return;
+                    previous = current;
+                    current = next;
+                    notifyDerivedSubscribers(notify);
+                }));
+            }
+        }
+        return result;
+    };
+    const context = {
+        dependencies,
+        run,
+    };
+    current = run();
+    previous = current;
+    const instance = {
+        type: "atom",
+        get disposed() {
+            return disposed;
+        },
+        get() {
+            if (disposed)
+                throw new Error("Atom has been disposed");
+            if (activeFormula) {
+                activeFormula.dependencies.add(instance);
+            }
+            return current;
+        },
+        get value() {
+            if (activeFormula) {
+                activeFormula.dependencies.add(instance);
+            }
+            return current;
+        },
+        get prior() {
+            return previous;
+        },
+        subscribe(callback) {
+            subs.add(callback);
+            return createSubscription(() => {
+                subs.delete(callback);
+            });
+        },
+        dispose() {
+            if (disposed)
+                return;
+            disposed = true;
+            for (const sub of depSubscriptions.values()) {
+                sub.unsubscribe();
+            }
+            depSubscriptions.clear();
+            subs.clear();
+        }
+    };
+    registerWithCurrentScope(instance);
+    // Notify scope subscribers immediately so derived atoms are
+    // considered "ready" — their value is already available.
+    for (const cb of Array.from(subs)) {
+        cb(current);
+    }
+    return instance;
+}
+/* ── iterate ── */
+/**
+ * Creates an async iterable from an atom.
+ *
+ * Yields the current value immediately, then yields subsequent values
+ * whenever the atom emits. The iterable completes when the atom is disposed.
+ *
+ * @param atom - The atom to iterate over.
+ * @returns An async iterable that yields atom values.
+ *
+ * @example
+ * ```ts
+ * const a = atom(0);
+ * setTimeout(() => a.set(1), 10);
+ * setTimeout(() => a.set(2), 20);
+ * setTimeout(() => a.dispose(), 30);
+ *
+ * for await (const value of iterate(a)) {
+ *   console.log(value); // 0, 1, 2
+ * }
+ * ```
+ */
+function iterate(atom) {
+    return {
+        [Symbol.asyncIterator]() {
+            const buffer = [];
+            let resolveNext = null;
+            let done = false;
+            // Push current value immediately
+            buffer.push(atom.value);
+            const subscription = atom.subscribe((value) => {
+                if (done)
+                    return;
+                if (resolveNext) {
+                    resolveNext({ value, done: false });
+                    resolveNext = null;
+                }
+                else {
+                    buffer.push(value);
+                }
+            });
+            // Track disposal
+            const checkDisposed = () => {
+                if (atom.disposed && !done) {
+                    done = true;
+                    if (resolveNext) {
+                        resolveNext({ value: undefined, done: true });
+                        resolveNext = null;
+                    }
+                }
+            };
+            // Poll for disposal since we can't directly observe it
+            const disposeInterval = setInterval(checkDisposed, 0);
+            return {
+                async next() {
+                    if (done) {
+                        return { value: undefined, done: true };
+                    }
+                    if (buffer.length > 0) {
+                        return { value: buffer.shift(), done: false };
+                    }
+                    return new Promise((resolve) => {
+                        resolveNext = resolve;
+                    });
+                },
+                async return() {
+                    done = true;
+                    clearInterval(disposeInterval);
+                    subscription.unsubscribe();
+                    return { value: undefined, done: true };
+                },
+            };
+        },
+    };
+}
+
+/**
+ * @module atoms
+ *
+ * Provides reactive atoms, derived values, and scope-based lifecycle management.
+ *
+ * Atoms are reactive values that can be read, written to, and subscribed to.
+ * They participate in automatic dependency tracking and scope-based cleanup.
+ *
+ * @example
+ * ```ts
+ * import { atom, derived, scope, flow } from '@streamix/atoms';
+ *
+ * const app = scope(() => {
+ *   const count = atom(0);
+ *   const doubled = derived(() => count.value * 2);
+ *   return { count, doubled };
+ * });
+ *
+ * app.count.set(5);
+ * console.log(app.doubled.value); // 10
+ * app.dispose();
+ * ```
+ */
 
 /**
  * Creates a stream operator that emits the latest value from the source stream
@@ -2507,8 +3320,8 @@ function fromEvent(target, event, options) {
         if (++subscriberCount === 1) {
             void start();
         }
-        const originalOnUnsubscribe = subscription.onUnsubscribe;
-        subscription.onUnsubscribe = () => {
+        const originalOnUnsubscribe = subscription.teardown;
+        subscription.teardown = () => {
             if (--subscriberCount === 0) {
                 stop();
             }
@@ -2734,22 +3547,25 @@ function merge(...sources) {
             const resolved = fromAny(source);
             return resolved[Symbol.asyncIterator]();
         });
-        const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));
-        const activeIterators = [];
-        for (let i = 0; i < initialResults.length; i++) {
-            const settled = initialResults[i];
-            if (settled.status === 'rejected') {
-                throw settled.reason;
-            }
-            const result = settled.value;
-            if (result.done) {
-                continue;
-            }
-            yield result.value;
-            activeIterators.push(iterators[i]);
-        }
-        const coordinator = createAsyncCoordinator(activeIterators);
+        // Track coordinator so the outer finally can clean it up even if it was
+        // created before an early return/throw.
+        let coordinator = null;
         try {
+            const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));
+            const activeIterators = [];
+            for (let i = 0; i < initialResults.length; i++) {
+                const settled = initialResults[i];
+                if (settled.status === 'rejected') {
+                    throw settled.reason;
+                }
+                const result = settled.value;
+                if (result.done) {
+                    continue;
+                }
+                yield result.value;
+                activeIterators.push(iterators[i]);
+            }
+            coordinator = createAsyncCoordinator(activeIterators);
             while (true) {
                 const result = await coordinator.next();
                 if (result.done)
@@ -2764,7 +3580,23 @@ function merge(...sources) {
             }
         }
         finally {
-            await coordinator.return?.();
+            // coordinator.return() cleans up iterators that were handed to it.
+            // For iterators that never made it into activeIterators (completed on
+            // first pull), call return() directly so no iterator leaks.
+            if (coordinator) {
+                await coordinator.return?.();
+            }
+            else {
+                // Early exit before coordinator was created — clean up all iterators.
+                await Promise.all(iterators.map((it) => {
+                    try {
+                        return Promise.resolve(it.return?.()).catch(() => { });
+                    }
+                    catch {
+                        return Promise.resolve();
+                    }
+                }));
+            }
         }
     };
     return createStream('merge', gen);
@@ -3708,7 +4540,7 @@ function delayUntil(notifier) {
             if (event.sourceIndex === 1) {
                 if (gateOpened) {
                     // Gate is open - forward immediately
-                    return { done: false, value: event.value };
+                    return NEXT(event.value);
                 }
                 else {
                     // Gate is closed - buffer
@@ -5421,7 +6253,7 @@ function skipUntil(notifier) {
                 return null;
             }
             if (gateOpened) {
-                return { done: false, value: event.value };
+                return NEXT(event.value);
             }
             // Gate not yet open — skip this value and continue waiting.
             return null;
@@ -5513,7 +6345,7 @@ const skipWhile = (predicate) => createOperator('skipWhile', function (source) {
  *
  * This operator is a powerful tool for comparing consecutive values in a stream.
  * It maintains an internal state to remember the last value it received. For
- * each new value, it creates a tuple of `[previousValue, currentValue]` and
+ * each new value, it creates a tuple of `[prior, currentValue]` and
  * emits it to the output stream.
  *
  * The very first value emitted will have `undefined` as its "previous" value.
@@ -5849,7 +6681,7 @@ function takeUntil(notifier) {
                         case 'value':
                             if (event.sourceIndex === 0) {
                                 // Source value - forward it (preserving dropped flag)
-                                return { done: false, value: event.value };
+                                return NEXT(event.value);
                             }
                             // Notifier emitted - stop immediately
                             isDone = true;
@@ -5885,7 +6717,7 @@ function takeUntil(notifier) {
                     switch (event.type) {
                         case 'value':
                             if (event.sourceIndex === 0) {
-                                return { done: false, value: event.value };
+                                return NEXT(event.value);
                             }
                             isDone = true;
                             // Can't await in sync method, but we can schedule cleanup
@@ -6423,5 +7255,5 @@ const createSemaphore = (initialCount) => {
  * Generated bundle index. Do not edit.
  */
 
-export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
+export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncAtom, asyncPull, atom, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, derived, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, flow, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isOperator, isPromiseLike, isStreamLike, iterate, last, lastValueFrom, loop, map, merge, mergeMap, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, scope, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
 //# sourceMappingURL=epikodelabs-streamix.mjs.map

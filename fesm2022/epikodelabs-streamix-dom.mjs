@@ -93,11 +93,11 @@ function onAnimationFrame() {
                 if (subscriberCount === 0) {
                     stopLoop();
                 }
-                // Some specs expect onUnsubscribe to run synchronously.
-                const onUnsubscribe = subscription.onUnsubscribe;
-                subscription.onUnsubscribe = undefined;
+                // Some specs expect teardown to run synchronously.
+                const teardown = subscription.teardown;
+                subscription.teardown = undefined;
                 try {
-                    onUnsubscribe?.();
+                    teardown?.();
                 }
                 catch {
                 }
@@ -203,11 +203,11 @@ function onBattery() {
                 if (subscriberCount === 0) {
                     stop();
                 }
-                // Some DOM specs expect the onUnsubscribe callback to run synchronously.
-                const onUnsubscribe = sub.onUnsubscribe;
-                sub.onUnsubscribe = undefined;
+                // Some DOM specs expect the teardown callback to run synchronously.
+                const teardown = sub.teardown;
+                sub.teardown = undefined;
                 try {
-                    onUnsubscribe?.();
+                    teardown?.();
                 }
                 catch {
                 }
@@ -308,11 +308,11 @@ function onFullscreen() {
                 if (subscriberCount === 0) {
                     stop();
                 }
-                // Some DOM specs expect the onUnsubscribe callback to run synchronously.
-                const onUnsubscribe = sub.onUnsubscribe;
-                sub.onUnsubscribe = undefined;
+                // Some DOM specs expect the teardown callback to run synchronously.
+                const teardown = sub.teardown;
+                sub.teardown = undefined;
                 try {
-                    onUnsubscribe?.();
+                    teardown?.();
                 }
                 catch {
                 }
@@ -404,8 +404,8 @@ function onIdle(timeout) {
     subject.subscribe = (callback) => {
         const subscription = originalSubscribe.call(subject, callback);
         scheduleStart();
-        const originalOnUnsubscribe = subscription.onUnsubscribe;
-        subscription.onUnsubscribe = () => {
+        const originalOnUnsubscribe = subscription.teardown;
+        subscription.teardown = () => {
             if (--subscriberCount === 0) {
                 stopLoop();
             }
@@ -638,8 +638,8 @@ function onMediaQuery(query) {
     subject.subscribe = (cb) => {
         const sub = originalSubscribe.call(subject, cb);
         scheduleStart();
-        const prev = sub.onUnsubscribe;
-        sub.onUnsubscribe = () => {
+        const prev = sub.teardown;
+        sub.teardown = () => {
             if (--subscriberCount === 0) {
                 stop();
             }
@@ -733,8 +733,8 @@ function onMutation(element, options) {
     subject.subscribe = (cb) => {
         const sub = originalSubscribe.call(subject, cb);
         scheduleStart();
-        const o = sub.onUnsubscribe;
-        sub.onUnsubscribe = () => {
+        const o = sub.teardown;
+        sub.teardown = () => {
             if (--subscriberCount === 0) {
                 stop();
             }
@@ -823,8 +823,8 @@ function onNetwork() {
     subject.subscribe = (cb) => {
         const sub = originalSubscribe.call(subject, cb);
         scheduleStart();
-        const o = sub.onUnsubscribe;
-        sub.onUnsubscribe = () => {
+        const o = sub.teardown;
+        sub.teardown = () => {
             if (--subscriberCount === 0) {
                 stop();
             }
@@ -917,11 +917,11 @@ function onOrientation() {
                 if (subscriberCount === 0) {
                     stop();
                 }
-                // Some DOM specs expect the onUnsubscribe callback to run synchronously.
-                const onUnsubscribe = sub.onUnsubscribe;
-                sub.onUnsubscribe = undefined;
+                // Some DOM specs expect the teardown callback to run synchronously.
+                const teardown = sub.teardown;
+                sub.teardown = undefined;
                 try {
-                    onUnsubscribe?.();
+                    teardown?.();
                 }
                 catch {
                 }
@@ -1054,11 +1054,11 @@ function onResize(element) {
                 if (subscriberCount === 0) {
                     stop();
                 }
-                // Some DOM specs expect the onUnsubscribe callback to run synchronously.
-                const onUnsubscribe = sub.onUnsubscribe;
-                sub.onUnsubscribe = undefined;
+                // Some DOM specs expect the teardown callback to run synchronously.
+                const teardown = sub.teardown;
+                sub.teardown = undefined;
                 try {
-                    onUnsubscribe?.();
+                    teardown?.();
                 }
                 catch {
                 }
@@ -1162,8 +1162,8 @@ function onViewportChange() {
     subject.subscribe = (cb) => {
         const sub = originalSubscribe.call(subject, cb);
         scheduleStart();
-        const o = sub.onUnsubscribe;
-        sub.onUnsubscribe = () => {
+        const o = sub.teardown;
+        sub.teardown = () => {
             if (--subscriberCount === 0) {
                 stop();
             }
@@ -1247,8 +1247,8 @@ function onVisibilityChange() {
     subject.subscribe = (cb) => {
         const sub = originalSubscribe.call(subject, cb);
         scheduleStart();
-        const o = sub.onUnsubscribe;
-        sub.onUnsubscribe = () => {
+        const o = sub.teardown;
+        sub.teardown = () => {
             if (--subscriberCount === 0) {
                 stop();
             }
