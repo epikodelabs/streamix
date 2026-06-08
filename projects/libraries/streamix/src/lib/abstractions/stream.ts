@@ -1,7 +1,7 @@
 import { firstValueFrom } from "../converters";
 import { createSubject } from "../subjects";
 import { createAsyncIterator } from "../utils/iterator";
-import type { MaybePromise, Operator, OperatorChain } from "./operator";
+import { isPromiseLike, type MaybePromise, type Operator, type OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
 import { createSubscription, type Subscription } from "./subscription";
 
@@ -76,13 +76,27 @@ async function drainIterator<T>(
 ): Promise<void> {
   const abortPromise = waitForAbort(signal);
 
-  const processResult = (result: IteratorResult<T>) => {
+  const processResult = (result: IteratorResult<T>): boolean => {
     if (result.done) return true;
 
     const receivers = getReceivers();
     for (const { receiver, subscription } of receivers) {
       if (!subscription.unsubscribed) {
-        receiver.next?.(result.value);
+        try {
+          const ret = receiver.next?.(result.value);
+          // Fire async callbacks without blocking the source.
+          // Per-subscriber backpressure is handled by the receiver's own
+          // buffering (e.g. Subject's AsyncPushable queue).
+          if (isPromiseLike(ret)) {
+            (ret  as Promise<unknown>).catch((err: any) => {
+              console.log('Subscriber callback error', err);
+              receiver.error?.(err);
+            });
+          }
+        } catch (err) {
+          console.log('Subscriber callback error', err);
+          receiver.error?.(err);
+        }
       }
     }
     return false;
@@ -384,3 +398,4 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
 
   return pipedStream as Stream<TOut>;
 }
+

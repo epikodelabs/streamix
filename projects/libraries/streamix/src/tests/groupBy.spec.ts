@@ -49,7 +49,7 @@ describe('groupBy', () => {
         const key = groupItem.key; // Get the group key ('low' or 'high')
         const operators = paths[key] || []; // Get the operators for this group
 
-        return of(groupItem.value).pipe(
+        return (of(groupItem.value).pipe as any)(
           ...operators,
           tap(value => {
             const groupValues = groupsMap.get(key) || [];
@@ -57,6 +57,7 @@ describe('groupBy', () => {
             groupsMap.set(groupItem.key, groupValues);
           })
         );
+
       })
     );
 
@@ -96,7 +97,7 @@ describe('groupBy', () => {
         const key = groupItem.key; // Get the group key ('low' or 'high')
         const operators = paths[key] || []; // Get the operators for this group
 
-        return of(groupItem.value).pipe(
+        return (of(groupItem.value).pipe as any)(
           ...operators,
           tap(value => {
             const groupValues = groupsMap.get(key) || [];
@@ -104,6 +105,7 @@ describe('groupBy', () => {
             groupsMap.set(groupItem.key, groupValues);
           })
         );
+
       })
     );
 

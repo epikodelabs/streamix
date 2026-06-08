@@ -638,9 +638,10 @@ idescribe("actor", () => {
   it("should deliver published bus messages to global main inbox listeners", async () => {
     const seen: Array<{ topic: string; payload: string; from?: string }> = [];
 
-    async function behavior(msg: unknown, state: number) {
+    async function behavior(_msg: unknown, state: number) {
       return state;
     }
+
 
     (globalThis as any).currentMainTask = behavior;
 

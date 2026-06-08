@@ -1,4 +1,3 @@
-
 /**
  * Coordinator utilities for merging and managing multiple async iterators.
  *
@@ -9,8 +8,8 @@
  */
 import { DONE } from "../abstractions";
 
-
 /**
+
  * Event emitted by the coordinator for each source.
  *
  * - `value`: A value was emitted from a source.
@@ -108,7 +107,7 @@ export function createAsyncCoordinator(
   };
 
   const queue: CoordinatorQueueItem[] = [];
-  
+
   // Use sparse arrays to support dynamic indices
   const sourceList: (AsyncIterator<any> | null)[] = [...sources];
   const completed: boolean[] = sources.map(() => false);
@@ -147,15 +146,15 @@ export function createAsyncCoordinator(
   function pullAsync(i: number) {
     // CRITICAL: Don't start a new pull if already pulling, completed, removed, or returned
     if (!sourceList[i] || completed[i] || pulling[i] || iteratorReturned) return;
-    
+
     pulling[i] = true;
     pendingPulls[i] = false;
     const src: any = sourceList[i];
-    
+
     src.next().then(
       (r: IteratorResult<any>) => {
         pulling[i] = false;
-        
+
         // Don't process if source was completed/removed during the async wait
         if (!sourceList[i] || completed[i] || iteratorReturned) return;
 
@@ -170,7 +169,7 @@ export function createAsyncCoordinator(
         }
 
         notify();
-        
+
         // CRITICAL: Only schedule next pull if there are more values AND not already pulling
         // AND not completed AND there's a pending pull request
         if (sourceList[i] && !completed[i] && !pulling[i] && pendingPulls[i]) {
@@ -181,7 +180,7 @@ export function createAsyncCoordinator(
       (err: any) => {
         pulling[i] = false;
         if (!sourceList[i] || completed[i] || iteratorReturned) return;
-        
+
         if (!completed[i]) {
           completed[i] = true;
           activeCount--;
@@ -271,7 +270,7 @@ export function createAsyncCoordinator(
 
     next() {
       if (iteratorReturned) return Promise.resolve(DONE);
-      
+
       drainSources();
 
       if (queue.length > 0) {
@@ -288,7 +287,7 @@ export function createAsyncCoordinator(
 
     __tryNext() {
       if (iteratorReturned) return DONE;
-      
+
       drainSources();
 
       if (queue.length > 0) {
@@ -307,7 +306,7 @@ export function createAsyncCoordinator(
       iteratorReturned = true;
       activeCount = 0;
       queue.length = 0;
-      
+
       // Mark all as completed immediately
       for (let i = 0; i < completed.length; i++) {
         completed[i] = true;
@@ -318,19 +317,22 @@ export function createAsyncCoordinator(
       const safe = (s: any) => {
         if (!s?.return) return Promise.resolve();
         try {
-          return Promise.resolve(s.return()).catch(() => {});
-        } catch {
+          return Promise.resolve(s.return()).catch((err: any) => {
+            console.log('Coordinator source return error', err);
+          });
+        } catch (err: any) {
+          console.log('Coordinator source return error', err);
           return Promise.resolve();
         }
       };
 
       await Promise.all(sourceList.filter(s => s !== null).map(safe));
-      
+
       if (waitingResolve) {
         waitingResolve(DONE);
         waitingResolve = null;
       }
-      
+
       return DONE;
     },
 
@@ -391,18 +393,18 @@ export function createAsyncCoordinator(
       if (!completed[index]) {
         activeCount--;
       }
-      
+
       completed[index] = true;
       pulling[index] = false;
       pendingPulls[index] = false;
       sourceList[index] = null;
 
-      
+
       // Call return on the source
       try {
         await source.return?.();
-      } catch {
-        // Ignore cleanup errors
+      } catch (err: any) {
+        console.log('Coordinator removeSource error', err);
       }
 
       // Notify in case we're waiting and all sources are now done
