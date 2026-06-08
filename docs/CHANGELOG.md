@@ -1,10 +1,10 @@
 # Changelog
 
-## 2.1.0
+## 2.0.47
 
 ### Atoms Evolution — Subject Replacement
 
-This release introduces `asyncAtom` and `iterate`, completing the atoms API as a full replacement for imperative Subjects.
+This release introduces `atoms` and `scopes`, completing the atoms API as a full replacement for imperative Subjects.
 
 - **`asyncAtom()`** — Creates a hot atom without an initial value, similar to a Subject. No replay by default.
 - **`asyncAtom({ capacity: n })`** — Replays the last `n` values to late subscribers (like ReplaySubject).

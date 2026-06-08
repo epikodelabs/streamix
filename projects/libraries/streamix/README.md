@@ -258,7 +258,7 @@ projects/libraries/streamix/
 
 ## 🚀 What's New?
 
-### v2.1.0 — Atoms Evolution
+### v2.0.47 — Atoms Evolution
 
 The atoms API is now a complete replacement for imperative Subjects:
 
