@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { asyncAtom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the visual viewport.
@@ -19,123 +19,87 @@ export type ViewportState = {
  * **Behavior:**
  * - Emits initial viewport metrics on start.
  * - Emits on resize, scroll, and zoom.
- * - Starts listening on first subscriber.
- * - Stops listening when the last subscriber unsubscribes.
+ * - Stops listening when the signal is aborted (last subscriber unsubscribes).
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
  * @returns {Stream<ViewportState>}
  */
 export function onViewportChange(): Stream<ViewportState> {
-  const subject = createSubject<ViewportState>();
-
-  let subscriberCount = 0;
-  let stopped = true;
-
-  let target: VisualViewport | Window | null = null;
-
-  const snapshot = (): ViewportState => {
-    if (typeof window === "undefined") {
-      return {
-        width: 0,
-        height: 0,
-        scale: 1,
-        offsetLeft: 0,
-        offsetTop: 0
-      };
-    }
-
-    if (window.visualViewport) {
-      const vp = window.visualViewport;
-      return {
-        width: vp.width,
-        height: vp.height,
-        scale: vp.scale,
-        offsetLeft: vp.offsetLeft,
-        offsetTop: vp.offsetTop
-      };
-    }
-
-    return {
-      width: window.innerWidth,
-      height: window.innerHeight,
-      scale: 1,
-      offsetLeft: 0,
-      offsetTop: 0
-    };
-  };
-
-  const emit = () => {
-    subject.next(snapshot());
-  };
-
-  const start = () => {
-    if (!stopped) return;
-    stopped = false;
-
+  return createStream<ViewportState>("onViewportChange", async function* (signal) {
     // SSR guard
     if (typeof window === "undefined") return;
 
-    target = window.visualViewport ?? window;
+    const atom = asyncAtom<ViewportState>();
+
+    const snapshot = (): ViewportState => {
+      if (window.visualViewport) {
+        const vp = window.visualViewport;
+        return {
+          width: vp.width,
+          height: vp.height,
+          scale: vp.scale,
+          offsetLeft: vp.offsetLeft,
+          offsetTop: vp.offsetTop,
+        };
+      }
+      return {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        scale: 1,
+        offsetLeft: 0,
+        offsetTop: 0,
+      };
+    };
+
+    const emit = () => {
+      if (signal?.aborted) {
+        return;
+      }
+      atom.set(snapshot());
+    };
+
+    const target: VisualViewport | Window =
+      window.visualViewport ?? window;
 
     target.addEventListener("resize", emit);
     target.addEventListener("scroll", emit);
 
+    // Emit initial snapshot
     emit();
-  };
 
-  const stop = () => {
-    if (stopped) return;
-    stopped = true;
-
-    if (!target) return;
-
-    target.removeEventListener("resize", emit);
-    target.removeEventListener("scroll", emit);
-
-    target = null;
-  };
-
-  /* ------------------------------------------------------------------------
-   * Ref-counted subscription handling
-   * ---------------------------------------------------------------------- */
-
-  const originalSubscribe = subject.subscribe;
-  const scheduleStart = () => {
-    subscriberCount += 1;
-    if (subscriberCount === 1) {
-      start();
-    }
-  };
-
-  subject.subscribe = (
-    cb?: ((value: ViewportState) => void) | Receiver<ViewportState>
-  ) => {
-    const sub = (originalSubscribe as any).call(subject, cb);
-
-    scheduleStart();
-
-    const o = sub.teardown;
-    sub.teardown = () => {
-      if (--subscriberCount === 0) {
-        stop();
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (signal) {
+        try {
+          signal.removeEventListener("abort", cleanup);
+        } catch {
+          // ignore
+        }
       }
-      o?.call(sub);
+      try {
+        target.removeEventListener("resize", emit);
+      } catch {
+        // ignore
+      }
+      try {
+        target.removeEventListener("scroll", emit);
+      } catch {
+        // ignore
+      }
+      atom.dispose();
     };
 
-    return sub;
-  };
+    if (signal) {
+      signal.addEventListener("abort", cleanup, { once: true });
+    }
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
-
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
-  
-  subject.name = "onViewportChange";
-  subject.type = "stream";
-  return subject;
+    try {
+      yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+    } finally {
+      cleanup();
+    }
+  });
 }
-
-

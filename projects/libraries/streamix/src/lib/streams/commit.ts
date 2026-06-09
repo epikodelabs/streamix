@@ -90,7 +90,7 @@ export function commit<T = any>(
             }
 
             const timeoutId = setTimeout(() => {
-              if (signal) signal.removeEventListener("abort", abortHandler);
+              signal?.removeEventListener("abort", abortHandler);
               resolve();
             }, resolvedDelay);
 
@@ -99,9 +99,7 @@ export function commit<T = any>(
               reject(new DOMException("Stream aborted", "AbortError"));
             };
 
-            if (signal) {
-              signal.addEventListener("abort", abortHandler, { once: true });
-            }
+            signal?.addEventListener("abort", abortHandler, { once: true });
           });
         }
       } finally {

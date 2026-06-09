@@ -1,6 +1,6 @@
+import { asyncAtom } from '@epikodelabs/streamix';
 import type { MaybePromise } from '../abstractions';
 import { isPromiseLike, pipeSourceThrough, type Stream } from '../abstractions';
-import { asyncAtom } from '../atoms/atom';
 import { createAsyncIterator } from '../utils';
 
 /**
