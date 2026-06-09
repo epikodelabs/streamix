@@ -1,4 +1,4 @@
-import { asyncAtom, type Atom } from "../atoms/atom";
+import { asyncAtom, type Atom } from "@epikodelabs/streamix";
 import { firstValueFrom } from "../converters";
 import { createAsyncIterator } from "../utils/iterator";
 import { isPromiseLike, type MaybePromise, type Operator, type OperatorChain } from "./operator";
@@ -287,14 +287,14 @@ export function createStream<T>(
 
     let unsubscribed = false;
     const originalUnsubscribe = sub.unsubscribe.bind(sub);
-    sub.unsubscribe = async () => {
+    sub.unsubscribe = () => {
       if (unsubscribed) return;
       unsubscribed = true;
 
       // Mark the subscription as complete
       void receiver.complete?.();
 
-      await originalUnsubscribe();
+      originalUnsubscribe();
       run.subscriberCount = Math.max(0, run.subscriberCount - 1);
       if (
         run.subscriberCount === 0 &&

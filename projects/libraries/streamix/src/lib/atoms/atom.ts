@@ -1,4 +1,4 @@
-import type { Stream } from "../abstractions/stream";
+import type { Stream } from "@epikodelabs/streamix";
 import { createSubscription, type Subscription } from "../abstractions/subscription";
 import { registerWithCurrentScope } from "./scope";
 

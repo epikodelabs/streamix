@@ -23,7 +23,7 @@
  */
 
 export { asyncAtom, atom, derived, flow, iterate } from './atom';
-export type { AsyncAtom, AsyncAtomOptions, AtomBase as Atom, Atom as WritableAtom } from './atom';
+export type { AsyncAtom, AsyncAtomOptions, Atom, AtomBase } from './atom';
 
 export { scope } from './scope';
 export type { Scope } from './scope';
