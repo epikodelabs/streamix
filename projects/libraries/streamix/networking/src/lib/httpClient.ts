@@ -192,14 +192,13 @@ export const useAccept = (contentType: string): Middleware => {
 export const useOauth = ({
   getToken,
   refreshToken,
-  shouldRetry = () => true, // Default to always retry
+  shouldRetry = () => true,
 }: {
   getToken: () => Promise<string>;
   refreshToken: () => Promise<string>;
   shouldRetry?: (context: Context) => boolean;
 }): Middleware => {
   return (next) => async (context) => {
-    // Set the initial token in the Authorization header
     context.headers["Authorization"] = `Bearer ${await getToken()}`;
 
     let newContext: Context;
@@ -215,10 +214,9 @@ export const useOauth = ({
       throw error;
     }
 
-    // If unauthorized and shouldRetry allows, refresh the token and retry
     if (newContext.status === 401 && shouldRetry(newContext)) {
       newContext.headers["Authorization"] = `Bearer ${await refreshToken()}`;
-      return await next(newContext); // Retry with the new context (includes refreshed token)
+      return await next(newContext);
     }
 
     return newContext;
@@ -229,8 +227,7 @@ export const useOauth = ({
  * Retry middleware for handling transient errors.
  *
  * This middleware automatically retries a failed request, with an exponential
- * backoff delay between attempts. This is useful for handling temporary network
- * failures or flaky API services.
+ * backoff delay between attempts.
  */
 export const useRetry = (
   maxRetries: number = 3,
@@ -242,27 +239,22 @@ export const useRetry = (
 
     while (retryCount <= maxRetries) {
       try {
-        return await next(context); // Attempt the request
+        return await next(context);
       } catch (error: any) {
         if (!shouldRetry(error, context)) {
-          throw error; // Do not retry if the error is not retryable
+          throw error;
         }
 
         if (retryCount === maxRetries) {
-          throw error; // Max retries reached, rethrow the error
+          throw error;
         }
 
-        // Calculate exponential backoff delay
         const delay = backoffBase * Math.pow(2, retryCount);
-
-        // Wait for the delay before retrying
         await new Promise((resolve) => setTimeout(resolve, delay));
-
         retryCount++;
       }
     }
 
-    // This line should never be reached, but TypeScript requires a return statement
     throw new Error(`${LOG_PREFIX} Retry middleware failed unexpectedly after ${maxRetries} attempts`);
   };
 };
@@ -271,8 +263,7 @@ export const useRetry = (
  * Handles HTTP redirects.
  *
  * This middleware automatically follows 3xx redirect responses up to a
- * specified maximum number of times. It updates the URL in the context and
- * handles the change in HTTP method for a 303 See Other redirect.
+ * specified maximum number of times.
  */
 export const useRedirect = (maxRedirects: number = 5): Middleware => {
   return (next) => async (initialContext) => {
@@ -282,42 +273,32 @@ export const useRedirect = (maxRedirects: number = 5): Middleware => {
     while (true) {
       const result = await next(context);
 
-      // 1. Check if the result indicates a redirect is needed
       if (result.redirectTo === undefined) {
         return result;
       }
 
-      // 2. Increment and check limit
       redirects++;
       if (redirects > maxRedirects) {
         throw new Error(`${LOG_PREFIX} Too many redirects while requesting ${context.url} (max: ${maxRedirects})`);
       }
 
-      // 3. Robust location check
       const location = result.redirectTo;
       if (!location || typeof location !== 'string') {
         throw new Error(`${LOG_PREFIX} Redirect response missing Location header for ${result.url}`);
       }
 
-      // 4. Resolve the URL relative to the previous request
       const nextUrl = new URL(location, result.url).toString();
 
-      // 5. Build the next context
       context = {
         ...result,
         url: nextUrl,
-        redirectTo: undefined, 
+        redirectTo: undefined,
       };
 
-      // 6. Handle RFC 7231 (303 See Other)
       if (result.status === 303) {
         context.method = 'GET';
         context.body = undefined;
-        
-        // Simplified header handling - always treat as plain object
         context.headers = { ...context.headers };
-        
-        // Delete specific headers (case-insensitive)
         delete context.headers['content-type'];
         delete context.headers['content-length'];
         delete context.headers['Content-Type'];
@@ -339,9 +320,6 @@ export const useHeader = (name: string, value: string): Middleware => {
 
 /**
  * Removes headers from the request context by name.
- *
- * This is useful for stripping default headers (like `Content-Type`) that
- * would otherwise trigger a CORS preflight on simple GET requests.
  */
 export const useStripHeaders = (...names: string[]): Middleware => {
   return (next) => async (context) => {
@@ -362,7 +340,6 @@ export const useStripHeaders = (...names: string[]): Middleware => {
  */
 export const useParams = (data: Record<string, any>): Middleware => {
   return (next) => async (context) => {
-    // FIX #2: Safely handle undefined context.params
     context.params = { ...data, ...(context.params || {}) };
     return await next(context);
   };
@@ -370,13 +347,8 @@ export const useParams = (data: Record<string, any>): Middleware => {
 
 /**
  * Handles errors thrown by the next middleware in the chain.
- *
- * This middleware provides a way to gracefully handle errors without
- * breaking the entire chain. It catches errors and allows you to
- * define a custom fallback behavior.
  */
 export const useFallback = (
-  // FIX #15: Support async handlers by allowing Promise return
   handler: (error: any, context: Context) => Context | Promise<Context>,
 ): Middleware => {
   return (next) => async (context) => {
@@ -397,31 +369,24 @@ export const useLogger = (
   return (next) => async (context) => {
     logger(`Request: ${context.method} ${context.url}`);
     context = await next(context);
-    logger(
-      `Response: ${context.status || 'No Response'} ${context.url}`,
-    );
+    logger(`Response: ${context.status || 'No Response'} ${context.url}`);
     return context;
   };
 };
 
 /**
  * Sets a timeout for the request.
- *
- * This middleware adds a timeout to the request, automatically aborting it
- * if it takes longer than the specified number of milliseconds.
  */
 export const useTimeout = (ms: number): Middleware => {
   return (next) => async (context: Context) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), ms);
 
-    // FIX #11: Add fallback for AbortSignal.any
     let combinedSignal = controller.signal;
     if (context['signal']) {
       if (typeof AbortSignal !== 'undefined' && (AbortSignal as any).any) {
         combinedSignal = (AbortSignal as any).any([context['signal'], controller.signal]);
       } else {
-        // Fallback: use the timeout signal only (or combine manually)
         logWarning('AbortSignal.any not available, using timeout signal only');
       }
     }
@@ -444,70 +409,11 @@ export const useTimeout = (ms: number): Middleware => {
 
 /**
  * Creates an HTTP client with middleware support and streaming capabilities.
- *
- * The client is a factory for creating request streams. Middleware can be
- * configured globally for the client using `withDefaults`.
- *
- * @returns {HttpClient} An instance of the HTTP client.
- *
- * @example
- * ```typescript
- * async function fetchData() {
- *   const client = createHttpClient().withDefaults(
- *     useBase("https://api.example.com"),
- *     useAccept("application/json"),
- *     useLogger(),
- *     useTimeout(5000),
- *     useFallback((error, context) => {
- *       console.error("Request failed:", error);
- *       return context;
- *     })
- *   );
- *
- *   const responseStream = client.get("/data", readJson);
- *
- *   try {
- *     for await (const value of responseStream) {
- *       console.log("Received data:", value);
- *     }
- *   } catch (error) {
- *     console.error("Unexpected error:", error);
- *   }
- * }
- *
- * fetchData();
- *
- * async function postData() {
- *   const client = createHttpClient().use(
- *     useBase("https://api.example.com"),
- *     useLogger(),
- *     useFallback((error, context) => {
- *       console.error("Post request failed:", error);
- *       return context;
- *     })
- *   );
- *
- *   const responseStream = client.post("/items");
- *
- *   try {
- *     for await (const value of responseStream) {
- *       console.log("Post response:", value);
- *     }
- *   } catch (error) {
- *     console.error("Post request error:", error);
- *   }
- * }
- *
- * postData();
- * ```
  */
 export const createHttpClient = (): HttpClient => {
   const defaultHeaders = { 'Content-Type': 'application/json' };
   const middlewares: Middleware[] = [];
 
-  /**
-   * Resolves the final request URL, adding query parameters if provided.
-   */
   const resolveUrl = (url: string, params?: Record<string, string>): string => {
     const isAbsolute = url.startsWith('http://') || url.startsWith('https://');
 
@@ -537,35 +443,27 @@ export const createHttpClient = (): HttpClient => {
     return url;
   };
 
-  /**
-   * Chains middlewares to process the request context before making the request.
-   */
   const chainMiddleware = (middlewares: Middleware[]): Middleware => {
     return middlewares.reduceRight((nextMiddleware, middleware) =>
       (next) => (ctx) => middleware(nextMiddleware(next))(ctx),
     () => async (context) => {
       let body = context.body;
       
-      // FIX #6: Better binary stream detection
       if (typeof body === 'object' && body !== null) {
-        // Skip binary types that shouldn't be stringified
         const isBinaryStream = body instanceof ArrayBuffer ||
                                body instanceof Blob ||
                                body instanceof ReadableStream;
         
-        // FIX #7: Safe FormData check for Node.js
         let isFormData = false;
         try {
           isFormData = body instanceof FormData;
         } catch {
-          // FormData doesn't exist in this environment
           isFormData = false;
         }
         
         const isUrlSearchParams = body instanceof URLSearchParams;
         
         if (!isBinaryStream && !isFormData && !isUrlSearchParams) {
-          // FIX #8: Flexible Content-Type check (includes charset)
           const contentType = context.headers['Content-Type'] || '';
           if (contentType.startsWith('application/json')) {
             body = JSON.stringify(body);
@@ -586,23 +484,29 @@ export const createHttpClient = (): HttpClient => {
 
       const response = await context.fetch!(request) as Response;
 
-      // Update context with response details
       context.ok = response.ok;
       context.status = response.status;
       context.statusText = response.statusText;
+
+      // Handle empty responses (204 No Content, 304 Not Modified)
+      if (response.status === 204 || response.status === 304 || method === 'HEAD') {
+        const data = createReplaySubject();
+        data.complete();
+        context.data = data;
+        return context;
+      }
 
       // Handle redirects
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get('Location');
         if (!location) {
-          // If no location, it's not a valid redirect context, it's an error
           throw new Error(`${LOG_PREFIX} Redirect response (${response.status}) missing Location header for ${url}`);
         }
         context.redirectTo = location;
         return context;
       }
 
-      // **Handle errors before processing response**
+      // Handle errors before processing response
       if (!response.ok) {
         const error = new Error(
           `${LOG_PREFIX} HTTP Error: ${response.status} ${response.statusText} for ${method} ${url}`
@@ -612,30 +516,34 @@ export const createHttpClient = (): HttpClient => {
         throw error;
       }
 
-      const data = createReplaySubject();
+      const replay = createReplaySubject();
 
-      void (async () => {
+      // Eagerly consume the parser and store results
+      (async () => {
         try {
           for await (const item of parser(response)) {
-            data.next(item);
+            replay.next(item);
           }
-        } catch (error) {
-          data.error(error);
-          // FIX #10: Don't call complete() after error
-          return;
+          replay.complete();
+        } catch (error: any) {
+          replay.error(error);
         }
-        // Only complete if no error occurred
-        data.complete();
       })();
 
-      context.data = data;
+      // Create stream that reads from the replay subject
+      context.data = createStream('httpParser', async function* (signal) {
+        if (signal?.aborted) return;
+        
+        for await (const value of replay) {
+          if (signal?.aborted) break;
+          yield value;
+        }
+      });
+      
       return context;
     });
   }
 
-  /**
-   * Performs an HTTP request using the configured middlewares and streaming.
-   */
   const request = <T = any>(
     method: string,
     url: string,
@@ -644,7 +552,6 @@ export const createHttpClient = (): HttpClient => {
   ): HttpStream<T> => {
     const abortController = new AbortController();
 
-    // Determine whether optionsOrParser is the parser or options
     const isParser = typeof optionsOrParser === 'function';
 
     const options: HttpOptions = isParser ? {} : optionsOrParser || {};
@@ -652,7 +559,6 @@ export const createHttpClient = (): HttpClient => {
       ? (optionsOrParser as ParserFunction<T>)
       : (maybeParser ?? (readStatus as ParserFunction<T>));
 
-    // FIX #1: Safely handle missing options.headers
     const headers = { ...defaultHeaders, ...(options.headers || {}) };
 
     const context: Context = {
@@ -670,11 +576,10 @@ export const createHttpClient = (): HttpClient => {
     const promise = chainMiddleware(middlewares)(async (ctx) => ctx)(context);
 
     const stream = createStream('httpData', async function* () {
-      const ctx = await promise; // If middleware throws, this rejection happens here
+      const ctx = await promise;
       
       if (!ctx || !ctx.data) {
-        // This prevents the Symbol.asyncIterator error on undefined
-        return; 
+        return;
       }
       
       yield* ctx.data;
@@ -689,38 +594,21 @@ export const createHttpClient = (): HttpClient => {
       middlewares.push(...newMiddlewares);
       return this;
     },
-    get: <T>(
-      url: string,
-      options?: HttpOptions | ParserFunction<T>,
-      parser?: ParserFunction<T>,
-    ): HttpStream<T> => request<T>('GET', url, options, parser),
-    post: <T>(
-      url: string,
-      options?: HttpOptions | ParserFunction<T>,
-      parser?: ParserFunction<T>,
-    ): HttpStream<T> => request<T>('POST', url, options, parser),
-    put: <T>(
-      url: string,
-      options?: HttpOptions | ParserFunction<T>,
-      parser?: ParserFunction<T>,
-    ): HttpStream<T> => request<T>('PUT', url, options, parser),
-    patch: <T>(
-      url: string,
-      options?: HttpOptions | ParserFunction<T>,
-      parser?: ParserFunction<T>,
-    ): HttpStream<T> => request<T>('PATCH', url, options, parser),
-    delete: <T>(
-      url: string,
-      options?: HttpOptions | ParserFunction<T>,
-      parser?: ParserFunction<T>,
-    ): HttpStream<T> => request<T>('DELETE', url, options, parser),
+    get: <T>(url: string, options?: HttpOptions | ParserFunction<T>, parser?: ParserFunction<T>): HttpStream<T> => 
+      request<T>('GET', url, options, parser),
+    post: <T>(url: string, options?: HttpOptions | ParserFunction<T>, parser?: ParserFunction<T>): HttpStream<T> => 
+      request<T>('POST', url, options, parser),
+    put: <T>(url: string, options?: HttpOptions | ParserFunction<T>, parser?: ParserFunction<T>): HttpStream<T> => 
+      request<T>('PUT', url, options, parser),
+    patch: <T>(url: string, options?: HttpOptions | ParserFunction<T>, parser?: ParserFunction<T>): HttpStream<T> => 
+      request<T>('PATCH', url, options, parser),
+    delete: <T>(url: string, options?: HttpOptions | ParserFunction<T>, parser?: ParserFunction<T>): HttpStream<T> => 
+      request<T>('DELETE', url, options, parser),
   };
 };
 
 /**
  * Yields the response status and status text as a single object.
- *
- * This parser ignores the response body and emits the HTTP status metadata only.
  */
 export const readStatus: ParserFunction<{ status: number; statusText: string; headers: Record<string, string>; }> =
   async function* (response) {
@@ -738,26 +626,18 @@ export const readStatus: ParserFunction<{ status: number; statusText: string; he
 
 /**
  * Parses a Response object as JSON.
- *
- * This is a standard parser function that reads the entire response body,
- * parses it as a JSON object, and then emits that single object.
  */
 export const readJson: ParserFunction = async function* <T>(response: Response) {
-  // FIX #5: Handle empty body gracefully
   const text = await response.text();
   if (!text || text.trim() === '') {
-    return; // Don't yield anything for empty responses
+    return;
   }
   const data = JSON.parse(text) as T;
   yield data;
 };
 
 /**
- **
  * Parses a Response object as text.
- *
- * This parser reads the entire response body as a text string and emits
- * that string as a single value.
  */
 export const readText: ParserFunction<string> = async function* (response) {
   const data = await response.text() as string;
@@ -766,9 +646,6 @@ export const readText: ParserFunction<string> = async function* (response) {
 
 /**
  * Parses a Response object as an ArrayBuffer.
- *
- * This parser reads the entire response body into an `ArrayBuffer` and
- * emits it as a single value. This is useful for handling binary data.
  */
 export const readArrayBuffer: ParserFunction<ArrayBuffer> = async function* (response) {
   const data = await response.arrayBuffer();
@@ -777,9 +654,6 @@ export const readArrayBuffer: ParserFunction<ArrayBuffer> = async function* (res
 
 /**
  * Parses a Response object as a Blob.
- *
- * This parser reads the entire response body into a `Blob` object and
- * emits it as a single value. This is useful for working with files or images.
  */
 export const readBlob: ParserFunction<Blob> = async function* (response) {
   const data = await response.blob();
@@ -788,9 +662,6 @@ export const readBlob: ParserFunction<Blob> = async function* (response) {
 
 /**
  * Type for the chunks emitted by the readChunks function.
- *
- * This object contains a parsed chunk of data, the current progress of the
- * download, and a `done` flag indicating completion.
  */
 export type ChunkData<T> = {
   chunk: T;
@@ -799,85 +670,97 @@ export type ChunkData<T> = {
 };
 
 /**
- * Reads and processes streamed response chunks based on Content-Type.
- *
- * This is a versatile parser that can handle a variety of streaming formats,
- * including binary data and line-delimited JSON (NDJSON). It emits chunks
- * as they arrive, along with progress information.
+ * Parses a streaming response into chunks with progress information.
+ * 
+ * @example
+ * // Basic usage
+ * for await (const chunk of readChunks(response)) {
+ *   console.log(chunk.progress, chunk.chunk);
+ * }
+ * 
+ * @example
+ * // With custom chunk parser for NDJSON
+ * for await (const chunk of readChunks(response, readNdjsonChunk)) {
+ *   console.log(chunk.chunk);
+ * }
+ * 
+ * @param response - The fetch Response object
+ * @param chunkParser - Optional function to parse each chunk (default: identity)
+ * @returns AsyncGenerator yielding chunks with progress information
  */
-/**
- * Reads and processes streamed response chunks based on Content-Type.
- */
-export const readChunks = <T = Uint8Array>(
-  chunkParser: (chunk: any) => T = (chunk) => chunk
-): ParserFunction<ChunkData<T>> => async function* (response) {
-  // FIX #4: Handle null response.body
+export function readChunks<T>(
+  response: Response,
+  chunkParser: (chunk: Uint8Array | string) => T
+): AsyncGenerator<ChunkData<T>>;
+export function readChunks(
+  response: Response
+): AsyncGenerator<ChunkData<Uint8Array | string>>;
+export async function* readChunks<T>(
+  response: Response,
+  chunkParser?: (chunk: Uint8Array | string) => T
+): AsyncGenerator<ChunkData<T>> {
+  // Handle empty responses
   if (!response.body) {
-    // Valid cases: 204 No Content, 304 Not Modified, or HEAD requests (method not available in Response)
-    // Also handle 200 with empty body as valid but with no content
     if (response.status === 204 || response.status === 304) {
-      // Valid empty response - just signal completion
       yield { chunk: null as unknown as T, progress: 1, done: true };
       return;
     }
-    // For any other status (including 200, 404, 500, etc.), this is an error
     throw new Error(`${LOG_PREFIX} Response body for ${response.url || 'unknown'} is not readable`);
   }
 
-  const contentLength = response.headers.get("Content-Length");
+  const contentLength = response.headers.get('Content-Length');
   const totalSize = contentLength ? parseInt(contentLength, 10) : null;
   let loaded = 0;
-
+  
   const reader = response.body.getReader();
-  const contentType = response.headers.get("Content-Type") || "";
-  const isNDJSON = contentType.includes("x-ndjson");
+  const contentType = response.headers.get('Content-Type') || '';
+  const isNDJSON = contentType.includes('x-ndjson');
+  const isText = contentType.includes('text') || contentType.includes('json');
 
-  let lineBuffer = "";
+  const parser = chunkParser || ((chunk: any) => chunk);
+  
   const encoding = getEncoding(contentType).replace(/^['"]|['"]$/g, '');
   const decoder = new TextDecoder(encoding);
+  
+  let lineBuffer = '';
 
   try {
     while (true) {
       const { value, done } = await reader.read();
+      if (done) break;
       
       if (value) {
         loaded += value.length;
         const progress = totalSize ? loaded / totalSize : 0.5;
 
-        const chunkText = decoder.decode(value, { stream: true });
-
         if (isNDJSON) {
+          // NDJSON processing
+          const chunkText = decoder.decode(value, { stream: true });
           lineBuffer += chunkText;
-          const lines = lineBuffer.split("\n");
-          lineBuffer = lines.pop() || "";
+          const lines = lineBuffer.split('\n');
+          lineBuffer = lines.pop() || '';
 
           for (const line of lines) {
             if (line.trim()) {
               try {
-                const parsedChunk = chunkParser(line);
+                const parsedChunk = parser(line);
                 yield { chunk: parsedChunk, progress, done: false };
               } catch (error) {
                 logWarning('Invalid NDJSON line', line, error);
               }
             }
           }
+        } else if (isText) {
+          // Text/JSON processing
+          const chunkText = decoder.decode(value, { stream: true });
+          const parsedChunk = parser(chunkText);
+          yield { chunk: parsedChunk, progress, done: false };
         } else {
-          let parsedChunk;
-          if (contentType.includes("text") || contentType.includes("json")) {
-            parsedChunk = chunkParser(chunkText);
-          } else {
-            parsedChunk = chunkParser(value);
-          }
-          
-          yield {
-            chunk: parsedChunk,
-            progress,
-            done: false,
-          };
+          // Binary processing
+          const parsedChunk = parser(value);
+          yield { chunk: parsedChunk, progress, done: false };
         }
       }
-      
-      if (done) break;
     }
 
     // Flush remaining buffers
@@ -887,44 +770,41 @@ export const readChunks = <T = Uint8Array>(
       if (finalText) lineBuffer += finalText;
       if (lineBuffer && lineBuffer.trim()) {
         try {
-          const parsedChunk = chunkParser(lineBuffer);
+          const parsedChunk = parser(lineBuffer);
           yield { chunk: parsedChunk, progress: 1, done: false };
         } catch (error) {
           logWarning('Invalid or incomplete NDJSON in final buffer', lineBuffer, error);
         }
       }
-    } else if (finalText && (contentType.includes("text") || contentType.includes("json"))) {
+    } else if (isText && finalText) {
       if (finalText.trim()) {
-        const parsedChunk = chunkParser(finalText);
+        const parsedChunk = parser(finalText);
         yield { chunk: parsedChunk, progress: 1, done: false };
       }
     }
 
-    yield {
-      chunk: null as unknown as T,
-      progress: 1,
-      done: true,
-    };
+    // Signal completion
+    yield { chunk: null as unknown as T, progress: 1, done: true };
+    
   } finally {
     reader.releaseLock();
   }
-};
-
-/**
- * Reads and collects the entire response body from a `ReadableStream`.
- */
-
+}
 
 /**
  * Parses raw binary chunks (returns Uint8Array as-is).
  */
-export const readBinaryChunk = (chunk: Uint8Array): Uint8Array => chunk;
+export const readBinaryChunk = (chunk: Uint8Array | string): Uint8Array => {
+  if (chunk instanceof Uint8Array) {
+    return chunk;
+  }
+  throw new TypeError('readBinaryChunk expects a Uint8Array, but received a string.');
+};
 
 /**
  * Decodes a binary chunk into a text string.
  */
 export function readTextChunk(chunk: any, encoding = 'utf-8'): string {
-  // If chunk is null or undefined (like the final signal in readChunks)
   if (chunk === null || chunk === undefined) return '';
   
   if (chunk instanceof ArrayBuffer || ArrayBuffer.isView(chunk)) {
@@ -937,7 +817,9 @@ export function readTextChunk(chunk: any, encoding = 'utf-8'): string {
 /**
  * Parses a binary chunk as JSON.
  */
-export const readJsonChunk = (chunk: string): any => {
+export const readJsonChunk = (chunk: Uint8Array | string): any => {
+  if (typeof chunk !== 'string') chunk = new TextDecoder().decode(chunk);
+
   try {
     return JSON.parse(chunk);
   } catch {
@@ -949,8 +831,13 @@ export const readJsonChunk = (chunk: string): any => {
 /**
  * Parses a single NDJSON line.
  */
-export const readNdjsonChunk = (line: string): any => {
+export const readNdjsonChunk = (chunk: Uint8Array | string): any => {
+  const line = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+
   try {
+    if (!line.trim()) {
+      return null;
+    }
     return JSON.parse(line);
   } catch {
     logWarning('Invalid NDJSON line', line);
@@ -962,7 +849,6 @@ export const readNdjsonChunk = (line: string): any => {
  * Converts a binary chunk to a Base64 string.
  */
 export const readBase64Chunk = (chunk: Uint8Array): string => {
-  // Process in chunks to avoid stack overflow with large Uint8Arrays
   const chunkSize = 8192;
   let binary = '';
   for (let i = 0; i < chunk.byteLength; i += chunkSize) {
@@ -981,15 +867,11 @@ export const readBase64Chunk = (chunk: Uint8Array): string => {
  * Parses a text chunk as CSV data.
  */
 export const readCsvChunk = (chunk: string): string[][] => {
-  // FIX #13: Handle CRLF line endings properly
   return chunk.split(/\r?\n/).map((line) => line.split(","));
 };
 
 /**
  * Gets the encoding from a Content-Type header.
- *
- * This utility function extracts the character set from a content-type
- * string, defaulting to `utf-8` if no charset is specified.
  */
 function getEncoding(contentType: string): string {
   const match = contentType.match(/charset=([^;]+)/);
@@ -998,20 +880,13 @@ function getEncoding(contentType: string): string {
 
 /**
  * Reads and collects the entire response body from a `ReadableStream`.
- *
- * This function returns a stream that yields the full data as it's read.
- * It's useful for scenarios where you need the complete response body
- * before processing the data, such as for images or complete files.
  */
-export const readFull: ParserFunction<Uint8Array> = async function* (response) {
-  // FIX #4: Handle null response.body
+export async function* readFull(response: Response): AsyncGenerator<Uint8Array> {
   if (!response.body) {
-    // Valid cases: 204 No Content, 304 Not Modified
     if (response.status === 204 || response.status === 304) {
       yield new Uint8Array(0);
       return;
     }
-    // For any other status, this is an error
     throw new Error(`${LOG_PREFIX} Response body for ${response.url || 'unknown'} is not readable`);
   }
 
@@ -1041,4 +916,4 @@ export const readFull: ParserFunction<Uint8Array> = async function* (response) {
   } finally {
     reader.releaseLock();
   }
-};
+}

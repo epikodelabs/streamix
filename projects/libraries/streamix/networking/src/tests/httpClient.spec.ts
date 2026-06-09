@@ -858,7 +858,7 @@ describe('parsers', () => {
     const response = new Response(null, { status: 204 });
     
     const chunks = [];
-    for await (const chunk of readChunks()(response)) {
+    for await (const chunk of readChunks(response)) {
       chunks.push(chunk);
     }
     
@@ -871,7 +871,7 @@ describe('parsers', () => {
     const response = new Response(null, { status: 304 });
     
     const chunks = [];
-    for await (const chunk of readChunks()(response)) {
+    for await (const chunk of readChunks(response)) {
       chunks.push(chunk);
     }
     
@@ -885,7 +885,7 @@ describe('parsers', () => {
     Object.defineProperty(response, 'body', { value: null, configurable: true });
     
     await expectAsync(
-      collect(readChunks()(response))
+      collect(readChunks(response))
     ).toBeRejectedWithError(/not readable/);
   });
 
@@ -897,7 +897,7 @@ describe('parsers', () => {
       headers: { 'Content-Type': 'text/plain' },
     });
 
-    const values = await collect(readChunks()(response));
+    const values = await collect(readChunks(response));
 
     expect(values.length).toBeGreaterThan(0);
     expect(values[values.length - 1].done).toBeTrue();
@@ -911,7 +911,7 @@ describe('parsers', () => {
       headers: { 'Content-Type': 'application/x-ndjson' },
     });
 
-    const values = await collect(readChunks<any>(readNdjsonChunk)(response));
+    const values = await collect(readChunks<any>(response, readNdjsonChunk));
 
     const dataChunks = values.filter((v) => !v.done);
     expect(dataChunks.length).toBe(2);
@@ -926,7 +926,7 @@ describe('parsers', () => {
       headers: { 'Content-Type': 'application/x-ndjson' },
     });
 
-    const values = await collect(readChunks<any>(readNdjsonChunk)(response));
+    const values = await collect(readChunks<any>(response, readNdjsonChunk));
 
     const dataChunks = values.filter((v) => !v.done);
     expect(dataChunks.length).toBe(2);
@@ -941,7 +941,7 @@ describe('parsers', () => {
       headers: { 'Content-Type': 'application/octet-stream' },
     });
 
-    const values = await collect(readChunks<Uint8Array>(readBinaryChunk)(response));
+    const values = await collect(readChunks<Uint8Array>(response, readBinaryChunk));
 
     expect(values[0].chunk).toBeInstanceOf(Uint8Array);
   });
@@ -955,7 +955,7 @@ describe('parsers', () => {
       headers: { 'Content-Type': 'text/plain', 'Content-Length': String(data.length) },
     });
 
-    const values = await collect(readChunks()(response));
+    const values = await collect(readChunks(response));
 
     expect(values[values.length - 1].progress).toBe(1);
   });
@@ -966,7 +966,7 @@ describe('parsers', () => {
 
     const response = new Response(createMockReadableStream(chunks));
 
-    const values = await collect(readChunks()(response));
+    const values = await collect(readChunks(response));
     expect(values.length).toBeGreaterThan(0);
   });
 
@@ -978,7 +978,7 @@ describe('parsers', () => {
       headers: { 'Content-Type': 'application/json' },
     });
 
-    const values = await collect(readChunks<any>(readJsonChunk)(response));
+    const values = await collect(readChunks<any>(response, readJsonChunk));
 
     expect(values[0].chunk.test).toBeTrue();
   });
@@ -1063,7 +1063,7 @@ describe('parsers', () => {
     Object.defineProperty(response, 'body', { value: null, configurable: true });
     
     await expectAsync(
-      collect(readChunks()(response))
+      collect(readChunks(response))
     ).toBeRejectedWithError(/not readable/);
   });
 
