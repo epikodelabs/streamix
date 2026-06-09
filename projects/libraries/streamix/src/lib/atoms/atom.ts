@@ -556,10 +556,28 @@ export function derived<T>(fn: () => T): AtomBase<T> {
 
 /* ── iterate ── */
 
-export function iterate<T>(atom: AtomBase<T>): AsyncIterator<T> {
+export function iterate<T>(atom: AtomBase<T>, signal?: AbortSignal): AsyncIterator<T> {
+  if (signal?.aborted) {
+    return {
+      next: () => Promise.resolve({ done: true, value: undefined as any }),
+      return: () => Promise.resolve({ done: true, value: undefined as any }),
+    };
+  }
+
   const buffer: T[] = [];
   let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
   let done = false;
+
+  const cleanup = () => {
+    if (done) return;
+    done = true;
+    signal?.removeEventListener("abort", cleanup);
+    subscription.unsubscribe();
+    if (resolveNext) {
+      resolveNext({ value: undefined as any, done: true });
+      resolveNext = null;
+    }
+  };
 
   if (atom.error === null && atom.safeValue !== undefined) {
     buffer.push(atom.safeValue);
@@ -575,15 +593,15 @@ export function iterate<T>(atom: AtomBase<T>): AsyncIterator<T> {
     }
   });
 
+  signal?.addEventListener("abort", cleanup, { once: true });
+
   return {
     async next(): Promise<IteratorResult<T>> {
-      // Lazy evaluation check replaces performance-heavy setInterval loop
-      if (atom.disposed && buffer.length === 0) {
-        done = true;
+      if (!done && atom.disposed && buffer.length === 0) {
+        cleanup();
       }
 
       if (done) {
-        subscription.unsubscribe();
         return { value: undefined as any, done: true };
       }
 
@@ -596,8 +614,7 @@ export function iterate<T>(atom: AtomBase<T>): AsyncIterator<T> {
       });
     },
     async return(): Promise<IteratorResult<T>> {
-      done = true;
-      subscription.unsubscribe();
+      cleanup();
       return { value: undefined as any, done: true };
     },
   };
