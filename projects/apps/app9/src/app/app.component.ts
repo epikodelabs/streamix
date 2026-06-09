@@ -1,6 +1,6 @@
 import { DecimalPipe, JsonPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, OnDestroy, inject } from '@angular/core';
-import { atom, derived, flow, fromPromise, scope } from '@epikodelabs/streamix';
+import { atom, derived, flow, fromPromise, scope, startWith } from '@epikodelabs/streamix';
 
 type Tab = 'tree' | 'state';
 
@@ -383,8 +383,7 @@ export class AppComponent implements OnDestroy {
     preferences: this.preferences,
     async: scope(() => ({
       countries: flow(
-        fromPromise(() => new Promise<string[]>(r => setTimeout(() => r(['US','CA','UK','DE','FR']), 1500))),
-        [] as string[]
+        fromPromise(() => new Promise<string[]>(r => setTimeout(() => r(['US','CA','UK','DE','FR']), 1500))).pipe(startWith([] as string[]))
       ),
     })),
   }));

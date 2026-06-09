@@ -254,8 +254,8 @@ idescribe('onAnimationFrame', () => {
         deltas.push(delta);
         if (deltas.length === 3) {
           try {
-            // First tick is always 0, second is non-monotonic => 0, third is 110-100 => 10
-            expect(deltas).toEqual([0, 0, 10]);
+            // First tick is always 0, second is non-monotonic => 0, third is 110-90 => 20
+            expect(deltas).toEqual([0, 0, 20]);
             subscription.unsubscribe();
             (globalThis as any).requestAnimationFrame = originalRAF;
             (globalThis as any).cancelAnimationFrame = originalCancel;

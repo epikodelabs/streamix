@@ -1,20 +1,28 @@
-import { createSubject } from '@epikodelabs/streamix';
+import { createSubject, startWith } from '@epikodelabs/streamix';
 import { asyncAtom, atom, derived, flow } from '../lib/atoms/atom';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 describe('flow', () => {
-  it('should hold an initial value', () => {
-    const subject = createSubject<number>();
-    const a = flow(subject, 42);
+  it('should hold an initial value when using startWith', async () => {
+    const subject = createSubject<number>().pipe(startWith(42));
+    const a = flow(subject);
+    await delay();
     expect(a.get()).toBe(42);
     expect(a.value).toBe(42);
     a.dispose();
   });
 
+  it('should start in an error state if no initial value provided', () => {
+    const subject = createSubject<number>();
+    const a = flow(subject);
+    expect(() => a.get()).toThrowError(/Flow has not emitted yet/);
+    a.dispose();
+  });
+
   it('should update when the stream emits', async () => {
     const subject = createSubject<number>();
-    const a = flow(subject, 0);
+    const a = flow(subject);
     const values: number[] = [];
     a.subscribe(v => values.push(v));
     await delay();
@@ -31,13 +39,13 @@ describe('flow', () => {
 
   it('should track prior', async () => {
     const subject = createSubject<number>();
-    const a = flow(subject, 10);
-    expect(a.prior).toBe(10);
+    const a = flow(subject);
+    expect(a.prior).toBeUndefined();
 
     subject.next(20);
     await delay();
     expect(a.value).toBe(20);
-    expect(a.prior).toBe(10);
+    expect(a.prior).toBeUndefined();
 
     subject.next(30);
     await delay();
@@ -49,7 +57,7 @@ describe('flow', () => {
 
   it('should emit duplicate values', async () => {
     const subject = createSubject<number>();
-    const a = flow(subject, 0);
+    const a = flow(subject);
     const values: number[] = [];
     a.subscribe(v => values.push(v));
     await delay();
@@ -65,14 +73,14 @@ describe('flow', () => {
 
   it('should throw after disposal', () => {
     const subject = createSubject<number>();
-    const a = flow(subject, 0);
+    const a = flow(subject);
     a.dispose();
     expect(() => a.get()).toThrowError(/disposed/);
   });
 
   it('should clean up stream subscription on dispose', async () => {
     const subject = createSubject<number>();
-    const a = flow(subject, 0);
+    const a = flow(subject);
     a.dispose();
     expect(() => subject.next(1)).not.toThrow();
   });

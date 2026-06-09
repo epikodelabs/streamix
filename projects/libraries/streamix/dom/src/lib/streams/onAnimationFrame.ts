@@ -55,15 +55,8 @@ export function onAnimationFrame(): Stream<number> {
     const tick = (now: number) => {
       if (stopped) return;
 
-      // Some RAF polyfills can provide non-monotonic timestamps; clamp to 0.
-      // Also treat the first tick as a 0-delta frame.
-      let delta = 0;
-      if (lastTime > 0 && now >= lastTime) {
-        delta = now - lastTime;
-      }
-      if (now >= lastTime) {
-        lastTime = now;
-      }
+      const delta = lastTime > 0 ? Math.max(0, now - lastTime) : 0;
+      lastTime = now;
 
       subject.next(delta);
       rafId = raf(tick);

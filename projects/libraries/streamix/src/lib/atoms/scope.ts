@@ -125,8 +125,8 @@ export function registerWithCurrentScope(value: AtomBase<any> | Scope): void {
  * @example
  * ```ts
  * const app = scope(() => {
- *   const count = flow(counterStream, 0);
- *   const label = flow(labelStream, 'hello');
+ *   const count = flow(counterStream.pipe(startWith(0)));
+ *   const label = flow(labelStream.pipe(startWith('hello')));
  *   return { count, label };
  * });
  *
@@ -139,7 +139,7 @@ export function registerWithCurrentScope(value: AtomBase<any> | Scope): void {
  * // Nested scopes and loading
  * const parent = scope(() => {
  *   const child = scope(() => ({
- *     value: flow(delayedStream, 0)
+ *     value: flow(delayedStream.pipe(startWith(0)))
  *   }));
  *   return { child };
  * });

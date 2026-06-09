@@ -1,4 +1,4 @@
-import { createSubject, flow, scope } from '@epikodelabs/streamix';
+import { createBehaviorSubject, createSubject, flow, scope, startWith } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -9,11 +9,12 @@ describe('scope', () => {
     s.dispose();
   });
 
-  it('should merge factory return value', () => {
+  it('should merge factory return value', async () => {
     const s = scope(() => {
-      const count = flow(createSubject<number>(), 0);
+      const count = flow(createSubject<number>().pipe(startWith(0)));
       return { count };
     });
+    await delay();
     expect(s.count.value).toBe(0);
     s.dispose();
   });
@@ -21,7 +22,7 @@ describe('scope', () => {
   it('should auto-register atoms created inside factory', async () => {
     const subject = createSubject<number>();
     const s = scope(() => {
-      const a = flow(subject, 0);
+      const a = flow(subject);
       return { a };
     });
     expect(s.a.disposed).toBeFalse();
@@ -30,13 +31,14 @@ describe('scope', () => {
   });
 
   it('should support snapshot', async () => {
-    const s1 = createSubject<number>();
-    const s2 = createSubject<number>();
+    const s1 = createSubject<number>().pipe(startWith(1));
+    const s2 = createSubject<number>().pipe(startWith(2));
     const s = scope(() => {
-      const a = flow(s1, 1);
-      const b = flow(s2, 2);
+      const a = flow(s1);
+      const b = flow(s2);
       return { a, b };
     });
+    await delay();
     expect(s.snapshot()).toEqual({ a: 1, b: 2 });
     s.dispose();
   });
@@ -55,7 +57,7 @@ describe('scope', () => {
     const parent = scope(() => {
       const child = scope(() => {
         const grandchild = scope(() => {
-          const x = flow(subject, 0);
+          const x = flow(subject);
           return { x };
         });
         return { grandchild };
@@ -68,28 +70,30 @@ describe('scope', () => {
     expect(parent.child.grandchild.x.disposed).toBeTrue();
   });
 
-  it('should snapshot nested scopes', () => {
+  it('should snapshot nested scopes', async () => {
     const s = scope(() => {
       const child = scope(() => {
-        const a = flow(createSubject<number>(), 42);
+        const a = flow(createSubject<number>().pipe(startWith(42)));
         return { a };
       });
       return { child };
     });
+    await delay();
     expect(s.snapshot()).toEqual({ child: { a: 42 } });
     s.dispose();
   });
 
   it('should react to stream emissions inside scope', async () => {
-    const s1 = createSubject<number>();
-    const s2 = createSubject<number>();
+    const s1 = createBehaviorSubject<number>(1);
+    const s2 = createBehaviorSubject<number>(2);
     const s = scope(() => {
-      const a = flow(s1, 1);
-      const b = flow(s2, 2);
+      const a = flow(s1);
+      const b = flow(s2);
       return { a, b };
     });
 
     const values: number[][] = [];
+    await delay();
     s.a.subscribe(v => values.push(['a', v] as any));
     s.b.subscribe(v => values.push(['b', v] as any));
     await delay();
@@ -116,8 +120,8 @@ describe('scope', () => {
       const s1 = createSubject<number>();
       const s2 = createSubject<string>();
       const s = scope(() => {
-        const a = flow(s1, 0);
-        const b = flow(s2, '');
+        const a = flow(s1);
+        const b = flow(s2);
         return { a, b };
       });
 
@@ -138,7 +142,7 @@ describe('scope', () => {
       const subject = createSubject<number>();
       const parent = scope(() => {
         const child = scope(() => {
-          const a = flow(subject, 0);
+          const a = flow(subject);
           return { a };
         });
         return { child };
@@ -156,7 +160,7 @@ describe('scope', () => {
     it('should become false when atom emits', async () => {
       const subject = createSubject<number>();
       const s = scope(() => {
-        const a = flow(subject, 0);
+        const a = flow(subject);
         return { a };
       });
 

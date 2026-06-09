@@ -1,5 +1,5 @@
+import { asyncAtom, type Atom } from "../atoms/atom";
 import { firstValueFrom } from "../converters";
-import { createSubject } from "../subjects";
 import { createAsyncIterator } from "../utils/iterator";
 import { isPromiseLike, type MaybePromise, type Operator, type OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
@@ -190,7 +190,7 @@ export function createStream<T>(
   generatorFn: (signal?: AbortSignal) => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
   interface ActiveRun {
-    subject: Stream<T> & { next: (v: T) => void; error: (e: any) => void; complete: () => void; };
+    atom: Atom<T>;
     abortController: AbortController;
     subscriberCount: number;
   }
@@ -200,11 +200,9 @@ export function createStream<T>(
   const startNewRun = (): ActiveRun => {
     // Create new run state
     const abortController = new AbortController();
-    const subject = createSubject<T>();
-    (subject as any).name = name;
-    (subject as any).type = 'stream';
-    const run: ActiveRun = { subject, abortController, subscriberCount: 0 };
-    
+    const atom = asyncAtom<T>();
+    const run: ActiveRun = { atom, abortController, subscriberCount: 0 };
+
     // activeRun = run; // Caller handles this
 
     void (async () => {
@@ -218,10 +216,10 @@ export function createStream<T>(
               const result = gen.__tryNext();
               if (!result) break;
               if (result.done) {
-                run.subject.complete();
+                run.atom.dispose();
                 return;
               }
-              run.subject.next(result.value);
+              run.atom.set(result.value);
             }
           }
 
@@ -233,15 +231,15 @@ export function createStream<T>(
           if ("aborted" in result || signal.aborted) break;
 
           if (result.result.done) {
-            run.subject.complete();
+            run.atom.dispose();
             break;
           }
 
-          run.subject.next(result.result.value);
+          run.atom.set(result.result.value);
         }
       } catch (err) {
         if (!signal.aborted) {
-          run.subject.error(err instanceof Error ? err : new Error(String(err)));
+          run.atom.setError(err instanceof Error ? err : new Error(String(err)));
         }
       } finally {
         if (gen.return) {
@@ -270,13 +268,32 @@ export function createStream<T>(
 
     const run = activeRun;
     run.subscriberCount++;
-    const sub = run.subject.subscribe(cb);
+
+    const receiver = createReceiver(cb);
+    const sub = run.atom.onStateChange(state => {
+      if (receiver.completed) return;
+      switch (state.tag) {
+        case 'value':
+          receiver.next(state.current);
+          break;
+        case 'error':
+          receiver.error(state.current);
+          break;
+        case 'disposed':
+          receiver.complete();
+          break;
+      }
+    });
 
     let unsubscribed = false;
     const originalUnsubscribe = sub.unsubscribe.bind(sub);
     sub.unsubscribe = async () => {
       if (unsubscribed) return;
       unsubscribed = true;
+
+      // Mark the subscription as complete
+      void receiver.complete?.();
+
       await originalUnsubscribe();
       run.subscriberCount = Math.max(0, run.subscriberCount - 1);
       if (
@@ -398,4 +415,3 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
 
   return pipedStream as Stream<TOut>;
 }
-

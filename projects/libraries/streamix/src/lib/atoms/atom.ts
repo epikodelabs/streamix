@@ -109,8 +109,12 @@ function getStateValue<T>(state: AtomState<T>): T {
 
 /* ── flow ── */
 
-export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
-  let state: AtomState<T> = valueState(initialValue);
+export function flow<T>(stream: Stream<T>): AtomBase<T> {
+  let state: AtomState<T> = {
+    tag: "error",
+    current: new Error("Flow has not emitted yet"),
+    previous: undefined
+  };
   const valueSubs = new Set<(value: T) => void>();
   const stateSubs = new Set<(state: AtomState<T>) => void>();
 
@@ -168,7 +172,9 @@ export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
 
     onStateChange(callback) {
       stateSubs.add(callback);
-      callback(state);
+      // Do not emit the initial "not emitted" error state to new subscribers.
+      // They will get the first value when it's set.
+      if (state.tag === "value") callback(state);
       return createSubscription(() => { stateSubs.delete(callback); });
     },
 
@@ -232,7 +238,9 @@ export function atom<T>(initialValue: T): Atom<T> {
 
     onStateChange(callback) {
       stateSubs.add(callback);
-      callback(state);
+      // Do not emit the initial "not emitted" error state to new subscribers.
+      // They will get the first value when it's set.
+      if (state.tag === "value") callback(state);
       return createSubscription(() => { stateSubs.delete(callback); });
     },
 
@@ -282,20 +290,31 @@ export function atom<T>(initialValue: T): Atom<T> {
 
 /* ── asyncAtom ── */
 
-export interface AsyncAtomOptions { capacity?: number; }
+export interface AsyncAtomOptions<T = any> {
+  capacity?: number;
+  initialValue?: T;
+}
 
 export type AsyncAtom<T = any> = Atom<T>;
 
-export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
+export function asyncAtom<T>(): AsyncAtom<T>;
+export function asyncAtom<T>(options: AsyncAtomOptions<T>): AsyncAtom<T>;
+export function asyncAtom<T>(options?: AsyncAtomOptions<T>): AsyncAtom<T> {
   const capacity = options?.capacity ?? 0;
   const isFiniteCapacity = capacity !== Infinity && capacity > 0;
   const replay: T[] = [];
 
-  let state: AtomState<T> = { 
-    tag: "error", 
-    current: new Error("Async atom has not emitted yet"), 
-    previous: undefined 
-  };
+  let state: AtomState<T>;
+  if (options && 'initialValue' in options) {
+    state = valueState(options.initialValue as T);
+  } else {
+    state = {
+      tag: "error",
+      current: new Error("Async atom has not emitted yet"),
+      previous: undefined
+    };
+  }
+
   let hasValue = false;
   const valueSubs = new Set<(value: T) => void>();
   const stateSubs = new Set<(state: AtomState<T>) => void>();
@@ -307,6 +326,11 @@ export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
       replay.shift();
     }
   };
+
+  if (state.tag === 'value') {
+    hasValue = true;
+    pushReplay(state.current);
+  }
 
   const instance: AsyncAtom<T> = {
     type: "atom",
@@ -337,7 +361,9 @@ export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
 
     onStateChange(callback) {
       stateSubs.add(callback);
-      callback(state);
+      // Do not emit the initial "not emitted" error state to new subscribers.
+      // They will get the first value when it's set.
+      if (hasValue) callback(state);
       return createSubscription(() => { stateSubs.delete(callback); });
     },
 
@@ -345,8 +371,9 @@ export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
       if (state.tag === "disposed") return;
 
       const prev = state.tag === "value" ? state.current : state.previous;
-      if (hasValue && state.tag === "value" && Object.is(state.current, value)) return;
       state = { tag: "value", current: value, previous: prev };
+      hasValue = true;
+
       for (const cb of Array.from(stateSubs)) {
         cb(state);
       }
@@ -441,7 +468,6 @@ export function derived<T>(fn: () => T): AtomBase<T> {
             const prevValue = state.tag === "value" ? state.current : state.previous;
             const next = run();
 
-
             if (next.type === "value") {
               state = { tag: "value", current: next.value, previous: prevValue };
               for (const cb of Array.from(stateSubs)) {
@@ -505,7 +531,9 @@ export function derived<T>(fn: () => T): AtomBase<T> {
 
     onStateChange(callback) {
       stateSubs.add(callback);
-      callback(state);
+      // Do not emit the initial "not emitted" error state to new subscribers.
+      // They will get the first value when it's set.
+      if (state.tag === "value") callback(state);
       return createSubscription(() => { stateSubs.delete(callback); });
     },
 
