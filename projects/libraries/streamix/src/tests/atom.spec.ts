@@ -47,7 +47,7 @@ describe('flow', () => {
     a.dispose();
   });
 
-  it('should not emit duplicate values', async () => {
+  it('should emit duplicate values', async () => {
     const subject = createSubject<number>();
     const a = flow(subject, 0);
     const values: number[] = [];
@@ -59,7 +59,7 @@ describe('flow', () => {
     subject.next(0);
     await delay();
 
-    expect(values).toEqual([]);
+    expect(values).toEqual([0, 0]);
     a.dispose();
   });
 
@@ -103,14 +103,14 @@ describe('atom', () => {
     a.dispose();
   });
 
-  it('should suppress duplicate values', () => {
+  it('should emit duplicate values', () => {
     const a = atom(5);
     const values: number[] = [];
     a.subscribe(v => values.push(v));
 
     a.set(5);
     a.set(5);
-    expect(values).toEqual([]);
+    expect(values).toEqual([5, 5]);
 
     a.dispose();
   });
@@ -149,7 +149,7 @@ describe('derived', () => {
     doubled.dispose();
   });
 
-  it('should suppress duplicate values', () => {
+  it('should emit duplicate values', () => {
     const a = atom(1);
     const doubled = derived(() => a.value * 2);
     const values: number[] = [];
@@ -157,7 +157,7 @@ describe('derived', () => {
 
     a.set(2);
     a.set(2); // same underlying value, derived result unchanged
-    expect(values).toEqual([4]);
+    expect(values).toEqual([4, 4]);
 
     doubled.dispose();
   });
@@ -260,14 +260,14 @@ describe('asyncAtom', () => {
     a.dispose();
   });
 
-  it('should suppress duplicate values', () => {
+  it('should emit duplicate values', () => {
     const a = asyncAtom<number>();
     const values: number[] = [];
     a.subscribe(v => values.push(v));
 
     a.set(5);
     a.set(5);
-    expect(values).toEqual([5]);
+    expect(values).toEqual([5, 5]);
 
     a.dispose();
   });

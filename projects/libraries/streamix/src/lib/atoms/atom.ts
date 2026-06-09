@@ -41,16 +41,11 @@ export interface AtomBase<T = any> {
    */
   subscribe(callback: (value: T) => void): Subscription;
 
+  /** Subscribes to all state changes, including value, error, and disposed states. */
+  onStateChange(callback: (state: AtomState<T>) => void): Subscription;
+
   /** Disposes the atom, clearing all subscriptions and resources. */
   dispose(): void;
-}
-
-export interface Atom<T = any> extends AtomBase<T> {
-  /** Updates the atom's value. Transitions Error → Value (recovery). */
-  set(value: T): void;
-
-  /** Transitions the atom into an error state. */
-  setError(error: Error): void;
 }
 
 /* ── Internal state type ── */
@@ -117,15 +112,18 @@ function getStateValue<T>(state: AtomState<T>): T {
 export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
   let state: AtomState<T> = valueState(initialValue);
   const valueSubs = new Set<(value: T) => void>();
+  const stateSubs = new Set<(state: AtomState<T>) => void>();
 
   const streamSub = stream.subscribe({
     next(value: T) {
       if (state.tag === "disposed") return;
 
       const prev = state.tag === "value" ? state.current : state.previous;
-      if (state.tag === "value" && Object.is(state.current, value)) return;
 
       state = { tag: "value", current: value, previous: prev };
+      for (const cb of Array.from(stateSubs)) {
+        cb(state);
+      }
 
       runWithPropagation(() => {
         for (const cb of Array.from(valueSubs)) {
@@ -138,6 +136,9 @@ export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
 
       const prev = state.tag === "value" ? state.current : state.previous;
       state = { tag: "error", current: err, previous: prev };
+      for (const cb of Array.from(stateSubs)) {
+        cb(state);
+      }
     },
   });
 
@@ -162,16 +163,22 @@ export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
 
     subscribe(callback) {
       valueSubs.add(callback);
-      if (state.tag === "value") {
-        callback(state.current);
-      }
       return createSubscription(() => { valueSubs.delete(callback); });
+    },
+
+    onStateChange(callback) {
+      stateSubs.add(callback);
+      callback(state);
+      return createSubscription(() => { stateSubs.delete(callback); });
     },
 
     dispose() {
       if (state.tag === "disposed") return;
       const prev = state.previous;
       state = { tag: "disposed", previous: prev };
+      for (const cb of Array.from(stateSubs)) {
+        cb(state);
+      }
       valueSubs.clear();
       streamSub.unsubscribe();
     },
@@ -183,9 +190,18 @@ export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
 
 /* ── atom ── */
 
+export interface Atom<T = any> extends AtomBase<T> {
+  /** Updates the atom's value. Transitions Error → Value (recovery). */
+  set(value: T): void;
+
+  /** Transitions the atom into an error state. */
+  setError(error: Error): void;
+}
+
 export function atom<T>(initialValue: T): Atom<T> {
   let state: AtomState<T> = valueState(initialValue);
   const valueSubs = new Set<(value: T) => void>();
+  const stateSubs = new Set<(state: AtomState<T>) => void>();
 
   const instance: Atom<T> = {
     type: "atom",
@@ -211,19 +227,24 @@ export function atom<T>(initialValue: T): Atom<T> {
 
     subscribe(callback) {
       valueSubs.add(callback);
-      if (state.tag === "value") {
-        callback(state.current);
-      }
       return createSubscription(() => { valueSubs.delete(callback); });
+    },
+
+    onStateChange(callback) {
+      stateSubs.add(callback);
+      callback(state);
+      return createSubscription(() => { stateSubs.delete(callback); });
     },
 
     set(value) {
       if (state.tag === "disposed") return;
 
       const prev = state.tag === "value" ? state.current : state.previous;
-      if (state.tag === "value" && Object.is(state.current, value)) return;
 
       state = { tag: "value", current: value, previous: prev };
+      for (const cb of Array.from(stateSubs)) {
+        cb(state);
+      }
 
       runWithPropagation(() => {
         for (const cb of Array.from(valueSubs)) {
@@ -239,12 +260,18 @@ export function atom<T>(initialValue: T): Atom<T> {
       if (state.tag === "error" && state.current === error) return;
 
       state = { tag: "error", current: error, previous: prev };
+      for (const cb of Array.from(stateSubs)) {
+        cb(state);
+      }
     },
 
     dispose() {
       if (state.tag === "disposed") return;
       const prev = state.previous;
       state = { tag: "disposed", previous: prev };
+      for (const cb of Array.from(stateSubs)) {
+        cb(state);
+      }
       valueSubs.clear();
     },
   };
@@ -271,6 +298,7 @@ export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
   };
   let hasValue = false;
   const valueSubs = new Set<(value: T) => void>();
+  const stateSubs = new Set<(state: AtomState<T>) => void>();
 
   const pushReplay = (value: T) => {
     if (capacity <= 0) return;
@@ -307,14 +335,21 @@ export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
       return createSubscription(() => { valueSubs.delete(callback); });
     },
 
+    onStateChange(callback) {
+      stateSubs.add(callback);
+      callback(state);
+      return createSubscription(() => { stateSubs.delete(callback); });
+    },
+
     set(value) {
       if (state.tag === "disposed") return;
 
       const prev = state.tag === "value" ? state.current : state.previous;
       if (hasValue && state.tag === "value" && Object.is(state.current, value)) return;
-
       state = { tag: "value", current: value, previous: prev };
-      hasValue = true;
+      for (const cb of Array.from(stateSubs)) {
+        cb(state);
+      }
 
       pushReplay(value);
       runWithPropagation(() => {
@@ -331,12 +366,18 @@ export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
       if (state.tag === "error" && state.current === error) return;
 
       state = { tag: "error", current: error, previous: prev };
+      for (const cb of Array.from(stateSubs)) {
+        cb(state);
+      }
     },
 
     dispose() {
       if (state.tag === "disposed") return;
       const prev = state.previous;
       state = { tag: "disposed", previous: prev };
+      for (const cb of Array.from(stateSubs)) {
+        cb(state);
+      }
       valueSubs.clear();
       replay.length = 0;
     },
@@ -353,6 +394,7 @@ export function derived<T>(fn: () => T): AtomBase<T> {
   let running = false;
 
   const valueSubs = new Set<(value: T) => void>();
+  const stateSubs = new Set<(state: AtomState<T>) => void>();
   const dependencies = new Set<AtomBase<any>>();
   const depSubscriptions = new Map<AtomBase<any>, Subscription>();
 
@@ -394,16 +436,17 @@ export function derived<T>(fn: () => T): AtomBase<T> {
         depSubscriptions.set(
           dep,
           dep.subscribe(() => {
-            if (state.tag === "disposed") return;
+            if (running || state.tag === "disposed") return;
 
             const prevValue = state.tag === "value" ? state.current : state.previous;
             const next = run();
 
-            if (next.type === "value" && state.tag === "value" && Object.is(state.current, next.value)) return;
-            if (next.type === "error" && state.tag === "error" && state.current === next.error) return;
 
             if (next.type === "value") {
               state = { tag: "value", current: next.value, previous: prevValue };
+              for (const cb of Array.from(stateSubs)) {
+                cb(state);
+              }
               runWithPropagation(() => {
                 for (const cb of Array.from(valueSubs)) {
                   queueNotification(() => cb(next.value));
@@ -411,6 +454,9 @@ export function derived<T>(fn: () => T): AtomBase<T> {
               });
             } else {
               state = { tag: "error", current: next.error, previous: prevValue };
+              for (const cb of Array.from(stateSubs)) {
+                cb(state);
+              }
             }
           })
         );
@@ -422,6 +468,7 @@ export function derived<T>(fn: () => T): AtomBase<T> {
 
   context.run = run;
 
+  // Set initial state without notifying
   const initial = run();
   if (initial.type === "value") {
     state = { tag: "value", current: initial.value, previous: initial.value };
@@ -453,16 +500,22 @@ export function derived<T>(fn: () => T): AtomBase<T> {
 
     subscribe(callback) {
       valueSubs.add(callback);
-      if (state.tag === "value") {
-        callback(state.current);
-      }
       return createSubscription(() => { valueSubs.delete(callback); });
+    },
+
+    onStateChange(callback) {
+      stateSubs.add(callback);
+      callback(state);
+      return createSubscription(() => { stateSubs.delete(callback); });
     },
 
     dispose() {
       if (state.tag === "disposed") return;
       const prev = state.previous;
       state = { tag: "disposed", previous: prev };
+      for (const cb of Array.from(stateSubs)) {
+        cb(state);
+      }
       for (const sub of depSubscriptions.values()) sub.unsubscribe();
       depSubscriptions.clear();
       valueSubs.clear();
