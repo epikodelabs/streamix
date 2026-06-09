@@ -314,46 +314,14 @@ export const useRedirect = (maxRedirects: number = 5): Middleware => {
         context.method = 'GET';
         context.body = undefined;
         
-        // Handle headers properly - only if headers exist
-        if (context.headers) {
-          try {
-            // Convert headers to a format we can work with
-            let headersObj: Record<string, string>;
-            
-            if (context.headers instanceof Headers) {
-              headersObj = {};
-              context.headers.forEach((value, key) => {
-                headersObj[key] = value;
-              });
-            } else if (Array.isArray(context.headers)) {
-              headersObj = Object.fromEntries(context.headers);
-            } else if (typeof context.headers === 'object') {
-              headersObj = { ...context.headers };
-            } else {
-              // Unknown headers format, keep as is
-              headersObj = context.headers;
-            }
-            
-            // Delete specific headers
-            delete headersObj['content-type'];
-            delete headersObj['content-length'];
-            delete headersObj['Content-Type'];
-            delete headersObj['Content-Length'];
-            
-            context.headers = headersObj;
-          } catch (error) {
-            logWarning('Failed to process headers for 303 redirect', {
-              url: context.url,
-              status: context.status,
-              redirectCount: redirects,
-            }, error);
-            // If header processing fails, set to empty object
-            context.headers = {};
-          }
-        } else {
-          // Ensure headers exists as at least an empty object
-          context.headers = {};
-        }
+        // Simplified header handling - always treat as plain object
+        context.headers = { ...context.headers };
+        
+        // Delete specific headers (case-insensitive)
+        delete context.headers['content-type'];
+        delete context.headers['content-length'];
+        delete context.headers['Content-Type'];
+        delete context.headers['Content-Length'];
       }
     }
   };
@@ -394,7 +362,8 @@ export const useStripHeaders = (...names: string[]): Middleware => {
  */
 export const useParams = (data: Record<string, any>): Middleware => {
   return (next) => async (context) => {
-    context.params = { ...data, ...context.params };
+    // FIX #2: Safely handle undefined context.params
+    context.params = { ...data, ...(context.params || {}) };
     return await next(context);
   };
 };
@@ -407,13 +376,14 @@ export const useParams = (data: Record<string, any>): Middleware => {
  * define a custom fallback behavior.
  */
 export const useFallback = (
-  handler: (error: any, context: Context) => Context,
+  // FIX #15: Support async handlers by allowing Promise return
+  handler: (error: any, context: Context) => Context | Promise<Context>,
 ): Middleware => {
   return (next) => async (context) => {
     try {
       return await next(context);
     } catch (error) {
-      return handler(error, context);
+      return await handler(error, context);
     }
   };
 };
@@ -445,9 +415,16 @@ export const useTimeout = (ms: number): Middleware => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), ms);
 
-    const combinedSignal = context['signal']
-      ? (AbortSignal as any).any([context['signal'], controller.signal])
-      : controller.signal;
+    // FIX #11: Add fallback for AbortSignal.any
+    let combinedSignal = controller.signal;
+    if (context['signal']) {
+      if (typeof AbortSignal !== 'undefined' && (AbortSignal as any).any) {
+        combinedSignal = (AbortSignal as any).any([context['signal'], controller.signal]);
+      } else {
+        // Fallback: use the timeout signal only (or combine manually)
+        logWarning('AbortSignal.any not available, using timeout signal only');
+      }
+    }
 
     context['signal'] = combinedSignal;
 
@@ -568,9 +545,29 @@ export const createHttpClient = (): HttpClient => {
       (next) => (ctx) => middleware(nextMiddleware(next))(ctx),
     () => async (context) => {
       let body = context.body;
+      
+      // FIX #6: Better binary stream detection
       if (typeof body === 'object' && body !== null) {
-        if (!(body instanceof FormData || body instanceof URLSearchParams)) {
-          if (context.headers['Content-Type'] === 'application/json') {
+        // Skip binary types that shouldn't be stringified
+        const isBinaryStream = body instanceof ArrayBuffer ||
+                               body instanceof Blob ||
+                               body instanceof ReadableStream;
+        
+        // FIX #7: Safe FormData check for Node.js
+        let isFormData = false;
+        try {
+          isFormData = body instanceof FormData;
+        } catch {
+          // FormData doesn't exist in this environment
+          isFormData = false;
+        }
+        
+        const isUrlSearchParams = body instanceof URLSearchParams;
+        
+        if (!isBinaryStream && !isFormData && !isUrlSearchParams) {
+          // FIX #8: Flexible Content-Type check (includes charset)
+          const contentType = context.headers['Content-Type'] || '';
+          if (contentType.startsWith('application/json')) {
             body = JSON.stringify(body);
           }
         }
@@ -624,9 +621,11 @@ export const createHttpClient = (): HttpClient => {
           }
         } catch (error) {
           data.error(error);
-        } finally {
-          data.complete();
+          // FIX #10: Don't call complete() after error
+          return;
         }
+        // Only complete if no error occurred
+        data.complete();
       })();
 
       context.data = data;
@@ -653,10 +652,13 @@ export const createHttpClient = (): HttpClient => {
       ? (optionsOrParser as ParserFunction<T>)
       : (maybeParser ?? (readStatus as ParserFunction<T>));
 
+    // FIX #1: Safely handle missing options.headers
+    const headers = { ...defaultHeaders, ...(options.headers || {}) };
+
     const context: Context = {
       url,
       method,
-      headers: { ...defaultHeaders, ...options.headers },
+      headers,
       body: options.body,
       params: options.params,
       credentials: options.withCredentials ? 'include' : 'same-origin',
@@ -741,7 +743,12 @@ export const readStatus: ParserFunction<{ status: number; statusText: string; he
  * parses it as a JSON object, and then emits that single object.
  */
 export const readJson: ParserFunction = async function* <T>(response: Response) {
-  const data = await response.json() as T;
+  // FIX #5: Handle empty body gracefully
+  const text = await response.text();
+  if (!text || text.trim() === '') {
+    return; // Don't yield anything for empty responses
+  }
+  const data = JSON.parse(text) as T;
   yield data;
 };
 
@@ -798,10 +805,22 @@ export type ChunkData<T> = {
  * including binary data and line-delimited JSON (NDJSON). It emits chunks
  * as they arrive, along with progress information.
  */
+/**
+ * Reads and processes streamed response chunks based on Content-Type.
+ */
 export const readChunks = <T = Uint8Array>(
   chunkParser: (chunk: any) => T = (chunk) => chunk
 ): ParserFunction<ChunkData<T>> => async function* (response) {
+  // FIX #4: Handle null response.body
   if (!response.body) {
+    // Valid cases: 204 No Content, 304 Not Modified, or HEAD requests (method not available in Response)
+    // Also handle 200 with empty body as valid but with no content
+    if (response.status === 204 || response.status === 304) {
+      // Valid empty response - just signal completion
+      yield { chunk: null as unknown as T, progress: 1, done: true };
+      return;
+    }
+    // For any other status (including 200, 404, 500, etc.), this is an error
     throw new Error(`${LOG_PREFIX} Response body for ${response.url || 'unknown'} is not readable`);
   }
 
@@ -811,64 +830,90 @@ export const readChunks = <T = Uint8Array>(
 
   const reader = response.body.getReader();
   const contentType = response.headers.get("Content-Type") || "";
+  const isNDJSON = contentType.includes("x-ndjson");
 
-  let buffer = "";
-  const decoder = new TextDecoder(getEncoding(contentType));
+  let lineBuffer = "";
+  const encoding = getEncoding(contentType).replace(/^['"]|['"]$/g, '');
+  const decoder = new TextDecoder(encoding);
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      
+      if (value) {
+        loaded += value.length;
+        const progress = totalSize ? loaded / totalSize : 0.5;
 
-    if (value) {
-      loaded += value.length;
-      const progress = totalSize ? loaded / totalSize : 0.5;
-
-      let parsedChunk;
-
-      if (contentType.includes("text") || contentType.includes("json")) {
-        // Convert binary to text
         const chunkText = decoder.decode(value, { stream: true });
 
-        if (contentType.includes("x-ndjson")) {
-          // NDJSON: Process line by line
-          buffer += chunkText;
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
+        if (isNDJSON) {
+          lineBuffer += chunkText;
+          const lines = lineBuffer.split("\n");
+          lineBuffer = lines.pop() || "";
 
-            for (const line of lines) {
-              if (line.trim()) {
-                try {
-                  parsedChunk = chunkParser(line);
-                  yield { chunk: parsedChunk, progress, done: false };
-                } catch (error) {
-                  logWarning('Invalid NDJSON line', line, error);
-                }
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const parsedChunk = chunkParser(line);
+                yield { chunk: parsedChunk, progress, done: false };
+              } catch (error) {
+                logWarning('Invalid NDJSON line', line, error);
               }
             }
-          continue; // Skip standard yield for NDJSON
+          }
+        } else {
+          let parsedChunk;
+          if (contentType.includes("text") || contentType.includes("json")) {
+            parsedChunk = chunkParser(chunkText);
+          } else {
+            parsedChunk = chunkParser(value);
+          }
+          
+          yield {
+            chunk: parsedChunk,
+            progress,
+            done: false,
+          };
         }
-
-        parsedChunk = chunkParser(chunkText);
-      } else {
-        // Binary/Base64/Other formats
-        parsedChunk = chunkParser(value);
       }
-
-      yield {
-        chunk: parsedChunk,
-        progress,
-        done: false,
-      };
+      
+      if (done) break;
     }
-  }
 
-  // Emit final completion signal
-  yield {
-    chunk: null as unknown as T,
-    progress: 1,
-    done: true,
-  };
+    // Flush remaining buffers
+    const finalText = decoder.decode();
+    
+    if (isNDJSON) {
+      if (finalText) lineBuffer += finalText;
+      if (lineBuffer && lineBuffer.trim()) {
+        try {
+          const parsedChunk = chunkParser(lineBuffer);
+          yield { chunk: parsedChunk, progress: 1, done: false };
+        } catch (error) {
+          logWarning('Invalid or incomplete NDJSON in final buffer', lineBuffer, error);
+        }
+      }
+    } else if (finalText && (contentType.includes("text") || contentType.includes("json"))) {
+      if (finalText.trim()) {
+        const parsedChunk = chunkParser(finalText);
+        yield { chunk: parsedChunk, progress: 1, done: false };
+      }
+    }
+
+    yield {
+      chunk: null as unknown as T,
+      progress: 1,
+      done: true,
+    };
+  } finally {
+    reader.releaseLock();
+  }
 };
+
+/**
+ * Reads and collects the entire response body from a `ReadableStream`.
+ */
+
 
 /**
  * Parses raw binary chunks (returns Uint8Array as-is).
@@ -936,7 +981,8 @@ export const readBase64Chunk = (chunk: Uint8Array): string => {
  * Parses a text chunk as CSV data.
  */
 export const readCsvChunk = (chunk: string): string[][] => {
-  return chunk.split("\n").map((line) => line.split(","));
+  // FIX #13: Handle CRLF line endings properly
+  return chunk.split(/\r?\n/).map((line) => line.split(","));
 };
 
 /**
@@ -958,7 +1004,14 @@ function getEncoding(contentType: string): string {
  * before processing the data, such as for images or complete files.
  */
 export const readFull: ParserFunction<Uint8Array> = async function* (response) {
+  // FIX #4: Handle null response.body
   if (!response.body) {
+    // Valid cases: 204 No Content, 304 Not Modified
+    if (response.status === 204 || response.status === 304) {
+      yield new Uint8Array(0);
+      return;
+    }
+    // For any other status, this is an error
     throw new Error(`${LOG_PREFIX} Response body for ${response.url || 'unknown'} is not readable`);
   }
 
@@ -966,25 +1019,26 @@ export const readFull: ParserFunction<Uint8Array> = async function* (response) {
   const chunks: Uint8Array[] = [];
   let totalLength = 0;
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
 
-    if (value) {
-      chunks.push(value);
-      totalLength += value.length;
+      if (value) {
+        chunks.push(value);
+        totalLength += value.length;
+      }
     }
-  }
 
-  // Concatenate all chunks into a single buffer
-  const accumulatedData = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    accumulatedData.set(chunk, offset);
-    offset += chunk.length;
-  }
+    const accumulatedData = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      accumulatedData.set(chunk, offset);
+      offset += chunk.length;
+    }
 
-  yield accumulatedData;
+    yield accumulatedData;
+  } finally {
+    reader.releaseLock();
+  }
 };
-
-
