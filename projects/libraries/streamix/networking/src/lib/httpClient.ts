@@ -490,10 +490,19 @@ export const createHttpClient = (): HttpClient => {
 
       // Handle empty responses (204 No Content, 304 Not Modified)
       if (response.status === 204 || response.status === 304 || method === 'HEAD') {
-        const data = createReplaySubject();
-        data.complete();
-        context.data = data;
-        return context;
+        const replay = createReplaySubject<any>();
+
+        (async () => {
+          try {
+            for await (const item of parser(response)) {
+              replay.next(item);
+            }
+            replay.complete();
+          } catch (error) {
+            replay.error(error);
+          }
+        })();
+        context.data = replay; return context;
       }
 
       // Handle redirects
