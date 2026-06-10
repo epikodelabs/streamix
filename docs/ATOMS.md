@@ -71,14 +71,14 @@ count.dispose();
 
 ---
 
-### `asyncAtom(options?)`
+### `atom(options?)`
 
-Creates a hot atom without an initial value, similar to a Subject. Supports optional replay to late subscribers.
+Creates a hot, writable atom. If no initial value is provided, it starts in an empty state, similar to a Subject. It also supports an optional `capacity` to replay recent values to new subscribers.
 
 ```ts
-const count = asyncAtom<number>();           // no replay (like Subject)
-const replay = asyncAtom<number>({ capacity: 3 });  // replay last 3 values
-const all = asyncAtom<number>({ capacity: Infinity }); // replay all values
+const count = atom<number>();           // No replay (like a Subject)
+const withInitial = atom(0);            // Starts with an initial value
+const withReplay = atom<number>({ capacity: 3 }); // Replays the last 3 values
 ```
 
 ```ts

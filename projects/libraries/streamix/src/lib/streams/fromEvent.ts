@@ -1,4 +1,4 @@
-import { asyncAtom } from '@epikodelabs/streamix';
+import { atom } from '@epikodelabs/streamix';
 import type { MaybePromise } from '../abstractions';
 import { isPromiseLike, pipeSourceThrough, type Stream } from '../abstractions';
 import { createAsyncIterator } from '../utils';
@@ -45,7 +45,7 @@ export function fromEvent<T extends Event = Event>(
   event: MaybePromise<string>,
   options?: AddEventListenerOptions | boolean
 ): Stream<T> {
-  const eventAtom = asyncAtom<T>();
+  const atom$ = atom<T>();
 
   let subscriberCount = 0;
   let listening = false;
@@ -53,7 +53,7 @@ export function fromEvent<T extends Event = Event>(
   let resolvedEvent: string | null = null;
 
   const listener = (ev: Event) => {
-    eventAtom.set(ev as T);
+    atom$.set(ev as T);
   };
 
   const start = async () => {
@@ -90,7 +90,7 @@ export function fromEvent<T extends Event = Event>(
   };
 
   const subscribe = (callback?: ((value: T) => void)) => {
-    const sub = eventAtom.subscribe(callback!);
+    const sub = atom$.subscribe(callback!);
     if (++subscriberCount === 1) {
       void start();
     }
