@@ -240,7 +240,6 @@ describe('atom', () => {
 describe('replay', () => {
   it('should replay last N values to late subscribers', () => {
     const a = replay<number>(3);
-    const a = atom<number>({ capacity: 3 });
 
     a.set(1);
     a.set(2);
@@ -256,7 +255,6 @@ describe('replay', () => {
 
   it('should replay all values when fewer than capacity have been pushed', () => {
     const a = replay<number>(5);
-    const a = atom<number>({ capacity: 5 });
 
     a.set(1);
     a.set(2);
@@ -270,7 +268,6 @@ describe('replay', () => {
 
   it('should replay only last value with capacity 1', () => {
     const a = replay<number>(1);
-    const a = atom<number>({ capacity: 1 });
 
     a.set(1);
     a.set(2);
@@ -285,7 +282,6 @@ describe('replay', () => {
 
   it('should replay initial value to late subscribers', () => {
     const a = replay<number>(2, 99);
-    const a = atom<number>({ capacity: 2, initialValue: 99 });
 
     const values: number[] = [];
     a.subscribe(v => values.push(v));
@@ -296,7 +292,6 @@ describe('replay', () => {
 
   it('should deliver replayed values then live values in order', () => {
     const a = replay<number>(2);
-    const a = atom<number>({ capacity: 2 });
 
     a.set(1);
     a.set(2);
@@ -313,7 +308,6 @@ describe('replay', () => {
 
   it('should give different replay windows to subscribers joining at different times', () => {
     const a = replay<number>(2);
-    const a = atom<number>({ capacity: 2 });
 
     a.set(1);
     a.set(2);
@@ -335,7 +329,6 @@ describe('replay', () => {
 
   it('should not replay values after dispose', () => {
     const a = replay<number>(3);
-    const a = atom<number>({ capacity: 3 });
 
     a.set(1);
     a.set(2);
@@ -350,8 +343,6 @@ describe('replay', () => {
   it('should throw on capacity less than 1', () => {
     expect(() => replay(0)).toThrowError(/capacity/);
     expect(() => replay(-1)).toThrowError(/capacity/);
-    expect(() => atom({ capacity: 0 })).toThrowError(/capacity/);
-    expect(() => atom({ capacity: -1 })).toThrowError(/capacity/);
   });
 });
 
