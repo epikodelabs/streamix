@@ -1,4 +1,4 @@
-import { asyncAtom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
+import { atom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the current network state.
@@ -35,7 +35,7 @@ export function onNetwork(): Stream<NetworkState> {
       return;
     }
 
-    const atom = asyncAtom<NetworkState>();
+    const atom$ = atom<NetworkState>();
 
     const connection: any = (navigator as any).connection ?? null;
 
@@ -52,7 +52,7 @@ export function onNetwork(): Stream<NetworkState> {
       if (signal?.aborted) {
         return;
       }
-      atom.set(snapshot());
+      atom$.set(snapshot());
     };
 
     window.addEventListener("online", emit);
@@ -88,7 +88,7 @@ export function onNetwork(): Stream<NetworkState> {
       } catch {
         // ignore
       }
-      atom.dispose();
+      atom$.dispose();
     };
 
     if (signal) {
@@ -96,7 +96,7 @@ export function onNetwork(): Stream<NetworkState> {
     }
 
     try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
     } finally {
       cleanup();
     }

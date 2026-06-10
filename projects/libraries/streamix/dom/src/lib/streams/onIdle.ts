@@ -1,4 +1,4 @@
-import { asyncAtom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
+import { atom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `IdleDeadline` objects whenever
@@ -20,7 +20,7 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
     // SSR / non-browser guard
     if (typeof setTimeout !== "function") return;
 
-    const atom = asyncAtom<IdleDeadline>();
+    const atom$ = atom<IdleDeadline>();
 
     const ric: typeof requestIdleCallback =
       typeof requestIdleCallback === "function"
@@ -52,7 +52,7 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
         }
         idleId = null;
       }
-      atom.dispose();
+      atom$.dispose();
     };
 
     if (signal) {
@@ -61,14 +61,14 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
 
     const tick = (deadline: IdleDeadline) => {
       if (signal?.aborted) return;
-      atom.set(deadline);
+      atom$.set(deadline);
       idleId = ric(tick, options);
     };
 
     idleId = ric(tick, options);
 
     try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
     } finally {
       cleanup();
     }

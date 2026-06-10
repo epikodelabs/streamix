@@ -1,4 +1,4 @@
-import { asyncAtom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
+import { atom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the visual viewport.
@@ -30,7 +30,7 @@ export function onViewportChange(): Stream<ViewportState> {
     // SSR guard
     if (typeof window === "undefined") return;
 
-    const atom = asyncAtom<ViewportState>();
+    const atom$ = atom<ViewportState>();
 
     const snapshot = (): ViewportState => {
       if (window.visualViewport) {
@@ -56,7 +56,7 @@ export function onViewportChange(): Stream<ViewportState> {
       if (signal?.aborted) {
         return;
       }
-      atom.set(snapshot());
+      atom$.set(snapshot());
     };
 
     const target: VisualViewport | Window =
@@ -89,7 +89,7 @@ export function onViewportChange(): Stream<ViewportState> {
       } catch {
         // ignore
       }
-      atom.dispose();
+      atom$.dispose();
     };
 
     if (signal) {
@@ -97,7 +97,7 @@ export function onViewportChange(): Stream<ViewportState> {
     }
 
     try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
     } finally {
       cleanup();
     }

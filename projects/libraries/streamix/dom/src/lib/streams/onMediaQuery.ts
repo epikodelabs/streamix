@@ -1,4 +1,4 @@
-import { asyncAtom, createStream, isPromiseLike, iterate, type MaybePromise, type Stream } from "@epikodelabs/streamix";
+import { atom, createStream, isPromiseLike, iterate, type MaybePromise, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `true` or `false` whenever a CSS media
@@ -37,7 +37,7 @@ export function onMediaQuery(query: MaybePromise<string>): Stream<boolean> {
 
     if (signal?.aborted) return;
 
-    const atom = asyncAtom<boolean>();
+    const atom$ = atom<boolean>();
 
     const mql = window.matchMedia(queryString);
 
@@ -45,7 +45,7 @@ export function onMediaQuery(query: MaybePromise<string>): Stream<boolean> {
       if (signal?.aborted) {
         return;
       }
-      atom.set(e.matches);
+      atom$.set(e.matches);
     };
 
     let cleaned = false;
@@ -60,7 +60,7 @@ export function onMediaQuery(query: MaybePromise<string>): Stream<boolean> {
       } else {
         (mql as any).removeListener(listener);
       }
-      atom.dispose();
+      atom$.dispose();
     };
 
     if (signal) {
@@ -75,10 +75,10 @@ export function onMediaQuery(query: MaybePromise<string>): Stream<boolean> {
     }
 
     // Emit initial state
-    atom.set(mql.matches);
+    atom$.set(mql.matches);
 
     try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
     } finally {
       cleanup();
     }

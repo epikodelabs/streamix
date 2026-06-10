@@ -1,4 +1,4 @@
-import { asyncAtom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
+import { atom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the document's visibility state
@@ -23,7 +23,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
       // SSR / unsupported guard
       if (typeof document === "undefined") return;
 
-      const atom = asyncAtom<DocumentVisibilityState>();
+      const atom$ = atom<DocumentVisibilityState>();
 
       const getState = (): DocumentVisibilityState => {
         const s = (document as any).visibilityState;
@@ -34,7 +34,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
         if (signal?.aborted) {
           return;
         }
-        atom.set(getState());
+        atom$.set(getState());
       };
 
       document.addEventListener("visibilitychange", emit);
@@ -58,7 +58,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
         } catch {
           // ignore
         }
-        atom.dispose();
+        atom$.dispose();
       };
 
       if (signal) {
@@ -66,7 +66,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
       }
 
       try {
-        yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+        yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
       } finally {
         cleanup();
       }

@@ -204,8 +204,10 @@ export interface Atom<T = any> extends AtomBase<T> {
   setError(error: Error): void;
 }
 
-export function atom<T>(initialValue: T): Atom<T> {
-  let state: AtomState<T> = valueState(initialValue);
+export function atom<T>(initialValue?: T): Atom<T> {
+  let state: AtomState<T> = initialValue !== undefined
+    ? valueState(initialValue)
+    : { tag: "error", current: new Error("Atom has not emitted yet"), previous: undefined };
   const valueSubs = new Set<(value: T) => void>();
   const stateSubs = new Set<(state: AtomState<T>) => void>();
 
@@ -288,56 +290,66 @@ export function atom<T>(initialValue: T): Atom<T> {
   return instance;
 }
 
-/* ── asyncAtom ── */
+/* ── replay ── */
 
 export interface AsyncAtomOptions<T = any> {
   capacity?: number;
   initialValue?: T;
 }
 
-export type AsyncAtom<T = any> = Atom<T>;
+export type ReplayAtom<T = any> = Atom<T>;
 
-export function asyncAtom<T>(): AsyncAtom<T>;
-export function asyncAtom<T>(options: AsyncAtomOptions<T>): AsyncAtom<T>;
-export function asyncAtom<T>(options?: AsyncAtomOptions<T>): AsyncAtom<T> {
-  const capacity = options?.capacity ?? 0;
-  const isFiniteCapacity = capacity !== Infinity && capacity > 0;
-  const replay: T[] = [];
+export function replay<T>(capacity: number, initialValue?: T): Atom<T> {
+  if (capacity < 1) throw new RangeError("replay capacity must be >= 1");
 
-  let state: AtomState<T>;
-  if (options && 'initialValue' in options) {
-    state = valueState(options.initialValue as T);
-  } else {
-    state = {
-      tag: "error",
-      current: new Error("Async atom has not emitted yet"),
-      previous: undefined
-    };
-  }
+  const buf: (T | undefined)[] = new Array(capacity);
+  let head = 0;
+  let tail = 0;
+  let count = 0;
 
-  let hasValue = false;
-  const valueSubs = new Set<(value: T) => void>();
-  const stateSubs = new Set<(state: AtomState<T>) => void>();
-
-  const pushReplay = (value: T) => {
-    if (capacity <= 0) return;
-    replay.push(value);
-    if (isFiniteCapacity && replay.length > capacity) {
-      replay.shift();
+  const pushBuf = (value: T): void => {
+    buf[tail] = value;
+    tail = (tail + 1) % capacity;
+    if (count < capacity) {
+      count++;
+    } else {
+      head = (head + 1) % capacity;
     }
   };
 
-  if (state.tag === 'value') {
+  const forEachBuf = (cb: (value: T) => void): void => {
+    for (let i = 0; i < count; i++) {
+      cb(buf[(head + i) % capacity] as T);
+    }
+  };
+
+  const clearBuf = (): void => {
+    buf.fill(undefined);
+    head = 0;
+    tail = 0;
+    count = 0;
+  };
+
+  let state: AtomState<T>;
+  let hasValue = false;
+
+  if (initialValue !== undefined) {
+    state = valueState(initialValue);
     hasValue = true;
-    pushReplay(state.current);
+    pushBuf(initialValue);
+  } else {
+    state = { tag: "error", current: new Error("Replay has not emitted yet"), previous: undefined };
   }
 
-  const instance: AsyncAtom<T> = {
+  const valueSubs = new Set<(value: T) => void>();
+  const stateSubs = new Set<(state: AtomState<T>) => void>();
+
+  const instance: Atom<T> = {
     type: "atom",
 
     get disposed() { return state.tag === "disposed"; },
-    get error() { return state.tag === "error" ? state.current : null; },
-    get() { return getStateValue(state); },
+    get error()    { return state.tag === "error" ? state.current : null; },
+    get()          { return getStateValue(state); },
 
     get value() {
       if (activeFormula) activeFormula.dependencies.add(instance);
@@ -353,18 +365,14 @@ export function asyncAtom<T>(options?: AsyncAtomOptions<T>): AsyncAtom<T> {
 
     subscribe(callback) {
       valueSubs.add(callback);
-      for (const val of replay) {
-        callback(val);
-      }
-      return createSubscription(() => { valueSubs.delete(callback); });
+      forEachBuf(callback);
+      return createSubscription(() => valueSubs.delete(callback));
     },
 
     onStateChange(callback) {
       stateSubs.add(callback);
-      // Do not emit the initial "not emitted" error state to new subscribers.
-      // They will get the first value when it's set.
       if (hasValue) callback(state);
-      return createSubscription(() => { stateSubs.delete(callback); });
+      return createSubscription(() => stateSubs.delete(callback));
     },
 
     set(value) {
@@ -373,12 +381,10 @@ export function asyncAtom<T>(options?: AsyncAtomOptions<T>): AsyncAtom<T> {
       const prev = state.tag === "value" ? state.current : state.previous;
       state = { tag: "value", current: value, previous: prev };
       hasValue = true;
+      pushBuf(value);
 
-      for (const cb of Array.from(stateSubs)) {
-        cb(state);
-      }
+      for (const cb of Array.from(stateSubs)) cb(state);
 
-      pushReplay(value);
       runWithPropagation(() => {
         for (const cb of Array.from(valueSubs)) {
           queueNotification(() => cb(value));
@@ -393,27 +399,24 @@ export function asyncAtom<T>(options?: AsyncAtomOptions<T>): AsyncAtom<T> {
       if (state.tag === "error" && state.current === error) return;
 
       state = { tag: "error", current: error, previous: prev };
-      for (const cb of Array.from(stateSubs)) {
-        cb(state);
-      }
+      for (const cb of Array.from(stateSubs)) cb(state);
     },
 
     dispose() {
       if (state.tag === "disposed") return;
+
       const prev = state.previous;
       state = { tag: "disposed", previous: prev };
-      for (const cb of Array.from(stateSubs)) {
-        cb(state);
-      }
+      for (const cb of Array.from(stateSubs)) cb(state);
       valueSubs.clear();
-      replay.length = 0;
+      stateSubs.clear();
+      clearBuf();
     },
   };
 
   registerWithCurrentScope(instance);
   return instance;
 }
-
 /* ── derived ── */
 
 export function derived<T>(fn: () => T): AtomBase<T> {

@@ -1,4 +1,4 @@
-import { asyncAtom, createStream, isPromiseLike, iterate, type MaybePromise, type Stream } from "@epikodelabs/streamix";
+import { atom, createStream, isPromiseLike, iterate, type MaybePromise, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the dimensions of a given DOM element
@@ -28,7 +28,7 @@ export function onResize(
 
       if (signal?.aborted || !el) return;
 
-      const atom = asyncAtom<{ width: number; height: number }>();
+      const atom$ = atom<{ width: number; height: number }>();
 
       const measure = (entry?: ResizeObserverEntry) => {
         if (signal?.aborted) {
@@ -50,7 +50,7 @@ export function onResize(
           height = Math.round(rect.height);
         }
 
-        atom.set({ width, height });
+        atom$.set({ width, height });
       };
 
       const observer = new ResizeObserver((entries) => measure(entries[0]));
@@ -71,7 +71,7 @@ export function onResize(
         } catch {
           // ignore
         }
-        atom.dispose();
+        atom$.dispose();
       };
 
       if (signal) {
@@ -84,7 +84,7 @@ export function onResize(
       measure();
 
       try {
-        yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+        yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
       } finally {
         cleanup();
       }

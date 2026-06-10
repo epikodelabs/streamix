@@ -1,4 +1,4 @@
-import { asyncAtom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
+import { atom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Represents the current battery status.
@@ -44,13 +44,13 @@ export function onBattery(): Stream<BatteryState> {
 
     if (signal?.aborted) return;
 
-    const atom = asyncAtom<BatteryState>();
+    const atom$ = atom<BatteryState>();
 
     const emit = () => {
       if (signal?.aborted) {
         return;
       }
-      atom.set({
+      atom$.set({
         charging: battery.charging,
         level: battery.level,
         chargingTime: battery.chargingTime,
@@ -89,7 +89,7 @@ export function onBattery(): Stream<BatteryState> {
       } catch {
         // ignore
       }
-      atom.dispose();
+      atom$.dispose();
     };
 
     if (signal) {
@@ -105,7 +105,7 @@ export function onBattery(): Stream<BatteryState> {
     emit();
 
     try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
     } finally {
       cleanup();
     }

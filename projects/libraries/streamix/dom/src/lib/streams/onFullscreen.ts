@@ -1,4 +1,4 @@
-import { asyncAtom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
+import { atom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits fullscreen state changes.
@@ -20,7 +20,7 @@ export function onFullscreen(): Stream<boolean> {
     // SSR guard
     if (typeof document === "undefined") return;
 
-    const atom = asyncAtom<boolean>();
+    const atom$ = atom<boolean>();
 
     const isFullscreen = (): boolean =>
       !!(
@@ -34,7 +34,7 @@ export function onFullscreen(): Stream<boolean> {
       if (signal?.aborted) {
         return;
       }
-      atom.set(isFullscreen());
+      atom$.set(isFullscreen());
     };
 
     let cleaned = false;
@@ -68,7 +68,7 @@ export function onFullscreen(): Stream<boolean> {
       } catch {
         // ignore
       }
-      atom.dispose();
+      atom$.dispose();
     };
 
     if (signal) {
@@ -84,7 +84,7 @@ export function onFullscreen(): Stream<boolean> {
     emit();
 
     try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
     } finally {
       cleanup();
     }

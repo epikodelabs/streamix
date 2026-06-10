@@ -1,4 +1,4 @@
-import { asyncAtom, createStream, isPromiseLike, iterate, type MaybePromise, type Stream } from "@epikodelabs/streamix";
+import { atom, createStream, isPromiseLike, iterate, type MaybePromise, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits arrays of `MutationRecord` objects
@@ -28,13 +28,13 @@ export function onMutation(
 
     if (signal?.aborted || !el) return;
 
-    const atom = asyncAtom<MutationRecord[]>();
+    const atom$ = atom<MutationRecord[]>();
 
     const observer = new MutationObserver((mutations) => {
       if (signal?.aborted) {
         return;
       }
-      atom.set([...mutations]);
+      atom$.set([...mutations]);
     });
 
     observer.observe(el, resolvedOptions);
@@ -55,7 +55,7 @@ export function onMutation(
       } catch {
         // ignore
       }
-      atom.dispose();
+      atom$.dispose();
     };
 
     if (signal) {
@@ -63,7 +63,7 @@ export function onMutation(
     }
 
     try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
     } finally {
       cleanup();
     }

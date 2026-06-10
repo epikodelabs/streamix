@@ -1,4 +1,4 @@
-import { asyncAtom, createStream, isPromiseLike, iterate, type MaybePromise, type Stream } from "@epikodelabs/streamix";
+import { atom, createStream, isPromiseLike, iterate, type MaybePromise, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `true` when a given element enters
@@ -33,14 +33,14 @@ export function onIntersection(
 
     if (signal?.aborted || !el) return;
 
-    const atom = asyncAtom<boolean>();
+    const atom$ = atom<boolean>();
 
     // Deduplicate — IntersectionObserver can fire with the same value
     let last: boolean | undefined;
     const emit = (v: boolean) => {
       if (signal?.aborted || v === last) return;
       last = v;
-      atom.set(v);
+      atom$.set(v);
     };
 
     const computeInitial = (): boolean => {
@@ -68,7 +68,7 @@ export function onIntersection(
     if (typeof MutationObserver !== "undefined") {
       mo = new MutationObserver(() => {
         if (!document.body.contains(el)) {
-          atom.dispose();
+          atom$.dispose();
         }
       });
       mo.observe(document.body, { childList: true, subtree: true });
@@ -85,7 +85,7 @@ export function onIntersection(
       } catch {
         // ignore
       }
-      atom.dispose();
+      atom$.dispose();
     };
 
     if (signal) {
@@ -93,7 +93,7 @@ export function onIntersection(
     }
 
     try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
     } finally {
       cleanup();
     }

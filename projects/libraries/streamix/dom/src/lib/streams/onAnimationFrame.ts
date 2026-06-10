@@ -1,4 +1,4 @@
-import { asyncAtom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
+import { atom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the time delta (in milliseconds) between
@@ -21,7 +21,7 @@ export function onAnimationFrame(): Stream<number> {
     // SSR / non-browser guard
     if (typeof globalThis.performance === "undefined") return;
 
-    const atom = asyncAtom<number>();
+    const atom$ = atom<number>();
 
     const hasRaf =
       typeof (globalThis as any).requestAnimationFrame === "function";
@@ -62,7 +62,7 @@ export function onAnimationFrame(): Stream<number> {
         }
         rafId = null;
       }
-      atom.dispose();
+      atom$.dispose();
     };
 
     if (signal) {
@@ -75,14 +75,14 @@ export function onAnimationFrame(): Stream<number> {
       const delta = lastTime > 0 ? Math.max(0, now - lastTime) : 0;
       lastTime = now;
 
-      atom.set(delta);
+      atom$.set(delta);
       rafId = raf(tick);
     };
 
     rafId = raf(tick);
 
     try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom, signal) };
+      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
     } finally {
       cleanup();
     }
