@@ -71,14 +71,13 @@ count.dispose();
 
 ---
 
-### `atom(options?)`
+### `atom(initialValue?)`
 
-Creates a hot, writable atom. If no initial value is provided, it starts in an empty state, similar to a Subject. It also supports an optional `capacity` to replay recent values to new subscribers.
+Creates a hot, writable atom. If no initial value is provided, it starts in an empty state, similar to a Subject.
 
 ```ts
-const count = atom<number>();           // No replay (like a Subject)
+const count = atom<number>();           // Starts with no initial value (like a Subject)
 const withInitial = atom(0);            // Starts with an initial value
-const withReplay = atom<number>({ capacity: 3 }); // Replays the last 3 values
 ```
 
 ```ts
@@ -87,7 +86,7 @@ count.value;   // 10
 count.prior;   // undefined (no initial value)
 ```
 
-Subscribe to changes (late subscribers may receive replayed values based on capacity):
+Subscribe to changes:
 
 ```ts
 const sub = count.subscribe(v => console.log(v));
