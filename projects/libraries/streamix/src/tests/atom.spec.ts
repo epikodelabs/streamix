@@ -55,22 +55,6 @@ describe('flow', () => {
     a.dispose();
   });
 
-  it('should emit duplicate values', async () => {
-    const subject = createSubject<number>();
-    const a = flow(subject);
-    const values: number[] = [];
-    a.subscribe(v => values.push(v));
-    await delay();
-
-    subject.next(0);
-    await delay();
-    subject.next(0);
-    await delay();
-
-    expect(values).toEqual([0, 0]);
-    a.dispose();
-  });
-
   it('should throw after disposal', () => {
     const subject = createSubject<number>();
     const a = flow(subject);

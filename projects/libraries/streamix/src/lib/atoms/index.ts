@@ -22,8 +22,8 @@
  * ```
  */
 
-export { atom, derived, flow, iterate } from './atom';
-export type { AsyncAtomOptions, Atom, AtomBase } from './atom';
+export { atom, derived, flow, iterate, replay } from './atom';
+export type { AsyncAtomOptions, Atom, AtomBase, ReplayAtom } from './atom';
 
 export { scope } from './scope';
 export type { Scope } from './scope';

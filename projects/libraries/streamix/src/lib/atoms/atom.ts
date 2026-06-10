@@ -300,34 +300,49 @@ export interface AsyncAtomOptions<T = any> {
 export type ReplayAtom<T = any> = Atom<T>;
 
 export function replay<T>(capacity: number, initialValue?: T): Atom<T> {
-  if (capacity < 1) throw new RangeError("replay capacity must be >= 1");
+  if (capacity < 1 && capacity !== Infinity) throw new RangeError("replay capacity must be >= 1");
 
-  const buf: (T | undefined)[] = new Array(capacity);
+  const isFinite = capacity !== Infinity;
+  const buf: T[] = isFinite ? new Array(capacity) : [];
   let head = 0;
   let tail = 0;
   let count = 0;
 
   const pushBuf = (value: T): void => {
-    buf[tail] = value;
-    tail = (tail + 1) % capacity;
-    if (count < capacity) {
-      count++;
+    if (isFinite) {
+      (buf as (T | undefined)[])[tail] = value;
+      tail = (tail + 1) % capacity;
+      if (count < capacity) {
+        count++;
+      } else {
+        head = (head + 1) % capacity;
+      }
     } else {
-      head = (head + 1) % capacity;
+      buf.push(value);
     }
   };
 
   const forEachBuf = (cb: (value: T) => void): void => {
-    for (let i = 0; i < count; i++) {
-      cb(buf[(head + i) % capacity] as T);
+    if (isFinite) {
+      for (let i = 0; i < count; i++) {
+        cb(buf[(head + i) % capacity] as T);
+      }
+    } else {
+      for (const value of buf) {
+        cb(value);
+      }
     }
   };
 
   const clearBuf = (): void => {
-    buf.fill(undefined);
-    head = 0;
-    tail = 0;
-    count = 0;
+    if (isFinite) {
+      (buf as (T | undefined)[]).fill(undefined);
+      head = 0;
+      tail = 0;
+      count = 0;
+    } else {
+      buf.length = 0;
+    }
   };
 
   let state: AtomState<T>;
