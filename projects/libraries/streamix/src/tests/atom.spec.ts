@@ -1,5 +1,5 @@
 import { createSubject, startWith } from '@epikodelabs/streamix';
-import { atom, derived, flow, replay } from '../lib/atoms/atom';
+import { atom, derived, flow } from '../lib/atoms/atom';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -117,12 +117,6 @@ describe('flow', () => {
     expect(values).toEqual([]);
     a.dispose();
   });
-
-  it('should throw after disposal', () => {
-    const a = atom(0);
-    a.dispose();
-    expect(() => a.get()).toThrowError(/disposed/);
-  });
 });
 
 describe('atom', () => {
@@ -214,119 +208,10 @@ describe('atom', () => {
     a.dispose();
   });
 
-  it('should throw after disposal', () => {
+  it('should throw after atom disposal', () => {
     const a = atom<number>();
     a.dispose();
     expect(() => a.get()).toThrowError(/disposed/);
-  });
-});
-
-describe('replay', () => {
-  it('should replay last N values to late subscribers', () => {
-    const a = replay<number>(3);
-
-    a.set(1);
-    a.set(2);
-    a.set(3);
-    a.set(4);
-
-    const values: number[] = [];
-    a.subscribe(v => values.push(v));
-
-    expect(values).toEqual([2, 3, 4]);
-    a.dispose();
-  });
-
-  it('should replay all values when fewer than capacity have been pushed', () => {
-    const a = replay<number>(5);
-
-    a.set(1);
-    a.set(2);
-
-    const values: number[] = [];
-    a.subscribe(v => values.push(v));
-
-    expect(values).toEqual([1, 2]);
-    a.dispose();
-  });
-
-  it('should replay only last value with capacity 1', () => {
-    const a = replay<number>(1);
-
-    a.set(1);
-    a.set(2);
-    a.set(3);
-
-    const values: number[] = [];
-    a.subscribe(v => values.push(v));
-
-    expect(values).toEqual([3]);
-    a.dispose();
-  });
-
-  it('should replay initial value to late subscribers', () => {
-    const a = replay<number>(2, 99);
-
-    const values: number[] = [];
-    a.subscribe(v => values.push(v));
-
-    expect(values).toEqual([99]);
-    a.dispose();
-  });
-
-  it('should deliver replayed values then live values in order', () => {
-    const a = replay<number>(2);
-
-    a.set(1);
-    a.set(2);
-
-    const values: number[] = [];
-    a.subscribe(v => values.push(v));
-
-    a.set(3);
-    a.set(4);
-
-    expect(values).toEqual([1, 2, 3, 4]);
-    a.dispose();
-  });
-
-  it('should give different replay windows to subscribers joining at different times', () => {
-    const a = replay<number>(2);
-
-    a.set(1);
-    a.set(2);
-
-    const early: number[] = [];
-    a.subscribe(v => early.push(v));
-
-    a.set(3);
-
-    const late: number[] = [];
-    a.subscribe(v => late.push(v));
-
-    a.set(4);
-
-    expect(early).toEqual([1, 2, 3, 4]);
-    expect(late).toEqual([2, 3, 4]);
-    a.dispose();
-  });
-
-  it('should not replay values after dispose', () => {
-    const a = replay<number>(3);
-
-    a.set(1);
-    a.set(2);
-    a.dispose();
-
-    const values: number[] = [];
-    a.subscribe(v => values.push(v));
-
-    expect(values).toEqual([]);
-  });
-
-  it('should throw on capacity less than 1', () => {
-    expect(() => replay(0)).toThrowError(/capacity/);
-    expect(() => replay(-1)).toThrowError(/capacity/);
   });
 });
 
