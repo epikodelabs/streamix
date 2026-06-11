@@ -1,10 +1,11 @@
-import { createSubject, delayWhile, from } from '@epikodelabs/streamix';
+import { atom, fromAtom, delayWhile, from, type Atom } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 describe('delayWhile', () => {
   it('buffers values while the predicate returns true and flushes them when it flips', async () => {
-    const subject = createSubject<number>();
+    const source$: Atom<number> = atom<number>();
+    const subject = fromAtom(source$);
     const results: number[] = [];
     const reader = (async () => {
       for await (const value of subject.pipe(delayWhile((value) => value < 3))) {
@@ -12,19 +13,20 @@ describe('delayWhile', () => {
       }
     })();
 
-    subject.next(1);
+    source$.set(1);
     await wait(10);
-    subject.next(2);
+    source$.set(2);
     await wait(10);
-    subject.next(3);
-    subject.complete();
+    source$.set(3);
+    source$.dispose();
     await reader;
 
     expect(results).toEqual([1, 2, 3]);
   });
 
   it('can re-enter the delayed state after emitting once', async () => {
-    const subject = createSubject<number>();
+    const source$: Atom<number> = atom<number>();
+    const subject = fromAtom(source$);
     const results: number[] = [];
     const reader = (async () => {
       for await (const value of subject.pipe(delayWhile((value) => value % 2 === 1))) {
@@ -32,14 +34,14 @@ describe('delayWhile', () => {
       }
     })();
 
-    subject.next(1);
+    source$.set(1);
     await wait(10);
-    subject.next(2);
+    source$.set(2);
     await wait(10);
-    subject.next(3);
+    source$.set(3);
     await wait(10);
-    subject.next(4);
-    subject.complete();
+    source$.set(4);
+    source$.dispose();
     await reader;
 
     expect(results).toEqual([1, 2, 3, 4]);
@@ -74,7 +76,8 @@ describe('delayWhile', () => {
   });
 
   it('supports index parameter in predicate', async () => {
-    const subject = createSubject<number>();
+    const source$: Atom<number> = atom<number>();
+    const subject = fromAtom(source$);
     const results: number[] = [];
     const indices: number[] = [];
     const reader = (async () => {
@@ -88,12 +91,12 @@ describe('delayWhile', () => {
       }
     })();
 
-    subject.next(10);
+    source$.set(10);
     await wait(5);
-    subject.next(20);
+    source$.set(20);
     await wait(5);
-    subject.next(30);
-    subject.complete();
+    source$.set(30);
+    source$.dispose();
     await reader;
 
     expect(results).toEqual([10, 20, 30]);
@@ -101,7 +104,8 @@ describe('delayWhile', () => {
   });
 
   it('uses index to delay based on position not value', async () => {
-    const subject = createSubject<string>();
+    const source$: Atom<string> = atom<string>();
+    const subject = fromAtom(source$);
     const results: string[] = [];
     const reader = (async () => {
       for await (const value of subject.pipe(
@@ -111,10 +115,10 @@ describe('delayWhile', () => {
       }
     })();
 
-    subject.next('a');
+    source$.set('a');
     await wait(5);
-    subject.next('b');
-    subject.complete();
+    source$.set('b');
+    source$.dispose();
     await reader;
 
     expect(results).toEqual(['a', 'b']);

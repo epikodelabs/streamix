@@ -1,4 +1,4 @@
-import { createAsyncIterator, createStream, createSubject, createSubscription, DONE, from, isStreamLike, map, NEXT, startWith, toArray } from '@epikodelabs/streamix';
+import { atom, createAsyncIterator, createStream, createSubscription, DONE, from, fromAtom, isStreamLike, map, NEXT, startWith, toArray } from '@epikodelabs/streamix';
 
 describe('stream', () => {
   it('allows base streams to be consumed with for-await', async () => {
@@ -23,7 +23,8 @@ describe('stream', () => {
   });
 
   it('supports async iteration over subjects', async () => {
-    const subject = createSubject<number>();
+    const source$ = atom<number>();
+    const subject = fromAtom(source$);
     const received: number[] = [];
 
     void (async () => {
@@ -32,9 +33,9 @@ describe('stream', () => {
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.complete();
+    source$.set(1);
+    source$.set(2);
+    source$.dispose();
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(received).toEqual([1, 2]);

@@ -1,8 +1,9 @@
-import { createSubject, ignoreElements } from "@epikodelabs/streamix";
+import { atom, fromAtom, ignoreElements } from "@epikodelabs/streamix";
 
 describe("ignoreElements", () => {
   it("should ignore all emitted values and only emit complete", (done) => {
-    const sourceStream = createSubject<number>();
+    const source$ = atom<number>();
+    const sourceStream = fromAtom(source$);
     const emittedValues: number[] = [];
     const ignoredStream = sourceStream.pipe(ignoreElements());
 
@@ -15,14 +16,15 @@ describe("ignoreElements", () => {
       error: (err) => done.fail(err.message),
     });
 
-    sourceStream.next(1);
-    sourceStream.next(2);
-    sourceStream.next(3);
-    sourceStream.complete();
+    source$.set(1);
+    source$.set(2);
+    source$.set(3);
+    source$.dispose();
   });
 
   it("should pass error notifications through", (done) => {
-    const sourceStream = createSubject<number>();
+    const source$ = atom<number>();
+    const sourceStream = fromAtom(source$);
     const emittedValues: number[] = [];
     const ignoredStream = sourceStream.pipe(ignoreElements());
 
@@ -36,13 +38,14 @@ describe("ignoreElements", () => {
       },
     });
 
-    sourceStream.next(1);
-    sourceStream.next(2);
-    sourceStream.error(new Error("Test error"));
+    source$.set(1);
+    source$.set(2);
+    source$.setError(new Error("Test error"));
   });
 
   it("should complete after source stream completes", (done) => {
-    const sourceStream = createSubject<number>();
+    const source$ = atom<number>();
+    const sourceStream = fromAtom(source$);
     const emittedValues: number[] = [];
     const ignoredStream = sourceStream.pipe(ignoreElements());
 
@@ -55,13 +58,14 @@ describe("ignoreElements", () => {
       error: (err) => done.fail(err.message),
     });
 
-    sourceStream.next(10);
-    sourceStream.next(20);
-    sourceStream.complete();
+    source$.set(10);
+    source$.set(20);
+    source$.dispose();
   });
 
   it("should not emit any value but should handle complete", (done) => {
-    const sourceStream = createSubject<string>();
+    const source$ = atom<string>();
+    const sourceStream = fromAtom(source$);
     const emittedValues: string[] = [];
     const ignoredStream = sourceStream.pipe(ignoreElements());
 
@@ -74,13 +78,14 @@ describe("ignoreElements", () => {
       error: (err) => done.fail(err.message),
     });
 
-    sourceStream.next("value1");
-    sourceStream.next("value2");
-    sourceStream.complete();
+    source$.set("value1");
+    source$.set("value2");
+    source$.dispose();
   });
 
   it("should handle error in source stream", (done) => {
-    const sourceStream = createSubject<string>();
+    const source$ = atom<string>();
+    const sourceStream = fromAtom(source$);
     const emittedValues: string[] = [];
     const ignoredStream = sourceStream.pipe(ignoreElements());
 
@@ -94,9 +99,8 @@ describe("ignoreElements", () => {
       },
     });
 
-    sourceStream.next("value1");
-    sourceStream.next("value2");
-    sourceStream.error(new Error("Some error"));
+    source$.set("value1");
+    source$.set("value2");
+    source$.setError(new Error("Some error"));
   });
 });
-

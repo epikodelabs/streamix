@@ -5,6 +5,7 @@ export * from './defer';
 export * from './EMPTY';
 export * from './forkJoin';
 export * from './from';
+export * from './fromAtom';
 export * from './fromEvent';
 export * from './fromPromise';
 export * from './iif';

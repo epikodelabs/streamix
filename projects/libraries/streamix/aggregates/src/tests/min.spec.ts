@@ -1,15 +1,15 @@
-import { createSubject, type Stream } from '@epikodelabs/streamix';
+import { atom, fromAtom, type Atom, type Stream } from '@epikodelabs/streamix';
 import { min } from '@epikodelabs/streamix/aggregates';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe('min', () => {
-  let subject: ReturnType<typeof createSubject<number>>;
+  let source$: Atom<number>;
   let source: Stream<number>;
 
   beforeEach(() => {
-    subject = createSubject<number>();
-    source = subject;
+    source$ = atom<number>();
+    source = fromAtom(source$);
   });
 
   it('should emit the smallest value', async () => {
@@ -22,10 +22,10 @@ describe('min', () => {
       }
     })();
 
-    subject.next(3);
-    subject.next(1); // Smallest value
-    subject.next(2);
-    subject.complete();
+    source$.set(3);
+    source$.set(1); // Smallest value
+    source$.set(2);
+    source$.dispose();
     await settle();
 
     expect(results).toEqual([1]);
@@ -45,7 +45,7 @@ describe('min', () => {
       }
     })();
 
-    subject.error(new Error('Test Error'));
+    source$.setError(new Error('Test Error'));
     await settle();
 
     expect(error).toEqual(new Error('Test Error'));

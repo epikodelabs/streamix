@@ -1,10 +1,12 @@
-import { createSubject, sample } from '@epikodelabs/streamix';
+import { atom, fromAtom, sample, type Stream, type Atom } from '@epikodelabs/streamix';
 
 describe("sample", () => {
-  let subject: any;
+  let source$: Atom<number>;
+  let subject: Stream<number>;
 
   beforeEach(() => {
-    subject = createSubject<number>();
+    source$ = atom<number>();
+    subject = fromAtom(source$);
   });
 
   it("should emit the latest value at the specified interval", async () => {
@@ -18,12 +20,12 @@ describe("sample", () => {
       }
     })();
 
-    subject.next(1);
+    source$.set(1);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    subject.next(2);
+    source$.set(2);
     await new Promise((resolve) => setTimeout(resolve, 125));
-    subject.next(3);
-    subject.complete();
+    source$.set(3);
+    source$.dispose();
 
     await new Promise((resolve) => setTimeout(resolve, 200));
 
@@ -42,8 +44,8 @@ describe("sample", () => {
       completed = true;
     })();
 
-    subject.next(1);
-    subject.complete();
+    source$.set(1);
+    source$.dispose();
     await new Promise((resolve) => setTimeout(resolve, 150));
 
     expect(completed).toBeTrue();
@@ -76,9 +78,9 @@ describe("sample", () => {
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.complete();
+    source$.set(1);
+    source$.set(2);
+    source$.dispose();
     await new Promise((resolve) => setTimeout(resolve, 150));
 
     expect(results).toEqual([2]); // The last value before completion should be emitted
@@ -95,11 +97,11 @@ describe("sample", () => {
       }
     })();
 
-    subject.next(5);
+    source$.set(5);
     await new Promise((resolve) => setTimeout(resolve, 15));
-    subject.next(6);
+    source$.set(6);
     await new Promise((resolve) => setTimeout(resolve, 30));
-    subject.complete();
+    source$.dispose();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(results.length).toBeGreaterThan(0);
@@ -119,5 +121,3 @@ describe("sample", () => {
     }
   });
 });
-
-

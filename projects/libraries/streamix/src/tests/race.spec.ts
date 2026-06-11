@@ -1,4 +1,4 @@
-import { createStream, createSubject, from, race } from "@epikodelabs/streamix";
+import { atom, fromAtom, createStream, from, race } from "@epikodelabs/streamix";
 
 describe('race', () => {
   it('should complete without emitting when called with no streams', (done) => {
@@ -15,8 +15,8 @@ describe('race', () => {
   });
 
   it('should only emit values from the winning stream', (done) => {
-    const stream1 = createSubject<number>();
-    const stream2 = createSubject<number>();
+    const stream1$ = atom<number>(); const stream1 = fromAtom(stream1$);
+    const stream2$ = atom<number>(); const stream2 = fromAtom(stream2$);
     const results: number[] = [];
 
     const racedStream = race(stream1, stream2);
@@ -33,14 +33,14 @@ describe('race', () => {
       complete: done.fail,
     });
 
-    stream1.next(1);
-    stream1.next(2);
-    stream2.next(3);
+    stream1$.set(1);
+    stream1$.set(2);
+    stream2$.set(3);
   });
 
   it('should emit the first value from the winning stream', (done) => {
-    const stream1 = createSubject<number>();
-    const stream2 = createSubject<number>();
+    const stream1$ = atom<number>(); const stream1 = fromAtom(stream1$);
+    const stream2$ = atom<number>(); const stream2 = fromAtom(stream2$);
 
     const racedStream = race(stream1, stream2);
 
@@ -53,13 +53,13 @@ describe('race', () => {
       complete: done.fail,
     });
 
-    stream1.next(1);
-    stream2.next(2);
+    stream1$.set(1);
+    stream2$.set(2);
   });
 
   it('should complete when the winning stream completes', (done) => {
-    const stream1 = createSubject<number>();
-    const stream2 = createSubject<number>();
+    const stream1$ = atom<number>(); const stream1 = fromAtom(stream1$);
+    const stream2$ = atom<number>(); const stream2 = fromAtom(stream2$);
 
     const racedStream = race(stream1, stream2);
 
@@ -73,14 +73,14 @@ describe('race', () => {
       },
     });
 
-    stream1.next(1);
-    stream1.complete();
-    stream2.next(2);
+    stream1$.set(1);
+    stream1$.dispose();
+    stream2$.set(2);
   });
 
   it('should propagate errors from the winning stream', (done) => {
-    const stream1 = createSubject<number>();
-    const stream2 = createSubject<number>();
+    const stream1$ = atom<number>(); const stream1 = fromAtom(stream1$);
+    const stream2$ = atom<number>(); const stream2 = fromAtom(stream2$);
     const errorMsg = 'test error';
 
     const racedStream = race(stream1, stream2);
@@ -96,15 +96,15 @@ describe('race', () => {
       complete: () => done.fail("Should not complete after error"),
     });
 
-    stream1.next(1);
-    stream1.error(new Error(errorMsg));
-    stream2.next(2);
+    stream1$.set(1);
+    stream1$.setError(new Error(errorMsg));
+    stream2$.set(2);
   });
 
   it('should handle multiple streams correctly', (done) => {
-    const stream1 = createSubject<number>();
-    const stream2 = createSubject<number>();
-    const stream3 = createSubject<number>();
+    const stream1$ = atom<number>(); const stream1 = fromAtom(stream1$);
+    const stream2$ = atom<number>(); const stream2 = fromAtom(stream2$);
+    const stream3$ = atom<number>(); const stream3 = fromAtom(stream3$);
     const results: number[] = [];
 
     const racedStream = race(stream1, stream2, stream3);
@@ -120,12 +120,12 @@ describe('race', () => {
       }
     });
 
-    stream1.next(1);
-    stream2.next(2);
-    stream3.next(4);
-    stream1.complete();
-    stream2.complete();
-    stream3.complete();
+    stream1$.set(1);
+    stream2$.set(2);
+    stream3$.set(4);
+    stream1$.dispose();
+    stream2$.dispose();
+    stream3$.dispose();
   });
 
   it('should work with streams that emit after a delay', (done) => {

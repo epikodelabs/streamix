@@ -1,6 +1,7 @@
 import {
+    atom,
+    fromAtom,
     createStream,
-    createSubject,
     from,
     withLatestFrom,
 } from '@epikodelabs/streamix';
@@ -162,8 +163,8 @@ describe('withLatestFrom', () => {
   });
 
   it('should convert non-Error auxiliary errors into Error', async () => {
-    const main$ = createSubject<number>();
-    const aux$ = createSubject<string>();
+    const mainSource$ = atom<number>(); const main$ = fromAtom(mainSource$);
+    const auxSource$ = atom<string>(); const aux$ = fromAtom(auxSource$);
 
     const combined = main$.pipe(withLatestFrom(aux$));
 
@@ -183,13 +184,13 @@ describe('withLatestFrom', () => {
       });
     });
 
-    aux$.error("AUX_STR");
+    auxSource$.setError("AUX_STR" as any);
     await done;
   });
 
   it('should convert non-Error source errors into Error', async () => {
-    const main$ = createSubject<number>();
-    const aux$ = createSubject<string>();
+    const mainSource$ = atom<number>(); const main$ = fromAtom(mainSource$);
+    const auxSource$ = atom<string>(); const aux$ = fromAtom(auxSource$);
 
     const combined = main$.pipe(withLatestFrom(aux$));
 
@@ -209,14 +210,14 @@ describe('withLatestFrom', () => {
       });
     });
 
-    aux$.next("A");
-    main$.error("MAIN_STR");
+    auxSource$.set("A");
+    mainSource$.setError("MAIN_STR" as any);
     await done;
   });
 
   it('unsubscribe does not re-abort after the pipeline is already aborted', async () => {
-    const main$ = createSubject<number>();
-    const aux$ = createSubject<string>();
+    const mainSource$ = atom<number>(); const main$ = fromAtom(mainSource$);
+    const auxSource$ = atom<string>(); const aux$ = fromAtom(auxSource$);
 
     const combined = main$.pipe(withLatestFrom(aux$));
 
@@ -237,7 +238,7 @@ describe('withLatestFrom', () => {
     });
 
     await scheduler.flush();
-    aux$.error(new Error("AUX"));
+    auxSource$.setError(new Error("AUX"));
     await scheduler.flush();
     await done;
 
@@ -246,17 +247,17 @@ describe('withLatestFrom', () => {
   });
 
   it('auxiliary errors after abort are ignored', async () => {
-    const main$ = createSubject<number>();
-    const aux1$ = createSubject<string>();
-    const aux2$ = createSubject<string>();
+    const mainSource$ = atom<number>(); const main$ = fromAtom(mainSource$);
+    const aux1Source$ = atom<string>(); const aux1$ = fromAtom(aux1Source$);
+    const aux2Source$ = atom<string>(); const aux2$ = fromAtom(aux2Source$);
 
     const combined = main$.pipe(withLatestFrom(aux1$, aux2$));
 
     const errorSpy = jasmine.createSpy("errorSpy");
     combined.subscribe({ next: (value) => console.log(value), error: errorSpy });
 
-    aux1$.error(new Error("FIRST"));
-    aux2$.error("SECOND");
+    aux1Source$.setError(new Error("FIRST"));
+    aux2Source$.setError("SECOND" as any);
     await new Promise((r) => setTimeout(r, 0));
 
     expect(errorSpy).toHaveBeenCalledTimes(1);
@@ -290,8 +291,8 @@ describe('withLatestFrom', () => {
   });
 
   it('does not emit until all auxiliary streams have a value', async () => {
-    const main$ = createSubject<number>();
-    const aux$ = createSubject<string>();
+    const mainSource$ = atom<number>(); const main$ = fromAtom(mainSource$);
+    const auxSource$ = atom<string>(); const aux$ = fromAtom(auxSource$);
     const combined = main$.pipe(withLatestFrom(aux$));
 
     const results: any[] = [];
@@ -300,14 +301,14 @@ describe('withLatestFrom', () => {
     await scheduler.flush();
 
     // Main emits before aux has any value -> gated, no emission.
-    main$.next(1);
+    mainSource$.set(1);
     await scheduler.flush();
     expect(results).toEqual([]);
 
-    aux$.next('A');
+    auxSource$.set('A');
     await scheduler.flush();
 
-    main$.next(2);
+    mainSource$.set(2);
     await scheduler.flush();
 
     expect(results).toEqual([[2, 'A']]);
@@ -333,7 +334,7 @@ describe('withLatestFrom', () => {
   });
 
   it('should abort during promise resolution of auxiliary streams', async () => {
-    const main$ = createSubject<number>();
+    const mainSource$ = atom<number>(); const main$ = fromAtom(mainSource$);
     
     // Create a slow-resolving promise for auxiliary stream
     let resolveAux!: (s: any) => void;
@@ -365,7 +366,7 @@ describe('withLatestFrom', () => {
   });
 
   it('should handle auxiliary error during promise resolution setup', async () => {
-    const main$ = createSubject<number>();
+    const mainSource$ = atom<number>(); const main$ = fromAtom(mainSource$);
     
     // Create a promise that rejects
     const rejectingPromise = Promise.reject(new Error('SETUP_ERROR'));
@@ -390,8 +391,8 @@ describe('withLatestFrom', () => {
   });
 
   it('should call original teardown callback when unsubscribing', async () => {
-    const main$ = createSubject<number>();
-    const aux$ = createSubject<string>();
+    const mainSource$ = atom<number>(); const main$ = fromAtom(mainSource$);
+    const auxSource$ = atom<string>(); const aux$ = fromAtom(auxSource$);
 
     const combined = main$.pipe(withLatestFrom(aux$));
 
@@ -419,8 +420,8 @@ describe('withLatestFrom', () => {
   });
 
   it('should handle source error when auxiliary has emitted', async () => {
-    const main$ = createSubject<number>();
-    const aux$ = createSubject<string>();
+    const mainSource$ = atom<number>(); const main$ = fromAtom(mainSource$);
+    const auxSource$ = atom<string>(); const aux$ = fromAtom(auxSource$);
 
     const combined = main$.pipe(withLatestFrom(aux$));
 
@@ -435,13 +436,13 @@ describe('withLatestFrom', () => {
 
     await scheduler.flush();
 
-    aux$.next('A');
+    auxSource$.set('A');
     await scheduler.flush();
 
-    main$.next(1);
+    mainSource$.set(1);
     await scheduler.flush();
 
-    main$.error(new Error('SOURCE_ERROR'));
+    mainSource$.setError(new Error('SOURCE_ERROR'));
     await scheduler.flush();
 
     expect(results).toEqual([[1, 'A']]);
@@ -449,8 +450,8 @@ describe('withLatestFrom', () => {
   });
 
   it('should cleanup when auxiliary error occurs before source emits', async () => {
-    const main$ = createSubject<number>();
-    const aux$ = createSubject<string>();
+    const mainSource$ = atom<number>(); const main$ = fromAtom(mainSource$);
+    const auxSource$ = atom<string>(); const aux$ = fromAtom(auxSource$);
 
     const combined = main$.pipe(withLatestFrom(aux$));
 
@@ -465,11 +466,11 @@ describe('withLatestFrom', () => {
     await scheduler.flush();
 
     // Emit error from auxiliary before main has emitted
-    aux$.error(new Error('EARLY_AUX_ERROR'));
+    auxSource$.setError(new Error('EARLY_AUX_ERROR'));
     await scheduler.flush();
 
     // Try to emit from main after error
-    main$.next(1);
+    mainSource$.set(1);
     await scheduler.flush();
 
     expect(errorSpy).toHaveBeenCalledWith(jasmine.objectContaining({ message: 'EARLY_AUX_ERROR' }));

@@ -1,22 +1,23 @@
-import { createSubject, defer, from, type Stream } from '@epikodelabs/streamix';
+import { atom, fromAtom, defer, from, type Stream, type Atom } from '@epikodelabs/streamix';
 
 // Mocking Stream class
 /**
  * Function mockStream.
  */
 export function mockStream(values: any[], completed = false, error?: Error): Stream<any> {
-  const subject = createSubject<any>();
+  const source$: Atom<any> = atom<any>();
+  const subject = fromAtom(source$);
 
   setTimeout(() => {
     if (error) {
-      subject.error(error);
+      source$.setError(error);
       return;
     }
 
-    values.forEach(value => subject.next(value));
+    values.forEach(value => source$.set(value));
 
     if (completed) {
-      subject.complete();
+      source$.dispose();
     }
   }, 0);
 

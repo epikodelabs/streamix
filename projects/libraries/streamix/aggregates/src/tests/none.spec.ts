@@ -1,15 +1,15 @@
-import { createSubject, type Stream } from '@epikodelabs/streamix';
+import { atom, fromAtom, type Atom, type Stream } from '@epikodelabs/streamix';
 import { none } from '@epikodelabs/streamix/aggregates';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe('none', () => {
-  let subject: ReturnType<typeof createSubject<number>>;
+  let source$: Atom<number>;
   let source: Stream<number>;
 
   beforeEach(() => {
-    subject = createSubject<number>();
-    source = subject;
+    source$ = atom<number>();
+    source = fromAtom(source$);
   });
 
   it('should emit true when no values satisfy the predicate', async () => {
@@ -23,9 +23,9 @@ describe('none', () => {
       }
     })();
 
-    subject.next(1);
-    subject.next(9);
-    subject.complete();
+    source$.set(1);
+    source$.set(9);
+    source$.dispose();
     await settle();
 
     expect(results).toEqual([true]);
@@ -42,10 +42,10 @@ describe('none', () => {
       }
     })();
 
-    subject.next(1);
-    subject.next(6);
-    subject.next(2);
-    subject.complete();
+    source$.set(1);
+    source$.set(6);
+    source$.set(2);
+    source$.dispose();
     await settle();
 
     expect(results).toEqual([false]);
@@ -62,10 +62,10 @@ describe('none', () => {
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.next(3);
-    subject.complete();
+    source$.set(1);
+    source$.set(2);
+    source$.set(3);
+    source$.dispose();
     await settle();
 
     expect(results).toEqual([false]);

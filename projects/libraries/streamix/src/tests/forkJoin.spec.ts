@@ -1,4 +1,4 @@
-import { createSubject, forkJoin, from } from '@epikodelabs/streamix';
+import { atom, forkJoin, from, fromAtom, type Atom } from '@epikodelabs/streamix';
 
 describe('forkJoin', () => {
   it('should emit last values from all sources', async () => {
@@ -33,24 +33,24 @@ describe('forkJoin', () => {
   });
 
   it('should accept array of streams', async () => {
-    const a$ = createSubject<number>();
-    const b$ = createSubject<string>();
+    const a$: Atom<number> = atom<number>();
+    const b$: Atom<string> = atom<string>();
 
     const results: any[] = [];
     const done = new Promise<void>((resolve, reject) => {
-      forkJoin(a$, b$).subscribe({
+      forkJoin(fromAtom(a$), fromAtom(b$)).subscribe({
         next: (value) => results.push(value),
         complete: resolve,
         error: reject,
       });
     });
 
-    a$.next(10);
-    b$.next('x');
-    a$.next(20);
-    b$.next('y');
-    a$.complete();
-    b$.complete();
+    a$.set(10);
+    b$.set('x');
+    a$.set(20);
+    b$.set('y');
+    a$.dispose();
+    b$.dispose();
 
     await done;
     expect(results).toEqual([[20, 'y']]);

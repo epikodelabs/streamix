@@ -1,12 +1,12 @@
-import { createSubject, distinctUntilKeyChanged, type Stream } from '@epikodelabs/streamix';
+import { atom, fromAtom, distinctUntilKeyChanged, type Stream, type Atom } from '@epikodelabs/streamix';
 
 describe('distinctUntilKeyChanged', () => {
-  let subject: ReturnType<typeof createSubject<any>>;
+  let source$: Atom<any>;
   let source: Stream<any>;
 
   beforeEach(() => {
-    subject = createSubject<any>();
-    source = subject;
+    source$ = atom<any>();
+    source = fromAtom(source$);
   });
 
   it('should emit values with distinct keys', async () => {
@@ -19,12 +19,12 @@ describe('distinctUntilKeyChanged', () => {
       }
     })();
 
-    subject.next({ key: 1, value: 'a' });
-    subject.next({ key: 1, value: 'b' }); // same key, skip
-    subject.next({ key: 2, value: 'c' }); // new key, emit
-    subject.next({ key: 2, value: 'd' }); // same key, skip
-    subject.next({ key: 3, value: 'e' }); // new key, emit
-    subject.complete();
+    source$.set({ key: 1, value: 'a' });
+    source$.set({ key: 1, value: 'b' }); // same key, skip
+    source$.set({ key: 2, value: 'c' }); // new key, emit
+    source$.set({ key: 2, value: 'd' }); // same key, skip
+    source$.set({ key: 3, value: 'e' }); // new key, emit
+    source$.dispose();
 
     await consumptionPromise;
 
@@ -45,10 +45,10 @@ describe('distinctUntilKeyChanged', () => {
       }
     })();
 
-    subject.next({ key: 1, value: 'a' }); // emit
-    subject.next({ key: 1, value: 'b' }); // same key, skip
-    subject.next({ key: 1, value: 'c' }); // same key, skip
-    subject.complete();
+    source$.set({ key: 1, value: 'a' }); // emit
+    source$.set({ key: 1, value: 'b' }); // same key, skip
+    source$.set({ key: 1, value: 'c' }); // same key, skip
+    source$.dispose();
 
     await consumptionPromise;
 
@@ -67,7 +67,7 @@ describe('distinctUntilKeyChanged', () => {
       }
     })();
 
-    subject.complete();
+    source$.dispose();
 
     await consumptionPromise;
 
@@ -88,7 +88,7 @@ describe('distinctUntilKeyChanged', () => {
       }
     })();
 
-    subject.error(new Error('Test Error'));
+    source$.setError(new Error('Test Error'));
 
     await consumptionPromise;
 
@@ -105,10 +105,10 @@ describe('distinctUntilKeyChanged', () => {
       }
     })();
 
-    subject.next({ key: 1, value: 'a' });
-    subject.next({ key: 1, value: 'b' });
-    subject.next({ key: 2, value: 'c' });
-    subject.complete();
+    source$.set({ key: 1, value: 'a' });
+    source$.set({ key: 1, value: 'b' });
+    source$.set({ key: 2, value: 'c' });
+    source$.dispose();
 
     await consumptionPromise;
 
@@ -129,11 +129,11 @@ describe('distinctUntilKeyChanged', () => {
       }
     })();
 
-    subject.next({ key: 5, value: 'first' });
-    subject.next({ key: 5, value: 'skip' });
-    subject.next({ key: 6, value: 'second' });
-    subject.next({ key: 6, value: 'skip again' });
-    subject.complete();
+    source$.set({ key: 5, value: 'first' });
+    source$.set({ key: 5, value: 'skip' });
+    source$.set({ key: 6, value: 'second' });
+    source$.set({ key: 6, value: 'skip again' });
+    source$.dispose();
 
     await consumptionPromise;
 

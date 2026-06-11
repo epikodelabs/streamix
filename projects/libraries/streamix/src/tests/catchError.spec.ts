@@ -1,7 +1,8 @@
-import { catchError, createSubject, map, NEXT, type Subject } from '@epikodelabs/streamix';
+import { catchError, atom, fromAtom, map, NEXT, type Atom, type Stream } from '@epikodelabs/streamix';
 
 describe('catchError', () => {
-  let subject: Subject;
+  let source$: Atom;
+  let source: Stream;
   let handlerMock: jasmine.Spy;
 
   beforeEach(() => {
@@ -9,11 +10,12 @@ describe('catchError', () => {
   });
 
   it('should handle errors from a stream and not propagate them', (done) => {
-    subject = createSubject();
+    source$ = atom();
+    source = fromAtom(source$);
     const error = new Error("Unhandled exception.");
     let errorCalled = false;
 
-    const streamWithCatchError = subject
+    const streamWithCatchError = source
       .pipe(
         map(() => { throw error; }),
         catchError(handlerMock)
@@ -28,15 +30,16 @@ describe('catchError', () => {
       }
     });
 
-    subject.next(1);
-    subject.complete();
+    source$.set(1);
+    source$.dispose();
   });
 
   it('should propagate errors if catchError is not present', (done) => {
-    subject = createSubject();
+    source$ = atom();
+    source = fromAtom(source$);
     const error = new Error("Unhandled exception.");
 
-    const streamWithoutCatchError = subject.pipe(map(() => { throw error; }));
+    const streamWithoutCatchError = source.pipe(map(() => { throw error; }));
 
     streamWithoutCatchError.subscribe({
       error: (err) => {
@@ -46,14 +49,15 @@ describe('catchError', () => {
       }
     });
 
-    subject.next(1);
-    subject.complete();
+    source$.set(1);
+    source$.dispose();
   });
 
   it('should complete after catching the first error', async () => {
     const error = new Error('Unhandled exception.');
-    subject = createSubject<number>();
-    const streamWithCatchError = subject.pipe(
+    source$ = atom<number>();
+    source = fromAtom(source$);
+    const streamWithCatchError = source.pipe(
       map((value) => {
         if (value === 2) {
           throw error;
@@ -65,10 +69,10 @@ describe('catchError', () => {
     );
     const streamIterator = streamWithCatchError[Symbol.asyncIterator]();
 
-    subject.next(1);
+    source$.set(1);
     expect(await streamIterator.next()).toEqual(NEXT(1));
 
-    subject.next(2);
+    source$.set(2);
     const result = await streamIterator.next();
 
     expect(result.done).toBeTrue();
@@ -81,16 +85,17 @@ describe('catchError', () => {
 
   it('should not trigger exception when catchError handles error from subject.error', async () => {
     const error = new Error('Subject error.');
-    subject = createSubject<number>();
-    const streamWithCatchError = subject.pipe(
+    source$ = atom<number>();
+    source = fromAtom(source$);
+    const streamWithCatchError = source.pipe(
       catchError(handlerMock)
     );
     const streamIterator = streamWithCatchError[Symbol.asyncIterator]();
 
-    subject.next(1);
+    source$.set(1);
     expect(await streamIterator.next()).toEqual(NEXT(1));
 
-    subject.error(error);
+    source$.setError(error);
     const result = await streamIterator.next();
 
     expect(result.done).toBeTrue();
@@ -101,10 +106,11 @@ describe('catchError', () => {
 
   it('should not call subscriber error callback when catchError handles subject.error', (done) => {
     const error = new Error('Subject error.');
-    subject = createSubject<number>();
+    source$ = atom<number>();
+    source = fromAtom(source$);
     let errorCalled = false;
 
-    const streamWithCatchError = subject.pipe(
+    const streamWithCatchError = source.pipe(
       catchError(handlerMock)
     );
 
@@ -117,7 +123,7 @@ describe('catchError', () => {
       }
     });
 
-    subject.next(1);
-    subject.error(error);
+    source$.set(1);
+    source$.setError(error);
   });
 });

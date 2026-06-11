@@ -1,13 +1,13 @@
-import { createSubject, type Stream } from '@epikodelabs/streamix';
+import { atom, fromAtom, type Atom, type Stream } from '@epikodelabs/streamix';
 import { every } from '@epikodelabs/streamix/aggregates';
 
 describe('every', () => {
-  let subject: ReturnType<typeof createSubject<number>>;
+  let source$: Atom<number>;
   let source: Stream<number>;
 
   beforeEach(() => {
-    subject = createSubject<number>();
-    source = subject;
+    source$ = atom<number>();
+    source = fromAtom(source$);
   });
 
   it('should emit true if all values satisfy the predicate', async () => {
@@ -21,10 +21,10 @@ describe('every', () => {
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.next(3); // All values > 0
-    subject.complete();
+    source$.set(1);
+    source$.set(2);
+    source$.set(3); // All values > 0
+    source$.dispose();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([true]);
@@ -41,9 +41,9 @@ describe('every', () => {
       }
     })();
 
-    subject.next(1);
-    subject.next(-1); // Does not satisfy predicate (value > 0)
-    subject.complete();
+    source$.set(1);
+    source$.set(-1); // Does not satisfy predicate (value > 0)
+    source$.dispose();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([false]);
@@ -60,7 +60,7 @@ describe('every', () => {
       }
     })();
 
-    subject.complete(); // Empty stream, so it should emit true
+    source$.dispose(); // Empty stream, so it should emit true
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([true]);
@@ -81,7 +81,7 @@ describe('every', () => {
       }
     })();
 
-    subject.error(new Error('Test Error'));
+    source$.setError(new Error('Test Error'));
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(error).toEqual(new Error('Test Error')); // Propagate error
@@ -99,9 +99,9 @@ describe('every', () => {
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.complete(); // All values > 0, should emit true and complete
+    source$.set(1);
+    source$.set(2);
+    source$.dispose(); // All values > 0, should emit true and complete
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(completed).toBe(true);
@@ -119,12 +119,10 @@ describe('every', () => {
       }
     })();
 
-    subject.next(1);
-    subject.next(-1); // Does not satisfy predicate, should emit false and complete
+    source$.set(1);
+    source$.set(-1); // Does not satisfy predicate, should emit false and complete
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(completed).toBe(true);
   });
 });
-
-
