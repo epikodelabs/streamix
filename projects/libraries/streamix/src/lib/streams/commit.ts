@@ -42,6 +42,14 @@ export function commit<T = any>(
     let retryCount = 0;
     let lastError: Error | null = null;
 
+    let produced: Stream<T> | MaybePromise<T>;
+    try {
+      produced = factory();
+    } catch (factoryError) {
+      // Fail fast if the factory itself throws, as retrying is unlikely to help.
+      throw factoryError instanceof Error ? factoryError : new Error(String(factoryError));
+    }
+
     while (retryCount <= resolvedMaxRetries) {
       let iterator: AsyncIterator<T> | null = null;
 
@@ -108,6 +116,15 @@ export function commit<T = any>(
             await iterator.return(undefined);
           } catch {
             // Suppress secondary exceptions to protect the core error trace
+          }
+        }
+
+        // If we are about to retry, re-invoke the factory.
+        if (retryCount < resolvedMaxRetries) {
+          try {
+            produced = factory();
+          } catch (factoryError) {
+            throw factoryError instanceof Error ? factoryError : new Error(String(factoryError));
           }
         }
       }

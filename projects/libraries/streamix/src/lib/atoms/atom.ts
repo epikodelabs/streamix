@@ -15,7 +15,8 @@ export interface AtomBase<T = any> {
 
   /**
    * The current value, or the last known value if in an error state.
-   * Never returns `undefined` due to errors. For a nullable variant, use
+   * Never returns `undefined` due to errors.
+   * @throws {Error} If the atom has not yet emitted a value, is in an error state, or has been disposed. For a nullable variant, use
    * {@link safeValue}.
    */
   readonly value: T;
@@ -155,7 +156,8 @@ export function flow<T>(stream: Stream<T>): AtomBase<T> {
 
     get value() {
       if (activeFormula) activeFormula.dependencies.add(instance);
-      return state.tag === "value" ? state.current : state.previous!;
+      if (state.tag === "value") return state.current;
+      throw new Error("Atom has not emitted a value yet or is in an error state.");
     },
 
     get safeValue() {
@@ -229,7 +231,8 @@ export function atom<T>(initialValue?: T, options?: AtomOptions<T>): Atom<T> {
 
     get value() {
       if (activeFormula) activeFormula.dependencies.add(instance);
-      return state.tag === "value" ? state.current : state.previous!;
+      if (state.tag === "value") return state.current;
+      throw new Error("Atom has not emitted a value yet or is in an error state.");
     },
 
     get safeValue() {
@@ -410,7 +413,8 @@ export function derived<T>(fn: () => T): AtomBase<T> {
     get value() {
       ensureEvaluated();
       if (activeFormula) activeFormula.dependencies.add(instance);
-      return state.tag === "value" ? state.current : state.previous!;
+      if (state.tag === "value") return state.current;
+      throw new Error("Derived atom has not been evaluated yet or is in an error state.");
     },
 
     get safeValue() {

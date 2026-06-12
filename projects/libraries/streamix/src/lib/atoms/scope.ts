@@ -198,7 +198,7 @@ export function scope<T>(factory: () => T): Scope & T {
       const result: Record<string, any> = {};
       for (const [key, value] of Object.entries(source)) {
         if (isAtom(value)) {
-          result[key] = value.disposed ? undefined : value.value;
+          result[key] = value.disposed ? undefined : value.safeValue;
         } else if (isScope(value)) {
           result[key] = value.snapshot();
         } else {
