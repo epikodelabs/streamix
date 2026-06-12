@@ -1,17 +1,17 @@
 import { createStream } from "@epikodelabs/streamix";
 import {
-    ChannelClosedError,
-    ContextCancelledError,
-    background,
-    channel,
-    coroutine,
-    otherwise,
-    receive,
-    select,
-    send,
-    withCancel,
-    withDeadline,
-    withTimeout
+  ChannelClosedError,
+  ContextCancelledError,
+  background,
+  channel,
+  coroutine,
+  otherwise,
+  receive,
+  select,
+  send,
+  withCancel,
+  withDeadline,
+  withTimeout
 } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
@@ -114,16 +114,18 @@ idescribe('coroutine', () => {
                 this.onmessage?.(event);
                 this.listeners['message']?.forEach(fn => fn(event));
               }).catch(err => {
+                const message = err instanceof Error ? err.message : err === undefined ? "Worker task threw undefined" : String(err);
                 const event: MessageEvent<any> = {
-                  data: { ...msg, type: 'error', error: err.message }
+                  data: { ...msg, type: 'error', error: message }
                 } as any;
                 this.onmessage?.(event);
                 this.listeners['message']?.forEach(fn => fn(event));
               });
               
             } catch (err: any) {
+              const message = err instanceof Error ? err.message : err === undefined ? "Worker task threw undefined" : String(err);
               const event: MessageEvent<any> = {
-                data: { ...msg, type: 'error', error: err.message }
+                data: { ...msg, type: 'error', error: message }
               } as any;
               this.onmessage?.(event);
               this.listeners['message']?.forEach(fn => fn(event));
@@ -234,6 +236,32 @@ idescribe('coroutine', () => {
       fail('Expected processTask to throw error');
     } catch (err: any) {
       expect(err.message).toBe('boom');
+    }
+
+    // Restore originals
+    console.log = originalLog;
+    console.error = originalError;
+    console.warn = originalWarn;
+  });
+
+  it('should serialize undefined worker errors sensibly', async () => {
+    // Silence them
+    console.log = () => {};
+    console.error = () => {};
+    console.warn = () => {};
+
+    const mainTask = () => {
+      throw undefined;
+    };
+    (globalThis as any).currentMainTask = mainTask;
+
+    const co = coroutine(mainTask);
+
+    try {
+      await co.processTask(1);
+      fail('Expected processTask to throw error');
+    } catch (err: any) {
+      expect(err.message).toBe('Worker task threw undefined');
     }
 
     // Restore originals
@@ -385,37 +413,22 @@ idescribe('coroutine', () => {
   });
 
   it('should reject queued processTask requests when finalized', async () => {
-    const originalDescriptor = Object.getOwnPropertyDescriptor(navigator, "hardwareConcurrency");
-
-    let releaseFirstTask!: () => void;
     const mainTask = (x: number) => {
       if (x === 1) {
-        return new Promise<number>((resolve) => {
-          releaseFirstTask = () => resolve(1);
-        });
+        return new Promise<number>(() => {}); // never resolves
       }
       return x;
     };
     (globalThis as any).currentMainTask = mainTask;
+
     const co = coroutine(mainTask);
+    const active = co.processTask(1);
+    const queued = co.processTask(2);
 
-    try {
-      Object.defineProperty(navigator, "hardwareConcurrency", { value: 1, configurable: true });
+    await co.finalize();
 
-      const active = co.processTask(1);
-      const queued = co.processTask(2);
-
-      await new Promise(r => setTimeout(r, 10));
-      await co.finalize();
-
-      await expectAsync(active).toBeRejectedWithError(/finalized before the worker task completed/);
-      await expectAsync(queued).toBeRejectedWithError(/finalized before a worker became available/);
-    } finally {
-      releaseFirstTask?.();
-      if (originalDescriptor) {
-        Object.defineProperty(navigator, "hardwareConcurrency", originalDescriptor);
-      }
-    }
+    await expectAsync(active).toBeRejectedWithError(/finalized before the worker task completed/);
+    await expectAsync(queued).toBeRejectedWithError(/finalized before a worker became available/);
   });
 
   it('finalize is safe when called before any worker is created', async () => {
@@ -424,6 +437,11 @@ idescribe('coroutine', () => {
     const co = coroutine(mainTask);
 
     await co.finalize();
+
+    // After finalization, new tasks should be rejected.
+    await expectAsync(co.processTask(1)).toBeRejectedWithError(
+      /finalized before a worker became available/
+    );
   });
 
 });

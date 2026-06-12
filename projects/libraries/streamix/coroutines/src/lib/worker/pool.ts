@@ -164,7 +164,6 @@ export function createTaskPool<T, R>({
     }
 
     createdWorkersCount = 0;
-    isFinalizing = false;
     releaseBlobUrl(workerScript);
   };
 

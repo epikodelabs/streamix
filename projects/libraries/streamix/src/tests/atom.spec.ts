@@ -305,7 +305,8 @@ describe('derived', () => {
     doubled.dispose();
 
     a.set(99);
-    expect(doubled.value).toBe(2);
+    expect(doubled.safeValue).toBe(2);
+    expect(() => doubled.value).toThrowError();
   });
 
   it('should not evaluate until read', () => {
