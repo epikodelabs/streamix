@@ -67,7 +67,7 @@ export function createDefaultMessageHandler(
 ) {
   return (event: MessageEvent<WorkerProtocolMessage>) => {
     const msg = event.data;
-    const { taskId, payload, error, type, workerId } = msg;
+    const { taskId, payload, error, type } = msg;
     const pending = pendingTasks.get(taskId);
 
     switch (type) {
@@ -79,14 +79,6 @@ export function createDefaultMessageHandler(
         break;
       case "error": {
         const errorMessage = error?.trim?.() ? error : "Unknown worker error";
-        if (!error?.trim?.()) {
-          console.warn(
-            `Error received from worker ${workerId} for task ${taskId} (missing error details):`,
-            msg
-          );
-        } else if (pending) {
-          console.warn(`Error received from worker ${workerId} for task ${taskId}:`, errorMessage);
-        }
         if (pending) {
           pendingTasks.delete(taskId);
           pending.reject(new Error(errorMessage));

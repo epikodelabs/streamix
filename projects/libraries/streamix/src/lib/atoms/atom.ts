@@ -31,8 +31,18 @@ export interface AtomBase<T = any> {
    *
    * When accessed inside a {@link derived} factory, this atom is automatically
    * registered as a dependency.
+   *
+   * @throws {Error} If the atom has been disposed.
    */
   readonly value: T;
+
+  /**
+   * The current value, or the last known value if the atom has been disposed.
+   *
+   * Unlike {@link value}, this never throws. Use it when you need a defensive
+   * read (e.g. snapshots, cleanup handlers).
+   */
+  readonly safeValue: T;
 
   /** The previous value (before the most recent change). */
   readonly prior: T;
@@ -180,9 +190,14 @@ export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
     },
 
     get value() {
+      if (disposed) throw new Error("Atom has been disposed");
       if (activeFormula) {
         activeFormula.dependencies.add(instance);
       }
+      return current;
+    },
+
+    get safeValue() {
       return current;
     },
 
@@ -265,9 +280,14 @@ export function atom<T>(initialValue: T): Atom<T> {
     },
 
     get value() {
+      if (disposed) throw new Error("Atom has been disposed");
       if (activeFormula) {
         activeFormula.dependencies.add(instance);
       }
+      return current;
+    },
+
+    get safeValue() {
       return current;
     },
 
@@ -425,9 +445,14 @@ export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
     },
 
     get value() {
+      if (disposed) throw new Error("Atom has been disposed");
       if (activeFormula) {
         activeFormula.dependencies.add(instance);
       }
+      return current;
+    },
+
+    get safeValue() {
       return current;
     },
 
@@ -587,9 +612,14 @@ export function derived<T>(fn: () => T): AtomBase<T> {
     },
 
     get value() {
+      if (disposed) throw new Error("Atom has been disposed");
       if (activeFormula) {
         activeFormula.dependencies.add(instance);
       }
+      return current;
+    },
+
+    get safeValue() {
       return current;
     },
 
