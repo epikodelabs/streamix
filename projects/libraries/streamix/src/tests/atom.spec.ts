@@ -181,7 +181,8 @@ describe('derived', () => {
 
     // Should not throw or affect the derived after disposal
     a.set(99);
-    expect(doubled.value).toBe(2);
+    expect(doubled.safeValue).toBe(2);
+    expect(() => doubled.value).toThrowError();
   });
 
   it('should dynamically adjust dependencies', () => {

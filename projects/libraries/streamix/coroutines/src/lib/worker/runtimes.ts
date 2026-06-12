@@ -4,6 +4,13 @@
  * Used by `coroutine()`, `compute()`, and `compose()`.
  */
 export const buildCoroutineWorkerRuntime = (): string => `
+const __serializeWorkerError = (error) => {
+  if (error instanceof Error) return error.message || error.name || "Error";
+  if (error === undefined) return "Worker task threw undefined";
+  if (error === null) return "Worker task threw null";
+  return String(error);
+};
+
 onmessage = async (event) => {
   const { workerId, taskId, payload, type } = event.data;
 
@@ -15,7 +22,7 @@ onmessage = async (event) => {
     const result = await __mainTask(payload);
     postMessage({ workerId, taskId, payload: result, type: 'response' });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = __serializeWorkerError(error);
     postMessage({ workerId, taskId, error: message, type: 'error' });
   }
 };`;
@@ -28,6 +35,13 @@ onmessage = async (event) => {
  * by the build script.
  */
 export const buildActorWorkerRuntime = (): string => `
+const __serializeWorkerError = (error) => {
+  if (error instanceof Error) return error.message || error.name || "Error";
+  if (error === undefined) return "Worker task threw undefined";
+  if (error === null) return "Worker task threw null";
+  return String(error);
+};
+
 const __pendingWorkerRequests = new Map();
 let __requestCounter = 0;
 
@@ -106,7 +120,7 @@ const __runBehaviorLoop = async (workerId, taskId) => {
         __postToMain({ workerId, taskId, type: "response", requestId: replyId, payload: result });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = __serializeWorkerError(error);
       if (replyId) {
         __postToMain({ workerId, taskId, type: "error", requestId: replyId, error: message });
       } else {

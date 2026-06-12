@@ -77,13 +77,22 @@ export function createDefaultMessageHandler(
           pending.resolve(payload);
         }
         break;
-      case "error":
-        console.warn(`Error received from worker ${workerId} for task ${taskId}:`, error);
+      case "error": {
+        const errorMessage = error?.trim?.() ? error : "Unknown worker error";
+        if (!error?.trim?.()) {
+          console.warn(
+            `Error received from worker ${workerId} for task ${taskId} (missing error details):`,
+            msg
+          );
+        } else if (pending) {
+          console.warn(`Error received from worker ${workerId} for task ${taskId}:`, errorMessage);
+        }
         if (pending) {
           pendingTasks.delete(taskId);
-          pending.reject(new Error(error ?? "Unknown worker error"));
+          pending.reject(new Error(errorMessage));
         }
         break;
+      }
       case "request":
         if (options?.onRequest) {
           Promise.resolve(options.onRequest(msg)).catch((hookError) => {

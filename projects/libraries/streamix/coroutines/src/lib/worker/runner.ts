@@ -126,7 +126,7 @@ export function createTaskRunner<T, R>({
 
   const processTask = (value: T): Promise<R> => {
     if (isFinalizing) {
-      return Promise.reject(new Error(`${name} is finalizing`));
+      return Promise.reject(new Error(`${name} finalized before a worker became available`));
     }
 
     return new Promise<R>((resolve, reject) => {
@@ -163,7 +163,6 @@ export function createTaskRunner<T, R>({
 
     workerMessageHandler = null;
     isProcessing = false;
-    isFinalizing = false;
     releaseWorkerScript();
   };
 
