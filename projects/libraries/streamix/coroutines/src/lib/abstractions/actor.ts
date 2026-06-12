@@ -1096,6 +1096,7 @@ function createActor<S = any, Q = any, D = any, FromMain = any>(
         settled = true;
         finishShutdown = null;
         activeWorker.removeEventListener("message", handleMessage);
+        activeWorker.removeEventListener("error", handleError);
         activeWorker.terminate();
         if (worker === activeWorker) {
           worker = null;
@@ -1155,6 +1156,10 @@ function createActor<S = any, Q = any, D = any, FromMain = any>(
         void shutdown(true);
       }
     }
+  };
+
+  const handleError = () => {
+    // Generic error handler, specific errors are handled within the message handler
   };
 
   worker.addEventListener("message", handleMessage);
