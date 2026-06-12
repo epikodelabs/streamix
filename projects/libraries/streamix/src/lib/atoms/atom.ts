@@ -1,6 +1,7 @@
 import type { Stream } from "../abstractions/stream";
 import { createSubscription, type Subscription } from "../abstractions/subscription";
-import { registerWithCurrentScope } from "./scope";
+import { sample } from "../operators/sample";
+import { getCurrentScope, getScopeStrobe, registerWithCurrentScope } from "./scope";
 
 /**
  * Base interface for all atoms.
@@ -152,6 +153,10 @@ function notifyDerivedSubscribers(notify: () => void) {
  * ```
  */
 export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
+  const scope = getCurrentScope();
+  const strobe = scope ? getScopeStrobe(scope) : undefined;
+  const sourceStream = strobe ? stream.pipe(sample(strobe)) : stream;
+
   let current = initialValue;
   let previous = initialValue;
   let disposed = false;
@@ -159,7 +164,7 @@ export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
 
   const subs = new Set<(value: T) => void>();
 
-  const streamSub = stream.subscribe((value: T) => {
+  const streamSub = sourceStream.subscribe((value: T) => {
     if (disposed) return;
     if (Object.is(current, value)) return;
 

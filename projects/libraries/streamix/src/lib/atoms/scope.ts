@@ -80,6 +80,23 @@ interface ScopeInternal {
   snapshotSource?: Record<string, any>;
   checkLoading(): void;
   loadingSubscriptions: Subscription[];
+  options: ScopeOptions;
+  effectiveStrobe: number | undefined;
+}
+
+/**
+ * Optional configuration for a scope.
+ */
+export interface ScopeOptions {
+  /**
+   * Strobe period in milliseconds.
+   *
+   * When set, every `flow()` atom created inside this scope (or a child scope
+   * that does not override it) will sample its source stream on this interval,
+   * batching rapid emissions into windowed updates. `0` or `undefined` disables
+   * the strobe.
+   */
+  strobe?: number;
 }
 
 const scopeInternals = new WeakMap<Scope, ScopeInternal>();
@@ -109,6 +126,16 @@ export function registerWithCurrentScope(value: AtomBase<any> | Scope): void {
     });
     internal.loadingSubscriptions.push(sub);
   }
+}
+
+/**
+ * Resolves the effective strobe for a scope by walking up the parent chain.
+ *
+ * @internal
+ */
+export function getScopeStrobe(scope: Scope): number | undefined {
+  const internal = scopeInternals.get(scope);
+  return internal?.effectiveStrobe;
 }
 
 /**
@@ -149,18 +176,23 @@ export function registerWithCurrentScope(value: AtomBase<any> | Scope): void {
  *
  * @see {@link AtomBase}
  */
-export function scope<T>(factory: () => T): Scope & T {
+export function scope<T>(factory: () => T, options: ScopeOptions = {}): Scope & T {
   const previousScope = currentScope;
 
   const tracked = new Set<AtomBase<any> | Scope>();
   const emittedAtoms = new Set<AtomBase<any>>();
   let localLoading = true;
 
+  const parentStrobe = previousScope ? scopeInternals.get(previousScope)?.effectiveStrobe : undefined;
+  const effectiveStrobe = options.strobe ? options.strobe : parentStrobe;
+
   const internal: ScopeInternal = {
     tracked,
     emittedAtoms,
     localLoading,
     loadingSubscriptions: [],
+    options,
+    effectiveStrobe,
 
     checkLoading() {
       if (!localLoading) return;

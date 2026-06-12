@@ -167,4 +167,88 @@ describe('scope', () => {
       s.dispose();
     });
   });
+
+  describe('strobe', () => {
+    it('should sample flow emissions with scope strobe', async () => {
+      const subject = createSubject<number>();
+      const s = scope(() => {
+        const a = flow(subject, 0);
+        return { a };
+      }, { strobe: 50 });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      subject.next(1);
+      subject.next(2);
+      subject.next(3);
+
+      await delay(70);
+      expect(s.a.value).toBe(3);
+      expect(values).toContain(3);
+
+      s.dispose();
+    });
+
+    it('should inherit strobe from parent scope', async () => {
+      const subject = createSubject<number>();
+      const parent = scope(() => {
+        const child = scope(() => {
+          const a = flow(subject, 0);
+          return { a };
+        });
+        return { child };
+      }, { strobe: 50 });
+
+      subject.next(1);
+      subject.next(2);
+
+      await delay(70);
+      expect(parent.child.a.value).toBe(2);
+
+      parent.dispose();
+    });
+
+    it('should allow child scope to override parent strobe', async () => {
+      const subject = createSubject<number>();
+      const parent = scope(() => {
+        const child = scope(() => {
+          const a = flow(subject, 0);
+          return { a };
+        }, { strobe: 150 });
+        return { child };
+      }, { strobe: 50 });
+
+      subject.next(1);
+      subject.next(2);
+
+      await delay(70);
+      // Child uses 150ms strobe, so it should not have sampled yet
+      expect(parent.child.a.value).toBe(0);
+
+      await delay(100);
+      // Total ~170ms, child's strobe should have fired
+      expect(parent.child.a.value).toBe(2);
+
+      parent.dispose();
+    });
+
+    it('should stop sampling when scope is disposed', async () => {
+      const subject = createSubject<number>();
+      const s = scope(() => {
+        const a = flow(subject, 0);
+        return { a };
+      }, { strobe: 50 });
+
+      s.dispose();
+
+      subject.next(1);
+      subject.next(2);
+
+      await delay(70);
+      expect(s.a.safeValue).toBe(0);
+
+      expect(() => s.a.value).toThrowError();
+    });
+  });
 });
