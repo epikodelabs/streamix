@@ -1,6 +1,6 @@
 import type { Stream } from "@epikodelabs/streamix";
 import { createSubscription, type Subscription } from "../abstractions/subscription";
-import { registerWithCurrentScope } from "./scope";
+import { DERIVED_ATOM, registerWithCurrentScope } from "./scope";
 
 /* ── Base interface ── */
 
@@ -204,12 +204,18 @@ export interface Atom<T = any> extends AtomBase<T> {
   setError(error: Error): void;
 }
 
-export function atom<T>(initialValue?: T): Atom<T> {
+export interface AtomOptions<T = any> {
+  /** Custom equality function. If provided, `set` calls that return `true` are ignored. */
+  equal?: (a: T, b: T) => boolean;
+}
+
+export function atom<T>(initialValue?: T, options?: AtomOptions<T>): Atom<T> {
   let state: AtomState<T> = initialValue !== undefined
     ? valueState(initialValue)
     : { tag: "error", current: new Error("Atom has not emitted yet"), previous: undefined };
   const valueSubs = new Set<(value: T) => void>();
   const stateSubs = new Set<(state: AtomState<T>) => void>();
+  const equal = options?.equal;
 
   const instance: Atom<T> = {
     type: "atom",
@@ -250,6 +256,10 @@ export function atom<T>(initialValue?: T): Atom<T> {
       if (state.tag === "disposed") return;
 
       const prev = state.tag === "value" ? state.current : state.previous;
+
+      if (state.tag === "value" && equal && equal(state.current, value)) {
+        return;
+      }
 
       state = { tag: "value", current: value, previous: prev };
       for (const cb of Array.from(stateSubs)) {
@@ -293,8 +303,13 @@ export function atom<T>(initialValue?: T): Atom<T> {
 /* ── derived ── */
 
 export function derived<T>(fn: () => T): AtomBase<T> {
-  let state: AtomState<T>;
+  let state: AtomState<T> = {
+    tag: "error",
+    current: new Error("Derived atom has not been evaluated yet"),
+    previous: undefined
+  };
   let running = false;
+  let evaluated = false;
 
   const valueSubs = new Set<(value: T) => void>();
   const stateSubs = new Set<(state: AtomState<T>) => void>();
@@ -316,7 +331,7 @@ export function derived<T>(fn: () => T): AtomBase<T> {
     running = true;
     const prev = activeFormula;
     activeFormula = context;
-    
+
     let result: { type: "value"; value: T } | { type: "error"; error: Error };
     try {
       result = { type: "value", value: fn() };
@@ -370,13 +385,16 @@ export function derived<T>(fn: () => T): AtomBase<T> {
 
   context.run = run;
 
-  // Set initial state without notifying
-  const initial = run();
-  if (initial.type === "value") {
-    state = { tag: "value", current: initial.value, previous: initial.value };
-  } else {
-    state = { tag: "error", current: initial.error, previous: undefined };
-  }
+  const ensureEvaluated = (): void => {
+    if (evaluated || state.tag === "disposed") return;
+    evaluated = true;
+    const result = run();
+    if (result.type === "value") {
+      state = { tag: "value", current: result.value, previous: result.value };
+    } else {
+      state = { tag: "error", current: result.error, previous: undefined };
+    }
+  };
 
   const instance: AtomBase<T> = {
     type: "atom",
@@ -384,28 +402,36 @@ export function derived<T>(fn: () => T): AtomBase<T> {
     get disposed() { return state.tag === "disposed"; },
     get error() { return state.tag === "error" ? state.current : null; },
     get() {
+      ensureEvaluated();
       if (activeFormula) activeFormula.dependencies.add(instance);
       return getStateValue(state);
     },
 
     get value() {
+      ensureEvaluated();
       if (activeFormula) activeFormula.dependencies.add(instance);
       return state.tag === "value" ? state.current : state.previous!;
     },
 
     get safeValue() {
+      ensureEvaluated();
       if (activeFormula) activeFormula.dependencies.add(instance);
       return state.tag === "value" ? state.current : state.previous;
     },
 
-    get prior() { return state.previous; },
+    get prior() {
+      ensureEvaluated();
+      return state.previous;
+    },
 
     subscribe(callback) {
+      ensureEvaluated();
       valueSubs.add(callback);
       return createSubscription(() => { valueSubs.delete(callback); });
     },
 
     onStateChange(callback) {
+      ensureEvaluated();
       stateSubs.add(callback);
       // Do not emit the initial "not emitted" error state to new subscribers.
       // They will get the first value when it's set.
@@ -425,6 +451,8 @@ export function derived<T>(fn: () => T): AtomBase<T> {
       valueSubs.clear();
     },
   };
+
+  (instance as any)[DERIVED_ATOM] = true;
 
   registerWithCurrentScope(instance);
   return instance;

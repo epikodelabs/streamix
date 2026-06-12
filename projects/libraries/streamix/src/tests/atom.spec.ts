@@ -1,4 +1,4 @@
-import { atom, derived, flow, fromAtom } from '@epikodelabs/streamix';
+import { atom, derived, flow, fromAtom, scope } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -207,6 +207,37 @@ describe('atom', () => {
     a.dispose();
   });
 
+  it('should use custom equality to skip duplicate values', () => {
+    const a = atom({ id: 1 }, {
+      equal: (x, y) => x.id === y.id
+    });
+
+    const values: { id: number }[] = [];
+    a.subscribe(v => values.push(v));
+
+    a.set({ id: 1, name: 'Ada' }); // equal by id, should be skipped
+    a.set({ id: 2, name: 'Grace' }); // different id, should emit
+
+    expect(a.value).toEqual({ id: 2, name: 'Grace' });
+    expect(values).toEqual([{ id: 2, name: 'Grace' }]);
+
+    a.dispose();
+  });
+
+  it('should recover from error even when equal returns true', () => {
+    const a = atom<number>(0, { equal: (x, y) => x === y });
+    a.setError(new Error('boom'));
+
+    const values: number[] = [];
+    a.subscribe(v => values.push(v));
+
+    a.set(0); // same value, but error -> value recovery should still happen
+    expect(a.value).toBe(0);
+    expect(values).toEqual([0]);
+
+    a.dispose();
+  });
+
   it('should throw after atom disposal', () => {
     const a = atom<number>();
     a.dispose();
@@ -269,10 +300,74 @@ describe('derived', () => {
   it('should clean up dependency subscriptions on dispose', () => {
     const a = atom(1);
     const doubled = derived(() => a.value * 2);
+
+    expect(doubled.value).toBe(2); // evaluate before disposal
     doubled.dispose();
 
     a.set(99);
     expect(doubled.value).toBe(2);
+  });
+
+  it('should not evaluate until read', () => {
+    let calls = 0;
+    const a = atom(1);
+    const d = derived(() => {
+      calls++;
+      return a.value * 2;
+    });
+
+    expect(calls).toBe(0);
+    expect(d.value).toBe(2);
+    expect(calls).toBe(1);
+
+    d.dispose();
+  });
+
+  it('should not subscribe to dependencies until read', () => {
+    const a = atom(1);
+    const d = derived(() => a.value * 2);
+
+    a.set(5);
+    expect(d.value).toBe(10); // value reflects latest dependency, not historical emissions
+
+    d.dispose();
+  });
+
+  it('should evaluate on subscription', () => {
+    let calls = 0;
+    const a = atom(1);
+    const d = derived(() => {
+      calls++;
+      return a.value * 2;
+    });
+
+    const values: number[] = [];
+    d.subscribe(v => values.push(v));
+
+    expect(calls).toBe(1);
+    a.set(5);
+    expect(values).toEqual([10]);
+
+    d.dispose();
+  });
+
+  it('should stay lazy inside a scope until read', () => {
+    let calls = 0;
+    const a = atom(1);
+
+    const s = scope(() => {
+      const d = derived(() => {
+        calls++;
+        return a.value * 2;
+      });
+      return { d };
+    });
+
+    expect(calls).toBe(0);
+    expect(s.d.value).toBe(2);
+    expect(calls).toBe(1);
+
+    s.dispose();
   });
 
   it('should dynamically adjust dependencies', () => {

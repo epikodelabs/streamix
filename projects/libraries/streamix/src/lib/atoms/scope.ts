@@ -84,6 +84,9 @@ interface ScopeInternal {
 
 const scopeInternals = new WeakMap<Scope, ScopeInternal>();
 
+/** @internal Symbol used to identify lazy derived atoms. */
+export const DERIVED_ATOM = Symbol("derivedAtom");
+
 /** The scope currently executing its factory, if any. */
 let currentScope: Scope | undefined;
 
@@ -103,6 +106,11 @@ export function registerWithCurrentScope(value: AtomBase<any> | Scope): void {
   internal.tracked.add(value);
 
   if (isAtom(value)) {
+    // Derived atoms are lazy: they should not be evaluated or subscribed
+    // by the scope just because they were created. Skip loading tracking
+    // so they only activate when actually read or subscribed to.
+    if ((value as any)[DERIVED_ATOM]) return;
+
     const sub = value.subscribe(() => {
       internal.emittedAtoms.add(value);
       internal.checkLoading();

@@ -23,7 +23,7 @@
  */
 
 export { atom, derived, flow, iterate } from './atom';
-export type { Atom, AtomBase } from './atom';
+export type { Atom, AtomBase, AtomOptions } from './atom';
 
 export { scope } from './scope';
 export type { Scope } from './scope';

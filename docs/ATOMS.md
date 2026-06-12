@@ -102,13 +102,13 @@ count.dispose();
 
 ---
 
-### `flow(stream, initialValue)`
+### `flow(stream)`
 
 Creates a reactive state node connected to a stream.
 
 ```ts
 const source = createSubject<number>();
-const count = flow(source, 0);
+const count = flow(source.pipe(startWith(0)));
 ```
 
 ```ts
@@ -182,7 +182,7 @@ Creates a scoped reactive tree. All atoms and nested scopes created inside are a
 ```ts
 const app = scope(() => {
   const count = atom(0);
-  const label = flow(labelStream, 'hello');
+  const label = flow(labelStream.pipe(startWith('hello')));
 
   return { count, label };
 });
@@ -220,8 +220,8 @@ root.dispose(); // disposes full tree
 
 ```ts
 const app = scope(() => {
-  const a = flow(streamA, 0);
-  const b = flow(streamB, '');
+  const a = flow(streamA.pipe(startWith(0)));
+  const b = flow(streamB.pipe(startWith('')));
 
   return { a, b };
 });
