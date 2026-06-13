@@ -806,15 +806,14 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
  */
 export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
   return {
-    [Symbol.asyncIterator](): AsyncIterator<T> {
+    [Symbol.asyncIterator]() {
       const buffer: T[] = [];
-      let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
+      let resolveNext: ((res: IteratorResult<T>) => void) | null = null;
       let done = false;
 
-      // Push current value immediately
       buffer.push(atom.value);
 
-      const subscription = atom.subscribe((value) => {
+      const sub = atom.subscribe((value) => {
         if (done) return;
         if (resolveNext) {
           resolveNext({ value, done: false });
@@ -824,39 +823,32 @@ export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
         }
       });
 
-      // Track disposal
-      const checkDisposed = () => {
-        if (atom.disposed && !done) {
-          done = true;
-          if (resolveNext) {
-            resolveNext({ value: undefined as any, done: true });
-            resolveNext = null;
-          }
-        }
-      };
-
-      // Poll for disposal since we can't directly observe it
-      const disposeInterval = setInterval(checkDisposed, 0);
-
+      // No polling. Just check disposed on each next() call.
+      // If the atom is disposed and buffer is empty, we're done.
       return {
-        async next(): Promise<IteratorResult<T>> {
-          if (done) {
+        async next() {
+          if (done) return { value: undefined as any, done: true };
+
+          if (buffer.length > 0) {
+            const val = buffer.shift()!;
+            if (atom.disposed && buffer.length === 0) {
+              done = true;
+            }
+            return { value: val, done: false };
+          }
+
+          if (atom.disposed) {
+            done = true;
             return { value: undefined as any, done: true };
           }
 
-          if (buffer.length > 0) {
-            return { value: buffer.shift()!, done: false };
-          }
-
-          return new Promise<IteratorResult<T>>((resolve) => {
+          return new Promise((resolve) => {
             resolveNext = resolve;
           });
         },
-
-        async return(): Promise<IteratorResult<T>> {
+        async return() {
           done = true;
-          clearInterval(disposeInterval);
-          subscription.unsubscribe();
+          sub.unsubscribe();
           return { value: undefined as any, done: true };
         },
       };
