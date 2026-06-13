@@ -28,7 +28,6 @@ describe("runner", () => {
         // Debug: show actual results
         // The actual chronological order of events:
         // eslint-disable-next-line no-console
-        console.log('runner.spec results:', results.map(r => ({...r, stamp: (r && (r as any).stamp) })));
         expect(results).toEqual([
             { type: 'value', value: 'A', sourceIndex: 0 },    // 20ms
             { type: 'value', value: 'B', sourceIndex: 1 },    // 40ms
