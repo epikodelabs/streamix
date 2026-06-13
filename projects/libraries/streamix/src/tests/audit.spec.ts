@@ -1,12 +1,10 @@
-import { audit, atom, fromAtom, type Atom, type Stream } from '@epikodelabs/streamix';
+import { audit, createSubject } from '@epikodelabs/streamix';
 
 describe('audit', () => {
-  let input: Stream<number>;
-  let source$: Atom<number>;
+  let input: ReturnType<typeof createSubject<number>>;
 
   beforeEach(() => {
-    source$ = atom<number>();
-    input = fromAtom(source$);
+    input = createSubject<number>();
   });
 
   it('should emit the latest value after a period of inactivity and on completion', (done) => {
@@ -23,19 +21,19 @@ describe('audit', () => {
     });
 
     // 1. New value arrives at 0ms. Timer starts. lastValue = 1.
-    source$.set(1);
+    input.next(1);
     // 2. New value arrives at 50ms. Timer is active. lastValue = 2.
-    setTimeout(() => source$.set(2), 50);
+    setTimeout(() => input.next(2), 50);
     // 3. At 100ms, the timer from value 1 expires. Emits 2.
     // 4. New value arrives at 150ms. Timer starts. lastValue = 3.
-    setTimeout(() => source$.set(3), 150);
+    setTimeout(() => input.next(3), 150);
     // 5. New value arrives at 200ms. Timer is active. lastValue = 4.
-    setTimeout(() => source$.set(4), 200);
+    setTimeout(() => input.next(4), 200);
     // 6. At 250ms, the timer from value 3 expires. Emits 4.
     // 7. New value arrives at 300ms. Timer starts. lastValue = 5.
-    setTimeout(() => source$.set(5), 300);
+    setTimeout(() => input.next(5), 300);
     // 8. Stream completes at 400ms. The pending value 5 is emitted.
-    setTimeout(() => source$.dispose(), 400);
+    setTimeout(() => input.complete(), 400);
   });
 
   it('should complete the stream immediately after input completes with no buffered value', (done) => {
@@ -53,7 +51,7 @@ describe('audit', () => {
       },
     });
 
-    source$.dispose();
+    input.complete();
   });
 
   it('should emit the last value when input completes during the audit duration', (done) => {
@@ -70,14 +68,14 @@ describe('audit', () => {
     });
 
     // 1. New value at 0ms. Timer starts. lastValue = 1.
-    source$.set(1);
+    input.next(1);
     // 2. New value at 50ms. Timer is active. lastValue = 2.
-    setTimeout(() => source$.set(2), 50);
+    setTimeout(() => input.next(2), 50);
     // 3. At 100ms, the timer expires. Emits 2.
     // 4. New value at 150ms. Timer starts. lastValue = 3.
-    setTimeout(() => source$.set(3), 150);
+    setTimeout(() => input.next(3), 150);
     // 5. Stream completes at 175ms, before the timer for 3 expires. The pending value 3 is emitted.
-    setTimeout(() => source$.dispose(), 175);
+    setTimeout(() => input.complete(), 175);
   });
 
   it('should emit the single value when input completes before audit duration', (done) => {
@@ -94,9 +92,9 @@ describe('audit', () => {
     });
 
     // 1. New value at 0ms. Timer starts. lastValue = 1.
-    source$.set(1);
+    input.next(1);
     // 2. Stream completes at 50ms. The pending value 1 is emitted.
-    setTimeout(() => source$.dispose(), 50);
+    setTimeout(() => input.complete(), 50);
   });
 
   it('should propagate errors from the input stream', (done) => {
@@ -109,7 +107,7 @@ describe('audit', () => {
       },
     });
 
-    source$.setError(new Error('Test Error'));
+    input.error(new Error('Test Error'));
   });
 });
 

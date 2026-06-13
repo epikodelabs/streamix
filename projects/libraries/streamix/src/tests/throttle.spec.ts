@@ -1,12 +1,11 @@
-import { atom, fromAtom, throttle } from '@epikodelabs/streamix';
+import { createSubject, throttle } from '@epikodelabs/streamix';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('throttle', () => {
   it('should emit first value immediately and throttle subsequent values', async () => {
     const output: number[] = [];
-    const source$ = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const iter = subject.pipe(throttle<number>(50));
 
     void (async () => {
@@ -15,13 +14,13 @@ describe('throttle', () => {
       }
     })();
 
-    source$.set(1);  // t0, should emit immediately
-    source$.set(2);  // t0 + 0ms, should be throttled
+    subject.next(1);  // t0, should emit immediately
+    subject.next(2);  // t0 + 0ms, should be throttled
     await new Promise((r) => setTimeout(r, 30));
-    source$.set(3);  // t0 + 30ms, should replace pending
+    subject.next(3);  // t0 + 30ms, should replace pending
     await new Promise((r) => setTimeout(r, 30));
-    source$.set(4);  // t0 + 60ms, after first throttle window
-    source$.dispose();
+    subject.next(4);  // t0 + 60ms, after first throttle window
+    subject.complete();
 
     // Wait for trailing emissions
     await new Promise((r) => setTimeout(r, 50));
@@ -34,8 +33,7 @@ describe('throttle', () => {
   });
 
   it('should complete after source completes', async () => {
-    const source$ = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const iter = subject.pipe(throttle<number>(50));
 
     let completed = false;
@@ -44,9 +42,9 @@ describe('throttle', () => {
       completed = true;
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.complete();
 
     await new Promise((r) => setTimeout(r, 100));
 
@@ -54,8 +52,7 @@ describe('throttle', () => {
   });
 
   it('should forward errors from the source', async () => {
-    const source$ = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const iter = subject.pipe(throttle<number>(50));
 
     let caught: any = null;
@@ -68,7 +65,7 @@ describe('throttle', () => {
     })();
 
     const error = new Error('test error');
-    source$.setError(error);
+    subject.error(error);
 
     await new Promise((r) => setTimeout(r, 50));
 
@@ -77,8 +74,7 @@ describe('throttle', () => {
 
   it('should flush the trailing value when the source completes during cooldown', async () => {
     const output: number[] = [];
-    const source$ = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const iter = subject.pipe(throttle<number>(50));
 
     void (async () => {
@@ -87,9 +83,9 @@ describe('throttle', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.complete();
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -98,8 +94,7 @@ describe('throttle', () => {
 
   it('should emit every value when values are spaced beyond duration', async () => {
     const output: number[] = [];
-    const source$ = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const iter = subject.pipe(throttle<number>(20));
 
     const consumer = (async () => {
@@ -108,12 +103,12 @@ describe('throttle', () => {
       }
     })();
 
-    source$.set(1);
+    subject.next(1);
     await sleep(30);
-    source$.set(2);
+    subject.next(2);
     await sleep(30);
-    source$.set(3);
-    source$.dispose();
+    subject.next(3);
+    subject.complete();
 
     await consumer;
     expect(output).toEqual([1, 2, 3]);
@@ -121,8 +116,7 @@ describe('throttle', () => {
 
   it('should not throttle when duration is 0', async () => {
     const output: number[] = [];
-    const source$ = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const iter = subject.pipe(throttle<number>(0));
 
     void (async () => {
@@ -131,10 +125,10 @@ describe('throttle', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -143,8 +137,7 @@ describe('throttle', () => {
 
   it('should support promised duration', async () => {
     const output: number[] = [];
-    const source$ = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     // Use a generous duration to avoid flakiness under heavy test load.
     // If the event loop is blocked long enough, a short throttle window can
     // legitimately elapse before the next value is emitted, causing an extra
@@ -157,13 +150,11 @@ describe('throttle', () => {
       }
     })();
 
-    await new Promise((r) => setTimeout(r, 0));
-
-    source$.set(1);
-    source$.set(2);
+    subject.next(1);
+    subject.next(2);
     await sleep(20);
-    source$.set(3);
-    source$.dispose();
+    subject.next(3);
+    subject.complete();
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -173,3 +164,5 @@ describe('throttle', () => {
     expect(output.length).toBe(2);
   });
 });
+
+

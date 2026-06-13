@@ -1,6 +1,6 @@
-import { atom } from '@epikodelabs/streamix';
-import type { MaybePromise } from '../abstractions';
-import { isPromiseLike, pipeSourceThrough, type Stream } from '../abstractions';
+import type { MaybePromise, Receiver } from '../abstractions';
+import { isPromiseLike, type Stream } from '../abstractions';
+import { createSubject } from '../subjects';
 import { createAsyncIterator } from '../utils';
 
 /**
@@ -27,9 +27,7 @@ import { createAsyncIterator } from '../utils';
  * @example
  * // Basic usage
  * const clicks = fromEvent(document.getElementById('myButton'), 'click');
- * for await (const ev of clicks) {
- *   console.log(ev);
- * }
+ * clicks.subscribe(console.log);
  *
  * @example
  * // With async target (e.g., waiting for DOM element)
@@ -45,15 +43,17 @@ export function fromEvent<T extends Event = Event>(
   event: MaybePromise<string>,
   options?: AddEventListenerOptions | boolean
 ): Stream<T> {
-  const atom$ = atom<T>();
-
+  const subject = createSubject<T>();
+  
   let subscriberCount = 0;
   let listening = false;
   let resolvedTarget: EventTarget | null = null;
   let resolvedEvent: string | null = null;
 
   const listener = (ev: Event) => {
-    atom$.set(ev as T);
+    if (!subject.completed()) {
+      subject.next(ev as T);
+    }
   };
 
   const start = async () => {
@@ -89,48 +89,29 @@ export function fromEvent<T extends Event = Event>(
     resolvedEvent = null;
   };
 
-  const subscribe = (callback?: ((value: T) => void)) => {
-    const sub = atom$.subscribe(callback!);
+  const originalSubscribe = subject.subscribe;
+
+  subject.subscribe = (callback?: ((value: T) => void) | Receiver<T>) => {
+    const subscription = (originalSubscribe as any).call(subject, callback);
     if (++subscriberCount === 1) {
       void start();
     }
 
-    const originalTeardown = sub.teardown?.bind(sub);
-    sub.teardown = () => {
+    const originalOnUnsubscribe = subscription.teardown;
+    subscription.teardown = () => {
       if (--subscriberCount === 0) {
         stop();
       }
-      originalTeardown?.();
+      originalOnUnsubscribe?.call(subscription);
     };
 
-    return sub;
+    return subscription;
   };
 
-  const stream: Stream<T> = {
-    type: 'stream',
-    name: 'fromEvent',
-    subscribe,
-    query: async () => {
-      return new Promise<T>((resolve) => {
-        const sub = subscribe((value) => {
-          sub.unsubscribe();
-          resolve(value);
-        });
-      });
-    },
-    toArray: async () => {
-      const result: T[] = [];
-      subscribe((value) => {
-        result.push(value);
-      });
-      return result;
-    },
-    pipe: (...operators: any[]) => {
-      return pipeSourceThrough(stream, operators);
-    },
-    [Symbol.asyncIterator]: () =>
-      createAsyncIterator<T>({ register: (receiver) => subscribe((value) => receiver.next?.(value)) })(),
-  };
+  subject[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<T>) => subject.subscribe(receiver) })();
 
-  return stream;
+  subject.name = 'fromEvent';
+  subject.type = "stream";
+  return subject as Stream<T>;
 }

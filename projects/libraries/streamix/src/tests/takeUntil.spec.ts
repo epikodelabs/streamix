@@ -1,4 +1,4 @@
-import { atom, fromAtom, from, of, take, takeUntil, throwError, timer } from '@epikodelabs/streamix';
+import { createSubject, from, of, take, takeUntil, throwError, timer } from '@epikodelabs/streamix';
 
 describe('takeUntil', () => {
   it('should take emissions until notifier emits', (done) => {
@@ -131,8 +131,8 @@ describe('takeUntil', () => {
     const notifierError = new Error('Notifier failure');
 
     // Source: a controllable subject instead of infinite timer
-    const source$ = atom<number>(); const source = fromAtom(source$);
-    const notifier$ = atom<void>(); const notifier = fromAtom(notifier$);
+    const source = createSubject<number>();
+    const notifier = createSubject<void>();
 
     const takenUntilStream = source.pipe(takeUntil(notifier));
 
@@ -149,18 +149,18 @@ describe('takeUntil', () => {
     });
 
     // Emit some source values
-    source$.set(1);
-    source$.set(2);
+    source.next(1);
+    source.next(2);
 
     // Emit error from notifier
-    notifier$.setError(notifierError);
+    notifier.error(notifierError);
   });
 
   // --- Unsubscription Check (Needs mock/spy to fully verify in a real environment) ---
   // Since we cannot easily spy on internal unsubscriptions, this test checks the behavior
   // that implies correct unsubscription: the source continues *if* the operator didn't stop it.
   it('should ensure the source stream is unsubscribed from after notifier emits', (done) => {
-    const sourceSubject$ = atom<number>(); const sourceSubject = fromAtom(sourceSubject$);
+    const sourceSubject = createSubject<number>();
     const notifier = timer(50).pipe(take(1));
 
     const takenUntilStream = sourceSubject.pipe(takeUntil(notifier));
@@ -175,8 +175,8 @@ describe('takeUntil', () => {
 
         // At this point (after 50ms), the output stream should be completed.
         // We now emit a value on the source *after* completion.
-        sourceSubject$.set(99); // This should be ignored by the operator.
-        sourceSubject$.dispose();
+        sourceSubject.next(99); // This should be ignored by the operator.
+        sourceSubject.complete();
 
         // Give a moment for any potential delayed propagation to happen
         setTimeout(() => {
@@ -190,8 +190,8 @@ describe('takeUntil', () => {
     });
 
     // Initial value before notifier emits
-    sourceSubject$.set(1); // With an immediate notifier, this might or might not pass depending on timing
-    sourceSubject$.set(2);
+    sourceSubject.next(1); // With an immediate notifier, this might or might not pass depending on timing
+    sourceSubject.next(2);
     // This test might be unreliable depending on the async nature of the source.
     // Let's refine the unsubscription test for **completeness**.
 
@@ -201,8 +201,8 @@ describe('takeUntil', () => {
   });
 
   it('should emit the current value before propagating a notifier error', async () => {
-    const source$ = atom<number>(); const source = fromAtom(source$);
-    const notifier$ = atom<never>(); const notifier = fromAtom(notifier$);
+    const source = createSubject<number>();
+    const notifier = createSubject<never>();
     const taken = source.pipe(takeUntil(notifier));
 
     const testError = new Error('Notifier error after value');
@@ -219,8 +219,8 @@ describe('takeUntil', () => {
       });
     });
 
-    source$.set(1);
-    notifier$.setError(testError);
+    source.next(1);
+    notifier.error(testError);
 
     await promise;
   });

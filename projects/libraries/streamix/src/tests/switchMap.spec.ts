@@ -1,7 +1,5 @@
 import {
-  atom,
-  fromAtom,
-  type Atom,
+  createSubject,
   delay,
   DONE,
   EMPTY,
@@ -33,10 +31,10 @@ describe('switchMap', () => {
     const testStream = from([1, 2, 3]);
 
     const project = (value: number) => {
-      const innerStream$ = atom(); const innerStream = fromAtom(innerStream$);
-      setTimeout(() => innerStream$.set(value * 10), 50);
-      setTimeout(() => innerStream$.set(value * 100), 150);
-      setTimeout(() => innerStream$.dispose(), 500);
+      const innerStream = createSubject();
+      setTimeout(() => innerStream.next(value * 10), 50);
+      setTimeout(() => innerStream.next(value * 100), 150);
+      setTimeout(() => innerStream.complete(), 500);
       return innerStream;
     };
 
@@ -57,8 +55,8 @@ describe('switchMap', () => {
   it('should handle switching to an empty observable', (done) => {
     const testStream = from([1, 2, 3]);
     const project = () => {
-      const innerStream$ = atom(); const innerStream = fromAtom(innerStream$);
-      innerStream$.dispose();
+      const innerStream = createSubject();
+      innerStream.complete();
       return innerStream;
     };
 
@@ -92,7 +90,7 @@ describe('switchMap', () => {
   });
 
   it('should drop stale promise results and only emit latest', (done) => {
-    const source$ = atom<number>(); const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const switchedStream = subject.pipe(
       switchMap((value) =>
         new Promise<number>((resolve) => {
@@ -111,17 +109,17 @@ describe('switchMap', () => {
       }
     });
 
-    source$.set(1);
-    setTimeout(() => source$.set(2), 20);
-    setTimeout(() => source$.dispose(), 150);
+    subject.next(1);
+    setTimeout(() => subject.next(2), 20);
+    setTimeout(() => subject.complete(), 150);
   });
 
   it('should switch to an inner observable that delays emissions', (done) => {
     const testStream = from([1, 2]);
     const project = (value: number) => {
-      const innerStream$ = atom(); const innerStream = fromAtom(innerStream$);
-      setTimeout(() => innerStream$.set(value * 10), 100);
-      setTimeout(() => innerStream$.dispose(), 300);
+      const innerStream = createSubject();
+      setTimeout(() => innerStream.next(value * 10), 100);
+      setTimeout(() => innerStream.complete(), 300);
       return innerStream;
     };
 
@@ -141,12 +139,12 @@ describe('switchMap', () => {
   it('should propagate errors from inner observables', (done) => {
     const testStream = from([1, 2, 3]);
     const project = (value: number) => {
-      const innerStream$ = atom(); const innerStream = fromAtom(innerStream$);
+      const innerStream = createSubject();
       if (value === 2) {
         throw new Error('Inner Error');
       } else {
-        setTimeout(() => innerStream$.set(value * 10), 50);
-        setTimeout(() => innerStream$.dispose(), 200);
+        setTimeout(() => innerStream.next(value * 10), 50);
+        setTimeout(() => innerStream.complete(), 200);
       }
       return innerStream;
     };
@@ -174,9 +172,9 @@ describe('switchMap', () => {
     const testStream = EMPTY;
 
     const project = (value: number) => {
-      const innerStream$ = atom(); const innerStream = fromAtom(innerStream$);
-      innerStream$.set(value * 10);
-      innerStream$.dispose();
+      const innerStream = createSubject();
+      innerStream.next(value * 10);
+      innerStream.complete();
       return innerStream;
     };
 
@@ -210,7 +208,7 @@ describe('switchMap', () => {
   });
 
   it('should wait for promised inner stream before switching', (done) => {
-    const source$ = atom<number>(); const subject = fromAtom(source$);
+    const subject = createSubject<number>();
 
     const project = (value: number) => {
       return new Promise<number>((resolve) => {
@@ -229,22 +227,22 @@ describe('switchMap', () => {
       }
     });
 
-    source$.set(1);
-    setTimeout(() => source$.set(2), 20);
-    setTimeout(() => source$.dispose(), 150);
+    subject.next(1);
+    setTimeout(() => subject.next(2), 20);
+    setTimeout(() => subject.complete(), 150);
   });
 
   it('should handle rapid switching correctly', (done) => {
-    const source$ = atom<number>(); const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[] = [];
 
     const switched = subject.pipe(
       switchMap(value => {
-        const inner$ = atom<number>(); const inner = fromAtom(inner$);
+        const inner = createSubject<number>();
         setTimeout(() => {
-          inner$.set(value * 10);
-          inner$.set(value * 100);
-          inner$.dispose();
+          inner.next(value * 10);
+          inner.next(value * 100);
+          inner.complete();
         }, value * 50);
         return inner;
       })
@@ -262,23 +260,28 @@ describe('switchMap', () => {
       }
     });
 
-    source$.set(1);
-    setTimeout(() => source$.set(2), 10);
-    setTimeout(() => source$.set(3), 20);
-    setTimeout(() => source$.dispose(), 300);
+    subject.next(1);
+    setTimeout(() => subject.next(2), 10);
+    setTimeout(() => subject.next(3), 20);
+    setTimeout(() => subject.complete(), 300);
   });
 
   it('should continue emitting the active inner even if outer completes', (done) => {
-    const source$ = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[] = [];
-    let activeInner$: Atom<number> | undefined;
+    let activeInner: ReturnType<typeof createSubject<number>> | undefined;
 
     const switched = subject.pipe(
       switchMap(() => {
-        const inner$ = atom<number>();
-        activeInner$ = inner$;
-        return fromAtom(inner$);
+        const inner = createSubject<number>();
+        activeInner = inner;
+        queueMicrotask(() => {
+          activeInner!.next(10);
+          activeInner!.complete();
+          subject.complete();
+        });
+        
+        return inner;
       })
     );
 
@@ -290,14 +293,11 @@ describe('switchMap', () => {
       }
     });
 
-    source$.set(1);
-    activeInner$!.set(10);
-    activeInner$!.dispose();
-    source$.dispose();
+    subject.next(1);
   });
 
   it('should handle errors in inner streams and continue with next values', (done) => {
-    const source$ = atom<number>(); const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[] = [];
     let errorCount = 0;
 
@@ -320,23 +320,23 @@ describe('switchMap', () => {
       }
     });
 
-    source$.set(1);
-    setTimeout(() => source$.set(2), 10);
+    subject.next(1);
+    setTimeout(() => subject.next(2), 10);
   });
 
   // FIXED: Properly complete the inner stream after emitting
   it('should cleanup active inner subscription when unsubscribed', (done) => {
-    const source$ = atom<number>(); const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[] = [];
     let innerCompleted = false;
   
     const switched = subject.pipe(
       switchMap(value => {
-        const inner$ = atom<number>(); const inner = fromAtom(inner$);
+        const inner = createSubject<number>();
         // Schedule emission and completion
         setTimeout(() => {
-          inner$.set(value * 10);
-          inner$.dispose();
+          inner.next(value * 10);
+          inner.complete();
           innerCompleted = true;
         }, 10);
         return inner;
@@ -354,7 +354,7 @@ describe('switchMap', () => {
       }
     });
 
-    source$.set(1);
+    subject.next(1);
     
     // Wait for the value to be emitted and unsubscribe to happen
     setTimeout(() => {
@@ -365,7 +365,7 @@ describe('switchMap', () => {
   });
 
   it('should work with synchronous inner observables', (done) => {
-    const source$ = atom<number>(); const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[] = [];
 
     const switched = subject.pipe(
@@ -382,13 +382,13 @@ describe('switchMap', () => {
       }
     });
 
-    source$.set(1);
-    source$.set(2);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.complete();
   });
 
   it('should handle project function returning a value (not a stream)', (done) => {
-    const source$ = atom<number>(); const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[] = [];
 
     const switched = subject.pipe(
@@ -403,14 +403,14 @@ describe('switchMap', () => {
       }
     });
 
-    source$.set(1);
-    setTimeout(() => source$.set(2), 20);
-    setTimeout(() => source$.set(3), 40);
-    setTimeout(() => source$.dispose(), 60);
+    subject.next(1);
+    setTimeout(() => subject.next(2), 20);
+    setTimeout(() => subject.next(3), 40);
+    setTimeout(() => subject.complete(), 60);
   });
 
   it('should handle concurrent promises correctly', async () => {
-    const source$ = atom<number>(); const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[] = [];
 
     const switched = subject.pipe(
@@ -427,11 +427,11 @@ describe('switchMap', () => {
       });
     });
 
-    source$.set(3);
-    source$.set(1);
-    source$.set(2);
+    subject.next(3);
+    subject.next(1);
+    subject.next(2);
 
-    setTimeout(() => source$.dispose(), 100);
+    setTimeout(() => subject.complete(), 100);
 
     await promise;
     expect(results).toEqual([20]);
@@ -452,9 +452,9 @@ describe('switchMap', () => {
   });
 
   it('should ignore completion of stale inner streams', (done) => {
-    const source$ = atom<number>(); const source = fromAtom(source$);
-    const inner1$ = atom<string>(); const inner1 = fromAtom(inner1$);
-    const inner2$ = atom<string>(); const inner2 = fromAtom(inner2$);
+    const source = createSubject<number>();
+    const inner1 = createSubject<string>();
+    const inner2 = createSubject<string>();
 
     const switched = source.pipe(
       switchMap(val => val === 1 ? inner1 : inner2)
@@ -472,24 +472,24 @@ describe('switchMap', () => {
       }
     });
 
-    source$.set(1);
+    source.next(1);
     
     // Verify output hasn't completed yet
     expect(completed).toBeFalse();
     expect(results).toEqual([]);
     
     // Switch to inner2 so inner1 becomes stale
-    source$.set(2);
+    source.next(2);
 
     // inner1 completion should be ignored (it's stale)
-    inner1$.dispose();
+    inner1.complete();
     expect(completed).toBeFalse();
 
     // Now complete the active inner stream
-    inner2$.set('second');
+    inner2.next('second');
     
-    inner2$.dispose();
-    source$.dispose();
+    inner2.complete();
+    source.complete();
   });
 
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -580,15 +580,15 @@ describe('switchMap', () => {
   });
 
   it('coverage: should propagate errors from the active inner stream', async () => {
-    const source$ = atom<number>(); const source = fromAtom(source$);
-    const inner$ = atom<number>(); const inner = fromAtom(inner$);
+    const source = createSubject<number>();
+    const inner = createSubject<number>();
     const stream = source.pipe(switchMap(() => inner));
     const iterator = stream[Symbol.asyncIterator]();
 
     const read = iterator.next();
-    source$.set(1);
+    source.next(1);
     await wait(0);
-    inner$.setError(new Error("boom"));
+    inner.error(new Error("boom"));
 
     await expectAsync(read).toBeRejectedWithError("boom");
   });
@@ -688,7 +688,7 @@ describe('switchMap', () => {
   });
 
   it('coverage: should ignore delayed emissions from stale inners (when inner has no return)', async () => {
-    const source$ = atom<number>(); const source = fromAtom(source$);
+    const source = createSubject<number>();
 
     const uncancellableDelayedInner = (value: number, ms: number) => {
       return {
@@ -730,10 +730,10 @@ describe('switchMap', () => {
       }
     })();
 
-    source$.set(1);
+    source.next(1);
     await wait(0);
-    source$.set(2);
-    source$.dispose();
+    source.next(2);
+    source.complete();
 
     await readAll;
 
@@ -772,7 +772,7 @@ describe('switchMap', () => {
   });
 
   it('coverage: should propagate promise rejections from project', async () => {
-    const source$ = atom<number>(); const source = fromAtom(source$);
+    const source = createSubject<number>();
     const stream = source.pipe(
       switchMap(() => new Promise<number>((_, reject) => setTimeout(() => reject(new Error("reject boom")), 0)))
     );
@@ -780,7 +780,7 @@ describe('switchMap', () => {
     const iterator = stream[Symbol.asyncIterator]();
     const read = iterator.next();
 
-    source$.set(1);
+    source.next(1);
 
     await expectAsync(read).toBeRejectedWithError("reject boom");
     await iterator.return?.();

@@ -1,12 +1,10 @@
-import { atom, fromAtom, delayUntil, type Atom } from "@epikodelabs/streamix"; // Import your delayUntil operator
+import { createSubject, delayUntil } from "@epikodelabs/streamix"; // Import your delayUntil operator
 
 
 describe("delayUntil", () => {
   it("should delay emissions until the condition stream emits a value", async () => {
-    const source$: Atom<number> = atom<number>();
-    const sourceStream = fromAtom(source$);
-    const condition$: Atom<any> = atom<any>();
-    const conditionStream = fromAtom(condition$);
+    const sourceStream = createSubject<number>();
+    const conditionStream = createSubject<any>();
 
     const emittedValues: number[] = [];
     const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
@@ -25,24 +23,22 @@ describe("delayUntil", () => {
         error: (err) => reject(new Error(`Stream failed: ${err}`)),
       });
 
-      source$.set(1); // Buffered
-      condition$.set("start"); // Emission starts
-      source$.set(2); // Emitted
-      source$.set(3); // Emitted
-      source$.set(4); // Emitted
+      sourceStream.next(1); // Buffered
+      conditionStream.next("start"); // Emission starts
+      sourceStream.next(2); // Emitted
+      sourceStream.next(3); // Emitted
+      sourceStream.next(4); // Emitted
 
       // FIX: Must complete the source stream for the delayed stream to complete
-      source$.dispose();
-      condition$.dispose();
+      sourceStream.complete();
+      conditionStream.complete();
     });
   });
 
 
   it("should not emit any values if condition stream does not emit", async () => {
-    const source$: Atom<number> = atom<number>();
-    const sourceStream = fromAtom(source$);
-    const condition$: Atom<any> = atom<any>();
-    const conditionStream = fromAtom(condition$);
+    const sourceStream = createSubject<number>();
+    const conditionStream = createSubject<any>();
 
     const emittedValues: number[] = [];
     const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
@@ -61,21 +57,19 @@ describe("delayUntil", () => {
         error: (err) => reject(new Error(`Stream failed: ${err}`)),
       });
 
-      source$.set(1);
-      source$.set(2);
-      source$.set(3);
+      sourceStream.next(1);
+      sourceStream.next(2);
+      sourceStream.next(3);
 
       // FIX: Must complete the source stream
-      source$.dispose();
-      condition$.dispose(); // This completes the delayed stream without emitting
+      sourceStream.complete();
+      conditionStream.complete(); // This completes the delayed stream without emitting
     });
   });
 
   it("should drop values after notifier completes without emitting", async () => {
-    const source$: Atom<number> = atom<number>();
-    const sourceStream = fromAtom(source$);
-    const condition$: Atom<any> = atom<any>();
-    const conditionStream = fromAtom(condition$);
+    const sourceStream = createSubject<number>();
+    const conditionStream = createSubject<any>();
 
     const emittedValues: number[] = [];
     const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
@@ -94,18 +88,16 @@ describe("delayUntil", () => {
         error: (err) => reject(new Error(`Stream failed: ${err}`)),
       });
 
-      condition$.dispose(); // closes gate without emitting
-      source$.set(1);
-      source$.set(2);
-      source$.dispose();
+      conditionStream.complete(); // closes gate without emitting
+      sourceStream.next(1);
+      sourceStream.next(2);
+      sourceStream.complete();
     });
   });
 
   it("should emit the source stream values after condition stream emits", async () => {
-    const source$: Atom<number> = atom<number>();
-    const sourceStream = fromAtom(source$);
-    const condition$: Atom<any> = atom<any>();
-    const conditionStream = fromAtom(condition$);
+    const sourceStream = createSubject<number>();
+    const conditionStream = createSubject<any>();
 
     const emittedValues: number[] = [];
     const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
@@ -124,22 +116,20 @@ describe("delayUntil", () => {
         error: (err) => reject(new Error(`Stream failed: ${err}`)),
       });
 
-      condition$.set("start"); // Start the emission
-      source$.set(10);
-      source$.set(20);
-      source$.set(30);
+      conditionStream.next("start"); // Start the emission
+      sourceStream.next(10);
+      sourceStream.next(20);
+      sourceStream.next(30);
 
       // FIX: Must complete the source stream
-      source$.dispose();
-      condition$.dispose();
+      sourceStream.complete();
+      conditionStream.complete();
     });
   });
 
   it("should handle error in source stream", async () => {
-    const source$: Atom<number> = atom<number>();
-    const sourceStream = fromAtom(source$);
-    const condition$: Atom<any> = atom<any>();
-    const conditionStream = fromAtom(condition$);
+    const sourceStream = createSubject<number>();
+    const conditionStream = createSubject<any>();
 
     // We expect the promise to be rejected
     await expectAsync(new Promise<void>((resolve, reject) => {
@@ -155,9 +145,9 @@ describe("delayUntil", () => {
         },
       });
 
-      source$.set(1);
-      source$.setError(new Error("Something went wrong")); // Error in the source stream
-      condition$.set("start"); // Too late, stream already errored
+      sourceStream.next(1);
+      sourceStream.error(new Error("Something went wrong")); // Error in the source stream
+      conditionStream.next("start"); // Too late, stream already errored
 
       // If the error doesn't happen, the promise will hang unless we reject it after a timeout.
       // Since the error is synchronous here, we rely on the error callback resolving the promise.
@@ -165,10 +155,8 @@ describe("delayUntil", () => {
   });
 
   it("should propagate notifier errors", async () => {
-    const source$: Atom<number> = atom<number>();
-    const sourceStream = fromAtom(source$);
-    const condition$: Atom<any> = atom<any>();
-    const conditionStream = fromAtom(condition$);
+    const sourceStream = createSubject<number>();
+    const conditionStream = createSubject<any>();
 
     await expectAsync(
       new Promise<void>((resolve, reject) => {
@@ -187,15 +175,14 @@ describe("delayUntil", () => {
           },
         });
 
-        source$.set(7);
-        condition$.setError(new Error("Notifier failed"));
+        sourceStream.next(7);
+        conditionStream.error(new Error("Notifier failed"));
       })
     ).toBeResolved();
   });
 
   it("should flush buffer when notifier promise resolves", async () => {
-    const source$: Atom<number> = atom<number>();
-    const sourceStream = fromAtom(source$);
+    const sourceStream = createSubject<number>();
     const notifierPromise = new Promise<void>((resolve) => setTimeout(resolve, 20));
 
     const emittedValues: number[] = [];
@@ -215,20 +202,18 @@ describe("delayUntil", () => {
         error: (err) => reject(new Error(`Stream failed: ${err}`)),
       });
 
-      source$.set(8);
-      source$.set(9);
+      sourceStream.next(8);
+      sourceStream.next(9);
 
       setTimeout(() => {
-        source$.dispose();
+        sourceStream.complete();
       }, 40);
     });
   });
 
   it("should complete the stream after both source and condition streams complete", async () => {
-    const source$: Atom<number> = atom<number>();
-    const sourceStream = fromAtom(source$);
-    const condition$: Atom<any> = atom<any>();
-    const conditionStream = fromAtom(condition$);
+    const sourceStream = createSubject<number>();
+    const conditionStream = createSubject<any>();
 
     const emittedValues: number[] = [];
     const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
@@ -247,12 +232,12 @@ describe("delayUntil", () => {
         error: (err) => reject(new Error(`Stream failed: ${err}`)),
       });
 
-      condition$.set("start"); // Start the emission
-      source$.set(5);
-      source$.set(6);
-      source$.set(7);
-      source$.dispose(); // Complete the source stream
-      condition$.dispose(); // Complete the condition stream
+      conditionStream.next("start"); // Start the emission
+      sourceStream.next(5);
+      sourceStream.next(6);
+      sourceStream.next(7);
+      sourceStream.complete(); // Complete the source stream
+      conditionStream.complete(); // Complete the condition stream
     });
   });
 });

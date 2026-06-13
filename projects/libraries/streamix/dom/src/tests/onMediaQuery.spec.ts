@@ -94,10 +94,11 @@ idescribe('onMediaQuery', () => {
     spyOn(console, 'warn');
 
     const stream: Stream<boolean> = onMediaQuery('(min-width: 600px)');
+    expect(console.warn).toHaveBeenCalledWith('matchMedia is not supported in this environment');
+
     const callback = jasmine.createSpy('callback');
     stream.subscribe(callback);
 
-    expect(console.warn).toHaveBeenCalledWith('matchMedia is not supported in this environment');
     expect(callback).not.toHaveBeenCalled();
   });
 

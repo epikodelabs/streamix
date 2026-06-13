@@ -1,4 +1,4 @@
-import { atom, fromAtom, from, zip } from '@epikodelabs/streamix';
+import { createSubject, from, zip } from '@epikodelabs/streamix';
 
 describe('zip', () => {
   it('should zip values from multiple streams', (done) => {
@@ -57,9 +57,9 @@ describe('zip', () => {
   });
 
   it('should handle sources that emit values asynchronously', (done) => {
-    const stream1Source$ = atom<number>(); const stream1$ = fromAtom(stream1Source$);
-    const stream2Source$ = atom<string>(); const stream2$ = fromAtom(stream2Source$);
-    const stream3Source$ = atom<boolean>(); const stream3$ = fromAtom(stream3Source$);
+    const stream1$ = createSubject<number>();
+    const stream2$ = createSubject<string>();
+    const stream3$ = createSubject<boolean>();
 
     const result: any[] = [];
     zip(stream1$, stream2$, stream3$).subscribe({
@@ -75,17 +75,17 @@ describe('zip', () => {
     });
 
     setTimeout(() => {
-      stream1Source$.set(1);
-      stream2Source$.set('a');
-      stream3Source$.set(true);
+      stream1$.next(1);
+      stream2$.next('a');
+      stream3$.next(true);
 
-      stream1Source$.set(2);
-      stream2Source$.set('b');
-      stream3Source$.set(false);
+      stream1$.next(2);
+      stream2$.next('b');
+      stream3$.next(false);
 
-      stream1Source$.dispose();
-      stream2Source$.dispose();
-      stream3Source$.dispose();
+      stream1$.complete();
+      stream2$.complete();
+      stream3$.complete();
     }, 100);
   });
 

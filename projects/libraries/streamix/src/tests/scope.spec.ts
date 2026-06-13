@@ -1,28 +1,27 @@
-import { atom, flow, fromAtom, scope } from '@epikodelabs/streamix';
+import { atom, asyncAtom, createSubject, derived, flow, globalScope, scope } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 describe('scope', () => {
   it('should create a scope', () => {
     const s = scope(() => {});
-    expect(s.parent).toBeUndefined();
+    expect(s.parent).toBe(globalScope);
     s.dispose();
   });
 
-  it('should merge factory return value', async () => {
+  it('should merge factory return value', () => {
     const s = scope(() => {
-      const count = flow(fromAtom(atom<number>(0)));
+      const count = flow(createSubject<number>(), 0);
       return { count };
     });
-    await delay();
     expect(s.count.value).toBe(0);
     s.dispose();
   });
 
   it('should auto-register atoms created inside factory', async () => {
-    const source$ = atom<number>();
+    const subject = createSubject<number>();
     const s = scope(() => {
-      const a = flow(fromAtom(source$));
+      const a = flow(subject, 0);
       return { a };
     });
     expect(s.a.disposed).toBeFalse();
@@ -31,14 +30,13 @@ describe('scope', () => {
   });
 
   it('should support snapshot', async () => {
-    const s1 = fromAtom(atom<number>(1));
-    const s2 = fromAtom(atom<number>(2));
+    const s1 = createSubject<number>();
+    const s2 = createSubject<number>();
     const s = scope(() => {
-      const a = flow(s1);
-      const b = flow(s2);
+      const a = flow(s1, 1);
+      const b = flow(s2, 2);
       return { a, b };
     });
-    await delay();
     expect(s.snapshot()).toEqual({ a: 1, b: 2 });
     s.dispose();
   });
@@ -53,11 +51,11 @@ describe('scope', () => {
   });
 
   it('should dispose descendants recursively', () => {
-    const source$ = atom<number>();
+    const subject = createSubject<number>();
     const parent = scope(() => {
       const child = scope(() => {
         const grandchild = scope(() => {
-          const x = flow(fromAtom(source$));
+          const x = flow(subject, 0);
           return { x };
         });
         return { grandchild };
@@ -70,39 +68,37 @@ describe('scope', () => {
     expect(parent.child.grandchild.x.disposed).toBeTrue();
   });
 
-  it('should snapshot nested scopes', async () => {
+  it('should snapshot nested scopes', () => {
     const s = scope(() => {
       const child = scope(() => {
-        const a = flow(fromAtom(atom<number>(42)));
+        const a = flow(createSubject<number>(), 42);
         return { a };
       });
       return { child };
     });
-    await delay();
     expect(s.snapshot()).toEqual({ child: { a: 42 } });
     s.dispose();
   });
 
   it('should react to stream emissions inside scope', async () => {
-    const s1$ = atom<number>(1);
-    const s2$ = atom<number>(2);
+    const s1 = createSubject<number>();
+    const s2 = createSubject<number>();
     const s = scope(() => {
-      const a = flow(fromAtom(s1$));
-      const b = flow(fromAtom(s2$));
+      const a = flow(s1, 1);
+      const b = flow(s2, 2);
       return { a, b };
     });
 
     const values: number[][] = [];
-    await delay();
     s.a.subscribe(v => values.push(['a', v] as any));
     s.b.subscribe(v => values.push(['b', v] as any));
     await delay();
 
-    s1$.set(10);
+    s1.next(10);
     await delay();
     expect(s.a.value).toBe(10);
 
-    s2$.set(20);
+    s2.next(20);
     await delay();
     expect(s.b.value).toBe(20);
 
@@ -117,21 +113,21 @@ describe('scope', () => {
     });
 
     it('should be true until all atoms have emitted', async () => {
-      const s1$ = atom<number>();
-      const s2$ = atom<string>();
+      const s1 = createSubject<number>();
+      const s2 = createSubject<string>();
       const s = scope(() => {
-        const a = flow(fromAtom(s1$));
-        const b = flow(fromAtom(s2$));
+        const a = flow(s1, 0);
+        const b = flow(s2, '');
         return { a, b };
       });
 
       expect(s.loading).toBeTrue();
 
-      s1$.set(1);
+      s1.next(1);
       await delay();
       expect(s.loading).toBeTrue();
 
-      s2$.set('x');
+      s2.next('x');
       await delay();
       expect(s.loading).toBeFalse();
 
@@ -139,10 +135,10 @@ describe('scope', () => {
     });
 
     it('should track recursive loading through nested scopes', async () => {
-      const source$ = atom<number>();
+      const subject = createSubject<number>();
       const parent = scope(() => {
         const child = scope(() => {
-          const a = flow(fromAtom(source$));
+          const a = flow(subject, 0);
           return { a };
         });
         return { child };
@@ -150,7 +146,7 @@ describe('scope', () => {
 
       expect(parent.loading).toBeTrue();
 
-      source$.set(1);
+      subject.next(1);
       await delay();
       expect(parent.loading).toBeFalse();
 
@@ -158,16 +154,243 @@ describe('scope', () => {
     });
 
     it('should become false when atom emits', async () => {
-      const source$ = atom<number>();
+      const subject = createSubject<number>();
       const s = scope(() => {
-        const a = flow(fromAtom(source$));
+        const a = flow(subject, 0);
         return { a };
       });
 
       expect(s.loading).toBeTrue();
-      source$.set(1);
+      subject.next(1);
       await delay();
       expect(s.loading).toBeFalse();
+      s.dispose();
+    });
+  });
+
+  describe('strobe', () => {
+    it('should sample flow emissions with scope strobe', async () => {
+      const subject = createSubject<number>();
+      const s = scope(() => {
+        const a = flow(subject, 0);
+        return { a };
+      }, { strobe: 50 });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      subject.next(1);
+      subject.next(2);
+      subject.next(3);
+
+      await delay(70);
+      expect(s.a.value).toBe(3);
+      expect(values).toContain(3);
+
+      s.dispose();
+    });
+
+    it('should inherit strobe from parent scope', async () => {
+      const subject = createSubject<number>();
+      const parent = scope(() => {
+        const child = scope(() => {
+          const a = flow(subject, 0);
+          return { a };
+        });
+        return { child };
+      }, { strobe: 50 });
+
+      subject.next(1);
+      subject.next(2);
+
+      await delay(70);
+      expect(parent.child.a.value).toBe(2);
+
+      parent.dispose();
+    });
+
+    it('should allow child scope to override parent strobe', async () => {
+      const subject = createSubject<number>();
+      const parent = scope(() => {
+        const child = scope(() => {
+          const a = flow(subject, 0);
+          return { a };
+        }, { strobe: 150 });
+        return { child };
+      }, { strobe: 50 });
+
+      subject.next(1);
+      subject.next(2);
+
+      await delay(70);
+      // Child uses 150ms strobe, so it should not have sampled yet
+      expect(parent.child.a.value).toBe(0);
+
+      await delay(100);
+      // Total ~170ms, child's strobe should have fired
+      expect(parent.child.a.value).toBe(2);
+
+      parent.dispose();
+    });
+
+    it('should stop sampling when scope is disposed', async () => {
+      const subject = createSubject<number>();
+      const s = scope(() => {
+        const a = flow(subject, 0);
+        return { a };
+      }, { strobe: 50 });
+
+      s.dispose();
+
+      subject.next(1);
+      subject.next(2);
+
+      await delay(70);
+      expect(s.a.safeValue).toBe(0);
+
+      expect(() => s.a.value).toThrowError();
+    });
+
+    it('should batch atom set() calls on strobe', async () => {
+      const s = scope(() => {
+        const a = atom(0);
+        return { a };
+      }, { strobe: 50 });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+      s.a.set(3);
+
+      expect(s.a.value).toBe(3);
+      expect(values).toEqual([]);
+
+      await delay(70);
+      expect(values).toEqual([3]);
+
+      s.dispose();
+    });
+
+    it('should batch derived recomputations on strobe', async () => {
+      const s = scope(() => {
+        const a = atom(0);
+        const doubled = derived(() => a.value * 2);
+        return { a, doubled };
+      }, { strobe: 50 });
+
+      const values: number[] = [];
+      s.doubled.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+      s.a.set(3);
+
+      // In analog mode the derived value is sampled; it stays at the
+      // last-emitted value until the strobe fires.
+      expect(s.doubled.value).toBe(0);
+      expect(values).toEqual([]);
+
+      await delay(70);
+      expect(s.doubled.value).toBe(6);
+      expect(values).toEqual([6]);
+
+      s.dispose();
+    });
+
+    it('should support discrete opt-out', async () => {
+      const s = scope(() => {
+        const a = atom(0, { discrete: true });
+        return { a };
+      }, { strobe: 50 });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+
+      expect(values).toEqual([1, 2]);
+
+      s.dispose();
+    });
+
+    it('should batch asyncAtom set() calls on strobe', async () => {
+      const s = scope(() => {
+        const a = asyncAtom<number>();
+        return { a };
+      }, { strobe: 50 });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+      s.a.set(3);
+
+      expect(s.a.value).toBe(3);
+      expect(values).toEqual([]);
+
+      await delay(70);
+      expect(values).toEqual([3]);
+
+      s.dispose();
+    });
+  });
+
+  describe('globalScope', () => {
+    afterEach(() => {
+      globalScope.mode = 'discrete';
+      globalScope.strobe = 0;
+    });
+
+    it('should default to discrete mode', () => {
+      expect(globalScope.mode).toBe('discrete');
+      expect(globalScope.strobe).toBe(0);
+    });
+
+    it('should make top-level scopes analog via global config', async () => {
+      globalScope.mode = 'analog';
+      globalScope.strobe = 50;
+
+      const s = scope(() => {
+        const a = atom(0);
+        return { a };
+      });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+      s.a.set(3);
+
+      expect(values).toEqual([]);
+
+      await delay(70);
+      expect(values).toEqual([3]);
+
+      s.dispose();
+    });
+
+    it('should let child scopes override global analog mode', async () => {
+      globalScope.mode = 'analog';
+      globalScope.strobe = 50;
+
+      const s = scope(() => {
+        const a = atom(0);
+        return { a };
+      }, { mode: 'discrete' });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+
+      expect(values).toEqual([1, 2]);
+
       s.dispose();
     });
   });

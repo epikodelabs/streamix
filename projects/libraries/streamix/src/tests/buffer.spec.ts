@@ -1,12 +1,12 @@
-import { atom, buffer, fromAtom, type Atom, type Stream } from "@epikodelabs/streamix";
+import { buffer, createSubject, type Stream } from "@epikodelabs/streamix";
 
 describe("buffer", () => {
   let source: Stream<number>;
-  let source$: Atom<number>;
+  let subject: ReturnType<typeof createSubject<number>>;
 
   beforeEach(() => {
-    source$ = atom<number>();
-    source = fromAtom(source$);
+    subject = createSubject<number>();
+    source = subject;
   });
 
   it("should emit buffered values at the specified interval", async () => {
@@ -20,15 +20,15 @@ describe("buffer", () => {
       }
     })();
 
-    source$.set(1);
+    subject.next(1);
     await new Promise((resolve) => setTimeout(resolve, 25));
-    source$.set(2);
+    subject.next(2);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    source$.set(3);
+    subject.next(3);
     await new Promise((resolve) => setTimeout(resolve, 100));
-    source$.set(4);
+    subject.next(4);
     await new Promise((resolve) => setTimeout(resolve, 100));
-    source$.dispose();
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([[1, 2, 3], [4]]);
@@ -46,9 +46,9 @@ describe("buffer", () => {
       completed = true;
     })();
 
-    source$.set(1);
+    subject.next(1);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    source$.dispose();
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(completed).toBeTrue();
@@ -65,11 +65,11 @@ describe("buffer", () => {
       }
     })();
 
-    source$.set(1);
+    subject.next(1);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    source$.set(2);
+    subject.next(2);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    source$.dispose();
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([[1, 2]]);
@@ -94,12 +94,12 @@ describe("buffer", () => {
 
     // Wait for consumer to start
     while (!started) {
-      source$.set(1); // Emit a value to start the stream
+      subject.next(1); // Emit a value to start the stream
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
     // Trigger error
-    source$.setError(new Error("Test error"));
+    subject.error(new Error("Test error"));
 
     // Wait for consumer to catch error
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -121,7 +121,7 @@ describe("buffer", () => {
     })();
 
     await new Promise((resolve) => setTimeout(resolve, 100));
-    source$.dispose();
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([]);
@@ -135,7 +135,7 @@ describe("buffer", () => {
 
     const iterator = buffered[Symbol.asyncIterator]();
     
-    source$.set(1);
+    subject.next(1);
     await new Promise((resolve) => setTimeout(resolve, 50));
     
     const firstResult = await iterator.next();
@@ -148,8 +148,8 @@ describe("buffer", () => {
     iteratorReturned = true;
     
     // These values should not be processed
-    source$.set(2);
-    source$.set(3);
+    subject.next(2);
+    subject.next(3);
     await new Promise((resolve) => setTimeout(resolve, 150));
     
     const nextResult = await iterator.next();
@@ -166,7 +166,7 @@ describe("buffer", () => {
 
     const iterator = buffered[Symbol.asyncIterator]();
     
-    source$.set(1);
+    subject.next(1);
     await new Promise((resolve) => setTimeout(resolve, 50));
     
     await iterator.next();

@@ -818,7 +818,7 @@ describe('parsers', () => {
   let warnSpy: jasmine.Spy;
 
   beforeEach(() => {
-    warnSpy = spyOn(console, 'warn').and.callFake(() => {});
+    warnSpy = spyOn(console, 'warn').and.callFake(() => {});  // Silences all warnings
   });
 
   afterEach(() => {
@@ -853,40 +853,13 @@ describe('parsers', () => {
     expect(values[0]).toBeInstanceOf(Blob);
   });
 
-  // UPDATED: Valid empty response (204) should NOT throw
-  it('handles 204 No Content without throwing', async () => {
-    const response = new Response(null, { status: 204 });
-    
-    const chunks = [];
-    for await (const chunk of readChunks(response)) {
-      chunks.push(chunk);
-    }
-    
-    expect(chunks.length).toBe(1);
-    expect(chunks[0].done).toBe(true);
-  });
+  it('throws error when response body is not readable', async () => {
+    const response = new Response(null);
+    Object.defineProperty(response, 'body', { value: null });
 
-  // UPDATED: Valid empty response (304) should NOT throw
-  it('handles 304 Not Modified without throwing', async () => {
-    const response = new Response(null, { status: 304 });
-    
-    const chunks = [];
-    for await (const chunk of readChunks(response)) {
-      chunks.push(chunk);
-    }
-    
-    expect(chunks.length).toBe(1);
-    expect(chunks[0].done).toBe(true);
-  });
-
-  // NEW: Test for malformed response (200 with null body) - SHOULD throw
-  it('throws when response body is null for status 200', async () => {
-    const response = new Response(null, { status: 200 });
-    Object.defineProperty(response, 'body', { value: null, configurable: true });
-    
-    await expectAsync(
-      collect(readChunks(response))
-    ).toBeRejectedWithError(/not readable/);
+    await expectAsync((async () => {
+      for await (const _ of readChunks()(response)) { /* no-op */ }
+    })()).toBeRejectedWithError(/not readable/);
   });
 
   it('parses text chunks', async () => {
@@ -897,7 +870,7 @@ describe('parsers', () => {
       headers: { 'Content-Type': 'text/plain' },
     });
 
-    const values = await collect(readChunks(response));
+    const values = await collect(readChunks()(response));
 
     expect(values.length).toBeGreaterThan(0);
     expect(values[values.length - 1].done).toBeTrue();
@@ -911,27 +884,10 @@ describe('parsers', () => {
       headers: { 'Content-Type': 'application/x-ndjson' },
     });
 
-    const values = await collect(readChunks<any>(response, readNdjsonChunk));
+    const values = await collect(readChunks<any>(readNdjsonChunk)(response));
 
     const dataChunks = values.filter((v) => !v.done);
     expect(dataChunks.length).toBe(2);
-  });
-
-  // NEW: NDJSON without trailing newline (tests buffer flushing)
-  it('parses NDJSON chunks without trailing newline', async () => {
-    const encoder = new TextEncoder();
-    const chunks = [encoder.encode('{"a":1}\n{"b":2}')];
-
-    const response = new Response(createMockReadableStream(chunks), {
-      headers: { 'Content-Type': 'application/x-ndjson' },
-    });
-
-    const values = await collect(readChunks<any>(response, readNdjsonChunk));
-
-    const dataChunks = values.filter((v) => !v.done);
-    expect(dataChunks.length).toBe(2);
-    expect(dataChunks[0].chunk).toEqual({ a: 1 });
-    expect(dataChunks[1].chunk).toEqual({ b: 2 });
   });
 
   it('parses binary chunks', async () => {
@@ -941,7 +897,7 @@ describe('parsers', () => {
       headers: { 'Content-Type': 'application/octet-stream' },
     });
 
-    const values = await collect(readChunks<Uint8Array>(response, readBinaryChunk));
+    const values = await collect(readChunks<Uint8Array>(readBinaryChunk)(response));
 
     expect(values[0].chunk).toBeInstanceOf(Uint8Array);
   });
@@ -955,7 +911,7 @@ describe('parsers', () => {
       headers: { 'Content-Type': 'text/plain', 'Content-Length': String(data.length) },
     });
 
-    const values = await collect(readChunks(response));
+    const values = await collect(readChunks()(response));
 
     expect(values[values.length - 1].progress).toBe(1);
   });
@@ -966,7 +922,7 @@ describe('parsers', () => {
 
     const response = new Response(createMockReadableStream(chunks));
 
-    const values = await collect(readChunks(response));
+    const values = await collect(readChunks()(response));
     expect(values.length).toBeGreaterThan(0);
   });
 
@@ -978,7 +934,7 @@ describe('parsers', () => {
       headers: { 'Content-Type': 'application/json' },
     });
 
-    const values = await collect(readChunks<any>(response, readJsonChunk));
+    const values = await collect(readChunks<any>(readJsonChunk)(response));
 
     expect(values[0].chunk.test).toBeTrue();
   });
@@ -995,16 +951,6 @@ describe('parsers', () => {
 
   it('parses CSV chunks', () => {
     const csvData = 'name,age\nJohn,30\nJane,25';
-    expect(readCsvChunk(csvData)).toEqual([
-      ['name', 'age'],
-      ['John', '30'],
-      ['Jane', '25'],
-    ]);
-  });
-
-  // NEW: CSV with CRLF line endings
-  it('parses CSV chunks with CRLF line endings', () => {
-    const csvData = 'name,age\r\nJohn,30\r\nJane,25';
     expect(readCsvChunk(csvData)).toEqual([
       ['name', 'age'],
       ['John', '30'],
@@ -1038,33 +984,11 @@ describe('parsers', () => {
     expect(text).toBe('Hello World');
   });
 
-  // UPDATED: Valid empty response for readFull should NOT throw
-  it('handles 204 No Content with readFull without throwing', async () => {
-    const response = new Response(null, { status: 204 });
-    
-    const values = await collect(readFull(response));
-    
-    expect(values.length).toBe(1);
-    expect(values[0]).toBeInstanceOf(Uint8Array);
-    expect(values[0].length).toBe(0);
-  });
+  it('throws when readFull cannot access the response body', async () => {
+    const response = new Response(null);
+    Object.defineProperty(response, 'body', { value: null });
 
-  // UPDATED: Malformed response (200 with null body) SHOULD throw for readFull
-  it('throws when readFull cannot access response body for status 200', async () => {
-    const response = new Response(null, { status: 200 });
-    Object.defineProperty(response, 'body', { value: null, configurable: true });
-    
     await expectAsync(collect(readFull(response))).toBeRejectedWithError(/not readable/);
-  });
-
-  // NEW: Status 500 with null body SHOULD throw
-  it('throws when response body is null for error status', async () => {
-    const response = new Response(null, { status: 500 });
-    Object.defineProperty(response, 'body', { value: null, configurable: true });
-    
-    await expectAsync(
-      collect(readChunks(response))
-    ).toBeRejectedWithError(/not readable/);
   });
 
   it('handles parser errors in stream', async () => {

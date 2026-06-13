@@ -1,15 +1,15 @@
-import { atom, fromAtom, type Atom, type Stream } from '@epikodelabs/streamix';
+import { createSubject, type Stream } from '@epikodelabs/streamix';
 import { mode } from '@epikodelabs/streamix/aggregates';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe('mode', () => {
-  let source$: Atom<number>;
+  let subject: ReturnType<typeof createSubject<number>>;
   let source: Stream<number>;
 
   beforeEach(() => {
-    source$ = atom<number>();
-    source = fromAtom(source$);
+    subject = createSubject<number>();
+    source = subject;
   });
 
   it('should emit the most frequently occurring value', async () => {
@@ -22,11 +22,11 @@ describe('mode', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
     await settle();
 
     expect(results).toEqual([[2]]);
@@ -42,19 +42,19 @@ describe('mode', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(1);
-    source$.set(2);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.next(1);
+    subject.next(2);
+    subject.complete();
     await settle();
 
     expect(results).toEqual([[1, 2]]);
   });
 
   it('should be able to key values before counting', async () => {
-    const itemSource$ = atom<{ group: string; value: string }>();
-    const itemSource: Stream<{ group: string; value: string }> = fromAtom(itemSource$);
+    const itemSubject = createSubject<{ group: string; value: string }>();
+    const itemSource: Stream<{ group: string; value: string }> = itemSubject;
     const modeStream = itemSource.pipe(mode((item) => item.group));
     const results: { group: string; value: string }[][] = [];
 
@@ -64,11 +64,11 @@ describe('mode', () => {
       }
     })();
 
-    itemSource$.set({ group: 'alpha', value: 'a' });
-    itemSource$.set({ group: 'beta', value: 'b' });
-    itemSource$.set({ group: 'alpha', value: 'a2' });
-    itemSource$.set({ group: 'beta', value: 'b2' });
-    itemSource$.dispose();
+    itemSubject.next({ group: 'alpha', value: 'a' });
+    itemSubject.next({ group: 'beta', value: 'b' });
+    itemSubject.next({ group: 'alpha', value: 'a2' });
+    itemSubject.next({ group: 'beta', value: 'b2' });
+    itemSubject.complete();
     await settle();
 
     expect(results).toEqual([
@@ -89,7 +89,7 @@ describe('mode', () => {
       }
     })();
 
-    source$.dispose();
+    subject.complete();
     await settle();
 
     expect(results).toEqual([]);

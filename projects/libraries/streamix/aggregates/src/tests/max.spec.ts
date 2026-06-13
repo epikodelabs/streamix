@@ -1,15 +1,15 @@
-import { atom, fromAtom, type Atom, type Stream } from '@epikodelabs/streamix';
+import { createSubject, type Stream } from '@epikodelabs/streamix';
 import { max } from '@epikodelabs/streamix/aggregates';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe('max', () => {
-  let source$: Atom<number>;
+  let subject: ReturnType<typeof createSubject<number>>;
   let source: Stream<number>;
 
   beforeEach(() => {
-    source$ = atom<number>();
-    source = fromAtom(source$);
+    subject = createSubject<number>();
+    source = subject;
   });
 
   it('should emit the largest value', async () => {
@@ -22,10 +22,10 @@ describe('max', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(3); // Largest value
-    source$.set(2);
-    source$.dispose();
+    subject.next(1);
+    subject.next(3); // Largest value
+    subject.next(2);
+    subject.complete();
     await settle();
 
     expect(results).toEqual([3]);
@@ -45,7 +45,7 @@ describe('max', () => {
       }
     })();
 
-    source$.setError(new Error('Test Error'));
+    subject.error(new Error('Test Error'));
     await settle();
 
     expect(error).toEqual(new Error('Test Error'));

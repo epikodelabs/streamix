@@ -1,18 +1,16 @@
 import {
-  atom,
-  fromAtom,
+  createSubject,
   type Stream,
-  type Atom,
   toArray,
 } from '@epikodelabs/streamix';
 
 describe('toArray', () => {
-  let source$: Atom<number>;
+  let subject: ReturnType<typeof createSubject<number>>;
   let source: Stream<number>;
 
   beforeEach(() => {
-    source$ = atom<number>();
-    source = fromAtom(source$);
+    subject = createSubject<number>();
+    source = subject;
   });
 
   it('should collect all values and emit them as an array when the stream completes', async () => {
@@ -25,10 +23,10 @@ describe('toArray', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([[1, 2, 3]]);
@@ -44,7 +42,7 @@ describe('toArray', () => {
       }
     })();
 
-    source$.dispose(); // No values emitted, just completing
+    subject.complete(); // No values emitted, just completing
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([[]]); // Empty array
@@ -64,7 +62,7 @@ describe('toArray', () => {
       }
     })();
 
-    source$.setError(new Error('Test Error'));
+    subject.error(new Error('Test Error'));
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(error).toEqual(new Error('Test Error'));  // Propagate error
@@ -80,10 +78,10 @@ describe('toArray', () => {
       }
     })();
 
-    source$.set(10);
-    source$.set(20);
-    source$.set(30);
-    source$.dispose();
+    subject.next(10);
+    subject.next(20);
+    subject.next(30);
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([[10, 20, 30]]);
@@ -99,11 +97,13 @@ describe('toArray', () => {
       }
     })();
 
-    source$.set(42); // Single value
-    source$.dispose();
+    subject.next(42); // Single value
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([[42]]);  // Single value in array
   });
 
 });
+
+

@@ -1,332 +1,660 @@
-import type { Stream } from "@epikodelabs/streamix";
+import type { Stream } from "../abstractions/stream";
 import { createSubscription, type Subscription } from "../abstractions/subscription";
-import { DERIVED_ATOM, registerWithCurrentScope } from "./scope";
+import { sample } from "../operators/sample";
+import {
+  getCurrentScope,
+  getScopeStrobe,
+  markAtomAsEmitted,
+  registerAnalogAtom,
+  registerWithCurrentScope,
+  unregisterAnalogAtom,
+} from "./scope";
 
-/* ── Base interface ── */
+/**
+ * Common options for atom factories.
+ */
+export interface AtomOptions {
+  /**
+   * When `true`, the atom always emits updates immediately, bypassing any
+   * scope-level or global strobe. When `false` or omitted, the atom follows
+   * the effective mode of the owning scope (or the global scope).
+   */
+  discrete?: boolean;
+}
 
+/**
+ * Base interface for all atoms.
+ *
+ * Atoms are reactive values that can be read, subscribed to, and disposed.
+ * They automatically track dependencies for derived atoms and participate in
+ * scope-based lifecycle management.
+ *
+ * @template T The type of the value held by this atom.
+ */
 export interface AtomBase<T = any> {
+  /** Discriminator for runtime type checks. */
   type: "atom";
 
   /**
    * Reads the current value.
-   * @throws {Error} If the atom has been disposed or is in an error state.
+   *
+   * When called inside a {@link derived} factory, this atom is automatically
+   * registered as a dependency.
+   *
+   * @returns The current value.
+   * @throws {Error} If the atom has been disposed.
    */
   get(): T;
 
   /**
-   * The current value, or the last known value if in an error state.
-   * Never returns `undefined` due to errors.
-   * @throws {Error} If the atom has not yet emitted a value, is in an error state, or has been disposed. For a nullable variant, use
-   * {@link safeValue}.
+   * The current value.
+   *
+   * When accessed inside a {@link derived} factory, this atom is automatically
+   * registered as a dependency.
+   *
+   * @throws {Error} If the atom has been disposed.
    */
   readonly value: T;
 
   /**
-   * The current value, or `undefined` if in an error or disposed state.
-   * Use alongside {@link error} to discriminate.
+   * The current value, or the last known value if the atom has been disposed.
+   *
+   * Unlike {@link value}, this never throws. Use it when you need a defensive
+   * read (e.g. snapshots, cleanup handlers).
    */
-  readonly safeValue: T | undefined;
+  readonly safeValue: T;
 
-  /** The previous value, or `undefined` if no previous value exists. */
-  readonly prior: T | undefined;
+  /** The previous value (before the most recent change). */
+  readonly prior: T;
 
   /** Whether the atom has been disposed. */
   readonly disposed: boolean;
 
-  /** The current error, or `null` if the atom is in a valid Value state. */
-  readonly error: Error | null;
-
   /**
    * Subscribes to value changes.
-   * Only invoked on valid value transitions, not on error states.
+   *
+   * The callback is invoked synchronously whenever the atom's value changes.
+   *
+   * @param callback - Function called with the new value.
+   * @returns A subscription that can be used to unsubscribe.
    */
   subscribe(callback: (value: T) => void): Subscription;
-
-  /** Subscribes to all state changes, including value, error, and disposed states. */
-  onStateChange(callback: (state: AtomState<T>) => void): Subscription;
 
   /** Disposes the atom, clearing all subscriptions and resources. */
   dispose(): void;
 }
 
-/* ── Internal state type ── */
-
-type AtomState<T> =
-  | { tag: "value"; current: T; previous: T | undefined }
-  | { tag: "error"; current: Error; previous: T | undefined }
-  | { tag: "disposed"; previous: T | undefined };
-
-function valueState<T>(value: T): AtomState<T> {
-  return { tag: "value", current: value, previous: value };
+/**
+ * Writable atom that extends {@link AtomBase} with a {@link set} method.
+ *
+ * @template T The type of the value held by this atom.
+ */
+export interface Atom<T = any> extends AtomBase<T> {
+  /**
+   * Updates the atom's value and notifies subscribers.
+   *
+   * If the new value is the same as the current value (using `Object.is`),
+   * no notification occurs.
+   *
+   * @param value - The new value to set.
+   */
+  set(value: T): void;
 }
 
-/* ── Dependency tracking ── */
-
-interface FormulaContext {
-  dependencies: Set<AtomBase<any>>;
-  run: () => any;
-}
-
-let activeFormula: FormulaContext | null = null;
+let activeFormula: { dependencies: Set<AtomBase<any>> } | null = null;
 
 /* ── Glitch-free propagation ── */
 
 let propagationDepth = 0;
 let deferredNotifications = new Set<() => void>();
 
+/** Flushes all deferred notifications that were queued during propagation. */
 function flushDeferred() {
   const notifications = Array.from(deferredNotifications);
-  deferredNotifications.clear();
+  deferredNotifications = new Set();
   for (const notify of notifications) {
     notify();
   }
 }
 
+/**
+ * Runs a function inside a propagation context.
+ *
+ * Notifications are deferred until the outermost propagation completes,
+ * ensuring glitch-free updates where derived atoms see a consistent state.
+ *
+ * @param fn - The function to run.
+ */
 function runWithPropagation(fn: () => void) {
   propagationDepth++;
   try {
     fn();
   } finally {
     propagationDepth--;
-    if (propagationDepth === 0) {
+    if (propagationDepth === 0 && deferredNotifications.size > 0) {
       flushDeferred();
     }
   }
 }
 
-function queueNotification(cb: () => void) {
+/**
+ * Notifies derived subscribers, deferring if inside a propagation.
+ *
+ * @param notify - Callback that performs the actual notification.
+ */
+function notifyDerivedSubscribers(notify: () => void) {
   if (propagationDepth > 0) {
-    deferredNotifications.add(cb);
+    deferredNotifications.add(notify);
   } else {
-    cb();
+    notify();
   }
-}
-
-function getStateValue<T>(state: AtomState<T>): T {
-  if (state.tag === "value") return state.current;
-  if (state.tag === "error") throw state.current;
-  throw new Error("Atom has been disposed");
 }
 
 /* ── flow ── */
 
-export function flow<T>(stream: Stream<T>): AtomBase<T> {
-  let state: AtomState<T> = {
-    tag: "error",
-    current: new Error("Flow has not emitted yet"),
-    previous: undefined
-  };
-  const valueSubs = new Set<(value: T) => void>();
-  const stateSubs = new Set<(state: AtomState<T>) => void>();
+/**
+ * Creates an atom backed by a stream.
+ *
+ * The atom's value is updated whenever the stream emits. The initial value is
+ * used until the first emission. If the stream emits synchronously during
+ * subscription, the value is replayed to scope subscribers.
+ *
+ * @param stream - The stream to subscribe to.
+ * @param initialValue - The starting value before any stream emission.
+ * @returns An atom that reflects the stream's latest value.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = flow(counterStream, 0);
+ *   return { count };
+ * });
+ * ```
+ */
+export function flow<T>(stream: Stream<T>, initialValue: T, options?: AtomOptions): AtomBase<T> {
+  const scope = getCurrentScope();
+  const strobe = scope ? getScopeStrobe(scope) : undefined;
+  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
+  const sourceStream = analog ? stream.pipe(sample(strobe)) : stream;
 
-  const streamSub = stream.subscribe({
-    next(value: T) {
-      if (state.tag === "disposed") return;
+  let current = initialValue;
+  let previous = initialValue;
+  let disposed = false;
+  let hasEmitted = false;
 
-      const prev = state.tag === "value" ? state.current : state.previous;
+  const subs = new Set<(value: T) => void>();
 
-      state = { tag: "value", current: value, previous: prev };
-      for (const cb of Array.from(stateSubs)) {
-        cb(state);
+  const streamSub = sourceStream.subscribe((value: T) => {
+    if (disposed) return;
+    if (Object.is(current, value)) return;
+
+    hasEmitted = true;
+    previous = current;
+    current = value;
+
+    runWithPropagation(() => {
+      for (const cb of Array.from(subs)) {
+        cb(value);
       }
-
-      runWithPropagation(() => {
-        for (const cb of Array.from(valueSubs)) {
-          queueNotification(() => cb(value));
-        }
-      });
-    },
-    error(err: Error) {
-      if (state.tag === "disposed") return;
-
-      const prev = state.tag === "value" ? state.current : state.previous;
-      state = { tag: "error", current: err, previous: prev };
-      for (const cb of Array.from(stateSubs)) {
-        cb(state);
-      }
-    },
+    });
   });
 
   const instance: AtomBase<T> = {
     type: "atom",
 
-    get disposed() { return state.tag === "disposed"; },
-    get error() { return state.tag === "error" ? state.current : null; },
-    get() { return getStateValue(state); },
+    get disposed() {
+      return disposed;
+    },
+
+    get() {
+      if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
+      return current;
+    },
 
     get value() {
-      if (activeFormula) activeFormula.dependencies.add(instance);
-      if (state.tag === "value") return state.current;
-      throw new Error("Atom has not emitted a value yet or is in an error state.");
+      if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
+      return current;
     },
 
     get safeValue() {
-      if (activeFormula) activeFormula.dependencies.add(instance);
-      return state.tag === "value" ? state.current : state.previous;
+      return current;
     },
 
-    get prior() { return state.previous; },
+    get prior() {
+      return previous;
+    },
 
     subscribe(callback) {
-      valueSubs.add(callback);
-      return createSubscription(() => { valueSubs.delete(callback); });
-    },
+      subs.add(callback);
 
-    onStateChange(callback) {
-      stateSubs.add(callback);
-      // Do not emit the initial "not emitted" error state to new subscribers.
-      // They will get the first value when it's set.
-      if (state.tag === "value") callback(state);
-      return createSubscription(() => { stateSubs.delete(callback); });
+      return createSubscription(() => {
+        subs.delete(callback);
+      });
     },
 
     dispose() {
-      if (state.tag === "disposed") return;
-      const prev = state.previous;
-      state = { tag: "disposed", previous: prev };
-      for (const cb of Array.from(stateSubs)) {
-        cb(state);
-      }
-      valueSubs.clear();
+      if (disposed) return;
+
+      disposed = true;
+      subs.clear();
       streamSub.unsubscribe();
-    },
+    }
   };
 
   registerWithCurrentScope(instance);
+
+  // If the stream emitted synchronously during subscription, the scope's
+  // loading callback missed it because it hadn't subscribed yet. Replay it.
+  if (hasEmitted) {
+    for (const cb of Array.from(subs)) {
+      cb(current);
+    }
+  }
+
   return instance;
 }
 
 /* ── atom ── */
 
-export interface Atom<T = any> extends AtomBase<T> {
-  /** Updates the atom's value. Transitions Error → Value (recovery). */
-  set(value: T): void;
+/**
+ * Creates a writable atom with an initial value.
+ *
+ * Writable atoms can be updated via {@link Atom.set} and automatically notify
+ * subscribers on change. They participate in scope tracking and dependency
+ * discovery for derived atoms.
+ *
+ * @param initialValue - The starting value.
+ * @returns A writable atom.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = atom(0);
+ *   count.set(5);
+ *   console.log(count.value); // 5
+ *   return { count };
+ * });
+ * ```
+ */
+export function atom<T>(initialValue: T, options?: AtomOptions): Atom<T> {
+  const scope = getCurrentScope();
+  const strobe = scope ? getScopeStrobe(scope) : undefined;
+  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
 
-  /** Transitions the atom into an error state. */
-  setError(error: Error): void;
-}
+  let current = initialValue;
+  let previous = initialValue;
+  let disposed = false;
+  let dirty = false;
+  let lastNotified = current;
 
-export interface AtomOptions<T = any> {
-  /** Custom equality function. If provided, `set` calls that return `true` are ignored. */
-  equal?: (a: T, b: T) => boolean;
-}
+  const subs = new Set<(value: T) => void>();
 
-export function atom<T>(initialValue?: T, options?: AtomOptions<T>): Atom<T> {
-  let state: AtomState<T> = initialValue !== undefined
-    ? valueState(initialValue)
-    : { tag: "error", current: new Error("Atom has not emitted yet"), previous: undefined };
-  const valueSubs = new Set<(value: T) => void>();
-  const stateSubs = new Set<(state: AtomState<T>) => void>();
-  const equal = options?.equal;
+  const notify = (value: T) => {
+    runWithPropagation(() => {
+      for (const cb of Array.from(subs)) {
+        cb(value);
+      }
+    });
+  };
+
+  const flush = () => {
+    if (!dirty || disposed) return;
+    dirty = false;
+    if (Object.is(lastNotified, current)) return;
+    lastNotified = current;
+    notify(current);
+  };
 
   const instance: Atom<T> = {
     type: "atom",
 
-    get disposed() { return state.tag === "disposed"; },
-    get error() { return state.tag === "error" ? state.current : null; },
+    get disposed() {
+      return disposed;
+    },
+
     get() {
-      if (activeFormula) activeFormula.dependencies.add(instance);
-      return getStateValue(state);
+      if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
+      return current;
     },
 
     get value() {
-      if (activeFormula) activeFormula.dependencies.add(instance);
-      if (state.tag === "value") return state.current;
-      throw new Error("Atom has not emitted a value yet or is in an error state.");
+      if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
+      return current;
     },
 
     get safeValue() {
-      if (activeFormula) activeFormula.dependencies.add(instance);
-      return state.tag === "value" ? state.current : state.previous;
+      return current;
     },
 
-    get prior() { return state.previous; },
+    get prior() {
+      return previous;
+    },
 
     subscribe(callback) {
-      valueSubs.add(callback);
-      return createSubscription(() => { valueSubs.delete(callback); });
-    },
+      subs.add(callback);
 
-    onStateChange(callback) {
-      stateSubs.add(callback);
-      // Do not emit the initial "not emitted" error state to new subscribers.
-      // They will get the first value when it's set.
-      if (state.tag === "value") callback(state);
-      return createSubscription(() => { stateSubs.delete(callback); });
-    },
-
-    set(value) {
-      if (state.tag === "disposed") return;
-
-      const prev = state.tag === "value" ? state.current : state.previous;
-
-      if (state.tag === "value" && equal && equal(state.current, value)) {
-        return;
-      }
-
-      state = { tag: "value", current: value, previous: prev };
-      for (const cb of Array.from(stateSubs)) {
-        cb(state);
-      }
-
-      runWithPropagation(() => {
-        for (const cb of Array.from(valueSubs)) {
-          queueNotification(() => cb(value));
-        }
+      return createSubscription(() => {
+        subs.delete(callback);
       });
     },
 
-    setError(error) {
-      if (state.tag === "disposed") return;
+    set(value) {
+      if (disposed) return;
+      if (Object.is(current, value)) return;
 
-      const prev = state.tag === "value" ? state.current : state.previous;
-      if (state.tag === "error" && state.current === error) return;
+      previous = current;
+      current = value;
 
-      state = { tag: "error", current: error, previous: prev };
-      for (const cb of Array.from(stateSubs)) {
-        cb(state);
+      if (analog) {
+        dirty = true;
+      } else {
+        lastNotified = current;
+        notify(value);
       }
     },
 
     dispose() {
-      if (state.tag === "disposed") return;
-      const prev = state.previous;
-      state = { tag: "disposed", previous: prev };
-      for (const cb of Array.from(stateSubs)) {
-        cb(state);
-      }
-      valueSubs.clear();
-    },
+      if (disposed) return;
+
+      disposed = true;
+      unregisterAnalogAtom(instance);
+      subs.clear();
+    }
   };
 
   registerWithCurrentScope(instance);
+  markAtomAsEmitted(instance);
+  if (analog) {
+    registerAnalogAtom(instance, flush);
+  }
+
+  // Notify scope subscribers immediately so writable atoms are
+  // considered "ready" — their value is already available.
+  for (const cb of Array.from(subs)) {
+    cb(current);
+  }
+
+  return instance;
+}
+
+/**
+ * Alias for {@link atom}.
+ *
+ * Use `discrete` when you want to emphasize that the value is updated by
+ * explicit, discrete events rather than a continuous/analog stream.
+ *
+ * @param initialValue - The starting value.
+ * @param options - Optional atom configuration.
+ * @returns A writable discrete atom.
+ *
+ * @example
+ * ```ts
+ * const count = discrete(0);
+ * count.set(5);
+ * ```
+ */
+export function discrete<T>(initialValue: T, options?: AtomOptions): Atom<T> {
+  return atom(initialValue, options);
+}
+
+/* ── asyncAtom ── */
+
+/**
+ * Options for creating an async atom.
+ */
+export interface AsyncAtomOptions {
+  /**
+   * Maximum number of values to replay to late subscribers.
+   * Defaults to `0` (no replay). Use `Infinity` for unlimited replay.
+   */
+  capacity?: number;
+}
+
+/**
+ * Async atom that buffers emissions and optionally replays them to late subscribers.
+ * Unlike {@link atom}, async atoms do not require an initial value.
+ *
+ * @template T The type of the value held by this atom.
+ */
+export interface AsyncAtom<T = any> extends AtomBase<T> {
+  /**
+   * Updates the atom's value and notifies subscribers.
+   *
+   * If the new value is the same as the current value (using `Object.is`),
+   * no notification occurs.
+   *
+   * @param value - The new value to set.
+   */
+  set(value: T): void;
+}
+
+/**
+ * Creates an async atom with optional replay capacity.
+ *
+ * Async atoms are hot atoms that do not require an initial value.
+ * Values are pushed via {@link AsyncAtom.set}. Late subscribers can
+ * receive buffered values based on the configured capacity.
+ *
+ * @param options - Configuration options.
+ * @returns An async atom.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const count = asyncAtom<number>();
+ *   count.set(5);
+ *   console.log(count.value); // 5
+ *   return { count };
+ * });
+ * ```
+ */
+export function asyncAtom<T>(): AsyncAtom<T>;
+export function asyncAtom<T>(options: AsyncAtomOptions & AtomOptions): AsyncAtom<T>;
+export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): AsyncAtom<T> {
+  const scope = getCurrentScope();
+  const strobe = scope ? getScopeStrobe(scope) : undefined;
+  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
+
+  const capacity = options?.capacity ?? 0;
+  const isFiniteCapacity = capacity !== Infinity && capacity > 0;
+  const replay: T[] = [];
+  let replayHead = 0;
+
+  let current: T = undefined as any;
+  let previous: T = undefined as any;
+  let hasValue = false;
+  let disposed = false;
+  let dirty = false;
+  let lastNotified: T = undefined as any;
+
+  const subs = new Set<(value: T) => void>();
+
+  const notify = (value: T) => {
+    runWithPropagation(() => {
+      for (const cb of Array.from(subs)) {
+        cb(value);
+      }
+    });
+  };
+
+  const flush = () => {
+    if (!dirty || disposed) return;
+    dirty = false;
+    if (hasValue && Object.is(lastNotified, current)) return;
+    lastNotified = current;
+    notify(current);
+  };
+
+  const pushReplay = (value: T) => {
+    if (capacity <= 0) return;
+    if (!isFiniteCapacity) {
+      replay.push(value);
+      return;
+    }
+    if (replay.length < capacity) {
+      replay.push(value);
+    } else {
+      replay[replayHead] = value;
+      replayHead = (replayHead + 1) % capacity;
+    }
+  };
+
+  const forEachReplay = (fn: (value: T) => void) => {
+    if (capacity <= 0) return;
+    if (!isFiniteCapacity) {
+      for (const value of replay) fn(value);
+      return;
+    }
+    const size = replay.length;
+    const start = size < capacity ? 0 : replayHead;
+    for (let i = 0; i < size; i++) {
+      fn(replay[(start + i) % capacity]);
+    }
+  };
+
+  const instance: AsyncAtom<T> = {
+    type: "atom",
+
+    get disposed() {
+      return disposed;
+    },
+
+    get() {
+      if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
+      return current;
+    },
+
+    get value() {
+      if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
+      return current;
+    },
+
+    get safeValue() {
+      return current;
+    },
+
+    get prior() {
+      return previous;
+    },
+
+    subscribe(callback) {
+      subs.add(callback);
+
+      // Replay buffered values to late subscribers
+      forEachReplay((value) => callback(value));
+
+      return createSubscription(() => {
+        subs.delete(callback);
+      });
+    },
+
+    set(value) {
+      if (disposed) return;
+      if (hasValue && Object.is(current, value)) return;
+
+      previous = current;
+      current = value;
+      const wasFirstValue = !hasValue;
+      hasValue = true;
+      pushReplay(value);
+
+      if (wasFirstValue) {
+        markAtomAsEmitted(instance);
+      }
+
+      if (analog) {
+        dirty = true;
+      } else {
+        lastNotified = current;
+        notify(value);
+      }
+    },
+
+    dispose() {
+      if (disposed) return;
+
+      disposed = true;
+      unregisterAnalogAtom(instance);
+      subs.clear();
+      replay.length = 0;
+      replayHead = 0;
+    }
+  };
+
+  registerWithCurrentScope(instance);
+  if (analog) {
+    registerAnalogAtom(instance, flush);
+  }
+
   return instance;
 }
 
 /* ── derived ── */
 
-export function derived<T>(fn: () => T): AtomBase<T> {
-  let state: AtomState<T> = {
-    tag: "error",
-    current: new Error("Derived atom has not been evaluated yet"),
-    previous: undefined
-  };
-  let running = false;
-  let evaluated = false;
+/**
+ * Creates a derived atom with automatic dependency tracking.
+ *
+ * The factory is re-evaluated synchronously whenever any atom read inside it
+ * changes. Dependencies are discovered automatically — no manual array is
+ * required. The result is itself an atom — it can be subscribed to,
+ * snapshotted, and disposed like any other.
+ *
+ * @param fn - Pure function that reads atom values and returns the derived value.
+ * @returns A derived atom.
+ *
+ * @example
+ * ```ts
+ * const app = scope(() => {
+ *   const first = atom('Ada');
+ *   const last = atom('Lovelace');
+ *   const full = derived(() => `${first.value} ${last.value}`);
+ *   return { first, last, full };
+ * });
+ *
+ * app.first.set('Grace');
+ * console.log(app.full.value); // 'Grace Lovelace'
+ * ```
+ */
+export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
+  const scope = getCurrentScope();
+  const strobe = scope ? getScopeStrobe(scope) : undefined;
+  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
 
-  const valueSubs = new Set<(value: T) => void>();
-  const stateSubs = new Set<(state: AtomState<T>) => void>();
+  let current: T;
+  let previous: T;
+  let disposed = false;
+  let running = false;
+  let dirty = false;
+  const subs = new Set<(value: T) => void>();
   const dependencies = new Set<AtomBase<any>>();
   const depSubscriptions = new Map<AtomBase<any>, Subscription>();
 
-  // Fix ReferenceError by defining the tracking payload context container out-of-band first
-  const context: FormulaContext = {
-    dependencies,
-    run: () => {}
+  const notify = () => {
+    for (const cb of Array.from(subs)) cb(current);
   };
 
-  const run = (): { type: "value"; value: T } | { type: "error"; error: Error } => {
-    if (running) throw new Error("Circular dependency detected in derived()");
+  const run = (): T => {
+    if (running) {
+      throw new Error("Circular dependency detected in derived()");
+    }
 
     const oldDeps = new Set(depSubscriptions.keys());
     dependencies.clear();
@@ -334,17 +662,15 @@ export function derived<T>(fn: () => T): AtomBase<T> {
     running = true;
     const prev = activeFormula;
     activeFormula = context;
-
-    let result: { type: "value"; value: T } | { type: "error"; error: Error };
+    let result: T;
     try {
-      result = { type: "value", value: fn() };
-    } catch (err) {
-      result = { type: "error", error: err instanceof Error ? err : new Error(String(err)) };
+      result = fn();
     } finally {
       activeFormula = prev;
       running = false;
     }
 
+    // Unsubscribe from removed deps
     for (const dep of oldDeps) {
       if (!dependencies.has(dep)) {
         depSubscriptions.get(dep)?.unsubscribe();
@@ -352,31 +678,21 @@ export function derived<T>(fn: () => T): AtomBase<T> {
       }
     }
 
+    // Subscribe to new deps
     for (const dep of dependencies) {
       if (!depSubscriptions.has(dep)) {
         depSubscriptions.set(
           dep,
           dep.subscribe(() => {
-            if (running || state.tag === "disposed") return;
-
-            const prevValue = state.tag === "value" ? state.current : state.previous;
+            if (disposed) return;
             const next = run();
-
-            if (next.type === "value") {
-              state = { tag: "value", current: next.value, previous: prevValue };
-              for (const cb of Array.from(stateSubs)) {
-                cb(state);
-              }
-              runWithPropagation(() => {
-                for (const cb of Array.from(valueSubs)) {
-                  queueNotification(() => cb(next.value));
-                }
-              });
+            if (Object.is(current, next)) return;
+            previous = current;
+            current = next;
+            if (analog) {
+              dirty = true;
             } else {
-              state = { tag: "error", current: next.error, previous: prevValue };
-              for (const cb of Array.from(stateSubs)) {
-                cb(state);
-              }
+              notifyDerivedSubscribers(notify);
             }
           })
         );
@@ -386,144 +702,156 @@ export function derived<T>(fn: () => T): AtomBase<T> {
     return result;
   };
 
-  context.run = run;
-
-  const ensureEvaluated = (): void => {
-    if (evaluated || state.tag === "disposed") return;
-    evaluated = true;
-    const result = run();
-    if (result.type === "value") {
-      state = { tag: "value", current: result.value, previous: result.value };
-    } else {
-      state = { tag: "error", current: result.error, previous: undefined };
-    }
+  const flush = () => {
+    if (!dirty || disposed) return;
+    dirty = false;
+    notifyDerivedSubscribers(notify);
   };
+
+  const context = {
+    dependencies,
+    run,
+  };
+
+  current = run();
+  previous = current;
 
   const instance: AtomBase<T> = {
     type: "atom",
 
-    get disposed() { return state.tag === "disposed"; },
-    get error() { return state.tag === "error" ? state.current : null; },
+    get disposed() {
+      return disposed;
+    },
+
     get() {
-      ensureEvaluated();
-      if (activeFormula) activeFormula.dependencies.add(instance);
-      return getStateValue(state);
+      if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
+      return current;
     },
 
     get value() {
-      ensureEvaluated();
-      if (activeFormula) activeFormula.dependencies.add(instance);
-      if (state.tag === "value") return state.current;
-      throw new Error("Derived atom has not been evaluated yet or is in an error state.");
+      if (disposed) throw new Error("Atom has been disposed");
+      if (activeFormula) {
+        activeFormula.dependencies.add(instance);
+      }
+      return current;
     },
 
     get safeValue() {
-      ensureEvaluated();
-      if (activeFormula) activeFormula.dependencies.add(instance);
-      return state.tag === "value" ? state.current : state.previous;
+      return current;
     },
 
     get prior() {
-      ensureEvaluated();
-      return state.previous;
+      return previous;
     },
 
     subscribe(callback) {
-      ensureEvaluated();
-      valueSubs.add(callback);
-      return createSubscription(() => { valueSubs.delete(callback); });
-    },
-
-    onStateChange(callback) {
-      ensureEvaluated();
-      stateSubs.add(callback);
-      // Do not emit the initial "not emitted" error state to new subscribers.
-      // They will get the first value when it's set.
-      if (state.tag === "value") callback(state);
-      return createSubscription(() => { stateSubs.delete(callback); });
+      subs.add(callback);
+      return createSubscription(() => {
+        subs.delete(callback);
+      });
     },
 
     dispose() {
-      if (state.tag === "disposed") return;
-      const prev = state.previous;
-      state = { tag: "disposed", previous: prev };
-      for (const cb of Array.from(stateSubs)) {
-        cb(state);
+      if (disposed) return;
+      disposed = true;
+      unregisterAnalogAtom(instance);
+      for (const sub of depSubscriptions.values()) {
+        sub.unsubscribe();
       }
-      for (const sub of depSubscriptions.values()) sub.unsubscribe();
       depSubscriptions.clear();
-      valueSubs.clear();
-    },
+      subs.clear();
+    }
   };
 
-  (instance as any)[DERIVED_ATOM] = true;
-
   registerWithCurrentScope(instance);
+  markAtomAsEmitted(instance);
+  if (analog) {
+    registerAnalogAtom(instance, flush);
+  }
+
+  // Notify scope subscribers immediately so derived atoms are
+  // considered "ready" — their value is already available.
+  for (const cb of Array.from(subs)) {
+    cb(current);
+  }
+
   return instance;
 }
 
 /* ── iterate ── */
 
-export function iterate<T>(atom: AtomBase<T>, signal?: AbortSignal): AsyncIterator<T> {
-  if (signal?.aborted) {
-    return {
-      next: () => Promise.resolve({ done: true, value: undefined as any }),
-      return: () => Promise.resolve({ done: true, value: undefined as any }),
-    };
-  }
-
-  const buffer: T[] = [];
-  let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
-  let done = false;
-
-  const cleanup = () => {
-    if (done) return;
-    done = true;
-    signal?.removeEventListener("abort", cleanup);
-    subscription.unsubscribe();
-    if (resolveNext) {
-      resolveNext({ value: undefined as any, done: true });
-      resolveNext = null;
-    }
-  };
-
-  if (atom.error === null && atom.safeValue !== undefined) {
-    buffer.push(atom.safeValue);
-  }
-
-  const subscription = atom.subscribe((value) => {
-    if (done) return;
-    if (resolveNext) {
-      resolveNext({ value, done: false });
-      resolveNext = null;
-    } else {
-      buffer.push(value);
-    }
-  });
-
-  signal?.addEventListener("abort", cleanup, { once: true });
-
+/**
+ * Creates an async iterable from an atom.
+ *
+ * Yields the current value immediately, then yields subsequent values
+ * whenever the atom emits. The iterable completes when the atom is disposed.
+ *
+ * @param atom - The atom to iterate over.
+ * @returns An async iterable that yields atom values.
+ *
+ * @example
+ * ```ts
+ * const a = atom(0);
+ * setTimeout(() => a.set(1), 10);
+ * setTimeout(() => a.set(2), 20);
+ * setTimeout(() => a.dispose(), 30);
+ *
+ * for await (const value of iterate(a)) {
+ *   console.log(value); // 0, 1, 2
+ * }
+ * ```
+ */
+export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
   return {
-    async next(): Promise<IteratorResult<T>> {
-      if (!done && atom.disposed && buffer.length === 0) {
-        cleanup();
-      }
+    [Symbol.asyncIterator]() {
+      const buffer: T[] = [];
+      let resolveNext: ((res: IteratorResult<T>) => void) | null = null;
+      let done = false;
 
-      if (done) {
-        return { value: undefined as any, done: true };
-      }
+      buffer.push(atom.value);
 
-      if (buffer.length > 0) {
-        return { value: buffer.shift()!, done: false };
-      }
-
-      return new Promise<IteratorResult<T>>((resolve) => {
-        resolveNext = resolve;
+      const sub = atom.subscribe((value) => {
+        if (done) return;
+        if (resolveNext) {
+          resolveNext({ value, done: false });
+          resolveNext = null;
+        } else {
+          buffer.push(value);
+        }
       });
-    },
-    async return(): Promise<IteratorResult<T>> {
-      cleanup();
-      return { value: undefined as any, done: true };
+
+      // No polling. Just check disposed on each next() call.
+      // If the atom is disposed and buffer is empty, we're done.
+      return {
+        async next() {
+          if (done) return { value: undefined as any, done: true };
+
+          if (buffer.length > 0) {
+            const val = buffer.shift()!;
+            if (atom.disposed && buffer.length === 0) {
+              done = true;
+            }
+            return { value: val, done: false };
+          }
+
+          if (atom.disposed) {
+            done = true;
+            return { value: undefined as any, done: true };
+          }
+
+          return new Promise((resolve) => {
+            resolveNext = resolve;
+          });
+        },
+        async return() {
+          done = true;
+          sub.unsubscribe();
+          return { value: undefined as any, done: true };
+        },
+      };
     },
   };
 }

@@ -1,14 +1,22 @@
-import { atom, createStream, isPromiseLike, iterate, type MaybePromise, type Stream } from "@epikodelabs/streamix";
+import {
+  createStream,
+  isPromiseLike,
+  type MaybePromise,
+  type Stream,
+} from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `true` when a given element enters
  * the viewport and `false` when it leaves.
  *
+ * This stream is a wrapper around the `IntersectionObserver` API and is useful
+ * for lazy loading, visibility tracking, and viewport-aware effects.
+ *
  * **Behavior:**
  * - Resolves the element and options once on first subscription.
  * - Emits the current intersection state whenever it changes.
- * - Deduplicates consecutive identical values.
- * - Stops observing when the signal is aborted (last subscriber unsubscribes).
+ * - Starts observing on first subscriber.
+ * - Stops observing when the last subscriber unsubscribes.
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
@@ -33,14 +41,23 @@ export function onIntersection(
 
     if (signal?.aborted || !el) return;
 
-    const atom$ = atom<boolean>();
+    let done = false;
+    let pending: (() => void) | null = null;
+    const queue: boolean[] = [];
 
-    // Deduplicate — IntersectionObserver can fire with the same value
+    const notify = () => {
+      const r = pending;
+      pending = null;
+      r?.();
+    };
+
     let last: boolean | undefined;
     const emit = (v: boolean) => {
-      if (signal?.aborted || v === last) return;
+      if (done) return;
+      if (last === v) return;
       last = v;
-      atom$.set(v);
+      queue.push(v);
+      notify();
     };
 
     const computeInitial = (): boolean => {
@@ -49,53 +66,68 @@ export function onIntersection(
       return rect.top < window.innerHeight && rect.bottom > 0;
     };
 
-    let hasObserverEmitted = false;
-
-    const io = new IntersectionObserver((entries) => {
-      hasObserverEmitted = true;
-      emit(entries[0]?.isIntersecting ?? false);
-    }, resolvedOptions);
-
-    io.observe(el);
-
-    // Emit a best-effort initial value before the first IO callback fires
-    if (!hasObserverEmitted) {
-      emit(computeInitial());
-    }
-
-    // Watch for the element being removed from the DOM
+    let io: IntersectionObserver | null = null;
     let mo: MutationObserver | null = null;
-    if (typeof MutationObserver !== "undefined") {
-      mo = new MutationObserver(() => {
-        if (!document.body.contains(el)) {
-          atom$.dispose();
-        }
-      });
-      mo.observe(document.body, { childList: true, subtree: true });
-    }
+    let hasEmitted = false;
 
-    const cleanup = () => {
+    const stop = () => {
+      if (done) return;
+      done = true;
       try {
-        io.disconnect();
-      } catch {
-        // ignore
-      }
+        io?.disconnect();
+      } catch {}
       try {
         mo?.disconnect();
-      } catch {
-        // ignore
-      }
-      atom$.dispose();
+      } catch {}
+      io = null;
+      mo = null;
+      notify();
     };
 
-    if (signal) {
-      signal.addEventListener("abort", cleanup, { once: true });
-    }
+    const abortPromise =
+      signal &&
+      new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true })
+      );
 
     try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
+      io = new IntersectionObserver((entries) => {
+        hasEmitted = true;
+        emit(entries[0]?.isIntersecting ?? false);
+      }, resolvedOptions);
+
+      io.observe(el);
+
+      if (!hasEmitted) {
+        emit(computeInitial());
+      }
+
+      if (typeof MutationObserver !== "undefined") {
+        mo = new MutationObserver(() => {
+          if (!document.body.contains(el)) {
+            stop();
+          }
+        });
+        mo.observe(document.body, { childList: true, subtree: true });
+      }
+
+      while (!done && !signal?.aborted) {
+        if (queue.length === 0) {
+          const wait = new Promise<void>((resolve) => {
+            pending = resolve;
+          });
+          if (abortPromise) {
+            await Promise.race([wait, abortPromise]);
+          } else {
+            await wait;
+          }
+          continue;
+        }
+
+        yield queue.shift()!;
+      }
     } finally {
-      cleanup();
+      stop();
     }
   });
 }

@@ -1,16 +1,13 @@
 import {
     bufferWhile,
-    atom,
-    fromAtom,
-    type Atom,
+    createSubject,
 } from "@epikodelabs/streamix";
 
 const waitTick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("bufferWhile", () => {
   it("flushes the buffer when the predicate resolves truthy", async () => {
-    const source$: Atom<number> = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[][] = [];
     const buffered = subject.pipe(bufferWhile((_value, _index, buffer) => buffer.length < 3));
 
@@ -20,22 +17,21 @@ describe("bufferWhile", () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3);
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
     await waitTick();
 
-    source$.set(4);
-    source$.set(5);
-    source$.dispose();
+    subject.next(4);
+    subject.next(5);
+    subject.complete();
     await waitTick();
 
     expect(results).toEqual([[1, 2, 3], [4, 5]]);
   });
 
   it("emits the trailing buffer when the source completes", async () => {
-    const source$: Atom<number> = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[][] = [];
     const buffered = subject.pipe(bufferWhile(() => false));
 
@@ -45,16 +41,15 @@ describe("bufferWhile", () => {
       }
     })();
 
-    source$.set(9);
-    source$.dispose();
+    subject.next(9);
+    subject.complete();
     await waitTick();
 
     expect(results).toEqual([[9]]);
   });
 
   it("supports index parameter in predicate", async () => {
-    const source$: Atom<number> = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[][] = [];
     const indices: number[] = [];
     const buffered = subject.pipe(
@@ -70,13 +65,13 @@ describe("bufferWhile", () => {
       }
     })();
 
-    source$.set(10);
-    source$.set(20);
-    source$.set(30);
+    subject.next(10);
+    subject.next(20);
+    subject.next(30);
     await waitTick();
 
-    source$.set(40);
-    source$.dispose();
+    subject.next(40);
+    subject.complete();
     await waitTick();
 
     expect(results).toEqual([[10, 20, 30], [40]]);
@@ -84,8 +79,7 @@ describe("bufferWhile", () => {
   });
 
   it("uses index to flush based on value position", async () => {
-    const source$: Atom<string> = atom<string>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<string>();
     const results: string[][] = [];
     const buffered = subject.pipe(
       bufferWhile((_value, index) => index < 2) // Flush after 2 values
@@ -97,20 +91,19 @@ describe("bufferWhile", () => {
       }
     })();
 
-    source$.set("a");
-    source$.set("b");
+    subject.next("a");
+    subject.next("b");
     await waitTick();
 
-    source$.set("c");
-    source$.dispose();
+    subject.next("c");
+    subject.complete();
     await waitTick();
 
     expect(results).toEqual([["a", "b"], ["c"]]);
   });
 
   it("supports async predicates", async () => {
-    const source$: Atom<number> = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[][] = [];
     const buffered = subject.pipe(
       bufferWhile((_value, _index, buffer) => Promise.resolve(buffer.length < 2))
@@ -122,20 +115,19 @@ describe("bufferWhile", () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
+    subject.next(1);
+    subject.next(2);
     await waitTick();
 
-    source$.set(3);
-    source$.dispose();
+    subject.next(3);
+    subject.complete();
     await waitTick();
 
     expect(results).toEqual([[1, 2], [3]]);
   });
 
   it("does not emit when source completes without values", async () => {
-    const source$: Atom<number> = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[][] = [];
     const buffered = subject.pipe(bufferWhile(() => true));
 
@@ -145,7 +137,7 @@ describe("bufferWhile", () => {
       }
     })();
 
-    source$.dispose();
+    subject.complete();
     await waitTick();
 
     expect(results).toEqual([]);

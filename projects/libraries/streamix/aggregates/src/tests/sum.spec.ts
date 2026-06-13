@@ -1,15 +1,15 @@
-import { atom, fromAtom, type Atom, type Stream } from '@epikodelabs/streamix';
+import { createSubject, type Stream } from '@epikodelabs/streamix';
 import { sum } from '@epikodelabs/streamix/aggregates';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe('sum', () => {
-  let source$: Atom<number>;
+  let subject: ReturnType<typeof createSubject<number>>;
   let source: Stream<number>;
 
   beforeEach(() => {
-    source$ = atom<number>();
-    source = fromAtom(source$);
+    subject = createSubject<number>();
+    source = subject;
   });
 
   it('should emit the sum of emitted values', async () => {
@@ -22,10 +22,10 @@ describe('sum', () => {
       }
     })();
 
-    source$.set(2);
-    source$.set(3);
-    source$.set(5);
-    source$.dispose();
+    subject.next(2);
+    subject.next(3);
+    subject.next(5);
+    subject.complete();
     await settle();
 
     expect(results).toEqual([10]);
@@ -43,10 +43,10 @@ describe('sum', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
     await settle();
 
     expect(results).toEqual([9]);
@@ -62,7 +62,7 @@ describe('sum', () => {
       }
     })();
 
-    source$.dispose();
+    subject.complete();
     await settle();
 
     expect(results).toEqual([0]);

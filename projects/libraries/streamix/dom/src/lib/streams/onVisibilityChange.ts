@@ -1,75 +1,107 @@
-import { atom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the document's visibility state
  * whenever it changes.
  *
- * Useful for pausing animations, throttling background work, or detecting
- * tab switching and minimization.
+ * This stream is useful for:
+ * - pausing animations or polling when the page is hidden
+ * - throttling background work
+ * - detecting tab switching or minimization
  *
  * **Behavior:**
  * - Emits the current visibility state on start.
  * - Emits on every `visibilitychange` event.
- * - Stops listening when the signal is aborted (last subscriber unsubscribes).
+ * - Starts listening on first subscriber.
+ * - Stops listening when the last subscriber unsubscribes.
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
  * @returns {Stream<DocumentVisibilityState>}
  */
 export function onVisibilityChange(): Stream<DocumentVisibilityState> {
-  return createStream<DocumentVisibilityState>(
-    "onVisibilityChange",
-    async function* (signal) {
-      // SSR / unsupported guard
-      if (typeof document === "undefined") return;
+  const subject = createSubject<DocumentVisibilityState>();
 
-      const atom$ = atom<DocumentVisibilityState>();
+  let subscriberCount = 0;
+  let stopped = true;
 
-      const getState = (): DocumentVisibilityState => {
-        const s = (document as any).visibilityState;
-        return s === "hidden" ? "hidden" : "visible";
-      };
-
-      const emit = () => {
-        if (signal?.aborted) {
-          return;
-        }
-        atom$.set(getState());
-      };
-
-      document.addEventListener("visibilitychange", emit);
-
-      // Emit initial state
-      emit();
-
-      let cleaned = false;
-      const cleanup = () => {
-        if (cleaned) return;
-        cleaned = true;
-        if (signal) {
-          try {
-            signal.removeEventListener("abort", cleanup);
-          } catch {
-            // ignore
-          }
-        }
-        try {
-          document.removeEventListener("visibilitychange", emit);
-        } catch {
-          // ignore
-        }
-        atom$.dispose();
-      };
-
-      if (signal) {
-        signal.addEventListener("abort", cleanup, { once: true });
-      }
-
-      try {
-        yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
-      } finally {
-        cleanup();
-      }
+  const getState = (): DocumentVisibilityState => {
+    if (typeof document === "undefined") {
+      return "visible";
     }
-  );
+
+    const state = (document as any).visibilityState;
+    if (state === "visible" || state === "hidden") {
+      return state;
+    }
+    return "visible";
+  };
+
+  const emit = () => {
+    subject.next(getState());
+  };
+
+  const start = () => {
+    if (!stopped) return;
+    stopped = false;
+
+    // SSR / unsupported guard
+    if (typeof document === "undefined") return;
+
+    document.addEventListener("visibilitychange", emit);
+    
+    emit();
+  };
+
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+
+    if (typeof document === "undefined") return;
+
+    document.removeEventListener("visibilitychange", emit);
+  };
+
+  /* ------------------------------------------------------------------------
+   * Ref-counted subscription handling
+   * ---------------------------------------------------------------------- */
+
+  const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
+
+  subject.subscribe = (
+    cb?: ((value: DocumentVisibilityState) => void) | Receiver<DocumentVisibilityState>
+  ) => {
+    const sub = (originalSubscribe as any).call(subject, cb);
+
+    scheduleStart();
+
+    const o = sub.teardown;
+    sub.teardown = () => {
+      if (--subscriberCount === 0) {
+        stop();
+      }
+      o?.call(sub);
+    };
+
+    return sub;
+  };
+
+  /* ------------------------------------------------------------------------
+   * Async iteration support
+   * ---------------------------------------------------------------------- */
+
+  subject[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
+
+  subject.name = "onVisibilityChange";
+  subject.type = "stream";
+  return subject;
 }
+
+

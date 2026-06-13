@@ -1,4 +1,4 @@
-import { createStream, atom, fromAtom, eachValueFrom, EMPTY, firstValueFrom, from, lastValueFrom, type Atom } from '@epikodelabs/streamix';
+import { createStream, createSubject, eachValueFrom, EMPTY, firstValueFrom, from, lastValueFrom } from '@epikodelabs/streamix';
 
 describe('eachValueFrom', () => {
   it('should get first value from the stream', async () => {
@@ -14,8 +14,7 @@ describe('eachValueFrom', () => {
   });
   
   it('should throw an error if the source stream fails before completion for lastValueFrom', async () => {
-    const sourceAtom$: Atom<number> = atom<number>();
-    const source$ = fromAtom(sourceAtom$);
+    const source$ = createSubject<number>();
     const expectedError = new Error('Source failed unexpectedly');
 
     // We use try/catch to assert that the promise returned by lastValueFrom is rejected
@@ -24,11 +23,11 @@ describe('eachValueFrom', () => {
       const promise = lastValueFrom(source$);
 
       // Emit some values, which should be ignored since the stream errors
-      sourceAtom$.set(10);
-      sourceAtom$.set(20);
+      source$.next(10);
+      source$.next(20);
 
       // Cause the stream to fail
-      sourceAtom$.setError(expectedError);
+      source$.error(expectedError);
 
       // Wait for the promise to settle
       await promise;

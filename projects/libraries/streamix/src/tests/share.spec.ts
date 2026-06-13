@@ -1,11 +1,11 @@
-import { atom, createStream, fromAtom, share } from '@epikodelabs/streamix';
+import { createStream, createSubject, share } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 describe('share', () => {
   it('shares a single source across subscribers without replaying past values', async () => {
-    const source$ = atom<number>();
-    const shared = fromAtom(source$).pipe(share());
+    const subject = createSubject<number>();
+    const shared = subject.pipe(share());
 
     const first: number[] = [];
     const second: number[] = [];
@@ -16,7 +16,7 @@ describe('share', () => {
       }
     })();
 
-    source$.set(1);
+    subject.next(1);
     await wait(5);
 
     const secondReader = (async () => {
@@ -25,9 +25,9 @@ describe('share', () => {
       }
     })();
 
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
 
     await Promise.all([firstReader, secondReader]);
 
@@ -71,8 +71,8 @@ describe('share', () => {
   });
 
   it('propagates errors to every subscriber', async () => {
-    const source$ = atom<number>();
-    const shared = fromAtom(source$).pipe(share());
+    const subject = createSubject<number>();
+    const shared = subject.pipe(share());
 
     const firstValues: number[] = [];
     let firstError: any = null;
@@ -98,8 +98,8 @@ describe('share', () => {
       }
     })();
 
-    source$.set(1);
-    source$.setError(new Error('boom'));
+    subject.next(1);
+    subject.error(new Error('boom'));
 
     await Promise.all([firstRun, secondRun]);
     expect(firstValues).toEqual([1]);
@@ -109,13 +109,13 @@ describe('share', () => {
   });
 
   it('should handle iterator.throw() call', async () => {
-    const source$ = atom<number>();
-    const shared = fromAtom(source$).pipe(share());
+    const subject = createSubject<number>();
+    const shared = subject.pipe(share());
     let caughtError: any = null;
 
     const iterator = shared[Symbol.asyncIterator]();
     
-    source$.set(1);
+    subject.next(1);
     const firstResult = await iterator.next();
     expect(firstResult.value).toBe(1);
     
@@ -134,12 +134,12 @@ describe('share', () => {
   });
 
   it('should handle iterator.return() call', async () => {
-    const source$ = atom<number>();
-    const shared = fromAtom(source$).pipe(share());
+    const subject = createSubject<number>();
+    const shared = subject.pipe(share());
 
     const iterator = shared[Symbol.asyncIterator]();
     
-    source$.set(1);
+    subject.next(1);
     const firstResult = await iterator.next();
     expect(firstResult.value).toBe(1);
     

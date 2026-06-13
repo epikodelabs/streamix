@@ -1,4 +1,4 @@
-import { atom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the current network state.
@@ -15,90 +15,115 @@ export type NetworkState = {
 /**
  * Creates a reactive stream that emits network connectivity changes.
  *
- * Combines `online` / `offline` window events with the Network Information
- * API (when available).
+ * This stream combines:
+ * - `online` / `offline` events
+ * - Network Information API (when available)
  *
  * **Behavior:**
  * - Emits an initial snapshot on start.
  * - Emits whenever connectivity or connection quality changes.
- * - Gracefully degrades when the Network Information API is unavailable.
- * - Stops listening when the signal is aborted (last subscriber unsubscribes).
+ * - Starts listening on first subscriber.
+ * - Stops listening when the last subscriber unsubscribes.
+ * - Gracefully degrades when Network Information API is unavailable.
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
  * @returns {Stream<NetworkState>}
  */
 export function onNetwork(): Stream<NetworkState> {
-  return createStream<NetworkState>("onNetwork", async function* (signal) {
+  const subject = createSubject<NetworkState>();
+
+
+  let subscriberCount = 0;
+  let stopped = true;
+
+  let connection: any = null;
+
+  const snapshot = (): NetworkState => ({
+    online:
+      typeof navigator !== "undefined" ? navigator.onLine : false,
+    type: connection?.type,
+    effectiveType: connection?.effectiveType,
+    downlink: connection?.downlink,
+    rtt: connection?.rtt,
+    saveData: connection?.saveData
+  });
+
+  const emit = () => {
+    subject.next(snapshot());
+  };
+
+  const start = () => {
+    if (!stopped) return;
+    stopped = false;
+
     // SSR / unsupported guard
     if (typeof window === "undefined" || typeof navigator === "undefined") {
       return;
     }
 
-    const atom$ = atom<NetworkState>();
-
-    const connection: any = (navigator as any).connection ?? null;
-
-    const snapshot = (): NetworkState => ({
-      online: navigator.onLine,
-      type: connection?.type,
-      effectiveType: connection?.effectiveType,
-      downlink: connection?.downlink,
-      rtt: connection?.rtt,
-      saveData: connection?.saveData,
-    });
-
-    const emit = () => {
-      if (signal?.aborted) {
-        return;
-      }
-      atom$.set(snapshot());
-    };
+    connection = (navigator as any).connection ?? null;
 
     window.addEventListener("online", emit);
     window.addEventListener("offline", emit);
     connection?.addEventListener?.("change", emit);
 
-    // Emit initial snapshot
     emit();
+  };
 
-    let cleaned = false;
-    const cleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
-      if (signal) {
-        try {
-          signal.removeEventListener("abort", cleanup);
-        } catch {
-          // ignore
-        }
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+
+    if (typeof window === "undefined") return;
+
+    window.removeEventListener("online", emit);
+    window.removeEventListener("offline", emit);
+    connection?.removeEventListener?.("change", emit);
+
+    connection = null;
+  };
+
+  /* ------------------------------------------------------------------------
+   * Ref-counted subscription handling
+   * ---------------------------------------------------------------------- */
+
+  const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
+
+  subject.subscribe = (
+    cb?: ((value: NetworkState) => void) | Receiver<NetworkState>
+  ) => {
+    const sub = (originalSubscribe as any).call(subject, cb);
+
+    scheduleStart();
+
+    const o = sub.teardown;
+    sub.teardown = () => {
+      if (--subscriberCount === 0) {
+        stop();
       }
-      try {
-        window.removeEventListener("online", emit);
-      } catch {
-        // ignore
-      }
-      try {
-        window.removeEventListener("offline", emit);
-      } catch {
-        // ignore
-      }
-      try {
-        connection?.removeEventListener?.("change", emit);
-      } catch {
-        // ignore
-      }
-      atom$.dispose();
+      o?.call(sub);
     };
 
-    if (signal) {
-      signal.addEventListener("abort", cleanup, { once: true });
-    }
+    return sub;
+  };
 
-    try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
-    } finally {
-      cleanup();
-    }
-  });
+  /* ------------------------------------------------------------------------
+   * Async iteration support
+   * ---------------------------------------------------------------------- */
+
+  subject[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
+
+  subject.name = "onNetwork";
+  subject.type = "stream";
+  return subject;
 }
+
+

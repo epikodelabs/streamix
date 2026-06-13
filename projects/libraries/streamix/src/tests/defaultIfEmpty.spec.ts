@@ -1,9 +1,8 @@
-import { concatMap, atom, fromAtom, defaultIfEmpty, EMPTY, of, type Atom } from '@epikodelabs/streamix';
+import { concatMap, createSubject, defaultIfEmpty, EMPTY, of } from '@epikodelabs/streamix';
 
 describe('defaultIfEmpty', () => {
   it('should emit the default value if no values are emitted', (done) => {
-    const source$: Atom<any> = atom();
-    const stream = fromAtom(source$);
+    const stream = createSubject();
     const defaultValue = 'Default Value';
     const processedStream = stream.pipe(defaultIfEmpty(defaultValue));
     const emittedValues: any[] = [];
@@ -16,12 +15,11 @@ describe('defaultIfEmpty', () => {
       }
     });
 
-    source$.dispose();
+    stream.complete();
   });
 
   it('should not emit the default value if values are emitted', (done) => {
-    const source$: Atom<string> = atom<string>();
-    const stream = fromAtom(source$);
+    const stream = createSubject<string>();
     const defaultValue = 'Default Value';
     const processedStream = stream.pipe(defaultIfEmpty(defaultValue));
     const emittedValues: any[] = [];
@@ -34,14 +32,13 @@ describe('defaultIfEmpty', () => {
       }
     });
 
-    source$.set('Value 1');
-    source$.set('Value 2');
-    source$.dispose();
+    stream.next('Value 1');
+    stream.next('Value 2');
+    stream.complete();
   });
 
   it('should emit default value when one operator returns EMPTY', (done) => {
-    const source$: Atom<string> = atom<string>();
-    const stream = fromAtom(source$);
+    const stream = createSubject<string>();
     const defaultValue = 'Default Value';
     const processedStream = stream.pipe(
       concatMap(() => EMPTY), // This operator simulates an empty stream
@@ -58,14 +55,13 @@ describe('defaultIfEmpty', () => {
       }
     });
 
-    source$.set('Value 1');
+    stream.next('Value 1');
 
-    source$.dispose();
+    stream.complete();
   });
 
   it('should not emit default value if values are emitted before', (done) => {
-    const source$: Atom<string> = atom<string>();
-    const stream = fromAtom(source$);
+    const stream = createSubject<string>();
     const defaultValue = 'Default Value';
     const processedStream = stream.pipe(
       concatMap(() => of('Value 3')), // This operator simulates a new stream
@@ -82,9 +78,11 @@ describe('defaultIfEmpty', () => {
       }
     });
 
-    source$.set('Value 1');
-    source$.set('Value 2');
+    stream.next('Value 1');
+    stream.next('Value 2');
 
-    source$.dispose();
+    stream.complete();
   });
 });
+
+

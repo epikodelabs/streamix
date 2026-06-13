@@ -1,4 +1,4 @@
-import { atom, fromAtom, fork, from, of } from '@epikodelabs/streamix'; // Adjust the import path accordingly
+import { createSubject, fork, from, of } from '@epikodelabs/streamix'; // Adjust the import path accordingly
 
 describe('fork', () => {
   let source$: any;
@@ -84,8 +84,7 @@ describe('fork', () => {
   });
 
   it('edge: should route rapid emissions based on predicates', (done) => {
-    const source$ = atom<number>();
-    const source = fromAtom(source$);
+    const source = createSubject<number>();
     const results: number[] = [];
 
     const forked = source.pipe(
@@ -113,15 +112,14 @@ describe('fork', () => {
       }
     });
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    source.next(1);
+    source.next(2);
+    source.next(3);
+    source.complete();
   });
 
   it('edge: should handle predicates with index parameter in rapid emissions', (done) => {
-    const source$ = atom<number>();
-    const source = fromAtom(source$);
+    const source = createSubject<number>();
     const results: number[] = [];
 
     const forked = source.pipe(
@@ -149,15 +147,14 @@ describe('fork', () => {
       }
     });
 
-    source$.set(1); // index 0
-    source$.set(2); // index 1
-    source$.set(3); // index 2
-    source$.dispose();
+    source.next(1); // index 0
+    source.next(2); // index 1
+    source.next(3); // index 2
+    source.complete();
   });
 
   it('edge: should handle async predicates during rapid emissions', (done) => {
-    const source$ = atom<number>();
-    const source = fromAtom(source$);
+    const source = createSubject<number>();
     const results: number[] = [];
 
     const forked = source.pipe(
@@ -187,15 +184,14 @@ describe('fork', () => {
       }
     });
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    source.next(1);
+    source.next(2);
+    source.next(3);
+    source.complete();
   });
 
   it('edge: should handle mixed handler types (stream, promise, array, scalar)', (done) => {
-    const source$ = atom<number>();
-    const source = fromAtom(source$);
+    const source = createSubject<number>();
     const results: number[] = [];
 
     const forked = source.pipe(
@@ -229,16 +225,15 @@ describe('fork', () => {
       }
     });
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3);
-    source$.set(4);
-    source$.dispose();
+    source.next(1);
+    source.next(2);
+    source.next(3);
+    source.next(4);
+    source.complete();
   });
 
   it('edge: should handle sequential routing with rapid emissions', (done) => {
-    const source$ = atom<string>();
-    const source = fromAtom(source$);
+    const source = createSubject<string>();
     const results: string[] = [];
 
     const forked = source.pipe(
@@ -266,10 +261,10 @@ describe('fork', () => {
       }
     });
 
-    source$.set('apple');
-    source$.set('banana');
-    source$.set('cherry');
-    source$.dispose();
+    source.next('apple');
+    source.next('banana');
+    source.next('cherry');
+    source.complete();
   });
 });
 

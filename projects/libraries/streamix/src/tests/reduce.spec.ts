@@ -1,12 +1,12 @@
-import { atom, fromAtom, reduce, type Stream, type Atom } from '@epikodelabs/streamix';
+import { createSubject, reduce, type Stream } from '@epikodelabs/streamix';
 
 describe('reduce', () => {
-  let source$: Atom<number>;
+  let subject: ReturnType<typeof createSubject<number>>;
   let source: Stream<number>;
 
   beforeEach(() => {
-    source$ = atom<number>();
-    source = fromAtom(source$);
+    subject = createSubject<number>();
+    source = subject;
   });
 
   it('should accumulate values from the source stream', async () => {
@@ -19,10 +19,10 @@ describe('reduce', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([6]);  // 1 + 2 + 3 = 6
@@ -38,7 +38,7 @@ describe('reduce', () => {
       }
     })();
 
-    source$.dispose();
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([0]);  // Seed value should be emitted
@@ -58,7 +58,7 @@ describe('reduce', () => {
       }
     })();
 
-    source$.setError(new Error('Test Error'));
+    subject.error(new Error('Test Error'));
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(error).toEqual(new Error('Test Error'));  // Propagate error
@@ -74,17 +74,16 @@ describe('reduce', () => {
       }
     })();
 
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([6]);  // 1 * 2 * 3 = 6
   });
 
   it('should work with non-numeric accumulators', async () => {
-    let source$ = atom<string>();
-    let subject = fromAtom(source$);
+    let subject = createSubject<string>();
 
     const accumulatedStream = subject.pipe(reduce((acc, value) => acc + value, ''));  // Concatenate strings
     const results: string[] = [];
@@ -95,18 +94,17 @@ describe('reduce', () => {
       }
     })();
 
-    source$.set('Hello');
-    source$.set(' ');
-    source$.set('World');
-    source$.dispose();
+    subject.next('Hello');
+    subject.next(' ');
+    subject.next('World');
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual(['Hello World']);
   });
 
   it('should handle edge case where accumulator always returns the same value', async () => {
-    let source$ = atom<string>();
-    let subject = fromAtom(source$);
+    let subject = createSubject<string>();
     const accumulatedStream = subject.pipe(reduce(() => 'constant', 'initial'));  // Always return 'constant'
     const results: string[] = [];
 
@@ -116,9 +114,9 @@ describe('reduce', () => {
       }
     })();
 
-    source$.set('A');
-    source$.set('B');
-    source$.dispose();
+    subject.next('A');
+    subject.next('B');
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual(['constant']);  // The accumulator always returns 'constant'
@@ -139,9 +137,9 @@ describe('reduce', () => {
       }
     })();
 
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([5]);
@@ -169,11 +167,13 @@ describe('reduce', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    await source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    await subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(caught!.message).toEqual('Accumulator failure');
   });
 });
+
+

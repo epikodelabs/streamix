@@ -1,13 +1,17 @@
-import { atom, createStream, isPromiseLike, iterate, type MaybePromise, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits arrays of `MutationRecord` objects
  * whenever mutations are observed on a given DOM element.
  *
+ * This stream is a wrapper around the `MutationObserver` API and is useful
+ * for reacting to DOM structure or attribute changes.
+ *
  * **Behavior:**
  * - Resolves the target element and options once on first subscription.
  * - Emits mutation records whenever changes occur.
- * - Stops observing when the signal is aborted (last subscriber unsubscribes).
+ * - Starts observing on first subscriber.
+ * - Stops observing when the last subscriber unsubscribes.
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
@@ -19,53 +23,98 @@ export function onMutation(
   element: MaybePromise<Element>,
   options?: MaybePromise<MutationObserverInit>
 ): Stream<MutationRecord[]> {
-  return createStream<MutationRecord[]>("onMutation", async function* (signal) {
+  const subject = createSubject<MutationRecord[]>();
+
+  let subscriberCount = 0;
+  let stopped = true;
+
+  let resolvedElement: Element | null = null;
+  let resolvedOptions: MutationObserverInit | undefined;
+  let observer: MutationObserver | null = null;
+
+  const start = () => {
+    if (!stopped) return;
+    stopped = false;
+
     // SSR / unsupported guard
     if (typeof MutationObserver === "undefined") return;
 
-    const el = isPromiseLike(element) ? await element : element;
-    const resolvedOptions = isPromiseLike(options) ? await options : options;
+    if (isPromiseLike(element) || isPromiseLike(options)) {
+      // Async path for promise element/options
+      void (async () => {
+        resolvedElement = isPromiseLike(element) ? await element : element;
+        resolvedOptions = isPromiseLike(options) ? await options : options;
 
-    if (signal?.aborted || !el) return;
+        if (stopped || !resolvedElement) return;
 
-    const atom$ = atom<MutationRecord[]>();
+        observer = new MutationObserver(mutations => {
+          subject.next([...mutations]);
+        });
 
-    const observer = new MutationObserver((mutations) => {
-      if (signal?.aborted) {
-        return;
+        observer.observe(resolvedElement, resolvedOptions);
+      })();
+    } else {
+      // Synchronous path for immediate element/options
+      resolvedElement = element;
+      resolvedOptions = options;
+
+      observer = new MutationObserver(mutations => {
+        subject.next([...mutations]);
+      });
+
+      observer.observe(resolvedElement, resolvedOptions);
+    }
+  };
+
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+
+    observer?.disconnect();
+    observer = null;
+    resolvedElement = null;
+  };
+
+  /* ------------------------------------------------------------------------
+   * Ref-counted subscription handling
+   * ---------------------------------------------------------------------- */
+
+  const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
+
+  subject.subscribe = (
+    cb?: ((value: MutationRecord[]) => void) | Receiver<MutationRecord[]>
+  ) => {
+    const sub = (originalSubscribe as any).call(subject, cb);
+
+    scheduleStart();
+
+    const o = sub.teardown;
+    sub.teardown = () => {
+      if (--subscriberCount === 0) {
+        stop();
       }
-      atom$.set([...mutations]);
-    });
-
-    observer.observe(el, resolvedOptions);
-
-    let cleaned = false;
-    const cleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
-      if (signal) {
-        try {
-          signal.removeEventListener("abort", cleanup);
-        } catch {
-          // ignore
-        }
-      }
-      try {
-        observer.disconnect();
-      } catch {
-        // ignore
-      }
-      atom$.dispose();
+      o?.call(sub);
     };
 
-    if (signal) {
-      signal.addEventListener("abort", cleanup, { once: true });
-    }
+    return sub;
+  };
 
-    try {
-      yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
-    } finally {
-      cleanup();
-    }
-  });
+  /* ------------------------------------------------------------------------
+   * Async iteration support
+   * ---------------------------------------------------------------------- */
+
+  subject[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
+
+  subject.name = "onMutation";
+  subject.type = "stream";
+  return subject;
 }
+
+

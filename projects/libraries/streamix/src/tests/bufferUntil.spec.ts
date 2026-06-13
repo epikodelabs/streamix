@@ -1,18 +1,14 @@
 import {
   bufferUntil,
-  atom,
-  fromAtom,
-  type Atom,
+  createSubject,
 } from "@epikodelabs/streamix";
 
 const waitTick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("bufferUntil", () => {
   it("flushes buffered values whenever the notifier emits", async () => {
-    const source$: Atom<number> = atom<number>();
-    const source = fromAtom(source$);
-    const notifier$: Atom<void> = atom<void>();
-    const notifier = fromAtom(notifier$);
+    const source = createSubject<number>();
+    const notifier = createSubject<void>();
     const results: number[][] = [];
     const buffered = source.pipe(bufferUntil(notifier));
 
@@ -22,15 +18,15 @@ describe("bufferUntil", () => {
       }
     })();
     
-    source$.set(1);
-    source$.set(2);
-    notifier$.set(void 0);
+    source.next(1);
+    source.next(2);
+    notifier.next();
 
-    source$.set(3);
-    notifier$.set(void 0);
+    source.next(3);
+    notifier.next();
 
-    source$.set(4);
-    source$.dispose();
+    source.next(4);
+    source.complete();
 
     // allow async drains to run before assertions
     await waitTick();
@@ -42,10 +38,8 @@ describe("bufferUntil", () => {
   });
 
   it("does emit the final buffer", async () => {
-    const source$: Atom<number> = atom<number>();
-    const source = fromAtom(source$);
-    const notifier$: Atom<void> = atom<void>();
-    const notifier = fromAtom(notifier$);
+    const source = createSubject<number>();
+    const notifier = createSubject<void>();
     const results: number[][] = [];
     const buffered = source.pipe(bufferUntil(notifier));
 
@@ -55,8 +49,8 @@ describe("bufferUntil", () => {
       }
     })();
 
-    source$.set(1);
-    source$.dispose();
+    source.next(1);
+    source.complete();
 
     // allow async drains to run before assertions
     await waitTick();
@@ -65,10 +59,8 @@ describe("bufferUntil", () => {
   });
 
   it("does not emit empty buffers when notifier emits with an empty buffer", async () => {
-    const source$: Atom<number> = atom<number>();
-    const source = fromAtom(source$);
-    const notifier$: Atom<void> = atom<void>();
-    const notifier = fromAtom(notifier$);
+    const source = createSubject<number>();
+    const notifier = createSubject<void>();
     const results: number[][] = [];
     const buffered = source.pipe(bufferUntil(notifier));
 
@@ -78,12 +70,12 @@ describe("bufferUntil", () => {
       }
     })();
 
-    notifier$.set(void 0);
+    notifier.next();
 
-    source$.set(1);
-    notifier$.set(void 0);
+    source.next(1);
+    notifier.next();
 
-    source$.dispose();
+    source.complete();
 
     // allow async drains to run before assertions
     await waitTick();
@@ -92,10 +84,8 @@ describe("bufferUntil", () => {
   });
 
   it("propagates notifier errors", async () => {
-    const source$: Atom<number> = atom<number>();
-    const source = fromAtom(source$);
-    const notifier$: Atom<void> = atom<void>();
-    const notifier = fromAtom(notifier$);
+    const source = createSubject<number>();
+    const notifier = createSubject<void>();
     const buffered = source.pipe(bufferUntil(notifier));
 
     let error: any;
@@ -109,7 +99,7 @@ describe("bufferUntil", () => {
       }
     })();
 
-    notifier$.setError(new Error("NOTIFIER"));
+    notifier.error(new Error("NOTIFIER"));
     await waitTick();
 
     expect(error).toEqual(jasmine.any(Error));
@@ -117,10 +107,8 @@ describe("bufferUntil", () => {
   });
 
   it("propagates source errors and cancels the notifier iterator", async () => {
-    const source$: Atom<number> = atom<number>();
-    const source = fromAtom(source$);
-    const notifier$: Atom<void> = atom<void>();
-    const notifier = fromAtom(notifier$);
+    const source = createSubject<number>();
+    const notifier = createSubject<void>();
 
     let returnCalls = 0;
     const originalAsyncIterator = (notifier as any)[Symbol.asyncIterator].bind(notifier);
@@ -149,7 +137,7 @@ describe("bufferUntil", () => {
       }
     })();
 
-    source$.setError(new Error("SOURCE"));
+    source.error(new Error("SOURCE"));
     await waitTick();
 
     expect(error).toEqual(jasmine.any(Error));
@@ -158,10 +146,8 @@ describe("bufferUntil", () => {
   });
 
   it("cancels source and notifier iterators when downstream returns", async () => {
-    const source$: Atom<number> = atom<number>();
-    const source = fromAtom(source$);
-    const notifier$: Atom<void> = atom<void>();
-    const notifier = fromAtom(notifier$);
+    const source = createSubject<number>();
+    const notifier = createSubject<void>();
 
     let sourceReturnCalls = 0;
     const originalSourceAsyncIterator = (source as any)[Symbol.asyncIterator].bind(source);
@@ -194,8 +180,8 @@ describe("bufferUntil", () => {
     const buffered = source.pipe(bufferUntil(notifier));
     const it = buffered[Symbol.asyncIterator]();
 
-    source$.set(1);
-    notifier$.set(void 0);
+    source.next(1);
+    notifier.next();
     await waitTick();
 
     const r1 = await it.next();

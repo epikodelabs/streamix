@@ -1,10 +1,5 @@
-import { createOperator, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
-
-interface Subscriber<T> {
-  push(value: T): void;
-  error(err: unknown): void;
-  complete(): void;
-}
+import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createReplaySubject, type ReplaySubject } from '../subjects';
 
 /**
  * Creates a stream operator that shares a single subscription to the source stream
@@ -12,7 +7,7 @@ interface Subscriber<T> {
  *
  * This operator multicasts the source stream, ensuring that multiple downstream
  * consumers can receive values from a single source connection. It uses an internal
- * ring buffer to cache the most recent values. When a new consumer subscribes,
+ * `ReplaySubject` to cache the most recent values. When a new consumer subscribes,
  * it immediately receives these cached values before receiving new ones.
  *
  * This is useful for:
@@ -25,144 +20,92 @@ interface Subscriber<T> {
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity) {
-  // Shared state — created once across all subscribers
-  let started = false;
-  let done = false;
-  let error: unknown = undefined;
-  let hasError = false;
-  let buffer: T[] = [];
-  let resolvedSize = Infinity;
-  const subscribers = new Set<Subscriber<T>>();
+  let isConnected = false;
+  let output: ReplaySubject<T> | undefined;
+  let resolvedSize: number | undefined;
+  let sourceIterator: AsyncIterator<T> | null = null;
+  let subscriberCount = 0;
 
-  function addToBuffer(value: T) {
-    buffer.push(value);
-    if (isFinite(resolvedSize) && buffer.length > resolvedSize) {
-      buffer.shift();
+  const disconnect = () => {
+    if (sourceIterator) {
+      const it = sourceIterator;
+      sourceIterator = null;
+      isConnected = false;
+      void it.return?.().catch(() => {});
     }
-  }
+  };
 
-  function startPump(source: AsyncIterator<T>) {
-    if (started) return;
-    started = true;
-
-    (async () => {
+  const connectSource = (source: AsyncIterator<T>) => {
+    sourceIterator = source;
+    isConnected = true;
+    void (async () => {
       try {
-        resolvedSize = isPromiseLike(bufferSize) ? await bufferSize : bufferSize;
-        if (resolvedSize < 0) {
-          throw new RangeError('Buffer size must be a non-negative number.');
-        }
-
         while (true) {
           const result = await source.next();
           if (result.done) break;
 
-          addToBuffer(result.value);
-          for (const sub of subscribers) {
-            sub.push(result.value);
-          }
+          output!.next(result.value);
         }
-
-        done = true;
-        for (const sub of subscribers) sub.complete();
       } catch (err) {
-        hasError = true;
-        error = err;
-        for (const sub of subscribers) sub.error(err);
+        output!.error(err);
+      } finally {
+        sourceIterator = null;
+        if (output && !output.completed()) output.complete();
       }
     })();
-  }
+  };
 
   return createOperator<T, T>('shareReplay', function (this: Operator, source) {
-    // Start the shared pump on first subscription; discard extra source iterators
-    if (!started) {
-      startPump(source);
-    } else {
-      source.return?.().catch(() => {});
-    }
+    let initialized = false;
+    let outputIterator: AsyncIterator<T> | null = null;
 
-    // Return an async iterator for this specific subscriber
-    let resolve: ((value: IteratorResult<T>) => void) | null = null;
-    const queue: Array<IteratorResult<T> | { error: unknown }> = [];
-    let closed = false;
-
-    function enqueue(item: IteratorResult<T> | { error: unknown }) {
-      if (closed) return;
-      if (resolve) {
-        const r = resolve;
-        resolve = null;
-        r(item as IteratorResult<T>);
-      } else {
-        queue.push(item);
+    const ensureOutputIterator = async () => {
+      if (initialized && outputIterator) {
+        return outputIterator;
       }
-    }
 
-    const sub: Subscriber<T> = {
-      push(value) { enqueue({ value, done: false }); },
-      error(err) { enqueue({ error: err } as any); },
-      complete() { enqueue({ value: undefined as any, done: true }); },
+      initialized = true;
+
+      if (resolvedSize === undefined) {
+        resolvedSize = isPromiseLike(bufferSize) ? await bufferSize : bufferSize;
+      }
+      if (!output) output = createReplaySubject<T>(resolvedSize);
+      if (!isConnected) connectSource(source);
+      else if (typeof source.return === "function") {
+        await Promise.resolve(source.return()).catch(() => {});
+      }
+      if (!outputIterator) {
+        outputIterator = output[Symbol.asyncIterator]();
+      }
+      return outputIterator;
     };
 
-    subscribers.add(sub);
+    subscriberCount++;
+    void ensureOutputIterator();
 
-    // Replay buffered values immediately (synchronously into the queue)
-    // These are replayed before the subscriber starts pulling
-    const snapshot = buffer.slice();
+    const iterator: AsyncIterator<T> = {
+      async next() {
+        const it = await ensureOutputIterator();
+        return it.next();
+      },
 
-    // If the source already finished/errored before this subscriber arrived,
-    // pre-fill the queue with snapshot + terminal signal
-    for (const v of snapshot) {
-      queue.push({ value: v, done: false });
-    }
-    if (hasError && snapshot.length === buffer.length) {
-      queue.push({ error } as any);
-    } else if (done && snapshot.length === buffer.length) {
-      queue.push({ value: undefined as any, done: true });
-    }
-
-    return {
-      [Symbol.asyncIterator]() { return this; },
-
-      next(): Promise<IteratorResult<T>> {
-        if (closed) return Promise.resolve({ value: undefined as any, done: true });
-
-        if (queue.length > 0) {
-          const item = queue.shift()!;
-          if ('error' in item) {
-            closed = true;
-            subscribers.delete(sub);
-            return Promise.reject((item as any).error);
-          }
-          if ((item as IteratorResult<T>).done) {
-            closed = true;
-            subscribers.delete(sub);
-          }
-          return Promise.resolve(item as IteratorResult<T>);
+      async return(value?: any) {
+        subscriberCount--;
+        if (subscriberCount === 0 && isConnected) {
+          disconnect();
         }
-
-        return new Promise<IteratorResult<T>>((res, rej) => {
-          resolve = (item) => {
-            if ('error' in (item as any)) {
-              closed = true;
-              subscribers.delete(sub);
-              rej((item as any).error);
-            } else {
-              if ((item as IteratorResult<T>).done) {
-                closed = true;
-                subscribers.delete(sub);
-              }
-              res(item);
-            }
-          };
-        });
+        const it = await ensureOutputIterator();
+        return it.return ? it.return(value) : DONE;
       },
 
-      return(): Promise<IteratorResult<T>> {
-        closed = true;
-        subscribers.delete(sub);
-        resolve?.({ value: undefined as any, done: true });
-        resolve = null;
-        return Promise.resolve({ value: undefined as any, done: true });
-      },
+      async throw(err: any) {
+        const it = await ensureOutputIterator();
+        if (output && !output.completed()) output.error(err);
+        if (it.throw) return it.throw(err);
+        throw err;
+      }
     };
+
+    return iterator;
   });
 }

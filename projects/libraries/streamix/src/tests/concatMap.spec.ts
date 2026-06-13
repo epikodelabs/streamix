@@ -1,4 +1,4 @@
-import { concatMap, createStream, atom, fromAtom, from, of, type Stream } from '@epikodelabs/streamix';
+import { concatMap, createStream, createSubject, from, of, type Stream } from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
 
@@ -89,19 +89,17 @@ describe('concatMap', () => {
   });
 
   it('edge: should queue rapid successive emissions and process sequentially', (done) => {
-    const source$ = atom<number>();
-    const source = fromAtom(source$);
+    const source = createSubject<number>();
     const results: number[] = [];
     const order: string[] = [];
 
     const concatenated = source.pipe(
       concatMap((val) => {
         order.push(`start-${val}`);
-        const inner$ = atom<number>();
-        const inner = fromAtom(inner$);
+        const inner = createSubject<number>();
         setTimeout(() => {
-          inner$.set(val * 10);
-          inner$.dispose();
+          inner.next(val * 10);
+          inner.complete();
           order.push(`end-${val}`);
         }, (4 - val) * 20); // Reverse timing
         return inner;
@@ -122,15 +120,14 @@ describe('concatMap', () => {
       }
     });
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    source.next(1);
+    source.next(2);
+    source.next(3);
+    source.complete();
   });
 
   it('edge: should handle mix of sync and async inners in order', (done) => {
-    const source$ = atom<number>();
-    const source = fromAtom(source$);
+    const source = createSubject<number>();
     const results: number[] = [];
 
     const concatenated = source.pipe(
@@ -154,16 +151,15 @@ describe('concatMap', () => {
       }
     });
 
-    source$.set(1); // sync
-    source$.set(2); // async
-    source$.set(3); // sync
-    source$.set(4); // async
-    source$.dispose();
+    source.next(1); // sync
+    source.next(2); // async
+    source.next(3); // sync
+    source.next(4); // async
+    source.complete();
   });
 
   it('edge: should handle rapid emissions with empty inners', (done) => {
-    const source$ = atom<number>();
-    const source = fromAtom(source$);
+    const source = createSubject<number>();
     const results: number[] = [];
 
     const concatenated = source.pipe(
@@ -183,27 +179,25 @@ describe('concatMap', () => {
       }
     });
 
-    source$.set(1);
-    source$.set(2); // empty
-    source$.set(3);
-    source$.dispose();
+    source.next(1);
+    source.next(2); // empty
+    source.next(3);
+    source.complete();
   });
 
   it('edge: should stop on first inner error in rapid emissions', (done) => {
-    const source$ = atom<number>();
-    const source = fromAtom(source$);
+    const source = createSubject<number>();
     const results: number[] = [];
 
     const concatenated = source.pipe(
       concatMap((val) => {
-        const inner$ = atom<number>();
-        const inner = fromAtom(inner$);
+        const inner = createSubject<number>();
         setTimeout(() => {
           if (val === 2) {
-            inner$.setError(new Error('Error at 2'));
+            inner.error(new Error('Error at 2'));
           } else {
-            inner$.set(val * 10);
-            inner$.dispose();
+            inner.next(val * 10);
+            inner.complete();
           }
         }, 20);
         return inner;
@@ -219,10 +213,10 @@ describe('concatMap', () => {
       }
     });
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3); // Should never process
-    source$.dispose();
+    source.next(1);
+    source.next(2);
+    source.next(3); // Should never process
+    source.complete();
   });
 });
 

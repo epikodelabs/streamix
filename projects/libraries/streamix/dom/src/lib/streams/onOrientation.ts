@@ -1,77 +1,130 @@
-import { atom, createStream, iterate, type Stream } from "@epikodelabs/streamix";
+import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
 
 /**
- * Creates a reactive stream that emits the current screen orientation —
- * either `"portrait"` or `"landscape"` — whenever it changes.
+ * Creates a reactive stream that emits the current screen orientation,
+ * either `"portrait"` or `"landscape"`, whenever it changes.
  *
  * **Behavior:**
  * - Emits the initial orientation on start.
  * - Emits whenever the orientation changes.
- * - Stops listening when the signal is aborted (last subscriber unsubscribes).
+ * - Starts listening on first subscriber.
+ * - Stops listening when the last subscriber unsubscribes.
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
  * @returns {Stream<"portrait" | "landscape">}
  */
 export function onOrientation(): Stream<"portrait" | "landscape"> {
-  return createStream<"portrait" | "landscape">(
-    "onOrientation",
-    async function* (signal) {
-      // SSR guard
-      if (typeof window === "undefined" || !window.screen) return;
+  const subject = createSubject<"portrait" | "landscape">();
 
-      const atom$ = atom<"portrait" | "landscape">();
+  let subscriberCount = 0;
+  let stopped = true;
+  let orientation: ScreenOrientation | null = null;
 
-      const getOrientation = (): "portrait" | "landscape" => {
-        if (!window.screen.orientation) return "portrait";
-        const angle = window.screen.orientation.angle;
-        return angle === 0 || angle === 180 ? "portrait" : "landscape";
-      };
-
-      const emit = () => {
-        if (signal?.aborted) {
-          return;
-        }
-        atom$.set(getOrientation());
-      };
-
-      let cleaned = false;
-      const cleanup = () => {
-        if (cleaned) return;
-        cleaned = true;
-        if (signal) {
-          try {
-            signal.removeEventListener("abort", cleanup);
-          } catch {
-            // ignore
-          }
-        }
-        if (window.screen?.orientation) {
-          try {
-            window.screen.orientation.removeEventListener("change", emit);
-          } catch {
-            // ignore
-          }
-        }
-        atom$.dispose();
-      };
-
-      if (signal) {
-        signal.addEventListener("abort", cleanup, { once: true });
-      }
-
-      if (window.screen.orientation) {
-        window.screen.orientation.addEventListener("change", emit);
-      }
-
-      // Emit initial orientation
-      emit();
-
-      try {
-        yield* { [Symbol.asyncIterator]: () => iterate(atom$, signal) };
-      } finally {
-        cleanup();
-      }
+  const getOrientation = (): "portrait" | "landscape" => {
+    if (
+      typeof window === "undefined" ||
+      !window.screen ||
+      !window.screen.orientation
+    ) {
+      return "portrait";
     }
-  );
+
+    const angle = window.screen.orientation.angle;
+    return angle === 0 || angle === 180 ? "portrait" : "landscape";
+  };
+
+  const emit = () => {
+    subject.next(getOrientation());
+  };
+
+  const start = () => {
+    if (!stopped) return;
+
+    stopped = false;
+
+    if (typeof window === "undefined" || !window.screen) {
+      return;
+    }
+
+    // If the Orientation API is unavailable, still emit a sane default once.
+    if (!window.screen.orientation) {
+      emit();
+      return;
+    }
+
+    orientation = window.screen.orientation;
+
+    orientation.addEventListener("change", emit);
+
+    emit();
+  };
+
+  const stop = () => {
+    if (stopped) return;
+
+    stopped = true;
+
+    orientation?.removeEventListener("change", emit);
+    orientation = null;
+  };
+
+  /* ------------------------------------------------------------------------
+   * Ref-counted subscription handling
+   * ---------------------------------------------------------------------- */
+
+  const originalSubscribe = subject.subscribe;
+  const scheduleStart = () => {
+    subscriberCount += 1;
+    if (subscriberCount === 1) {
+      start();
+    }
+  };
+
+  subject.subscribe = (
+    cb?: ((value: "portrait" | "landscape") => void) | Receiver<"portrait" | "landscape">
+  ) => {
+    const sub = (originalSubscribe as any).call(subject, cb);
+
+    scheduleStart();
+
+    const baseUnsubscribe = sub.unsubscribe.bind(sub);
+    let cleaned = false;
+
+    sub.unsubscribe = () => {
+      if (!cleaned) {
+        cleaned = true;
+
+        subscriberCount = Math.max(0, subscriberCount - 1);
+        if (subscriberCount === 0) {
+          stop();
+        }
+
+        // Some DOM specs expect the teardown callback to run synchronously.
+        const teardown = sub.teardown;
+        sub.teardown = undefined;
+        try {
+          teardown?.();
+        } catch {
+        }
+      }
+
+      return baseUnsubscribe();
+    };
+
+    return sub;
+  };
+
+  /* ------------------------------------------------------------------------
+   * Async iteration support
+   * ---------------------------------------------------------------------- */
+
+  subject[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
+
+  subject.name = "onOrientation";
+  subject.type = "stream";
+  return subject;
 }
+
+

@@ -1,4 +1,4 @@
-import { atom, fromAtom, delay, exhaustMap, from } from '@epikodelabs/streamix';
+import { createSubject, delay, exhaustMap, from } from '@epikodelabs/streamix';
 
 let previousTimeoutInterval = jasmine.DEFAULT_TIMEOUT_INTERVAL;
 
@@ -15,8 +15,7 @@ describe('exhaustMap', () => {
   });
 
   it('does not start a second inner stream while the first is active', async () => {
-    const source$ = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[] = [];
     let projectCalls = 0;
 
@@ -33,12 +32,12 @@ describe('exhaustMap', () => {
       }
     })();
 
-    source$.set(1);
+    subject.next(1);
     await wait(5);
-    source$.set(2);
-    source$.set(3);
+    subject.next(2);
+    subject.next(3);
     await wait(150);
-    source$.dispose();
+    subject.complete();
     await reader;
 
     expect(results).toEqual([1]);
@@ -46,8 +45,7 @@ describe('exhaustMap', () => {
   });
 
   it('restarts after the inner stream completes', async () => {
-    const source$ = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[] = [];
     let projectCalls = 0;
 
@@ -64,14 +62,14 @@ describe('exhaustMap', () => {
       }
     })();
 
-    source$.set(1);
+    subject.next(1);
     await wait(10);
-    source$.set(2);
-    source$.set(3);
+    subject.next(2);
+    subject.next(3);
     await wait(60);
-    source$.set(4);
+    subject.next(4);
     await wait(60);
-    source$.dispose();
+    subject.complete();
     await reader;
 
     expect(results).toEqual([1, 4]);
@@ -79,8 +77,7 @@ describe('exhaustMap', () => {
   });
 
   it('propagates inner errors and ignores later sources', async () => {
-    const source$ = atom<number>();
-    const subject = fromAtom(source$);
+    const subject = createSubject<number>();
     const results: number[] = [];
 
     const stream = subject.pipe(
@@ -106,11 +103,11 @@ describe('exhaustMap', () => {
       }
     })();
 
-    source$.set(1);
+    subject.next(1);
     await wait(5);
-    source$.set(3);
+    subject.next(3);
     await wait(10);
-    source$.set(2);
+    subject.next(2);
     const error = await errPromise;
 
     expect(error).toBeInstanceOf(Error);

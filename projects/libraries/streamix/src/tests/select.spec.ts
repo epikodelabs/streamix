@@ -1,12 +1,12 @@
-import { atom, fromAtom, select, type Atom } from '@epikodelabs/streamix';
+import { createSubject, select } from '@epikodelabs/streamix';
 
 describe('select', () => {
-  let source$: Atom<any>;
+  let subject: any;
   let source: any;
 
   beforeEach(() => {
-    source$ = atom();
-    source = fromAtom(source$);
+    subject = createSubject();
+    source = subject;
   });
 
   it("should emit selected values based on indexIterator", async () => {
@@ -21,12 +21,12 @@ describe('select', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3);
-    source$.set(4);
-    source$.set(5);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.next(4);
+    subject.next(5);
+    subject.complete();
 
     // Wait for the consumption to finish
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -45,9 +45,9 @@ describe('select', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([]); // No values should be emitted
@@ -64,9 +64,9 @@ describe('select', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([]); // No values should be emitted
@@ -83,10 +83,10 @@ describe('select', () => {
       }
     })();
 
-    source$.set(1);
-    source$.set(2);
-    source$.set(3);
-    source$.dispose();
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(results).toEqual([1, 3]); // Only values at indexes 0 and 2 should be emitted
