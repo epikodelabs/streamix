@@ -1,11 +1,11 @@
-import { atom, asyncAtom, createSubject, derived, flow, scope } from '@epikodelabs/streamix';
+import { atom, asyncAtom, createSubject, derived, flow, globalScope, scope } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 describe('scope', () => {
   it('should create a scope', () => {
     const s = scope(() => {});
-    expect(s.parent).toBeUndefined();
+    expect(s.parent).toBe(globalScope);
     s.dispose();
   });
 
@@ -334,6 +334,62 @@ describe('scope', () => {
 
       await delay(70);
       expect(values).toEqual([3]);
+
+      s.dispose();
+    });
+  });
+
+  describe('globalScope', () => {
+    afterEach(() => {
+      globalScope.mode = 'discrete';
+      globalScope.strobe = 0;
+    });
+
+    it('should default to discrete mode', () => {
+      expect(globalScope.mode).toBe('discrete');
+      expect(globalScope.strobe).toBe(0);
+    });
+
+    it('should make top-level scopes analog via global config', async () => {
+      globalScope.mode = 'analog';
+      globalScope.strobe = 50;
+
+      const s = scope(() => {
+        const a = atom(0);
+        return { a };
+      });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+      s.a.set(3);
+
+      expect(values).toEqual([]);
+
+      await delay(70);
+      expect(values).toEqual([3]);
+
+      s.dispose();
+    });
+
+    it('should let child scopes override global analog mode', async () => {
+      globalScope.mode = 'analog';
+      globalScope.strobe = 50;
+
+      const s = scope(() => {
+        const a = atom(0);
+        return { a };
+      }, { mode: 'discrete' });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+
+      expect(values).toEqual([1, 2]);
 
       s.dispose();
     });

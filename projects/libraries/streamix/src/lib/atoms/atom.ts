@@ -16,8 +16,8 @@ import {
 export interface AtomOptions {
   /**
    * When `true`, the atom always emits updates immediately, bypassing any
-   * scope-level strobe. When `false` or omitted, the atom follows the scope's
-   * strobe configuration (analog mode when a strobe is active).
+   * scope-level or global strobe. When `false` or omitted, the atom follows
+   * the effective mode of the owning scope (or the global scope).
    */
   discrete?: boolean;
 }
