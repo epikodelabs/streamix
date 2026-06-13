@@ -40,6 +40,14 @@ function isScope(value: unknown): value is Scope {
  * and recursing into child scopes. Non-atom/scope values are passed through
  * unchanged.
  *
+ * **Strobe / analog mode**
+ *
+ * A scope can be configured with a `strobe` interval. When set, every atom
+ * created inside the scope (or a child scope that does not override it)
+ * behaves as an analog signal: value changes are batched and emitted once
+ * per strobe period. Use `{ discrete: true }` on an individual atom to
+ * opt out and emit every change immediately.
+ *
  * **Disposal**
  *
  * {@link dispose} tears down every tracked atom or child scope recursively.
@@ -82,6 +90,9 @@ interface ScopeInternal {
   loadingSubscriptions: Subscription[];
   options: ScopeOptions;
   effectiveStrobe: number | undefined;
+  strobeOwner: Scope | undefined;
+  strobeId: ReturnType<typeof setInterval> | undefined;
+  analogAtoms: Map<AtomBase<any>, () => void>;
 }
 
 /**
@@ -100,6 +111,7 @@ export interface ScopeOptions {
 }
 
 const scopeInternals = new WeakMap<Scope, ScopeInternal>();
+const analogOwners = new WeakMap<AtomBase<any>, Scope>();
 
 /** The scope currently executing its factory, if any. */
 let currentScope: Scope | undefined;
@@ -107,6 +119,37 @@ let currentScope: Scope | undefined;
 /** @internal Returns the scope currently executing its factory. */
 export function getCurrentScope(): Scope | undefined {
   return currentScope;
+}
+
+/** @internal Returns the scope that owns the active strobe for the given scope. */
+export function getStrobeOwner(scope: Scope): Scope | undefined {
+  return scopeInternals.get(scope)?.strobeOwner;
+}
+
+/**
+ * Resolves the effective strobe for a scope by walking up the parent chain.
+ *
+ * @internal
+ */
+export function getScopeStrobe(scope: Scope): number | undefined {
+  const internal = scopeInternals.get(scope);
+  return internal?.effectiveStrobe;
+}
+
+/**
+ * Marks an atom as having emitted its first value for scope loading tracking.
+ *
+ * @internal
+ */
+export function markAtomAsEmitted(atom: AtomBase<any>): void {
+  const scope = currentScope;
+  if (!scope) return;
+
+  const internal = scopeInternals.get(scope);
+  if (!internal) return;
+
+  internal.emittedAtoms.add(atom);
+  internal.checkLoading();
 }
 
 /** @internal Registers a value with the scope that is currently active. */
@@ -129,13 +172,38 @@ export function registerWithCurrentScope(value: AtomBase<any> | Scope): void {
 }
 
 /**
- * Resolves the effective strobe for a scope by walking up the parent chain.
+ * Registers an atom's flush callback with the scope that owns its strobe.
  *
  * @internal
  */
-export function getScopeStrobe(scope: Scope): number | undefined {
-  const internal = scopeInternals.get(scope);
-  return internal?.effectiveStrobe;
+export function registerAnalogAtom(atom: AtomBase<any>, flush: () => void): void {
+  const scope = currentScope;
+  if (!scope) return;
+
+  const owner = getStrobeOwner(scope);
+  if (!owner) return;
+
+  const internal = scopeInternals.get(owner);
+  if (!internal) return;
+
+  internal.analogAtoms.set(atom, flush);
+  analogOwners.set(atom, owner);
+}
+
+/**
+ * Removes an atom's flush callback from its strobe owner.
+ *
+ * @internal
+ */
+export function unregisterAnalogAtom(atom: AtomBase<any>): void {
+  const owner = analogOwners.get(atom);
+  if (!owner) return;
+
+  const internal = scopeInternals.get(owner);
+  if (!internal) return;
+
+  internal.analogAtoms.delete(atom);
+  analogOwners.delete(atom);
 }
 
 /**
@@ -183,8 +251,11 @@ export function scope<T>(factory: () => T, options: ScopeOptions = {}): Scope & 
   const emittedAtoms = new Set<AtomBase<any>>();
   let localLoading = true;
 
-  const parentStrobe = previousScope ? scopeInternals.get(previousScope)?.effectiveStrobe : undefined;
-  const effectiveStrobe = options.strobe ? options.strobe : parentStrobe;
+  const parentInternal = previousScope ? scopeInternals.get(previousScope) : undefined;
+  const parentStrobe = parentInternal?.effectiveStrobe;
+  const effectiveStrobe = options.strobe !== undefined ? options.strobe : parentStrobe;
+  const ownsStrobe = effectiveStrobe !== undefined && effectiveStrobe > 0 &&
+    (options.strobe !== undefined ? options.strobe > 0 : false);
 
   const internal: ScopeInternal = {
     tracked,
@@ -193,6 +264,9 @@ export function scope<T>(factory: () => T, options: ScopeOptions = {}): Scope & 
     loadingSubscriptions: [],
     options,
     effectiveStrobe,
+    strobeOwner: undefined,
+    strobeId: undefined,
+    analogAtoms: new Map(),
 
     checkLoading() {
       if (!localLoading) return;
@@ -233,6 +307,11 @@ export function scope<T>(factory: () => T, options: ScopeOptions = {}): Scope & 
     },
 
     dispose() {
+      if (internal.strobeId !== undefined) {
+        clearInterval(internal.strobeId);
+        internal.strobeId = undefined;
+      }
+      internal.analogAtoms.clear();
       for (const sub of internal.loadingSubscriptions) {
         sub.unsubscribe();
       }
@@ -247,6 +326,14 @@ export function scope<T>(factory: () => T, options: ScopeOptions = {}): Scope & 
   };
 
   scopeInternals.set(instance, internal);
+  internal.strobeOwner = ownsStrobe ? instance : parentInternal?.strobeOwner;
+  if (ownsStrobe && effectiveStrobe !== undefined) {
+    internal.strobeId = setInterval(() => {
+      for (const flush of internal.analogAtoms.values()) {
+        flush();
+      }
+    }, effectiveStrobe);
+  }
 
   currentScope = instance;
 

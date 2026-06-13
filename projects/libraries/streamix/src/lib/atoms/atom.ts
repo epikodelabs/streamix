@@ -1,7 +1,26 @@
 import type { Stream } from "../abstractions/stream";
 import { createSubscription, type Subscription } from "../abstractions/subscription";
 import { sample } from "../operators/sample";
-import { getCurrentScope, getScopeStrobe, registerWithCurrentScope } from "./scope";
+import {
+  getCurrentScope,
+  getScopeStrobe,
+  markAtomAsEmitted,
+  registerAnalogAtom,
+  registerWithCurrentScope,
+  unregisterAnalogAtom,
+} from "./scope";
+
+/**
+ * Common options for atom factories.
+ */
+export interface AtomOptions {
+  /**
+   * When `true`, the atom always emits updates immediately, bypassing any
+   * scope-level strobe. When `false` or omitted, the atom follows the scope's
+   * strobe configuration (analog mode when a strobe is active).
+   */
+  discrete?: boolean;
+}
 
 /**
  * Base interface for all atoms.
@@ -152,10 +171,11 @@ function notifyDerivedSubscribers(notify: () => void) {
  * });
  * ```
  */
-export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
+export function flow<T>(stream: Stream<T>, initialValue: T, options?: AtomOptions): AtomBase<T> {
   const scope = getCurrentScope();
   const strobe = scope ? getScopeStrobe(scope) : undefined;
-  const sourceStream = strobe ? stream.pipe(sample(strobe)) : stream;
+  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
+  const sourceStream = analog ? stream.pipe(sample(strobe)) : stream;
 
   let current = initialValue;
   let previous = initialValue;
@@ -262,12 +282,34 @@ export function flow<T>(stream: Stream<T>, initialValue: T): AtomBase<T> {
  * });
  * ```
  */
-export function atom<T>(initialValue: T): Atom<T> {
+export function atom<T>(initialValue: T, options?: AtomOptions): Atom<T> {
+  const scope = getCurrentScope();
+  const strobe = scope ? getScopeStrobe(scope) : undefined;
+  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
+
   let current = initialValue;
   let previous = initialValue;
   let disposed = false;
+  let dirty = false;
+  let lastNotified = current;
 
   const subs = new Set<(value: T) => void>();
+
+  const notify = (value: T) => {
+    runWithPropagation(() => {
+      for (const cb of Array.from(subs)) {
+        cb(value);
+      }
+    });
+  };
+
+  const flush = () => {
+    if (!dirty || disposed) return;
+    dirty = false;
+    if (Object.is(lastNotified, current)) return;
+    lastNotified = current;
+    notify(current);
+  };
 
   const instance: Atom<T> = {
     type: "atom",
@@ -315,22 +357,28 @@ export function atom<T>(initialValue: T): Atom<T> {
       previous = current;
       current = value;
 
-      runWithPropagation(() => {
-        for (const cb of Array.from(subs)) {
-          cb(value);
-        }
-      });
+      if (analog) {
+        dirty = true;
+      } else {
+        lastNotified = current;
+        notify(value);
+      }
     },
 
     dispose() {
       if (disposed) return;
 
       disposed = true;
+      unregisterAnalogAtom(instance);
       subs.clear();
     }
   };
 
   registerWithCurrentScope(instance);
+  markAtomAsEmitted(instance);
+  if (analog) {
+    registerAnalogAtom(instance, flush);
+  }
 
   // Notify scope subscribers immediately so writable atoms are
   // considered "ready" — their value is already available.
@@ -339,6 +387,26 @@ export function atom<T>(initialValue: T): Atom<T> {
   }
 
   return instance;
+}
+
+/**
+ * Alias for {@link atom}.
+ *
+ * Use `discrete` when you want to emphasize that the value is updated by
+ * explicit, discrete events rather than a continuous/analog stream.
+ *
+ * @param initialValue - The starting value.
+ * @param options - Optional atom configuration.
+ * @returns A writable discrete atom.
+ *
+ * @example
+ * ```ts
+ * const count = discrete(0);
+ * count.set(5);
+ * ```
+ */
+export function discrete<T>(initialValue: T, options?: AtomOptions): Atom<T> {
+  return atom(initialValue, options);
 }
 
 /* ── asyncAtom ── */
@@ -393,8 +461,12 @@ export interface AsyncAtom<T = any> extends AtomBase<T> {
  * ```
  */
 export function asyncAtom<T>(): AsyncAtom<T>;
-export function asyncAtom<T>(options: AsyncAtomOptions): AsyncAtom<T>;
-export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
+export function asyncAtom<T>(options: AsyncAtomOptions & AtomOptions): AsyncAtom<T>;
+export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): AsyncAtom<T> {
+  const scope = getCurrentScope();
+  const strobe = scope ? getScopeStrobe(scope) : undefined;
+  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
+
   const capacity = options?.capacity ?? 0;
   const isFiniteCapacity = capacity !== Infinity && capacity > 0;
   const replay: T[] = [];
@@ -404,8 +476,26 @@ export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
   let previous: T = undefined as any;
   let hasValue = false;
   let disposed = false;
+  let dirty = false;
+  let lastNotified: T = undefined as any;
 
   const subs = new Set<(value: T) => void>();
+
+  const notify = (value: T) => {
+    runWithPropagation(() => {
+      for (const cb of Array.from(subs)) {
+        cb(value);
+      }
+    });
+  };
+
+  const flush = () => {
+    if (!dirty || disposed) return;
+    dirty = false;
+    if (hasValue && Object.is(lastNotified, current)) return;
+    lastNotified = current;
+    notify(current);
+  };
 
   const pushReplay = (value: T) => {
     if (capacity <= 0) return;
@@ -482,20 +572,27 @@ export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
 
       previous = current;
       current = value;
+      const wasFirstValue = !hasValue;
       hasValue = true;
       pushReplay(value);
 
-      runWithPropagation(() => {
-        for (const cb of Array.from(subs)) {
-          cb(value);
-        }
-      });
+      if (wasFirstValue) {
+        markAtomAsEmitted(instance);
+      }
+
+      if (analog) {
+        dirty = true;
+      } else {
+        lastNotified = current;
+        notify(value);
+      }
     },
 
     dispose() {
       if (disposed) return;
 
       disposed = true;
+      unregisterAnalogAtom(instance);
       subs.clear();
       replay.length = 0;
       replayHead = 0;
@@ -503,6 +600,9 @@ export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
   };
 
   registerWithCurrentScope(instance);
+  if (analog) {
+    registerAnalogAtom(instance, flush);
+  }
 
   return instance;
 }
@@ -533,11 +633,16 @@ export function asyncAtom<T>(options?: AsyncAtomOptions): AsyncAtom<T> {
  * console.log(app.full.value); // 'Grace Lovelace'
  * ```
  */
-export function derived<T>(fn: () => T): AtomBase<T> {
+export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
+  const scope = getCurrentScope();
+  const strobe = scope ? getScopeStrobe(scope) : undefined;
+  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
+
   let current: T;
   let previous: T;
   let disposed = false;
   let running = false;
+  let dirty = false;
   const subs = new Set<(value: T) => void>();
   const dependencies = new Set<AtomBase<any>>();
   const depSubscriptions = new Map<AtomBase<any>, Subscription>();
@@ -584,13 +689,23 @@ export function derived<T>(fn: () => T): AtomBase<T> {
             if (Object.is(current, next)) return;
             previous = current;
             current = next;
-            notifyDerivedSubscribers(notify);
+            if (analog) {
+              dirty = true;
+            } else {
+              notifyDerivedSubscribers(notify);
+            }
           })
         );
       }
     }
 
     return result;
+  };
+
+  const flush = () => {
+    if (!dirty || disposed) return;
+    dirty = false;
+    notifyDerivedSubscribers(notify);
   };
 
   const context = {
@@ -642,6 +757,7 @@ export function derived<T>(fn: () => T): AtomBase<T> {
     dispose() {
       if (disposed) return;
       disposed = true;
+      unregisterAnalogAtom(instance);
       for (const sub of depSubscriptions.values()) {
         sub.unsubscribe();
       }
@@ -651,6 +767,10 @@ export function derived<T>(fn: () => T): AtomBase<T> {
   };
 
   registerWithCurrentScope(instance);
+  markAtomAsEmitted(instance);
+  if (analog) {
+    registerAnalogAtom(instance, flush);
+  }
 
   // Notify scope subscribers immediately so derived atoms are
   // considered "ready" — their value is already available.

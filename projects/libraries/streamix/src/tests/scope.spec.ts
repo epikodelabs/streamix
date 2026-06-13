@@ -1,4 +1,4 @@
-import { createSubject, flow, scope } from '@epikodelabs/streamix';
+import { atom, asyncAtom, createSubject, derived, flow, scope } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -249,6 +249,93 @@ describe('scope', () => {
       expect(s.a.safeValue).toBe(0);
 
       expect(() => s.a.value).toThrowError();
+    });
+
+    it('should batch atom set() calls on strobe', async () => {
+      const s = scope(() => {
+        const a = atom(0);
+        return { a };
+      }, { strobe: 50 });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+      s.a.set(3);
+
+      expect(s.a.value).toBe(3);
+      expect(values).toEqual([]);
+
+      await delay(70);
+      expect(values).toEqual([3]);
+
+      s.dispose();
+    });
+
+    it('should batch derived recomputations on strobe', async () => {
+      const s = scope(() => {
+        const a = atom(0);
+        const doubled = derived(() => a.value * 2);
+        return { a, doubled };
+      }, { strobe: 50 });
+
+      const values: number[] = [];
+      s.doubled.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+      s.a.set(3);
+
+      // In analog mode the derived value is sampled; it stays at the
+      // last-emitted value until the strobe fires.
+      expect(s.doubled.value).toBe(0);
+      expect(values).toEqual([]);
+
+      await delay(70);
+      expect(s.doubled.value).toBe(6);
+      expect(values).toEqual([6]);
+
+      s.dispose();
+    });
+
+    it('should support discrete opt-out', async () => {
+      const s = scope(() => {
+        const a = atom(0, { discrete: true });
+        return { a };
+      }, { strobe: 50 });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+
+      expect(values).toEqual([1, 2]);
+
+      s.dispose();
+    });
+
+    it('should batch asyncAtom set() calls on strobe', async () => {
+      const s = scope(() => {
+        const a = asyncAtom<number>();
+        return { a };
+      }, { strobe: 50 });
+
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+
+      s.a.set(1);
+      s.a.set(2);
+      s.a.set(3);
+
+      expect(s.a.value).toBe(3);
+      expect(values).toEqual([]);
+
+      await delay(70);
+      expect(values).toEqual([3]);
+
+      s.dispose();
     });
   });
 });
