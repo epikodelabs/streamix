@@ -1,38 +1,20 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
+import { flow, type AtomBase } from "../atoms/atom";
+import { toAsyncIterable, type StreamInput } from "./pipe";
 
 /**
- * Creates a stream from an asynchronous or synchronous iterable.
+ * Creates an atom from an asynchronous or synchronous iterable.
  *
  * This operator is a powerful way to convert any source that can be iterated
  * over (such as arrays, strings, `Map`, `Set`, `AsyncGenerator`, etc.) into
- * a reactive stream. The stream will emit each value from the source in order
+ * a reactive atom. The atom's value is updated with each value from the source
  * before completing.
  *
  * @template T The type of the values in the iterable.
- * @param {AsyncIterable<T> | Iterable<T> | PromiseLike<AsyncIterable<T> | Iterable<T>>} source The iterable source to convert into a stream.
- * @returns {Stream<T>} A new stream that emits each value from the source.
+ * @param source The iterable source to convert into an atom.
+ * @returns {AtomBase<T | undefined>} A new atom that emits each value from the source.
  */
-export function from<T = any>(source: MaybePromise<AsyncIterable<T> | Iterable<T>>): Stream<T> {
-  async function* generator() {
-    const resolvedSource = isPromiseLike(source) ? await source : source;
-    const iterator = (resolvedSource as any)[Symbol.asyncIterator]?.() ?? (resolvedSource as any)[Symbol.iterator]?.();
-
-    try {
-      while (true) {
-        const result = await iterator.next();
-        if (result.done) break;
-        yield result.value;
-      }
-    } finally {
-      if (iterator.return) {
-        try {
-          await iterator.return();
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }
-
-  return createStream<T>("from", generator);
+export function from<T = any>(source: StreamInput<T>): AtomBase<T | undefined> {
+  return flow<T | undefined>(async function* () {
+    yield* toAsyncIterable(source);
+  });
 }

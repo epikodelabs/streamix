@@ -1,6 +1,6 @@
-import { createStream, type Stream } from "../abstractions";
-import { fromAny } from "../converters";
+import { flow, type AtomBase } from "../atoms/atom";
 import { createAsyncCoordinator } from "../utils";
+import { toAsyncIterable, type StreamInput } from "./pipe";
 
 /**
  * Waits for all sources to complete and emits an array of their last values.
@@ -12,50 +12,47 @@ import { createAsyncCoordinator } from "../utils";
  * - If any source errors, the output errors.
  * - If any source completes without emitting a value, `forkJoin` errors.
  *
- * Sources may be Streams or plain values (including promises). Plain values are
- * converted to streams via `fromAny(...)`.
+ * Sources may be atoms, streams, or plain values (including promises).
  *
- * @template T The type of the last values emitted by each stream.
- * @param sources Streams or values (including promises) to join.
- * @returns A stream that emits a single array of last values.
+ * @template R A tuple type representing the last values emitted by each source.
+ * @param sources Atoms, streams, or values (including promises) to join.
+ * @returns An atom that emits a single array of last values.
  *
  * @example
  * const s = forkJoin(from([1, 2]), from([10]));
  * // emits: [2, 10]
  */
-export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
-  ...sources: { [K in keyof R]: Stream<R[K]> | Promise<R[K]> }
-): Stream<T[]>;
+export function forkJoin<R extends readonly unknown[] = any[]>(
+  ...sources: { [K in keyof R]: StreamInput<R[K]> }
+): AtomBase<R | undefined>;
 
 /**
  * Overload that accepts an array/tuple of sources.
  *
- * @template T
  * @template R
  * @param sources Tuple/array of sources.
- * @returns A stream that emits a single array of last values.
+ * @returns An atom that emits a single array of last values.
  */
-export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
-  sources: { [K in keyof R]: Stream<R[K]> | Promise<R[K]> }
-): Stream<T[]>;
+export function forkJoin<R extends readonly unknown[] = any[]>(
+  sources: { [K in keyof R]: StreamInput<R[K]> }
+): AtomBase<R | undefined>;
 
 /**
  * Implementation signature.
  *
  * This implementation supports both `forkJoin(a, b, c)` and `forkJoin([a, b, c])`.
  */
-export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
-  ...sources: R
-): Stream<T[]> {
-  async function* generator() {
+export function forkJoin<R extends readonly unknown[] = any[]>(
+  ...sources: any[]
+): AtomBase<R | undefined> {
+  return flow<R | undefined>(async function* () {
     const normalizedSources = sources.length === 1 && Array.isArray(sources[0]) ? sources[0] : sources;
 
     const results = new Array(normalizedSources.length);
     const hasValue = new Array(normalizedSources.length).fill(false);
-    const iterators = normalizedSources.map((source) => {
-      const stream = fromAny(source as any);
-      return stream[Symbol.asyncIterator]() as AsyncIterator<T>;
-    });
+    const iterators = normalizedSources.map((source: any) =>
+      toAsyncIterable(source as StreamInput<R[number]>)[Symbol.asyncIterator]() as AsyncIterator<R[number]>
+    );
 
     const coordinator = createAsyncCoordinator(iterators);
     let completedCount = 0;
@@ -78,15 +75,13 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
 
         completedCount++;
         if (!hasValue[event.sourceIndex]) {
-          throw new Error(`forkJoin: stream at index ${event.sourceIndex} completed without emitting any value`);
+          throw new Error(`forkJoin: source at index ${event.sourceIndex} completed without emitting any value`);
         }
       }
 
-      yield results as T[];
+      yield results as unknown as R;
     } finally {
       await coordinator.return?.();
     }
-  }
-
-  return createStream<T[]>("forkJoin", generator);
+  }, undefined as unknown as R);
 }

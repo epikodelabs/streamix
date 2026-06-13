@@ -1,23 +1,19 @@
-import { createStream, type Stream } from '../abstractions';
+import { flow, type AtomBase } from '../atoms/atom';
 
 /**
- * Creates an empty stream that emits no values and completes immediately.
+ * Creates an empty atom that emits no values and completes immediately.
  *
- * @template T The type of the stream's values (will never be emitted).
- * @returns {Stream<T>} An empty stream.
+ * @template T The type of the atom's values (will never be emitted).
+ * @returns {AtomBase<T | undefined>} An empty atom.
  */
-export const empty = <T = any>(): Stream<T> => {
-  const stream = createStream<T>('EMPTY', async function* (this: Stream<T>): AsyncGenerator<T> {
-    // No emissions, just complete immediately
-  });
-
-  return Object.assign(stream, { completed: () => true });
+export const empty = <T = any>(): AtomBase<T | undefined> => {
+  return flow<T | undefined>(async function* () {});
 };
 
 /**
- * A singleton instance of an empty stream.
+ * A singleton instance of an empty atom.
  *
- * This constant provides a reusable, empty stream that immediately completes
+ * This constant provides a reusable, empty atom that immediately completes
  * upon subscription without emitting any values. It is useful in stream
  * compositions as a placeholder or to represent a sequence with no elements.
  */

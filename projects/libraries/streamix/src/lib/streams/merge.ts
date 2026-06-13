@@ -1,24 +1,24 @@
-import { createStream, type Stream } from "../abstractions";
-import { fromAny } from "../converters";
+import { flow, type AtomBase } from "../atoms/atom";
 import { createAsyncCoordinator } from "../utils";
+import { toAsyncIterable, type StreamInput } from "./pipe";
 
 /**
- * Merges multiple source streams into a single stream, emitting values as they arrive from any source.
+ * Merges multiple source streams into a single atom, emitting values as they arrive from any source.
  *
  * This is useful for combining data from multiple independent sources into a single,
  * unified stream of events. Unlike `zip`, it does not wait for a value from every
  * stream before emitting; it emits values as they become available.
  *
- * The merged stream completes only after all source streams have completed.
- * If any source stream errors, the merged stream immediately errors.
+ * The merged atom completes only after all source streams have completed.
+ * If any source stream errors, the merged atom immediately errors.
  *
  * **Performance characteristics:**
  * - Synchronous sources with buffered values are drained immediately
  * - Asynchronous sources are pulled concurrently
  *
  * @template T The type of the values in the streams.
- * @param sources Streams or values (including promises) to merge.
- * @returns {Stream<T>} A new stream that emits values from all input streams.
+ * @param sources Atoms, streams, or values (including promises) to merge.
+ * @returns {AtomBase<T | undefined>} A new atom that emits values from all input streams.
  *
  * @example
  * ```typescript
@@ -30,14 +30,13 @@ import { createAsyncCoordinator } from "../utils";
  * merge(fast, slow, instant).forEach(console.log);
  * ```
  */
-export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T> {
-  const gen = async function* () {
+export function merge<T = any>(...sources: StreamInput<T>[]): AtomBase<T | undefined> {
+  return flow<T | undefined>(async function* () {
     if (sources.length === 0) return;
 
-    const iterators = sources.map((source) => {
-      const resolved = fromAny<T>(source as any);
-      return resolved[Symbol.asyncIterator]() as AsyncIterator<T>;
-    });
+    const iterators = sources.map((source) =>
+      toAsyncIterable(source)[Symbol.asyncIterator]() as AsyncIterator<T>
+    );
 
     // Track coordinator so the outer finally can clean it up even if it was
     // created before an early return/throw.
@@ -92,7 +91,5 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
         );
       }
     }
-  };
-
-  return createStream<T>('merge', gen);
+  });
 }

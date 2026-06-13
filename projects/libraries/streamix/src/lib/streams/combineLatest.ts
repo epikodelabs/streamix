@@ -1,30 +1,29 @@
-import { createStream, type Stream } from "../abstractions";
-import { fromAny } from "../converters";
+import { flow, type AtomBase } from "../atoms/atom";
 import { createAsyncCoordinator } from "../utils";
+import { toAsyncIterable, type StreamInput } from "./pipe";
 
 /**
- * Combines multiple streams and emits a tuple containing the latest values
- * from each stream whenever any of the source streams emits a new value.
+ * Combines multiple sources and emits a tuple containing the latest values
+ * from each source whenever any of the source sources emits a new value.
  *
  * This operator is useful for scenarios where you need to react to changes
- * in multiple independent data sources simultaneously. The output stream
- * will not emit a value until all source streams have emitted at least one
- * value. The output stream completes when all source streams have completed.
+ * in multiple independent data sources simultaneously. The output atom
+ * will not emit a value until all source sources have emitted at least one
+ * value. The output atom completes when all source sources have completed.
  *
  * @template {unknown[]} T A tuple type representing the combined values from the sources.
- * @param sources Streams or values (including promises) to combine.
- * @returns {Stream<T>} A new stream that emits a tuple of the latest values from all source streams.
+ * @param sources Atoms, streams, or values (including promises) to combine.
+ * @returns {AtomBase<T | undefined>} A new atom that emits a tuple of the latest values from all source sources.
  */
 export function combineLatest<T extends unknown[] = any[]>(
-  ...sources: Array<Stream<T[number]> | Promise<T[number]>>
-): Stream<T> {
-  const gen = async function* () {
+  ...sources: Array<StreamInput<T[number]>>
+): AtomBase<T | undefined> {
+  return flow<T | undefined>(async function* () {
     if (sources.length === 0) return;
 
-    const iterators = sources.map((s) => {
-      const resolved = fromAny(s);
-      return resolved[Symbol.asyncIterator]() as AsyncIterator<T[number]>;
-    });
+    const iterators = sources.map((s) =>
+      toAsyncIterable(s)[Symbol.asyncIterator]() as AsyncIterator<T[number]>
+    );
     const runner = createAsyncCoordinator(iterators);
 
     const latestValues = new Array(sources.length).fill(undefined);
@@ -62,7 +61,5 @@ export function combineLatest<T extends unknown[] = any[]>(
       // Ensure all upstream iterators are closed
       await runner.return?.();
     }
-  };
-
-  return createStream<T>("combineLatest", gen);
+  });
 }

@@ -54,11 +54,7 @@ export function buffer<T = any>(period: MaybePromise<number>) {
       cleanup();
     };
 
-    intervalSubscription = timer(period, period).subscribe({
-      next: () => flush(),
-      error: (err) => fail(err),
-      complete: () => flushAndComplete(),
-    });
+    intervalSubscription = timer(period, period).subscribe(() => flush());
 
     if (pendingIntervalUnsubscribe) {
       requestIntervalUnsubscribe();

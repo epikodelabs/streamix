@@ -1,6 +1,4 @@
-import type { Stream } from "../abstractions/stream";
 import { createSubscription, type Subscription } from "../abstractions/subscription";
-import { sample } from "../operators/sample";
 import {
   getCurrentScope,
   getScopeStrobe,
@@ -171,20 +169,22 @@ function notifyDerivedSubscribers(notify: () => void) {
  * });
  * ```
  */
-export function flow<T>(stream: Stream<T>, initialValue: T, options?: AtomOptions): AtomBase<T> {
-  const scope = getCurrentScope();
-  const strobe = scope ? getScopeStrobe(scope) : undefined;
-  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
-  const sourceStream = analog ? stream.pipe(sample(strobe)) : stream;
+export function flow<T>(
+  source: AsyncIterable<T> | Iterable<T> | (() => AsyncIterable<T> | Iterable<T>),
+  initialValue?: T,
+  options?: AtomOptions
+): AtomBase<T> {
+  void options;
 
-  let current = initialValue;
-  let previous = initialValue;
+  let current = initialValue as T;
+  let previous = initialValue as T;
   let disposed = false;
   let hasEmitted = false;
+  let started = false;
 
   const subs = new Set<(value: T) => void>();
 
-  const streamSub = sourceStream.subscribe((value: T) => {
+  const notify = (value: T) => {
     if (disposed) return;
     if (Object.is(current, value)) return;
 
@@ -197,7 +197,54 @@ export function flow<T>(stream: Stream<T>, initialValue: T, options?: AtomOption
         cb(value);
       }
     });
-  });
+  };
+
+  let iterator: AsyncIterator<T> | Iterator<T> | undefined;
+  let cancelled = false;
+  let cleanup = () => {};
+
+  const start = () => {
+    if (started || disposed) return;
+    started = true;
+
+    const iterable = typeof source === "function" ? source() : source;
+    iterator =
+      (iterable as any)[Symbol.asyncIterator]?.() ??
+      (iterable as any)[Symbol.iterator]?.();
+
+    if (!iterator) return;
+
+    cleanup = () => {
+      cancelled = true;
+      if (iterator && typeof (iterator as any).return === "function") {
+        try {
+          (iterator as any).return();
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    (async () => {
+      try {
+        while (!cancelled) {
+          const result = await iterator!.next();
+          if (cancelled || result.done) break;
+          notify(result.value);
+        }
+      } finally {
+        if (iterator && typeof (iterator as any).return === "function") {
+          try {
+            await (iterator as any).return();
+          } catch {
+            // ignore
+          }
+        }
+      }
+    })();
+  };
+
+  start();
 
   const instance: AtomBase<T> = {
     type: "atom",
@@ -231,6 +278,9 @@ export function flow<T>(stream: Stream<T>, initialValue: T, options?: AtomOption
     },
 
     subscribe(callback) {
+      if (!started && !disposed) {
+        start();
+      }
       subs.add(callback);
 
       return createSubscription(() => {
@@ -243,14 +293,12 @@ export function flow<T>(stream: Stream<T>, initialValue: T, options?: AtomOption
 
       disposed = true;
       subs.clear();
-      streamSub.unsubscribe();
+      cleanup();
     }
   };
 
   registerWithCurrentScope(instance);
 
-  // If the stream emitted synchronously during subscription, the scope's
-  // loading callback missed it because it hadn't subscribed yet. Replay it.
   if (hasEmitted) {
     for (const cb of Array.from(subs)) {
       cb(current);
@@ -281,6 +329,17 @@ export function flow<T>(stream: Stream<T>, initialValue: T, options?: AtomOption
  *   return { count };
  * });
  * ```
+ */
+/**
+ * Creates a read-only view of a writable atom from an initial value.
+ *
+ * This is useful when you want to expose an atom without allowing consumers
+ * to mutate it directly. The underlying atom is still writable, but the
+ * returned type only exposes the {@link AtomBase} interface.
+ *
+ * @param initialValue - The starting value.
+ * @param options - Optional atom configuration.
+ * @returns A read-only atom view.
  */
 export function atom<T>(initialValue: T, options?: AtomOptions): Atom<T> {
   const scope = getCurrentScope();
@@ -387,6 +446,21 @@ export function atom<T>(initialValue: T, options?: AtomOptions): Atom<T> {
   }
 
   return instance;
+}
+
+/**
+ * Creates a read-only view of a writable atom from an initial value.
+ *
+ * This is useful when you want to expose an atom without allowing consumers
+ * to mutate it directly. The underlying atom is still writable, but the
+ * returned type only exposes the {@link AtomBase} interface.
+ *
+ * @param initialValue - The starting value.
+ * @param options - Optional atom configuration.
+ * @returns A read-only atom view.
+ */
+export function atomOf<T>(initialValue: T, options?: AtomOptions): AtomBase<T> {
+  return atom(initialValue, options);
 }
 
 /**

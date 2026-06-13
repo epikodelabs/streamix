@@ -1,20 +1,20 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
+import { isPromiseLike, type MaybePromise } from '../abstractions';
+import { flow, type AtomBase } from '../atoms/atom';
 
 /**
- * Creates a stream that emits a single value and then completes.
+ * Creates an atom that emits a single value and then completes.
  *
  * This operator is useful for scenarios where you need to treat a static,
- * single value as a stream. It immediately yields the provided `value`
+ * single value as an atom. It immediately yields the provided `value`
  * and then signals completion, which is a common pattern for creating a
- * "hot" stream from a predefined value.
+ * "hot" atom from a predefined value.
  *
  * @template T The type of the value to be emitted.
- * @param {MaybePromise<T>} value The single value to emit.
- * @returns {Stream<T>} A new stream that emits the value and then completes.
+ * @param value The single value to emit.
+ * @returns {AtomBase<T | undefined>} A new atom that emits the value and then completes.
  */
-export function of<T = any>(value: MaybePromise<T>): Stream<T> {
-  return createStream<T>('of', async function* () {
-    const resolved = isPromiseLike(value) ? await value : value;
-    yield resolved;
+export function of<T = any>(value: MaybePromise<T>): AtomBase<T | undefined> {
+  return flow<T | undefined>(async function* () {
+    yield isPromiseLike(value) ? await value : value;
   });
 }

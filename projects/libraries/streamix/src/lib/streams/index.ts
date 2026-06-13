@@ -12,6 +12,7 @@ export * from './interval';
 export * from './loop';
 export * from './merge';
 export * from './of';
+export * from './pipe';
 export * from './race';
 export * from './range';
 export * from './retry';

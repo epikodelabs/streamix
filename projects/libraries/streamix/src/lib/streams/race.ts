@@ -1,35 +1,34 @@
-import { createStream, type Stream } from "../abstractions";
-import { fromAny } from "../converters";
+import { flow, type AtomBase } from "../atoms/atom";
 import { createAsyncCoordinator } from "../utils";
+import { toAsyncIterable, type StreamInput } from "./pipe";
 
 /**
- * Returns a stream that races multiple input streams.
- * It emits values from the first stream that produces a value,
- * then cancels all other streams.
+ * Returns an atom that races multiple input sources.
+ * It emits values from the first source that produces a value,
+ * then cancels all other sources.
  *
  * This operator is useful for scenarios where you only need the result from the fastest
  * of several asynchronous operations. For example, fetching data from multiple servers
  * and only taking the result from the one that responds first.
  *
- * Once the winning stream completes, the output stream also completes.
- * If the winning stream emits an error, the output stream will emit that error.
+ * Once the winning source completes, the output atom also completes.
+ * If the winning source emits an error, the output atom will emit that error.
  *
- * @template {readonly unknown[]} T - A tuple type representing the combined values from the streams.
- * @param streams Streams or values (including promises) to race against each other.
- * @returns {Stream<T[number]>} A new stream that emits values from the first stream to produce a value.
+ * @template {readonly unknown[]} T - A tuple type representing the combined values from the sources.
+ * @param streams Atoms, streams, or values (including promises) to race against each other.
+ * @returns {AtomBase<T[number] | undefined>} A new atom that emits values from the first source to produce a value.
  */
 export function race<T extends readonly unknown[] = any[]>(
-  ...streams: Array<Stream<T[number]> | Promise<T[number]>>
-): Stream<T[number]> {
-  const gen = async function* () {
+  ...streams: { [K in keyof T]: StreamInput<T[K]> }
+): AtomBase<T[number] | undefined> {
+  return flow<T[number] | undefined>(async function* () {
     if (streams.length === 0) return;
 
-    const iterators = streams.map(s => {
-      const resolved = fromAny(s);
-      return resolved[Symbol.asyncIterator]() as AsyncIterator<T[number]>;
-    });
+    const iterators = streams.map(s =>
+      toAsyncIterable(s)[Symbol.asyncIterator]() as AsyncIterator<T[number]>
+    );
     const runner = createAsyncCoordinator(iterators);
-    
+
     let winnerIndex: number | null = null;
 
     try {
@@ -47,7 +46,7 @@ export function race<T extends readonly unknown[] = any[]>(
         // 2. Identify the winner from the first real value or completion
         if (winnerIndex === null) {
           winnerIndex = event.sourceIndex;
-          
+
           // Once we have a winner, tell the runner to stop polling the others
           // by calling return on the losers. Await all cleanups so resources
           // are freed before we continue yielding from the winner.
@@ -71,7 +70,5 @@ export function race<T extends readonly unknown[] = any[]>(
       // Clean up the runner and all underlying iterators
       await runner.return?.();
     }
-  };
-
-  return createStream<T[number]>('race', gen);
+  });
 }

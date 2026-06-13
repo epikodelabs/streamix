@@ -1,31 +1,31 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
-import { fromAny } from '../converters';
+import { isPromiseLike, type MaybePromise } from '../abstractions';
+import { flow, type AtomBase } from '../atoms/atom';
+import { toAsyncIterable, type StreamInput } from './pipe';
 
 /**
- * Creates a stream that chooses between two streams based on a condition.
+ * Creates an atom that chooses between two streams based on a condition.
  *
- * The condition is evaluated lazily when the stream is subscribed to. This allows
+ * The condition is evaluated lazily when the atom is subscribed to. This allows
  * for dynamic stream selection based on runtime state.
  *
  * @template T The type of the values in the streams.
- * @param {() => MaybePromise<boolean>} condition A function that returns a boolean to determine which stream to use. It is called when the iif stream is subscribed to.
- * @param {Stream<T> | Promise<T>} trueStream The stream or value to use if the condition is `true`.
- * @param {Stream<T> | Promise<T>} falseStream The stream or value to use if the condition is `false`.
- * @returns {Stream<T>} A new stream that emits values from either `trueStream` or `falseStream` based on the condition.
+ * @param condition A function that returns a boolean to determine which stream to use. It is called when the iif atom is subscribed to.
+ * @param trueStream The source to use if the condition is `true`.
+ * @param falseStream The source to use if the condition is `false`.
+ * @returns {AtomBase<T | undefined>} A new atom that emits values from either `trueStream` or `falseStream` based on the condition.
  */
 export function iif<T = any>(
   condition: () => MaybePromise<boolean>,
-  trueStream: Stream<T> | Promise<T>,
-  falseStream: Stream<T> | Promise<T>
-): Stream<T> {
-  async function* generator(): AsyncGenerator<T, void, unknown> {
+  trueStream: StreamInput<T>,
+  falseStream: StreamInput<T>
+): AtomBase<T | undefined> {
+  return flow<T | undefined>(async function* generator(): AsyncGenerator<T, void, unknown> {
     // Evaluate condition lazily when the stream starts
     const conditionResult = condition();
     const resolvedCondition = isPromiseLike(conditionResult) ? await conditionResult : conditionResult;
     const chosen = resolvedCondition ? trueStream : falseStream;
-    const resolvedChosen = isPromiseLike(chosen) ? await chosen : chosen;
-    const stream = fromAny<T>(resolvedChosen);
-    const iterator = stream[Symbol.asyncIterator]() as AsyncIterator<T>;
+    const source = toAsyncIterable(chosen);
+    const iterator = source[Symbol.asyncIterator]() as AsyncIterator<T>;
 
     try {
       while (true) {
@@ -43,7 +43,5 @@ export function iif<T = any>(
         }
       }
     }
-  }
-
-  return createStream<T>('iif', generator);
+  });
 }

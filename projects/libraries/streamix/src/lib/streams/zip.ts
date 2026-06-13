@@ -1,26 +1,24 @@
-import { createStream, type Stream } from '../abstractions';
-import { fromAny } from '../converters';
+import { flow, type AtomBase } from '../atoms/atom';
+import { toAsyncIterable, type StreamInput } from './pipe';
 
 /**
- * Combine multiple streams into a single stream that emits arrays of the latest values
- * from each input stream whenever any input emits. Emission occurs only when all inputs
+ * Combine multiple sources into a single atom that emits arrays of the latest values
+ * from each input source whenever any input emits. Emission occurs only when all inputs
  * have emitted at least once.
  *
  * @template T
- * @param {...Stream<T[number]>[]} sources - The input streams to zip.
- * @returns {Stream<T>} A stream emitting arrays of values from each input.
+ * @param sources - The input atoms, streams, or values (including promises) to zip.
+ * @returns {AtomBase<T | undefined>} An atom emitting arrays of values from each input.
  */
 export function zip<T extends readonly unknown[] = any[]>(
-  ...sources: Array<Stream<T[number]> | Promise<T[number]>>
-): Stream<T> {
-
-  const gen = async function* (): AsyncGenerator<T, void, unknown> {
+  ...sources: { [K in keyof T]: StreamInput<T[K]> }
+): AtomBase<T | undefined> {
+  return flow<T | undefined>(async function* (): AsyncGenerator<T, void, unknown> {
     if (sources.length === 0) return;
 
-    const iterators = sources.map((source) => {
-      const resolved = fromAny(source as any);
-      return resolved[Symbol.asyncIterator]() as AsyncIterator<T[number]>;
-    });
+    const iterators = sources.map((source) =>
+      toAsyncIterable(source)[Symbol.asyncIterator]() as AsyncIterator<T[number]>
+    );
 
     try {
       while (true) {
@@ -60,7 +58,5 @@ export function zip<T extends readonly unknown[] = any[]>(
         iterators.map(it => (typeof it.return === 'function' ? it.return(undefined).catch(() => { }) : Promise.resolve()))
       );
     }
-  };
-
-  return createStream<T>('zip', gen);
+  });
 }

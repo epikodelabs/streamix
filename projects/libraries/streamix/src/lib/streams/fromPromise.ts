@@ -1,27 +1,27 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
+import { isPromiseLike, type MaybePromise } from "../abstractions";
+import { flow, type AtomBase } from "../atoms/atom";
 
 /**
- * Creates a stream from a value, promise, or a cancelable asynchronous factory.
+ * Creates an atom from a value, promise, or a cancelable asynchronous factory.
  *
  * The input can be:
  * - A value
  * - A promise
- * - A function that returns a value or promise, and optionally reacts to cancellation via an {@link AbortSignal}.
+ * - A function that returns a value or promise.
  *
- * The factory function (if provided) is invoked on subscription and receives an {@link AbortSignal}
- * that is aborted when the stream is unsubscribed. If the factory throws or returns a rejected promise,
- * the stream will emit an error.
+ * The factory function (if provided) is invoked on subscription.
+ * If the factory throws or returns a rejected promise, the atom will emit an error.
  *
  * @typeParam T - The type of the emitted value.
- * @param input - A value, promise, or a function producing a value or promise, optionally using the provided abort signal for cancellation.
- * @returns A stream that emits the produced value and then completes.
+ * @param input - A value, promise, or a function producing a value or promise.
+ * @returns An atom that emits the produced value and then completes.
  */
 export function fromPromise<T>(
-  input: MaybePromise<T> | ((signal: AbortSignal) => MaybePromise<T>)
-): Stream<T> {
-  return createStream<T>('fromPromise', async function* (signal?: AbortSignal) {
+  input: MaybePromise<T> | (() => MaybePromise<T>)
+): AtomBase<T | undefined> {
+  return flow<T | undefined>(async function* () {
     const valueOrPromise =
-      typeof input === "function" ? (input as (s?: AbortSignal) => Promise<T>)(signal) : input;
+      typeof input === "function" ? (input as () => MaybePromise<T>)() : input;
 
     yield isPromiseLike(valueOrPromise) ? await valueOrPromise : valueOrPromise;
   });

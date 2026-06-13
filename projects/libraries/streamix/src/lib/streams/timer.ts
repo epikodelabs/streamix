@@ -1,19 +1,20 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
+import { isPromiseLike, type MaybePromise } from '../abstractions';
+import { flow, type AtomBase } from '../atoms/atom';
 
 /**
- * Creates a timer stream that emits numbers starting from 0.
+ * Creates a timer atom that emits numbers starting from 0.
  *
- * This stream is useful for scheduling events or generating periodic data.
- * It is analogous to `setInterval` but as an asynchronous stream.
+ * This atom is useful for scheduling events or generating periodic data.
+ * It is analogous to `setInterval` but as an asynchronous atom.
  *
- * @param {number} [delayMs=0] - The time in milliseconds to wait before emitting the first value (0).
+ * @param delayMs - The time in milliseconds to wait before emitting the first value (0).
  * If 0, the first value is emitted immediately (in the next microtask).
- * @param {number} [intervalMs] - The time in milliseconds between subsequent emissions.
+ * @param intervalMs - The time in milliseconds between subsequent emissions.
  * If not provided, it defaults to `delayMs`.
- * @returns {Stream<number>} A stream that emits incrementing numbers (0, 1, 2, ...).
+ * @returns {AtomBase<number | undefined>} An atom that emits incrementing numbers (0, 1, 2, ...).
  */
-export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromise<number>): Stream<number> {
-  async function* timerGenerator() {
+export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromise<number>): AtomBase<number | undefined> {
+  return flow<number | undefined>(async function* () {
     const resolvedDelay = isPromiseLike(delayMs) ? await delayMs : delayMs;
     const resolvedInterval = intervalMs !== undefined
       ? (isPromiseLike(intervalMs) ? await intervalMs : intervalMs)
@@ -54,7 +55,5 @@ export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromi
       cancelled = true;
       clearPending();
     }
-  }
-
-  return createStream<number>('timer', timerGenerator);
+  }, undefined as unknown as number);
 }

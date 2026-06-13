@@ -1,8 +1,9 @@
-import { createStream, isPromiseLike, type MaybePromise, type Stream } from "../abstractions";
-import { fromAny } from "../converters";
+import { isPromiseLike, type MaybePromise } from "../abstractions";
+import { flow, type AtomBase } from "../atoms/atom";
+import { toAsyncIterable, type StreamInput } from "./pipe";
 
 /**
- * Creates a transactional retrying stream that commits values only after a full
+ * Creates a transactional retrying atom that commits values only after a full
  * attempt completes successfully.
  *
  * Unlike {@link retry}, this operator buffers values produced during each
@@ -15,20 +16,20 @@ import { fromAny } from "../converters";
  *
  * @template T The type of values emitted by the source stream.
  * @param factory A factory executed for each attempt. The produced result is
- * normalized through {@link fromAny}, so it may be a stream, a promise, or a
- * plain value.
+ * normalized through {@link toAsyncIterable}, so it may be an atom, stream,
+ * iterable, promise, or plain value.
  * @param maxRetries The maximum number of retry operations allowed. A value of
  * `0` runs a single attempt.
  * @param delay The delay window in milliseconds to pause between attempts.
- * @returns A stream that emits values only after an attempt finishes
+ * @returns An atom that emits values only after an attempt finishes
  * successfully.
  */
 export function commit<T = any>(
-  factory: () => Stream<T> | MaybePromise<T>,
+  factory: () => StreamInput<T>,
   maxRetries: MaybePromise<number> = 3,
   delay: MaybePromise<number> = 1000
-): Stream<T> {
-  return createStream<T>("commit", async function* (signal) {
+): AtomBase<T | undefined> {
+  return flow<T | undefined>(async function* () {
     const resolvedMaxRetries = isPromiseLike(maxRetries) ? await maxRetries : maxRetries;
     let resolvedDelayValue: number | undefined;
 
@@ -46,28 +47,20 @@ export function commit<T = any>(
       let iterator: AsyncIterator<T> | null = null;
 
       try {
-        if (signal?.aborted) {
-          throw new DOMException("Stream aborted", "AbortError");
-        }
-
-        let produced: Stream<T> | MaybePromise<T>;
+        let produced: StreamInput<T>;
         try {
           produced = factory();
         } catch (factoryError) {
           throw factoryError instanceof Error ? factoryError : new Error(String(factoryError));
         }
 
-        const stream = fromAny(isPromiseLike(produced) ? await produced : produced);
-        iterator = stream[Symbol.asyncIterator]() as AsyncIterator<T>;
+        const source = toAsyncIterable(produced);
+        iterator = source[Symbol.asyncIterator]() as AsyncIterator<T>;
 
         // Buffer the entire attempt — only commit on full success
         const batch: T[] = [];
 
         while (true) {
-          if (signal?.aborted) {
-            throw new DOMException("Stream aborted", "AbortError");
-          }
-
           const next = await iterator.next();
           if (next.done) break;
 
@@ -84,24 +77,10 @@ export function commit<T = any>(
 
         const resolvedDelay = await resolveDelayValue();
         if (retryCount <= resolvedMaxRetries && resolvedDelay !== undefined && resolvedDelay > 0) {
-          await new Promise<void>((resolve, reject) => {
-            if (signal?.aborted) {
-              return reject(new DOMException("Stream aborted", "AbortError"));
-            }
-
-            const timeoutId = setTimeout(() => {
-              if (signal) signal.removeEventListener("abort", abortHandler);
+          await new Promise<void>((resolve) => {
+            setTimeout(() => {
               resolve();
             }, resolvedDelay);
-
-            const abortHandler = () => {
-              clearTimeout(timeoutId);
-              reject(new DOMException("Stream aborted", "AbortError"));
-            };
-
-            if (signal) {
-              signal.addEventListener("abort", abortHandler, { once: true });
-            }
           });
         }
       } finally {
