@@ -35,7 +35,6 @@ export function onIntersection(
   let subscriberCount = 0;
   let active = false;
 
-  let resolvedElement: Element | null = null;
   let io: IntersectionObserver | null = null;
   let mo: MutationObserver | null = null;
   let lastValue: boolean | undefined;
@@ -67,7 +66,6 @@ export function onIntersection(
 
     io = null;
     mo = null;
-    resolvedElement = null;
     lastValue = undefined;
     hasEmitted = false;
   };
@@ -91,8 +89,6 @@ export function onIntersection(
       stop();
       return;
     }
-
-    resolvedElement = el;
 
     io = new IntersectionObserver((entries) => {
       emit(entries[0]?.isIntersecting ?? false);

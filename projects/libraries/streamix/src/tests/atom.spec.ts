@@ -16,12 +16,12 @@ describe('atom', () => {
       const values: number[] = [];
       a.subscribe(v => values.push(v));
 
-      a.set(10);
+      a.next(10);
       expect(a.value).toBe(10);
       expect(a.prior).toBe(0);
       expect(values).toEqual([10]);
 
-      a.set(20);
+      a.next(20);
       expect(a.value).toBe(20);
       expect(values).toEqual([10, 20]);
 
@@ -40,14 +40,15 @@ describe('atom', () => {
       a.dispose();
     });
 
-    it('should suppress duplicate values', () => {
+    it('should not suppress duplicate values', () => {
       const a = atom(5);
-      const values: number[] = [];
+      const values: (number | undefined)[] = [];
       a.subscribe(v => values.push(v));
 
-      a.set(5);
-      a.set(5);
-      expect(values).toEqual([]);
+      a.next(10);
+      a.next(5);
+      a.next(5);
+      expect(values).toEqual([10, 5, 5]);
 
       a.dispose();
     });
@@ -69,10 +70,10 @@ describe('atom', () => {
       const values: number[] = [];
       a.subscribe(v => values.push(v));
 
-      a.set(1);
+      a.next(1);
       a.dispose();
 
-      a.set(2);
+      a.next(2);
       expect(values).toEqual([1]);
     });
 
@@ -81,9 +82,9 @@ describe('atom', () => {
       const values: number[] = [];
       const sub = a.subscribe(v => values.push(v));
 
-      a.set(1);
+      a.next(1);
       sub.unsubscribe();
-      a.set(2);
+      a.next(2);
 
       expect(values).toEqual([1]);
     });
@@ -114,14 +115,14 @@ describe('atom', () => {
       a.dispose();
     });
 
-    it('should suppress duplicate values', () => {
+    it('should not suppress duplicate values', () => {
       const a = atom<number>();
       const values: number[] = [];
       a.subscribe(v => values.push(v));
 
-      a.set(5);
-      a.set(5);
-      expect(values).toEqual([5]);
+      a.next(5);
+      a.next(5);
+      expect(values).toEqual([5, 5]);
 
       a.dispose();
     });
@@ -253,7 +254,7 @@ describe('atom', () => {
       doubled.dispose();
     });
 
-    it('should suppress duplicate values', () => {
+    it('should not suppress duplicate values', () => {
       const a = atom(1);
       const doubled = derived(() => a.value * 2);
       const values: number[] = [];
@@ -261,7 +262,7 @@ describe('atom', () => {
 
       a.next(2);
       a.next(2);
-      expect(values).toEqual([4]);
+      expect(values).toEqual([4, 4]);
 
       doubled.dispose();
     });

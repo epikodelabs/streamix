@@ -88,7 +88,7 @@ export interface AtomBase<T = any> {
 }
 
 /**
- * Writable atom that extends {@link AtomBase} with a {@link set} method.
+ * Writable atom that extends {@link AtomBase} with a {@link next} method.
  *
  * @template T The type of the value held by this atom.
  */
@@ -96,22 +96,10 @@ export interface Atom<T = any> extends AtomBase<T> {
   /**
    * Updates the atom's value and notifies subscribers.
    *
-   * If the new value is the same as the current value (using `Object.is`),
-   * no notification occurs.
-   *
+   * If the new value is the same as the current value.
    * @param value - The new value to set.
    */
   next(value: T): void;
-
-  /**
-   * Updates the atom's value and notifies subscribers.
-   *
-   * If the new value is the same as the current value (using `Object.is`),
-   * no notification occurs.
-   *
-   * @param value - The new value to set.
-   */
-  set(value: T): void;
 
   /**
    * Signals that the atom has failed with the given error. The error is
@@ -536,21 +524,6 @@ export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
       return iterate(this)[Symbol.asyncIterator]();
     },
 
-    set(value) {
-      if (disposed) return;
-      if (Object.is(current, value)) return;
-
-      previous = current;
-      current = value;
-
-      if (analog) {
-        dirty = true;
-      } else {
-        lastNotified = current;
-        notify(value);
-      }
-    },
-
     next(value: T) {
       if (disposed) return;
 
@@ -793,13 +766,17 @@ export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): Atom<T> 
     },
 
     subscribe(callback) {
-      subs.add(callback);
+      const cb = typeof callback === 'function'
+        ? callback
+        : (value: T) => callback.next?.(value);
+
+      subs.add(cb);
 
       // Replay buffered values to late subscribers
-      forEachReplay((value) => callback(value));
+      forEachReplay((value) => cb(value));
 
       return createSubscription(() => {
-        subs.delete(callback);
+        subs.delete(cb);
       });
     },
 
@@ -971,7 +948,6 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
           dep.subscribe(() => {
             if (disposed) return;
             const next = run();
-            if (Object.is(current, next)) return;
             previous = current;
             current = next;
             if (analog) {
@@ -1025,9 +1001,13 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     },
 
     subscribe(callback) {
-      subs.add(callback);
+      const cb = typeof callback === 'function'
+        ? callback
+        : (value: T) => callback.next?.(value);
+
+      subs.add(cb);
       return createSubscription(() => {
-        subs.delete(callback);
+        subs.delete(cb);
       });
     },
 
