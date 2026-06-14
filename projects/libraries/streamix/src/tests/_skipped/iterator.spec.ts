@@ -1,9 +1,9 @@
 import type { Receiver, StrictReceiver } from '@epikodelabs/streamix';
 import {
-  createAsyncIterator,
-  createSubscription,
-  DONE,
-  NEXT
+    createAsyncIterator,
+    createSubscription,
+    DONE,
+    NEXT
 } from '@epikodelabs/streamix';
 
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -24,7 +24,7 @@ describe('createAsyncIterator', () => {
       expect(await firstPull).toEqual(NEXT(10));
 
       const donePull = iterator.next();
-      firstReceiver.complete();
+      firstReceiver.dispose();
       expect(await donePull).toEqual(DONE);
 
       const returned = await iterator.return?.();

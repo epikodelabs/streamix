@@ -1,11 +1,11 @@
-import { createSubject, delayUntil, iterate, pipe } from '@epikodelabs/streamix';
+import { atom, delayUntil, iterate, pipe } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('delayUntil', () => {
   it('should delay emissions until the condition stream emits a value', async () => {
-    const sourceStream = createSubject<number>();
-    const conditionStream = createSubject<any>();
+    const sourceStream = atom<number>();
+    const conditionStream = atom<any>();
 
     const emittedValues: number[] = [];
     const reader = (async () => {
@@ -19,16 +19,16 @@ describe('delayUntil', () => {
     sourceStream.next(2);
     sourceStream.next(3);
     sourceStream.next(4);
-    sourceStream.complete();
-    conditionStream.complete();
+    sourceStream.dispose();
+    conditionStream.dispose();
 
     await reader;
     expect(emittedValues).toEqual([1, 2, 3, 4]);
   });
 
   it('should not emit any values if condition stream does not emit', async () => {
-    const sourceStream = createSubject<number>();
-    const conditionStream = createSubject<any>();
+    const sourceStream = atom<number>();
+    const conditionStream = atom<any>();
 
     const emittedValues: number[] = [];
     const reader = (async () => {
@@ -40,16 +40,16 @@ describe('delayUntil', () => {
     sourceStream.next(1);
     sourceStream.next(2);
     sourceStream.next(3);
-    sourceStream.complete();
-    conditionStream.complete();
+    sourceStream.dispose();
+    conditionStream.dispose();
 
     await reader;
     expect(emittedValues).toEqual([]);
   });
 
   it('should drop values after notifier completes without emitting', async () => {
-    const sourceStream = createSubject<number>();
-    const conditionStream = createSubject<any>();
+    const sourceStream = atom<number>();
+    const conditionStream = atom<any>();
 
     const emittedValues: number[] = [];
     const reader = (async () => {
@@ -58,18 +58,18 @@ describe('delayUntil', () => {
       }
     })();
 
-    conditionStream.complete();
+    conditionStream.dispose();
     sourceStream.next(1);
     sourceStream.next(2);
-    sourceStream.complete();
+    sourceStream.dispose();
 
     await reader;
     expect(emittedValues).toEqual([]);
   });
 
   it('should emit the source stream values after condition stream emits', async () => {
-    const sourceStream = createSubject<number>();
-    const conditionStream = createSubject<any>();
+    const sourceStream = atom<number>();
+    const conditionStream = atom<any>();
 
     const emittedValues: number[] = [];
     const reader = (async () => {
@@ -82,16 +82,16 @@ describe('delayUntil', () => {
     sourceStream.next(10);
     sourceStream.next(20);
     sourceStream.next(30);
-    sourceStream.complete();
-    conditionStream.complete();
+    sourceStream.dispose();
+    conditionStream.dispose();
 
     await reader;
     expect(emittedValues).toEqual([10, 20, 30]);
   });
 
   it('should handle error in source stream', async () => {
-    const sourceStream = createSubject<number>();
-    const conditionStream = createSubject<any>();
+    const sourceStream = atom<number>();
+    const conditionStream = atom<any>();
 
     const reader = (async () => {
       for await (const _ of iterate(pipe(sourceStream, delayUntil(conditionStream)))) {
@@ -107,8 +107,8 @@ describe('delayUntil', () => {
   });
 
   it('should propagate notifier errors', async () => {
-    const sourceStream = createSubject<number>();
-    const conditionStream = createSubject<any>();
+    const sourceStream = atom<number>();
+    const conditionStream = atom<any>();
 
     const reader = (async () => {
       for await (const _ of iterate(pipe(sourceStream, delayUntil(conditionStream)))) {
@@ -123,7 +123,7 @@ describe('delayUntil', () => {
   });
 
   it('should flush buffer when notifier promise resolves', async () => {
-    const sourceStream = createSubject<number>();
+    const sourceStream = atom<number>();
     const notifierPromise = new Promise<void>((resolve) => setTimeout(resolve, 20));
 
     const emittedValues: number[] = [];
@@ -137,15 +137,15 @@ describe('delayUntil', () => {
     sourceStream.next(9);
 
     await wait(40);
-    sourceStream.complete();
+    sourceStream.dispose();
 
     await reader;
     expect(emittedValues).toEqual([8, 9]);
   });
 
   it('should complete the stream after both source and condition streams complete', async () => {
-    const sourceStream = createSubject<number>();
-    const conditionStream = createSubject<any>();
+    const sourceStream = atom<number>();
+    const conditionStream = atom<any>();
 
     const emittedValues: number[] = [];
     const reader = (async () => {
@@ -158,8 +158,8 @@ describe('delayUntil', () => {
     sourceStream.next(5);
     sourceStream.next(6);
     sourceStream.next(7);
-    sourceStream.complete();
-    conditionStream.complete();
+    sourceStream.dispose();
+    conditionStream.dispose();
 
     await reader;
     expect(emittedValues).toEqual([5, 6, 7]);

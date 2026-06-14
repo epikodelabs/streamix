@@ -18,7 +18,7 @@ export function retry<T = any>(
   factory: () => StreamInput<T>,
   maxRetries: MaybePromise<number> = 3,
   delay: MaybePromise<number> = 1000
-): AtomBase<T | undefined> {
+): AtomBase<T> {
   return flow<T>(async function* (signal?: AbortSignal) {
       const resolvedMaxRetries = isPromiseLike(maxRetries) ? await maxRetries : maxRetries;
       let resolvedDelayValue: number | undefined;

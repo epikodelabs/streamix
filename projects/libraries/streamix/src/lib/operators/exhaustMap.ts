@@ -1,19 +1,12 @@
-import {
-  createOperator,
-  DONE,
-  isPromiseLike,
-  MaybePromise,
-  NEXT,
-  type Operator,
-  type Stream
-} from "../abstractions";
+import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator } from "../abstractions";
 import { fromAny } from "../converters";
+import type { StreamInput } from "../streams/pipe";
 
 /**
  * Maps each value from the source stream to an inner stream, ignoring 
  * new outer values while the current inner stream is still executing.
  *
- * This operator is useful for preventing overlapping operations (e.g., preventing 
+ * This operator is useful for preventing overlapping operations (e.g. preventing 
  * multiple simultaneous form submissions or API calls). If a new value arrives 
  * from the source while an earlier projected stream is still active, that 
  * new value is silently discarded.
@@ -23,12 +16,12 @@ import { fromAny } from "../converters";
  * @template T The type of values emitted by the source stream.
  * @template R The type of values emitted by the produced inner streams.
  * @param project A function that transforms a source value into a {@link Stream}, 
- * a {@link MaybePromise<R>}, or an array. It receives the source value and a 
+ * a {@link MaybePromise<R>}, or an array. It receives the source value and a
  * zero-based index of the emission.
  * @returns An {@link Operator} that performs the "exhaust" transformation.
  */
 export const exhaustMap = <T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => StreamInput<R> | MaybePromise<R> | Array<R>
 ) =>
   createOperator<T, R>("exhaustMap", function (this: Operator, source) {
     let outerIndex = 0;

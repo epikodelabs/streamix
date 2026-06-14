@@ -1,4 +1,4 @@
-import { createStream, iterate, partition, pipe } from '@epikodelabs/streamix';
+import { createStream, iterate, partition, pipe, atom } from '@epikodelabs/streamix';
 
 describe('partition', () => {
 
@@ -6,7 +6,7 @@ describe('partition', () => {
     const trueValues: T[] = [];
     const falseValues: T[] = [];
 
-    for await (const { key, value } of iterate(source)) {
+    for await (const { key, value } of iterate(source) as AsyncIterable<{ key: string; value: T }>) {
       if (key === "true") {
         trueValues.push(value);
       } else {

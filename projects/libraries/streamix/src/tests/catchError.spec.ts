@@ -1,4 +1,4 @@
-import { catchError, createAsyncPushable, map, pipe, iterate } from '@epikodelabs/streamix';
+import { catchError, createAsyncPushable, iterate, map, pipe } from '@epikodelabs/streamix';
 
 describe('catchError', () => {
   let handlerMock: jasmine.Spy;
@@ -25,7 +25,7 @@ describe('catchError', () => {
     })();
 
     source.push(1);
-    source.complete();
+    source.dispose();
     await finished;
 
     expect(handlerMock).toHaveBeenCalled();
@@ -39,7 +39,7 @@ describe('catchError', () => {
     const atom = pipe(source, map(() => { throw error; }));
 
     source.push(1);
-    source.complete();
+    source.dispose();
 
     let caught: Error | undefined;
     try {

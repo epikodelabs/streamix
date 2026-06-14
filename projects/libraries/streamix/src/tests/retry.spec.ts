@@ -1,4 +1,4 @@
-import { createStream, iterate, retry } from "@epikodelabs/streamix";
+import { createStream, iterate, retry, atom } from '@epikodelabs/streamix';
 
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 

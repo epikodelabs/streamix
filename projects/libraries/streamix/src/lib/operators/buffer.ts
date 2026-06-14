@@ -43,7 +43,7 @@ export function buffer<T = any>(period: MaybePromise<number>) {
       flush();
       if (!completed) {
         completed = true;
-        output.complete();
+        output.dispose();
       }
       cleanup();
     };

@@ -222,7 +222,7 @@ export function createPushOperator<T, R = T>(
       } catch (err) {
         console.warn(`Operator '${name}': source.return() threw during output.return():`, err);
       }
-      if (typeof output.completed === 'function' && !output.completed()) output.complete();
+      if (!output.disposed) output.dispose();
       return baseReturn ? baseReturn(value) : DONE;
     };
 
@@ -233,7 +233,7 @@ export function createPushOperator<T, R = T>(
       } catch (cleanupErr) {
         console.warn(`Operator '${name}': source.return() threw during output.throw():`, cleanupErr);
       }
-      if (typeof output.completed === 'function' && !output.completed()) output.error(err);
+      if (!output.disposed) output.error(err);
       if (baseThrow) return baseThrow(err);
       throw err;
     };

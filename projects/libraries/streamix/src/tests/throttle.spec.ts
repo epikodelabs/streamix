@@ -1,11 +1,11 @@
-import { createSubject, iterate, pipe, throttle } from '@epikodelabs/streamix';
+import { atom, iterate, pipe, throttle } from '@epikodelabs/streamix';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('throttle', () => {
   it('should emit first value immediately and throttle subsequent values', async () => {
     const output: number[] = [];
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     const reader = (async () => {
       for await (const v of iterate(pipe(subject, throttle<number>(100)))) {
         output.push(v);
@@ -18,7 +18,7 @@ describe('throttle', () => {
     subject.next(3); // replaces pending trailing value
     await sleep(70); // window expires, trailing 3 is emitted
     subject.next(4); // emitted immediately in the new window
-    subject.complete();
+    subject.dispose();
 
     await reader;
 
@@ -27,10 +27,10 @@ describe('throttle', () => {
   });
 
   it('should complete after source completes', async () => {
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     let completed = false;
 
-    const reader = (async () => {
+    (async () => {
       for await (const _ of iterate(pipe(subject, throttle<number>(50)))) {
         void _;
       }
@@ -39,7 +39,7 @@ describe('throttle', () => {
 
     subject.next(1);
     subject.next(2);
-    subject.complete();
+    subject.dispose();
 
     await sleep(100);
 
@@ -47,10 +47,10 @@ describe('throttle', () => {
   });
 
   it('should forward errors from the source', async () => {
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     let caught: any = null;
 
-    const reader = (async () => {
+    (async () => {
       try {
         for await (const _ of iterate(pipe(subject, throttle<number>(50)))) {
           void _;
@@ -70,7 +70,7 @@ describe('throttle', () => {
 
   it('should flush the trailing value when the source completes during cooldown', async () => {
     const output: number[] = [];
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     const reader = (async () => {
       for await (const v of iterate(pipe(subject, throttle<number>(50)))) {
         output.push(v);
@@ -79,7 +79,7 @@ describe('throttle', () => {
 
     subject.next(1);
     subject.next(2);
-    subject.complete();
+    subject.dispose();
 
     await reader;
 
@@ -88,7 +88,7 @@ describe('throttle', () => {
 
   it('should emit every value when values are spaced beyond duration', async () => {
     const output: number[] = [];
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     const reader = (async () => {
       for await (const v of iterate(pipe(subject, throttle<number>(20)))) {
         output.push(v);
@@ -100,7 +100,7 @@ describe('throttle', () => {
     subject.next(2);
     await sleep(30);
     subject.next(3);
-    subject.complete();
+    subject.dispose();
 
     await reader;
     expect(output).toEqual([1, 2, 3]);
@@ -108,7 +108,7 @@ describe('throttle', () => {
 
   it('should not throttle when duration is 0', async () => {
     const output: number[] = [];
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     const reader = (async () => {
       for await (const v of iterate(pipe(subject, throttle<number>(0)))) {
         output.push(v);
@@ -118,7 +118,7 @@ describe('throttle', () => {
     subject.next(1);
     subject.next(2);
     subject.next(3);
-    subject.complete();
+    subject.dispose();
 
     await reader;
     expect(output).toEqual([1, 2, 3]);
@@ -126,7 +126,7 @@ describe('throttle', () => {
 
   it('should support promised duration', async () => {
     const output: number[] = [];
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     const reader = (async () => {
       for await (const v of iterate(pipe(subject, throttle<number>(Promise.resolve(200))))) {
         output.push(v);
@@ -137,7 +137,7 @@ describe('throttle', () => {
     subject.next(2);
     await sleep(20);
     subject.next(3);
-    subject.complete();
+    subject.dispose();
 
     await reader;
 

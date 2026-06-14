@@ -8,11 +8,11 @@ import { toAsyncIterable, type StreamInput } from './pipe';
  *
  * @template T
  * @param sources - The input atoms, streams, or values (including promises) to zip.
- * @returns {AtomBase<T | undefined>} An atom emitting arrays of values from each input.
+ * @returns {AtomBase<T>} An atom emitting arrays of values from each input.
  */
 export function zip<T extends readonly unknown[] = any[]>(
   ...sources: { [K in keyof T]: StreamInput<T[K]> }
-): AtomBase<T | undefined> {
+): AtomBase<T> {
   return flow<T>(async function* (): AsyncGenerator<T, void, unknown> {
     if (sources.length === 0) return;
 

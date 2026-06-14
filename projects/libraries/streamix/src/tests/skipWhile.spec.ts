@@ -1,4 +1,4 @@
-import { from, iterate, pipe, skipWhile } from '@epikodelabs/streamix';
+import { from, iterate, pipe, skipWhile, atom } from '@epikodelabs/streamix';
 
 describe('skipWhile', () => {
   it('should skip values while the predicate is true', async () => {

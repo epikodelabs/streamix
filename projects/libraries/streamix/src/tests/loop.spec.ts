@@ -1,4 +1,4 @@
-import { iterate, loop, type Atom } from '@epikodelabs/streamix';
+import { iterate, loop, type Atom, atom } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 

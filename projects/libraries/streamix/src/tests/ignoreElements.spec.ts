@@ -1,8 +1,8 @@
-import { createSubject, ignoreElements, iterate, pipe, type Subject } from '@epikodelabs/streamix';
+import { ignoreElements, iterate, atom as makeAtom, pipe } from '@epikodelabs/streamix';
 
 describe('ignoreElements', () => {
   it('should ignore all emitted values and only emit complete', async () => {
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const atom = pipe(subject, ignoreElements());
 
     const results: number[] = [];
@@ -15,7 +15,7 @@ describe('ignoreElements', () => {
     subject.next(1);
     subject.next(2);
     subject.next(3);
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 
@@ -23,7 +23,7 @@ describe('ignoreElements', () => {
   });
 
   it('should pass error notifications through', async () => {
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const atom = pipe(subject, ignoreElements());
 
     let error: any = null;
@@ -48,7 +48,7 @@ describe('ignoreElements', () => {
   });
 
   it('should complete after source stream completes', async () => {
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const atom = pipe(subject, ignoreElements());
 
     const results: number[] = [];
@@ -60,7 +60,7 @@ describe('ignoreElements', () => {
 
     subject.next(10);
     subject.next(20);
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 
@@ -68,7 +68,7 @@ describe('ignoreElements', () => {
   });
 
   it('should not emit any value but should handle complete', async () => {
-    const subject = createSubject<string>();
+    const subject: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const atom = pipe(subject, ignoreElements());
 
     const results: string[] = [];
@@ -80,7 +80,7 @@ describe('ignoreElements', () => {
 
     subject.next('value1');
     subject.next('value2');
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 
@@ -88,7 +88,7 @@ describe('ignoreElements', () => {
   });
 
   it('should handle error in source stream', async () => {
-    const subject = createSubject<string>();
+    const subject: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const atom = pipe(subject, ignoreElements());
 
     let error: any = null;

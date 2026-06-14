@@ -72,7 +72,7 @@ describe('createReceiver', () => {
     const nextSpy = jasmine.createSpy('next');
     const receiver = createReceiver<number>(nextSpy);
 
-    await receiver.complete();
+    await receiver.dispose();
     await receiver.next(5);
 
     expect(nextSpy).not.toHaveBeenCalledWith(5);
@@ -112,7 +112,7 @@ describe('createReceiver', () => {
       complete: () => { throw new Error('bad complete'); }
     });
 
-    await receiver.complete();
+    await receiver.dispose();
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       'Unhandled error in complete handler:',
@@ -133,7 +133,7 @@ describe('createReceiver', () => {
     const nextPromise = receiver.next(99);
 
     // Call complete while still processing
-    const completePromise = receiver.complete();
+    const completePromise = receiver.dispose();
 
     await flushMicrotasks();
 

@@ -1,11 +1,6 @@
-import {
-  createOperator,
-  DONE,
-  NEXT,
-  type Operator,
-  type Stream
-} from "../abstractions";
+import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
 import { fromAny } from "../converters";
+import type { StreamInput } from "../streams/pipe";
 import { createAsyncCoordinator } from "../utils";
 
 /**
@@ -31,7 +26,7 @@ import { createAsyncCoordinator } from "../utils";
  * @returns An `Operator<T, T>` that drops source values until the notifier emits.
  */
 export function skipUntil<T = any, N = any>(
-  notifier: Stream<N> | Promise<N>
+  notifier: StreamInput<N> | Promise<N>
 ): Operator<T, T> {
   return createOperator<T, T>("skipUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();

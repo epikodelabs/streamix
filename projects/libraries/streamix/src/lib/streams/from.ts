@@ -11,9 +11,9 @@ import { toAsyncIterable, type StreamInput } from "./pipe";
  *
  * @template T The type of the values in the iterable.
  * @param source The iterable source to convert into an atom.
- * @returns {AtomBase<T | undefined>} A new atom that emits each value from the source.
+ * @returns {AtomBase<T>} A new atom that emits each value from the source.
  */
-export function from<T = any>(source: StreamInput<T>): AtomBase<T | undefined> {
+export function from<T = any>(source: StreamInput<T>): AtomBase<T> {
   return flow<T>(async function* () {
     yield* toAsyncIterable(source);
   });

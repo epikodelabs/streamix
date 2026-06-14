@@ -1,14 +1,14 @@
 import {
-  createReceiver,
-  createSubscription,
-  isPromiseLike,
-  pipeSourceThrough,
-  streamToArray,
-  Subscription,
-  type MaybePromise,
-  type Operator,
-  type Receiver,
-  type Stream,
+    createReceiver,
+    createSubscription,
+    isPromiseLike,
+    pipeSourceThrough,
+    streamToArray,
+    Subscription,
+    type MaybePromise,
+    type Operator,
+    type Receiver,
+    type Stream,
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { AsyncPushable, createAsyncPushable } from "../utils";
@@ -41,7 +41,7 @@ export function createReplaySubject<T = any>(
   capacity: number = Infinity
 ): ReplaySubject<T> {
   let latestValue: T | undefined;
-  let isCompleted = false;
+  let isDisposed = false;
   let completionInfo: { kind: 'error'; error: any } | null = null;
 
   const listeners = new Set<AsyncPushable<T>>();
@@ -77,7 +77,7 @@ export function createReplaySubject<T = any>(
   };
 
   const next = (value: T) => {
-    if (isCompleted) return;
+    if (isDisposed) return;
     latestValue = value;
     pushReplay(value);
     for (const listener of listeners) {
@@ -85,18 +85,18 @@ export function createReplaySubject<T = any>(
     }
   };
 
-  const complete = () => {
-    if (isCompleted) return;
-    isCompleted = true;
+  const dispose = () => {
+    if (isDisposed) return;
+    isDisposed = true;
     for (const listener of listeners) {
-      listener.complete();
+      listener.dispose();
     }
     listeners.clear();
   };
 
   const error = (err: any) => {
-    if (isCompleted) return;
-    isCompleted = true;
+    if (isDisposed) return;
+    isDisposed = true;
     completionInfo = { kind: 'error', error: err };
     for (const listener of listeners) {
       listener.error(err);
@@ -163,9 +163,9 @@ export function createReplaySubject<T = any>(
     // Replay buffered values
     forEachReplay((value) => listener.push(value));
 
-    if (isCompleted) {
+    if (isDisposed) {
       if (completionInfo?.kind === 'error') listener.error(completionInfo.error);
-      else listener.complete();
+      else listener.dispose();
     }
 
     // Initial drain
@@ -173,7 +173,7 @@ export function createReplaySubject<T = any>(
 
     const sub = createSubscription(async () => {
       listeners.delete(listener);
-      listener.complete();
+      listener.dispose();
     });
 
     const origUnsub = sub.unsubscribe.bind(sub);
@@ -190,9 +190,9 @@ export function createReplaySubject<T = any>(
     name: "replaySubject",
     get value() { return latestValue; },
     next,
-    complete,
+    dispose,
     error,
-    completed: () => isCompleted,
+    get disposed() { return isDisposed; },
     pipe: <TOut>(...steps: Operator<any, any>[]): Stream<TOut> => {
       return pipeSourceThrough<T, TOut>(self, steps);
     },
@@ -205,12 +205,12 @@ export function createReplaySubject<T = any>(
       // Replay buffered values
       forEachReplay((value) => listener.push(value));
 
-      if (!isCompleted) {
+      if (!isDisposed) {
         listeners.add(listener);
       } else if (completionInfo?.kind === 'error') {
         listener.error(completionInfo.error);
       } else {
-        listener.complete();
+        listener.dispose();
       }
 
       const originalReturn = listener.return!.bind(listener);

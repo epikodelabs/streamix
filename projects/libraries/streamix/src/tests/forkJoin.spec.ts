@@ -1,4 +1,4 @@
-import { createSubject, forkJoin, from, iterate } from '@epikodelabs/streamix';
+import { atom, forkJoin, from, iterate } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -27,8 +27,8 @@ describe('forkJoin', () => {
   });
 
   it('should accept array of streams', async () => {
-    const a$ = createSubject<number>();
-    const b$ = createSubject<string>();
+    const a$ = atom<number>();
+    const b$ = atom<string>();
 
     const results: any[] = [];
     forkJoin(a$, b$).subscribe(v => { if (v !== undefined) results.push(v); });
@@ -37,8 +37,8 @@ describe('forkJoin', () => {
     b$.next('x');
     a$.next(20);
     b$.next('y');
-    a$.complete();
-    b$.complete();
+    a$.dispose();
+    b$.dispose();
 
     await delay();
 

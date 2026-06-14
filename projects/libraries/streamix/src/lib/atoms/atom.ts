@@ -1,4 +1,6 @@
 import { createSubscription, type Subscription } from "../abstractions/subscription";
+import { type Operator } from "../abstractions";
+import { pipe as pipeSource } from "../streams/pipe";
 import {
   getCurrentScope,
   getScopeStrobe,
@@ -80,6 +82,20 @@ export interface AtomBase<T = any> {
 
   /** Disposes the atom, clearing all subscriptions and resources. */
   dispose(): void;
+
+  /**
+   * Pipes this atom through one or more operators.
+   *
+   * This is a convenience wrapper around the standalone {@link pipe} function.
+   */
+  pipe<R = any>(...ops: Operator<any, any>[]): AtomBase<R>;
+
+  /**
+   * Returns an async iterator over the atom's future values.
+   *
+   * This makes atoms directly usable in `for await` loops.
+   */
+  [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
 /**
@@ -97,6 +113,21 @@ export interface Atom<T = any> extends AtomBase<T> {
    * @param value - The new value to set.
    */
   set(value: T): void;
+
+  /**
+   * Alias for {@link set}. Emits a value to subscribers.
+   *
+   * @param value - The value to emit.
+   */
+  next(value: T): void;
+
+  /**
+   * Signals that the atom has failed with the given error. The error is
+   * propagated to consumers iterating the atom, and the atom is disposed.
+   *
+   * @param err - The error to emit.
+   */
+  error(err: any): void;
 }
 
 let activeFormula: { dependencies: Set<AtomBase<any>> } | null = null;
@@ -205,6 +236,7 @@ export function flow<T>(
   let cleanup: () => void | Promise<void> = () => {};
   let disposePromise: Promise<void> | null = null;
   let abortController: AbortController | undefined;
+  let pending: Promise<IteratorResult<T>> | IteratorResult<T> | undefined;
 
   const stop = () => {
     cancelled = true;
@@ -277,10 +309,17 @@ export function flow<T>(
       }
     };
 
+    // Prime the iterator synchronously so generators can attach listeners or
+    // perform other setup before the consumer starts pulling values. The result
+    // is processed asynchronously so subscribers are added before any values
+    // are emitted.
+    pending = iterator.next();
+
     (async () => {
       try {
         while (!cancelled) {
-          const result = await iterator!.next();
+          const result = await pending;
+          pending = iterator!.next();
           if (cancelled || result.done) break;
           notify(result.value);
         }
@@ -350,6 +389,14 @@ export function flow<T>(
       return sub;
     },
 
+    pipe(...ops: Operator<any, any>[]) {
+      return pipeSource(this, ...ops);
+    },
+
+    [Symbol.asyncIterator]() {
+      return iterate(this)[Symbol.asyncIterator]();
+    },
+
     dispose() {
       void disposeInstance();
     }
@@ -407,16 +454,18 @@ export function flow<T>(
  * @param options - Optional atom configuration.
  * @returns A read-only atom view.
  */
-export function atom<T>(initialValue: T, options?: AtomOptions): Atom<T> {
+export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
   const scope = getCurrentScope();
   const strobe = scope ? getScopeStrobe(scope) : undefined;
   const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
 
-  let current = initialValue;
-  let previous = initialValue;
+  let current = initialValue as T;
+  let previous = initialValue as T;
   let disposed = false;
   let dirty = false;
   let lastNotified = current;
+  let error: any = undefined;
+  const disposeHandlers = new Set<() => void>();
 
   const subs = new Set<(value: T) => void>();
 
@@ -475,6 +524,14 @@ export function atom<T>(initialValue: T, options?: AtomOptions): Atom<T> {
       });
     },
 
+    pipe(...ops: Operator<any, any>[]) {
+      return pipeSource(this, ...ops);
+    },
+
+    [Symbol.asyncIterator]() {
+      return iterate(this)[Symbol.asyncIterator]();
+    },
+
     set(value) {
       if (disposed) return;
       if (Object.is(current, value)) return;
@@ -490,14 +547,67 @@ export function atom<T>(initialValue: T, options?: AtomOptions): Atom<T> {
       }
     },
 
+    next(value: T) {
+      if (disposed) return;
+
+      previous = current;
+      current = value;
+
+      if (analog) {
+        dirty = true;
+      } else {
+        lastNotified = current;
+        notify(value);
+      }
+    },
+
+    error(err: any) {
+      if (disposed) return;
+
+      error = err;
+      disposed = true;
+      unregisterAnalogAtom(instance);
+      for (const handler of Array.from(disposeHandlers)) {
+        try {
+          handler();
+        } catch {
+          // ignore
+        }
+      }
+      disposeHandlers.clear();
+      subs.clear();
+    },
+
     dispose() {
       if (disposed) return;
 
       disposed = true;
       unregisterAnalogAtom(instance);
+      for (const handler of Array.from(disposeHandlers)) {
+        try {
+          handler();
+        } catch {
+          // ignore
+        }
+      }
+      disposeHandlers.clear();
       subs.clear();
     }
   };
+
+  Object.defineProperty(instance, "_error", {
+    get() {
+      return error;
+    },
+    enumerable: false,
+  });
+
+  Object.defineProperty(instance, "_onDispose", {
+    get() {
+      return disposeHandlers;
+    },
+    enumerable: false,
+  });
 
   registerWithCurrentScope(instance);
   markAtomAsEmitted(instance);
@@ -578,6 +688,26 @@ export interface AsyncAtom<T = any> extends AtomBase<T> {
    * @param value - The new value to set.
    */
   set(value: T): void;
+
+  /**
+   * Signals that the atom has failed with the given error.
+   *
+   * The error is propagated to consumers iterating the atom, and the atom is
+   * disposed.
+   *
+   * @param err - The error to emit.
+   */
+  error(err: any): void;
+
+  /**
+   * Emits a value to subscribers without de-duplicating equal values.
+   *
+   * This is the stream-style counterpart to {@link set}; it always notifies
+   * subscribers, making it suitable for event-like atoms.
+   *
+   * @param value - The value to emit.
+   */
+  next(value: T): void;
 }
 
 /**
@@ -618,6 +748,8 @@ export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): AsyncAto
   let disposed = false;
   let dirty = false;
   let lastNotified: T = undefined as any;
+  let error: any = undefined;
+  const disposeHandlers = new Set<() => void>();
 
   const subs = new Set<(value: T) => void>();
 
@@ -706,6 +838,14 @@ export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): AsyncAto
       });
     },
 
+    pipe(...ops: Operator<any, any>[]) {
+      return pipeSource(this, ...ops);
+    },
+
+    [Symbol.asyncIterator]() {
+      return iterate(this)[Symbol.asyncIterator]();
+    },
+
     set(value) {
       if (disposed) return;
       if (hasValue && Object.is(current, value)) return;
@@ -728,16 +868,78 @@ export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): AsyncAto
       }
     },
 
+    next(value: T) {
+      if (disposed) return;
+
+      previous = current;
+      current = value;
+      const wasFirstValue = !hasValue;
+      hasValue = true;
+      pushReplay(value);
+
+      if (wasFirstValue) {
+        markAtomAsEmitted(instance);
+      }
+
+      if (analog) {
+        dirty = true;
+      } else {
+        lastNotified = current;
+        notify(value);
+      }
+    },
+
+    error(err: any) {
+      if (disposed) return;
+
+      error = err;
+      disposed = true;
+      unregisterAnalogAtom(instance);
+      for (const handler of Array.from(disposeHandlers)) {
+        try {
+          handler();
+        } catch {
+          // ignore
+        }
+      }
+      disposeHandlers.clear();
+      subs.clear();
+      replay.length = 0;
+      replayHead = 0;
+    },
+
     dispose() {
       if (disposed) return;
 
       disposed = true;
       unregisterAnalogAtom(instance);
+      for (const handler of Array.from(disposeHandlers)) {
+        try {
+          handler();
+        } catch {
+          // ignore
+        }
+      }
+      disposeHandlers.clear();
       subs.clear();
       replay.length = 0;
       replayHead = 0;
     }
   };
+
+  Object.defineProperty(instance, "_error", {
+    get() {
+      return error;
+    },
+    enumerable: false,
+  });
+
+  Object.defineProperty(instance, "_onDispose", {
+    get() {
+      return disposeHandlers;
+    },
+    enumerable: false,
+  });
 
   registerWithCurrentScope(instance);
   if (analog) {
@@ -894,6 +1096,14 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       });
     },
 
+    pipe(...ops: Operator<any, any>[]) {
+      return pipeSource(this, ...ops);
+    },
+
+    [Symbol.asyncIterator]() {
+      return iterate(this)[Symbol.asyncIterator]();
+    },
+
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -951,6 +1161,17 @@ export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
       let resolveNext: ((res: IteratorResult<T>) => void) | null = null;
       let rejectNext: ((e: any) => void) | null = null;
       let done = false;
+      let onPush: (() => void) | undefined;
+
+      const notifyPush = () => {
+        if (onPush) {
+          try {
+            onPush();
+          } catch {
+            // ignore consumer errors
+          }
+        }
+      };
 
       const sub = atom.subscribe((value) => {
         if (done) return;
@@ -961,11 +1182,12 @@ export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
         } else {
           buffer.push(value);
         }
+        notifyPush();
       });
 
       const finish = () => {
         if (done) return;
-        sub.unsubscribe();
+        const cleanup = sub.unsubscribe();
         const err = (atom as any)._error;
         if (resolveNext) {
           if (err) {
@@ -981,6 +1203,8 @@ export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
             rejectNext = null;
           }
         }
+        notifyPush();
+        return cleanup;
       };
 
       (atom as any)._onDispose?.add(finish);
@@ -988,18 +1212,18 @@ export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
       const checkError = () => {
         const err = (atom as any)._error;
         if (err !== undefined) {
-          finish();
           return err;
         }
         return undefined;
       };
 
-      return {
+      const iterator = {
         async next() {
           if (done) return { value: undefined as any, done: true };
 
           const err = checkError();
           if (err) {
+            finish();
             throw err;
           }
 
@@ -1022,10 +1246,44 @@ export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
           });
         },
         async return() {
-          finish();
+          await finish();
           return { value: undefined as any, done: true };
         },
       };
+
+      (iterator as any).__tryNext = (): IteratorResult<T> | null => {
+        if (done) return { value: undefined as any, done: true };
+        const err = checkError();
+        if (err) {
+          throw err;
+        }
+        if (buffer.length > 0) {
+          const val = buffer.shift()!;
+          if (atom.disposed && buffer.length === 0) {
+            done = true;
+          }
+          return { value: val, done: false };
+        }
+        if (atom.disposed) {
+          done = true;
+          return { value: undefined as any, done: true };
+        }
+        return null;
+      };
+
+      (iterator as any).__hasBufferedValues = () => buffer.length > 0;
+
+      Object.defineProperty(iterator, "__onPush", {
+        get() {
+          return onPush;
+        },
+        set(cb: () => void) {
+          onPush = cb;
+        },
+        configurable: true,
+      });
+
+      return iterator;
     },
   };
 }

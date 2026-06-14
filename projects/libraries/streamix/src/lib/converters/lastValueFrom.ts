@@ -18,7 +18,7 @@ function isAtomLike(value: unknown): value is Atom<any> {
  * @param source The source stream or atom to listen to for the final value.
  * @returns A promise that resolves with the last value from the source or rejects on completion without a value or on error.
  */
-export function lastValueFrom<T = any>(source: Stream<T> | Atom<T>): Promise<T> {
+export function lastValueFrom<T = any>(source: Stream<T> | Atom<T> | AsyncIterable<T>): Promise<T> {
   const iterator = isAtomLike(source)
     ? iterate(source)[Symbol.asyncIterator]()
     : source[Symbol.asyncIterator]();

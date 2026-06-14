@@ -1,5 +1,6 @@
-import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator } from "../abstractions";
 import { fromAny } from "../converters";
+import type { StreamInput } from "../streams/pipe";
 
 /**
  * Creates a stream operator that maps each value from the source stream to a new
@@ -22,7 +23,7 @@ import { fromAny } from "../converters";
  * @returns An {@link Operator} instance that can be used in a stream's `pipe` method.
  */
 export const concatMap = <T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => StreamInput<R> | MaybePromise<R> | Array<R>
 ) =>
   createOperator<T, R>("concatMap", function (this : Operator, source) {
     let outerIndex = 0;

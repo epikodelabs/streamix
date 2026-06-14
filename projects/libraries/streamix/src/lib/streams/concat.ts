@@ -13,14 +13,14 @@ import { toAsyncIterable, type StreamInput } from "./pipe";
  *
  * @template T Value type.
  * @param sources Atoms, streams, or values (including promises) to concatenate.
- * @returns {AtomBase<T | undefined>} A new atom that emits values from all input sources in order.
+ * @returns {AtomBase<T>} A new atom that emits values from all input sources in order.
  *
  * @example
  * const s = concat(from([1, 2]), from([3]), 4);
  * // emits: 1, 2, 3, 4
  */
 
-export function concat<T = any>(...sources: StreamInput<T>[]): AtomBase<T | undefined> {
+export function concat<T = any>(...sources: StreamInput<T>[]): AtomBase<T> {
   return flow<T>(async function* () {
     for (const source of sources) {
       const iterator = toAsyncIterable(source)[Symbol.asyncIterator]() as AsyncIterator<T>;

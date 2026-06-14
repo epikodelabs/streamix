@@ -1,4 +1,4 @@
-import { from, iterate, pipe, throwError } from '@epikodelabs/streamix';
+import { from, iterate, pipe, throwError, atom } from '@epikodelabs/streamix';
 
 describe('throwError', () => {
   it('should emit an error when the source emits a value', async () => {

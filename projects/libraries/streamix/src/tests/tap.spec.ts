@@ -1,4 +1,4 @@
-import { catchError, createStream, endWith, finalize, from, iterate, pipe, startWith, tap } from '@epikodelabs/streamix';
+import { catchError, createStream, endWith, finalize, from, iterate, pipe, startWith, tap, atom } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 

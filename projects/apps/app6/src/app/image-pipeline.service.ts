@@ -255,8 +255,8 @@ export class ImagePipelineService {
   ngOnDestroy() {
     main.outbox.stop(this.resizeActor);
     main.outbox.stop(this.compressActor);
-    this.fileStream.complete();
-    this.progressStream.complete();
+    this.fileStream.dispose();
+    this.progressStream.dispose();
     this.clearAll();
   }
 }

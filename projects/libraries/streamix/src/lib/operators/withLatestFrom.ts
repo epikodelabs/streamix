@@ -1,10 +1,26 @@
-import {
-  createPushOperator,
-  isPromiseLike,
-  Stream
-} from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
+import { createPushOperator, isPromiseLike, type Operator } from "../abstractions";
+import type { AtomBase } from '../atoms/atom';
+import { toAsyncIterable } from '../streams/pipe';
 import { createAsyncCoordinator } from '../utils';
+
+/**
+ * Auxiliary input accepted by {@link withLatestFrom}. The scalar branch is guarded
+ * so that atoms/iterables are not inferred as the element type itself.
+ */
+type WithLatestScalar<T> = T extends AsyncIterable<any>
+  ? never
+  : T extends Iterable<any>
+  ? never
+  : T extends AtomBase<any>
+  ? never
+  : T;
+
+type WithLatestInput<T> =
+  | AtomBase<T>
+  | AsyncIterable<T>
+  | Iterable<T>
+  | Promise<WithLatestInput<T>>
+  | WithLatestScalar<T>;
 
 /**
  * Combines the source stream with the latest values from one or more auxiliary streams or promises.
@@ -30,13 +46,17 @@ import { createAsyncCoordinator } from '../utils';
  * });
  * ```
  */
-export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
-  ...args: any[]
-) {
+export function withLatestFrom<T = any, R extends readonly unknown[] = readonly unknown[]>(
+  ...args: { [K in keyof R]: WithLatestInput<R[K]> }
+): Operator<T, [T, ...R]>;
+export function withLatestFrom<T = any, R extends readonly unknown[] = readonly unknown[]>(
+  args: { [K in keyof R]: WithLatestInput<R[K]> }
+): Operator<T, [T, ...R]>;
+export function withLatestFrom<T = any, R extends readonly unknown[] = readonly unknown[]>(...args: any[]): Operator<T, [T, ...R]> {
   // Normalize parameters immediately and synchronously to prevent execution pipeline lag
   const normalizedInputs = (args.length === 1 && Array.isArray(args[0]))
-    ? (args[0] as (Stream<unknown> | Promise<unknown>)[])
-    : (args as (Stream<unknown> | Promise<unknown>)[]);
+    ? (args[0] as (WithLatestInput<unknown>[]))
+    : (args as (WithLatestInput<unknown>[]));
 
   return createPushOperator<T, [T, ...R]>("withLatestFrom", (source, output) => {
     const abortController = new AbortController();
@@ -57,44 +77,44 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
         if (abortController.signal.aborted) return;
 
         // 2. Initialize iterators and track baseline structural dimensions
-        const auxIterators = resolvedAux.map((input) => eachValueFrom(fromAny(input)));
+        const auxIterators = resolvedAux.map((input) =>
+          toAsyncIterable(input as any)[Symbol.asyncIterator]()
+        );
         const latestValues = new Array(auxIterators.length).fill(undefined);
         const hasValue = new Array(auxIterators.length).fill(false);
 
-        // 3. Pre-warm auxiliary streams to catch any initial synchronous values safely
-        const initialAuxValues = await Promise.all(auxIterators.map((iterator) => iterator.next()));
-        for (let index = 0; index < initialAuxValues.length; index++) {
-          const result = initialAuxValues[index];
-          if (!result.done) {
-            latestValues[index] = result.value;
-            hasValue[index] = true;
-          }
-        }
-
-        // Post-warming check to ensure downstream didn't unsubscribe during the initialization microtasks
         if (abortController.signal.aborted) return;
 
-                // 4. Drain any buffered source values silently (they arrived before auxiliaries had values)
-        const sourceWithSyncPull = source as AsyncIterator<T> & { __tryNext?: () => IteratorResult<T> | null };
-        if (sourceWithSyncPull.__tryNext) {
-          while (true) {
-            let buffered: IteratorResult<T> | null;
-            try {
-              buffered = sourceWithSyncPull.__tryNext();
-            } catch (err) {
-              if (!isSettled) {
-                isSettled = true;
-                output.error(err instanceof Error ? err : new Error(String(err)));
-              }
-              return;
+        // 3. Prepare auxiliary values before the source can win the race.
+        //
+        // - For push-based sources (e.g. createAsyncPushable), attach the source
+        //   immediately so that emissions that arrive before any auxiliary has a
+        //   value are dropped. We only do a synchronous pre-drain of auxiliaries
+        //   to avoid dropping source emissions when the auxiliary is synchronous.
+        // - For pull-based sources (e.g. from([])), pre-pull each auxiliary fully
+        //   before attaching the source. This prevents the synchronous source from
+        //   completing before the auxiliaries have produced their first value.
+        const sourceIsPush = typeof (source as any).push === 'function';
+
+        if (sourceIsPush) {
+          for (let i = 0; i < auxIterators.length; i++) {
+            const r = (auxIterators[i] as any).__tryNext?.();
+            if (r && !r.done) {
+              latestValues[i] = r.value;
+              hasValue[i] = true;
             }
-            if (!buffered || buffered.done) break;
           }
+        } else {
+          for (let i = 0; i < auxIterators.length; i++) {
+            const r = await auxIterators[i].next();
+            if (r.done) continue;
+            latestValues[i] = r.value;
+            hasValue[i] = true;
+          }
+          if (abortController.signal.aborted) return;
         }
 
-        if (abortController.signal.aborted) return;
-
-        // 5. Build coordinate multiplexer mapping across source and side channels
+        // 4. Build coordinate multiplexer mapping across source and side channels.
         runner = createAsyncCoordinator([...auxIterators, source]);
         const sourceIndex = auxIterators.length;
 
@@ -134,9 +154,9 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
         }
 
         // 7. Loop closed cleanly without error triggers -> Complete pipeline execution
-        if (!isSettled && !output.completed()) {
+        if (!isSettled && !output.disposed) {
           isSettled = true;
-          output.complete();
+          output.dispose();
         }
       } catch (err) {
         // Safe lock catchment blocks for out-of-band exceptions during async scheduling phases

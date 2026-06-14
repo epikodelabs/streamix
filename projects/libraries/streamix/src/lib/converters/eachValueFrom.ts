@@ -17,7 +17,7 @@ function isAtomLike(value: unknown): value is Atom<any> {
  * @param source The source stream or atom to convert.
  * @returns An async generator that yields the values from the source.
  */
-export function eachValueFrom<T = any>(source: Stream<T> | Atom<T>): AsyncGenerator<T> {
+export function eachValueFrom<T = any>(source: Stream<T> | Atom<T> | AsyncIterable<T>): AsyncGenerator<T> {
   const iterator = isAtomLike(source)
     ? iterate(source)[Symbol.asyncIterator]()
     : source[Symbol.asyncIterator]();

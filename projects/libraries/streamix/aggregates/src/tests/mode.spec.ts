@@ -1,14 +1,14 @@
-import { createSubject, type Stream } from '@epikodelabs/streamix';
+import { atom } from '@epikodelabs/streamix';
 import { mode } from '@epikodelabs/streamix/aggregates';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe('mode', () => {
-  let subject: ReturnType<typeof createSubject<number>>;
-  let source: Stream<number>;
+  let subject: ReturnType<typeof atom<number>>;
+  let source: ReturnType<typeof atom<number>>;
 
   beforeEach(() => {
-    subject = createSubject<number>();
+    subject = atom<number>();
     source = subject;
   });
 
@@ -26,7 +26,7 @@ describe('mode', () => {
     subject.next(2);
     subject.next(2);
     subject.next(3);
-    subject.complete();
+    subject.dispose();
     await settle();
 
     expect(results).toEqual([[2]]);
@@ -46,15 +46,15 @@ describe('mode', () => {
     subject.next(2);
     subject.next(1);
     subject.next(2);
-    subject.complete();
+    subject.dispose();
     await settle();
 
     expect(results).toEqual([[1, 2]]);
   });
 
   it('should be able to key values before counting', async () => {
-    const itemSubject = createSubject<{ group: string; value: string }>();
-    const itemSource: Stream<{ group: string; value: string }> = itemSubject;
+    const itemSubject = atom<{ group: string; value: string }>();
+    const itemSource = itemSubject;
     const modeStream = itemSource.pipe(mode((item) => item.group));
     const results: { group: string; value: string }[][] = [];
 
@@ -68,7 +68,7 @@ describe('mode', () => {
     itemSubject.next({ group: 'beta', value: 'b' });
     itemSubject.next({ group: 'alpha', value: 'a2' });
     itemSubject.next({ group: 'beta', value: 'b2' });
-    itemSubject.complete();
+    itemSubject.dispose();
     await settle();
 
     expect(results).toEqual([
@@ -89,7 +89,7 @@ describe('mode', () => {
       }
     })();
 
-    subject.complete();
+    subject.dispose();
     await settle();
 
     expect(results).toEqual([]);

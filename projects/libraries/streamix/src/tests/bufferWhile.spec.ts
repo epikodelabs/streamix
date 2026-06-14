@@ -1,16 +1,10 @@
-import {
-  bufferWhile,
-  createSubject,
-  iterate,
-  pipe,
-  type Subject,
-} from "@epikodelabs/streamix";
+import { atom, bufferWhile, iterate, pipe } from '@epikodelabs/streamix';
 
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("bufferWhile", () => {
   it("flushes the buffer when the predicate resolves truthy", async () => {
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     const results: number[][] = [];
     const buffered = pipe(subject, bufferWhile((_value, _index, buffer) => buffer.length < 3));
 
@@ -27,7 +21,7 @@ describe("bufferWhile", () => {
 
     subject.next(4);
     subject.next(5);
-    subject.complete();
+    subject.dispose();
     await waitTick();
     await completed;
 
@@ -35,7 +29,7 @@ describe("bufferWhile", () => {
   });
 
   it("emits the trailing buffer when the source completes", async () => {
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     const results: number[][] = [];
     const buffered = pipe(subject, bufferWhile(() => false));
 
@@ -46,7 +40,7 @@ describe("bufferWhile", () => {
     })();
 
     subject.next(9);
-    subject.complete();
+    subject.dispose();
     await waitTick();
     await completed;
 
@@ -54,7 +48,7 @@ describe("bufferWhile", () => {
   });
 
   it("supports index parameter in predicate", async () => {
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     const results: number[][] = [];
     const indices: number[] = [];
     const buffered = pipe(
@@ -77,7 +71,7 @@ describe("bufferWhile", () => {
     await waitTick();
 
     subject.next(40);
-    subject.complete();
+    subject.dispose();
     await waitTick();
     await completed;
 
@@ -86,7 +80,7 @@ describe("bufferWhile", () => {
   });
 
   it("uses index to flush based on value position", async () => {
-    const subject = createSubject<string>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     const results: string[][] = [];
     const buffered = pipe(
       subject,
@@ -104,7 +98,7 @@ describe("bufferWhile", () => {
     await waitTick();
 
     subject.next("c");
-    subject.complete();
+    subject.dispose();
     await waitTick();
     await completed;
 
@@ -112,7 +106,7 @@ describe("bufferWhile", () => {
   });
 
   it("supports async predicates", async () => {
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     const results: number[][] = [];
     const buffered = pipe(
       subject,
@@ -130,7 +124,7 @@ describe("bufferWhile", () => {
     await waitTick();
 
     subject.next(3);
-    subject.complete();
+    subject.dispose();
     await waitTick();
     await completed;
 
@@ -138,7 +132,7 @@ describe("bufferWhile", () => {
   });
 
   it("does not emit when source completes without values", async () => {
-    const subject = createSubject<number>();
+    const subject: ReturnType<typeof atom> = atom<atom>();
     const results: number[][] = [];
     const buffered = pipe(subject, bufferWhile(() => true));
 
@@ -148,7 +142,7 @@ describe("bufferWhile", () => {
       }
     })();
 
-    subject.complete();
+    subject.dispose();
     await waitTick();
     await completed;
 

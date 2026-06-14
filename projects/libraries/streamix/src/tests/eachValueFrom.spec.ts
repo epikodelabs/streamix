@@ -1,4 +1,4 @@
-import { createAsyncPushable, eachValueFrom, EMPTY, firstValueFrom, flow, from, lastValueFrom } from '@epikodelabs/streamix';
+import { createAsyncPushable, eachValueFrom, EMPTY, firstValueFrom, flow, from, lastValueFrom, atom } from '@epikodelabs/streamix';
 
 describe('eachValueFrom', () => {
   it('should get first value from the stream', async () => {
@@ -77,6 +77,7 @@ describe('eachValueFrom', () => {
       } catch (err) {
         return err;
       }
+      return undefined;
     })();
 
     source.push(1);

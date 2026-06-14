@@ -17,8 +17,8 @@ import {
 export type AsyncPushable<R> = AsyncIterator<R> & AsyncIterable<R> & {
   push(value: R): void | Promise<void>;
   error(err: any): void;
-  complete(): void;
-  completed(): boolean;
+  disposed: boolean;
+  dispose(): void;
 };
 
 /**
@@ -42,7 +42,7 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
       pushError(state, iterator, err, iterator.__onPush);
     },
     
-    get completed() {
+    get disposed() {
       return state.completed;
     }
   };
@@ -55,8 +55,8 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
     __onPush?: () => void;
     push?: any;
     error?: any;
-    complete?: any;
-    completed?: any;
+    disposed?: boolean;
+    dispose?: () => void;
   } = {
     next() {
       return asyncPull(state, iterator);
@@ -101,12 +101,19 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
     receiver.error(err);
   };
 
-  iterator.complete = function() {
-    receiver.complete();
-  };
+  iterator.disposed = false;
 
-  iterator.completed = function() {
-    return receiver.completed;
+  iterator.dispose = function() {
+    if (iterator.disposed) return;
+    iterator.disposed = true;
+    state.markCompleted();
+    if (iterator.__onPush) {
+      try {
+        iterator.__onPush();
+      } catch {
+        // ignore
+      }
+    }
   };
 
   // Add optional hook for push notifications

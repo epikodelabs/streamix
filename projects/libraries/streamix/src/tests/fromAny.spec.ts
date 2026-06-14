@@ -1,4 +1,4 @@
-import { from, fromAny } from '@epikodelabs/streamix';
+import { from, fromAny, atom } from '@epikodelabs/streamix';
 
 async function collect<T>(input: any): Promise<T[]> {
   const values: T[] = [];

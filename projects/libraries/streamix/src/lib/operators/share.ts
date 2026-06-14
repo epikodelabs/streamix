@@ -1,4 +1,4 @@
-import { createOperator, DONE, type Operator } from '../abstractions';
+import { createOperator, DONE, type Operator } from "../abstractions";
 import { createSubject, type Subject } from '../subjects';
 
 /**
@@ -42,7 +42,7 @@ export function share<T = any>() {
         shared!.error(err);
         return;
       } finally {
-        if (shared && !shared.completed()) shared.complete();
+        if (shared && !shared.disposed) shared.dispose();
       }
     })();
   };

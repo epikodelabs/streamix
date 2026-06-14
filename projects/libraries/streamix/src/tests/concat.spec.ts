@@ -1,5 +1,5 @@
 import type { Stream } from '@epikodelabs/streamix';
-import { concat, createStream, createSubscription, DONE, from, iterate, NEXT } from '@epikodelabs/streamix';
+import { concat, createStream, createSubscription, DONE, from, iterate, NEXT, atom } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 

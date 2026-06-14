@@ -1,4 +1,4 @@
-import { createAsyncIterator, createStream, createSubject, createSubscription, DONE, from, isStreamLike, map, NEXT, startWith, toArray } from '@epikodelabs/streamix';
+import { createAsyncIterator, createStream, createSubscription, DONE, from, isStreamLike, map, NEXT, startWith, toArray } from '@epikodelabs/streamix';
 
 describe('stream', () => {
   it('allows base streams to be consumed with for-await', async () => {
@@ -23,7 +23,7 @@ describe('stream', () => {
   });
 
   it('supports async iteration over subjects', async () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const received: number[] = [];
 
     void (async () => {
@@ -32,9 +32,9 @@ describe('stream', () => {
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.complete();
+    subject.set(1);
+    subject.set(2);
+    subject.dispose();
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(received).toEqual([1, 2]);
@@ -174,7 +174,7 @@ describe('stream', () => {
 
     // push another value and then a completion; completion must wait until buffered values are consumed
     registered[0].next(7);
-    registered[0].complete();
+    registered[0].dispose();
 
     // next() should return the buffered value 7, then subsequent next() should indicate completion
     const r2 = await it.next();

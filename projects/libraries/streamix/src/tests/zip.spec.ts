@@ -1,4 +1,4 @@
-import { createSubject, from, zip } from '@epikodelabs/streamix';
+import { atom, from, zip } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -47,9 +47,9 @@ describe('zip', () => {
   });
 
   it('should handle sources that emit values asynchronously', async () => {
-    const stream1$ = createSubject<number>();
-    const stream2$ = createSubject<string>();
-    const stream3$ = createSubject<boolean>();
+    const stream1$ = atom<number>();
+    const stream2$ = atom<string>();
+    const stream3$ = atom<boolean>();
 
     const result: any[] = [];
     zip(stream1$, stream2$, stream3$).subscribe(v => { if (v !== undefined) result.push(v); });
@@ -62,9 +62,9 @@ describe('zip', () => {
     stream2$.next('b');
     stream3$.next(false);
 
-    stream1$.complete();
-    stream2$.complete();
-    stream3$.complete();
+    stream1$.dispose();
+    stream2$.dispose();
+    stream3$.dispose();
 
     await delay();
 

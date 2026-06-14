@@ -37,7 +37,7 @@ export function fromAny<R = any>(
       query: (() => { throw new Error("fromAny streams do not support query"); }) as any,
       toArray: (() => { throw new Error("fromAny streams do not support toArray"); }) as any,
       [Symbol.asyncIterator]() {
-        return iterate(value)[Symbol.asyncIterator]();
+        return value[Symbol.asyncIterator]();
       },
     } as Stream<R>;
   }

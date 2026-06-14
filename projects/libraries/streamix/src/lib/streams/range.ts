@@ -12,10 +12,10 @@ import { flow, type AtomBase } from '../atoms/atom';
  * @param start - The first number to emit in the sequence.
  * @param count - The total number of values to emit. Must be a non-negative number.
  * @param step - The amount to increment or decrement the value in each step.
- * @returns {AtomBase<number | undefined>} An atom that emits a sequence of numbers.
+ * @returns {AtomBase<number >} An atom that emits a sequence of numbers.
  */
-export function range(start: MaybePromise<number>, count: MaybePromise<number>, step: MaybePromise<number> = 1): AtomBase<number | undefined> {
-  return flow<number | undefined>(async function* () {
+export function range(start: MaybePromise<number>, count: MaybePromise<number>, step: MaybePromise<number> = 1): AtomBase<number > {
+  return flow<number >(async function* () {
     const resolvedStart = isPromiseLike(start) ? await start : start;
     const resolvedCount = isPromiseLike(count) ? await count : count;
     const resolvedStep = isPromiseLike(step) ? await step : step;

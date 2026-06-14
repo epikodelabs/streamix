@@ -1,4 +1,4 @@
-import { filter, from, iterate, pipe } from '@epikodelabs/streamix';
+import { filter, from, iterate, pipe, atom } from '@epikodelabs/streamix';
 
 describe('filter', () => {
   it('should allow values that pass the predicate', async () => {

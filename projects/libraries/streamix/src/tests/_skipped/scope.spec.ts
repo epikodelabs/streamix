@@ -1,4 +1,4 @@
-import { atom, asyncAtom, createSubject, derived, flow, globalScope, scope } from '@epikodelabs/streamix';
+import { atom, derived, flow, globalScope, scope } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -11,7 +11,7 @@ describe('scope', () => {
 
   it('should merge factory return value', () => {
     const s = scope(() => {
-      const count = flow(createSubject<number>(), 0);
+      const count = flow(atom<number>(), 0);
       return { count };
     });
     expect(s.count.value).toBe(0);
@@ -19,7 +19,7 @@ describe('scope', () => {
   });
 
   it('should auto-register atoms created inside factory', async () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const s = scope(() => {
       const a = flow(subject, 0);
       return { a };
@@ -30,8 +30,8 @@ describe('scope', () => {
   });
 
   it('should support snapshot', async () => {
-    const s1 = createSubject<number>();
-    const s2 = createSubject<number>();
+    const s1 = atom<number>();
+    const s2 = atom<number>();
     const s = scope(() => {
       const a = flow(s1, 1);
       const b = flow(s2, 2);
@@ -51,7 +51,7 @@ describe('scope', () => {
   });
 
   it('should dispose descendants recursively', () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const parent = scope(() => {
       const child = scope(() => {
         const grandchild = scope(() => {
@@ -71,7 +71,7 @@ describe('scope', () => {
   it('should snapshot nested scopes', () => {
     const s = scope(() => {
       const child = scope(() => {
-        const a = flow(createSubject<number>(), 42);
+        const a = flow(atom<number>(), 42);
         return { a };
       });
       return { child };
@@ -81,8 +81,8 @@ describe('scope', () => {
   });
 
   it('should react to stream emissions inside scope', async () => {
-    const s1 = createSubject<number>();
-    const s2 = createSubject<number>();
+    const s1 = atom<number>();
+    const s2 = atom<number>();
     const s = scope(() => {
       const a = flow(s1, 1);
       const b = flow(s2, 2);
@@ -113,8 +113,8 @@ describe('scope', () => {
     });
 
     it('should be true until all atoms have emitted', async () => {
-      const s1 = createSubject<number>();
-      const s2 = createSubject<string>();
+      const s1 = atom<number>();
+      const s2 = atom<string>();
       const s = scope(() => {
         const a = flow(s1, 0);
         const b = flow(s2, '');
@@ -135,7 +135,7 @@ describe('scope', () => {
     });
 
     it('should track recursive loading through nested scopes', async () => {
-      const subject = createSubject<number>();
+      const subject = atom<number>();
       const parent = scope(() => {
         const child = scope(() => {
           const a = flow(subject, 0);
@@ -154,7 +154,7 @@ describe('scope', () => {
     });
 
     it('should become false when atom emits', async () => {
-      const subject = createSubject<number>();
+      const subject = atom<number>();
       const s = scope(() => {
         const a = flow(subject, 0);
         return { a };
@@ -170,7 +170,7 @@ describe('scope', () => {
 
   describe('strobe', () => {
     it('should sample flow emissions with scope strobe', async () => {
-      const subject = createSubject<number>();
+      const subject = atom<number>();
       const s = scope(() => {
         const a = flow(subject, 0);
         return { a };
@@ -191,7 +191,7 @@ describe('scope', () => {
     });
 
     it('should inherit strobe from parent scope', async () => {
-      const subject = createSubject<number>();
+      const subject = atom<number>();
       const parent = scope(() => {
         const child = scope(() => {
           const a = flow(subject, 0);
@@ -210,7 +210,7 @@ describe('scope', () => {
     });
 
     it('should allow child scope to override parent strobe', async () => {
-      const subject = createSubject<number>();
+      const subject = atom<number>();
       const parent = scope(() => {
         const child = scope(() => {
           const a = flow(subject, 0);
@@ -234,7 +234,7 @@ describe('scope', () => {
     });
 
     it('should stop sampling when scope is disposed', async () => {
-      const subject = createSubject<number>();
+      const subject = atom<number>();
       const s = scope(() => {
         const a = flow(subject, 0);
         return { a };
@@ -260,9 +260,9 @@ describe('scope', () => {
       const values: number[] = [];
       s.a.subscribe(v => values.push(v));
 
-      s.a.set(1);
-      s.a.set(2);
-      s.a.set(3);
+      s.a.next(1);
+      s.a.next(2);
+      s.a.next(3);
 
       expect(s.a.value).toBe(3);
       expect(values).toEqual([]);
@@ -283,9 +283,9 @@ describe('scope', () => {
       const values: number[] = [];
       s.doubled.subscribe(v => values.push(v));
 
-      s.a.set(1);
-      s.a.set(2);
-      s.a.set(3);
+      s.a.next(1);
+      s.a.next(2);
+      s.a.next(3);
 
       // In analog mode the derived value is sampled; it stays at the
       // last-emitted value until the strobe fires.
@@ -308,8 +308,8 @@ describe('scope', () => {
       const values: number[] = [];
       s.a.subscribe(v => values.push(v));
 
-      s.a.set(1);
-      s.a.set(2);
+      s.a.next(1);
+      s.a.next(2);
 
       expect(values).toEqual([1, 2]);
 
@@ -318,16 +318,16 @@ describe('scope', () => {
 
     it('should batch asyncAtom set() calls on strobe', async () => {
       const s = scope(() => {
-        const a = asyncAtom<number>();
+        const a = atom<number>();
         return { a };
       }, { strobe: 50 });
 
       const values: number[] = [];
       s.a.subscribe(v => values.push(v));
 
-      s.a.set(1);
-      s.a.set(2);
-      s.a.set(3);
+      s.a.next(1);
+      s.a.next(2);
+      s.a.next(3);
 
       expect(s.a.value).toBe(3);
       expect(values).toEqual([]);
@@ -341,18 +341,18 @@ describe('scope', () => {
 
   describe('globalScope', () => {
     afterEach(() => {
-      globalScope.mode = 'discrete';
-      globalScope.strobe = 0;
+      globalScope!.mode = 'discrete';
+      globalScope!.strobe = 0;
     });
 
     it('should default to discrete mode', () => {
-      expect(globalScope.mode).toBe('discrete');
-      expect(globalScope.strobe).toBe(0);
+      expect(globalScope!.mode).toBe('discrete');
+      expect(globalScope!.strobe).toBe(0);
     });
 
     it('should make top-level scopes analog via global config', async () => {
-      globalScope.mode = 'analog';
-      globalScope.strobe = 50;
+      globalScope!.mode = 'analog';
+      globalScope!.strobe = 50;
 
       const s = scope(() => {
         const a = atom(0);
@@ -362,9 +362,9 @@ describe('scope', () => {
       const values: number[] = [];
       s.a.subscribe(v => values.push(v));
 
-      s.a.set(1);
-      s.a.set(2);
-      s.a.set(3);
+      s.a.next(1);
+      s.a.next(2);
+      s.a.next(3);
 
       expect(values).toEqual([]);
 
@@ -375,8 +375,8 @@ describe('scope', () => {
     });
 
     it('should let child scopes override global analog mode', async () => {
-      globalScope.mode = 'analog';
-      globalScope.strobe = 50;
+      globalScope!.mode = 'analog';
+      globalScope!.strobe = 50;
 
       const s = scope(() => {
         const a = atom(0);
@@ -386,8 +386,8 @@ describe('scope', () => {
       const values: number[] = [];
       s.a.subscribe(v => values.push(v));
 
-      s.a.set(1);
-      s.a.set(2);
+      s.a.next(1);
+      s.a.next(2);
 
       expect(values).toEqual([1, 2]);
 

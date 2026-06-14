@@ -16,12 +16,12 @@ import { toAsyncIterable, type StreamInput } from "./pipe";
  *
  * @template {readonly unknown[]} T - A tuple type representing the combined values from the sources.
  * @param streams Atoms, streams, or values (including promises) to race against each other.
- * @returns {AtomBase<T[number] | undefined>} A new atom that emits values from the first source to produce a value.
+ * @returns {AtomBase<T[number] >} A new atom that emits values from the first source to produce a value.
  */
 export function race<T extends readonly unknown[] = any[]>(
   ...streams: { [K in keyof T]: StreamInput<T[K]> }
-): AtomBase<T[number] | undefined> {
-  return flow<T[number] | undefined>(async function* () {
+): AtomBase<T[number] > {
+  return flow<T[number] >(async function* () {
     if (streams.length === 0) return;
 
     const iterators = streams.map(s =>

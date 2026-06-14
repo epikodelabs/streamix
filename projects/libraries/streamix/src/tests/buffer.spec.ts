@@ -1,12 +1,12 @@
-import { buffer, createSubject, iterate, pipe, type Subject } from "@epikodelabs/streamix";
+import { atom, buffer, iterate, pipe } from '@epikodelabs/streamix';
 
 const wait = (ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 describe("buffer", () => {
-  let source: Subject<number>;
+  let source: ReturnType<typeof atom>;
 
   beforeEach(() => {
-    source = createSubject<number>();
+    source = atom<number>();
   });
 
   it("should emit buffered values at the specified interval", async () => {
@@ -26,7 +26,7 @@ describe("buffer", () => {
     await wait(duration + 50);
     source.next(4);
     await wait(duration + 50);
-    source.complete();
+    source.dispose();
     await wait(duration);
 
     await completed;
@@ -47,7 +47,7 @@ describe("buffer", () => {
 
     source.next(1);
     await wait(100);
-    source.complete();
+    source.dispose();
     await wait(duration);
 
     await done;
@@ -69,7 +69,7 @@ describe("buffer", () => {
     await wait(50);
     source.next(2);
     await wait(duration + 50);
-    source.complete();
+    source.dispose();
     await wait(duration);
 
     await completed;
@@ -111,7 +111,7 @@ describe("buffer", () => {
     })();
 
     await wait(duration + 50);
-    source.complete();
+    source.dispose();
     await wait(duration);
 
     await completed;

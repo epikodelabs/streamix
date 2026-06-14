@@ -1,4 +1,4 @@
-import { createSubject, exhaustMap, iterate, pipe } from '@epikodelabs/streamix';
+import { atom, exhaustMap, iterate, pipe } from '@epikodelabs/streamix';
 
 let previousTimeoutInterval = jasmine.DEFAULT_TIMEOUT_INTERVAL;
 
@@ -15,11 +15,11 @@ describe('exhaustMap', () => {
   });
 
   it('does not start a second inner stream while the first is active', async () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const results: number[] = [];
     let projectCalls = 0;
 
-    const atom = pipe(
+    const output = pipe(
       subject,
       exhaustMap((value) => {
         projectCalls++;
@@ -28,7 +28,7 @@ describe('exhaustMap', () => {
     );
 
     const reader = (async () => {
-      for await (const value of iterate(atom)) {
+      for await (const value of iterate(output)) {
         results.push(value);
       }
     })();
@@ -38,7 +38,7 @@ describe('exhaustMap', () => {
     subject.next(2);
     subject.next(3);
     await wait(150);
-    subject.complete();
+    subject.dispose();
     await reader;
 
     expect(results).toEqual([1]);
@@ -46,11 +46,11 @@ describe('exhaustMap', () => {
   });
 
   it('restarts after the inner stream completes', async () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const results: number[] = [];
     let projectCalls = 0;
 
-    const atom = pipe(
+    const output = pipe(
       subject,
       exhaustMap((value) => {
         projectCalls++;
@@ -59,7 +59,7 @@ describe('exhaustMap', () => {
     );
 
     const reader = (async () => {
-      for await (const value of iterate(atom)) {
+      for await (const value of iterate(output)) {
         results.push(value);
       }
     })();
@@ -71,7 +71,7 @@ describe('exhaustMap', () => {
     await wait(60);
     subject.next(4);
     await wait(60);
-    subject.complete();
+    subject.dispose();
     await reader;
 
     expect(results).toEqual([1, 4]);
@@ -79,10 +79,10 @@ describe('exhaustMap', () => {
   });
 
   it('propagates inner errors and ignores later sources', async () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const results: number[] = [];
 
-    const atom = pipe(
+    const output = pipe(
       subject,
       exhaustMap((value) => {
         if (value === 1) {
@@ -97,7 +97,7 @@ describe('exhaustMap', () => {
 
     const errPromise = (async () => {
       try {
-        for await (const value of iterate(atom)) {
+        for await (const value of iterate(output)) {
           results.push(value);
         }
         return null;

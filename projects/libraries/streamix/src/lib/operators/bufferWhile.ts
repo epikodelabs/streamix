@@ -1,11 +1,4 @@
-import {
-    createOperator,
-    DONE,
-    isPromiseLike,
-    NEXT,
-    type MaybePromise,
-    type Operator
-} from "../abstractions";
+import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../abstractions";
 
 type BufferRecord<T> = {
   result: IteratorResult<T>;

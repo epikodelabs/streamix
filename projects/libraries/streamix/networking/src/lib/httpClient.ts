@@ -625,7 +625,7 @@ export const createHttpClient = (): HttpClient => {
         } catch (error) {
           data.error(error);
         } finally {
-          data.complete();
+          data.dispose();
         }
       })();
 

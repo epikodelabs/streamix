@@ -12,13 +12,13 @@ import { toAsyncIterable, type StreamInput } from './pipe';
  * @param condition A function that returns a boolean to determine which stream to use. It is called when the iif atom is subscribed to.
  * @param trueStream The source to use if the condition is `true`.
  * @param falseStream The source to use if the condition is `false`.
- * @returns {AtomBase<T | undefined>} A new atom that emits values from either `trueStream` or `falseStream` based on the condition.
+ * @returns {AtomBase<T>} A new atom that emits values from either `trueStream` or `falseStream` based on the condition.
  */
 export function iif<T = any>(
   condition: () => MaybePromise<boolean>,
   trueStream: StreamInput<T>,
   falseStream: StreamInput<T>
-): AtomBase<T | undefined> {
+): AtomBase<T> {
   return flow<T>(async function* generator(): AsyncGenerator<T, void, unknown> {
     // Evaluate condition lazily when the stream starts
     const conditionResult = condition();

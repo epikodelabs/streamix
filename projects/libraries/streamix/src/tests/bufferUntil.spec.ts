@@ -1,17 +1,16 @@
 import {
+  atom,
   bufferUntil,
-  createSubject,
   iterate,
   pipe,
-  type Subject,
 } from "@epikodelabs/streamix";
 
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("bufferUntil", () => {
   it("flushes buffered values whenever the notifier emits", async () => {
-    const source = createSubject<number>();
-    const notifier = createSubject<void>();
+    const source = atom<number>();
+    const notifier = atom<void>();
     const results: number[][] = [];
     const buffered = pipe(source, bufferUntil(notifier));
 
@@ -29,7 +28,7 @@ describe("bufferUntil", () => {
     notifier.next();
 
     source.next(4);
-    source.complete();
+    source.dispose();
 
     await waitTick();
     await completed;
@@ -41,8 +40,8 @@ describe("bufferUntil", () => {
   });
 
   it("does emit the final buffer", async () => {
-    const source = createSubject<number>();
-    const notifier = createSubject<void>();
+    const source = atom<number>();
+    const notifier = atom<void>();
     const results: number[][] = [];
     const buffered = pipe(source, bufferUntil(notifier));
 
@@ -53,7 +52,7 @@ describe("bufferUntil", () => {
     })();
 
     source.next(1);
-    source.complete();
+    source.dispose();
 
     await waitTick();
     await completed;
@@ -62,8 +61,8 @@ describe("bufferUntil", () => {
   });
 
   it("does not emit empty buffers when notifier emits with an empty buffer", async () => {
-    const source = createSubject<number>();
-    const notifier = createSubject<void>();
+    const source = atom<number>();
+    const notifier = atom<void>();
     const results: number[][] = [];
     const buffered = pipe(source, bufferUntil(notifier));
 
@@ -78,7 +77,7 @@ describe("bufferUntil", () => {
     source.next(1);
     notifier.next();
 
-    source.complete();
+    source.dispose();
 
     await waitTick();
     await completed;
@@ -87,8 +86,8 @@ describe("bufferUntil", () => {
   });
 
   it("propagates notifier errors", async () => {
-    const source = createSubject<number>();
-    const notifier = createSubject<void>();
+    const source = atom<number>();
+    const notifier = atom<void>();
     const buffered = pipe(source, bufferUntil(notifier));
 
     let error: any;
@@ -111,8 +110,8 @@ describe("bufferUntil", () => {
   });
 
   it("propagates source errors and cancels the notifier iterator", async () => {
-    const source = createSubject<number>();
-    const notifier = createSubject<void>();
+    const source = atom<number>();
+    const notifier = atom<void>();
 
     let returnCalls = 0;
     const originalAsyncIterator = (notifier as any)[Symbol.asyncIterator].bind(notifier);
@@ -151,8 +150,8 @@ describe("bufferUntil", () => {
   });
 
   it("cancels source and notifier iterators when downstream returns", async () => {
-    const source = createSubject<number>();
-    const notifier = createSubject<void>();
+    const source = atom<number>();
+    const notifier = atom<void>();
 
     let sourceReturnCalls = 0;
     const originalSourceAsyncIterator = (source as any)[Symbol.asyncIterator].bind(source);

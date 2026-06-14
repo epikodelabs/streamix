@@ -1,5 +1,17 @@
-import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator, type Stream } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../abstractions";
 import { fromAny } from '../converters';
+import type { AtomBase } from "../atoms/atom";
+
+/**
+ * Result type accepted from a fork handler. Includes stream/atom/iterable/promise
+ * and scalar values, but excludes iterables/atoms from the scalar branch so that
+ * TypeScript infers the emitted element type rather than the wrapper type.
+ */
+type ForkHandlerResult<R> =
+  | AtomBase<R>
+  | AsyncIterable<R>
+  | Iterable<R>
+  | MaybePromise<R>;
 
 /**
  * Represents a conditional branch for the `fork` operator.
@@ -25,14 +37,15 @@ export interface ForkOption<T = any, R = any> {
    * Handler function called for values that match the predicate.
    *
    * Can return:
-   * - a {@link Stream<R>}
+   * - an {@link AtomBase<R>}
+   * - an {@link AsyncIterable<R>}
+   * - an {@link Iterable<R>} (including arrays)
    * - a {@link MaybePromise<R>}
-   * - an array of `R`
    *
    * @param value The source value that matched the predicate.
-   * @returns A stream, value, promise, or array to be flattened and emitted.
+   * @returns A stream, atom, iterable, promise, or scalar to be flattened and emitted.
    */
-  handler: (value: T) => (Stream<R> | MaybePromise<R> | Array<R>);
+  handler: (value: T) => ForkHandlerResult<R>;
 }
 
 /**

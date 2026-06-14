@@ -1,12 +1,12 @@
-import { createSubject, type Stream } from '@epikodelabs/streamix';
+import { atom } from '@epikodelabs/streamix';
 import { unique } from '@epikodelabs/streamix/aggregates';
 
 describe('unique', () => {
-  let subject: ReturnType<typeof createSubject<any>>;
-  let source: Stream<any>;
+  let subject: ReturnType<typeof atom>;
+  let source: ReturnType<typeof atom>;
 
   beforeEach(() => {
-    subject = createSubject<any>();
+    subject = atom<any>();
     source = subject;
   });
 
@@ -25,7 +25,7 @@ describe('unique', () => {
     subject.next(2); // Duplicate, should not emit
     subject.next(3);
     subject.next(1); // Duplicate, should not emit
-    subject.complete();
+    subject.dispose();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([1, 2, 3]);
@@ -45,7 +45,7 @@ describe('unique', () => {
     subject.next({ key: 2, value: 'b' });
     subject.next({ key: 1, value: 'c' }); // Same key, should not emit
     subject.next({ key: 3, value: 'd' });
-    subject.complete();
+    subject.dispose();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([
@@ -69,7 +69,7 @@ describe('unique', () => {
     subject.next({ value: 'a' }); // Duplicate, should not emit
     subject.next({ value: 'b' });
     subject.next({ value: 'c' });
-    subject.complete();
+    subject.dispose();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([
@@ -90,7 +90,7 @@ describe('unique', () => {
       }
     })();
 
-    subject.complete();
+    subject.dispose();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([]); // No values emitted
@@ -130,7 +130,7 @@ describe('unique', () => {
     subject.next({ id: 2, name: 'Jane' });
     subject.next({ id: 1, name: 'John' }); // Duplicate, should not emit
     subject.next({ id: 3, name: 'Jake' });
-    subject.complete();
+    subject.dispose();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([

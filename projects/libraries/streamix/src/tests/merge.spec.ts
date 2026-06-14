@@ -1,4 +1,4 @@
-import { createStream, from, iterate, merge } from '@epikodelabs/streamix';
+import { createStream, from, iterate, merge, atom } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 

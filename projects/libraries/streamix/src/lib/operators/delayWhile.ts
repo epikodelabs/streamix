@@ -1,8 +1,4 @@
-import {
-    createPushOperator,
-    isPromiseLike,
-    type MaybePromise,
-} from '../abstractions';
+import { createPushOperator, isPromiseLike, type MaybePromise } from "../abstractions";
 
 /**
  * Buffers values while a predicate returns `true` and releases them once the predicate flips to `false`.
@@ -58,7 +54,7 @@ export const delayWhile = <T = any>(
       } catch (err) {
         output.error(err);
       } finally {
-        if (!output.completed()) output.complete();
+        if (!output.disposed) output.dispose();
       }
     })();
 

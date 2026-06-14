@@ -1,4 +1,4 @@
-import { createSubject, from, of, take, takeUntil, throwError, timer } from '@epikodelabs/streamix';
+import { from, of, take, takeUntil, throwError, timer } from '@epikodelabs/streamix';
 
 describe('takeUntil', () => {
   it('should take emissions until notifier emits', (done) => {
@@ -131,8 +131,8 @@ describe('takeUntil', () => {
     const notifierError = new Error('Notifier failure');
 
     // Source: a controllable subject instead of infinite timer
-    const source = createSubject<number>();
-    const notifier = createSubject<void>();
+    const source = atom<number>();
+    const notifier = atom<void>();
 
     const takenUntilStream = source.pipe(takeUntil(notifier));
 
@@ -160,7 +160,7 @@ describe('takeUntil', () => {
   // Since we cannot easily spy on internal unsubscriptions, this test checks the behavior
   // that implies correct unsubscription: the source continues *if* the operator didn't stop it.
   it('should ensure the source stream is unsubscribed from after notifier emits', (done) => {
-    const sourceSubject = createSubject<number>();
+    const sourceSubject = atom<number>();
     const notifier = timer(50).pipe(take(1));
 
     const takenUntilStream = sourceSubject.pipe(takeUntil(notifier));
@@ -176,7 +176,7 @@ describe('takeUntil', () => {
         // At this point (after 50ms), the output stream should be completed.
         // We now emit a value on the source *after* completion.
         sourceSubject.next(99); // This should be ignored by the operator.
-        sourceSubject.complete();
+        sourceSubject.dispose();
 
         // Give a moment for any potential delayed propagation to happen
         setTimeout(() => {
@@ -201,8 +201,8 @@ describe('takeUntil', () => {
   });
 
   it('should emit the current value before propagating a notifier error', async () => {
-    const source = createSubject<number>();
-    const notifier = createSubject<never>();
+    const source = atom<number>();
+    const notifier = atom<never>();
     const taken = source.pipe(takeUntil(notifier));
 
     const testError = new Error('Notifier error after value');

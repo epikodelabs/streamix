@@ -1,14 +1,14 @@
-import { createSubject, type Stream } from '@epikodelabs/streamix';
+import { atom } from '@epikodelabs/streamix';
 import { count } from '@epikodelabs/streamix/aggregates';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe('count', () => {
-  let subject: ReturnType<typeof createSubject<number>>;
-  let source: Stream<number>;
+  let subject: ReturnType<typeof atom>;
+  let source: ReturnType<typeof atom>;
 
   beforeEach(() => {
-    subject = createSubject<number>();
+    subject = atom<number>();
     source = subject;
   });
 
@@ -25,7 +25,7 @@ describe('count', () => {
     subject.next(1);
     subject.next(2);
     subject.next(3);
-    subject.complete();
+    subject.dispose();
     await settle();
 
     expect(results).toEqual([3]);
@@ -41,7 +41,7 @@ describe('count', () => {
       }
     })();
 
-    subject.complete();
+    subject.dispose();
     await settle();
 
     expect(results).toEqual([0]);

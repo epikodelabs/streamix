@@ -1,18 +1,12 @@
-import {
-  bufferCount,
-  createSubject,
-  iterate,
-  pipe,
-  type Subject,
-} from "@epikodelabs/streamix";
+import { atom, bufferCount, iterate, pipe, type Atom } from '@epikodelabs/streamix';
 
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("bufferCount", () => {
-  let source: Subject<number>;
+  let source: ReturnType<typeof atom>;
 
   beforeEach(() => {
-    source = createSubject<number>();
+    source = atom<number>();
   });
 
   it("should emit buffers of the specified size", async () => {
@@ -31,7 +25,7 @@ describe("bufferCount", () => {
     source.next(4);
     source.next(5);
     source.next(6); // Emits [4, 5, 6]
-    source.complete();
+    source.dispose();
     await waitTick();
 
     await completed;
@@ -50,7 +44,7 @@ describe("bufferCount", () => {
 
     source.next(1);
     source.next(2);
-    source.complete(); // Emits [1, 2]
+    source.dispose(); // Emits [1, 2]
     await waitTick();
 
     await completed;
@@ -88,7 +82,7 @@ describe("bufferCount", () => {
       }
     })();
 
-    source.complete(); // Should not emit anything
+    source.dispose(); // Should not emit anything
     await waitTick();
 
     await completed;
@@ -116,7 +110,7 @@ describe("bufferCount", () => {
     source.next(2);
     source.next(3);
     source.next(4);
-    source.complete();
+    source.dispose();
 
     await waitTick();
 
@@ -136,7 +130,7 @@ describe("bufferCount", () => {
 
     source.next(1);
     source.next(2);
-    source.complete();
+    source.dispose();
     await waitTick();
 
     await completed;
@@ -185,7 +179,7 @@ describe("bufferCount", () => {
   });
 
   it("should work with different data types", async () => {
-    const objectSubject = createSubject<{ id: number; name: string }>();
+    const objectSubject: Atom = atom<atom>();
     const buffered = pipe(objectSubject, bufferCount(2));
     const results: { id: number; name: string }[][] = [];
 
@@ -198,7 +192,7 @@ describe("bufferCount", () => {
     objectSubject.next({ id: 1, name: "Alice" });
     objectSubject.next({ id: 2, name: "Bob" });
     objectSubject.next({ id: 3, name: "Charlie" });
-    objectSubject.complete();
+    objectSubject.dispose();
     await waitTick();
 
     await completed;
@@ -209,7 +203,7 @@ describe("bufferCount", () => {
   });
 
   it("should handle null and undefined values in buffers", async () => {
-    const nullableSubject = createSubject<number | null | undefined>();
+    const nullableSubject: Atom = atom<atom>();
     const buffered = pipe(nullableSubject, bufferCount(3));
     const results: (number | null | undefined)[][] = [];
 
@@ -223,7 +217,7 @@ describe("bufferCount", () => {
     nullableSubject.next(null);
     nullableSubject.next(undefined);
     nullableSubject.next(2);
-    nullableSubject.complete();
+    nullableSubject.dispose();
     await waitTick();
 
     await completed;
@@ -244,7 +238,7 @@ describe("bufferCount", () => {
     source.next(2);
     source.next(3);
     source.next(4);
-    source.complete();
+    source.dispose();
     await waitTick();
 
     await completed;
@@ -264,7 +258,7 @@ describe("bufferCount", () => {
     source.next(1);
     source.next(2);
     source.next(3);
-    source.complete();
+    source.dispose();
     await waitTick();
 
     await completed;
@@ -284,7 +278,7 @@ describe("bufferCount", () => {
     for (let i = 1; i <= 8; i++) {
       source.next(i);
     }
-    source.complete();
+    source.dispose();
     await waitTick();
 
     await completed;
@@ -297,7 +291,7 @@ describe("bufferCount", () => {
 
     source.next(1);
     source.next(2);
-    source.complete();
+    source.dispose();
 
     const result1 = await it.next();
     expect(result1.done).toBe(false);

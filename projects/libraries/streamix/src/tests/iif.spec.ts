@@ -1,4 +1,4 @@
-import { from, iif } from '@epikodelabs/streamix';
+import { from, iif, atom } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 

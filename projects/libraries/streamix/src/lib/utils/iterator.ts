@@ -3,12 +3,12 @@ import { DONE } from "../abstractions";
 import type { Receiver, StrictReceiver, Subscription } from "../abstractions";
 import { isPromiseLike } from "../abstractions";
 import {
-  AsyncIteratorState,
-  asyncPull,
-  pushComplete,
-  pushError,
-  pushValue,
-  syncPull
+    AsyncIteratorState,
+    asyncPull,
+    pushComplete,
+    pushError,
+    pushValue,
+    syncPull
 } from "./helpers";
 
 export type AsyncIteratorYieldResult<T> = { value: T; done?: false };
@@ -70,7 +70,7 @@ export function createAsyncIterator<T>(opts: {
           error(err: any) {
             pushError(state, iterator, err, iterator.__onPush);
           },
-          get completed() {
+          get disposed() {
             return state.completed;
           }
         };

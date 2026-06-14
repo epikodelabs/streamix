@@ -1,11 +1,11 @@
-import { createSubject, iterate, pipe, select } from '@epikodelabs/streamix';
+import { atom, iterate, pipe, select } from '@epikodelabs/streamix';
 
 describe('select', () => {
-  let subject: ReturnType<typeof createSubject>;
-  let source: ReturnType<typeof createSubject>;
+  let subject: ReturnType<typeof atom>;
+  let source: ReturnType<typeof atom>;
 
   beforeEach(() => {
-    subject = createSubject();
+    subject = atom();
     source = subject;
   });
 
@@ -25,7 +25,7 @@ describe('select', () => {
     subject.next(3);
     subject.next(4);
     subject.next(5);
-    subject.complete();
+    subject.dispose();
 
     await done;
 
@@ -45,7 +45,7 @@ describe('select', () => {
 
     subject.next(1);
     subject.next(2);
-    subject.complete();
+    subject.dispose();
     await done;
 
     expect(results).toEqual([]); // No values should be emitted
@@ -64,7 +64,7 @@ describe('select', () => {
 
     subject.next(1);
     subject.next(2);
-    subject.complete();
+    subject.dispose();
     await done;
 
     expect(results).toEqual([]); // No values should be emitted
@@ -84,7 +84,7 @@ describe('select', () => {
     subject.next(1);
     subject.next(2);
     subject.next(3);
-    subject.complete();
+    subject.dispose();
     await done;
 
     expect(results).toEqual([1, 3]); // Only values at indexes 0 and 2 should be emitted

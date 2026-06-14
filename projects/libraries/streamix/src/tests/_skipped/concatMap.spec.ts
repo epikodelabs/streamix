@@ -1,4 +1,4 @@
-import { concatMap, createStream, createSubject, from, of, type Stream } from '@epikodelabs/streamix';
+import { concatMap, createStream, from, of, type Stream } from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
 
@@ -89,17 +89,17 @@ describe('concatMap', () => {
   });
 
   it('edge: should queue rapid successive emissions and process sequentially', (done) => {
-    const source = createSubject<number>();
+    const source = atom<number>();
     const results: number[] = [];
     const order: string[] = [];
 
     const concatenated = source.pipe(
       concatMap((val) => {
         order.push(`start-${val}`);
-        const inner = createSubject<number>();
+        const inner = atom<number>();
         setTimeout(() => {
           inner.next(val * 10);
-          inner.complete();
+          inner.dispose();
           order.push(`end-${val}`);
         }, (4 - val) * 20); // Reverse timing
         return inner;
@@ -123,11 +123,11 @@ describe('concatMap', () => {
     source.next(1);
     source.next(2);
     source.next(3);
-    source.complete();
+    source.dispose();
   });
 
   it('edge: should handle mix of sync and async inners in order', (done) => {
-    const source = createSubject<number>();
+    const source = atom<number>();
     const results: number[] = [];
 
     const concatenated = source.pipe(
@@ -155,11 +155,11 @@ describe('concatMap', () => {
     source.next(2); // async
     source.next(3); // sync
     source.next(4); // async
-    source.complete();
+    source.dispose();
   });
 
   it('edge: should handle rapid emissions with empty inners', (done) => {
-    const source = createSubject<number>();
+    const source = atom<number>();
     const results: number[] = [];
 
     const concatenated = source.pipe(
@@ -182,22 +182,22 @@ describe('concatMap', () => {
     source.next(1);
     source.next(2); // empty
     source.next(3);
-    source.complete();
+    source.dispose();
   });
 
   it('edge: should stop on first inner error in rapid emissions', (done) => {
-    const source = createSubject<number>();
+    const source = atom<number>();
     const results: number[] = [];
 
     const concatenated = source.pipe(
       concatMap((val) => {
-        const inner = createSubject<number>();
+        const inner = atom<number>();
         setTimeout(() => {
           if (val === 2) {
             inner.error(new Error('Error at 2'));
           } else {
             inner.next(val * 10);
-            inner.complete();
+            inner.dispose();
           }
         }, 20);
         return inner;
@@ -216,7 +216,7 @@ describe('concatMap', () => {
     source.next(1);
     source.next(2);
     source.next(3); // Should never process
-    source.complete();
+    source.dispose();
   });
 });
 

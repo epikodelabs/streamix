@@ -68,13 +68,13 @@ describe('createBehaviorSubject', () => {
     });
 
     completeSubject.next(1);
-    completeSubject.complete();
+    completeSubject.dispose();
     completeSubject.next(2);
     await delay();
 
     expect(delivered).toEqual([0, 1]);
     expect(completions).toBe(1);
-    expect(completeSubject.completed()).toBeTrue();
+    expect(completeSubject.disposed).toBeTrue();
 
     let lateComplete = false;
     completeSubject.subscribe({
@@ -85,7 +85,7 @@ describe('createBehaviorSubject', () => {
     expect(lateComplete).toBeTrue();
 
     expect(() => completeSubject.error(new Error('ignored'))).not.toThrow();
-    expect(completeSubject.completed()).toBeTrue();
+    expect(completeSubject.disposed).toBeTrue();
 
     const errorSubject = createBehaviorSubject<number>(0);
     const errorValues: number[] = [];
@@ -103,7 +103,7 @@ describe('createBehaviorSubject', () => {
     expect(errorValues).toEqual([0, 1]);
     expect(caughtError).toEqual(jasmine.any(Error));
     expect(caughtError!.message).toBe('boom');
-    expect(errorSubject.completed()).toBeTrue();
+    expect(errorSubject.disposed).toBeTrue();
 
     let lateError: any | null = null;
     errorSubject.subscribe({
@@ -125,7 +125,7 @@ describe('createBehaviorSubject', () => {
     let completionCount = 0;
     afterErrorSubject.subscribe({ complete: () => completionCount++ });
     afterErrorSubject.error(new Error('boom'));
-    afterErrorSubject.complete();
+    afterErrorSubject.dispose();
     await delay();
     expect(completionCount).toBe(0);
   });
@@ -137,7 +137,7 @@ describe('createBehaviorSubject', () => {
     expect(getterSubject.value).toBe(1);
     getterSubject.next(2);
     expect(getterSubject.value).toBe(2);
-    getterSubject.complete();
+    getterSubject.dispose();
     expect(getterSubject.value).toBe(2);
 
     const descriptor = Object.getOwnPropertyDescriptor(getterSubject, 'value');
@@ -173,7 +173,7 @@ describe('createBehaviorSubject', () => {
     });
     observerSubject.next(1);
     observerSubject.next(2);
-    observerSubject.complete();
+    observerSubject.dispose();
     await delay();
     expect(observerEvents).toEqual(['next:0', 'next:1', 'next:2', 'complete']);
 
@@ -181,7 +181,7 @@ describe('createBehaviorSubject', () => {
     const callbackValues: number[] = [];
     callbackSubject.subscribe(v => callbackValues.push(v));
     callbackSubject.next(1);
-    callbackSubject.complete();
+    callbackSubject.dispose();
     await delay();
     expect(callbackValues).toEqual([0, 1]);
 
@@ -192,7 +192,7 @@ describe('createBehaviorSubject', () => {
       complete: () => partialValues.push(-1)
     });
     partialSubject.next(1);
-    partialSubject.complete();
+    partialSubject.dispose();
     await delay();
     expect(partialValues).toEqual([0, 1, -1]);
 
@@ -217,7 +217,7 @@ describe('createBehaviorSubject', () => {
       }
     })();
     iteratorCompleteSubject.next(1);
-    iteratorCompleteSubject.complete();
+    iteratorCompleteSubject.dispose();
     await iteratorRunner2;
     expect(iterValues2).toEqual([0, 1]);
 

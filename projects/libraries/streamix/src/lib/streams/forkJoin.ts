@@ -24,7 +24,7 @@ import { toAsyncIterable, type StreamInput } from "./pipe";
  */
 export function forkJoin<R extends readonly unknown[] = any[]>(
   ...sources: { [K in keyof R]: StreamInput<R[K]> }
-): AtomBase<R | undefined>;
+): AtomBase<R >;
 
 /**
  * Overload that accepts an array/tuple of sources.
@@ -35,7 +35,7 @@ export function forkJoin<R extends readonly unknown[] = any[]>(
  */
 export function forkJoin<R extends readonly unknown[] = any[]>(
   sources: { [K in keyof R]: StreamInput<R[K]> }
-): AtomBase<R | undefined>;
+): AtomBase<R >;
 
 /**
  * Implementation signature.
@@ -44,8 +44,8 @@ export function forkJoin<R extends readonly unknown[] = any[]>(
  */
 export function forkJoin<R extends readonly unknown[] = any[]>(
   ...sources: any[]
-): AtomBase<R | undefined> {
-  return flow<R | undefined>(async function* () {
+): AtomBase<R > {
+  return flow<R >(async function* () {
     const normalizedSources = sources.length === 1 && Array.isArray(sources[0]) ? sources[0] : sources;
 
     const results = new Array(normalizedSources.length);

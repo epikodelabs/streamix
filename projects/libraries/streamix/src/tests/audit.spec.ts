@@ -1,12 +1,10 @@
-import { audit, createSubject, iterate, pipe } from '@epikodelabs/streamix';
-
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+import { atom, audit, iterate, pipe, type Atom } from '@epikodelabs/streamix';
 
 describe('audit', () => {
-  let input: ReturnType<typeof createSubject<number>>;
+  let input: Atom;
 
   beforeEach(() => {
-    input = createSubject<number>();
+    input = atom<number>();
   });
 
   it('should emit the latest value after a period of inactivity and on completion', async () => {
@@ -24,7 +22,7 @@ describe('audit', () => {
     setTimeout(() => input.next(3), 150);
     setTimeout(() => input.next(4), 200);
     setTimeout(() => input.next(5), 300);
-    setTimeout(() => input.complete(), 400);
+    setTimeout(() => input.dispose(), 400);
 
     await reader;
     expect(receivedValues).toEqual([2, 4, 5]);
@@ -42,7 +40,7 @@ describe('audit', () => {
       completed = true;
     })();
 
-    input.complete();
+    input.dispose();
 
     await reader;
     expect(completed).toBeTrue();
@@ -62,7 +60,7 @@ describe('audit', () => {
     input.next(1);
     setTimeout(() => input.next(2), 50);
     setTimeout(() => input.next(3), 150);
-    setTimeout(() => input.complete(), 175);
+    setTimeout(() => input.dispose(), 175);
 
     await reader;
     expect(receivedValues).toEqual([2, 3]);
@@ -79,7 +77,7 @@ describe('audit', () => {
     })();
 
     input.next(1);
-    setTimeout(() => input.complete(), 50);
+    setTimeout(() => input.dispose(), 50);
 
     await reader;
     expect(receivedValues).toEqual([1]);

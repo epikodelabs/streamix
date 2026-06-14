@@ -1,4 +1,4 @@
-import { createSubject, delay, EMPTY, filter, from, map, mergeMap, of, take, timer } from '@epikodelabs/streamix';
+import { delay, EMPTY, filter, from, map, mergeMap, of, take, timer } from '@epikodelabs/streamix';
 
 describe('mergeMap', () => {
   it('should merge emissions from inner streams correctly', (done) => {
@@ -174,7 +174,7 @@ describe('mergeMap', () => {
   });
 
   it('edge: should run all rapid emissions concurrently', (done) => {
-    const source = createSubject<number>();
+    const source = atom<number>();
     const results: number[] = [];
     const startTimes: number[] = [];
 
@@ -202,11 +202,11 @@ describe('mergeMap', () => {
     source.next(1);
     source.next(2);
     source.next(3);
-    source.complete();
+    source.dispose();
   });
 
   it('edge: should handle mix of sync and async inners concurrently', (done) => {
-    const source = createSubject<number>();
+    const source = atom<number>();
     const results: number[] = [];
 
     const merged = source.pipe(
@@ -233,11 +233,11 @@ describe('mergeMap', () => {
     source.next(2); // sync
     source.next(3); // async
     source.next(4); // sync
-    source.complete();
+    source.dispose();
   });
 
   it('edge: should continue other inners when one errors', (done) => {
-    const source = createSubject<number>();
+    const source = atom<number>();
     const results: number[] = [];
 
     const merged = source.pipe(
@@ -267,11 +267,11 @@ describe('mergeMap', () => {
     source.next(1);
     source.next(2);
     source.next(3);
-    source.complete();
+    source.dispose();
   });
 
   it('edge: should handle rapid emissions with varying inner durations', (done) => {
-    const source = createSubject<number>();
+    const source = atom<number>();
     const results: number[] = [];
 
     const merged = source.pipe(
@@ -295,11 +295,11 @@ describe('mergeMap', () => {
     source.next(1); // 100ms
     source.next(2); // 50ms
     source.next(3); // 10ms
-    source.complete();
+    source.dispose();
   });
 
   it('edge: should handle unsubscribe with multiple active inners', (done) => {
-    const source = createSubject<number>();
+    const source = atom<number>();
     const results: number[] = [];
     const completions: number[] = [];
 

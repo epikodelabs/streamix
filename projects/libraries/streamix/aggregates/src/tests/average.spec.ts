@@ -1,14 +1,14 @@
-import { createSubject, type Stream } from '@epikodelabs/streamix';
+import { atom } from '@epikodelabs/streamix';
 import { average } from '@epikodelabs/streamix/aggregates';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe('average', () => {
-  let subject: ReturnType<typeof createSubject<any>>;
-  let source: Stream<any>;
+  let subject: ReturnType<typeof atom>;
+  let source: ReturnType<typeof atom>;
 
   beforeEach(() => {
-    subject = createSubject<number>();
+    subject = atom<number>();
     source = subject;
   });
 
@@ -25,7 +25,7 @@ describe('average', () => {
     subject.next(1);
     subject.next(5);
     subject.next(4);
-    subject.complete();
+    subject.dispose();
     await settle();
 
     expect(results).toEqual([10 / 3]);
@@ -45,7 +45,7 @@ describe('average', () => {
 
     subject.next({ score: 1 });
     subject.next({ score: 3 });
-    subject.complete();
+    subject.dispose();
     await settle();
 
     expect(results).toEqual([4]);
@@ -61,7 +61,7 @@ describe('average', () => {
       }
     })();
 
-    subject.complete();
+    subject.dispose();
     await settle();
 
     expect(results).toEqual([0]);

@@ -1,10 +1,7 @@
-import type { MaybePromise, Operator, Stream } from "../abstractions";
-import {
-  createOperator,
-  DONE,
-  isPromiseLike,
-} from "../abstractions";
+import type { MaybePromise, Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike } from "../abstractions";
 import { fromAny } from "../converters";
+import type { StreamInput } from "../streams/pipe";
 import { createAsyncPushable } from "../utils";
 
 /**
@@ -31,7 +28,7 @@ import { createAsyncPushable } from "../utils";
  * ```
  */
 export function switchMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => StreamInput<R> | MaybePromise<R> | Array<R>
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source) {
     const output = createAsyncPushable<R>();
@@ -49,12 +46,12 @@ export function switchMap<T = any, R = any>(
      */
     const checkComplete = () => {
       if (inputCompleted && !currentInner) {
-        output.complete();
+        output.dispose();
       }
     };
 
     const subscribeToInner = (
-      innerStream: Stream<R>,
+      innerStream: StreamInput<R>,
       token: object
     ) => {
       // Cancel the previous inner immediately so sync inner streams can't
@@ -64,7 +61,7 @@ export function switchMap<T = any, R = any>(
         Promise.resolve(prev.it.return?.()).catch(() => {});
       }
 
-      const it = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
+      const it = fromAny(innerStream as any)[Symbol.asyncIterator]() as AsyncIterator<R>;
       currentInner = { token, it };
 
       void (async () => {

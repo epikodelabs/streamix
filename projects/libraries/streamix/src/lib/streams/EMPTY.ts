@@ -4,9 +4,9 @@ import { flow, type AtomBase } from '../atoms/atom';
  * Creates an empty atom that emits no values and completes immediately.
  *
  * @template T The type of the atom's values (will never be emitted).
- * @returns {AtomBase<T | undefined>} An empty atom.
+ * @returns {AtomBase<T>} An empty atom.
  */
-export const empty = <T = any>(): AtomBase<T | undefined> => {
+export const empty = <T = any>(): AtomBase<T> => {
   return flow<T>(async function* () {});
 };
 

@@ -20,7 +20,7 @@ import { flow, type AtomBase } from "../atoms/atom";
  */
 export function fromPromise<T>(
   input: MaybePromise<T> | ((signal?: AbortSignal) => MaybePromise<T>)
-): AtomBase<T | undefined> {
+): AtomBase<T> {
   return flow<T>(async function* () {
     const controller = new AbortController();
 

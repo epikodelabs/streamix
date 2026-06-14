@@ -304,7 +304,7 @@ describe('createReplaySubject', () => {
     });
     completeSubject.next(1);
     completeSubject.next(2);
-    completeSubject.complete();
+    completeSubject.dispose();
     await waitFor(() => completion.includes('complete'));
     expect(completion).toEqual([1, 2, 'complete']);
     completeSubject.next(3);
@@ -328,7 +328,7 @@ describe('createReplaySubject', () => {
     await shortDelay();
     expect(errors.length).toBe(1);
     expect(errors[0].message).toBe('failure');
-    expect(errorSubject.completed()).toBeTrue();
+    expect(errorSubject.disposed).toBeTrue();
 
     let lateError: any | null = null;
     errorSubject.subscribe({
@@ -345,7 +345,7 @@ describe('createReplaySubject', () => {
       error: () => {}
     });
     afterErrorSubject.error(new Error('boom'));
-    afterErrorSubject.complete();
+    afterErrorSubject.dispose();
     await shortDelay();
     expect(completeAfterError).toBe(0);
   });
@@ -358,9 +358,9 @@ describe('createReplaySubject', () => {
     getter.next(2);
     getter.next(3);
     expect(getter.value).toBe(3);
-    getter.complete();
+    getter.dispose();
     expect(getter.value).toBe(3);
-    expect(getter.completed()).toBeTrue();
+    expect(getter.disposed).toBeTrue();
 
     const queryBuilder = createReplaySubject<number>(2);
     queryBuilder.next(5);
@@ -394,7 +394,7 @@ describe('createReplaySubject', () => {
       }
     })();
     iteratorCompleteSubject.next(1);
-    iteratorCompleteSubject.complete();
+    iteratorCompleteSubject.dispose();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(iteratorCompleteValues).toEqual([1]);
 
@@ -407,7 +407,7 @@ describe('createReplaySubject', () => {
       complete: () => observerEvents.push('complete')
     });
     observerSubject.next(2);
-    observerSubject.complete();
+    observerSubject.dispose();
     await waitFor(() => observerEvents.length === 3);
     expect(observerEvents).toEqual(['next:1', 'next:2', 'complete']);
 
@@ -446,10 +446,10 @@ describe('createReplaySubject', () => {
     unionSub.unsubscribe();
 
     const completedIndicator = createReplaySubject<number>(2);
-    expect(completedIndicator.completed()).toBeFalse();
+    expect(completedIndicator.disposed).toBeFalse();
     completedIndicator.error(new Error('done'));
     await shortDelay();
-    expect(completedIndicator.completed()).toBeTrue();
+    expect(completedIndicator.disposed).toBeTrue();
   });
 
   it('manages lifecycle, asynchronous replay, and performance pressure', async () => {
@@ -562,7 +562,7 @@ describe('createReplaySubject', () => {
           completingValues.push(v);
         }
         if (v === 1) {
-          this.complete();
+          this.dispose();
         }
       },
       complete() {

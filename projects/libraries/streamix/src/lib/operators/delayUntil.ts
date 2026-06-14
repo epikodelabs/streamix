@@ -2,9 +2,9 @@ import {
   createOperator,
   DONE,
   NEXT,
-  type Operator,
-  type Stream
+  type Operator
 } from "../abstractions";
+import { AtomBase } from "../atoms";
 import { fromAny } from "../converters";
 import { createAsyncCoordinator } from "../utils";
 
@@ -36,7 +36,7 @@ import { createAsyncCoordinator } from "../utils";
  * @returns An `Operator<T, T>` that can be used in a stream pipeline.
  */
 export function delayUntil<T = any, N = any>(
-  notifier: Stream<N> | Promise<N>
+  notifier: AtomBase<N> | Promise<N>
 ): Operator<T, T> {
   return createOperator<T, T>("delayUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();

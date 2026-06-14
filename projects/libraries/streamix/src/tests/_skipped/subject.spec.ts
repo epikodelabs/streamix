@@ -42,7 +42,7 @@ describe('createSubject', () => {
     sub.unsubscribe();
 
     subject.next(1);
-    subject.complete();
+    subject.dispose();
 
     await flushMicrotasks();
     expect(values).toEqual([]);
@@ -67,7 +67,7 @@ describe('createSubject', () => {
 
     await flushMicrotasks();
     sub1.unsubscribe();
-    subject.complete();
+    subject.dispose();
     
     await flushMicrotasks();
 
@@ -93,7 +93,7 @@ describe('createSubject', () => {
     });
 
     subject.next('value2');
-    subject.complete();
+    subject.dispose();
     
     await flushMicrotasks();
 
@@ -116,7 +116,7 @@ describe('createSubject', () => {
 
     subject.next('value1');
     subject.next('value2');
-    subject.complete();
+    subject.dispose();
     
     await flushMicrotasks();
 
@@ -137,7 +137,7 @@ describe('createSubject', () => {
     });
 
     subject.next('value1');
-    subject.complete();
+    subject.dispose();
     subject.next('value2');
     
     await flushMicrotasks();
@@ -157,7 +157,7 @@ describe('createSubject', () => {
     });
 
     for (let n = 0; n < 1000; n++) subject.next(n);
-    subject.complete();
+    subject.dispose();
     
     await flushMicrotasks();
 
@@ -176,7 +176,7 @@ describe('createSubject', () => {
     });
 
     for (let i = 0; i < 1000; i++) subject.next(i);
-    subject.complete();
+    subject.dispose();
 
     await flushMicrotasks();
     expect(completed).toBeTrue();
@@ -199,7 +199,7 @@ describe('createSubject', () => {
 
     subject.next('value1');
     subject.next('value2');
-    subject.complete();
+    subject.dispose();
     
     await flushMicrotasks();
 
@@ -226,7 +226,7 @@ describe('createSubject', () => {
     await flushMicrotasks();
     sub1.unsubscribe();
     subject.next('value2');
-    subject.complete();
+    subject.dispose();
     
     await flushMicrotasks();
 
@@ -253,7 +253,7 @@ describe('createSubject', () => {
     subject.next();
     subject.next(undefined);
     subject.next();
-    subject.complete();
+    subject.dispose();
     
     await flushMicrotasks();
 
@@ -263,7 +263,7 @@ describe('createSubject', () => {
 
   it('late subscribers complete immediately if subject already completed', async () => {
     const subject = createSubject<number>();
-    subject.complete();
+    subject.dispose();
 
     await flushMicrotasks();
 
@@ -308,17 +308,17 @@ describe('createSubject', () => {
     const subject = createSubject<string>();
 
     expect(subject.value).toBeUndefined();
-    expect(subject.completed()).toBeFalse();
+    expect(subject.disposed).toBeFalse();
 
     subject.next('alpha');
     await flushMicrotasks();
     expect(subject.value).toBe('alpha');
-    expect(subject.completed()).toBeFalse();
+    expect(subject.disposed).toBeFalse();
 
-    subject.complete();
+    subject.dispose();
     await flushMicrotasks();
 
-    expect(subject.completed()).toBeTrue();
+    expect(subject.disposed).toBeTrue();
     expect(subject.value).toBe('alpha');
   });
 
@@ -338,10 +338,10 @@ describe('createSubject', () => {
     const subscription = piped.subscribe();
 
     subject.next(7);
-    subject.complete();
+    subject.dispose();
     await flushMicrotasks();
 
-    expect(subject.completed()).toBeTrue();
+    expect(subject.disposed).toBeTrue();
     expect(subject.value).toBe(7);
     subscription.unsubscribe();
   });
@@ -366,7 +366,7 @@ describe('createSubject', () => {
       ['next', 1],
       ['error', 'boom']
     ]);
-    expect(subject.completed()).toBeTrue();
+    expect(subject.disposed).toBeTrue();
     expect(subject.value).toBe(1);
   });
 
@@ -378,8 +378,8 @@ describe('createSubject', () => {
       complete: () => completes++
     });
 
-    subject.complete();
-    subject.complete();
+    subject.dispose();
+    subject.dispose();
 
     await flushMicrotasks();
     expect(completes).toBe(1);
@@ -407,12 +407,12 @@ describe('createSubject', () => {
     });
 
     subject.next(1);
-    subject.complete();
+    subject.dispose();
 
     await subscription.unsubscribe();
     await flushMicrotasks();
 
-    expect(subject.completed()).toBeTrue();
+    expect(subject.disposed).toBeTrue();
   });
 
   it('runs cleanup when unsubscribing while active', async () => {
@@ -436,7 +436,7 @@ describe('createSubject', () => {
     subject.next(1);
     subject.next(2);
     subject.next(3);
-    subject.complete();
+    subject.dispose();
 
     const result = await promise;
     expect(result).toEqual([1, 2, 3]);
@@ -446,7 +446,7 @@ describe('createSubject', () => {
     const subject = createSubject<number>();
     const promise = subject.toArray();
 
-    subject.complete();
+    subject.dispose();
 
     const result = await promise;
     expect(result).toEqual([]);

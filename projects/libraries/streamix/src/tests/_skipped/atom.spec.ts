@@ -1,19 +1,17 @@
-import { createSubject } from '@epikodelabs/streamix';
-import { asyncAtom, atom, derived, flow } from '../lib/atoms/atom';
+import { atom, derived, flow } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 describe('flow', () => {
   it('should hold an initial value', () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const a = flow(subject, 42);
-    expect(a.get()).toBe(42);
     expect(a.value).toBe(42);
     a.dispose();
   });
 
   it('should update when the stream emits', async () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const a = flow(subject, 0);
     const values: number[] = [];
     a.subscribe(v => values.push(v));
@@ -25,12 +23,12 @@ describe('flow', () => {
     await delay();
 
     expect(values).toEqual([1, 2]);
-    expect(a.get()).toBe(2);
+    expect(a.value).toBe(2);
     a.dispose();
   });
 
   it('should track prior', async () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const a = flow(subject, 10);
     expect(a.prior).toBe(10);
 
@@ -48,7 +46,7 @@ describe('flow', () => {
   });
 
   it('should not emit duplicate values', async () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const a = flow(subject, 0);
     const values: number[] = [];
     a.subscribe(v => values.push(v));
@@ -64,14 +62,14 @@ describe('flow', () => {
   });
 
   it('should throw after disposal', () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const a = flow(subject, 0);
     a.dispose();
-    expect(() => a.get()).toThrowError(/disposed/);
+    expect(() => a.value).toThrowError(/disposed/);
   });
 
   it('should clean up stream subscription on dispose', async () => {
-    const subject = createSubject<number>();
+    const subject = atom<number>();
     const a = flow(subject, 0);
     a.dispose();
     expect(() => subject.next(1)).not.toThrow();
@@ -86,17 +84,17 @@ describe('atom', () => {
     a.dispose();
   });
 
-  it('should update via set', () => {
+  it('should update via next', () => {
     const a = atom(0);
     const values: number[] = [];
     a.subscribe(v => values.push(v));
 
-    a.set(10);
+    a.next(10);
     expect(a.value).toBe(10);
     expect(a.prior).toBe(0);
     expect(values).toEqual([10]);
 
-    a.set(20);
+    a.next(20);
     expect(a.value).toBe(20);
     expect(values).toEqual([10, 20]);
 
@@ -108,8 +106,8 @@ describe('atom', () => {
     const values: number[] = [];
     a.subscribe(v => values.push(v));
 
-    a.set(5);
-    a.set(5);
+    a.next(5);
+    a.next(5);
     expect(values).toEqual([]);
 
     a.dispose();
@@ -118,7 +116,7 @@ describe('atom', () => {
   it('should throw after disposal', () => {
     const a = atom(0);
     a.dispose();
-    expect(() => a.get()).toThrowError(/disposed/);
+    expect(() => a.value).toThrowError(/disposed/);
   });
 });
 
@@ -138,11 +136,11 @@ describe('derived', () => {
     const values: number[] = [];
     doubled.subscribe(v => values.push(v));
 
-    a.set(5);
+    a.next(5);
     expect(doubled.value).toBe(10);
     expect(values).toEqual([10]);
 
-    a.set(7);
+    a.next(7);
     expect(doubled.value).toBe(14);
     expect(values).toEqual([10, 14]);
 
@@ -155,8 +153,8 @@ describe('derived', () => {
     const values: number[] = [];
     doubled.subscribe(v => values.push(v));
 
-    a.set(2);
-    a.set(2); // same underlying value, derived result unchanged
+    a.next(2);
+    a.next(2); // same underlying value, derived result unchanged
     expect(values).toEqual([4]);
 
     doubled.dispose();
@@ -167,7 +165,7 @@ describe('derived', () => {
     const inc = derived(() => a.value + 1);
 
     expect(inc.prior).toBe(11);
-    a.set(20);
+    a.next(20);
     expect(inc.value).toBe(21);
     expect(inc.prior).toBe(11);
 
@@ -180,7 +178,7 @@ describe('derived', () => {
     doubled.dispose();
 
     // Should not throw or affect the derived after disposal
-    a.set(99);
+    a.next(99);
     expect(doubled.safeValue).toBe(2);
     expect(() => doubled.value).toThrowError();
   });
@@ -193,19 +191,19 @@ describe('derived', () => {
     const result = derived(() => useA.value ? a.value : b.value);
     expect(result.value).toBe(1);
 
-    a.set(5);
+    a.next(5);
     expect(result.value).toBe(5);
 
-    b.set(20);
+    b.next(20);
     expect(result.value).toBe(5); // still using a
 
-    useA.set(false);
+    useA.next(false);
     expect(result.value).toBe(20);
 
-    a.set(99);
+    a.next(99);
     expect(result.value).toBe(20); // no longer using a
 
-    b.set(30);
+    b.next(30);
     expect(result.value).toBe(30);
 
     result.dispose();
@@ -213,10 +211,10 @@ describe('derived', () => {
 
   it('should track dependencies through get()', () => {
     const a = atom(7);
-    const result = derived(() => a.get() * 3);
+    const result = derived(() => a.value * 3);
 
     expect(result.value).toBe(21);
-    a.set(4);
+    a.next(4);
     expect(result.value).toBe(12);
 
     result.dispose();
@@ -228,7 +226,7 @@ describe('derived', () => {
     const outer = derived(() => inner.value + 1);
 
     expect(outer.value).toBe(7);
-    a.set(5);
+    a.next(5);
     expect(outer.value).toBe(11);
 
     outer.dispose();
@@ -236,25 +234,25 @@ describe('derived', () => {
   });
 });
 
-describe('asyncAtom', () => {
+describe('atom', () => {
   it('should have no initial value', () => {
-    const a = asyncAtom<number>();
+    const a = atom<number>();
     expect(a.value).toBeUndefined();
     expect(a.prior).toBeUndefined();
     a.dispose();
   });
 
-  it('should update via set', () => {
-    const a = asyncAtom<number>();
+  it('should update via next', () => {
+    const a = atom<number>();
     const values: number[] = [];
     a.subscribe(v => values.push(v));
 
-    a.set(10);
+    a.next(10);
     expect(a.value).toBe(10);
     expect(a.prior).toBeUndefined();
     expect(values).toEqual([10]);
 
-    a.set(20);
+    a.next(20);
     expect(a.value).toBe(20);
     expect(values).toEqual([10, 20]);
 
@@ -262,28 +260,28 @@ describe('asyncAtom', () => {
   });
 
   it('should suppress duplicate values', () => {
-    const a = asyncAtom<number>();
+    const a = atom<number>();
     const values: number[] = [];
     a.subscribe(v => values.push(v));
 
-    a.set(5);
-    a.set(5);
+    a.next(5);
+    a.next(5);
     expect(values).toEqual([5]);
 
     a.dispose();
   });
 
   it('should throw after disposal', () => {
-    const a = asyncAtom<number>();
+    const a = atom<number>();
     a.dispose();
-    expect(() => a.get()).toThrowError(/disposed/);
+    expect(() => a.value).toThrowError(/disposed/);
   });
 
   it('should not replay values to late subscribers by default', () => {
-    const a = asyncAtom<number>();
+    const a = atom<number>();
 
-    a.set(1);
-    a.set(2);
+    a.next(1);
+    a.next(2);
 
     const values: number[] = [];
     a.subscribe(v => values.push(v));
@@ -292,101 +290,44 @@ describe('asyncAtom', () => {
     a.dispose();
   });
 
-  it('should replay values to late subscribers with capacity', () => {
-    const a = asyncAtom<number>({ capacity: 3 });
-
-    a.set(1);
-    a.set(2);
-    a.set(3);
-    a.set(4);
-
-    const values: number[] = [];
-    a.subscribe(v => values.push(v));
-
-    // Should replay last 3 values
-    expect(values).toEqual([2, 3, 4]);
-    a.dispose();
-  });
-
-  it('should replay all values with infinite capacity', () => {
-    const a = asyncAtom<number>({ capacity: Infinity });
-
-    a.set(1);
-    a.set(2);
-    a.set(3);
-
-    const values: number[] = [];
-    a.subscribe(v => values.push(v));
-
-    expect(values).toEqual([1, 2, 3]);
-    a.dispose();
-  });
-
   it('should track prior after updates', () => {
-    const a = asyncAtom<number>();
+    const a = atom<number>();
 
-    a.set(10);
+    a.next(10);
     expect(a.prior).toBeUndefined();
 
-    a.set(20);
+    a.next(20);
     expect(a.prior).toBe(10);
 
-    a.set(30);
+    a.next(30);
     expect(a.prior).toBe(20);
 
     a.dispose();
   });
 
   it('should clean up subscriptions on dispose', () => {
-    const a = asyncAtom<number>();
+    const a = atom<number>();
     const values: number[] = [];
     a.subscribe(v => values.push(v));
 
-    a.set(1);
+    a.next(1);
     a.dispose();
 
-    // Should not throw when setting after disposal
-    a.set(2);
+    // Should not throw when nextting after disposal
+    a.next(2);
     expect(values).toEqual([1]);
   });
 
   it('should not receive values after unsubscribe', () => {
-    const a = asyncAtom<number>();
+    const a = atom<number>();
     const values: number[] = [];
     const sub = a.subscribe(v => values.push(v));
 
-    a.set(1);
+    a.next(1);
     sub.unsubscribe();
-    a.set(2);
+    a.next(2);
 
     expect(values).toEqual([1]);
-    a.dispose();
-  });
-
-  it('should handle capacity of 0 (no replay)', () => {
-    const a = asyncAtom<number>({ capacity: 0 });
-
-    a.set(1);
-    a.set(2);
-
-    const values: number[] = [];
-    a.subscribe(v => values.push(v));
-
-    expect(values).toEqual([]);
-    a.dispose();
-  });
-
-  it('should handle capacity of 1 (only last value)', () => {
-    const a = asyncAtom<number>({ capacity: 1 });
-
-    a.set(1);
-    a.set(2);
-    a.set(3);
-
-    const values: number[] = [];
-    a.subscribe(v => values.push(v));
-
-    expect(values).toEqual([3]);
     a.dispose();
   });
 });

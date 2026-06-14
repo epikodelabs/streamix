@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
+import { createPushOperator, isPromiseLike, type MaybePromise } from "../abstractions";
 
 /**
  * Creates a stream operator that emits the latest value from the source stream
@@ -29,7 +29,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
       bufferedResult = undefined;
       timerId = undefined;
 
-      if (completed) output.complete();
+      if (completed) output.dispose();
     };
 
     const startTimer = () => {
@@ -57,7 +57,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
         output.error(err);
       } finally {
         if (timerId) { clearTimeout(timerId); timerId = undefined; }
-        if (!output.completed()) output.complete();
+        if (!output.disposed) output.dispose();
       }
     })();
 

@@ -1,4 +1,4 @@
-import { createStream, delay, from, iterate, pipe } from '@epikodelabs/streamix';
+import { createStream, delay, from, iterate, pipe, atom } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -11,7 +11,7 @@ describe('delay', () => {
 
     const startTime = Date.now();
     const emittedTimes: number[] = [];
-    for await (const value of iterate(delayedAtom)) {
+    for await (const _ of iterate(delayedAtom)) {
       emittedTimes.push(Date.now() - startTime);
     }
 

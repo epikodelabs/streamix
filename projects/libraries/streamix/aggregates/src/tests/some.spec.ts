@@ -1,12 +1,12 @@
-import { createSubject, type Stream } from '@epikodelabs/streamix';
+import { atom } from '@epikodelabs/streamix';
 import { some } from '@epikodelabs/streamix/aggregates';
 
 describe('some', () => {
-  let subject: ReturnType<typeof createSubject<number>>;
-  let source: Stream<number>;
+  let subject: ReturnType<typeof atom>;
+  let source: ReturnType<typeof atom>;
 
   beforeEach(() => {
-    subject = createSubject<number>();
+    subject = atom<number>();
     source = subject;
   });
 
@@ -24,7 +24,7 @@ describe('some', () => {
     subject.next(1);
     subject.next(2);
     subject.next(3); // Satisfies predicate (value > 2)
-    subject.complete();
+    subject.dispose();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([true]);
@@ -43,7 +43,7 @@ describe('some', () => {
 
     subject.next(1);
     subject.next(2);
-    subject.complete(); // No value satisfies predicate (value > 5)
+    subject.dispose(); // No value satisfies predicate (value > 5)
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([false]);
@@ -60,7 +60,7 @@ describe('some', () => {
       }
     })();
 
-    subject.complete(); // No values, so should emit false
+    subject.dispose(); // No values, so should emit false
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(results).toEqual([false]);
@@ -117,7 +117,7 @@ describe('some', () => {
 
     subject.next(1);
     subject.next(2); // No value satisfies predicate, should emit false and complete
-    subject.complete();
+    subject.dispose();
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(completed).toBe(true);

@@ -516,9 +516,9 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
 
   ngOnDestroy(): void {
     this.subscriptions.forEach(s => s.unsubscribe());
-    this.clickSubject.complete();
-    this.streamA.complete();
-    this.streamB.complete();
+    this.clickSubject.dispose();
+    this.streamA.dispose();
+    this.streamB.dispose();
   }
 
   drawJulia(): void {

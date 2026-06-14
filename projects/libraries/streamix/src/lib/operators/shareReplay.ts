@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
 import { createReplaySubject, type ReplaySubject } from '../subjects';
 
 /**
@@ -50,7 +50,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
         output!.error(err);
       } finally {
         sourceIterator = null;
-        if (output && !output.completed()) output.complete();
+        if (output && !output.disposed) output.dispose();
       }
     })();
   };
@@ -100,7 +100,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
 
       async throw(err: any) {
         const it = await ensureOutputIterator();
-        if (output && !output.completed()) output.error(err);
+        if (output && !output.disposed) output.error(err);
         if (it.throw) return it.throw(err);
         throw err;
       }

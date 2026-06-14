@@ -25,7 +25,7 @@ describe('withLatestFrom', () => {
       withLatestFrom([from(['A', 'B', 'C'])])
     );
 
-    const results: Array<[number, string]> = [];
+    const results: any[] = [];
     for await (const value of iterate(atom)) {
       results.push(value);
     }
@@ -102,7 +102,7 @@ describe('withLatestFrom', () => {
 
     const atom = pipe(main, withLatestFrom(aux));
 
-    const results: Array<[number, string]> = [];
+    const results: any[] = [];
     const finished = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
@@ -117,8 +117,8 @@ describe('withLatestFrom', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     main.push(2);
-    main.complete();
-    aux.complete();
+    main.dispose();
+    aux.dispose();
     await finished;
 
     expect(results).toEqual([[2, 'A']]);

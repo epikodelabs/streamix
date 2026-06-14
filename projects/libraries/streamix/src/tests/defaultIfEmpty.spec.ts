@@ -1,8 +1,8 @@
-import { concatMap, createSubject, defaultIfEmpty, iterate, pipe, type Subject } from '@epikodelabs/streamix';
+import { concatMap, defaultIfEmpty, iterate, atom as makeAtom, pipe } from '@epikodelabs/streamix';
 
 describe('defaultIfEmpty', () => {
   it('should emit the default value if no values are emitted', async () => {
-    const subject = createSubject<string>();
+    const subject: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const defaultValue = 'Default Value';
     const atom = pipe(subject, defaultIfEmpty(defaultValue));
     const results: string[] = [];
@@ -13,7 +13,7 @@ describe('defaultIfEmpty', () => {
       }
     })();
 
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 
@@ -21,7 +21,7 @@ describe('defaultIfEmpty', () => {
   });
 
   it('should not emit the default value if values are emitted', async () => {
-    const subject = createSubject<string>();
+    const subject: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const defaultValue = 'Default Value';
     const atom = pipe(subject, defaultIfEmpty(defaultValue));
     const results: string[] = [];
@@ -34,7 +34,7 @@ describe('defaultIfEmpty', () => {
 
     subject.next('Value 1');
     subject.next('Value 2');
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 
@@ -42,7 +42,7 @@ describe('defaultIfEmpty', () => {
   });
 
   it('should emit default value when an upstream operator yields no values', async () => {
-    const subject = createSubject<string>();
+    const subject: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const defaultValue = 'Default Value';
     const atom = pipe(
       subject,
@@ -58,7 +58,7 @@ describe('defaultIfEmpty', () => {
     })();
 
     subject.next('Value 1');
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 
@@ -66,7 +66,7 @@ describe('defaultIfEmpty', () => {
   });
 
   it('should not emit default value if values are emitted before', async () => {
-    const subject = createSubject<string>();
+    const subject: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const defaultValue = 'Default Value';
     const atom = pipe(
       subject,
@@ -83,7 +83,7 @@ describe('defaultIfEmpty', () => {
 
     subject.next('Value 1');
     subject.next('Value 2');
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 

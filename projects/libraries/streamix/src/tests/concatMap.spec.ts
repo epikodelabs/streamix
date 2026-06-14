@@ -1,6 +1,4 @@
-import { concatMap, createStream, createSubject, from, iterate, pipe, type Stream } from '@epikodelabs/streamix';
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+import { concatMap, createStream, from, iterate, atom as makeAtom, pipe, type Atom } from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
 
@@ -86,7 +84,7 @@ describe('concatMap', () => {
   });
 
   it('edge: should queue rapid successive emissions and process sequentially', async () => {
-    const source = createSubject<number>();
+    const source: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const results: number[] = [];
     const order: string[] = [];
 
@@ -94,10 +92,10 @@ describe('concatMap', () => {
       source,
       concatMap((val) => {
         order.push(`start-${val}`);
-        const inner = createSubject<number>();
+        const inner: Atom = makeAtom<makeAtom>();
         setTimeout(() => {
           inner.next(val * 10);
-          inner.complete();
+          inner.dispose();
           order.push(`end-${val}`);
         }, (4 - val) * 20);
         return inner;
@@ -113,7 +111,7 @@ describe('concatMap', () => {
     source.next(1);
     source.next(2);
     source.next(3);
-    source.complete();
+    source.dispose();
 
     await reader;
 
@@ -126,7 +124,7 @@ describe('concatMap', () => {
   });
 
   it('edge: should handle mix of sync and async inners in order', async () => {
-    const source = createSubject<number>();
+    const source: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const results: number[] = [];
 
     const atom = pipe(
@@ -151,7 +149,7 @@ describe('concatMap', () => {
     source.next(2); // async
     source.next(3); // sync
     source.next(4); // async
-    source.complete();
+    source.dispose();
 
     await reader;
 
@@ -159,7 +157,7 @@ describe('concatMap', () => {
   });
 
   it('edge: should handle rapid emissions with empty inners', async () => {
-    const source = createSubject<number>();
+    const source: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const results: number[] = [];
 
     const atom = pipe(
@@ -181,7 +179,7 @@ describe('concatMap', () => {
     source.next(1);
     source.next(2); // empty
     source.next(3);
-    source.complete();
+    source.dispose();
 
     await reader;
 
@@ -189,20 +187,20 @@ describe('concatMap', () => {
   });
 
   it('edge: should stop on first inner error in rapid emissions', async () => {
-    const source = createSubject<number>();
+    const source: ReturnType<typeof atom> = makeAtom<makeAtom>();
     const results: number[] = [];
     let caughtError: Error | undefined;
 
     const atom = pipe(
       source,
       concatMap((val) => {
-        const inner = createSubject<number>();
+        const inner: Atom = makeAtom<makeAtom>();
         setTimeout(() => {
           if (val === 2) {
             inner.error(new Error('Error at 2'));
           } else {
             inner.next(val * 10);
-            inner.complete();
+            inner.dispose();
           }
         }, 20);
         return inner;
@@ -222,7 +220,7 @@ describe('concatMap', () => {
     source.next(1);
     source.next(2);
     source.next(3); // Should never process
-    source.complete();
+    source.dispose();
 
     await reader;
 

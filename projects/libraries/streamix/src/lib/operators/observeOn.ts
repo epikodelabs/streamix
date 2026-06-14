@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
 import { createSubject } from '../subjects';
 
 /**
@@ -145,7 +145,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
       } catch (err) {
         output.error(err);
       } finally {
-        if (!output.completed()) output.complete();
+        if (!output.disposed) output.dispose();
       }
     })();
 
@@ -175,7 +175,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
         try {
           await source.return?.(value);
         } catch {}
-        if (!output.completed()) output.complete();
+        if (!output.disposed) output.dispose();
         return DONE;
       },
 
@@ -189,7 +189,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
         try {
           await source.return?.();
         } catch {}
-        if (!output.completed()) output.error(err);
+        if (!output.disposed) output.error(err);
         throw err;
       }
     };

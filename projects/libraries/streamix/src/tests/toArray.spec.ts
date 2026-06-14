@@ -15,7 +15,7 @@ describe('toArray', () => {
     source.push(1);
     source.push(2);
     source.push(3);
-    source.complete();
+    source.dispose();
     await finished;
 
     expect(results).toEqual([[1, 2, 3]]);
@@ -32,7 +32,7 @@ describe('toArray', () => {
       }
     })();
 
-    source.complete();
+    source.dispose();
     await finished;
 
     expect(results).toEqual([[]]);
@@ -74,7 +74,7 @@ describe('toArray', () => {
     source.push(10);
     source.push(20);
     source.push(30);
-    source.complete();
+    source.dispose();
     await finished;
 
     expect(results).toEqual([[10, 20, 30]]);
@@ -92,7 +92,7 @@ describe('toArray', () => {
     })();
 
     source.push(42);
-    source.complete();
+    source.dispose();
     await finished;
 
     expect(results).toEqual([[42]]);

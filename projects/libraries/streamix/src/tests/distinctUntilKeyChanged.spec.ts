@@ -1,10 +1,10 @@
-import { createSubject, distinctUntilKeyChanged, iterate, pipe, type Subject } from '@epikodelabs/streamix';
+import { atom, distinctUntilKeyChanged, iterate, atom as makeAtom, pipe } from '@epikodelabs/streamix';
 
 describe('distinctUntilKeyChanged', () => {
-  let subject: Subject<any>;
+  let subject: ReturnType<typeof atom>;
 
   beforeEach(() => {
-    subject = createSubject<any>();
+    subject = makeAtom<any>();
   });
 
   it('should emit values with distinct keys', async () => {
@@ -22,7 +22,7 @@ describe('distinctUntilKeyChanged', () => {
     subject.next({ key: 2, value: 'c' });
     subject.next({ key: 2, value: 'd' });
     subject.next({ key: 3, value: 'e' });
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 
@@ -46,7 +46,7 @@ describe('distinctUntilKeyChanged', () => {
     subject.next({ key: 1, value: 'a' });
     subject.next({ key: 1, value: 'b' });
     subject.next({ key: 1, value: 'c' });
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 
@@ -63,7 +63,7 @@ describe('distinctUntilKeyChanged', () => {
       }
     })();
 
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 
@@ -104,7 +104,7 @@ describe('distinctUntilKeyChanged', () => {
     subject.next({ key: 1, value: 'a' });
     subject.next({ key: 1, value: 'b' });
     subject.next({ key: 2, value: 'c' });
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 
@@ -129,7 +129,7 @@ describe('distinctUntilKeyChanged', () => {
     subject.next({ key: 5, value: 'skip' });
     subject.next({ key: 6, value: 'second' });
     subject.next({ key: 6, value: 'skip again' });
-    subject.complete();
+    subject.dispose();
 
     await consumptionPromise;
 

@@ -90,7 +90,7 @@ describe('fork', () => {
     source.push(1);
     source.push(2);
     source.push(3);
-    source.complete();
+    source.dispose();
     await finished;
 
     expect(results).toEqual([10, 100, 20, 30, 300]);
@@ -117,7 +117,7 @@ describe('fork', () => {
     source.push(1);
     source.push(2);
     source.push(3);
-    source.complete();
+    source.dispose();
     await finished;
 
     expect(results).toEqual([10, 100, 20, 30]);
@@ -155,7 +155,7 @@ describe('fork', () => {
     source.push(1);
     source.push(2);
     source.push(3);
-    source.complete();
+    source.dispose();
     await finished;
 
     expect(results).toEqual([10, 200, 300]);
@@ -184,7 +184,7 @@ describe('fork', () => {
     source.push(2);
     source.push(3);
     source.push(4);
-    source.complete();
+    source.dispose();
     await finished;
 
     expect(results).toEqual([10, 20, 30, 300, 40]);
@@ -211,7 +211,7 @@ describe('fork', () => {
     source.push('apple');
     source.push('banana');
     source.push('cherry');
-    source.complete();
+    source.dispose();
     await finished;
 
     expect(results).toEqual(['[A:apple]', '[B:banana]', '[?:cherry]']);

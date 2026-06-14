@@ -1,10 +1,6 @@
-import {
-  createPushOperator,
-  MaybePromise,
-  type Operator,
-  type Stream
-} from '../abstractions';
+import { createPushOperator, MaybePromise, type Operator } from "../abstractions";
 import { fromAny } from '../converters';
+import type { StreamInput } from "../streams/pipe";
 import { createAsyncCoordinator, type RunnerEvent } from '../utils';
 
 /**
@@ -39,7 +35,7 @@ import { createAsyncCoordinator, type RunnerEvent } from '../utils';
  * ```
  */
 export function mergeMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>,
+  project: (value: T, index: number) => StreamInput<R> | MaybePromise<R> | Array<R>,
   concurrent: number = Infinity,
   bufferSize: number = Infinity
 ) {
@@ -109,9 +105,9 @@ export function mergeMap<T = any, R = any>(
           }
         }
 
-        if (!output.completed()) output.complete();
+        if (!output.disposed) output.dispose();
       } catch (err) {
-        if (!output.completed()) output.error(err);
+        if (!output.disposed) output.error(err);
       } finally {
         await coordinator.return?.();
       }

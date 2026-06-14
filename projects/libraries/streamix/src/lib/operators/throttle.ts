@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
+import { createPushOperator, isPromiseLike, type MaybePromise } from "../abstractions";
 
 /**
  * Creates a throttle operator that emits the first value immediately, then ignores subsequent
@@ -81,7 +81,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
       } finally {
         aborted = true;
         if (timer) { clearTimeout(timer); timer = null; }
-        if (!output.completed()) output.complete();
+        if (!output.disposed) output.dispose();
       }
     })();
 

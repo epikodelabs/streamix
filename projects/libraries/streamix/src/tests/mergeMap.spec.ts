@@ -1,4 +1,4 @@
-import { createSubject, filter, from, iterate, mergeMap, pipe } from '@epikodelabs/streamix';
+import { atom, filter, from, iterate, mergeMap, pipe } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -153,7 +153,7 @@ describe('mergeMap', () => {
   });
 
   it('edge: should run all rapid emissions concurrently', async () => {
-    const source = createSubject<number>();
+    const source: ReturnType<typeof atom> = atom<atom>();
     const results: number[] = [];
     const startTimes: number[] = [];
 
@@ -176,7 +176,7 @@ describe('mergeMap', () => {
     source.next(1);
     source.next(2);
     source.next(3);
-    source.complete();
+    source.dispose();
 
     await reader;
 
@@ -186,7 +186,7 @@ describe('mergeMap', () => {
   });
 
   it('edge: should handle mix of sync and async inners concurrently', async () => {
-    const source = createSubject<number>();
+    const source: ReturnType<typeof atom> = atom<atom>();
     const results: number[] = [];
 
     const merged = pipe(
@@ -211,7 +211,7 @@ describe('mergeMap', () => {
     source.next(2); // sync
     source.next(3); // async
     source.next(4); // sync
-    source.complete();
+    source.dispose();
 
     await reader;
 
@@ -219,7 +219,7 @@ describe('mergeMap', () => {
   });
 
   it('edge: should continue other inners when one errors', async () => {
-    const source = createSubject<number>();
+    const source: ReturnType<typeof atom> = atom<atom>();
     const results: number[] = [];
     let caughtError: Error | undefined;
 
@@ -251,7 +251,7 @@ describe('mergeMap', () => {
     source.next(1);
     source.next(2);
     source.next(3);
-    source.complete();
+    source.dispose();
 
     await reader;
 
@@ -260,7 +260,7 @@ describe('mergeMap', () => {
   });
 
   it('edge: should handle rapid emissions with varying inner durations', async () => {
-    const source = createSubject<number>();
+    const source: ReturnType<typeof atom> = atom<atom>();
     const results: number[] = [];
 
     const merged = pipe(
@@ -282,7 +282,7 @@ describe('mergeMap', () => {
     source.next(1); // 100ms
     source.next(2); // 50ms
     source.next(3); // 10ms
-    source.complete();
+    source.dispose();
 
     await reader;
 
@@ -290,7 +290,7 @@ describe('mergeMap', () => {
   });
 
   it('edge: should handle unsubscribe with multiple active inners', async () => {
-    const source = createSubject<number>();
+    const source: ReturnType<typeof atom> = atom<atom>();
     const results: number[] = [];
     const completions: number[] = [];
 

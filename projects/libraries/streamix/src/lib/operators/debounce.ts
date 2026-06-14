@@ -27,7 +27,7 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
       latestResult = undefined;
       timeoutId = undefined;
 
-      if (completed) output.complete();
+      if (completed) output.dispose();
     };
 
     void (async () => {
@@ -56,7 +56,7 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
         completed = true;
         if (timeoutId) { clearTimeout(timeoutId); timeoutId = undefined; }
         if (latestResult) flush();
-        if (!output.completed()) output.complete();
+        if (!output.disposed) output.dispose();
       }
     })();
 

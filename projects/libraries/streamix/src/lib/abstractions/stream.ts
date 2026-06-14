@@ -190,7 +190,7 @@ export function createStream<T>(
   generatorFn: (signal?: AbortSignal) => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
   interface ActiveRun {
-    subject: Stream<T> & { next: (v: T) => void; error: (e: any) => void; complete: () => void; };
+    subject: Stream<T> & { next: (v: T) => void; error: (e: any) => void; dispose: () => void; };
     abortController: AbortController;
     subscriberCount: number;
   }
@@ -218,7 +218,7 @@ export function createStream<T>(
               const result = gen.__tryNext();
               if (!result) break;
               if (result.done) {
-                run.subject.complete();
+                run.subject.dispose();
                 return;
               }
               run.subject.next(result.value);
@@ -233,7 +233,7 @@ export function createStream<T>(
           if ("aborted" in result || signal.aborted) break;
 
           if (result.result.done) {
-            run.subject.complete();
+            run.subject.dispose();
             break;
           }
 

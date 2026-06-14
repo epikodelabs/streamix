@@ -11,7 +11,7 @@ describe('createAsyncPushable', () => {
     expect(typeof (pushable as any)[Symbol.asyncIterator]).toBe('function');
     expect((pushable as any)[Symbol.asyncIterator]()).toBe(pushable as any);
 
-    pushable.complete();
+    pushable.dispose();
     expect(await pushable.next()).toEqual(DONE);
   });
 
@@ -27,9 +27,9 @@ describe('createAsyncPushable', () => {
     expect(await secondPull).toEqual(NEXT(2));
 
     const donePull = pushable.next();
-    pushable.complete();
+    pushable.dispose();
     expect(await donePull).toEqual(DONE);
-    expect(pushable.completed()).toBeTrue();
+    expect(pushable.disposed).toBeTrue();
 
     expect(await pushable.next()).toEqual(DONE);
   });
@@ -43,7 +43,7 @@ describe('createAsyncPushable', () => {
 
     expect(await pushable.next()).toEqual(NEXT(123));
 
-    pushable.complete();
+    pushable.dispose();
     expect(await pushable.next()).toEqual(DONE);
   });
 
@@ -54,7 +54,7 @@ describe('createAsyncPushable', () => {
     pushable.error(new Error('boom'));
 
     await expectAsync(pending).toBeRejectedWithError('boom');
-    expect(pushable.completed()).toBeTrue();
+    expect(pushable.disposed).toBeTrue();
   });
 
 });

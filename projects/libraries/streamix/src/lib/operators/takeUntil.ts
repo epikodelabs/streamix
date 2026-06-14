@@ -1,11 +1,6 @@
-import {
-  createOperator,
-  DONE,
-  NEXT,
-  type Operator,
-  type Stream
-} from "../abstractions";
+import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
 import { fromAny } from "../converters";
+import type { StreamInput } from "../streams/pipe";
 import { createAsyncCoordinator } from "../utils";
 
 /**
@@ -26,7 +21,7 @@ import { createAsyncCoordinator } from "../utils";
  * @returns An `Operator<T, T>` that can be used in a stream pipeline.
  */
 export function takeUntil<T = any, N = any>(
-  notifier: Stream<N> | Promise<N>
+  notifier: StreamInput<N> | Promise<N>
 ): Operator<T, T> {
   return createOperator<T, T>("takeUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();

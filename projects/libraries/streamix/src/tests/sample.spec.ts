@@ -1,12 +1,12 @@
-import { createSubject, iterate, pipe, sample } from '@epikodelabs/streamix';
+import { atom, iterate, pipe, sample } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('sample', () => {
-  let subject: ReturnType<typeof createSubject<number>>;
+  let subject: ReturnType<typeof atom>;
 
   beforeEach(() => {
-    subject = createSubject<number>();
+    subject = atom<number>();
   });
 
   it('should emit the latest value at the specified interval', async () => {
@@ -14,7 +14,7 @@ describe('sample', () => {
     const sampled = pipe(subject, sample(period));
     const results: number[] = [];
 
-    const reader = (async () => {
+    (async () => {
       for await (const value of iterate(sampled)) {
         results.push(value);
       }
@@ -25,7 +25,7 @@ describe('sample', () => {
     subject.next(2);
     await wait(125);
     subject.next(3);
-    subject.complete();
+    subject.dispose();
 
     await wait(200);
 
@@ -37,7 +37,7 @@ describe('sample', () => {
     const sampled = pipe(subject, sample(period));
     let completed = false;
 
-    const reader = (async () => {
+    (async () => {
       for await (const _ of iterate(sampled)) {
         void _;
       }
@@ -45,7 +45,7 @@ describe('sample', () => {
     })();
 
     subject.next(1);
-    subject.complete();
+    subject.dispose();
     await wait(150);
 
     expect(completed).toBeTrue();
@@ -56,7 +56,7 @@ describe('sample', () => {
     const sampled = pipe(subject, sample(period));
     const results: number[] = [];
 
-    const reader = (async () => {
+    (async () => {
       for await (const value of iterate(sampled)) {
         results.push(value);
       }
@@ -72,7 +72,7 @@ describe('sample', () => {
     const sampled = pipe(subject, sample(period));
     const results: number[] = [];
 
-    const reader = (async () => {
+    (async () => {
       for await (const value of iterate(sampled)) {
         results.push(value);
       }
@@ -80,7 +80,7 @@ describe('sample', () => {
 
     subject.next(1);
     subject.next(2);
-    subject.complete();
+    subject.dispose();
     await wait(150);
 
     expect(results).toEqual([2]);
@@ -91,7 +91,7 @@ describe('sample', () => {
     const sampled = pipe(subject, sample(periodPromise));
     const results: number[] = [];
 
-    const reader = (async () => {
+    (async () => {
       for await (const value of iterate(sampled)) {
         results.push(value);
       }
@@ -101,7 +101,7 @@ describe('sample', () => {
     await wait(15);
     subject.next(6);
     await wait(30);
-    subject.complete();
+    subject.dispose();
     await wait(20);
 
     expect(results.length).toBeGreaterThan(0);

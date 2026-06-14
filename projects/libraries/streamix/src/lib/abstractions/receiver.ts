@@ -16,7 +16,7 @@ export type Receiver<T = any> = {
  *
  * @template T The type of values received.
  */
-export type StrictReceiver<T = any> = Required<Receiver<T>> & { readonly completed: boolean; };
+export type StrictReceiver<T = any> = Required<Receiver<T>> & { readonly disposed: boolean; };
 
 /**
  * Create a strict receiver from a callback or receiver object.
@@ -28,8 +28,8 @@ export type StrictReceiver<T = any> = Required<Receiver<T>> & { readonly complet
 export function createReceiver<T = any>(
   callbackOrReceiver?: ((value: T) => MaybePromise) | Receiver<T>
 ): StrictReceiver<T> {
-  let _completed = false;
-  let _completedScheduled = false;
+  let _disposed = false;
+  let _disposeScheduled = false;
   let _pendingCount = 0;
   let _idlePromise: Promise<void> = Promise.resolve();
   let _resolveIdle: (() => void) | null = null;
@@ -63,11 +63,11 @@ export function createReceiver<T = any>(
 
   // Helper to safely execute a user-provided handler within the scheduler
   const runAction = (handler?: (...args: any[]) => MaybePromise, ...args: any[]): Promise<void> => {
-    if (!handler || _completed || _completedScheduled) return Promise.resolve();
+    if (!handler || _disposed || _disposeScheduled) return Promise.resolve();
 
     const action = async () => {
-      // Re-check completed status inside the scheduled task
-      if (_completed) return;
+      // Re-check disposed status inside the scheduled task
+      if (_disposed) return;
 
       incrementPending();
       try {
@@ -92,22 +92,22 @@ export function createReceiver<T = any>(
 
   const wrapped: StrictReceiver<T> = {
     next: (value: T) => {
-      if (_completed) return Promise.resolve();
+      if (_disposed) return Promise.resolve();
       return runAction(target.next, value);
     },
 
     error: (err: any) => {
-      if (_completed || _completedScheduled) return Promise.resolve();
-      _completedScheduled = true;
+      if (_disposed || _disposeScheduled) return Promise.resolve();
+      _disposeScheduled = true;
       const normalizedError = err instanceof Error ? err : new Error(String(err));
 
       const action = async () => {
-        if (_completed) return;
+        if (_disposed) return;
 
         // Wait for pending actions to complete
         await waitForIdle();
 
-        _completed = true;
+        _disposed = true;
         try {
           const result = target.error?.(normalizedError);
           if (isPromiseLike(result)) await result;
@@ -126,16 +126,16 @@ export function createReceiver<T = any>(
     },
 
     complete: () => {
-      if (_completed || _completedScheduled) return Promise.resolve();
-      _completedScheduled = true;
+      if (_disposed || _disposeScheduled) return Promise.resolve();
+      _disposeScheduled = true;
 
       const action = async () => {
-        if (_completed) return;
+        if (_disposed) return;
 
         // Wait for pending actions to complete
         await waitForIdle();
 
-        _completed = true;
+        _disposed = true;
         try {
           const result = target.complete?.();
           if (isPromiseLike(result)) await result;
@@ -153,8 +153,8 @@ export function createReceiver<T = any>(
       });
     },
 
-    get completed() {
-      return _completed;
+    get disposed() {
+      return _disposed;
     },
   };
 

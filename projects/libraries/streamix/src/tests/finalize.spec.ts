@@ -1,4 +1,4 @@
-import { createStream, finalize, from, interval, map, pipe, iterate } from "@epikodelabs/streamix";
+import { createStream, finalize, from, interval, map, pipe, iterate, atom } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 

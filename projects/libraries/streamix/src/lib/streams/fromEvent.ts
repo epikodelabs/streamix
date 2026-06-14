@@ -1,5 +1,6 @@
 import { isPromiseLike, type MaybePromise } from "../abstractions";
-import { flow, type AtomBase } from "../atoms/atom";
+import { createSubscription, type Subscription } from "../abstractions/subscription";
+import { asyncAtom, type AtomBase } from "../atoms/atom";
 
 /**
  * Creates an atom that emits events of the specified type from the given EventTarget.
@@ -14,38 +15,57 @@ export function fromEvent<T extends Event = Event>(
   target: MaybePromise<EventTarget>,
   event: MaybePromise<string>,
   options?: AddEventListenerOptions | boolean
-): AtomBase<T | undefined> {
-  return flow<T>(async function* () {
-    const resolvedTarget = isPromiseLike(target) ? await target : target;
-    const resolvedEvent = isPromiseLike(event) ? await event : event;
+): AtomBase<T> {
+  const output = asyncAtom<T>();
+  const originalSubscribe = output.subscribe.bind(output);
 
-    const queue: T[] = [];
-    let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
+  let activeCount = 0;
+  let listener: ((ev: Event) => void) | null = null;
+  let resolvedTarget: EventTarget | null = null;
+  let resolvedEvent: string | null = null;
+  let attachPromise: Promise<void> | null = null;
+  let aborted = false;
 
-    const listener = (ev: Event) => {
-      if (resolveNext) {
-        resolveNext({ value: ev as T, done: false });
-        resolveNext = null;
-      } else {
-        queue.push(ev as T);
-      }
-    };
+  const ensureAttached = async () => {
+    if (listener) return;
+    if (attachPromise) return attachPromise;
 
-    resolvedTarget.addEventListener(resolvedEvent, listener, options);
+    attachPromise = (async () => {
+      resolvedTarget = isPromiseLike(target) ? await target : target;
+      resolvedEvent = isPromiseLike(event) ? await event : event;
+      if (aborted) return;
 
-    try {
-      while (true) {
-        if (queue.length > 0) {
-          yield queue.shift()!;
-        } else {
-          const result = await new Promise<IteratorResult<T>>((resolve) => {
-            resolveNext = resolve;
-          });
-          yield result.value;
-        }
-      }
-    } finally {
+      listener = (ev: Event) => output.next(ev as T);
+      resolvedTarget.addEventListener(resolvedEvent, listener, options);
+    })();
+
+    return attachPromise;
+  };
+
+  const detach = () => {
+    if (listener && resolvedTarget && resolvedEvent) {
       resolvedTarget.removeEventListener(resolvedEvent, listener, options);
+      listener = null;
     }
-  });
+  };
+
+  output.subscribe = (callback: (value: T) => void): Subscription => {
+    const baseSub = originalSubscribe(callback);
+
+    if (activeCount === 0) {
+      void ensureAttached();
+    }
+    activeCount++;
+
+    return createSubscription(() => {
+      baseSub.unsubscribe();
+      activeCount--;
+      if (activeCount <= 0) {
+        aborted = true;
+        detach();
+      }
+    });
+  };
+
+  return output;
 }

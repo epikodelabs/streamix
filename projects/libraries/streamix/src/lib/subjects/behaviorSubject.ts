@@ -1,14 +1,14 @@
 import {
-    createReceiver,
-    createSubscription,
-    isPromiseLike,
-    pipeSourceThrough,
-    streamToArray,
-    Subscription,
-    type MaybePromise,
-    type Operator,
-    type Receiver,
-    type Stream,
+  createReceiver,
+  createSubscription,
+  isPromiseLike,
+  pipeSourceThrough,
+  streamToArray,
+  Subscription,
+  type MaybePromise,
+  type Operator,
+  type Receiver,
+  type Stream,
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
 import { AsyncPushable, createAsyncPushable } from "../utils";
@@ -22,9 +22,9 @@ import { AsyncPushable, createAsyncPushable } from "../utils";
  */
 export type BehaviorSubject<T = any> = Stream<T> & {
   next(value: T): void;
-  complete(): void;
+  dispose(): void;
   error(err: any): void;
-  completed(): boolean;
+  disposed: boolean;
   get value(): T; // BehaviorSubject always has a value
   subscribe(callback: (value: T) => MaybePromise): Subscription;
   subscribe(receiver: Receiver<T>): Subscription;
@@ -43,31 +43,31 @@ export type BehaviorSubject<T = any> = Stream<T> & {
  */
 export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject<T> {
   let latestValue: T = initialValue;
-  let isCompleted = false;
+  let isDisposed = false;
   let completionInfo: { kind: 'error'; error: any } | null = null;
 
   const listeners = new Set<AsyncPushable<T>>();
 
   const next = (value: T) => {
-    if (isCompleted) return;
+    if (isDisposed) return;
     latestValue = value;
     for (const listener of listeners) {
       listener.push(value);
     }
   };
 
-  const complete = () => {
-    if (isCompleted) return;
-    isCompleted = true;
+  const dispose = () => {
+    if (isDisposed) return;
+    isDisposed = true;
     for (const listener of listeners) {
-      listener.complete();
+      listener.dispose();
     }
     listeners.clear();
   };
 
   const error = (err: any) => {
-    if (isCompleted) return;
-    isCompleted = true;
+    if (isDisposed) return;
+    isDisposed = true;
     completionInfo = { kind: 'error', error: err };
     for (const listener of listeners) {
       listener.error(err);
@@ -133,13 +133,13 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
 
     // Replay current value only if the subject is still alive.
     // After completion/error, late subscribers receive only the terminal signal.
-    if (!isCompleted) {
+    if (!isDisposed) {
       listener.push(latestValue);
     }
 
-    if (isCompleted) {
+    if (isDisposed) {
       if (completionInfo?.kind === 'error') listener.error(completionInfo.error);
-      else listener.complete();
+      else listener.dispose();
     }
 
     // Initial drain
@@ -147,7 +147,7 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
 
     const sub = createSubscription(async () => {
       listeners.delete(listener);
-      listener.complete();
+      listener.dispose();
     });
 
     const origUnsub = sub.unsubscribe.bind(sub);
@@ -164,9 +164,9 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
     name: "behaviorSubject",
     get value() { return latestValue; },
     next,
-    complete,
+    dispose,
     error,
-    completed: () => isCompleted,
+    get disposed() { return isDisposed; },
     pipe: <TOut>(...steps: Operator<any, any>[]): Stream<TOut> => {
       return pipeSourceThrough<T, TOut>(self, steps);
     },
@@ -177,13 +177,13 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
       const listener = createAsyncPushable<T>();
 
       // Replay current value only if the subject is still alive.
-      if (!isCompleted) {
+      if (!isDisposed) {
         listeners.add(listener);
         listener.push(latestValue);
       } else if (completionInfo?.kind === 'error') {
         listener.error(completionInfo.error);
       } else {
-        listener.complete();
+        listener.dispose();
       }
 
       const originalReturn = listener.return!.bind(listener);

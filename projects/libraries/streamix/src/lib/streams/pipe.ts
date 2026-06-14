@@ -1,5 +1,5 @@
 import { isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
-import { flow, iterate, type AtomBase } from "../atoms/atom";
+import { flow, type AtomBase } from "../atoms/atom";
 
 /**
  * Anything that can be used as the source of an atom pipeline.
@@ -10,6 +10,8 @@ export type StreamInput<T = any> =
   | Iterable<T>
   | MaybePromise<T>
   | T;
+
+
 
 function isAtomLike(value: unknown): value is AtomBase<any> {
   return value != null && (value as any).type === "atom";
@@ -28,7 +30,7 @@ function isIterable(value: unknown): value is Iterable<any> {
  */
 export function toAsyncIterable<T>(source: StreamInput<T>): AsyncIterable<T> {
   if (isAtomLike(source)) {
-    return iterate(source);
+    return source as AsyncIterable<T>;
   }
 
   if (isAsyncIterable(source)) {
@@ -111,16 +113,25 @@ function combineAtoms<T extends unknown[]>(sources: AtomBase<any>[]): AsyncItera
  * @param ops Operators to apply.
  * @returns A new {@link AtomBase}.
  */
-export function pipe<T>(
-  source: StreamInput<T> | AtomBase<T>[],
+export function pipe<T>(source: StreamInput<T>): AtomBase<T>;
+export function pipe<T, A>(source: StreamInput<T>, op1: Operator<T, A>): AtomBase<A>;
+export function pipe<T, A, B>(source: StreamInput<T>, op1: Operator<T, A>, op2: Operator<A, B>): AtomBase<B>;
+export function pipe<T, A, B, C>(source: StreamInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>): AtomBase<C>;
+export function pipe<T, A, B, C, D>(source: StreamInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>): AtomBase<D>;
+export function pipe<T, A, B, C, D, E>(source: StreamInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>, op5: Operator<D, E>): AtomBase<E>;
+export function pipe<T, A, B, C, D, E, F>(source: StreamInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>, op5: Operator<D, E>, op6: Operator<E, F>): AtomBase<F>;
+export function pipe<T extends readonly unknown[]>(sources: [...{ [K in keyof T]: AtomBase<T[K]> }]): AtomBase<T>;
+export function pipe<T>(source: StreamInput<T>, ...ops: Operator[]): AtomBase<any>;
+export function pipe(
+  source: StreamInput<any> | AtomBase<any>[],
   ...ops: Operator[]
-): AtomBase<T | undefined> {
-  let iterable: AsyncIterable<T>;
+): AtomBase<any> {
+  let iterable: AsyncIterable<any>;
 
   if (Array.isArray(source) && source.every(isAtomLike)) {
-    iterable = combineAtoms(source) as AsyncIterable<T>;
+    iterable = combineAtoms(source);
   } else {
-    iterable = toAsyncIterable(source as StreamInput<T>);
+    iterable = toAsyncIterable(source as StreamInput<any>);
   }
 
   let iterator: AsyncIterator<any> = iterable[Symbol.asyncIterator]();
@@ -129,7 +140,7 @@ export function pipe<T>(
     iterator = op.apply(iterator);
   }
 
-  const resultIterable: AsyncIterable<T> = {
+  const resultIterable: AsyncIterable<any> = {
     [Symbol.asyncIterator]() {
       return iterator;
     },

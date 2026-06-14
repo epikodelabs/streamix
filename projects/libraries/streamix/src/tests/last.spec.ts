@@ -1,4 +1,4 @@
-import { from, iterate, last, pipe } from '@epikodelabs/streamix';
+import { from, iterate, last, pipe, atom } from '@epikodelabs/streamix';
 
 describe('last', () => {
   it('should emit the last value of the stream', async () => {

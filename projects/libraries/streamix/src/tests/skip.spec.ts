@@ -1,4 +1,4 @@
-import { from, iterate, pipe, skip } from '@epikodelabs/streamix';
+import { from, iterate, pipe, skip, atom } from '@epikodelabs/streamix';
 
 describe('skip', () => {
   it('should skip the specified number of emissions', async () => {

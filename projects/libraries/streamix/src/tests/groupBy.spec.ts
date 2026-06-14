@@ -1,4 +1,4 @@
-import { from, groupBy, iterate, map, merge, mergeMap, pipe, tap } from '@epikodelabs/streamix';
+import { from, groupBy, iterate, map, merge, mergeMap, pipe, tap, type Operator } from '@epikodelabs/streamix';
 
 describe('groupBy', () => {
   it('should partition values using groupBy and sort them by key', async () => {
@@ -47,7 +47,7 @@ describe('groupBy', () => {
         return iterate(
           pipe(
             from([groupItem.value]),
-            ...operators,
+            ...(operators as [Operator, ...Operator[]]),
             tap((value: any) => {
               const groupValues = groupsMap.get(key) || [];
               groupValues.push(value);
@@ -95,7 +95,7 @@ describe('groupBy', () => {
         return iterate(
           pipe(
             from([groupItem.value]),
-            ...operators,
+            ...(operators as [Operator, ...Operator[]]),
             tap((value: any) => {
               const groupValues = groupsMap.get(key) || [];
               groupValues.push(value);
