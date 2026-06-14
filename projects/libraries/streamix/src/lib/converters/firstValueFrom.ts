@@ -1,18 +1,25 @@
 import type { Stream } from "../abstractions";
+import { iterate, type Atom } from "../atoms";
+
+function isAtomLike(value: unknown): value is Atom<any> {
+  return value != null && (value as any).type === "atom";
+}
 
 /**
- * Returns a promise that resolves with the first emitted value from a `Stream`.
+ * Returns a promise that resolves with the first emitted value from a `Stream` or atom.
  *
- * - If the stream emits a value, the promise resolves with that value.
- * - If the stream emits an error, the promise rejects with that error.
- * - If the stream completes without ever emitting a value, the promise rejects with an `Error`.
+ * - If the source emits a value, the promise resolves with that value.
+ * - If the source emits an error, the promise rejects with that error.
+ * - If the source completes without ever emitting a value, the promise rejects with an `Error`.
  *
  * @template T The type of the value that the promise will resolve with.
- * @param stream The source stream to listen to.
- * @returns A promise that resolves with the first value from the stream or rejects on error or completion without a value.
+ * @param source The source stream or atom to listen to.
+ * @returns A promise that resolves with the first value from the source or rejects on error or completion without a value.
  */
-export function firstValueFrom<T = any>(stream: Stream<T>): Promise<T> {
-  const iterator = stream[Symbol.asyncIterator]();
+export function firstValueFrom<T = any>(source: Stream<T> | Atom<T>): Promise<T> {
+  const iterator = isAtomLike(source)
+    ? iterate(source)[Symbol.asyncIterator]()
+    : source[Symbol.asyncIterator]();
 
   return (async () => {
     try {
