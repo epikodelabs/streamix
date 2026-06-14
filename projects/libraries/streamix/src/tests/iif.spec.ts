@@ -1,62 +1,44 @@
-import { concatMap, from, iif } from '@epikodelabs/streamix';
+import { from, iif } from '@epikodelabs/streamix';
 
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
 describe('iif', () => {
-  it('should choose trueStream when condition is true', (done) => {
-    const condition = (value: number) => value > 5;
+  it('should choose trueStream when condition is true', async () => {
     const trueStream = from([10, 20, 30]);
     const falseStream = from([1, 2, 3]);
 
-    const pipeline = from([6]).pipe(concatMap((value: any) => iif(() => condition(value), trueStream, falseStream)));
-    const result: any[] = [];
+    const atom = iif(() => true, trueStream, falseStream);
+    const result: number[] = [];
 
-    const subscription = pipeline.subscribe({
-      next: (value: any) => result.push(value),
-      complete: () => {
-        expect(result).toEqual([10, 20, 30]);
-        subscription.unsubscribe();
-        done();
-      }
-    });
+    atom.subscribe(v => { if (v !== undefined) result.push(v); });
+    await delay();
+
+    expect(result).toEqual([10, 20, 30]);
   });
 
-  it('should choose falseStream when condition is false', (done) => {
-    const condition = (value: number) => value > 5;
+  it('should choose falseStream when condition is false', async () => {
     const trueStream = from([10, 20, 30]);
     const falseStream = from([1, 2, 3]);
 
-    const pipeline = from([2]).pipe(concatMap((value: any) => iif(() => condition(value), trueStream, falseStream)));
-    const result: any[] = [];
+    const atom = iif(() => false, trueStream, falseStream);
+    const result: number[] = [];
 
-    const subscription = pipeline.subscribe({
-      next: (value: any) => result.push(value),
-      complete: () => {
-        expect(result).toEqual([1, 2, 3]);
-        subscription.unsubscribe();
-        done();
-      }
-    });
+    atom.subscribe(v => { if (v !== undefined) result.push(v); });
+    await delay();
+
+    expect(result).toEqual([1, 2, 3]);
   });
 
-  it('should resolve asynchronous conditions and promise-based streams', (done) => {
-    const condition = () => Promise.resolve(false);
+  it('should resolve asynchronous conditions and promise-based streams', async () => {
     const trueStream = from(['true-case']);
     const falseStream = Promise.resolve('false-case');
 
+    const atom = iif(() => Promise.resolve(false), trueStream, falseStream);
     const result: string[] = [];
-    const subscription = iif(condition, trueStream, falseStream).subscribe({
-      next: (value: string) => result.push(value),
-      complete: () => {
-        expect(result).toEqual(['false-case']);
-        subscription.unsubscribe();
-        done();
-      },
-      error: (error: any) => {
-        subscription.unsubscribe();
-        done.fail(error);
-      },
-    });
+
+    atom.subscribe(v => { if (v !== undefined) result.push(v); });
+    await delay();
+
+    expect(result).toEqual(['false-case']);
   });
 });
-
-

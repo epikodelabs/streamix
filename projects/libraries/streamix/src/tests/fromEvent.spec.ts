@@ -2,98 +2,92 @@ import { fromEvent } from '@epikodelabs/streamix';
 import { idescribe } from './env.spec';
 
 const flushMicrotasks = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
 idescribe('fromEvent', () => {
 
-  it('should call the overridden subscribe method', (done) => {
+  it('should call the overridden subscribe method', async () => {
     const element = document.createElement('button');
-    const stream = fromEvent(element, 'click');
+    const atom = fromEvent(element, 'click');
 
-    const subscription = stream.subscribe((ev) => {
-      expect(ev).toBeInstanceOf(Event);
-      done();
-    });
+    let received: Event | undefined;
+    const subscription = atom.subscribe(ev => { received = ev; });
 
-    // Trigger the listener
     element.click();
-    subscription.unsubscribe(); // trigger cleanup
-});
+    await flushMicrotasks();
+
+    expect(received).toBeInstanceOf(Event);
+    subscription.unsubscribe();
+  });
 
   it('should emit multiple events correctly', async () => {
     const element = document.createElement('button');
-    const stream = fromEvent(element, 'click');
+    const atom = fromEvent(element, 'click');
 
     const emitted: Event[] = [];
-    const subscription = stream.subscribe((ev) => {
-      emitted.push(ev);
-    });
+    const subscription = atom.subscribe(ev => { if (ev !== undefined) emitted.push(ev); });
 
     element.click();
     element.click();
     await flushMicrotasks();
 
     expect(emitted.length).toBe(2);
-    subscription.unsubscribe(); // trigger cleanup
+    subscription.unsubscribe();
   });
 
-  it('should remove event listener and unsubscribe on unsubscribe', (done) => {
+  it('should remove event listener and unsubscribe on unsubscribe', async () => {
     const element = document.createElement('button');
-    const stream = fromEvent(element, 'click');
+    const atom = fromEvent(element, 'click');
 
     let listenerRemoved = false;
 
-    // Monkey-patch for testing cleanup
     const originalRemove = element.removeEventListener;
     element.removeEventListener = function (...args: any[]) {
       listenerRemoved = true;
       return originalRemove.apply(this, args as any);
     };
 
-    const subscription = stream.subscribe();
+    const subscription = atom.subscribe(() => {});
 
     subscription.unsubscribe();
 
-    setTimeout(() => {
-      expect(listenerRemoved).toBe(true);
-      done();
-    }, 10);
+    await delay(10);
+    expect(listenerRemoved).toBe(true);
   });
 
-  it('should not emit events after unsubscribe', (done) => {
+  it('should not emit events after unsubscribe', async () => {
     const element = document.createElement('button');
-    const stream = fromEvent(element, 'click');
+    const atom = fromEvent(element, 'click');
 
     let count = 0;
-    const subscription = stream.subscribe(() => count++);
+    const subscription = atom.subscribe(() => count++);
 
-    element.click();          // first event should increment count
+    element.click();
     subscription.unsubscribe();
-    element.click();          // second event should be ignored
+    element.click();
 
-    setTimeout(() => {
-      expect(count).toBe(1);
-      done();
-    }, 10);
+    await delay(10);
+    expect(count).toBe(1);
   });
 
-  it('supports promise-based targets and event names', (done) => {
+  it('supports promise-based targets and event names', async () => {
     const element = document.createElement('button');
     const targetPromise = Promise.resolve(element);
     const eventPromise = new Promise<string>((resolve) => setTimeout(() => resolve('click'), 0));
 
-    const stream = fromEvent(targetPromise, eventPromise);
-    const subscription = stream.subscribe((ev) => {
-      expect(ev).toBeInstanceOf(Event);
-      subscription.unsubscribe();
-      done();
-    });
+    const atom = fromEvent(targetPromise, eventPromise);
+    let received: Event | undefined;
+    const subscription = atom.subscribe(ev => { received = ev; });
 
-    setTimeout(() => {
-      element.click();
-    }, 20);
+    await delay(20);
+    element.click();
+    await flushMicrotasks();
+
+    expect(received).toBeInstanceOf(Event);
+    subscription.unsubscribe();
   });
 
-  it('does not attach listener when unsubscribed before pending target resolves', (done) => {
+  it('does not attach listener when unsubscribed before pending target resolves', async () => {
     const element = document.createElement('button');
 
     let listenerAdded = false;
@@ -107,18 +101,13 @@ idescribe('fromEvent', () => {
       setTimeout(() => resolve(element), 20);
     });
 
-    const stream = fromEvent(targetPromise, Promise.resolve('click'));
-    const subscription = stream.subscribe(() => listenerAdded = true);
+    const atom = fromEvent(targetPromise, Promise.resolve('click'));
+    const subscription = atom.subscribe(() => listenerAdded = true);
 
     subscription.unsubscribe();
 
-    setTimeout(() => {
-      expect(listenerAdded).toBe(false);
-      element.addEventListener = originalAdd;
-      done();
-    }, 40);
+    await delay(40);
+    expect(listenerAdded).toBe(false);
+    element.addEventListener = originalAdd;
   });
-
 });
-
-

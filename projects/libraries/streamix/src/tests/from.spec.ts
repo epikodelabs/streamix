@@ -1,26 +1,18 @@
 import { from } from '@epikodelabs/streamix';
 
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
+
 describe('from', () => {
 
   it('should emit values in sequence and complete (Array)', async () => {
     const values = [1, 2, 3];
-    const stream = from(values);
-    let emittedValues: any[] = [];
+    const atom = from(values);
+    const emittedValues: number[] = [];
 
-    await new Promise<void>((resolve, reject) => {
-      stream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues).toEqual(values);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: reject
-      });
-    });
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
+
+    expect(emittedValues).toEqual(values);
   });
 
   it('should emit values from an iterable (Generator)', async () => {
@@ -29,85 +21,47 @@ describe('from', () => {
       yield 20;
       yield 30;
     }
-    const stream = from(numberGenerator());
-    let emittedValues: number[] = [];
+    const atom = from(numberGenerator());
+    const emittedValues: number[] = [];
     const expected = [10, 20, 30];
 
-    await new Promise<void>((resolve, reject) => {
-      stream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues).toEqual(expected);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: reject
-      });
-    });
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
+
+    expect(emittedValues).toEqual(expected);
   });
 
   it('should stop emitting values when unsubscribe is called early', async () => {
-    // Async generator
     async function* asyncNumberGenerator() {
       yield 1;
-      await new Promise(r => setTimeout(r, 10));
+      await delay(10);
       yield 2;
-      await new Promise(r => setTimeout(r, 10));
+      await delay(10);
       yield 3;
     }
 
-    const stream = from(asyncNumberGenerator());
+    const atom = from(asyncNumberGenerator());
     const emittedValues: number[] = [];
 
-    await new Promise<void>((resolve, reject) => {
-      const subscription = stream.subscribe({
-        next: (value) => {
-          emittedValues.push(value);
-          if (value === 1) {
-            // Unsubscribe immediately after first value
-            subscription.unsubscribe();
-
-            // Delay a bit to catch any stray emissions
-            setTimeout(() => {
-              try {
-                expect(emittedValues).toEqual([1]); // only first value
-                resolve();
-              } catch (e) {
-                reject(e);
-              }
-            }, 50);
-          }
-        },
-        error: reject,
-        complete: () => {
-          // We allow complete() to fire; do not fail the test
-        }
-      });
+    const subscription = atom.subscribe(v => {
+      if (v === 1) {
+        emittedValues.push(v);
+        subscription.unsubscribe();
+      }
     });
+
+    await delay(50);
+    expect(emittedValues).toEqual([1]);
   });
 
   it('should await promised iterables before emitting', async () => {
     const promiseSource = Promise.resolve([4, 5, 6]);
-    const stream = from(promiseSource);
-    const collected: number[] = [];
+    const atom = from(promiseSource);
+    const collected: number[][] = [];
 
-    await new Promise<void>((resolve, reject) => {
-      stream.subscribe({
-        next: (value) => collected.push(value),
-        complete: () => {
-          try {
-            expect(collected).toEqual([4, 5, 6]);
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        },
-        error: reject,
-      });
-    });
+    atom.subscribe(v => { if (v !== undefined) collected.push(v); });
+    await delay();
+
+    expect(collected).toEqual([[4, 5, 6]]);
   });
 });
-

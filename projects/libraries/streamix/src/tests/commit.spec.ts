@@ -1,8 +1,8 @@
-import { commit, createStream } from "@epikodelabs/streamix";
+import { commit, createStream, iterate } from "@epikodelabs/streamix";
+
+const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("commit", () => {
-  const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
-
   it("should discard values from a failed attempt and emit the successful retry", async () => {
     let attempt = 0;
     const factory = jasmine.createSpy("factory").and.callFake(() => {
@@ -20,8 +20,8 @@ describe("commit", () => {
     });
 
     const values: number[] = [];
-    for await (const value of commit(factory, 1, 0)) {
-      values.push(value);
+    for await (const value of iterate(commit(factory, 1, 0))) {
+      if (value !== undefined) values.push(value);
     }
 
     expect(factory).toHaveBeenCalledTimes(2);
@@ -49,8 +49,8 @@ describe("commit", () => {
 
     const values: number[] = [];
     const finished = (async () => {
-      for await (const value of commit(factory, 1, delayPromise)) {
-        values.push(value);
+      for await (const value of iterate(commit(factory, 1, delayPromise))) {
+        if (value !== undefined) values.push(value);
       }
     })();
 
@@ -67,13 +67,13 @@ describe("commit", () => {
 
   it("should support plain values and promised results from the factory", async () => {
     const plainValues: number[] = [];
-    for await (const value of commit(() => 5, 0, 0)) {
-      plainValues.push(value);
+    for await (const value of iterate(commit(() => 5, 0, 0))) {
+      if (value !== undefined) plainValues.push(value);
     }
 
     const promisedValues: number[] = [];
-    for await (const value of commit(() => Promise.resolve(7), 0, 0)) {
-      promisedValues.push(value);
+    for await (const value of iterate(commit(() => Promise.resolve(7), 0, 0))) {
+      if (value !== undefined) promisedValues.push(value);
     }
 
     expect(plainValues).toEqual([5]);
@@ -84,7 +84,7 @@ describe("commit", () => {
     let iterationCount = 0;
     const values: number[] = [];
 
-    const stream$ = commit(
+    const atom = commit(
       () =>
         createStream<number>("slowCommit", async function* (signal) {
           while (!signal?.aborted) {
@@ -97,11 +97,7 @@ describe("commit", () => {
       0
     );
 
-    const sub = stream$.subscribe({
-      next: (value) => values.push(value),
-      error: () => fail("Unexpected error"),
-      complete: () => {},
-    });
+    const sub = atom.subscribe(v => { if (v !== undefined) values.push(v); });
 
     await sleep(35);
     sub.unsubscribe();

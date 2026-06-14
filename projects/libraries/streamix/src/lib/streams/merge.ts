@@ -31,7 +31,7 @@ import { toAsyncIterable, type StreamInput } from "./pipe";
  * ```
  */
 export function merge<T = any>(...sources: StreamInput<T>[]): AtomBase<T | undefined> {
-  return flow<T | undefined>(async function* () {
+  return flow<T>(async function* () {
     if (sources.length === 0) return;
 
     const iterators = sources.map((source) =>

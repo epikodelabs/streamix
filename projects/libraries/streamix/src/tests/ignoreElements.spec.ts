@@ -1,102 +1,114 @@
-import { createSubject, ignoreElements } from "@epikodelabs/streamix";
+import { createSubject, ignoreElements, iterate, pipe, type Subject } from '@epikodelabs/streamix';
 
-describe("ignoreElements", () => {
-  it("should ignore all emitted values and only emit complete", (done) => {
-    const sourceStream = createSubject<number>();
-    const emittedValues: number[] = [];
-    const ignoredStream = sourceStream.pipe(ignoreElements());
+describe('ignoreElements', () => {
+  it('should ignore all emitted values and only emit complete', async () => {
+    const subject = createSubject<number>();
+    const atom = pipe(subject, ignoreElements());
 
-    ignoredStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual([]);
-        done();
-      },
-      error: (err) => done.fail(err.message),
-    });
+    const results: number[] = [];
+    const consumptionPromise = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
+      }
+    })();
 
-    sourceStream.next(1);
-    sourceStream.next(2);
-    sourceStream.next(3);
-    sourceStream.complete();
+    subject.next(1);
+    subject.next(2);
+    subject.next(3);
+    subject.complete();
+
+    await consumptionPromise;
+
+    expect(results).toEqual([]);
   });
 
-  it("should pass error notifications through", (done) => {
-    const sourceStream = createSubject<number>();
-    const emittedValues: number[] = [];
-    const ignoredStream = sourceStream.pipe(ignoreElements());
+  it('should pass error notifications through', async () => {
+    const subject = createSubject<number>();
+    const atom = pipe(subject, ignoreElements());
 
-    ignoredStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {},
-      error: (err) => {
-        expect(err.message).toBe("Test error");
-        expect(emittedValues).toEqual([]);
-        done();
-      },
-    });
+    let error: any = null;
+    const consumptionPromise = (async () => {
+      try {
+        for await (const _ of iterate(atom)) {
+          void _;
+        }
+      } catch (err) {
+        error = err;
+      }
+    })();
 
-    sourceStream.next(1);
-    sourceStream.next(2);
-    sourceStream.error(new Error("Test error"));
+    subject.next(1);
+    subject.next(2);
+    subject.error(new Error('Test error'));
+
+    await consumptionPromise;
+
+    expect(error).toEqual(jasmine.any(Error));
+    expect(error.message).toBe('Test error');
   });
 
-  it("should complete after source stream completes", (done) => {
-    const sourceStream = createSubject<number>();
-    const emittedValues: number[] = [];
-    const ignoredStream = sourceStream.pipe(ignoreElements());
+  it('should complete after source stream completes', async () => {
+    const subject = createSubject<number>();
+    const atom = pipe(subject, ignoreElements());
 
-    ignoredStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual([]);
-        done();
-      },
-      error: (err) => done.fail(err.message),
-    });
+    const results: number[] = [];
+    const consumptionPromise = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
+      }
+    })();
 
-    sourceStream.next(10);
-    sourceStream.next(20);
-    sourceStream.complete();
+    subject.next(10);
+    subject.next(20);
+    subject.complete();
+
+    await consumptionPromise;
+
+    expect(results).toEqual([]);
   });
 
-  it("should not emit any value but should handle complete", (done) => {
-    const sourceStream = createSubject<string>();
-    const emittedValues: string[] = [];
-    const ignoredStream = sourceStream.pipe(ignoreElements());
+  it('should not emit any value but should handle complete', async () => {
+    const subject = createSubject<string>();
+    const atom = pipe(subject, ignoreElements());
 
-    ignoredStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual([]);
-        done();
-      },
-      error: (err) => done.fail(err.message),
-    });
+    const results: string[] = [];
+    const consumptionPromise = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
+      }
+    })();
 
-    sourceStream.next("value1");
-    sourceStream.next("value2");
-    sourceStream.complete();
+    subject.next('value1');
+    subject.next('value2');
+    subject.complete();
+
+    await consumptionPromise;
+
+    expect(results).toEqual([]);
   });
 
-  it("should handle error in source stream", (done) => {
-    const sourceStream = createSubject<string>();
-    const emittedValues: string[] = [];
-    const ignoredStream = sourceStream.pipe(ignoreElements());
+  it('should handle error in source stream', async () => {
+    const subject = createSubject<string>();
+    const atom = pipe(subject, ignoreElements());
 
-    ignoredStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {},
-      error: (err) => {
-        expect(err.message).toBe("Some error");
-        expect(emittedValues).toEqual([]);
-        done();
-      },
-    });
+    let error: any = null;
+    const consumptionPromise = (async () => {
+      try {
+        for await (const _ of iterate(atom)) {
+          void _;
+        }
+      } catch (err) {
+        error = err;
+      }
+    })();
 
-    sourceStream.next("value1");
-    sourceStream.next("value2");
-    sourceStream.error(new Error("Some error"));
+    subject.next('value1');
+    subject.next('value2');
+    subject.error(new Error('Some error'));
+
+    await consumptionPromise;
+
+    expect(error).toEqual(jasmine.any(Error));
+    expect(error.message).toBe('Some error');
   });
 });
-

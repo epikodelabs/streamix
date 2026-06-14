@@ -1,63 +1,54 @@
 import { of } from '@epikodelabs/streamix';
 
-describe('of', () => {
-  it('should emit the given value', (done) => {
-    const value = 'test_value';
-    const ofStream = of(value);
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
-    const emittedValues: any[] = [];
-    ofStream.subscribe({
-      next: (v) => emittedValues.push(v),
-      complete: () => {
-        expect(emittedValues).toEqual([value]);
-        done(); // tells Jasmine the async test is done
-      },
-      error: (err) => done.fail(err)
-    });
+describe('of', () => {
+  it('should emit the given value', async () => {
+    const value = 'test_value';
+    const atom = of(value);
+
+    const emittedValues: string[] = [];
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
+
+    expect(emittedValues).toEqual([value]);
   });
 
-  it('should complete after emitting the value', (done) => {
+  it('should emit the value and then have no further emissions', async () => {
     const value = 'test_value';
-    const ofStream = of(value);
+    const atom = of(value);
 
-    let isComplete = false;
-    ofStream.subscribe({
-      next: () => isComplete = true,
-      complete: () => {
-        expect(isComplete).toBe(true);
-        done();
-      }
-    })
+    const emittedValues: string[] = [];
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
+
+    expect(emittedValues).toEqual([value]);
+
+    await delay(30);
+    expect(emittedValues).toEqual([value]);
   });
 
   it('should not emit value if unsubscribed before run', async () => {
     const value = 'test_value';
-    const ofStream = of(value);
+    const atom = of(value);
 
-    const emittedValues: any[] = [];
-    const subscription = ofStream.subscribe((value: any) => {
-      emittedValues.push(value);
-    });
+    const emittedValues: string[] = [];
+    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     subscription.unsubscribe();
 
+    await delay();
     expect(emittedValues).toEqual([]);
   });
 
-  it('should resolve promised values before emitting', (done) => {
+  it('should resolve promised values before emitting', async () => {
     const valuePromise = Promise.resolve('async_value');
     const emittedValues: string[] = [];
 
-    const ofStream = of(valuePromise);
-    ofStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual(['async_value']);
-        done();
-      },
-      error: (err) => done.fail(err),
-    });
+    const atom = of(valuePromise);
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
+
+    expect(emittedValues).toEqual(['async_value']);
   });
 });
-
-

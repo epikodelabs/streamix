@@ -1,13 +1,13 @@
-import { createSubject, delayWhile, from } from '@epikodelabs/streamix';
+import { createSubject, delayWhile, from, iterate, pipe } from '@epikodelabs/streamix';
 
-const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('delayWhile', () => {
   it('buffers values while the predicate returns true and flushes them when it flips', async () => {
     const subject = createSubject<number>();
     const results: number[] = [];
     const reader = (async () => {
-      for await (const value of subject.pipe(delayWhile((value) => value < 3))) {
+      for await (const value of iterate(pipe(subject, delayWhile((value) => value < 3)))) {
         results.push(value);
       }
     })();
@@ -27,7 +27,7 @@ describe('delayWhile', () => {
     const subject = createSubject<number>();
     const results: number[] = [];
     const reader = (async () => {
-      for await (const value of subject.pipe(delayWhile((value) => value % 2 === 1))) {
+      for await (const value of iterate(pipe(subject, delayWhile((value) => value % 2 === 1)))) {
         results.push(value);
       }
     })();
@@ -48,7 +48,7 @@ describe('delayWhile', () => {
   it('flushes buffered values when the source completes even if the predicate stayed true', async () => {
     const results: number[] = [];
     const reader = (async () => {
-      for await (const value of from([1, 2]).pipe(delayWhile(() => true))) {
+      for await (const value of iterate(pipe(from([1, 2]), delayWhile(() => true)))) {
         results.push(value);
       }
     })();
@@ -61,10 +61,10 @@ describe('delayWhile', () => {
   it('supports asynchronous predicate functions', async () => {
     const results: number[] = [];
     const reader = (async () => {
-      for await (const value of from([1, 2, 3]).pipe(delayWhile(async (value) => {
+      for await (const value of iterate(pipe(from([1, 2, 3]), delayWhile(async (value) => {
         await wait(5);
         return value < 3;
-      }))) {
+      })))) {
         results.push(value);
       }
     })();
@@ -78,12 +78,10 @@ describe('delayWhile', () => {
     const results: number[] = [];
     const indices: number[] = [];
     const reader = (async () => {
-      for await (const value of subject.pipe(
-        delayWhile((_, index) => {
-          indices.push(index);
-          return index < 2; // Delay first 2 values by index
-        })
-      )) {
+      for await (const value of iterate(pipe(subject, delayWhile((_, index) => {
+        indices.push(index);
+        return index < 2;
+      })))) {
         results.push(value);
       }
     })();
@@ -104,9 +102,7 @@ describe('delayWhile', () => {
     const subject = createSubject<string>();
     const results: string[] = [];
     const reader = (async () => {
-      for await (const value of subject.pipe(
-        delayWhile((_, index) => index < 1) // Delay only first value
-      )) {
+      for await (const value of iterate(pipe(subject, delayWhile((_, index) => index < 1)))) {
         results.push(value);
       }
     })();

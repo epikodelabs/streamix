@@ -1,4 +1,4 @@
-import { createSubject, exhaustMap, iterate, pipe } from '@epikodelabs/streamix';
+import { createSubject, delay, exhaustMap, from } from '@epikodelabs/streamix';
 
 let previousTimeoutInterval = jasmine.DEFAULT_TIMEOUT_INTERVAL;
 
@@ -19,16 +19,15 @@ describe('exhaustMap', () => {
     const results: number[] = [];
     let projectCalls = 0;
 
-    const atom = pipe(
-      subject,
+    const stream = subject.pipe(
       exhaustMap((value) => {
         projectCalls++;
-        return new Promise<number>((resolve) => setTimeout(() => resolve(value), 20));
+        return from([value]).pipe(delay(20));
       })
     );
 
     const reader = (async () => {
-      for await (const value of iterate(atom)) {
+      for await (const value of stream) {
         results.push(value);
       }
     })();
@@ -50,16 +49,15 @@ describe('exhaustMap', () => {
     const results: number[] = [];
     let projectCalls = 0;
 
-    const atom = pipe(
-      subject,
+    const stream = subject.pipe(
       exhaustMap((value) => {
         projectCalls++;
-        return new Promise<number>((resolve) => setTimeout(() => resolve(value), 50));
+        return from([value]).pipe(delay(50));
       })
     );
 
     const reader = (async () => {
-      for await (const value of iterate(atom)) {
+      for await (const value of stream) {
         results.push(value);
       }
     })();
@@ -82,22 +80,21 @@ describe('exhaustMap', () => {
     const subject = createSubject<number>();
     const results: number[] = [];
 
-    const atom = pipe(
-      subject,
+    const stream = subject.pipe(
       exhaustMap((value) => {
         if (value === 1) {
-          return new Promise<number>((resolve) => setTimeout(() => resolve(value), 10));
+          return from([value]).pipe(delay(10));
         }
         if (value === 2) {
           throw new Error('boom');
         }
-        return [value];
+        return from([value]);
       })
     );
 
     const errPromise = (async () => {
       try {
-        for await (const value of iterate(atom)) {
+        for await (const value of stream) {
           results.push(value);
         }
         return null;

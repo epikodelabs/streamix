@@ -19,7 +19,7 @@ export function iif<T = any>(
   trueStream: StreamInput<T>,
   falseStream: StreamInput<T>
 ): AtomBase<T | undefined> {
-  return flow<T | undefined>(async function* generator(): AsyncGenerator<T, void, unknown> {
+  return flow<T>(async function* generator(): AsyncGenerator<T, void, unknown> {
     // Evaluate condition lazily when the stream starts
     const conditionResult = condition();
     const resolvedCondition = isPromiseLike(conditionResult) ? await conditionResult : conditionResult;

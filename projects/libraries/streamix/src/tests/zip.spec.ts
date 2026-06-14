@@ -1,124 +1,99 @@
 import { createSubject, from, zip } from '@epikodelabs/streamix';
 
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
+
 describe('zip', () => {
-  it('should zip values from multiple streams', (done) => {
+  it('should zip values from multiple streams', async () => {
     const stream1$ = from([1, 2, 3]);
     const stream2$ = from(['a', 'b', 'c']);
     const stream3$ = from([true, false, true]);
 
     const result: any[] = [];
-    zip(stream1$, stream2$, stream3$).subscribe({
-      next: (value: any) => result.push(value),
-      complete: () => {
-        expect(result).toEqual([
-          [1, 'a', true],
-          [2, 'b', false],
-          [3, 'c', true],
-        ]);
-        done();
-      },
-      error: (err: any) => done.fail(err),
-    });
+    zip(stream1$, stream2$, stream3$).subscribe(v => { if (v !== undefined) result.push(v); });
+    await delay();
+
+    expect(result).toEqual([
+      [1, 'a', true],
+      [2, 'b', false],
+      [3, 'c', true],
+    ]);
   });
 
-  it('should complete when one source is empty', (done) => {
+  it('should emit nothing when one source is empty', async () => {
     const stream1$ = from([] as any[]);
     const stream2$ = from(['a', 'b', 'c']);
     const stream3$ = from([true, false, true]);
 
     const result: any[] = [];
-    zip(stream1$, stream2$, stream3$).subscribe({
-      next: () => done.fail('Should not emit any values'),
-      complete: () => {
-        expect(result).toEqual([]);
-        done();
-      },
-      error: (err: any) => done.fail(err),
-    });
+    zip(stream1$, stream2$, stream3$).subscribe(v => { if (v !== undefined) result.push(v); });
+    await delay();
+
+    expect(result).toEqual([]);
   });
 
-  it('should zip until the shortest stream completes', (done) => {
+  it('should zip until the shortest stream completes', async () => {
     const stream1$ = from([1, 2]);
     const stream2$ = from(['a', 'b', 'c']);
     const stream3$ = from([true, false, true, false]);
 
     const result: any[] = [];
-    zip(stream1$, stream2$, stream3$).subscribe({
-      next: (value: any) => result.push(value),
-      complete: () => {
-        expect(result).toEqual([
-          [1, 'a', true],
-          [2, 'b', false],
-        ]);
-        done();
-      },
-      error: (err: any) => done.fail(err),
-    });
+    zip(stream1$, stream2$, stream3$).subscribe(v => { if (v !== undefined) result.push(v); });
+    await delay();
+
+    expect(result).toEqual([
+      [1, 'a', true],
+      [2, 'b', false],
+    ]);
   });
 
-  it('should handle sources that emit values asynchronously', (done) => {
+  it('should handle sources that emit values asynchronously', async () => {
     const stream1$ = createSubject<number>();
     const stream2$ = createSubject<string>();
     const stream3$ = createSubject<boolean>();
 
     const result: any[] = [];
-    zip(stream1$, stream2$, stream3$).subscribe({
-      next: (value: any) => result.push(value),
-      complete: () => {
-        expect(result).toEqual([
-          [1, 'a', true],
-          [2, 'b', false],
-        ]);
-        done();
-      },
-      error: (err: any) => done.fail(err),
-    });
+    zip(stream1$, stream2$, stream3$).subscribe(v => { if (v !== undefined) result.push(v); });
 
-    setTimeout(() => {
-      stream1$.next(1);
-      stream2$.next('a');
-      stream3$.next(true);
+    stream1$.next(1);
+    stream2$.next('a');
+    stream3$.next(true);
 
-      stream1$.next(2);
-      stream2$.next('b');
-      stream3$.next(false);
+    stream1$.next(2);
+    stream2$.next('b');
+    stream3$.next(false);
 
-      stream1$.complete();
-      stream2$.complete();
-      stream3$.complete();
-    }, 100);
+    stream1$.complete();
+    stream2$.complete();
+    stream3$.complete();
+
+    await delay();
+
+    expect(result).toEqual([
+      [1, 'a', true],
+      [2, 'b', false],
+    ]);
   });
 
-  it('should zip promise-based sources', (done) => {
-    const zipped = zip(Promise.resolve([1, 2]), Promise.resolve(['a', 'b']));
+  it('should zip promise-based sources', async () => {
+    const zipped = zip(Promise.resolve(from([1, 2])), Promise.resolve(from(['a', 'b'])));
     const result: any[] = [];
 
-    zipped.subscribe({
-      next: (value: any) => result.push(value),
-      complete: () => {
-        expect(result).toEqual([
-          [1, 'a'],
-          [2, 'b'],
-        ]);
-        done();
-      },
-      error: (err: any) => done.fail(err),
-    });
+    zipped.subscribe(v => { if (v !== undefined) result.push(v); });
+    await delay();
+
+    expect(result).toEqual([
+      [1, 'a'],
+      [2, 'b'],
+    ]);
   });
 
-  it('should complete immediately when no sources are provided', (done) => {
+  it('should emit nothing when no sources are provided', async () => {
     const zipped = zip();
-    const timer = setTimeout(() => done.fail('did not complete'), 50);
+    const result: any[] = [];
 
-    zipped.subscribe({
-      next: () => done.fail('should not emit'),
-      complete: () => {
-        clearTimeout(timer);
-        done();
-      },
-      error: (err: any) => done.fail(err),
-    });
+    zipped.subscribe(v => { if (v !== undefined) result.push(v); });
+    await delay(50);
+
+    expect(result).toEqual([]);
   });
 });
-
-

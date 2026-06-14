@@ -1,19 +1,19 @@
-import { expand, from, map } from '@epikodelabs/streamix';
+import { expand, from, map, pipe, iterate } from '@epikodelabs/streamix';
 
 describe('expand', () => {
   it('should handle errors thrown by the project function', async () => {
     const error = new Error('Project function error');
     const project = (value: number) => {
       if (value === 3) throw error;
-      return from([value + 1]);
+      return [value + 1];
     };
 
-    const stream = from([1]);
+    const atom = pipe(from([1]), expand(project));
     const result: number[] = [];
     let caughtError: Error | undefined;
 
     try {
-      for await (const value of stream.pipe(expand(project))) {
+      for await (const value of iterate(atom)) {
         result.push(value);
       }
     } catch (e) {
@@ -26,12 +26,12 @@ describe('expand', () => {
 
   it('should recursively expand (depth-first by default)', async () => {
     const project = (value: number) => {
-      if (value >= 3) return from([]);
-      return from([value + 1]);
+      if (value >= 3) return [];
+      return [value + 1];
     };
 
     const result: number[] = [];
-    for await (const value of from([1]).pipe(expand(project))) {
+    for await (const value of iterate(pipe(from([1]), expand(project)))) {
       result.push(value);
     }
 
@@ -41,12 +41,12 @@ describe('expand', () => {
 
   it('should expand with breadth-first traversal', async () => {
     const project = (value: number) => {
-      if (value >= 3) return from([]);
-      return from([value + 1]);
+      if (value >= 3) return [];
+      return [value + 1];
     };
 
     const result: number[] = [];
-    for await (const value of from([1]).pipe(expand(project, { traversal: 'breadth' }))) {
+    for await (const value of iterate(pipe(from([1]), expand(project, { traversal: 'breadth' })))) {
       result.push(value);
     }
 
@@ -54,22 +54,22 @@ describe('expand', () => {
   });
 
   it('should respect maxDepth and limit recursion', async () => {
-    const project = (v: number) => from([v + 1]);
+    const project = (v: number) => [v + 1];
 
     const result: number[] = [];
-    for await (const value of from([1]).pipe(expand(project, { maxDepth: 2 }))) {
+    for await (const value of iterate(pipe(from([1]), expand(project, { maxDepth: 2 })))) {
       result.push(value);
     }
 
-    // Depth 0: 1 ??? Depth 1: 2 ??? Depth 2: 3
+    // Depth 0: 1 -> Depth 1: 2 -> Depth 2: 3
     expect(result).toEqual([1, 2, 3]);
   });
 
   it('should emit nothing if input is empty', async () => {
-    const project = (v: number) => from([v + 1]);
+    const project = (v: number) => [v + 1];
 
     const result: number[] = [];
-    for await (const value of from([]).pipe(expand(project))) {
+    for await (const value of iterate(pipe(from([]), expand(project)))) {
       result.push(value);
     }
 
@@ -78,12 +78,12 @@ describe('expand', () => {
 
   it('should stop expanding when project returns an empty stream', async () => {
     const project = (value: number) => {
-      if (value >= 5) return from([]);
-      return from([value + 1]);
+      if (value >= 5) return [];
+      return [value + 1];
     };
 
     const result: number[] = [];
-    for await (const value of from([1]).pipe(expand(project))) {
+    for await (const value of iterate(pipe(from([1]), expand(project)))) {
       result.push(value);
     }
 
@@ -98,7 +98,7 @@ describe('expand', () => {
     };
 
     const result: number[] = [];
-    for await (const value of from([1]).pipe(expand(project))) {
+    for await (const value of iterate(pipe(from([1]), expand(project)))) {
       result.push(value);
     }
 
@@ -107,17 +107,18 @@ describe('expand', () => {
 
   it('should preserve metadata through expansions', async () => {
     const project = (value: number) => {
-      if (value >= 3) return from([]);
-      return from([value + 1]);
+      if (value >= 3) return [];
+      return [value + 1];
     };
 
     const result: number[] = [];
-    const stream = from([1]).pipe(
+    const atom = pipe(
+      from([1]),
       map(x => x), // Add metadata through map
       expand(project)
     );
 
-    for await (const value of stream) {
+    for await (const value of iterate(atom)) {
       result.push(value);
     }
 
@@ -126,12 +127,12 @@ describe('expand', () => {
 
   it('should handle depth-first traversal with metadata', async () => {
     const project = (value: number) => {
-      if (value >= 3) return from([]);
-      return from([value + 1]).pipe(map(x => x)); // Add metadata
+      if (value >= 3) return [];
+      return [value + 1];
     };
 
     const result: number[] = [];
-    for await (const value of from([1]).pipe(expand(project, { traversal: 'depth' }))) {
+    for await (const value of iterate(pipe(from([1]), expand(project, { traversal: 'depth' })))) {
       result.push(value);
     }
 
@@ -140,12 +141,12 @@ describe('expand', () => {
 
   it('should handle multiple source values with depth-first', async () => {
     const project = (value: number) => {
-      if (value >= 10) return from([]);
-      return from([value * 2]);
+      if (value >= 10) return [];
+      return [value * 2];
     };
 
     const result: number[] = [];
-    for await (const value of from([1, 5]).pipe(expand(project))) {
+    for await (const value of iterate(pipe(from([1, 5]), expand(project)))) {
       result.push(value);
     }
 
@@ -170,12 +171,10 @@ describe('expand', () => {
     };
 
     const result: number[] = [];
-    for await (const value of from(slowSource).pipe(expand(project))) {
+    for await (const value of iterate(pipe(from(slowSource), expand(project)))) {
       result.push(value);
     }
 
     expect(result).toEqual([0, 10, 1, 11]);
   });
 });
-
-

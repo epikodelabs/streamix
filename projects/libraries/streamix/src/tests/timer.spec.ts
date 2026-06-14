@@ -1,72 +1,62 @@
 import { timer } from '@epikodelabs/streamix';
 
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
+
 describe('timer', () => {
-  it('should emit values at specified interval', (done) => {
+  it('should emit values at specified interval', async () => {
     const intervalMs = 100;
-    const timerStream = timer(0, intervalMs); // Starting at 0 and emitting every intervalMs
+    const atom = timer(0, intervalMs);
 
     const emittedValues: number[] = [];
-    const subscription = timerStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {
-        // Check that values are emitted at the correct interval
-        expect(emittedValues.length).toBeGreaterThan(1); // At least two emissions should be received
-        for (let i = 1; i < emittedValues.length; i++) {
-          expect(emittedValues[i] - emittedValues[i - 1]).toBe(1); // Values should increment by 1, indicating interval passes
-        }
+    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
-        done();
-      }
-    });
+    await delay(250);
+    subscription.unsubscribe();
 
-    setTimeout(() => {
-      subscription.unsubscribe();
-    }, 250); // Ensure subscription is stopped after some time
+    expect(emittedValues.length).toBeGreaterThan(1);
+    for (let i = 1; i < emittedValues.length; i++) {
+      expect(emittedValues[i] - emittedValues[i - 1]).toBe(1);
+    }
   });
 
   it('should stop emitting after unsubscribe', async () => {
     const intervalMs = 100;
-    const timerStream = timer(0, intervalMs);
+    const atom = timer(0, intervalMs);
 
     const emittedValues: number[] = [];
-    const subscription = timerStream.subscribe((value) => {
-      emittedValues.push(value);
-    });
+    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     subscription.unsubscribe();
 
     const previousLength = emittedValues.length;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs * 2)); // Wait for potential additional emissions
+    await delay(intervalMs * 2);
 
-    expect(emittedValues.length).toBe(previousLength); // No new emissions should occur after unsubscribe
+    expect(emittedValues.length).toBe(previousLength);
   });
 
-  it('should support promise-based delay and interval inputs', (done) => {
-    const timerStream = timer(Promise.resolve(0), Promise.resolve(10));
+  it('should support promise-based delay and interval inputs', async () => {
+    const atom = timer(Promise.resolve(0), Promise.resolve(10));
     const emitted: number[] = [];
-    const subscription = timerStream.subscribe((value) => {
-      emitted.push(value);
+    const subscription = atom.subscribe(v => {
+      if (v !== undefined) emitted.push(v);
       if (emitted.length === 2) {
         subscription.unsubscribe();
-        expect(emitted).toEqual([0, 1]);
-        done();
       }
     });
+
+    await delay(50);
+    expect(emitted).toEqual([0, 1]);
   });
 
-  it('should use the delay value when no interval is provided', (done) => {
-    const timerStream = timer(20);
-    const emitted: number[] = [];
-    const subscription = timerStream.subscribe((value) => {
-      emitted.push(value);
-    });
+  it('should use the delay value when no interval is provided', async () => {
+    const atom = timer(20);
+    const emittedValues: number[] = [];
+    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
-    setTimeout(() => {
-      subscription.unsubscribe();
-      expect(emitted[0]).toBe(0);
-      expect(emitted[1]).toBe(1);
-      done();
-    }, 80);
+    await delay(80);
+    subscription.unsubscribe();
+
+    expect(emittedValues[0]).toBe(0);
+    expect(emittedValues[1]).toBe(1);
   });
 });
-

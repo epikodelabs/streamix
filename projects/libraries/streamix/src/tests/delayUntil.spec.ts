@@ -1,244 +1,167 @@
-import { createSubject, delayUntil } from "@epikodelabs/streamix"; // Import your delayUntil operator
+import { createSubject, delayUntil, iterate, pipe } from '@epikodelabs/streamix';
 
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-describe("delayUntil", () => {
-  it("should delay emissions until the condition stream emits a value", async () => {
+describe('delayUntil', () => {
+  it('should delay emissions until the condition stream emits a value', async () => {
     const sourceStream = createSubject<number>();
     const conditionStream = createSubject<any>();
 
     const emittedValues: number[] = [];
-    const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
+    const reader = (async () => {
+      for await (const value of iterate(pipe(sourceStream, delayUntil(conditionStream)))) {
+        emittedValues.push(value);
+      }
+    })();
 
-    await new Promise<void>((resolve, reject) => {
-      delayedStream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues).toEqual([1, 2, 3, 4]); // Expectation is now waited for
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: (err) => reject(new Error(`Stream failed: ${err}`)),
-      });
+    sourceStream.next(1);
+    conditionStream.next('start');
+    sourceStream.next(2);
+    sourceStream.next(3);
+    sourceStream.next(4);
+    sourceStream.complete();
+    conditionStream.complete();
 
-      sourceStream.next(1); // Buffered
-      conditionStream.next("start"); // Emission starts
-      sourceStream.next(2); // Emitted
-      sourceStream.next(3); // Emitted
-      sourceStream.next(4); // Emitted
-
-      // FIX: Must complete the source stream for the delayed stream to complete
-      sourceStream.complete();
-      conditionStream.complete();
-    });
+    await reader;
+    expect(emittedValues).toEqual([1, 2, 3, 4]);
   });
 
-
-  it("should not emit any values if condition stream does not emit", async () => {
+  it('should not emit any values if condition stream does not emit', async () => {
     const sourceStream = createSubject<number>();
     const conditionStream = createSubject<any>();
 
     const emittedValues: number[] = [];
-    const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
+    const reader = (async () => {
+      for await (const value of iterate(pipe(sourceStream, delayUntil(conditionStream)))) {
+        emittedValues.push(value);
+      }
+    })();
 
-    await new Promise<void>((resolve, reject) => {
-      delayedStream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues).toEqual([]); // Expectation is now waited for
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: (err) => reject(new Error(`Stream failed: ${err}`)),
-      });
+    sourceStream.next(1);
+    sourceStream.next(2);
+    sourceStream.next(3);
+    sourceStream.complete();
+    conditionStream.complete();
 
-      sourceStream.next(1);
-      sourceStream.next(2);
-      sourceStream.next(3);
-
-      // FIX: Must complete the source stream
-      sourceStream.complete();
-      conditionStream.complete(); // This completes the delayed stream without emitting
-    });
+    await reader;
+    expect(emittedValues).toEqual([]);
   });
 
-  it("should drop values after notifier completes without emitting", async () => {
+  it('should drop values after notifier completes without emitting', async () => {
     const sourceStream = createSubject<number>();
     const conditionStream = createSubject<any>();
 
     const emittedValues: number[] = [];
-    const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
+    const reader = (async () => {
+      for await (const value of iterate(pipe(sourceStream, delayUntil(conditionStream)))) {
+        emittedValues.push(value);
+      }
+    })();
 
-    await new Promise<void>((resolve, reject) => {
-      delayedStream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues).toEqual([]);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: (err) => reject(new Error(`Stream failed: ${err}`)),
-      });
+    conditionStream.complete();
+    sourceStream.next(1);
+    sourceStream.next(2);
+    sourceStream.complete();
 
-      conditionStream.complete(); // closes gate without emitting
-      sourceStream.next(1);
-      sourceStream.next(2);
-      sourceStream.complete();
-    });
+    await reader;
+    expect(emittedValues).toEqual([]);
   });
 
-  it("should emit the source stream values after condition stream emits", async () => {
+  it('should emit the source stream values after condition stream emits', async () => {
     const sourceStream = createSubject<number>();
     const conditionStream = createSubject<any>();
 
     const emittedValues: number[] = [];
-    const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
+    const reader = (async () => {
+      for await (const value of iterate(pipe(sourceStream, delayUntil(conditionStream)))) {
+        emittedValues.push(value);
+      }
+    })();
 
-    await new Promise<void>((resolve, reject) => {
-      delayedStream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues).toEqual([10, 20, 30]); // Expectation is now waited for
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: (err) => reject(new Error(`Stream failed: ${err}`)),
-      });
+    conditionStream.next('start');
+    sourceStream.next(10);
+    sourceStream.next(20);
+    sourceStream.next(30);
+    sourceStream.complete();
+    conditionStream.complete();
 
-      conditionStream.next("start"); // Start the emission
-      sourceStream.next(10);
-      sourceStream.next(20);
-      sourceStream.next(30);
-
-      // FIX: Must complete the source stream
-      sourceStream.complete();
-      conditionStream.complete();
-    });
+    await reader;
+    expect(emittedValues).toEqual([10, 20, 30]);
   });
 
-  it("should handle error in source stream", async () => {
+  it('should handle error in source stream', async () => {
     const sourceStream = createSubject<number>();
     const conditionStream = createSubject<any>();
 
-    // We expect the promise to be rejected
-    await expectAsync(new Promise<void>((resolve, reject) => {
-      const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
+    const reader = (async () => {
+      for await (const _ of iterate(pipe(sourceStream, delayUntil(conditionStream)))) {
+        void _;
+      }
+    })();
 
-      delayedStream.subscribe({
-        next: () => { },
-        complete: () => reject(new Error("Stream completed unexpectedly")), // Should not complete
-        error: (err) => {
-          // If the error callback fires, the test should succeed and resolve/reject logic should handle it
-          expect(err.message).toBe("Something went wrong");
-          resolve(); // Resolve the promise if the expected error is caught
-        },
-      });
+    sourceStream.next(1);
+    sourceStream.error(new Error('Something went wrong'));
+    conditionStream.next('start');
 
-      sourceStream.next(1);
-      sourceStream.error(new Error("Something went wrong")); // Error in the source stream
-      conditionStream.next("start"); // Too late, stream already errored
-
-      // If the error doesn't happen, the promise will hang unless we reject it after a timeout.
-      // Since the error is synchronous here, we rely on the error callback resolving the promise.
-    })).toBeResolved(); // Expect the promise to resolve (because we resolved it on successful error handling)
+    await expectAsync(reader).toBeRejectedWith(jasmine.objectContaining({ message: 'Something went wrong' }));
   });
 
-  it("should propagate notifier errors", async () => {
+  it('should propagate notifier errors', async () => {
     const sourceStream = createSubject<number>();
     const conditionStream = createSubject<any>();
 
-    await expectAsync(
-      new Promise<void>((resolve, reject) => {
-        const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
+    const reader = (async () => {
+      for await (const _ of iterate(pipe(sourceStream, delayUntil(conditionStream)))) {
+        void _;
+      }
+    })();
 
-        delayedStream.subscribe({
-          next: () => reject(new Error("Should not emit")),
-          complete: () => reject(new Error("Should not complete")),
-          error: (err) => {
-            try {
-              expect(err.message).toBe("Notifier failed");
-              resolve();
-            } catch (e) {
-              reject(e);
-            }
-          },
-        });
+    sourceStream.next(7);
+    conditionStream.error(new Error('Notifier failed'));
 
-        sourceStream.next(7);
-        conditionStream.error(new Error("Notifier failed"));
-      })
-    ).toBeResolved();
+    await expectAsync(reader).toBeRejectedWith(jasmine.objectContaining({ message: 'Notifier failed' }));
   });
 
-  it("should flush buffer when notifier promise resolves", async () => {
+  it('should flush buffer when notifier promise resolves', async () => {
     const sourceStream = createSubject<number>();
     const notifierPromise = new Promise<void>((resolve) => setTimeout(resolve, 20));
 
     const emittedValues: number[] = [];
-    const delayedStream = sourceStream.pipe(delayUntil(notifierPromise));
+    const reader = (async () => {
+      for await (const value of iterate(pipe(sourceStream, delayUntil(notifierPromise)))) {
+        emittedValues.push(value);
+      }
+    })();
 
-    await new Promise<void>((resolve, reject) => {
-      delayedStream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues).toEqual([8, 9]);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: (err) => reject(new Error(`Stream failed: ${err}`)),
-      });
+    sourceStream.next(8);
+    sourceStream.next(9);
 
-      sourceStream.next(8);
-      sourceStream.next(9);
+    await wait(40);
+    sourceStream.complete();
 
-      setTimeout(() => {
-        sourceStream.complete();
-      }, 40);
-    });
+    await reader;
+    expect(emittedValues).toEqual([8, 9]);
   });
 
-  it("should complete the stream after both source and condition streams complete", async () => {
+  it('should complete the stream after both source and condition streams complete', async () => {
     const sourceStream = createSubject<number>();
     const conditionStream = createSubject<any>();
 
     const emittedValues: number[] = [];
-    const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
+    const reader = (async () => {
+      for await (const value of iterate(pipe(sourceStream, delayUntil(conditionStream)))) {
+        emittedValues.push(value);
+      }
+    })();
 
-    await new Promise<void>((resolve, reject) => {
-      delayedStream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues).toEqual([5, 6, 7]); // Expectation is now waited for
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: (err) => reject(new Error(`Stream failed: ${err}`)),
-      });
+    conditionStream.next('start');
+    sourceStream.next(5);
+    sourceStream.next(6);
+    sourceStream.next(7);
+    sourceStream.complete();
+    conditionStream.complete();
 
-      conditionStream.next("start"); // Start the emission
-      sourceStream.next(5);
-      sourceStream.next(6);
-      sourceStream.next(7);
-      sourceStream.complete(); // Complete the source stream
-      conditionStream.complete(); // Complete the condition stream
-    });
+    await reader;
+    expect(emittedValues).toEqual([5, 6, 7]);
   });
 });
-

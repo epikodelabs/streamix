@@ -1,184 +1,164 @@
-import { createSubject, delay, EMPTY, filter, from, map, mergeMap, of, take, timer } from '@epikodelabs/streamix';
+import { createSubject, filter, from, iterate, mergeMap, pipe } from '@epikodelabs/streamix';
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('mergeMap', () => {
-  it('should merge emissions from inner streams correctly', (done) => {
+  it('should merge emissions from inner streams correctly', async () => {
     const testStream = from([1, 2, 3]);
 
-    const project = (value: number) => from([value * 2, value * 4]);
+    const project = (value: number) => [value * 2, value * 4];
 
-    const mergedStream = testStream.pipe(mergeMap(project));
+    const mergedAtom = pipe(testStream, mergeMap(project));
 
-    let results: any[] = [];
+    const results: any[] = [];
+    for await (const value of iterate(mergedAtom)) {
+      results.push(value);
+    }
 
-    mergedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        results.sort((a, b) => a - b);
-        expect(results).toEqual([2, 4, 4, 6, 8, 12]);
-        done();
-      }
-    });
+    results.sort((a, b) => a - b);
+    expect(results).toEqual([2, 4, 4, 6, 8, 12]);
   });
 
-  it('should correctly handle a chain of from, filter, mergeMap, filter, and mergeMap', (done) => {
+  it('should correctly handle a chain of from, filter, mergeMap, filter, and mergeMap', async () => {
     const testStream = from([1, 2, 3, 4, 5, 6]);
 
     // Project functions for mergeMap
-    const firstProject = (value: number) => from([value, value * 10]);
-    const secondProject = (value: number) => from([value * 2]);
+    const firstProject = (value: number) => [value, value * 10];
+    const secondProject = (value: number) => [value * 2];
 
     // Create the chained stream
-    const chainedStream = testStream.pipe(
-      // Filter: Keep only even numbers
-      filter((value) => value % 2 === 0),
-      // MergeMap: Project each even number into an array [value, value * 10]
+    const chainedAtom = pipe(
+      testStream,
+      filter((value: number) => value % 2 === 0),
       mergeMap(firstProject),
-      // Filter: Keep values greater than 10
-      filter((value) => value > 10),
-      // MergeMap: Project each value into its double
+      filter((value: number) => value > 10),
       mergeMap(secondProject)
     );
 
-    let results: number[] = [];
-    let emissionCounter = 0; // Assume you're tracking emissions this way
+    const results: number[] = [];
+    let emissionCounter = 0;
 
-    chainedStream.subscribe({
-      next: (value) => {
-        results.push(value);
-        emissionCounter++; // Increment the counter for each emission
-      },
-      complete: () => {
-        // Sort results for easier comparison
-        results.sort((a, b) => a - b);
+    for await (const value of iterate(chainedAtom)) {
+      results.push(value);
+      emissionCounter++;
+    }
 
-        // Validate the results
-        expect(results).toEqual([40, 80, 120]);
-        expect(emissionCounter).toBe(results.length); // Emission counter matches the number of emissions
-        done();
-      },
-    });
+    results.sort((a, b) => a - b);
+
+    expect(results).toEqual([40, 80, 120]);
+    expect(emissionCounter).toBe(results.length);
   });
 
-  it('should handle inner Observable that emits nothing', (done) => {
+  it('should handle inner Observable that emits nothing', async () => {
     const testStream = from([1, 2, 3]);
 
-    const project = () => EMPTY; // Inner observable emits nothing
+    const project = () => [];
 
-    const mergedStream = testStream.pipe(mergeMap(project));
+    const mergedAtom = pipe(testStream, mergeMap(project));
 
     const results: number[] = [];
+    for await (const value of iterate(mergedAtom)) {
+      results.push(value);
+    }
 
-    mergedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([]); // No emissions
-        done();
-      },
-    });
+    expect(results).toEqual([]);
   });
 
-  it('should handle inner Observable that errors out', (done) => {
+  it('should handle inner Observable that errors out', async () => {
     const testStream = from([1, 2, 3]);
 
     const project = (value: number) => {
       if (value === 2) {
         throw new Error('Inner observable error');
       }
-      return from([value * 2]);
+      return [value * 2];
     };
 
-    const mergedStream = testStream.pipe(mergeMap(project));
+    const mergedAtom = pipe(testStream, mergeMap(project));
 
     const results: number[] = [];
+    let caughtError: Error | undefined;
 
-    mergedStream.subscribe({
-      next: (value) => results.push(value),
-      error: (err) => {
-        expect(err.message).toBe('Inner observable error');
-        done();
-      },
-    });
+    try {
+      for await (const value of iterate(mergedAtom)) {
+        results.push(value);
+      }
+    } catch (err) {
+      caughtError = err as Error;
+    }
+
+    expect(caughtError?.message).toBe('Inner observable error');
   });
 
-  it('should merge inner Observable that emits multiple values', (done) => {
+  it('should merge inner Observable that emits multiple values', async () => {
     const testStream = from([1, 2]);
 
-    const project = (value: number) => from([value * 2, value * 3]);
+    const project = (value: number) => [value * 2, value * 3];
 
-    const mergedStream = testStream.pipe(mergeMap(project));
-
-    const results: number[] = [];
-
-    mergedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results.sort((a, b) => a - b)).toEqual([2, 3, 4, 6]); // Sorted results
-        done();
-      },
-    });
-  });
-
-  it('should handle an empty source Observable', (done) => {
-    const testStream = EMPTY;
-
-    const project = (value: number) => from([value * 2]);
-
-    const mergedStream = testStream.pipe(mergeMap(project));
+    const mergedAtom = pipe(testStream, mergeMap(project));
 
     const results: number[] = [];
+    for await (const value of iterate(mergedAtom)) {
+      results.push(value);
+    }
 
-    mergedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([]); // No emissions
-        done();
-      },
-    });
+    expect(results.sort((a, b) => a - b)).toEqual([2, 3, 4, 6]);
   });
 
-  it('should handle rapid emissions from the source', (done) => {
+  it('should handle an empty source Observable', async () => {
+    const testStream = from([]);
+
+    const project = (value: number) => [value * 2];
+
+    const mergedAtom = pipe(testStream, mergeMap(project));
+
+    const results: number[] = [];
+    for await (const value of iterate(mergedAtom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([]);
+  });
+
+  it('should handle rapid emissions from the source', async () => {
     const testStream = from([1, 2, 3, 4, 5]);
 
     const project = (value: number) =>
-      from([value * 2]).pipe(delay(value * 10)); // Delay emissions based on value
+      new Promise<number>((resolve) => setTimeout(() => resolve(value * 2), value * 10));
 
-    const mergedStream = testStream.pipe(mergeMap(project));
+    const mergedAtom = pipe(testStream, mergeMap(project));
 
     const results: number[] = [];
+    for await (const value of iterate(mergedAtom)) {
+      results.push(value);
+    }
 
-    mergedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results.sort((a, b) => a - b)).toEqual([2, 4, 6, 8, 10]); // Ordered by values processed
-        done();
-      },
-    });
+    expect(results.sort((a, b) => a - b)).toEqual([2, 4, 6, 8, 10]);
   });
 
-  it('should wait for all inner Observables to complete', (done) => {
+  it('should wait for all inner Observables to complete', async () => {
     const testStream = from([1, 2, 3]);
 
-    const project = (value: number) => timer(value * 10).pipe(map(() => value * 2), take(1));
+    const project = (value: number) =>
+      new Promise<number>((resolve) => setTimeout(() => resolve(value * 2), value * 10));
 
-    const mergedStream = testStream.pipe(mergeMap(project));
+    const mergedAtom = pipe(testStream, mergeMap(project));
 
     const results: number[] = [];
+    for await (const value of iterate(mergedAtom)) {
+      results.push(value);
+    }
 
-    mergedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([2, 4, 6]); // Inner streams complete in order
-        done();
-      },
-    });
+    expect(results.sort((a, b) => a - b)).toEqual([2, 4, 6]);
   });
 
-  it('edge: should run all rapid emissions concurrently', (done) => {
+  it('edge: should run all rapid emissions concurrently', async () => {
     const source = createSubject<number>();
     const results: number[] = [];
     const startTimes: number[] = [];
 
-    const merged = source.pipe(
+    const merged = pipe(
+      source,
       mergeMap((val) => {
         startTimes.push(Date.now());
         return new Promise<number>((resolve) => {
@@ -187,32 +167,33 @@ describe('mergeMap', () => {
       })
     );
 
-    merged.subscribe({
-      next: (val) => results.push(val),
-      complete: () => {
-        // Results should be in completion order, not emission order
-        expect(results).toEqual([30, 20, 10]);
-        // All should start nearly simultaneously
-        const maxDiff = Math.max(...startTimes) - Math.min(...startTimes);
-        expect(maxDiff).toBeLessThan(50);
-        done();
+    const reader = (async () => {
+      for await (const val of iterate(merged)) {
+        results.push(val);
       }
-    });
+    })();
 
     source.next(1);
     source.next(2);
     source.next(3);
     source.complete();
+
+    await reader;
+
+    expect(results).toEqual([30, 20, 10]);
+    const maxDiff = Math.max(...startTimes) - Math.min(...startTimes);
+    expect(maxDiff).toBeLessThan(50);
   });
 
-  it('edge: should handle mix of sync and async inners concurrently', (done) => {
+  it('edge: should handle mix of sync and async inners concurrently', async () => {
     const source = createSubject<number>();
     const results: number[] = [];
 
-    const merged = source.pipe(
+    const merged = pipe(
+      source,
       mergeMap((val) => {
         if (val % 2 === 0) {
-          return of(val * 10); // sync
+          return [val * 10]; // sync
         }
         return new Promise<number>((resolve) => {
           setTimeout(() => resolve(val * 10), 50);
@@ -220,27 +201,30 @@ describe('mergeMap', () => {
       })
     );
 
-    merged.subscribe({
-      next: (val) => results.push(val),
-      complete: () => {
-        // Sync values first, then async
-        expect(results).toEqual([20, 40, 10, 30]);
-        done();
+    const reader = (async () => {
+      for await (const val of iterate(merged)) {
+        results.push(val);
       }
-    });
+    })();
 
     source.next(1); // async
     source.next(2); // sync
     source.next(3); // async
     source.next(4); // sync
     source.complete();
+
+    await reader;
+
+    expect(results).toEqual([20, 40, 10, 30]);
   });
 
-  it('edge: should continue other inners when one errors', (done) => {
+  it('edge: should continue other inners when one errors', async () => {
     const source = createSubject<number>();
     const results: number[] = [];
+    let caughtError: Error | undefined;
 
-    const merged = source.pipe(
+    const merged = pipe(
+      source,
       mergeMap((val) => {
         return new Promise<number>((resolve, reject) => {
           setTimeout(() => {
@@ -254,27 +238,33 @@ describe('mergeMap', () => {
       })
     );
 
-    merged.subscribe({
-      next: (val) => results.push(val),
-      error: (err) => {
-        expect(err.message).toBe('Error at 2');
-        // First value completes before error
-        expect(results).toEqual([10]);
-        done();
+    const reader = (async () => {
+      try {
+        for await (const val of iterate(merged)) {
+          results.push(val);
+        }
+      } catch (err) {
+        caughtError = err as Error;
       }
-    });
+    })();
 
     source.next(1);
     source.next(2);
     source.next(3);
     source.complete();
+
+    await reader;
+
+    expect(caughtError?.message).toBe('Error at 2');
+    expect(results).toEqual([10]);
   });
 
-  it('edge: should handle rapid emissions with varying inner durations', (done) => {
+  it('edge: should handle rapid emissions with varying inner durations', async () => {
     const source = createSubject<number>();
     const results: number[] = [];
 
-    const merged = source.pipe(
+    const merged = pipe(
+      source,
       mergeMap((val, index) => {
         const delayMs = index === 0 ? 100 : index === 1 ? 50 : 10;
         return new Promise<number>((resolve) => {
@@ -283,27 +273,29 @@ describe('mergeMap', () => {
       })
     );
 
-    merged.subscribe({
-      next: (val) => results.push(val),
-      complete: () => {
-        // Should complete in reverse order of delays
-        expect(results).toEqual([30, 20, 10]);
-        done();
+    const reader = (async () => {
+      for await (const val of iterate(merged)) {
+        results.push(val);
       }
-    });
+    })();
 
     source.next(1); // 100ms
     source.next(2); // 50ms
     source.next(3); // 10ms
     source.complete();
+
+    await reader;
+
+    expect(results).toEqual([30, 20, 10]);
   });
 
-  it('edge: should handle unsubscribe with multiple active inners', (done) => {
+  it('edge: should handle unsubscribe with multiple active inners', async () => {
     const source = createSubject<number>();
     const results: number[] = [];
     const completions: number[] = [];
 
-    const merged = source.pipe(
+    const merged = pipe(
+      source,
       mergeMap((val) => {
         return new Promise<number>((resolve) => {
           setTimeout(() => {
@@ -314,12 +306,10 @@ describe('mergeMap', () => {
       })
     );
 
-    const sub = merged.subscribe({
-      next: (val) => {
-        results.push(val);
-        if (val === 10) {
-          sub.unsubscribe();
-        }
+    const sub = merged.subscribe((val: number) => {
+      results.push(val);
+      if (val === 10) {
+        sub.unsubscribe();
       }
     });
 
@@ -327,13 +317,10 @@ describe('mergeMap', () => {
     source.next(2);
     source.next(3);
 
-    setTimeout(() => {
-      expect(results).toEqual([10]);
-      // Unsubscribe stops delivery, but does not cancel already-started work.
-      expect(completions).toEqual([1, 2, 3]);
-      done();
-    }, 150);
+    await wait(150);
+
+    expect(results).toEqual([10]);
+    expect(completions).toEqual([1, 2, 3]);
   });
 });
-
 

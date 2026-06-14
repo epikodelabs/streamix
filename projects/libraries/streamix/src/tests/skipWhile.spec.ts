@@ -1,80 +1,78 @@
-import { from, skipWhile } from '@epikodelabs/streamix';
+import { from, iterate, pipe, skipWhile } from '@epikodelabs/streamix';
 
 describe('skipWhile', () => {
-  it('should skip values while the predicate is true', (done) => {
-    const source$ = from([1, 2, 3, 4, 5]);
-    const result: number[] = [];
+  it('should skip values while the predicate is true', async () => {
+    const atom = pipe(
+      from([1, 2, 3, 4, 5]),
+      skipWhile((value: number) => value < 3)
+    );
 
-    source$.pipe(skipWhile(val => val < 3)).subscribe({
-      next: val => result.push(val),
-      complete: () => {
-        expect(result).toEqual([3, 4, 5]);
-        done();
-      },
-      error: done.fail
-    });
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([3, 4, 5]);
   });
 
-  it('should emit all values if predicate is false initially', (done) => {
-    const source$ = from([3, 4, 5]);
-    const result: number[] = [];
+  it('should emit all values if predicate is false initially', async () => {
+    const atom = pipe(
+      from([3, 4, 5]),
+      skipWhile((value: number) => value < 3)
+    );
 
-    source$.pipe(skipWhile(val => val < 3)).subscribe({
-      next: val => result.push(val),
-      complete: () => {
-        expect(result).toEqual([3, 4, 5]);
-        done();
-      },
-      error: done.fail
-    });
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([3, 4, 5]);
   });
 
-  it('should skip all values if predicate is always true', (done) => {
-    const source$ = from([1, 2, 3]);
-    const result: number[] = [];
+  it('should skip all values if predicate is always true', async () => {
+    const atom = pipe(
+      from([1, 2, 3]),
+      skipWhile((value: number) => value < 10)
+    );
 
-    source$.pipe(skipWhile(val => val < 10)).subscribe({
-      next: val => result.push(val),
-      complete: () => {
-        expect(result).toEqual([]);
-        done();
-      },
-      error: done.fail
-    });
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([]);
   });
 
-  it('should support index parameter in predicate', (done) => {
-    const source$ = from([10, 20, 30, 40, 50]);
-    const result: number[] = [];
+  it('should support index parameter in predicate', async () => {
     const indices: number[] = [];
+    const atom = pipe(
+      from([10, 20, 30, 40, 50]),
+      skipWhile((_, index) => {
+        indices.push(index);
+        return index < 2;
+      })
+    );
 
-    source$.pipe(skipWhile((_, index) => {
-      indices.push(index);
-      return index < 2; // Skip first 2 values by index
-    })).subscribe({
-      next: val => result.push(val),
-      complete: () => {
-        expect(result).toEqual([30, 40, 50]);
-        expect(indices).toEqual([0, 1, 2]);
-        done();
-      },
-      error: done.fail
-    });
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([30, 40, 50]);
+    expect(indices).toEqual([0, 1, 2]);
   });
 
-  it('should use index to skip based on position not value', (done) => {
-    const source$ = from([100, 100, 100, 100]);
-    const result: number[] = [];
+  it('should use index to skip based on position not value', async () => {
+    const atom = pipe(
+      from([100, 100, 100, 100]),
+      skipWhile((_, index) => index < 2)
+    );
 
-    source$.pipe(skipWhile((_, index) => index < 2)).subscribe({
-      next: val => result.push(val),
-      complete: () => {
-        expect(result).toEqual([100, 100]);
-        done();
-      },
-      error: done.fail
-    });
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([100, 100]);
   });
 });
-
-

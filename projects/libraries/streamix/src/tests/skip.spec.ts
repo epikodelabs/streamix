@@ -1,56 +1,36 @@
-import { from, skip } from '@epikodelabs/streamix';
+import { from, iterate, pipe, skip } from '@epikodelabs/streamix';
 
 describe('skip', () => {
-  it('should skip the specified number of emissions', (done) => {
-    const testStream = from([1, 2, 3, 4, 5]);
-    const countToSkip = 3;
+  it('should skip the specified number of emissions', async () => {
+    const atom = pipe(from([1, 2, 3, 4, 5]), skip(3));
 
-    const skippedStream = testStream.pipe(skip(countToSkip));
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    let results: any[] = [];
-
-    skippedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([4, 5]); // Should skip the first 3 values and emit [4, 5]
-        done();
-      }
-    });
+    expect(results).toEqual([4, 5]);
   });
 
-  it('should handle skip count larger than stream length', (done) => {
-    const testStream = from([1, 2, 3]);
-    const countToSkip = 5; // More than the number of values in the stream
+  it('should handle skip count larger than stream length', async () => {
+    const atom = pipe(from([1, 2, 3]), skip(5));
 
-    const skippedStream = testStream.pipe(skip(countToSkip));
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    let results: any[] = [];
-
-    skippedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([]); // Should skip all values, resulting in an empty array
-        done();
-      }
-    });
+    expect(results).toEqual([]);
   });
 
-  it('should handle skip count of zero', (done) => {
-    const testStream = from([1, 2, 3]);
-    const countToSkip = 0;
+  it('should handle skip count of zero', async () => {
+    const atom = pipe(from([1, 2, 3]), skip(0));
 
-    const skippedStream = testStream.pipe(skip(countToSkip));
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    let results: any[] = [];
-
-    skippedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([1, 2, 3]); // Should emit all values without skipping
-        done();
-      }
-    });
+    expect(results).toEqual([1, 2, 3]);
   });
 });
-
-

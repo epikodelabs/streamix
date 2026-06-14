@@ -15,7 +15,7 @@ import { toAsyncIterable, type StreamInput } from './pipe';
  * @returns {AtomBase<T | undefined>} A new atom that defers subscription to the inner stream.
  */
 export function defer<T = any>(factory: () => StreamInput<T>): AtomBase<T | undefined> {
-  return flow<T | undefined>(async function* () {
+  return flow<T>(async function* () {
     const source = toAsyncIterable(factory());
     const iterator = source[Symbol.asyncIterator]() as AsyncIterator<T>;
 

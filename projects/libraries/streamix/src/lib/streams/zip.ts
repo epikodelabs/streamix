@@ -13,7 +13,7 @@ import { toAsyncIterable, type StreamInput } from './pipe';
 export function zip<T extends readonly unknown[] = any[]>(
   ...sources: { [K in keyof T]: StreamInput<T[K]> }
 ): AtomBase<T | undefined> {
-  return flow<T | undefined>(async function* (): AsyncGenerator<T, void, unknown> {
+  return flow<T>(async function* (): AsyncGenerator<T, void, unknown> {
     if (sources.length === 0) return;
 
     const iterators = sources.map((source) =>

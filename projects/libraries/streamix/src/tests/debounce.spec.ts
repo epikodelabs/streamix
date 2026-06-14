@@ -1,115 +1,94 @@
-import {
-  createStream,
-  debounce,
-  from,
-  interval,
-  take
-} from "@epikodelabs/streamix";
+import { createStream, debounce, from, interval, iterate, pipe, take } from '@epikodelabs/streamix';
+
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('debounce', () => {
-  it('should debounce values from an array stream', (done) => {
+  it('should debounce values from an array stream', async () => {
     const values = [1, 2, 3, 4, 5];
-    // `from(array)` completes synchronously; debounce should flush the latest value on completion
-    // even if the configured duration hasn't elapsed yet.
-    const debouncedStream = from(values).pipe(debounce(10_000));
+    const debouncedAtom = pipe(from(values), debounce(10_000));
     const emittedValues: number[] = [];
 
-    debouncedStream.subscribe({
-      next: (value: number) => emittedValues.push(value),
-      complete: () => {
-        // Only the last value should be emitted due to debounce
-        expect(emittedValues).toEqual([5]);
-        done();
-      },
-      error: done.fail,
-    });
+    for await (const value of iterate(debouncedAtom)) {
+      emittedValues.push(value);
+    }
+
+    expect(emittedValues).toEqual([5]);
   });
 
-  it('should debounce values from an interval stream', (done) => {
-    const source$ = interval(50).pipe(take(5)); // Emits 0,1,2,3,4 at intervals of 50ms
-    const debouncedStream = source$.pipe(debounce(120)); // Debounces emissions
-
+  it('should debounce values from an interval stream', async () => {
+    const sourceAtom = pipe(interval(50), take(5));
+    const debouncedAtom = pipe(sourceAtom, debounce(120));
     const emittedValues: number[] = [];
 
-    debouncedStream.subscribe({
-      next: (value: number) => emittedValues.push(value),
-      complete: () => {
-        // Expecting only the last emission to be debounced and received
-        expect(emittedValues.length).toBe(1);
-        expect(emittedValues[0]).toBe(4); // Last value after debounce period
-        done();
-      },
-    });
+    for await (const value of iterate(debouncedAtom)) {
+      emittedValues.push(value);
+    }
+
+    expect(emittedValues.length).toBe(1);
+    expect(emittedValues[0]).toBe(4);
   });
 
-  it('should debounce values with rapid emissions', (done) => {
+  it('should debounce values with rapid emissions', async () => {
     const values = [1, 2, 3, 4, 5];
-    const intervalStream = createStream<number>("interval", async function* () {
+    const intervalStream = createStream<number>('interval', async function* () {
       for (const value of values) {
         yield value;
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await wait(50);
       }
     });
 
-    const debouncedStream = intervalStream.pipe(debounce(100));
+    const debouncedAtom = pipe(intervalStream, debounce(100));
     const emittedValues: number[] = [];
 
-    debouncedStream.subscribe({
-      next: (value: number) => emittedValues.push(value),
-      complete: () => {
-        // Only the last value should be emitted due to debounce
-        expect(emittedValues).toEqual([5]);
-        done();
-      },
-    });
+    for await (const value of iterate(debouncedAtom)) {
+      emittedValues.push(value);
+    }
+
+    expect(emittedValues).toEqual([5]);
   });
 
-  it('should support promise-based duration', (done) => {
-    const debouncedStream = from([1, 2, 3]).pipe(debounce(Promise.resolve(10)));
+  it('should support promise-based duration', async () => {
+    const debouncedAtom = pipe(from([1, 2, 3]), debounce(Promise.resolve(10)));
     const emittedValues: number[] = [];
 
-    debouncedStream.subscribe({
-      next: (value: number) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual([3]);
-        done();
-      },
-      error: done.fail,
-    });
+    for await (const value of iterate(debouncedAtom)) {
+      emittedValues.push(value);
+    }
+
+    expect(emittedValues).toEqual([3]);
   });
 
-  it('should flush on completion when duration is undefined', (done) => {
-    const debouncedStream = from([1, 2, 3]).pipe(debounce(undefined as any));
+  it('should flush on completion when duration is undefined', async () => {
+    const debouncedAtom = pipe(from([1, 2, 3]), debounce(undefined as any));
     const emittedValues: number[] = [];
 
-    debouncedStream.subscribe({
-      next: (value: number) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual([3]);
-        done();
-      },
-      error: done.fail,
-    });
+    for await (const value of iterate(debouncedAtom)) {
+      emittedValues.push(value);
+    }
+
+    expect(emittedValues).toEqual([3]);
   });
 
-  it('should propagate errors from the source', (done) => {
-    const source$ = createStream<number>("boom", async function* () {
+  it('should propagate errors from the source', async () => {
+    const sourceAtom = createStream<number>('boom', async function* () {
       yield 1;
-      throw new Error("BOOM");
+      throw new Error('BOOM');
     });
 
-    const debouncedStream = source$.pipe(debounce(0));
-
+    const debouncedAtom = pipe(sourceAtom, debounce(0));
     const values: number[] = [];
-    debouncedStream.subscribe({
-      next: (v) => values.push(v),
-      error: (err) => {
-        expect(values).toEqual([]); // never flushed before error
-        expect(err).toEqual(jasmine.any(Error));
-        expect((err as Error).message).toBe("BOOM");
-        done();
-      },
-      complete: () => done.fail("Should not complete after error"),
-    });
+    let caught: any;
+
+    try {
+      for await (const value of iterate(debouncedAtom)) {
+        values.push(value);
+      }
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(values).toEqual([]);
+    expect(caught).toEqual(jasmine.any(Error));
+    expect(caught.message).toBe('BOOM');
   });
 });

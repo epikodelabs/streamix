@@ -25,6 +25,9 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
     // Buffered source values
     let buffer: T[] = [];
 
+    // Whether the source has completed
+    let sourceCompleted = false;
+
     // Whether the iterator has been cancelled (return/throw)
     let cancelled = false;
 
@@ -41,6 +44,14 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
       const values = [...buffer];
       buffer = [];
       return { value: values, done: false };
+    };
+
+    const finish = async () => {
+      if (cancelled || sourceCompleted) return;
+      sourceCompleted = true;
+      try {
+        await runner.return?.();
+      } catch {}
     };
 
     /**
@@ -72,6 +83,10 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
         while (true) {
           if (cancelled) return DONE;
 
+          if (sourceCompleted && buffer.length === 0) {
+            return DONE;
+          }
+
           const runnerResult = await runner.next();
 
           if (runnerResult.done) {
@@ -93,8 +108,13 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
               break;
 
             case "complete":
-              // Source completed: flush buffer if any
-              if (event.sourceIndex === 0 && buffer.length > 0) return flushBuffer();
+              // Source completed: flush buffer if any, then finish
+              if (event.sourceIndex === 0) {
+                sourceCompleted = true;
+                if (buffer.length > 0) return flushBuffer();
+                await finish();
+                return DONE;
+              }
               break;
 
             case "error":
@@ -145,6 +165,7 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
        */
       __tryNext: () => {
         if (cancelled) return DONE;
+        if (sourceCompleted && buffer.length === 0) return DONE;
         if (!runner.__tryNext) return null;
 
         while (true) {
@@ -165,7 +186,12 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
               break;
 
             case "complete":
-              if (event.sourceIndex === 0 && buffer.length > 0) return flushBuffer();
+              if (event.sourceIndex === 0) {
+                sourceCompleted = true;
+                if (buffer.length > 0) return flushBuffer();
+                runner.return?.().catch(() => {});
+                return DONE;
+              }
               break;
 
             case "error":

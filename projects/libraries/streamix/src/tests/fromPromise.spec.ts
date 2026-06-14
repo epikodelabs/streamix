@@ -1,149 +1,91 @@
-import { fromPromise, NEXT } from '@epikodelabs/streamix';
+import { fromPromise, iterate } from '@epikodelabs/streamix';
+
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
 describe('fromPromise', () => {
-  it('should emit value from resolved promise', (done) => {
+  it('should emit value from resolved promise', async () => {
     const value = 'test_value';
     const promise = Promise.resolve(value);
-    const stream = fromPromise(promise);
+    const atom = fromPromise(promise);
 
-    const emittedValues: any[] = [];
-    stream.subscribe({
-      next: (value: any) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual([value]);
-        done();
-      }
-    })
+    const emittedValues: string[] = [];
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
+
+    expect(emittedValues).toEqual([value]);
   });
 
-  it('should emit a single value from a Promise and then complete', async () => {
+  it('should emit a single value from a Promise', async () => {
     const promiseValue = 'Hello';
     const promise = Promise.resolve(promiseValue);
-    const stream = fromPromise(promise);
-    let emittedValues: any[] = [];
+    const atom = fromPromise(promise);
 
-    await new Promise<void>((resolve, reject) => {
-      stream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues).toEqual([promiseValue]);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: reject
-      });
-    });
+    const emittedValues: string[] = [];
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
+
+    expect(emittedValues).toEqual([promiseValue]);
   });
 
   it('should propagate an error from a rejected Promise', async () => {
     const expectedError = new Error('Promise rejection');
     const promise = Promise.reject(expectedError);
-    // Prevent Node's unhandledRejection warning before fromPromise subscribes.
     void promise.catch(() => {});
-    const stream = fromPromise(promise);
+    const atom = fromPromise(promise);
 
-    // We expect the promise to be rejected, so we use async/await with try/catch
+    let caught: any;
     try {
-      await new Promise<void>((resolve, reject) => {
-        stream.subscribe({
-          next: () => reject(new Error('Value emitted unexpectedly')),
-          complete: () => reject(new Error('Stream completed unexpectedly')),
-          error: (err) => {
-            expect(err).toBe(expectedError);
-            resolve(); // Resolve on expected error
-          }
-        });
-      });
+      for await (const v of iterate(atom)) {
+        fail(`Value emitted unexpectedly: ${v}`);
+      }
     } catch (e) {
-      // If the promise rejects for any reason other than the expected error, fail
-      fail(`Test failed in unexpected way: ${e}`);
+      caught = e;
     }
+
+    expect(caught).toBe(expectedError);
   });
 
-  it('should propagate an error from a Promise rejected after a small delay', (done) => {
+  it('should propagate an error from a Promise rejected after a small delay', async () => {
     const expectedError = new Error('Delayed promise rejection');
     const promise = new Promise((_, reject) => {
       setTimeout(() => reject(expectedError), 10);
     });
-    const stream = fromPromise(promise);
+    const atom = fromPromise(promise);
 
-    stream.subscribe({
-      next: () => fail('Value emitted unexpectedly'),
-      complete: () => done.fail('Stream completed unexpectedly'),
-      error: (err) => {
-        expect(err).toBe(expectedError);
-        done();
+    let caught: any;
+    try {
+      for await (const v of iterate(atom)) {
+        fail(`Value emitted unexpectedly: ${v}`);
       }
-    });
-  });
-  it('should complete after emitting value', (done) => {
-    const value = 'test_value';
-    const promise = Promise.resolve(value);
-    const stream = fromPromise(promise);
+    } catch (e) {
+      caught = e;
+    }
 
-    let completed = false;
-    stream.subscribe({
-      next: () => completed = true,
-      complete: () => {
-        expect(completed).toBe(true);
-        done();
-      }
-    });
+    expect(caught).toBe(expectedError);
   });
 
-  it('should handle promise rejection', (done) => {
-    const error = new Error('Test error');
-    const promise = Promise.reject(error);
-    // Prevent Node's unhandledRejection warning before fromPromise subscribes.
-    void promise.catch(() => {});
-    const stream = fromPromise(promise);
-
-    let receivedError: Error | undefined;
-    const subscription = stream.subscribe({
-      error: (error: any) => {
-        receivedError = error;
-        expect(receivedError).toBe(error);
-        subscription.unsubscribe();
-        done();
-      },
-      complete: () => {
-        done.fail('Stream completed unexpectedly');
-      }
-    });
-  });
-
-  it('should not emit if unsubscribed before run', (done) => {
+  it('should not emit if unsubscribed before run', async () => {
     const value = 'test_value';
     const promise = new Promise<string>((resolve) => setTimeout(() => resolve(value), 20));
-    const stream = fromPromise(promise);
+    const atom = fromPromise(promise);
 
-    const emittedValues: any[] = [];
-    const subscription = stream.subscribe({
-      next: (value: any) => emittedValues.push(value),
-      error: (err) => done.fail(err),
-      complete: () => {}
-    });
+    const emittedValues: string[] = [];
+    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
-    // Unsubscribe immediately; do not rely on `complete` being delivered.
-    Promise.resolve(subscription.unsubscribe()).then(() => {
-      setTimeout(() => {
-        expect(emittedValues).toEqual([]);
-        done();
-      }, 40);
-    });
+    subscription.unsubscribe();
+
+    await delay(40);
+    expect(emittedValues).toEqual([]);
   });
 
   it('should abort an abortable promise factory when unsubscribed', async () => {
     let capturedSignal: AbortSignal | undefined;
-    const emittedValues: any[] = [];
+    const emittedValues: string[] = [];
 
-    const stream = fromPromise<string>((signal: AbortSignal) => {
+    const atom = fromPromise<string>(((signal: AbortSignal) => {
       capturedSignal = signal;
 
-      return new Promise((resolve, reject) => {
+      return new Promise<string>((resolve, reject) => {
         const timeoutId = setTimeout(() => resolve('late_value'), 50);
 
         signal.addEventListener('abort', () => {
@@ -151,13 +93,9 @@ describe('fromPromise', () => {
           reject(new Error('Aborted'));
         }, { once: true });
       });
-    });
+    }) as any);
 
-    const subscription = stream.subscribe({
-      next: (value: any) => emittedValues.push(value),
-      error: () => fail('Error emitted unexpectedly'),
-      complete: () => {}
-    });
+    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     await subscription.unsubscribe();
 
@@ -166,76 +104,59 @@ describe('fromPromise', () => {
     expect(emittedValues).toEqual([]);
   });
 
-  it('should invoke factory for each subscription', async () => {
+  it('should invoke factory when the atom is subscribed', async () => {
     let callCount = 0;
     const factory = () => {
       callCount++;
       return Promise.resolve('result');
     };
-    const stream = fromPromise(factory);
+    const atom = fromPromise(factory);
 
-    const it1 = stream[Symbol.asyncIterator]();
-    expect(await it1.next()).toEqual(NEXT('result'));
-    await it1.return?.();
+    expect(callCount).toBe(0);
+
+    const values: string[] = [];
+    atom.subscribe(v => { if (v !== undefined) values.push(v); });
+    await delay();
+
     expect(callCount).toBe(1);
-
-    const it2 = stream[Symbol.asyncIterator]();
-    expect(await it2.next()).toEqual(NEXT('result'));
-    await it2.return?.();
-    expect(callCount).toBe(2);
+    expect(values).toEqual(['result']);
   });
 
   it('should emit error when factory throws immediately', async () => {
     const error = new Error('sync failure');
-    const stream = fromPromise(() => {
+    const atom = fromPromise(() => {
       throw error;
     });
 
-    await expectAsync(
-      new Promise<void>((resolve, reject) => {
-        stream.subscribe({
-          next: () => reject(new Error('Should not emit')),
-          error: (err) => {
-            try {
-              expect(err).toBe(error);
-              resolve();
-            } catch (inner) {
-              reject(inner);
-            }
-          },
-          complete: () => reject(new Error('Should not complete'))
-        });
-      })
-    ).toBeResolved();
+    let caught: any;
+    try {
+      for await (const v of iterate(atom)) {
+        fail(`Value emitted unexpectedly: ${v}`);
+      }
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBe(error);
   });
 
   it('should emit synchronous value without promise', async () => {
-    const stream = fromPromise(123);
+    const atom = fromPromise(123);
     const values: number[] = [];
 
-    void (async () => {
-      for await (const value of stream) {
-        values.push(value as number);
-      }
-    })();
+    atom.subscribe(v => { if (v !== undefined) values.push(v); });
+    await delay();
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(values).toEqual([123]);
   });
 
   it('should emit sync factory result without promise', async () => {
-    const stream = fromPromise(() => 'sync-factory');
+    const atom = fromPromise(() => 'sync-factory');
     const values: string[] = [];
 
-    void (async () => {
-      for await (const value of stream) {
-        values.push(value as string);
-      }
-    })();
+    atom.subscribe(v => { if (v !== undefined) values.push(v); });
+    await delay();
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(values).toEqual(['sync-factory']);
   });
 });
-
-

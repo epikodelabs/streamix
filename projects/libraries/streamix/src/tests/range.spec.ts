@@ -1,5 +1,7 @@
 import { range } from "@epikodelabs/streamix";
 
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
+
 describe("range", () => {
   it("should emit the correct range of values", async () => {
     const start = 1;
@@ -7,23 +9,11 @@ describe("range", () => {
     const expectedValues = [1, 2, 3, 4, 5];
     const emittedValues: number[] = [];
 
-    const rangeStream = range(start, count);
+    const atom = range(start, count);
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
 
-    // FIX: Use await Promise to wait for the complete callback
-    await new Promise<void>((resolve, reject) => {
-      rangeStream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues).toEqual(expectedValues);
-            resolve(); // Resolve the promise on successful completion
-          } catch (e) {
-            reject(e); // Reject if the expectation fails
-          }
-        },
-        error: (err) => reject(err), // Reject the promise if an error occurs
-      });
-    });
+    expect(emittedValues).toEqual(expectedValues);
   });
 
   it("should stop emitting after the specified count", async () => {
@@ -31,22 +21,11 @@ describe("range", () => {
     const count = 3;
     const emittedValues: number[] = [];
 
-    const rangeStream = range(start, count);
+    const atom = range(start, count);
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
 
-    await new Promise<void>((resolve, reject) => {
-      rangeStream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues.length).toBe(count);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: (err) => reject(err),
-      });
-    });
+    expect(emittedValues.length).toBe(count);
   });
 
   it("should handle a zero count by completing without emitting values", async () => {
@@ -54,22 +33,11 @@ describe("range", () => {
     const count = 0;
     const emittedValues: number[] = [];
 
-    const rangeStream = range(start, count);
+    const atom = range(start, count);
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
 
-    await new Promise<void>((resolve, reject) => {
-      rangeStream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues.length).toBe(0);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: (err) => reject(err),
-      });
-    });
+    expect(emittedValues.length).toBe(0);
   });
 
   it("should emit values in order starting from the start value", async () => {
@@ -78,22 +46,11 @@ describe("range", () => {
     const expectedValues = [10, 11, 12, 13];
     const emittedValues: number[] = [];
 
-    const rangeStream = range(start, count);
+    const atom = range(start, count);
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
 
-    await new Promise<void>((resolve, reject) => {
-      rangeStream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues).toEqual(expectedValues);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: (err) => reject(err),
-      });
-    });
+    expect(emittedValues).toEqual(expectedValues);
   });
 
   it("should complete immediately if count is 0", async () => {
@@ -101,22 +58,11 @@ describe("range", () => {
     const count = 0;
     const emittedValues: number[] = [];
 
-    const rangeStream = range(start, count);
+    const atom = range(start, count);
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
 
-    await new Promise<void>((resolve, reject) => {
-      rangeStream.subscribe({
-        next: (value) => emittedValues.push(value),
-        complete: () => {
-          try {
-            expect(emittedValues.length).toBe(0);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
-        },
-        error: (err) => reject(err),
-      });
-    });
+    expect(emittedValues.length).toBe(0);
   });
 
   it("resolves promised parameters before emitting", async () => {
@@ -125,39 +71,18 @@ describe("range", () => {
     const step = Promise.resolve(5);
     const emitted: number[] = [];
 
-    await new Promise<void>((resolve, reject) => {
-      range(start, count, step).subscribe({
-        next: (value) => emitted.push(value),
-        complete: () => {
-          try {
-            expect(emitted).toEqual([2, 7, 12]);
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        },
-        error: reject,
-      });
-    });
+    range(start, count, step).subscribe(v => { if (v !== undefined) emitted.push(v); });
+    await delay();
+
+    expect(emitted).toEqual([2, 7, 12]);
   });
 
   it("supports negative step values", async () => {
     const emitted: number[] = [];
 
-    await new Promise<void>((resolve, reject) => {
-      range(5, 3, -1).subscribe({
-        next: (value) => emitted.push(value),
-        complete: () => {
-          try {
-            expect(emitted).toEqual([5, 4, 3]);
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        },
-        error: reject,
-      });
-    });
+    range(5, 3, -1).subscribe(v => { if (v !== undefined) emitted.push(v); });
+    await delay();
+
+    expect(emitted).toEqual([5, 4, 3]);
   });
 });
-

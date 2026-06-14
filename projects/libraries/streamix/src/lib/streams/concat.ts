@@ -21,7 +21,7 @@ import { toAsyncIterable, type StreamInput } from "./pipe";
  */
 
 export function concat<T = any>(...sources: StreamInput<T>[]): AtomBase<T | undefined> {
-  return flow<T | undefined>(async function* () {
+  return flow<T>(async function* () {
     for (const source of sources) {
       const iterator = toAsyncIterable(source)[Symbol.asyncIterator]() as AsyncIterator<T>;
 

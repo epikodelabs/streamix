@@ -1,4 +1,6 @@
-import { createStream, observeOn } from "@epikodelabs/streamix";
+import { createStream, iterate, observeOn, pipe } from '@epikodelabs/streamix';
+
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('observeOn', () => {
   let originalRequestIdleCallback: typeof requestIdleCallback;
@@ -23,17 +25,17 @@ describe('observeOn', () => {
   it('should emit values using microtask scheduling', async () => {
     const values: number[] = [];
     const emissionOrder: string[] = [];
-    
+
     const stream = createStream('test', async function* () {
       yield 1;
       yield 2;
       yield 3;
     });
 
-    const observeOnStream = stream.pipe(observeOn('microtask'));
-    
+    const observeOnAtom = pipe(stream, observeOn('microtask'));
+
     void (async () => {
-      for await (const value of observeOnStream) {
+      for await (const value of iterate(observeOnAtom)) {
         emissionOrder.push(`value-${value}`);
         values.push(value);
       }
@@ -41,8 +43,7 @@ describe('observeOn', () => {
     })();
 
     emissionOrder.push('sync-after-subscribe');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
+    await wait(0);
 
     expect(values).toEqual([1, 2, 3]);
     expect(emissionOrder[0]).toBe('sync-after-subscribe');
@@ -50,68 +51,58 @@ describe('observeOn', () => {
     expect(emissionOrder[emissionOrder.length - 1]).toBe('complete');
   });
 
-  it('should emit values using macrotask scheduling', (done) => {
+  it('should emit values using macrotask scheduling', async () => {
     const values: number[] = [];
-    
+
     const stream = createStream('test', async function* () {
       yield 1;
       yield 2;
     });
 
-    const observeOnStream = stream.pipe(observeOn('macrotask'));
-    
-    setTimeout(async () => {
-      try {
-        for await (const value of observeOnStream) {
-          values.push(value);
-        }
-        
-        expect(values).toEqual([1, 2]);
-        done();
-      } catch (error: any) {
-        done.fail(error);
-      }
-    }, 10);
+    const observeOnAtom = pipe(stream, observeOn('macrotask'));
+
+    await wait(10);
+
+    for await (const value of iterate(observeOnAtom)) {
+      values.push(value);
+    }
+
+    expect(values).toEqual([1, 2]);
   });
 
-  it('should emit values using idle scheduling', (done) => {
+  it('should emit values using idle scheduling', async () => {
     const values: number[] = [];
-    
+
     const stream = createStream('test', async function* () {
       yield 1;
       yield 2;
     });
 
-    const observeOnStream = stream.pipe(observeOn('idle'));
-    
-    setTimeout(async () => {
-      try {
-        for await (const value of observeOnStream) {
-          values.push(value);
-        }
-        
-        expect(values).toEqual([1, 2]);
-        expect(mockRequestIdleCallback).toHaveBeenCalled();
-        done();
-      } catch (error: any) {
-        done.fail(error);
-      }
-    }, 10);
+    const observeOnAtom = pipe(stream, observeOn('idle'));
+
+    await wait(10);
+
+    for await (const value of iterate(observeOnAtom)) {
+      values.push(value);
+    }
+
+    expect(values).toEqual([1, 2]);
+    expect(mockRequestIdleCallback).toHaveBeenCalled();
   });
 
   it('should propagate errors asynchronously', async () => {
     const error = new Error('Test error');
-    
+
     const stream = createStream('error', async function* () {
       yield 1;
       throw error;
     });
 
-    const observeOnStream = stream.pipe(observeOn('microtask'));
+    const observeOnAtom = pipe(stream, observeOn('microtask'));
     const values: number[] = [];
-    
+
     try {
-      for await (const value of observeOnStream) {
+      for await (const value of iterate(observeOnAtom)) {
         values.push(value);
       }
       fail('Should have thrown an error');
@@ -123,14 +114,14 @@ describe('observeOn', () => {
 
   it('should handle empty streams', async () => {
     const values: number[] = [];
-    
+
     const stream = createStream('empty', async function* () {
       // Empty generator
     });
 
-    const observeOnStream = stream.pipe(observeOn('microtask'));
-    
-    for await (const value of observeOnStream) {
+    const observeOnAtom = pipe(stream, observeOn('microtask'));
+
+    for await (const value of iterate(observeOnAtom)) {
       values.push(value);
     }
 
@@ -151,7 +142,7 @@ describe('observeOn', () => {
       yield 2;
     });
 
-    for await (const value of stream.pipe(observeOn('idle'))) {
+    for await (const value of iterate(pipe(stream, observeOn('idle')))) {
       values.push(value);
     }
 
@@ -159,5 +150,3 @@ describe('observeOn', () => {
     expect(setTimeoutSpy).toHaveBeenCalled();
   });
 });
-
-

@@ -1,4 +1,4 @@
-import { createStream, partition } from '@epikodelabs/streamix';
+import { createStream, iterate, partition, pipe } from '@epikodelabs/streamix';
 
 describe('partition', () => {
 
@@ -6,7 +6,7 @@ describe('partition', () => {
     const trueValues: T[] = [];
     const falseValues: T[] = [];
 
-    for await (const { key, value } of source) {
+    for await (const { key, value } of iterate(source)) {
       if (key === "true") {
         trueValues.push(value);
       } else {
@@ -25,7 +25,7 @@ describe('partition', () => {
       yield 4;
     });
 
-    const partitioned = source.pipe(partition(n => n % 2 === 0));
+    const partitioned = pipe(source, partition(n => n % 2 === 0));
     const { true: evens, false: odds } = await collect<number>(partitioned);
 
     expect(evens).toEqual([2, 4]);
@@ -35,7 +35,7 @@ describe('partition', () => {
   it('should handle empty source stream', async () => {
     const source = createStream<number>("test", async function* () {});
 
-    const partitioned = source.pipe(partition(() => true));
+    const partitioned = pipe(source, partition(() => true));
     const { true: yes, false: no } = await collect<number>(partitioned);
 
     expect(yes).toEqual([]);
@@ -48,7 +48,7 @@ describe('partition', () => {
       yield 2;
     });
 
-    const partitioned = source.pipe(partition(n => n > 0));
+    const partitioned = pipe(source, partition(n => n > 0));
     const { true: pass, false: fail } = await collect<number>(partitioned);
 
     expect(pass).toEqual([1, 2]);
@@ -61,35 +61,31 @@ describe('partition', () => {
       yield -2;
     });
 
-    const partitioned = source.pipe(partition(n => n > 0));
+    const partitioned = pipe(source, partition(n => n > 0));
     const { true: pass, false: fail } = await collect<number>(partitioned);
 
     expect(pass).toEqual([]);
     expect(fail).toEqual([-1, -2]);
   });
 
-  it('should propagate errors from source', done => {
+  it('should propagate errors from source', async () => {
     const source = createStream<number>("test", async function* () {
       yield 1;
       yield 2;
       throw new Error('Test error');
     });
 
-    const partitioned = source.pipe(partition(n => n % 2 === 0));
+    const partitioned = pipe(source, partition(n => n % 2 === 0));
 
-    partitioned.subscribe({
-      next: () => {
-        // do nothing
-      },
-      error: (err) => {
-        expect(err).toEqual(new Error('Test error'));
-        done();
-      },
-      complete: () => {
-        done.fail('Should not complete after error');
+    let caught: Error | undefined;
+    try {
+      for await (const _ of iterate(partitioned)) {
+        // consume
       }
-    });
+    } catch (err) {
+      caught = err as Error;
+    }
+
+    expect(caught).toEqual(new Error('Test error'));
   });
 });
-
-

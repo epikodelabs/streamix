@@ -1,65 +1,69 @@
 import {
   bufferCount,
   createSubject,
-  type Stream,
+  iterate,
+  pipe,
+  type Subject,
 } from "@epikodelabs/streamix";
 
+const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 describe("bufferCount", () => {
-  let source: Stream<number>;
-  let subject: ReturnType<typeof createSubject<number>>;
+  let source: Subject<number>;
 
   beforeEach(() => {
-    subject = createSubject<number>();
-    source = subject;
+    source = createSubject<number>();
   });
 
   it("should emit buffers of the specified size", async () => {
-    const buffered = source.pipe(bufferCount(3));
+    const buffered = pipe(source, bufferCount(3));
     const results: number[][] = [];
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.next(3); // Emits [1, 2, 3]
-    subject.next(4);
-    subject.next(5);
-    subject.next(6); // Emits [4, 5, 6]
-    subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    source.next(1);
+    source.next(2);
+    source.next(3); // Emits [1, 2, 3]
+    source.next(4);
+    source.next(5);
+    source.next(6); // Emits [4, 5, 6]
+    source.complete();
+    await waitTick();
 
+    await completed;
     expect(results).toEqual([[1, 2, 3], [4, 5, 6]]);
   });
 
   it("should emit the remaining buffer when source completes", async () => {
-    const buffered = source.pipe(bufferCount(3));
+    const buffered = pipe(source, bufferCount(3));
     const results: number[][] = [];
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.complete(); // Emits [1, 2]
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    source.next(1);
+    source.next(2);
+    source.complete(); // Emits [1, 2]
+    await waitTick();
 
+    await completed;
     expect(results).toEqual([[1, 2]]);
   });
 
   it("should propagate errors from the source stream", async () => {
-    const buffered = source.pipe(bufferCount(3));
+    const buffered = pipe(source, bufferCount(3));
     let error: any = null;
 
-    void (async () => {
+    const completed = (async () => {
       try {
-        for await (const _ of buffered) {
+        for await (const _ of iterate(buffered)) {
           void _;
         }
       } catch (err) {
@@ -67,25 +71,27 @@ describe("bufferCount", () => {
       }
     })();
 
-    subject.error(new Error("Test error"));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    source.error(new Error("Test error"));
+    await waitTick();
 
+    await completed;
     expect(error.message).toBe("Test error");
   });
 
   it("should not emit empty buffers", async () => {
-    const buffered = source.pipe(bufferCount(3));
+    const buffered = pipe(source, bufferCount(3));
     const results: number[][] = [];
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
 
-    subject.complete(); // Should not emit anything
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    source.complete(); // Should not emit anything
+    await waitTick();
 
+    await completed;
     expect(results).toEqual([]);
   });
 
@@ -95,71 +101,72 @@ describe("bufferCount", () => {
       resolveSize = resolve;
     });
 
-    const buffered = source.pipe(bufferCount(promisedSize));
+    const buffered = pipe(source, bufferCount(promisedSize));
     const results: number[][] = [];
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
 
     await new Promise<void>((resolve) => setTimeout(() => (resolveSize(2), resolve()), 0));
-    
-    subject.next(1);
-    subject.next(2);
-    subject.next(3);
-    subject.next(4);
-    subject.complete();
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    source.next(1);
+    source.next(2);
+    source.next(3);
+    source.next(4);
+    source.complete();
 
+    await waitTick();
+
+    await completed;
     expect(results).toEqual([[1, 2], [3, 4]]);
   });
 
   it("should behave like identity wrapped in arrays for buffer count 1", async () => {
-    const buffered = source.pipe(bufferCount(1));
+    const buffered = pipe(source, bufferCount(1));
     const results: number[][] = [];
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    source.next(1);
+    source.next(2);
+    source.complete();
+    await waitTick();
 
+    await completed;
     expect(results).toEqual([[1], [2]]);
   });
 
   it("should fail gracefully if bufferSize promise rejects", async () => {
-     const errorMsg = "invalid size";
-     const buffered = source.pipe(bufferCount(Promise.reject(new Error(errorMsg))));
-     let capturedError;
- 
-     try {
-       // We need to trigger the loop
-       const it = buffered[Symbol.asyncIterator]();
-       await it.next();
-     } catch (e) {
-       capturedError = e;
-     }
- 
-     expect(capturedError).toBeDefined();
-     expect((capturedError as any).message).toBe(errorMsg);
-   });
+    const errorMsg = "invalid size";
+    const buffered = pipe(source, bufferCount(Promise.reject(new Error(errorMsg))));
+    let capturedError;
+
+    try {
+      const it = iterate(buffered)[Symbol.asyncIterator]();
+      await it.next();
+    } catch (e) {
+      capturedError = e;
+    }
+
+    expect(capturedError).toBeDefined();
+    expect((capturedError as any).message).toBe(errorMsg);
+  });
 
   it("should handle error in the middle of buffering without emitting partial buffer", async () => {
-    const buffered = source.pipe(bufferCount(3));
+    const buffered = pipe(source, bufferCount(3));
     const results: number[][] = [];
     let error: any = null;
 
-    void (async () => {
+    const completed = (async () => {
       try {
-        for await (const value of buffered) {
+        for await (const value of iterate(buffered)) {
           results.push(value);
         }
       } catch (err) {
@@ -167,22 +174,23 @@ describe("bufferCount", () => {
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.error(new Error("Error during buffering"));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    source.next(1);
+    source.next(2);
+    source.error(new Error("Error during buffering"));
+    await waitTick();
 
+    await completed;
     expect(results).toEqual([]);
     expect(error.message).toBe("Error during buffering");
   });
 
   it("should work with different data types", async () => {
     const objectSubject = createSubject<{ id: number; name: string }>();
-    const buffered = objectSubject.pipe(bufferCount(2));
+    const buffered = pipe(objectSubject, bufferCount(2));
     const results: { id: number; name: string }[][] = [];
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
@@ -191,8 +199,9 @@ describe("bufferCount", () => {
     objectSubject.next({ id: 2, name: "Bob" });
     objectSubject.next({ id: 3, name: "Charlie" });
     objectSubject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitTick();
 
+    await completed;
     expect(results).toEqual([
       [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }],
       [{ id: 3, name: "Charlie" }]
@@ -201,11 +210,11 @@ describe("bufferCount", () => {
 
   it("should handle null and undefined values in buffers", async () => {
     const nullableSubject = createSubject<number | null | undefined>();
-    const buffered = nullableSubject.pipe(bufferCount(3));
+    const buffered = pipe(nullableSubject, bufferCount(3));
     const results: (number | null | undefined)[][] = [];
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
@@ -215,76 +224,80 @@ describe("bufferCount", () => {
     nullableSubject.next(undefined);
     nullableSubject.next(2);
     nullableSubject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitTick();
 
+    await completed;
     expect(results).toEqual([[1, null, undefined], [2]]);
   });
 
   it("should handle fractional buffer sizes", async () => {
-    const buffered = source.pipe(bufferCount(2.7));
+    const buffered = pipe(source, bufferCount(2.7));
     const results: number[][] = [];
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.next(3);
-    subject.next(4);
-    subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    source.next(1);
+    source.next(2);
+    source.next(3);
+    source.next(4);
+    source.complete();
+    await waitTick();
 
+    await completed;
     expect(results).toEqual([[1, 2, 3], [4]]);
   });
 
   it("should handle completion immediately after creating buffer full", async () => {
-    const buffered = source.pipe(bufferCount(2));
+    const buffered = pipe(source, bufferCount(2));
     const results: number[][] = [];
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
 
-    subject.next(1);
-    subject.next(2);
-    subject.next(3);
-    subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    source.next(1);
+    source.next(2);
+    source.next(3);
+    source.complete();
+    await waitTick();
 
+    await completed;
     expect(results).toEqual([[1, 2], [3]]);
   });
 
   it("should emit multiple complete buffers followed by partial on completion", async () => {
-    const buffered = source.pipe(bufferCount(3));
+    const buffered = pipe(source, bufferCount(3));
     const results: number[][] = [];
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
 
     for (let i = 1; i <= 8; i++) {
-      subject.next(i);
+      source.next(i);
     }
-    subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    source.complete();
+    await waitTick();
 
+    await completed;
     expect(results).toEqual([[1, 2, 3], [4, 5, 6], [7, 8]]);
   });
 
   it("should call next multiple times after source completes", async () => {
-    const buffered = source.pipe(bufferCount(2));
-    const it = buffered[Symbol.asyncIterator]();
+    const buffered = pipe(source, bufferCount(2));
+    const it = iterate(buffered)[Symbol.asyncIterator]();
 
-    subject.next(1);
-    subject.next(2);
-    subject.complete();
+    source.next(1);
+    source.next(2);
+    source.complete();
 
     const result1 = await it.next();
     expect(result1.done).toBe(false);
@@ -296,7 +309,4 @@ describe("bufferCount", () => {
     const result3 = await it.next();
     expect(result3.done).toBe(true);
   });
-
 });
-
-

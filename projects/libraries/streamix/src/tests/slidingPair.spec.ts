@@ -1,69 +1,41 @@
-import { from, slidingPair } from "@epikodelabs/streamix";
-
+import { from, pipe, slidingPair, iterate } from "@epikodelabs/streamix";
 
 describe('slidingPair', () => {
-  it('should emit pairs of consecutive values', (done) => {
-    const testStream = from([1, 2, 3, 4]);
-    const pairedStream = testStream.pipe(slidingPair());
+  it('should emit pairs of consecutive values', async () => {
+    const atom = pipe(from([1, 2, 3, 4]), slidingPair());
 
-    const expectedValues = [
+    const results: [number | undefined, number][] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([
       [undefined, 1],
       [1, 2],
       [2, 3],
       [3, 4]
-    ];
-    let index = 0;
-
-    pairedStream.subscribe({
-      next: (value) => {
-        expect(value).toEqual(expectedValues[index]);
-        index++;
-        if (index === expectedValues.length) {
-          done();
-        }
-      },
-      error: (err) => done.fail(err),
-    });
+    ]);
   });
 
-  it('should handle a stream with a single value', (done) => {
-    const testStream = from([1]);
-    const pairedStream = testStream.pipe(slidingPair());
+  it('should handle a stream with a single value', async () => {
+    const atom = pipe(from([1]), slidingPair());
 
-    const expectedValues = [
-      [undefined, 1]
-    ];
-    let index = 0;
+    const results: [number | undefined, number][] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    pairedStream.subscribe({
-      next: (value) => {
-        expect(value).toEqual(expectedValues[index]);
-        index++;
-        if (index === expectedValues.length) {
-          done();
-        }
-      },
-      error: (err) => done.fail(err),
-    });
+    expect(results).toEqual([[undefined, 1]]);
   });
 
-  it('should handle an empty stream', (done) => {
-    const testStream = from([]);
-    const pairedStream = testStream.pipe(slidingPair());
+  it('should handle an empty stream', async () => {
+    const atom = pipe(from([]), slidingPair());
 
-    let emitted = false;
+    const results: [number | undefined, number][] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    pairedStream.subscribe({
-      next: () => {
-        emitted = true;
-      },
-      complete: () => {
-        expect(emitted).toBe(false);
-        done();
-      },
-      error: (err) => done.fail(err),
-    });
+    expect(results).toEqual([]);
   });
 });
-
-

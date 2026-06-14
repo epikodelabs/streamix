@@ -21,7 +21,7 @@ export function loop<T = any>(
   condition: (value: T) => MaybePromise<boolean>,
   iterateFn: (value: T) => MaybePromise<T>
 ): AtomBase<T | undefined> {
-  return flow<T | undefined>(
+  return flow<T>(
     async function* () {
       let currentValue = isPromiseLike(initialValue) ? await initialValue : initialValue;
       while (true) {

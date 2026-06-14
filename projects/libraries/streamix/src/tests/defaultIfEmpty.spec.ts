@@ -1,88 +1,92 @@
-import { concatMap, createSubject, defaultIfEmpty, EMPTY, of } from '@epikodelabs/streamix';
+import { concatMap, createSubject, defaultIfEmpty, iterate, pipe, type Subject } from '@epikodelabs/streamix';
 
 describe('defaultIfEmpty', () => {
-  it('should emit the default value if no values are emitted', (done) => {
-    const stream = createSubject();
+  it('should emit the default value if no values are emitted', async () => {
+    const subject = createSubject<string>();
     const defaultValue = 'Default Value';
-    const processedStream = stream.pipe(defaultIfEmpty(defaultValue));
-    const emittedValues: any[] = [];
+    const atom = pipe(subject, defaultIfEmpty(defaultValue));
+    const results: string[] = [];
 
-    processedStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual([defaultValue]);
-        done();
+    const consumptionPromise = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
       }
-    });
+    })();
 
-    stream.complete();
+    subject.complete();
+
+    await consumptionPromise;
+
+    expect(results).toEqual([defaultValue]);
   });
 
-  it('should not emit the default value if values are emitted', (done) => {
-    const stream = createSubject<string>();
+  it('should not emit the default value if values are emitted', async () => {
+    const subject = createSubject<string>();
     const defaultValue = 'Default Value';
-    const processedStream = stream.pipe(defaultIfEmpty(defaultValue));
-    const emittedValues: any[] = [];
+    const atom = pipe(subject, defaultIfEmpty(defaultValue));
+    const results: string[] = [];
 
-    processedStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual(['Value 1', 'Value 2']);
-        done();
+    const consumptionPromise = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
       }
-    });
+    })();
 
-    stream.next('Value 1');
-    stream.next('Value 2');
-    stream.complete();
+    subject.next('Value 1');
+    subject.next('Value 2');
+    subject.complete();
+
+    await consumptionPromise;
+
+    expect(results).toEqual(['Value 1', 'Value 2']);
   });
 
-  it('should emit default value when one operator returns EMPTY', (done) => {
-    const stream = createSubject<string>();
+  it('should emit default value when an upstream operator yields no values', async () => {
+    const subject = createSubject<string>();
     const defaultValue = 'Default Value';
-    const processedStream = stream.pipe(
-      concatMap(() => EMPTY), // This operator simulates an empty stream
-      defaultIfEmpty(defaultValue) // This operator provides a default value if the stream is empty
+    const atom = pipe(
+      subject,
+      concatMap(() => []),
+      defaultIfEmpty(defaultValue)
     );
+    const results: string[] = [];
 
-    const emittedValues: any[] = [];
-
-    processedStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual([defaultValue]);
-        done();
+    const consumptionPromise = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
       }
-    });
+    })();
 
-    stream.next('Value 1');
+    subject.next('Value 1');
+    subject.complete();
 
-    stream.complete();
+    await consumptionPromise;
+
+    expect(results).toEqual([defaultValue]);
   });
 
-  it('should not emit default value if values are emitted before', (done) => {
-    const stream = createSubject<string>();
+  it('should not emit default value if values are emitted before', async () => {
+    const subject = createSubject<string>();
     const defaultValue = 'Default Value';
-    const processedStream = stream.pipe(
-      concatMap(() => of('Value 3')), // This operator simulates a new stream
-      defaultIfEmpty(defaultValue) // This operator provides a default value if the stream is empty
+    const atom = pipe(
+      subject,
+      concatMap(() => 'Value 3'),
+      defaultIfEmpty(defaultValue)
     );
+    const results: string[] = [];
 
-    const emittedValues: any[] = [];
-
-    processedStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues).toEqual(['Value 3', 'Value 3']);
-        done();
+    const consumptionPromise = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
       }
-    });
+    })();
 
-    stream.next('Value 1');
-    stream.next('Value 2');
+    subject.next('Value 1');
+    subject.next('Value 2');
+    subject.complete();
 
-    stream.complete();
+    await consumptionPromise;
+
+    expect(results).toEqual(['Value 3', 'Value 3']);
   });
 });
-
-

@@ -1,123 +1,132 @@
-import { catchError, createSubject, map, NEXT, type Subject } from '@epikodelabs/streamix';
+import { catchError, createAsyncPushable, map, pipe, iterate } from '@epikodelabs/streamix';
 
 describe('catchError', () => {
-  let subject: Subject;
   let handlerMock: jasmine.Spy;
 
   beforeEach(() => {
-    handlerMock = jasmine.createSpy('handlerMock').and.returnValue(Promise.resolve(undefined)); // Mock handler function
+    handlerMock = jasmine.createSpy('handlerMock').and.returnValue(Promise.resolve(undefined));
   });
 
-  it('should handle errors from a stream and not propagate them', (done) => {
-    subject = createSubject();
+  it('should handle errors from a stream and not propagate them', async () => {
+    const source = createAsyncPushable<number>();
     const error = new Error("Unhandled exception.");
-    let errorCalled = false;
 
-    const streamWithCatchError = subject
-      .pipe(
-        map(() => { throw error; }),
-        catchError(handlerMock)
-      );
+    const atom = pipe(
+      source,
+      map(() => { throw error; }),
+      catchError(handlerMock)
+    );
 
-    streamWithCatchError.subscribe({
-      error: () => { errorCalled = true; },
-      complete: () => {
-        expect(handlerMock).toHaveBeenCalled();
-        expect(errorCalled).toBeFalse();
-        done();
+    const results: number[] = [];
+    const finished = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
       }
-    });
+    })();
 
-    subject.next(1);
-    subject.complete();
+    source.push(1);
+    source.complete();
+    await finished;
+
+    expect(handlerMock).toHaveBeenCalled();
+    expect(results).toEqual([]);
   });
 
-  it('should propagate errors if catchError is not present', (done) => {
-    subject = createSubject();
+  it('should propagate errors if catchError is not present', async () => {
+    const source = createAsyncPushable<number>();
     const error = new Error("Unhandled exception.");
 
-    const streamWithoutCatchError = subject.pipe(map(() => { throw error; }));
+    const atom = pipe(source, map(() => { throw error; }));
 
-    streamWithoutCatchError.subscribe({
-      error: (err) => {
-        expect(err).toBe(error);
-        expect(handlerMock).not.toHaveBeenCalled();
-        done();
+    source.push(1);
+    source.complete();
+
+    let caught: Error | undefined;
+    try {
+      for await (const _ of iterate(atom)) {
+        // consume
       }
-    });
+    } catch (err) {
+      caught = err as Error;
+    }
 
-    subject.next(1);
-    subject.complete();
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(caught).toBe(error);
+    expect(handlerMock).not.toHaveBeenCalled();
   });
 
   it('should complete after catching the first error', async () => {
     const error = new Error('Unhandled exception.');
-    subject = createSubject<number>();
-    const streamWithCatchError = subject.pipe(
+    const source = createAsyncPushable<number>();
+
+    const atom = pipe(
+      source,
       map((value) => {
         if (value === 2) {
           throw error;
         }
-
         return value;
       }),
       catchError(handlerMock)
     );
-    const streamIterator = streamWithCatchError[Symbol.asyncIterator]();
 
-    subject.next(1);
-    expect(await streamIterator.next()).toEqual(NEXT(1));
-
-    subject.next(2);
-    const result = await streamIterator.next();
-
-    expect(result.done).toBeTrue();
-    expect(result.value).toBeUndefined();
-    expect(handlerMock).toHaveBeenCalledTimes(1);
-    expect(handlerMock).toHaveBeenCalledWith(error);
-
-    expect(await streamIterator.next()).toEqual({ done: true, value: undefined });
-  });
-
-  it('should not trigger exception when catchError handles error from subject.error', async () => {
-    const error = new Error('Subject error.');
-    subject = createSubject<number>();
-    const streamWithCatchError = subject.pipe(
-      catchError(handlerMock)
-    );
-    const streamIterator = streamWithCatchError[Symbol.asyncIterator]();
-
-    subject.next(1);
-    expect(await streamIterator.next()).toEqual(NEXT(1));
-
-    subject.error(error);
-    const result = await streamIterator.next();
-
-    expect(result.done).toBeTrue();
-    expect(result.value).toBeUndefined();
-    expect(handlerMock).toHaveBeenCalledTimes(1);
-    expect(handlerMock).toHaveBeenCalledWith(error);
-  });
-
-  it('should not call subscriber error callback when catchError handles subject.error', (done) => {
-    const error = new Error('Subject error.');
-    subject = createSubject<number>();
-    let errorCalled = false;
-
-    const streamWithCatchError = subject.pipe(
-      catchError(handlerMock)
-    );
-
-    streamWithCatchError.subscribe({
-      error: () => { errorCalled = true; },
-      complete: () => {
-        expect(handlerMock).toHaveBeenCalledTimes(1);
-        expect(errorCalled).toBeFalse();
-        done();
+    const results: number[] = [];
+    const finished = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
       }
-    });
+    })();
 
-    subject.next(1);
-    subject.error(error);
+    source.push(1);
+    source.push(2);
+    await finished;
+
+    expect(results).toEqual([1]);
+    expect(handlerMock).toHaveBeenCalledTimes(1);
+    expect(handlerMock).toHaveBeenCalledWith(error);
+  });
+
+  it('should not trigger exception when catchError handles source error', async () => {
+    const error = new Error('Source error.');
+    const source = createAsyncPushable<number>();
+
+    const atom = pipe(source, catchError(handlerMock));
+
+    const results: number[] = [];
+    const finished = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
+      }
+    })();
+
+    source.push(1);
+    source.error(error);
+    await finished;
+
+    expect(results).toEqual([1]);
+    expect(handlerMock).toHaveBeenCalledTimes(1);
+    expect(handlerMock).toHaveBeenCalledWith(error);
+  });
+
+  it('should not call subscriber error callback when catchError handles source error', async () => {
+    const error = new Error('Source error.');
+    const source = createAsyncPushable<number>();
+
+    const atom = pipe(source, catchError(handlerMock));
+
+    const results: number[] = [];
+    const finished = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
+      }
+    })();
+
+    source.push(1);
+    source.error(error);
+    await finished;
+
+    expect(handlerMock).toHaveBeenCalledTimes(1);
+    expect(results).toEqual([1]);
   });
 });

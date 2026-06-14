@@ -1,18 +1,21 @@
 import {
-    bufferWhile,
-    createSubject,
+  bufferWhile,
+  createSubject,
+  iterate,
+  pipe,
+  type Subject,
 } from "@epikodelabs/streamix";
 
-const waitTick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("bufferWhile", () => {
   it("flushes the buffer when the predicate resolves truthy", async () => {
     const subject = createSubject<number>();
     const results: number[][] = [];
-    const buffered = subject.pipe(bufferWhile((_value, _index, buffer) => buffer.length < 3));
+    const buffered = pipe(subject, bufferWhile((_value, _index, buffer) => buffer.length < 3));
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
@@ -26,6 +29,7 @@ describe("bufferWhile", () => {
     subject.next(5);
     subject.complete();
     await waitTick();
+    await completed;
 
     expect(results).toEqual([[1, 2, 3], [4, 5]]);
   });
@@ -33,10 +37,10 @@ describe("bufferWhile", () => {
   it("emits the trailing buffer when the source completes", async () => {
     const subject = createSubject<number>();
     const results: number[][] = [];
-    const buffered = subject.pipe(bufferWhile(() => false));
+    const buffered = pipe(subject, bufferWhile(() => false));
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
@@ -44,6 +48,7 @@ describe("bufferWhile", () => {
     subject.next(9);
     subject.complete();
     await waitTick();
+    await completed;
 
     expect(results).toEqual([[9]]);
   });
@@ -52,15 +57,16 @@ describe("bufferWhile", () => {
     const subject = createSubject<number>();
     const results: number[][] = [];
     const indices: number[] = [];
-    const buffered = subject.pipe(
+    const buffered = pipe(
+      subject,
       bufferWhile((_value, index, buffer) => {
         indices.push(index);
         return buffer.length < 3; // Flush when buffer size reaches 3
       })
     );
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
@@ -73,6 +79,7 @@ describe("bufferWhile", () => {
     subject.next(40);
     subject.complete();
     await waitTick();
+    await completed;
 
     expect(results).toEqual([[10, 20, 30], [40]]);
     expect(indices).toEqual([0, 1, 2, 3]);
@@ -81,12 +88,13 @@ describe("bufferWhile", () => {
   it("uses index to flush based on value position", async () => {
     const subject = createSubject<string>();
     const results: string[][] = [];
-    const buffered = subject.pipe(
+    const buffered = pipe(
+      subject,
       bufferWhile((_value, index) => index < 2) // Flush after 2 values
     );
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
@@ -98,6 +106,7 @@ describe("bufferWhile", () => {
     subject.next("c");
     subject.complete();
     await waitTick();
+    await completed;
 
     expect(results).toEqual([["a", "b"], ["c"]]);
   });
@@ -105,12 +114,13 @@ describe("bufferWhile", () => {
   it("supports async predicates", async () => {
     const subject = createSubject<number>();
     const results: number[][] = [];
-    const buffered = subject.pipe(
+    const buffered = pipe(
+      subject,
       bufferWhile((_value, _index, buffer) => Promise.resolve(buffer.length < 2))
     );
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
@@ -122,6 +132,7 @@ describe("bufferWhile", () => {
     subject.next(3);
     subject.complete();
     await waitTick();
+    await completed;
 
     expect(results).toEqual([[1, 2], [3]]);
   });
@@ -129,18 +140,18 @@ describe("bufferWhile", () => {
   it("does not emit when source completes without values", async () => {
     const subject = createSubject<number>();
     const results: number[][] = [];
-    const buffered = subject.pipe(bufferWhile(() => true));
+    const buffered = pipe(subject, bufferWhile(() => true));
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
 
     subject.complete();
     await waitTick();
+    await completed;
 
     expect(results).toEqual([]);
   });
-
 });

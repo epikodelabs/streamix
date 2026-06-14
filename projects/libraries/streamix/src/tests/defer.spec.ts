@@ -1,10 +1,8 @@
-import { createSubject, defer, from, type Stream } from '@epikodelabs/streamix';
+import { createSubject, defer, from, iterate } from '@epikodelabs/streamix';
 
-// Mocking Stream class
-/**
- * Function mockStream.
- */
-export function mockStream(values: any[], completed = false, error?: Error): Stream<any> {
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
+
+function mockStream(values: any[], completed = false, error?: Error): any {
   const subject = createSubject<any>();
 
   setTimeout(() => {
@@ -24,67 +22,58 @@ export function mockStream(values: any[], completed = false, error?: Error): Str
 }
 
 describe('defer', () => {
-  it('should create a new stream each time it is subscribed to', (done) => {
-    const emissions: any[] = [1, 2, 3];
+  it('should create a new stream each time it is subscribed to', async () => {
+    const emissions = [1, 2, 3];
     const factory = jasmine.createSpy('factory').and.callFake(() => mockStream(emissions, true));
 
-    const deferStream = defer(factory);
+    const deferAtom = defer(factory);
 
-    const collectedEmissions: number[] = [];
-    const subscription = deferStream.subscribe({
-      next: (value: any) => collectedEmissions.push(value),
-      complete: () => {
-        expect(factory).toHaveBeenCalled();
-        expect(collectedEmissions.length).toBe(3);
-        expect(collectedEmissions).toEqual([1, 2, 3]);
+    const collected: number[] = [];
+    deferAtom.subscribe(v => { if (v !== undefined) collected.push(v); });
+    await delay();
 
-        subscription.unsubscribe();
-        done();
-      },
-      error: done.fail,
-    });
+    expect(factory).toHaveBeenCalled();
+    expect(collected.length).toBe(3);
+    expect(collected).toEqual([1, 2, 3]);
   });
 
-  it('should handle stream completion', (done) => {
+  it('should handle stream completion', async () => {
     const factory = jasmine.createSpy('factory').and.callFake(() => mockStream([], true));
 
-    const deferStream = defer(factory);
+    const deferAtom = defer(factory);
 
-    deferStream.subscribe({
-      complete: () => {
-        expect(factory).toHaveBeenCalled();
-        done();
-      },
-      error: done.fail,
-    });
+    const collected: any[] = [];
+    deferAtom.subscribe(v => { if (v !== undefined) collected.push(v); });
+    await delay();
+
+    expect(factory).toHaveBeenCalled();
+    expect(collected).toEqual([]);
   });
 
-  it('should handle stream errors', (done) => {
+  it('should handle stream errors', async () => {
     const error = new Error('Test Error');
     const factory = jasmine.createSpy('factory').and.callFake(() => mockStream([], false, error));
 
-    const deferStream = defer(factory);
+    const deferAtom = defer(factory);
 
-    deferStream.subscribe({
-      error: (e: Error) => {
-        expect(e).toEqual(error);
-        done();
-      },
-      complete: () => {
-        done.fail('Should not complete after error');
-      },
-      next: () => {
-        fail('Should not emit');
+    let caught: any;
+    try {
+      for await (const v of iterate(deferAtom)) {
+        fail(`Should not emit, got ${v}`);
       }
-    });
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toEqual(error);
   });
 
   it('supports promised factory results', async () => {
-    const stream = defer(() => from(['defered', 'values']));
+    const atom = defer(() => from(['defered', 'values']));
     const results: string[] = [];
 
-    for await (const value of stream) {
-      results.push(value);
+    for await (const value of iterate(atom)) {
+      if (value !== undefined) results.push(value);
     }
 
     expect(results).toEqual(['defered', 'values']);
@@ -95,11 +84,11 @@ describe('defer', () => {
       .createSpy('factory')
       .and.callFake(async () => from([10, 20]));
 
-    const stream = defer(() => factory());
+    const atom = defer(() => factory());
     const results: number[] = [];
 
-    for await (const value of stream) {
-      results.push(value);
+    for await (const value of iterate(atom)) {
+      if (value !== undefined) results.push(value);
     }
 
     expect(factory).toHaveBeenCalled();
@@ -108,30 +97,28 @@ describe('defer', () => {
 
   it('throws when the factory promises reject', async () => {
     const err = new Error('factory failure');
-    const stream = defer(() => Promise.reject(err));
+    const atom = defer(() => Promise.reject(err));
 
-    await new Promise<void>((resolve, reject) => {
-      stream.subscribe({
-        next: () => reject(new Error('should not emit')),
-        error: (error) => {
-          expect(error).toBe(err);
-          resolve();
-        },
-        complete: () => reject(new Error('complete should not run')),
-      });
-    });
+    let caught: any;
+    try {
+      for await (const _ of iterate(atom)) {
+        fail('should not emit');
+      }
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBe(err);
   });
 
   it('emits plain values returned by the factory immediately', async () => {
-    const stream = defer(() => 42);
+    const atom = defer(() => 42);
     const results: number[] = [];
 
-    for await (const value of stream) {
-      results.push(value);
+    for await (const value of iterate(atom)) {
+      if (value !== undefined) results.push(value);
     }
 
     expect(results).toEqual([42]);
   });
 });
-
-

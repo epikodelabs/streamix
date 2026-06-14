@@ -1,4 +1,4 @@
-import { createSubject, throttle } from '@epikodelabs/streamix';
+import { createSubject, iterate, pipe, throttle } from '@epikodelabs/streamix';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -6,39 +6,34 @@ describe('throttle', () => {
   it('should emit first value immediately and throttle subsequent values', async () => {
     const output: number[] = [];
     const subject = createSubject<number>();
-    const iter = subject.pipe(throttle<number>(50));
-
-    void (async () => {
-      for await (const v of iter) {
+    const reader = (async () => {
+      for await (const v of iterate(pipe(subject, throttle<number>(100)))) {
         output.push(v);
       }
     })();
 
-    subject.next(1);  // t0, should emit immediately
-    subject.next(2);  // t0 + 0ms, should be throttled
-    await new Promise((r) => setTimeout(r, 30));
-    subject.next(3);  // t0 + 30ms, should replace pending
-    await new Promise((r) => setTimeout(r, 30));
-    subject.next(4);  // t0 + 60ms, after first throttle window
+    subject.next(1); // emitted immediately
+    subject.next(2); // suppressed
+    await sleep(60); // still within the first window
+    subject.next(3); // replaces pending trailing value
+    await sleep(70); // window expires, trailing 3 is emitted
+    subject.next(4); // emitted immediately in the new window
     subject.complete();
 
-    // Wait for trailing emissions
-    await new Promise((r) => setTimeout(r, 50));
+    await reader;
 
-    // Check results
-    expect(output[0]).toBe(1); // first emitted immediately
-    expect(output).toContain(3); // trailing value from first window
-    expect(output).toContain(4); // value after throttle window
-    expect(output.length).toBe(3);
+    expect(output[0]).toBe(1);
+    expect(output).toEqual([1, 3, 4]);
   });
 
   it('should complete after source completes', async () => {
     const subject = createSubject<number>();
-    const iter = subject.pipe(throttle<number>(50));
-
     let completed = false;
-    void (async () => {
-      for await (const _ of iter) { void _; }
+
+    const reader = (async () => {
+      for await (const _ of iterate(pipe(subject, throttle<number>(50)))) {
+        void _;
+      }
       completed = true;
     })();
 
@@ -46,19 +41,20 @@ describe('throttle', () => {
     subject.next(2);
     subject.complete();
 
-    await new Promise((r) => setTimeout(r, 100));
+    await sleep(100);
 
     expect(completed).toBe(true);
   });
 
   it('should forward errors from the source', async () => {
     const subject = createSubject<number>();
-    const iter = subject.pipe(throttle<number>(50));
-
     let caught: any = null;
-    void (async () => {
+
+    const reader = (async () => {
       try {
-        for await (const _ of iter) { void _; }
+        for await (const _ of iterate(pipe(subject, throttle<number>(50)))) {
+          void _;
+        }
       } catch (err) {
         caught = err;
       }
@@ -67,7 +63,7 @@ describe('throttle', () => {
     const error = new Error('test error');
     subject.error(error);
 
-    await new Promise((r) => setTimeout(r, 50));
+    await sleep(50);
 
     expect(caught).toBe(error);
   });
@@ -75,10 +71,8 @@ describe('throttle', () => {
   it('should flush the trailing value when the source completes during cooldown', async () => {
     const output: number[] = [];
     const subject = createSubject<number>();
-    const iter = subject.pipe(throttle<number>(50));
-
-    void (async () => {
-      for await (const v of iter) {
+    const reader = (async () => {
+      for await (const v of iterate(pipe(subject, throttle<number>(50)))) {
         output.push(v);
       }
     })();
@@ -87,7 +81,7 @@ describe('throttle', () => {
     subject.next(2);
     subject.complete();
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await reader;
 
     expect(output).toEqual([1, 2]);
   });
@@ -95,10 +89,8 @@ describe('throttle', () => {
   it('should emit every value when values are spaced beyond duration', async () => {
     const output: number[] = [];
     const subject = createSubject<number>();
-    const iter = subject.pipe(throttle<number>(20));
-
-    const consumer = (async () => {
-      for await (const v of iter) {
+    const reader = (async () => {
+      for await (const v of iterate(pipe(subject, throttle<number>(20)))) {
         output.push(v);
       }
     })();
@@ -110,17 +102,15 @@ describe('throttle', () => {
     subject.next(3);
     subject.complete();
 
-    await consumer;
+    await reader;
     expect(output).toEqual([1, 2, 3]);
   });
 
   it('should not throttle when duration is 0', async () => {
     const output: number[] = [];
     const subject = createSubject<number>();
-    const iter = subject.pipe(throttle<number>(0));
-
-    void (async () => {
-      for await (const v of iter) {
+    const reader = (async () => {
+      for await (const v of iterate(pipe(subject, throttle<number>(0)))) {
         output.push(v);
       }
     })();
@@ -130,22 +120,15 @@ describe('throttle', () => {
     subject.next(3);
     subject.complete();
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
+    await reader;
     expect(output).toEqual([1, 2, 3]);
   });
 
   it('should support promised duration', async () => {
     const output: number[] = [];
     const subject = createSubject<number>();
-    // Use a generous duration to avoid flakiness under heavy test load.
-    // If the event loop is blocked long enough, a short throttle window can
-    // legitimately elapse before the next value is emitted, causing an extra
-    // trailing emission and making this test timing-sensitive.
-    const iter = subject.pipe(throttle<number>(Promise.resolve(200)));
-
-    void (async () => {
-      for await (const v of iter) {
+    const reader = (async () => {
+      for await (const v of iterate(pipe(subject, throttle<number>(Promise.resolve(200))))) {
         output.push(v);
       }
     })();
@@ -156,13 +139,10 @@ describe('throttle', () => {
     subject.next(3);
     subject.complete();
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
+    await reader;
 
     expect(output[0]).toBe(1);
     expect(output).toContain(3);
     expect(output.length).toBe(2);
   });
 });
-
-

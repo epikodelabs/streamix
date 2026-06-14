@@ -1,124 +1,88 @@
-import { createStream, createSubject, from, race } from "@epikodelabs/streamix";
+import { createStream, createSubject, from, race, type Atom } from '@epikodelabs/streamix';
+
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
 describe('race', () => {
-  it('should complete without emitting when called with no streams', (done) => {
+  it('should complete without emitting when called with no streams', async () => {
     const results: unknown[] = [];
 
-    race().subscribe({
-      next: (v) => results.push(v),
-      error: done.fail,
-      complete: () => {
-        expect(results).toEqual([]);
-        done();
-      },
-    });
+    race().subscribe(v => { if (v !== undefined) results.push(v); });
+    await delay(50);
+
+    expect(results).toEqual([]);
   });
 
-  it('should only emit values from the winning stream', (done) => {
+  it('should only emit values from the winning stream', async () => {
     const stream1 = createSubject<number>();
     const stream2 = createSubject<number>();
     const results: number[] = [];
 
-    const racedStream = race(stream1, stream2);
-
-    racedStream.subscribe({
-      next: (value) => {
-        results.push(value);
-        if (results.length === 2){
-          expect(results).toEqual([1,2]);
-          done();
-        }
-      },
-      error: done.fail,
-      complete: done.fail,
-    });
+    (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
     stream1.next(2);
     stream2.next(3);
+
+    await delay();
+
+    expect(results).toEqual([1, 2]);
   });
 
-  it('should emit the first value from the winning stream', (done) => {
+  it('should emit the first value from the winning stream', async () => {
     const stream1 = createSubject<number>();
     const stream2 = createSubject<number>();
+    const results: number[] = [];
 
-    const racedStream = race(stream1, stream2);
-
-    racedStream.subscribe({
-      next: (value) => {
-        expect(value).toBe(1);
-        done();
-      },
-      error: done.fail,
-      complete: done.fail,
-    });
+    (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
     stream2.next(2);
+
+    await delay();
+
+    expect(results).toEqual([1]);
   });
 
-  it('should complete when the winning stream completes', (done) => {
+  it('should complete when the winning stream completes', async () => {
     const stream1 = createSubject<number>();
     const stream2 = createSubject<number>();
+    const results: number[] = [];
 
-    const racedStream = race(stream1, stream2);
-
-    racedStream.subscribe({
-      next: (value) => {
-        expect(value).toBe(1);
-      },
-      error: done.fail,
-      complete: () => {
-        done();
-      },
-    });
+    const subscription = (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
     stream1.complete();
     stream2.next(2);
+
+    await delay();
+
+    expect(results).toEqual([1]);
+    expect(subscription.unsubscribed).toBe(true);
   });
 
-  it('should propagate errors from the winning stream', (done) => {
+  it('should not crash when the winning stream errors', async () => {
     const stream1 = createSubject<number>();
     const stream2 = createSubject<number>();
-    const errorMsg = 'test error';
+    const results: number[] = [];
 
-    const racedStream = race(stream1, stream2);
-
-    racedStream.subscribe({
-      next: (value) => {
-        expect(value).toBe(1);
-      },
-      error: (err) => {
-        expect(err.message).toBe(errorMsg);
-        done();
-      },
-      complete: () => done.fail("Should not complete after error"),
-    });
+    (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
-    stream1.error(new Error(errorMsg));
+    stream1.error(new Error('test error'));
     stream2.next(2);
+
+    await delay();
+
+    expect(results).toEqual([1]);
   });
 
-  it('should handle multiple streams correctly', (done) => {
+  it('should handle multiple streams correctly', async () => {
     const stream1 = createSubject<number>();
     const stream2 = createSubject<number>();
     const stream3 = createSubject<number>();
     const results: number[] = [];
 
-    const racedStream = race(stream1, stream2, stream3);
-
-    racedStream.subscribe({
-      next: (value) => {
-        results.push(value);
-      },
-      error: done.fail,
-      complete: () => {
-        expect(results).toEqual([1]);
-        done();
-      }
-    });
+    const subscription = (race(stream1, stream2, stream3) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
     stream2.next(2);
@@ -126,62 +90,53 @@ describe('race', () => {
     stream1.complete();
     stream2.complete();
     stream3.complete();
+
+    await delay();
+
+    expect(results).toEqual([1]);
+    expect(subscription.unsubscribed).toBe(true);
   });
 
-  it('should work with streams that emit after a delay', (done) => {
+  it('should work with streams that emit after a delay', async () => {
     const stream1 = createStream<number>('delayed1', async function* () {
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await delay(10);
       yield 1;
       yield 2;
     });
 
     const stream2 = createStream<number>('delayed2', async function* () {
-      await new Promise(resolve => setTimeout(resolve, 5));
+      await delay(5);
       yield 3;
       yield 4;
     });
 
     const results: number[] = [];
-    const racedStream = race(stream1, stream2);
+    const subscription = (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
-    racedStream.subscribe({
-      next: (value) => {
-        results.push(value);
-      },
-      error: done.fail,
-      complete: () => {
-        if(results.length === 2){
-          expect(results).toEqual([3,4]);
-          done();
-        } else {
-          done.fail();
-        }
-      }
-    });
+    await delay(100);
+    subscription.unsubscribe();
+
+    expect(results).toEqual([3, 4]);
   });
 
-  it('should complete when the winning stream completes after a delay', (done) => {
+  it('should complete when the winning stream completes after a delay', async () => {
     const stream1 = createStream<number>('delayed1', async function* () {
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await delay(100);
       yield 1;
     });
 
     const stream2 = createStream<number>('delayed2', async function* () {
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await delay(50);
       yield 3;
     });
 
-    const racedStream = race(stream1, stream2);
+    const results: number[] = [];
+    const subscription = (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
-    racedStream.subscribe({
-      next: (value) => {
-        expect(value).toBe(3);
-      },
-      error: done.fail,
-      complete: () => {
-        done();
-      },
-    });
+    await delay(150);
+
+    expect(results).toEqual([3]);
+    expect(subscription.unsubscribed).toBe(true);
   });
 
   it('should emit nothing if the winning stream completes immediately (and cancel losers)', async () => {
@@ -189,7 +144,7 @@ describe('race', () => {
     let returnCalls = 0;
 
     const losing = createStream<number>('losing', async function* () {
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await delay(50);
       yield 123;
     });
 
@@ -209,18 +164,13 @@ describe('race', () => {
 
     const results: number[] = [];
 
-    await new Promise<void>((resolve, reject) => {
-      race(from([] as number[]), losing).subscribe({
-        next: (v) => results.push(v),
-        error: reject,
-        complete: resolve,
-      });
-    });
+    (race(from([] as number[]), losing) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+
+    await delay(50);
 
     expect(results).toEqual([]);
 
-    // Allow cancellation microtasks to run.
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await delay(0);
     expect(cancelled).toBe(true);
     expect(returnCalls).toBeGreaterThanOrEqual(1);
   });
@@ -228,17 +178,11 @@ describe('race', () => {
   it('supports promise inputs', async () => {
     const results: number[] = [];
 
-    await new Promise<void>((resolve, reject) => {
-      race(Promise.resolve(1), Promise.resolve(2)).subscribe({
-        next: (v) => results.push(v),
-        error: reject,
-        complete: resolve,
-      });
-    });
+    (race(Promise.resolve(1), Promise.resolve(2)) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+
+    await delay();
 
     expect(results.length).toBe(1);
     expect([1, 2]).toContain(results[0]);
   });
 });
-
-

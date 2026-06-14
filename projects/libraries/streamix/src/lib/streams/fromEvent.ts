@@ -15,7 +15,7 @@ export function fromEvent<T extends Event = Event>(
   event: MaybePromise<string>,
   options?: AddEventListenerOptions | boolean
 ): AtomBase<T | undefined> {
-  return flow<T | undefined>(async function* () {
+  return flow<T>(async function* () {
     const resolvedTarget = isPromiseLike(target) ? await target : target;
     const resolvedEvent = isPromiseLike(event) ? await event : event;
 

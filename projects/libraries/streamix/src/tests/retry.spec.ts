@@ -1,8 +1,8 @@
-import { createStream, retry } from "@epikodelabs/streamix";
+import { createStream, iterate, retry } from "@epikodelabs/streamix";
+
+const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('retry', () => {
-  const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
-
   it('should retry the stream once and preserve values already emitted by the failed attempt', async () => {
     let attempt = 0;
     const factory = jasmine.createSpy('factory').and.callFake(() => {
@@ -20,10 +20,10 @@ describe('retry', () => {
     });
 
     const result: number[] = [];
-    const stream$ = retry(factory, 3, 1000);
+    const atom = retry(factory, 3, 1000);
 
-    for await (const value of stream$) {
-      result.push(value);
+    for await (const value of iterate(atom)) {
+      if (value !== undefined) result.push(value);
     }
 
     expect(result).toEqual([1, 2, 3, 4]);
@@ -39,10 +39,10 @@ describe('retry', () => {
     });
 
     const result: number[] = [];
-    const stream$ = retry(factory, 3, 1000);
+    const atom = retry(factory, 3, 1000);
 
-    for await (const value of stream$) {
-      result.push(value);
+    for await (const value of iterate(atom)) {
+      if (value !== undefined) result.push(value);
     }
 
     expect(result).toEqual([1, 2]);
@@ -51,18 +51,17 @@ describe('retry', () => {
 
   it('should emit error after max retries are reached', async () => {
     const factory = jasmine.createSpy('factory').and.callFake(() => {
-      // Mock the stream and async generator
       return createStream("errorStream", async function* () {
         throw new Error('Test Error');
       });
     });
 
     const result: any[] = [];
-    const stream$ = retry(factory, 2, 500);
+    const atom = retry(factory, 2, 500);
 
     try {
-      for await (const value of stream$) {
-        result.push(value);
+      for await (const value of iterate(atom)) {
+        if (value !== undefined) result.push(value);
       }
     } catch (error: any) {
       result.push(error.message);
@@ -81,7 +80,7 @@ describe('retry', () => {
 
     let caught: Error | null = null;
     try {
-      for await (const _ of retry(factory, 0, 0)) {
+      for await (const _ of iterate(retry(factory, 0, 0))) {
         void _;
       }
     } catch (err: any) {
@@ -99,7 +98,7 @@ describe('retry', () => {
 
     let caught: any;
     try {
-      for await (const _ of retry(factory as any, 0, 0)) {
+      for await (const _ of iterate(retry(factory as any, 0, 0))) {
         void _;
       }
     } catch (err) {
@@ -125,16 +124,15 @@ describe('retry', () => {
     });
 
     const result: number[] = [];
-    const stream$ = retry(factory, 3, 1000);
+    const atom = retry(factory, 3, 1000);
 
     try {
-      for await (const value of stream$) {
-        result.push(value);
+      for await (const value of iterate(atom)) {
+        if (value !== undefined) result.push(value);
       }
     } catch {
-
+      // ignore
     }
-
 
     expect(result).toEqual([1, 2, 3, 4]);
   });
@@ -143,10 +141,10 @@ describe('retry', () => {
     const factory = jasmine.createSpy('factory').and.callFake(() => Promise.resolve(5));
 
     const result: number[] = [];
-    const stream$ = retry(factory, Promise.resolve(0), undefined as any);
+    const atom = retry(factory, Promise.resolve(0), undefined as any);
 
-    for await (const value of stream$) {
-      result.push(value);
+    for await (const value of iterate(atom)) {
+      if (value !== undefined) result.push(value);
     }
 
     expect(result).toEqual([5]);
@@ -166,8 +164,8 @@ describe('retry', () => {
     });
 
     const values: number[] = [];
-    for await (const v of retry(factory, 1, undefined as any)) {
-      values.push(v);
+    for await (const v of iterate(retry(factory, 1, undefined as any))) {
+      if (v !== undefined) values.push(v);
     }
 
     expect(values).toEqual([7]);
@@ -191,8 +189,8 @@ describe('retry', () => {
     const values: number[] = [];
     await Promise.race([
       (async () => {
-        for await (const v of retry(factory, 1, 0)) {
-          values.push(v);
+        for await (const v of iterate(retry(factory, 1, 0))) {
+          if (v !== undefined) values.push(v);
         }
       })(),
       sleep(250).then(() => {
@@ -225,8 +223,8 @@ describe('retry', () => {
     });
 
     const values: number[] = [];
-    for await (const v of retry(factory, 1, 5)) {
-      values.push(v);
+    for await (const v of iterate(retry(factory, 1, 5))) {
+      if (v !== undefined) values.push(v);
     }
 
     expect(values).toEqual([11]);
@@ -244,18 +242,11 @@ describe('retry', () => {
     });
 
     const values: number[] = [];
-    const stream$ = retry(factory, 3, 50);
+    const atom = retry(factory, 3, 50);
 
-    const sub = stream$.subscribe({
-      next: (v) => values.push(v),
-      error: () => fail("Unexpected error"),
-      complete: () => {},
-    });
+    const sub = atom.subscribe(v => { if (v !== undefined) values.push(v); });
 
-    // Let attempt #1 run and enter the delay sleep.
     await sleep(0);
-
-    // Abort during the delay window so the sleep promise rejects via abort handler.
     sub.unsubscribe();
 
     await sleep(60);
@@ -284,22 +275,18 @@ describe('retry', () => {
 
     const result: number[] = [];
     void (async () => {
-      for await (const value of retry(factory, 1, delayPromise)) {
-        result.push(value);
+      for await (const value of iterate(retry(factory, 1, delayPromise))) {
+        if (value !== undefined) result.push(value);
       }
     })();
 
-    // Wait for first attempt to complete and fail
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await sleep(50);
     expect(factory).toHaveBeenCalledTimes(1);
     expect(result).toEqual([1]);
 
-    // At this point, retry is waiting for delayPromise to resolve
-    // Resolve the delay to allow retry
     delayResolve(0);
 
-    // Wait for the retry and completion
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await sleep(0);
 
     expect(factory).toHaveBeenCalledTimes(2);
     expect(result).toEqual([1, 2]);
@@ -312,32 +299,23 @@ describe('retry', () => {
       });
     });
 
-    const stream$ = retry(factory, 1, 0);
-    const sub = stream$.subscribe({
-      next: () => fail('Should not emit'),
-      error: () => {},
-      complete: () => {},
-    });
+    const atom = retry(factory, 1, 0);
+    const sub = atom.subscribe(() => fail('Should not emit'));
 
-    // Immediately abort
     sub.unsubscribe();
 
     await sleep(10);
 
-    // Factory should be called once before abort check
     expect(factory).toHaveBeenCalledTimes(1);
   });
 
   it('should abort during iteration when signal is aborted', async () => {
     let iterationCount = 0;
-    let abortCheckCount = 0;
-    
+
     const factory = jasmine.createSpy('factory').and.callFake(() => {
       return createStream<number>("slowStream", async function* (signal) {
         while (true) {
-          // Check if signal was aborted
           if (signal?.aborted) {
-            abortCheckCount++;
             throw new Error("Stream aborted");
           }
           iterationCount++;
@@ -348,31 +326,23 @@ describe('retry', () => {
     });
 
     const values: number[] = [];
-    const stream$ = retry(factory, 3, 0);
-    
-    const sub = stream$.subscribe({
-      next: (v) => values.push(v),
-      error: () => {},
-      complete: () => {},
-    });
+    const atom = retry(factory, 3, 0);
 
-    // Let a few iterations happen before aborting the active attempt.
+    const sub = atom.subscribe(v => { if (v !== undefined) values.push(v); });
+
     await sleep(35);
-    
-    // Abort during iteration
     sub.unsubscribe();
-    
     await sleep(20);
 
     expect(iterationCount).toBeGreaterThan(0);
-    expect(iterationCount).toBeLessThan(10); // Should stop before too many iterations
+    expect(iterationCount).toBeLessThan(10);
     expect(values.length).toBeGreaterThan(0);
   });
 
   it('should handle abort during delay and cleanup iterator', async () => {
     let attempt = 0;
     let returnCalled = false;
-    
+
     const factory = jasmine.createSpy('factory').and.callFake(() => {
       attempt++;
       return createStream<number>("cleanupTest", async function* () {
@@ -385,20 +355,12 @@ describe('retry', () => {
       });
     });
 
-    const stream$ = retry(factory, 2, 100);
-    
-    const sub = stream$.subscribe({
-      next: () => {},
-      error: () => {},
-      complete: () => {},
-    });
+    const atom = retry(factory, 2, 100);
 
-    // Wait for first attempt to fail
+    const sub = atom.subscribe(() => {});
+
     await sleep(10);
-    
-    // Abort during the delay
     sub.unsubscribe();
-    
     await sleep(50);
 
     expect(factory).toHaveBeenCalledTimes(1);
@@ -415,7 +377,7 @@ describe('retry', () => {
       gen.return = async () => {
         throw new Error("Return error");
       };
-      
+
       return createStream("throwOnReturn", async function* () {
         for await (const v of gen) {
           yield v;
@@ -425,7 +387,7 @@ describe('retry', () => {
 
     let caught: any;
     try {
-      for await (const _ of retry(factory, 0, 0)) {
+      for await (const _ of iterate(retry(factory, 0, 0))) {
         void _;
       }
     } catch (err) {

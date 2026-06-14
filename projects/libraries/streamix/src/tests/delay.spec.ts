@@ -1,119 +1,108 @@
-import { createStream, delay, from } from '@epikodelabs/streamix';
+import { createStream, delay, from, iterate, pipe } from '@epikodelabs/streamix';
+
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('delay', () => {
-  it('should delay each value by the specified time', (done) => {
+  it('should delay each value by the specified time', async () => {
     const testStream = from([1, 2, 3]);
-    const delayTime = 100; // 100 ms delay
+    const delayTime = 100;
 
-    const delayedStream = testStream.pipe(delay(delayTime));
+    const delayedAtom = pipe(testStream, delay(delayTime));
 
     const startTime = Date.now();
-    let emitCount = 0;
+    const emittedTimes: number[] = [];
+    for await (const value of iterate(delayedAtom)) {
+      emittedTimes.push(Date.now() - startTime);
+    }
 
-    delayedStream.subscribe({
-      next: () => {
-        emitCount++;
-        const elapsedTime = Date.now() - startTime + 5;
-        expect(elapsedTime).toBeGreaterThanOrEqual(emitCount * delayTime);
-      },
-      complete: () => {
-        expect(emitCount).toBe(3);
-        done();
-      }
+    expect(emittedTimes.length).toBe(3);
+    emittedTimes.forEach((elapsed, i) => {
+      expect(elapsed + 5).toBeGreaterThanOrEqual((i + 1) * delayTime);
     });
   });
 
-  it('should stop emitting if the stream is cancelled', (done) => {
+  it('should stop emitting if the stream is cancelled', async () => {
     const testStream = from([1, 2, 3]);
-    const delayTime = 1000; // 100 ms delay
+    const delayTime = 1000;
 
-    const delayedStream = testStream.pipe(delay(delayTime));
+    const delayedAtom = pipe(testStream, delay(delayTime));
 
-    let emitCount = 0;
-
-    let subscription = delayedStream.subscribe({
-      next: () => {
-        emitCount++;
-        if (emitCount === 2) {
-          subscription.unsubscribe();
-        }
-      },
-      complete: () => {
-        expect(emitCount).toBe(2);
-        done();
+    const results: number[] = [];
+    for await (const value of iterate(delayedAtom)) {
+      results.push(value);
+      if (results.length === 2) {
+        break;
       }
-    });
+    }
+
+    await wait(200);
+    expect(results).toEqual([1, 2]);
   });
 
-  it('should emit all values with delay before stopping', (done) => {
+  it('should emit all values with delay before stopping', async () => {
     const testStream = from([1, 2, 3, 4, 5]);
-    const delayTime = 100; // 100 ms delay
+    const delayTime = 100;
 
-    let emitCount = 0;
+    const delayedAtom = pipe(testStream, delay(delayTime));
+    const results: number[] = [];
+    for await (const value of iterate(delayedAtom)) {
+      results.push(value);
+    }
 
-    const delayedStream = testStream.pipe(delay(delayTime));
-
-    delayedStream.subscribe({
-      next: () => emitCount++,
-      complete: () => {
-        expect(emitCount).toBe(5);
-        done();
-      }
-    });
+    expect(results).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it('should respect promise-based delay inputs', (done) => {
+  it('should respect promise-based delay inputs', async () => {
     const testStream = from([1]);
     const delayPromise = Promise.resolve(10);
 
-    const delayedStream = testStream.pipe(delay(delayPromise));
+    const delayedAtom = pipe(testStream, delay(delayPromise));
     const startTime = Date.now();
 
-    delayedStream.subscribe({
-      next: (value) => {
-        expect(value).toBe(1);
-        const elapsed = Date.now() - startTime;
-        expect(elapsed).toBeGreaterThanOrEqual(9);
-      },
-      complete: () => done(),
-      error: done.fail,
-    });
+    const results: number[] = [];
+    for await (const value of iterate(delayedAtom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([1]);
+    expect(Date.now() - startTime).toBeGreaterThanOrEqual(9);
   });
 
-  it('should treat undefined delay durations as immediate', (done) => {
+  it('should treat undefined delay durations as immediate', async () => {
     const testStream = from([42]);
     const delayPromise = Promise.resolve<number | undefined>(undefined);
 
-    const delayedStream = testStream.pipe(delay(delayPromise as any));
+    const delayedAtom = pipe(testStream, delay(delayPromise as any));
     const startTime = Date.now();
 
-    delayedStream.subscribe({
-      next: (value) => {
-        expect(value).toBe(42);
-        expect(Date.now() - startTime).toBeLessThan(10);
-      },
-      complete: () => done(),
-      error: done.fail,
-    });
+    const results: number[] = [];
+    for await (const value of iterate(delayedAtom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([42]);
+    expect(Date.now() - startTime).toBeLessThan(10);
   });
 
-  it('should forward source errors through the delay operator', (done) => {
+  it('should forward source errors through the delay operator', async () => {
     const stream = createStream('error-source', async function* () {
       yield 1;
       throw new Error('boom');
     });
 
-    const delayedStream = stream.pipe(delay(5));
+    const delayedAtom = pipe(stream, delay(5));
 
-    delayedStream.subscribe({
-      next: () => {},
-      error: (err: any) => {
-        expect(err.message).toBe('boom');
-        done();
-      },
-      complete: () => done.fail('should error before completing'),
-    });
+    const results: number[] = [];
+    let caught: any;
+    try {
+      for await (const value of iterate(delayedAtom)) {
+        results.push(value);
+      }
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(results).toEqual([1]);
+    expect(caught?.message).toBe('boom');
   });
 });
-
-

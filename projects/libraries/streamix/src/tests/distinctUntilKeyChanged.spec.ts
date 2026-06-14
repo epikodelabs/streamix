@@ -1,29 +1,27 @@
-import { createSubject, distinctUntilKeyChanged, type Stream } from '@epikodelabs/streamix';
+import { createSubject, distinctUntilKeyChanged, iterate, pipe, type Subject } from '@epikodelabs/streamix';
 
 describe('distinctUntilKeyChanged', () => {
-  let subject: ReturnType<typeof createSubject<any>>;
-  let source: Stream<any>;
+  let subject: Subject<any>;
 
   beforeEach(() => {
     subject = createSubject<any>();
-    source = subject;
   });
 
   it('should emit values with distinct keys', async () => {
-    const distinctStream = source.pipe(distinctUntilKeyChanged('key'));
+    const atom = pipe(subject, distinctUntilKeyChanged('key'));
     const results: any[] = [];
 
     const consumptionPromise = (async () => {
-      for await (const value of distinctStream) {
+      for await (const value of iterate(atom)) {
         results.push(value);
       }
     })();
 
     subject.next({ key: 1, value: 'a' });
-    subject.next({ key: 1, value: 'b' }); // same key, skip
-    subject.next({ key: 2, value: 'c' }); // new key, emit
-    subject.next({ key: 2, value: 'd' }); // same key, skip
-    subject.next({ key: 3, value: 'e' }); // new key, emit
+    subject.next({ key: 1, value: 'b' });
+    subject.next({ key: 2, value: 'c' });
+    subject.next({ key: 2, value: 'd' });
+    subject.next({ key: 3, value: 'e' });
     subject.complete();
 
     await consumptionPromise;
@@ -36,33 +34,31 @@ describe('distinctUntilKeyChanged', () => {
   });
 
   it('should emit the first value regardless of key', async () => {
-    const distinctStream = source.pipe(distinctUntilKeyChanged('key'));
+    const atom = pipe(subject, distinctUntilKeyChanged('key'));
     const results: any[] = [];
 
     const consumptionPromise = (async () => {
-      for await (const value of distinctStream) {
+      for await (const value of iterate(atom)) {
         results.push(value);
       }
     })();
 
-    subject.next({ key: 1, value: 'a' }); // emit
-    subject.next({ key: 1, value: 'b' }); // same key, skip
-    subject.next({ key: 1, value: 'c' }); // same key, skip
+    subject.next({ key: 1, value: 'a' });
+    subject.next({ key: 1, value: 'b' });
+    subject.next({ key: 1, value: 'c' });
     subject.complete();
 
     await consumptionPromise;
 
-    expect(results).toEqual([
-      { key: 1, value: 'a' },
-    ]);
+    expect(results).toEqual([{ key: 1, value: 'a' }]);
   });
 
   it('should handle an empty stream gracefully', async () => {
-    const distinctStream = source.pipe(distinctUntilKeyChanged('key'));
+    const atom = pipe(subject, distinctUntilKeyChanged('key'));
     const results: any[] = [];
 
     const consumptionPromise = (async () => {
-      for await (const value of distinctStream) {
+      for await (const value of iterate(atom)) {
         results.push(value);
       }
     })();
@@ -75,12 +71,12 @@ describe('distinctUntilKeyChanged', () => {
   });
 
   it('should propagate errors from the source stream', async () => {
-    const distinctStream = source.pipe(distinctUntilKeyChanged('key'));
+    const atom = pipe(subject, distinctUntilKeyChanged('key'));
     let error: any = null;
 
     const consumptionPromise = (async () => {
       try {
-        for await (const _ of distinctStream) {
+        for await (const _ of iterate(atom)) {
           void _;
         }
       } catch (err) {
@@ -96,11 +92,11 @@ describe('distinctUntilKeyChanged', () => {
   });
 
   it('should resolve promised keys before filtering values', async () => {
-    const distinctStream = source.pipe(distinctUntilKeyChanged(Promise.resolve('key')));
+    const atom = pipe(subject, distinctUntilKeyChanged(Promise.resolve('key')));
     const results: any[] = [];
 
     const consumptionPromise = (async () => {
-      for await (const value of distinctStream) {
+      for await (const value of iterate(atom)) {
         results.push(value);
       }
     })();
@@ -120,11 +116,11 @@ describe('distinctUntilKeyChanged', () => {
 
   it('should work with promise-based comparators', async () => {
     const comparator = (prev: number, curr: number) => Promise.resolve(prev === curr);
-    const distinctStream = source.pipe(distinctUntilKeyChanged('key', comparator));
+    const atom = pipe(subject, distinctUntilKeyChanged('key', comparator));
     const results: any[] = [];
 
     const consumptionPromise = (async () => {
-      for await (const value of distinctStream) {
+      for await (const value of iterate(atom)) {
         results.push(value);
       }
     })();
@@ -143,5 +139,3 @@ describe('distinctUntilKeyChanged', () => {
     ]);
   });
 });
-
-

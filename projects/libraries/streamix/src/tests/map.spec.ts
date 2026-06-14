@@ -1,25 +1,20 @@
-import { catchError, from, map } from '@epikodelabs/streamix';
+import { catchError, from, map, pipe, iterate } from '@epikodelabs/streamix';
 
 describe('map', () => {
-  it('should transform values correctly', (done) => {
-    const testStream = from([1, 2, 3]);
+  it('should transform values correctly', async () => {
     const transform = (value: number) => value * 2;
 
-    const mappedStream = testStream.pipe(map(transform));
+    const mappedAtom = pipe(from([1, 2, 3]), map(transform));
 
-    let results: any[] = [];
+    const results: number[] = [];
+    for await (const value of iterate(mappedAtom)) {
+      results.push(value);
+    }
 
-    mappedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([2, 4, 6]);
-        done();
-      }
-    });
+    expect(results).toEqual([2, 4, 6]);
   });
 
-  it('should handle errors in transformation', (done) => {
-    const testStream = from([1, 2, 3]);
+  it('should handle errors in transformation', async () => {
     const transform = (value: number) => {
       if (value === 2) {
         throw new Error('Error in transformation');
@@ -27,36 +22,27 @@ describe('map', () => {
       return value * 2;
     };
 
-    const mappedStream = testStream.pipe(map(transform), catchError());
+    const mappedAtom = pipe(from([1, 2, 3]), map(transform), catchError());
 
-    let results: any[] = [];
+    const results: number[] = [];
+    for await (const value of iterate(mappedAtom)) {
+      results.push(value);
+    }
 
-    mappedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([2]); // Only the first value should be emitted before error
-        done();
-      }
-    });
+    expect(results).toEqual([2]);
   });
 
-  it('should handle promise-based transformations', (done) => {
-    const testStream = from([1, 2, 3]);
+  it('should handle promise-based transformations', async () => {
     const transform = (value: number, index: number) =>
       Promise.resolve(value + index);
 
-    const mappedStream = testStream.pipe(map(transform));
+    const mappedAtom = pipe(from([1, 2, 3]), map(transform));
 
     const results: number[] = [];
-    mappedStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([1, 3, 5]);
-        done();
-      },
-      error: done.fail,
-    });
+    for await (const value of iterate(mappedAtom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([1, 3, 5]);
   });
 });
-
-

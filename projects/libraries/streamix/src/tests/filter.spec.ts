@@ -1,125 +1,103 @@
-import { filter, from } from '@epikodelabs/streamix';
+import { filter, from, iterate, pipe } from '@epikodelabs/streamix';
 
 describe('filter', () => {
-  it('should allow values that pass the predicate', (done) => {
-    const testStream = from([1, 2, 3, 4, 5]);
-    const predicate = (value: number) => value % 2 === 0;
+  it('should allow values that pass the predicate', async () => {
+    const atom = pipe(
+      from([1, 2, 3, 4, 5]),
+      filter((value: number) => value % 2 === 0)
+    );
 
-    const filteredStream = testStream.pipe(filter(predicate));
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    filteredStream.subscribe({
-      next: (value) => {
-        expect(value).toBeGreaterThanOrEqual(2);
-      },
-      complete: () => {
-        done();
-      },
-      error: done.fail,
-    });
+    expect(results).toEqual([2, 4]);
   });
 
-  it('should not emit values that fail the predicate', (done) => {
-    const testStream = from([1, 2, 3]);
-    const predicate = (value: number) => value > 3;
+  it('should not emit values that fail the predicate', async () => {
+    const atom = pipe(
+      from([1, 2, 3]),
+      filter((value: number) => value > 3)
+    );
 
-    const filteredStream = testStream.pipe(filter(predicate));
-    let emittedCount = 0;
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    filteredStream.subscribe({
-      next: (value) => {
-        emittedCount++;
-        fail(`Unexpected value emitted: ${value}`);
-      },
-      complete: () => {
-        expect(emittedCount).toBe(0);
-        done();
-      },
-      error: done.fail,
-    });
+    expect(results).toEqual([]);
   });
 
-  it('should emit all allowed values before stopping', (done) => {
-    const testStream = from([1, 2, 3, 4, 5]);
-    const predicate = (value: number) => value <= 3;
+  it('should emit all allowed values before stopping', async () => {
+    const atom = pipe(
+      from([1, 2, 3, 4, 5]),
+      filter((value: number) => value <= 3)
+    );
 
-    let count = 0;
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    const filteredStream = testStream.pipe(filter(predicate));
-
-    filteredStream.subscribe({
-      next: () => count++,
-      complete: () => {
-        expect(count).toBe(3);
-        done();
-      },
-      error: done.fail,
-    });
+    expect(results).toEqual([1, 2, 3]);
   });
 
-  it('should support async predicates', (done) => {
-    const testStream = from([1, 2, 3]);
-    const predicate = async (value: number) => {
-      await new Promise(resolve => setTimeout(resolve, 1));
-      return value % 2 === 1;
-    };
+  it('should support async predicates', async () => {
+    const atom = pipe(
+      from([1, 2, 3]),
+      filter(async (value: number) => {
+        await new Promise(resolve => setTimeout(resolve, 1));
+        return value % 2 === 1;
+      })
+    );
 
-    const filteredStream = testStream.pipe(filter(predicate));
-    const values: number[] = [];
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    filteredStream.subscribe({
-      next: (value) => values.push(value),
-      complete: () => {
-        expect(values).toEqual([1, 3]);
-        done();
-      },
-      error: done.fail,
-    });
+    expect(results).toEqual([1, 3]);
   });
 
-  it('should allow filtering by array of values', (done) => {
-    const testStream = from([1, 2, 3, 4, 5]);
+  it('should allow filtering by array of values', async () => {
+    const atom = pipe(from([1, 2, 3, 4, 5]), filter([2, 4]));
 
-    const filteredStream = testStream.pipe(filter([2, 4]));
-    const values: number[] = [];
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    filteredStream.subscribe({
-      next: (value) => values.push(value),
-      complete: () => {
-        expect(values).toEqual([2, 4]);
-        done();
-      },
-      error: done.fail,
-    });
+    expect(results).toEqual([2, 4]);
   });
 
-  it('should allow filtering by single value', (done) => {
-    const testStream = from([1, 2, 3]);
+  it('should allow filtering by single value', async () => {
+    const atom = pipe(from([1, 2, 3]), filter(2));
 
-    const filteredStream = testStream.pipe(filter(2));
-    const values: number[] = [];
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    filteredStream.subscribe({
-      next: (value) => values.push(value),
-      complete: () => {
-        expect(values).toEqual([2]);
-        done();
-      },
-      error: done.fail,
-    });
+    expect(results).toEqual([2]);
   });
 
   it('should advance predicate index for every source value, including filtered ones', async () => {
     const indices: number[] = [];
-    const values: number[] = [];
+    const atom = pipe(
+      from([1, 2, 3]),
+      filter((current, index) => {
+        indices.push(index);
+        return current === 3;
+      })
+    );
 
-    for await (const value of from([1, 2, 3]).pipe(filter((current, index) => {
-      indices.push(index);
-      return current === 3;
-    }))) {
-      values.push(value);
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
     }
 
     expect(indices).toEqual([0, 1, 2]);
-    expect(values).toEqual([3]);
+    expect(results).toEqual([3]);
   });
 });

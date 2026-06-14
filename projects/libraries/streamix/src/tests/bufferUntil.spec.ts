@@ -1,23 +1,26 @@
 import {
   bufferUntil,
   createSubject,
+  iterate,
+  pipe,
+  type Subject,
 } from "@epikodelabs/streamix";
 
-const waitTick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("bufferUntil", () => {
   it("flushes buffered values whenever the notifier emits", async () => {
     const source = createSubject<number>();
     const notifier = createSubject<void>();
     const results: number[][] = [];
-    const buffered = source.pipe(bufferUntil(notifier));
+    const buffered = pipe(source, bufferUntil(notifier));
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
-    
+
     source.next(1);
     source.next(2);
     notifier.next();
@@ -28,8 +31,8 @@ describe("bufferUntil", () => {
     source.next(4);
     source.complete();
 
-    // allow async drains to run before assertions
     await waitTick();
+    await completed;
 
     expect(results.length).toBe(3);
     expect(results[0]).toEqual([1, 2]);
@@ -41,10 +44,10 @@ describe("bufferUntil", () => {
     const source = createSubject<number>();
     const notifier = createSubject<void>();
     const results: number[][] = [];
-    const buffered = source.pipe(bufferUntil(notifier));
+    const buffered = pipe(source, bufferUntil(notifier));
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
@@ -52,8 +55,8 @@ describe("bufferUntil", () => {
     source.next(1);
     source.complete();
 
-    // allow async drains to run before assertions
     await waitTick();
+    await completed;
 
     expect(results).toEqual([[1]]);
   });
@@ -62,10 +65,10 @@ describe("bufferUntil", () => {
     const source = createSubject<number>();
     const notifier = createSubject<void>();
     const results: number[][] = [];
-    const buffered = source.pipe(bufferUntil(notifier));
+    const buffered = pipe(source, bufferUntil(notifier));
 
-    void (async () => {
-      for await (const value of buffered) {
+    const completed = (async () => {
+      for await (const value of iterate(buffered)) {
         results.push(value);
       }
     })();
@@ -77,8 +80,8 @@ describe("bufferUntil", () => {
 
     source.complete();
 
-    // allow async drains to run before assertions
     await waitTick();
+    await completed;
 
     expect(results).toEqual([[1]]);
   });
@@ -86,12 +89,12 @@ describe("bufferUntil", () => {
   it("propagates notifier errors", async () => {
     const source = createSubject<number>();
     const notifier = createSubject<void>();
-    const buffered = source.pipe(bufferUntil(notifier));
+    const buffered = pipe(source, bufferUntil(notifier));
 
     let error: any;
-    void (async () => {
+    const completed = (async () => {
       try {
-        for await (const _ of buffered) {
+        for await (const _ of iterate(buffered)) {
           void _;
         }
       } catch (e) {
@@ -101,6 +104,7 @@ describe("bufferUntil", () => {
 
     notifier.error(new Error("NOTIFIER"));
     await waitTick();
+    await completed;
 
     expect(error).toEqual(jasmine.any(Error));
     expect((error as Error).message).toBe("NOTIFIER");
@@ -124,12 +128,12 @@ describe("bufferUntil", () => {
       return it;
     };
 
-    const buffered = source.pipe(bufferUntil(notifier));
+    const buffered = pipe(source, bufferUntil(notifier));
 
     let error: any;
-    void (async () => {
+    const completed = (async () => {
       try {
-        for await (const _ of buffered) {
+        for await (const _ of iterate(buffered)) {
           void _;
         }
       } catch (e) {
@@ -139,6 +143,7 @@ describe("bufferUntil", () => {
 
     source.error(new Error("SOURCE"));
     await waitTick();
+    await completed;
 
     expect(error).toEqual(jasmine.any(Error));
     expect((error as Error).message).toBe("SOURCE");
@@ -177,8 +182,8 @@ describe("bufferUntil", () => {
       return it;
     };
 
-    const buffered = source.pipe(bufferUntil(notifier));
-    const it = buffered[Symbol.asyncIterator]();
+    const buffered = pipe(source, bufferUntil(notifier));
+    const it = iterate(buffered)[Symbol.asyncIterator]();
 
     source.next(1);
     notifier.next();

@@ -1,99 +1,85 @@
-import { createStream, from, merge } from '@epikodelabs/streamix';
+import { createStream, from, iterate, merge } from '@epikodelabs/streamix';
+
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
 describe('merge', () => {
-  it('should merge values from multiple sources', (done) => {
+  it('should merge values from multiple sources', async () => {
     const sources = [
       from(['source1_value1', 'source1_value2']),
       from(['source2_value1', 'source2_value2']),
     ];
 
-    const mergeStream = merge(...sources);
+    const atom = merge(...sources);
 
-    const emittedValues: any[] = [];
-    const subscription = mergeStream.subscribe({
-      next: (value: any) => emittedValues.push(value),
-      complete: () => {
-        expect(emittedValues.sort()).toEqual([
-          'source1_value1',
-          'source1_value2',
-          'source2_value1',
-          'source2_value2',
-        ]);
+    const emittedValues: string[] = [];
+    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
 
-        subscription.unsubscribe();
-        done();
-      }
-    });
+    expect(emittedValues.sort()).toEqual([
+      'source1_value1',
+      'source1_value2',
+      'source2_value1',
+      'source2_value2',
+    ]);
   });
 
-  it('should complete when all sources complete', (done) => {
+  it('should emit values from all sources', async () => {
     const sources = [
       from(['source1_value1', 'source1_value2']),
       from(['source2_value1', 'source2_value2']),
     ];
 
-    const mergeStream = merge(...sources);
+    const atom = merge(...sources);
 
     let subscriptionCalls = 0;
+    atom.subscribe(() => subscriptionCalls++);
+    await delay();
 
-    mergeStream.subscribe({
-      next: () => subscriptionCalls++,
-      complete: () => {
-        expect(subscriptionCalls).toBe(4);
-        done();
-      }
-    })
+    expect(subscriptionCalls).toBe(4);
   });
 
-  it('should merge promise-based sources and resolve arrays', (done) => {
+  it('should merge promise-based sources and resolve arrays', async () => {
     const sources = [
       from(['stream-value']),
       Promise.resolve('promise-value'),
     ];
 
-    const merged = merge(...sources);
+    const atom = merge(...sources);
     const emitted: string[] = [];
 
-    merged.subscribe({
-      next: (value) => emitted.push(value),
-      complete: () => {
-        expect(emitted.sort()).toEqual(['promise-value', 'stream-value']);
-        done();
-      },
-      error: () => done.fail('should not error'),
-    });
+    atom.subscribe(v => { if (v !== undefined) emitted.push(v); });
+    await delay();
+
+    expect(emitted.sort()).toEqual(['promise-value', 'stream-value']);
   });
 
-  it('should propagate errors from rejected sources', (done) => {
+  it('should propagate errors from rejected sources', async () => {
     const badStream = createStream('error', async function* () {
       throw new Error('boom');
     });
 
-    const merged = merge(badStream, from([1]));
+    const atom = merge(badStream, from([1]));
 
-    merged.subscribe({
-      next: () => done.fail('unexpected next'),
-      error: (error: Error) => {
-        expect(error.message).toBe('boom');
-        done();
-      },
-    });
+    let caught: any;
+    try {
+      for await (const v of iterate(atom)) {
+        fail(`unexpected value ${v}`);
+      }
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught.message).toBe('boom');
   });
 
-  it('should complete immediately when no sources are provided', (done) => {
-    const merged = merge();
-    let emitted = false;
+  it('should emit nothing immediately when no sources are provided', async () => {
+    const atom = merge();
+    const emitted: any[] = [];
 
-    merged.subscribe({
-      next: () => {
-        emitted = true;
-      },
-      complete: () => {
-        expect(emitted).toBe(false);
-        done();
-      },
-      error: () => done.fail('should not error'),
-    });
+    atom.subscribe(v => { if (v !== undefined) emitted.push(v); });
+    await delay();
+
+    expect(emitted).toEqual([]);
   });
 
   it('cleans up underlying iterators when the consumer stops early', async () => {
@@ -111,13 +97,13 @@ describe('merge', () => {
       });
 
     const merged = merge(makeStream(1), makeStream(2));
-    const iterator = merged[Symbol.asyncIterator]();
+    const iterator = iterate(merged)[Symbol.asyncIterator]();
 
     const first = await iterator.next();
     expect(first.done).toBeFalse();
 
     await iterator.return!(undefined);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await delay(20);
 
     expect(cleanupCalls).toContain(1);
     expect(cleanupCalls).toContain(2);

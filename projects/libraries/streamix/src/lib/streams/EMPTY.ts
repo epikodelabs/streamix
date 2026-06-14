@@ -7,7 +7,7 @@ import { flow, type AtomBase } from '../atoms/atom';
  * @returns {AtomBase<T | undefined>} An empty atom.
  */
 export const empty = <T = any>(): AtomBase<T | undefined> => {
-  return flow<T | undefined>(async function* () {});
+  return flow<T>(async function* () {});
 };
 
 /**

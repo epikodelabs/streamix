@@ -14,7 +14,7 @@ import { flow, type AtomBase } from '../atoms/atom';
  * @returns {AtomBase<T | undefined>} A new atom that emits the value and then completes.
  */
 export function of<T = any>(value: MaybePromise<T>): AtomBase<T | undefined> {
-  return flow<T | undefined>(async function* () {
+  return flow<T>(async function* () {
     yield isPromiseLike(value) ? await value : value;
   });
 }

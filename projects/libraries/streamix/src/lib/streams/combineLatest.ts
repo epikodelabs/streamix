@@ -18,7 +18,7 @@ import { toAsyncIterable, type StreamInput } from "./pipe";
 export function combineLatest<T extends unknown[] = any[]>(
   ...sources: Array<StreamInput<T[number]>>
 ): AtomBase<T | undefined> {
-  return flow<T | undefined>(async function* () {
+  return flow<T>(async function* () {
     if (sources.length === 0) return;
 
     const iterators = sources.map((s) =>

@@ -1,77 +1,57 @@
-import { distinctUntilChanged, from } from '@epikodelabs/streamix';
-
+import { distinctUntilChanged, from, iterate, pipe } from '@epikodelabs/streamix';
 
 describe('distinctUntilChanged', () => {
-  it('should emit values that are distinct from the previous one', (done) => {
-    const test = from([1, 1, 2, 2, 3, 3]);
-    const distinctStream = test.pipe(distinctUntilChanged());
+  it('should emit values that are distinct from the previous one', async () => {
+    const atom = pipe(from([1, 1, 2, 2, 3, 3]), distinctUntilChanged());
 
-    const expectedValues = [1, 2, 3];
-    let index = 0;
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    distinctStream.subscribe((value) => {
-      expect(value).toEqual(expectedValues[index]);
-      index++;
-      if (index === expectedValues.length) {
-        done();
-      }
-    });
+    expect(results).toEqual([1, 2, 3]);
   });
 
-  it('should not emit consecutive identical values', (done) => {
-    const test = from([1, 1, 2, 2, 3, 3]);
-    const distinctStream = test.pipe(distinctUntilChanged());
+  it('should not emit consecutive identical values', async () => {
+    const atom = pipe(from([1, 1, 2, 2, 3, 3]), distinctUntilChanged());
 
-    let count = 0;
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    distinctStream.subscribe({
-      next: () => count++,
-      complete: () => {
-        expect(count).toBe(3); // Only three distinct values should be emitted
-        done();
-      }
-    });
+    expect(results.length).toBe(3);
   });
 
-  it('should handle non-primitive values correctly', (done) => {
-    const test = from([{ id: 1 }, { id: 1 }, { id: 2 }, { id: 2 }, { id: 3 }, { id: 3 }]);
-    const distinctStream = test.pipe(distinctUntilChanged<{ id: number }>((a, b) => a.id === b.id));
+  it('should handle non-primitive values correctly', async () => {
+    const atom = pipe(
+      from([{ id: 1 }, { id: 1 }, { id: 2 }, { id: 2 }, { id: 3 }, { id: 3 }]),
+      distinctUntilChanged<{ id: number }>((a, b) => a.id === b.id)
+    );
 
-    const expectedValues = [{ id: 1 }, { id: 2 }, { id: 3 }];
-    let index = 0;
+    const results: { id: number }[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    distinctStream.subscribe((value) => {
-      expect(value).toEqual(expectedValues[index]);
-      index++;
-      if (index === expectedValues.length) {
-        done();
-      }
-    });
+    expect(results).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
   });
 
-  // Example object equality test with reference-based distinctUntilChanged
-  it('should emit distinct objects based on reference equality', (done) => {
+  it('should emit distinct objects based on reference equality', async () => {
     const object1 = { id: 1 };
     const object2 = { id: 2 };
     const object3 = { id: 3 };
 
-    const testObjects = [object1, object1, object2, object2, object3, object3];
-    const test = from(testObjects);
-    const distinctStream = test.pipe(distinctUntilChanged());
+    const atom = pipe(
+      from([object1, object1, object2, object2, object3, object3]),
+      distinctUntilChanged()
+    );
 
-    const expectedValues = [object1, object2, object3];
+    const results: { id: number }[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    let emittedValues: any[] = [];
-
-    distinctStream.subscribe({
-      next: (value) => emittedValues.push(value),
-      complete: () => {
-        // Ensure emitted values are distinct based on reference
-        expect(emittedValues).toEqual(expectedValues);
-        done();
-      }
-    });
+    expect(results).toEqual([object1, object2, object3]);
   });
 });
-
-

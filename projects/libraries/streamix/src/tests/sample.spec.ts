@@ -1,42 +1,44 @@
-import { createSubject, sample } from '@epikodelabs/streamix';
+import { createSubject, iterate, pipe, sample } from '@epikodelabs/streamix';
 
-describe("sample", () => {
-  let subject: any;
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+describe('sample', () => {
+  let subject: ReturnType<typeof createSubject<number>>;
 
   beforeEach(() => {
     subject = createSubject<number>();
   });
 
-  it("should emit the latest value at the specified interval", async () => {
+  it('should emit the latest value at the specified interval', async () => {
     const period = 100;
-    const sampled = subject.pipe(sample(period));
+    const sampled = pipe(subject, sample(period));
     const results: number[] = [];
 
-    void (async () => {
-      for await (const value of sampled) {
+    const reader = (async () => {
+      for await (const value of iterate(sampled)) {
         results.push(value);
       }
     })();
 
     subject.next(1);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await wait(50);
     subject.next(2);
-    await new Promise((resolve) => setTimeout(resolve, 125));
+    await wait(125);
     subject.next(3);
     subject.complete();
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await wait(200);
 
-    expect(results).toEqual([2, 3]); // The latest values should be emitted
+    expect(results).toEqual([2, 3]);
   });
 
-  it("should complete when the source completes", async () => {
+  it('should complete when the source completes', async () => {
     const period = 100;
-    const sampled = subject.pipe(sample(period));
+    const sampled = pipe(subject, sample(period));
     let completed = false;
 
-    void (async () => {
-      for await (const _ of sampled) {
+    const reader = (async () => {
+      for await (const _ of iterate(sampled)) {
         void _;
       }
       completed = true;
@@ -44,34 +46,34 @@ describe("sample", () => {
 
     subject.next(1);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await wait(150);
 
     expect(completed).toBeTrue();
   });
 
-  it("should not emit anything if the source does not emit", async () => {
+  it('should not emit anything if the source does not emit', async () => {
     const period = 100;
-    const sampled = subject.pipe(sample(period));
+    const sampled = pipe(subject, sample(period));
     const results: number[] = [];
 
-    void (async () => {
-      for await (const value of sampled) {
+    const reader = (async () => {
+      for await (const value of iterate(sampled)) {
         results.push(value);
       }
     })();
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await wait(200);
 
-    expect(results).toEqual([]); // No values emitted
+    expect(results).toEqual([]);
   });
 
-  it("should emit the last value even if the source completes early", async () => {
+  it('should emit the last value even if the source completes early', async () => {
     const period = 100;
-    const sampled = subject.pipe(sample(period));
+    const sampled = pipe(subject, sample(period));
     const results: number[] = [];
 
-    void (async () => {
-      for await (const value of sampled) {
+    const reader = (async () => {
+      for await (const value of iterate(sampled)) {
         results.push(value);
       }
     })();
@@ -79,45 +81,43 @@ describe("sample", () => {
     subject.next(1);
     subject.next(2);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await wait(150);
 
-    expect(results).toEqual([2]); // The last value before completion should be emitted
+    expect(results).toEqual([2]);
   });
 
-  it("should work with promise-based periods", async () => {
+  it('should work with promise-based periods', async () => {
     const periodPromise = Promise.resolve(10);
-    const sampled = subject.pipe(sample(periodPromise));
+    const sampled = pipe(subject, sample(periodPromise));
     const results: number[] = [];
 
-    void (async () => {
-      for await (const value of sampled) {
+    const reader = (async () => {
+      for await (const value of iterate(sampled)) {
         results.push(value);
       }
     })();
 
     subject.next(5);
-    await new Promise((resolve) => setTimeout(resolve, 15));
+    await wait(15);
     subject.next(6);
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await wait(30);
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await wait(20);
 
     expect(results.length).toBeGreaterThan(0);
     expect(results[results.length - 1]).toBe(6);
   });
 
-  it("should forward period promise rejections as errors", async () => {
-    const sampled = subject.pipe(sample(Promise.reject(new Error("boom"))));
+  it('should forward period promise rejections as errors', async () => {
+    const sampled = pipe(subject, sample(Promise.reject(new Error('boom'))));
 
     try {
-      for await (const _ of sampled) {
+      for await (const _ of iterate(sampled)) {
         void _;
       }
-      fail("expected an error to be thrown");
+      fail('expected an error to be thrown');
     } catch (err: any) {
-      expect(err.message).toBe("boom");
+      expect(err.message).toBe('boom');
     }
   });
 });
-
-

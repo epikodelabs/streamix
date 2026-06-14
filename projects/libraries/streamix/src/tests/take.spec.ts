@@ -1,56 +1,36 @@
-import { from, take } from '@epikodelabs/streamix';
+import { from, iterate, pipe, take } from '@epikodelabs/streamix';
 
 describe('take', () => {
-  it('should take specified number of emissions', (done) => {
-    const testStream = from([1, 2, 3, 4, 5]);
-    const count = 3;
+  it('should take specified number of emissions', async () => {
+    const atom = pipe(from([1, 2, 3, 4, 5]), take(3));
 
-    const takenStream = testStream.pipe(take(count));
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    let results: any[] = [];
-
-    takenStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([1, 2, 3]); // Should emit only the first three values
-        done();
-      }
-    });
+    expect(results).toEqual([1, 2, 3]);
   });
 
-  it('should handle case where count is greater than number of emissions', (done) => {
-    const testStream = from([1, 2]);
-    const count = 5;
+  it('should handle case where count is greater than number of emissions', async () => {
+    const atom = pipe(from([1, 2]), take(5));
 
-    const takenStream = testStream.pipe(take(count));
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    let results: any[] = [];
-
-    takenStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([1, 2]); // Should emit all values because count is greater than number of emissions
-        done();
-      }
-    });
+    expect(results).toEqual([1, 2]);
   });
 
-  it('should handle empty stream', (done) => {
-    const testStream = from([]);
-    const count = 3;
+  it('should handle empty stream', async () => {
+    const atom = pipe(from([]), take(3));
 
-    const takenStream = testStream.pipe(take(count));
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
 
-    let results: any[] = [];
-
-    takenStream.subscribe({
-      next: (value) => results.push(value),
-      complete: () => {
-        expect(results).toEqual([]); // Should emit no values because the stream is empty
-        done();
-      }
-    });
+    expect(results).toEqual([]);
   });
 });
-
-

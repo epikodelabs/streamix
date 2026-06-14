@@ -1,33 +1,21 @@
 import { EMPTY } from '@epikodelabs/streamix';
 
+const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
+
 describe('empty', () => {
   it('should auto-complete without emitting any values', async () => {
-    const emptyStream = EMPTY;
+    const emittedValues: any[] = [];
+    EMPTY.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
 
-    let emittedValues: any[] = [];
-    const subscription = emptyStream.subscribe({
-      next: (value: any) => emittedValues.push(value),
-      complete: () => {
-        // Ensure no values were emitted
-        expect(emittedValues.length).toBe(0);
-
-        subscription.unsubscribe();
-      }
-    })
+    expect(emittedValues.length).toBe(0);
   });
 
-  it('should behave the same as an instance of EmptyStream', async () => {
-    let emittedValues: any[] = [];
-    const subscription = EMPTY.subscribe({
-      next:(value: any) => emittedValues.push(value),
-      complete: () => {
-        // Ensure no values were emitted
-        expect(emittedValues.length).toBe(0);
+  it('should behave the same as an instance of empty atom', async () => {
+    const emittedValues: any[] = [];
+    EMPTY.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    await delay();
 
-        subscription.unsubscribe();
-      }
-    });
+    expect(emittedValues.length).toBe(0);
   });
 });
-
-
