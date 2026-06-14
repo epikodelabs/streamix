@@ -1,5 +1,5 @@
 import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
-import { createSubject } from '../subjects';
+import { atom, iterate } from '../atoms/atom';
 
 /**
  * Creates a stream operator that schedules the emission of each value from the source
@@ -21,8 +21,8 @@ import { createSubject } from '../subjects';
  */
 export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotask" | "idle">) => {
   return createOperator<T, T>('observeOn', function (this: Operator, source) {
-    const output = createSubject<T>();
-    const outputIterator = output[Symbol.asyncIterator]();
+    const output = atom<T>();
+    const outputIterator = iterate(output)[Symbol.asyncIterator]();
     let pendingCount = 0;
     let allDoneResolve: (() => void) | null = null;
     let stopped = false;

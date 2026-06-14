@@ -1,5 +1,5 @@
 import { createOperator, DONE, type Operator } from "../abstractions";
-import { createSubject, type Subject } from '../subjects';
+import { atom, iterate, type Atom } from '../atoms/atom';
 
 /**
  * Shares a single subscription to the source stream between multiple consumers.
@@ -13,7 +13,7 @@ import { createSubject, type Subject } from '../subjects';
  * @returns An operator that can be inserted into a pipeline to share the source.
  */
 export function share<T = any>() {
-  let shared: Subject<T> | undefined;
+  let shared: Atom<T> | undefined;
   let isConnected = false;
   let sourceIterator: AsyncIterator<T> | null = null;
   let subscriberCount = 0;
@@ -48,7 +48,7 @@ export function share<T = any>() {
   };
 
   return createOperator<T, T>('share', function (this: Operator, source) {
-    if (!shared) shared = createSubject<T>();
+    if (!shared) shared = atom<T>();
     if (!isConnected) {
       connect(source);
     } else if (typeof source.return === "function") {
@@ -59,7 +59,7 @@ export function share<T = any>() {
     }
 
     subscriberCount++;
-    const outputIterator = shared[Symbol.asyncIterator]();
+    const outputIterator = iterate(shared)[Symbol.asyncIterator]();
     const baseReturn = outputIterator.return?.bind(outputIterator);
     const baseThrow = outputIterator.throw?.bind(outputIterator);
 
