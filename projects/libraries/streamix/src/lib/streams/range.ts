@@ -22,5 +22,5 @@ export function range(start: MaybePromise<number>, count: MaybePromise<number>, 
     for (let i = 0; i < resolvedCount; i++) {
       yield resolvedStart + i * resolvedStep;
     }
-  }, undefined as unknown as number);
+  });
 }

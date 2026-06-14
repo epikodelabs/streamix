@@ -45,7 +45,7 @@ export function combineLatest<T extends unknown[] = any[]>(
 
             // Only emit if all sources have provided at least one value
             if (hasEmitted.size === sources.length) {
-              yield latestValues as T;
+              yield latestValues.slice() as T;
             }
             break;
 

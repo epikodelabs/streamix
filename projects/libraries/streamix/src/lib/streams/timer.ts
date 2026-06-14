@@ -55,5 +55,5 @@ export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromi
       cancelled = true;
       clearPending();
     }
-  }, undefined as unknown as number);
+  });
 }

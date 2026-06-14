@@ -170,25 +170,26 @@ function notifyDerivedSubscribers(notify: () => void) {
  * ```
  */
 export function flow<T>(
-  source: AsyncIterable<T> | Iterable<T> | (() => AsyncIterable<T> | Iterable<T>),
+  source: AsyncIterable<T> | Iterable<T> | ((signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>),
   initialValue?: T,
   options?: AtomOptions
-): AtomBase<T> {
+): AtomBase<T> & { _error?: any } {
   void options;
 
   let current = initialValue as T;
   let previous = initialValue as T;
   let disposed = false;
-  let hasEmitted = false;
   let started = false;
+  let activeSubCount = 0;
+  let error: any = undefined;
+  const disposeHandlers = new Set<() => void>();
 
   const subs = new Set<(value: T) => void>();
+  const subscriptions = new Set<Subscription>();
 
   const notify = (value: T) => {
     if (disposed) return;
-    if (Object.is(current, value)) return;
 
-    hasEmitted = true;
     previous = current;
     current = value;
 
@@ -201,24 +202,75 @@ export function flow<T>(
 
   let iterator: AsyncIterator<T> | Iterator<T> | undefined;
   let cancelled = false;
-  let cleanup = () => {};
+  let cleanup: () => void | Promise<void> = () => {};
+  let disposePromise: Promise<void> | null = null;
+  let abortController: AbortController | undefined;
+
+  const stop = () => {
+    cancelled = true;
+    return cleanup();
+  };
+
+  const disposeInstance = async (): Promise<void> => {
+    if (disposed) return;
+    if (disposePromise) return disposePromise;
+
+    disposePromise = (async () => {
+      disposed = true;
+      subs.clear();
+      activeSubCount = 0;
+      try {
+        await stop();
+      } catch {
+        // ignore cleanup errors
+      }
+      for (const handler of Array.from(disposeHandlers)) {
+        try {
+          handler();
+        } catch {
+          // ignore
+        }
+      }
+      disposeHandlers.clear();
+      for (const sub of Array.from(subscriptions)) {
+        try {
+          await sub.unsubscribe();
+        } catch {
+          // ignore
+        }
+      }
+      subscriptions.clear();
+    })();
+
+    return disposePromise;
+  };
 
   const start = () => {
     if (started || disposed) return;
     started = true;
 
-    const iterable = typeof source === "function" ? source() : source;
+    abortController = new AbortController();
+    const iterable =
+      typeof source === "function"
+        ? (source as (signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>)(abortController.signal)
+        : source;
     iterator =
       (iterable as any)[Symbol.asyncIterator]?.() ??
       (iterable as any)[Symbol.iterator]?.();
 
-    if (!iterator) return;
+    if (!iterator) {
+      abortController.abort();
+      void disposeInstance();
+      return;
+    }
 
     cleanup = () => {
+      if (!iterator) return;
       cancelled = true;
-      if (iterator && typeof (iterator as any).return === "function") {
+      abortController?.abort();
+      if (typeof (iterator as any).return === "function") {
         try {
-          (iterator as any).return();
+          return (iterator as any).return();
         } catch {
           // ignore
         }
@@ -232,21 +284,18 @@ export function flow<T>(
           if (cancelled || result.done) break;
           notify(result.value);
         }
+      } catch (err) {
+        error = err;
+        await disposeInstance();
       } finally {
-        if (iterator && typeof (iterator as any).return === "function") {
-          try {
-            await (iterator as any).return();
-          } catch {
-            // ignore
-          }
-        }
+        // Mark as disposed before awaiting cleanup so consumers see completion
+        // synchronously and any pending iterators can resolve to done.
+        await disposeInstance();
       }
     })();
   };
 
-  start();
-
-  const instance: AtomBase<T> = {
+  const instance: AtomBase<T> & { _error?: any } = {
     type: "atom",
 
     get disposed() {
@@ -278,32 +327,49 @@ export function flow<T>(
     },
 
     subscribe(callback) {
-      if (!started && !disposed) {
+      if (disposed) {
+        return createSubscription(() => {});
+      }
+
+      if (!started) {
         start();
       }
-      subs.add(callback);
 
-      return createSubscription(() => {
+      subs.add(callback);
+      activeSubCount++;
+
+      const sub = createSubscription(() => {
         subs.delete(callback);
+        activeSubCount--;
+        if (activeSubCount <= 0) {
+          return disposeInstance();
+        }
+        return undefined;
       });
+      subscriptions.add(sub);
+      return sub;
     },
 
     dispose() {
-      if (disposed) return;
-
-      disposed = true;
-      subs.clear();
-      cleanup();
+      void disposeInstance();
     }
   };
 
-  registerWithCurrentScope(instance);
+  Object.defineProperty(instance, "_error", {
+    get() {
+      return error;
+    },
+    enumerable: false,
+  });
 
-  if (hasEmitted) {
-    for (const cb of Array.from(subs)) {
-      cb(current);
-    }
-  }
+  Object.defineProperty(instance, "_onDispose", {
+    get() {
+      return disposeHandlers;
+    },
+    enumerable: false,
+  });
+
+  registerWithCurrentScope(instance);
 
   return instance;
 }
@@ -883,25 +949,59 @@ export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
     [Symbol.asyncIterator]() {
       const buffer: T[] = [];
       let resolveNext: ((res: IteratorResult<T>) => void) | null = null;
+      let rejectNext: ((e: any) => void) | null = null;
       let done = false;
-
-      buffer.push(atom.value);
 
       const sub = atom.subscribe((value) => {
         if (done) return;
         if (resolveNext) {
           resolveNext({ value, done: false });
           resolveNext = null;
+          rejectNext = null;
         } else {
           buffer.push(value);
         }
       });
 
-      // No polling. Just check disposed on each next() call.
-      // If the atom is disposed and buffer is empty, we're done.
+      const finish = () => {
+        if (done) return;
+        sub.unsubscribe();
+        const err = (atom as any)._error;
+        if (resolveNext) {
+          if (err) {
+            done = true;
+            const r = rejectNext!;
+            resolveNext = null;
+            rejectNext = null;
+            r(err);
+          } else if (buffer.length === 0) {
+            done = true;
+            resolveNext({ value: undefined as any, done: true });
+            resolveNext = null;
+            rejectNext = null;
+          }
+        }
+      };
+
+      (atom as any)._onDispose?.add(finish);
+
+      const checkError = () => {
+        const err = (atom as any)._error;
+        if (err !== undefined) {
+          finish();
+          return err;
+        }
+        return undefined;
+      };
+
       return {
         async next() {
           if (done) return { value: undefined as any, done: true };
+
+          const err = checkError();
+          if (err) {
+            throw err;
+          }
 
           if (buffer.length > 0) {
             const val = buffer.shift()!;
@@ -916,13 +1016,13 @@ export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
             return { value: undefined as any, done: true };
           }
 
-          return new Promise((resolve) => {
+          return new Promise<IteratorResult<T>>((resolve, reject) => {
             resolveNext = resolve;
+            rejectNext = reject;
           });
         },
         async return() {
-          done = true;
-          sub.unsubscribe();
+          finish();
           return { value: undefined as any, done: true };
         },
       };

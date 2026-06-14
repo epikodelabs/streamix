@@ -83,5 +83,5 @@ export function forkJoin<R extends readonly unknown[] = any[]>(
     } finally {
       await coordinator.return?.();
     }
-  }, undefined as unknown as R);
+  });
 }

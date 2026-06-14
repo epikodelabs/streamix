@@ -33,8 +33,6 @@ export function loop<T = any>(
         const nextValue = iterateFn(currentValue);
         currentValue = isPromiseLike(nextValue) ? await nextValue : nextValue;
       }
-    },
-    undefined as unknown as T,
-    { discrete: true }
+    }
   );
 }

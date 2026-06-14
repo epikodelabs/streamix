@@ -45,7 +45,20 @@ export function toAsyncIterable<T>(source: StreamInput<T>): AsyncIterable<T> {
 
   if (isPromiseLike(source)) {
     return (async function* () {
-      yield await source;
+      const resolved = await source;
+      if (isAtomLike(resolved)) {
+        for await (const item of toAsyncIterable(resolved)) {
+          yield item;
+        }
+        return;
+      }
+      if (isAsyncIterable(resolved)) {
+        for await (const item of resolved) {
+          yield item;
+        }
+        return;
+      }
+      yield resolved;
     })();
   }
 
