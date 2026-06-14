@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { atom, createAsyncIterator, type AtomBase, type Receiver } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `IdleDeadline` objects whenever
@@ -19,10 +19,10 @@ import { createAsyncIterator, createSubject, type Receiver, type Stream } from "
  * - Fully compatible with async iteration.
  *
  * @param timeout Optional timeout (ms) after which idle callback must fire.
- * @returns {Stream<IdleDeadline>} A stream emitting idle deadlines.
+ * @returns {Atom<IdleDeadline>} An atom emitting idle deadlines.
  */
-export function onIdle(timeout?: number): Stream<IdleDeadline> {
-  const subject = createSubject<IdleDeadline>();
+export function onIdle(timeout?: number): AtomBase<IdleDeadline> {
+  const atom$ = atom<IdleDeadline>();
 
   let subscriberCount = 0;
   let stopped = true;
@@ -51,7 +51,7 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
     const tick = (deadline: IdleDeadline) => {
       if (stopped) return;
 
-      subject.next(deadline);
+      atom$.next(deadline);
       idleId = ric(tick, timeout != null ? { timeout } : undefined);
     };
 
@@ -76,7 +76,7 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
    * Ref-counted subscription handling
    * ---------------------------------------------------------------------- */
 
-  const originalSubscribe = subject.subscribe;
+  const originalSubscribe = atom$.subscribe;
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
@@ -84,34 +84,34 @@ export function onIdle(timeout?: number): Stream<IdleDeadline> {
     }
   };
 
-  subject.subscribe = (
+  (atom$ as any).subscribe = (
     callback?: ((value: IdleDeadline) => void) | Receiver<IdleDeadline>
   ) => {
-    const subscription = (originalSubscribe as any).call(subject, callback);
+    const callbackFn = typeof callback === "function"
+      ? callback
+      : (value: IdleDeadline) => callback?.next?.(value);
+
+    const sub = (originalSubscribe as any).call(atom$, callbackFn);
 
     scheduleStart();
 
-    const originalOnUnsubscribe = subscription.teardown;
-    subscription.teardown = () => {
+    const o = sub.teardown;
+    sub.teardown = () => {
       if (--subscriberCount === 0) {
         stopLoop();
       }
-      originalOnUnsubscribe?.call(subscription);
+      o?.call(sub);
     };
 
-    return subscription;
+    return sub;
   };
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
+  (atom$ as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => atom$.subscribe(receiver as any) })();
 
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
-
-  subject.name = "onIdle";
-  subject.type = "stream";
-  return subject;
+  (atom$ as any).name = "onIdle";
+  (atom$ as any).type = "stream";
+  return atom$ as AtomBase<IdleDeadline>;
 }
 
 

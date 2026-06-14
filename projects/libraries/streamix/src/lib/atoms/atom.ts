@@ -1,5 +1,5 @@
+import { type Operator, type Receiver } from "../abstractions";
 import { createSubscription, type Subscription } from "../abstractions/subscription";
-import { type Operator } from "../abstractions";
 import { pipe as pipeSource } from "../streams/pipe";
 import {
   getCurrentScope,
@@ -36,17 +36,6 @@ export interface AtomBase<T = any> {
   type: "atom";
 
   /**
-   * Reads the current value.
-   *
-   * When called inside a {@link derived} factory, this atom is automatically
-   * registered as a dependency.
-   *
-   * @returns The current value.
-   * @throws {Error} If the atom has been disposed.
-   */
-  get(): T;
-
-  /**
    * The current value.
    *
    * When accessed inside a {@link derived} factory, this atom is automatically
@@ -75,10 +64,10 @@ export interface AtomBase<T = any> {
    *
    * The callback is invoked synchronously whenever the atom's value changes.
    *
-   * @param callback - Function called with the new value.
+   * @param callback - Function called with the new value, or a receiver with `next`/`complete`/`error`.
    * @returns A subscription that can be used to unsubscribe.
    */
-  subscribe(callback: (value: T) => void): Subscription;
+  subscribe(callback: ((value: T) => void) | Receiver<T>): Subscription;
 
   /** Disposes the atom, clearing all subscriptions and resources. */
   dispose(): void;
@@ -112,14 +101,17 @@ export interface Atom<T = any> extends AtomBase<T> {
    *
    * @param value - The new value to set.
    */
-  set(value: T): void;
+  next(value: T): void;
 
   /**
-   * Alias for {@link set}. Emits a value to subscribers.
+   * Updates the atom's value and notifies subscribers.
    *
-   * @param value - The value to emit.
+   * If the new value is the same as the current value (using `Object.is`),
+   * no notification occurs.
+   *
+   * @param value - The new value to set.
    */
-  next(value: T): void;
+  set(value: T): void;
 
   /**
    * Signals that the atom has failed with the given error. The error is
@@ -131,6 +123,10 @@ export interface Atom<T = any> extends AtomBase<T> {
 }
 
 let activeFormula: { dependencies: Set<AtomBase<any>> } | null = null;
+
+function toReceiver<T>(callback: ((value: T) => void) | Receiver<T>): Receiver<T> {
+  return typeof callback === "function" ? { next: callback } : callback;
+}
 
 /* ── Glitch-free propagation ── */
 
@@ -215,7 +211,7 @@ export function flow<T>(
   let error: any = undefined;
   const disposeHandlers = new Set<() => void>();
 
-  const subs = new Set<(value: T) => void>();
+  const subs = new Set<Receiver<T>>();
   const subscriptions = new Set<Subscription>();
 
   const notify = (value: T) => {
@@ -225,8 +221,12 @@ export function flow<T>(
     current = value;
 
     runWithPropagation(() => {
-      for (const cb of Array.from(subs)) {
-        cb(value);
+      for (const receiver of Array.from(subs)) {
+        try {
+          receiver.next?.(value);
+        } catch (err) {
+          receiver.error?.(err);
+        }
       }
     });
   };
@@ -249,8 +249,22 @@ export function flow<T>(
 
     disposePromise = (async () => {
       disposed = true;
+      const currentSubs = Array.from(subs);
       subs.clear();
       activeSubCount = 0;
+
+      for (const receiver of currentSubs) {
+        try {
+          if (error !== undefined) {
+            receiver.error?.(error);
+          } else {
+            receiver.complete?.();
+          }
+        } catch {
+          // ignore terminal callback errors
+        }
+      }
+
       try {
         await stop();
       } catch {
@@ -341,14 +355,6 @@ export function flow<T>(
       return disposed;
     },
 
-    get() {
-      if (disposed) throw new Error("Atom has been disposed");
-      if (activeFormula) {
-        activeFormula.dependencies.add(instance);
-      }
-      return current;
-    },
-
     get value() {
       if (disposed) throw new Error("Atom has been disposed");
       if (activeFormula) {
@@ -374,11 +380,12 @@ export function flow<T>(
         start();
       }
 
-      subs.add(callback);
+      const receiver = toReceiver(callback);
+      subs.add(receiver);
       activeSubCount++;
 
       const sub = createSubscription(() => {
-        subs.delete(callback);
+        subs.delete(receiver);
         activeSubCount--;
         if (activeSubCount <= 0) {
           return disposeInstance();
@@ -426,7 +433,7 @@ export function flow<T>(
 /**
  * Creates a writable atom with an initial value.
  *
- * Writable atoms can be updated via {@link Atom.set} and automatically notify
+ * Writable atoms can be updated via {@link Atom.next} and automatically notify
  * subscribers on change. They participate in scope tracking and dependency
  * discovery for derived atoms.
  *
@@ -437,7 +444,7 @@ export function flow<T>(
  * ```ts
  * const app = scope(() => {
  *   const count = atom(0);
- *   count.set(5);
+ *   count.next(5);
  *   console.log(count.value); // 5
  *   return { count };
  * });
@@ -467,12 +474,16 @@ export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
   let error: any = undefined;
   const disposeHandlers = new Set<() => void>();
 
-  const subs = new Set<(value: T) => void>();
+  const subs = new Set<Receiver<T>>();
 
   const notify = (value: T) => {
     runWithPropagation(() => {
-      for (const cb of Array.from(subs)) {
-        cb(value);
+      for (const receiver of Array.from(subs)) {
+        try {
+          receiver.next?.(value);
+        } catch (err) {
+          receiver.error?.(err);
+        }
       }
     });
   };
@@ -492,14 +503,6 @@ export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
       return disposed;
     },
 
-    get() {
-      if (disposed) throw new Error("Atom has been disposed");
-      if (activeFormula) {
-        activeFormula.dependencies.add(instance);
-      }
-      return current;
-    },
-
     get value() {
       if (disposed) throw new Error("Atom has been disposed");
       if (activeFormula) {
@@ -517,10 +520,11 @@ export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
     },
 
     subscribe(callback) {
-      subs.add(callback);
+      const receiver = toReceiver(callback);
+      subs.add(receiver);
 
       return createSubscription(() => {
-        subs.delete(callback);
+        subs.delete(receiver);
       });
     },
 
@@ -617,8 +621,8 @@ export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
 
   // Notify scope subscribers immediately so writable atoms are
   // considered "ready" — their value is already available.
-  for (const cb of Array.from(subs)) {
-    cb(current);
+  for (const receiver of Array.from(subs)) {
+    receiver.next?.(current);
   }
 
   return instance;
@@ -652,7 +656,7 @@ export function atomOf<T>(initialValue: T, options?: AtomOptions): AtomBase<T> {
  * @example
  * ```ts
  * const count = discrete(0);
- * count.set(5);
+ * count.next(5);
  * ```
  */
 export function discrete<T>(initialValue: T, options?: AtomOptions): Atom<T> {
@@ -678,43 +682,12 @@ export interface AsyncAtomOptions {
  *
  * @template T The type of the value held by this atom.
  */
-export interface AsyncAtom<T = any> extends AtomBase<T> {
-  /**
-   * Updates the atom's value and notifies subscribers.
-   *
-   * If the new value is the same as the current value (using `Object.is`),
-   * no notification occurs.
-   *
-   * @param value - The new value to set.
-   */
-  set(value: T): void;
-
-  /**
-   * Signals that the atom has failed with the given error.
-   *
-   * The error is propagated to consumers iterating the atom, and the atom is
-   * disposed.
-   *
-   * @param err - The error to emit.
-   */
-  error(err: any): void;
-
-  /**
-   * Emits a value to subscribers without de-duplicating equal values.
-   *
-   * This is the stream-style counterpart to {@link set}; it always notifies
-   * subscribers, making it suitable for event-like atoms.
-   *
-   * @param value - The value to emit.
-   */
-  next(value: T): void;
-}
 
 /**
  * Creates an async atom with optional replay capacity.
  *
  * Async atoms are hot atoms that do not require an initial value.
- * Values are pushed via {@link AsyncAtom.set}. Late subscribers can
+ * Values are pushed via {@link Atom.next}. Late subscribers can
  * receive buffered values based on the configured capacity.
  *
  * @param options - Configuration options.
@@ -724,15 +697,15 @@ export interface AsyncAtom<T = any> extends AtomBase<T> {
  * ```ts
  * const app = scope(() => {
  *   const count = asyncAtom<number>();
- *   count.set(5);
+ *   count.next(5);
  *   console.log(count.value); // 5
  *   return { count };
  * });
  * ```
  */
-export function asyncAtom<T>(): AsyncAtom<T>;
-export function asyncAtom<T>(options: AsyncAtomOptions & AtomOptions): AsyncAtom<T>;
-export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): AsyncAtom<T> {
+export function asyncAtom<T>(): Atom<T>;
+export function asyncAtom<T>(options: AsyncAtomOptions & AtomOptions): Atom<T>;
+export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): Atom<T> {
   const scope = getCurrentScope();
   const strobe = scope ? getScopeStrobe(scope) : undefined;
   const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
@@ -796,19 +769,11 @@ export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): AsyncAto
     }
   };
 
-  const instance: AsyncAtom<T> = {
+  const instance: Atom<T> = {
     type: "atom",
 
     get disposed() {
       return disposed;
-    },
-
-    get() {
-      if (disposed) throw new Error("Atom has been disposed");
-      if (activeFormula) {
-        activeFormula.dependencies.add(instance);
-      }
-      return current;
     },
 
     get value() {
@@ -844,28 +809,6 @@ export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): AsyncAto
 
     [Symbol.asyncIterator]() {
       return iterate(this)[Symbol.asyncIterator]();
-    },
-
-    set(value) {
-      if (disposed) return;
-      if (hasValue && Object.is(current, value)) return;
-
-      previous = current;
-      current = value;
-      const wasFirstValue = !hasValue;
-      hasValue = true;
-      pushReplay(value);
-
-      if (wasFirstValue) {
-        markAtomAsEmitted(instance);
-      }
-
-      if (analog) {
-        dirty = true;
-      } else {
-        lastNotified = current;
-        notify(value);
-      }
     },
 
     next(value: T) {
@@ -922,8 +865,8 @@ export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): AsyncAto
       }
       disposeHandlers.clear();
       subs.clear();
-      replay.length = 0;
-      replayHead = 0;
+      // Keep the replay buffer so late subscribers/iterators can still receive
+      // the completed response.
     }
   };
 
@@ -971,7 +914,7 @@ export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): AsyncAto
  *   return { first, last, full };
  * });
  *
- * app.first.set('Grace');
+ * app.first.next('Grace');
  * console.log(app.full.value); // 'Grace Lovelace'
  * ```
  */
@@ -1065,14 +1008,6 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       return disposed;
     },
 
-    get() {
-      if (disposed) throw new Error("Atom has been disposed");
-      if (activeFormula) {
-        activeFormula.dependencies.add(instance);
-      }
-      return current;
-    },
-
     get value() {
       if (disposed) throw new Error("Atom has been disposed");
       if (activeFormula) {
@@ -1145,8 +1080,8 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
  * @example
  * ```ts
  * const a = atom(0);
- * setTimeout(() => a.set(1), 10);
- * setTimeout(() => a.set(2), 20);
+ * setTimeout(() => a.next(1), 10);
+ * setTimeout(() => a.next(2), 20);
  * setTimeout(() => a.dispose(), 30);
  *
  * for await (const value of iterate(a)) {

@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { atom, createAsyncIterator, type AtomBase, type Receiver } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the current network state.
@@ -28,10 +28,10 @@ export type NetworkState = {
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Stream<NetworkState>}
+ * @returns {Atom<NetworkState>}
  */
-export function onNetwork(): Stream<NetworkState> {
-  const subject = createSubject<NetworkState>();
+export function onNetwork(): AtomBase<NetworkState> {
+  const atom$ = atom<NetworkState>();
 
 
   let subscriberCount = 0;
@@ -50,7 +50,7 @@ export function onNetwork(): Stream<NetworkState> {
   });
 
   const emit = () => {
-    subject.next(snapshot());
+    atom$.next(snapshot());
   };
 
   const start = () => {
@@ -88,7 +88,7 @@ export function onNetwork(): Stream<NetworkState> {
    * Ref-counted subscription handling
    * ---------------------------------------------------------------------- */
 
-  const originalSubscribe = subject.subscribe;
+  const originalSubscribe = atom$.subscribe;
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
@@ -96,10 +96,14 @@ export function onNetwork(): Stream<NetworkState> {
     }
   };
 
-  subject.subscribe = (
-    cb?: ((value: NetworkState) => void) | Receiver<NetworkState>
+  (atom$ as any).subscribe = (
+    callback?: ((value: NetworkState) => void) | Receiver<NetworkState>
   ) => {
-    const sub = (originalSubscribe as any).call(subject, cb);
+    const callbackFn = typeof callback === "function"
+      ? callback
+      : (value: NetworkState) => callback?.next?.(value);
+
+    const sub = (originalSubscribe as any).call(atom$, callbackFn);
 
     scheduleStart();
 
@@ -114,16 +118,12 @@ export function onNetwork(): Stream<NetworkState> {
     return sub;
   };
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
+  (atom$ as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => atom$.subscribe(receiver as any) })();
 
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
-
-  subject.name = "onNetwork";
-  subject.type = "stream";
-  return subject;
+  (atom$ as any).name = "onNetwork";
+  (atom$ as any).type = "stream";
+  return atom$ as AtomBase<NetworkState>;
 }
 
 

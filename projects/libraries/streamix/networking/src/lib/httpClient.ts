@@ -1,10 +1,103 @@
-import { createReplaySubject, createStream, type Stream } from '@epikodelabs/streamix';
+import {
+  atom,
+  createAsyncIterator,
+  createStream,
+  createSubscription,
+  type AtomBase,
+  type Receiver,
+  type Stream,
+} from '@epikodelabs/streamix';
 
 const LOG_PREFIX = '[httpClient]';
 
 const logWarning = (message: string, ...details: any[]) => {
   console.warn(`${LOG_PREFIX} ${message}`, ...details);
 };
+
+/**
+ * Creates a disposable atom that replays all emitted values to late subscribers.
+ *
+ * This is used for HTTP response bodies so that consumers can iterate the
+ * data after the parser has already finished.
+ */
+function createReplayAtom<T>(): AtomBase<T> & {
+  set(value: T): void;
+  error(err: any): void;
+  dispose(): void;
+} {
+  const output = atom<T>(undefined, { discrete: true });
+  const replay: T[] = [];
+  let completed = false;
+  let errorValue: any;
+  const subs = new Set<Receiver<T>>();
+  const baseNext = output.next.bind(output);
+
+  const notify = (value: T) => {
+    replay.push(value);
+    baseNext(value);
+    for (const receiver of Array.from(subs)) {
+      receiver.next?.(value);
+    }
+  };
+
+  const complete = () => {
+    if (completed) return;
+    completed = true;
+    for (const receiver of Array.from(subs)) {
+      receiver.complete?.();
+    }
+    subs.clear();
+  };
+
+  const fail = (err: any) => {
+    errorValue = err;
+    for (const receiver of Array.from(subs)) {
+      receiver.error?.(err);
+    }
+    subs.clear();
+  };
+
+  (output as any).subscribe = (
+    callback: ((value: T) => void) | Receiver<T>
+  ) => {
+    const receiver =
+      typeof callback === "function" ? { next: callback } : callback;
+
+    if (completed) {
+      for (const value of replay) {
+        receiver?.next?.(value);
+      }
+      receiver?.complete?.();
+      return createSubscription(() => {});
+    }
+
+    if (errorValue !== undefined) {
+      receiver?.error?.(errorValue);
+      return createSubscription(() => {});
+    }
+
+    subs.add(receiver);
+    for (const value of replay) {
+      receiver?.next?.(value);
+    }
+
+    return createSubscription(() => {
+      subs.delete(receiver);
+    });
+  };
+
+  (output as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({
+      register: (receiver: Receiver<any>) =>
+        (output as any).subscribe(receiver as any),
+    })();
+
+  return Object.assign(output, {
+    set: notify,
+    error: fail,
+    dispose: complete,
+  }) as any;
+}
 
 /**
  * Represents a stream of HTTP responses.
@@ -615,21 +708,20 @@ export const createHttpClient = (): HttpClient => {
         throw error;
       }
 
-      const data = createReplaySubject();
+      const data = createReplayAtom();
 
       void (async () => {
         try {
           for await (const item of parser(response)) {
-            data.next(item);
+            data.set(item);
           }
+          data.dispose();
         } catch (error) {
           data.error(error);
-        } finally {
-          data.dispose();
         }
       })();
 
-      context.data = data;
+      context.data = data as unknown as Stream;
       return context;
     });
   }

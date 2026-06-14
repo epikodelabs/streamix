@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { atom, createAsyncIterator, type AtomBase, type Receiver } from "@epikodelabs/streamix";
 
 /**
  * Represents the current battery status.
@@ -23,10 +23,10 @@ export type BatteryState = {
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Stream<BatteryState>}
+ * @returns {Atom<BatteryState>}
  */
-export function onBattery(): Stream<BatteryState> {
-  const subject = createSubject<BatteryState>();
+export function onBattery(): AtomBase<BatteryState> {
+  const atom$ = atom<BatteryState>();
 
   let subscriberCount = 0;
   let stopped = true;
@@ -40,7 +40,7 @@ export function onBattery(): Stream<BatteryState> {
   });
 
   const emit = () => {
-    subject.next(snapshot());
+    atom$.next(snapshot());
   };
 
   const start = async () => {
@@ -87,25 +87,29 @@ export function onBattery(): Stream<BatteryState> {
    * Ref-counted subscription handling
    * ---------------------------------------------------------------------- */
 
-  const originalSubscribe = subject.subscribe;
+  const originalSubscribe = atom$.subscribe;
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
-      void start(); // Always async due to getBattery API
+      start();
     }
   };
 
-  subject.subscribe = (
-    cb?: ((v: BatteryState) => void) | Receiver<BatteryState>
+  (atom$ as any).subscribe = (
+    callback?: ((value: BatteryState) => void) | Receiver<BatteryState>
   ) => {
-    const sub = (originalSubscribe as any).call(subject, cb);
+    const callbackFn = typeof callback === "function"
+      ? callback
+      : (value: BatteryState) => callback?.next?.(value);
+
+    const subscription = (originalSubscribe as any).call(atom$, callbackFn);
 
     scheduleStart();
 
-    const baseUnsubscribe = sub.unsubscribe.bind(sub);
+    const baseUnsubscribe = subscription.unsubscribe.bind(subscription);
     let cleaned = false;
 
-    sub.unsubscribe = () => {
+    subscription.unsubscribe = () => {
       if (!cleaned) {
         cleaned = true;
 
@@ -114,9 +118,9 @@ export function onBattery(): Stream<BatteryState> {
           stop();
         }
 
-        // Some DOM specs expect the teardown callback to run synchronously.
-        const teardown = sub.teardown;
-        sub.teardown = undefined;
+        // Some specs expect teardown to run synchronously.
+        const teardown = subscription.teardown;
+        subscription.teardown = undefined;
         try {
           teardown?.();
         } catch {
@@ -126,19 +130,15 @@ export function onBattery(): Stream<BatteryState> {
       return baseUnsubscribe();
     };
 
-    return sub;
+    return subscription;
   };
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
+  (atom$ as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => atom$.subscribe(receiver as any) })();
 
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (receiver: Receiver<BatteryState>) => subject.subscribe(receiver) })();
-
-  subject.name = "onBattery";
-  subject.type = "stream";
-  return subject;
+  (atom$ as any).name = "onBattery";
+  (atom$ as any).type = "stream";
+  return atom$ as AtomBase<BatteryState>;
 }
 
 

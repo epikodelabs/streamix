@@ -1,9 +1,9 @@
-import { atom, defer, from, iterate, atom as makeAtom } from '@epikodelabs/streamix';
+import { atom, defer, from, iterate } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
 function mockStream(values: any[], completed = false, error?: Error): any {
-  const subject: ReturnType<typeof atom> = makeAtom<makeAtom>();
+  const subject: ReturnType<typeof atom> = atom<any>();
 
   setTimeout(() => {
     if (error) {

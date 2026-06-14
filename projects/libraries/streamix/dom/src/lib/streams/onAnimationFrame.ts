@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { atom, createAsyncIterator, type AtomBase, type Receiver } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the time delta (in milliseconds) between
@@ -14,10 +14,10 @@ import { createAsyncIterator, createSubject, type Receiver, type Stream } from "
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Stream<number>} A stream emitting frame-to-frame time deltas.
+ * @returns {Atom<number>} An atom emitting frame-to-frame time deltas.
  */
-export function onAnimationFrame(): Stream<number> {
-  const subject = createSubject<number>();
+export function onAnimationFrame(): AtomBase<number> {
+  const atom$ = atom<number>();
 
   let subscriberCount = 0;
   let stopped = true;
@@ -65,7 +65,7 @@ export function onAnimationFrame(): Stream<number> {
         lastTime = now;
       }
 
-      subject.next(delta);
+      atom$.next(delta);
       rafId = raf(tick);
     };
 
@@ -88,7 +88,7 @@ export function onAnimationFrame(): Stream<number> {
    * Ref-counted subscription handling
    * ---------------------------------------------------------------------- */
 
-  const originalSubscribe = subject.subscribe;
+  const originalSubscribe = atom$.subscribe;
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
@@ -96,10 +96,14 @@ export function onAnimationFrame(): Stream<number> {
     }
   };
 
-  subject.subscribe = (
+  (atom$ as any).subscribe = (
     callback?: ((value: number) => void) | Receiver<number>
   ) => {
-    const subscription = (originalSubscribe as any).call(subject, callback);
+    const callbackFn = typeof callback === "function"
+      ? callback
+      : (value: number) => callback?.next?.(value);
+
+    const subscription = (originalSubscribe as any).call(atom$, callbackFn);
 
     scheduleStart();
 
@@ -130,16 +134,10 @@ export function onAnimationFrame(): Stream<number> {
     return subscription;
   };
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
+  (atom$ as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => atom$.subscribe(receiver as any) })();
 
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (receiver: Receiver<number>) => subject.subscribe(receiver) })();
-
-  subject.name = "onAnimationFrame";
-  subject.type = "stream";
-  return subject;
+  (atom$ as any).name = "onAnimationFrame";
+  (atom$ as any).type = "stream";
+  return atom$ as AtomBase<number>;
 }
-
-

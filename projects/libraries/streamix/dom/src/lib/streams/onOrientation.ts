@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { atom, createAsyncIterator, type AtomBase, type Receiver } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the current screen orientation,
@@ -12,10 +12,10 @@ import { createAsyncIterator, createSubject, type Receiver, type Stream } from "
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Stream<"portrait" | "landscape">}
+ * @returns {Atom<"portrait" | "landscape">}
  */
-export function onOrientation(): Stream<"portrait" | "landscape"> {
-  const subject = createSubject<"portrait" | "landscape">();
+export function onOrientation(): AtomBase<"portrait" | "landscape"> {
+  const atom$ = atom<"portrait" | "landscape">();
 
   let subscriberCount = 0;
   let stopped = true;
@@ -35,7 +35,7 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
   };
 
   const emit = () => {
-    subject.next(getOrientation());
+    atom$.next(getOrientation());
   };
 
   const start = () => {
@@ -73,7 +73,7 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
    * Ref-counted subscription handling
    * ---------------------------------------------------------------------- */
 
-  const originalSubscribe = subject.subscribe;
+  const originalSubscribe = atom$.subscribe;
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
@@ -81,17 +81,21 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
     }
   };
 
-  subject.subscribe = (
-    cb?: ((value: "portrait" | "landscape") => void) | Receiver<"portrait" | "landscape">
+  (atom$ as any).subscribe = (
+    callback?: ((value: "portrait" | "landscape") => void) | Receiver<"portrait" | "landscape">
   ) => {
-    const sub = (originalSubscribe as any).call(subject, cb);
+    const callbackFn = typeof callback === "function"
+      ? callback
+      : (value: "portrait" | "landscape") => callback?.next?.(value);
+
+    const subscription = (originalSubscribe as any).call(atom$, callbackFn);
 
     scheduleStart();
 
-    const baseUnsubscribe = sub.unsubscribe.bind(sub);
+    const baseUnsubscribe = subscription.unsubscribe.bind(subscription);
     let cleaned = false;
 
-    sub.unsubscribe = () => {
+    subscription.unsubscribe = () => {
       if (!cleaned) {
         cleaned = true;
 
@@ -100,9 +104,9 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
           stop();
         }
 
-        // Some DOM specs expect the teardown callback to run synchronously.
-        const teardown = sub.teardown;
-        sub.teardown = undefined;
+        // Some specs expect teardown to run synchronously.
+        const teardown = subscription.teardown;
+        subscription.teardown = undefined;
         try {
           teardown?.();
         } catch {
@@ -112,19 +116,15 @@ export function onOrientation(): Stream<"portrait" | "landscape"> {
       return baseUnsubscribe();
     };
 
-    return sub;
+    return subscription;
   };
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
+  (atom$ as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => atom$.subscribe(receiver as any) })();
 
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
-
-  subject.name = "onOrientation";
-  subject.type = "stream";
-  return subject;
+  (atom$ as any).name = "onOrientation";
+  (atom$ as any).type = "stream";
+  return atom$ as AtomBase<"portrait" | "landscape">;
 }
 
 

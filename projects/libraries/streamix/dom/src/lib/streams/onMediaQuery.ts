@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { atom, createAsyncIterator, isPromiseLike, type AtomBase, type MaybePromise, type Receiver } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `true` or `false` whenever a CSS media
@@ -17,12 +17,12 @@ import { createAsyncIterator, createSubject, isPromiseLike, type MaybePromise, t
  * - Fully compatible with async iteration.
  *
  * @param mediaQueryString A CSS media query string (or promise).
- * @returns {Stream<boolean>} A stream emitting match state.
+ * @returns {Atom<boolean>} An atom emitting match state.
  */
 export function onMediaQuery(
   query: MaybePromise<string>
-): Stream<boolean> {
-  const subject = createSubject<boolean>();
+): AtomBase<boolean> {
+  const atom$ = atom<boolean>();
 
   let subscriberCount = 0;
   let active = false;
@@ -36,7 +36,7 @@ export function onMediaQuery(
 
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     console.warn('matchMedia is not supported in this environment');
-    return subject;
+    return atom$ as AtomBase<boolean>;
   }
 
   /* -------------------------------------------------- */
@@ -49,16 +49,16 @@ export function onMediaQuery(
 
     if (isPromiseLike(query)) {
       // Async path for promise query
-      subject.next(false); // Emit false immediately
+      atom$.next(false); // Emit false immediately
       void (async () => {
         const q = await query;
         if (!active) return;
 
         mql = window.matchMedia(q);
-        subject.next(mql.matches);
+        atom$.next(mql.matches);
 
         listener = (e: MediaQueryListEvent) => {
-          subject.next(e.matches);
+          atom$.next(e.matches);
         };
 
         if (typeof mql.addEventListener === 'function') {
@@ -72,7 +72,7 @@ export function onMediaQuery(
       mql = window.matchMedia(query);
 
       listener = (e: MediaQueryListEvent) => {
-        subject.next(e.matches);
+        atom$.next(e.matches);
       };
 
       if (typeof mql.addEventListener === 'function') {
@@ -81,7 +81,7 @@ export function onMediaQuery(
         (mql as any).addListener(listener);
       }
       
-      if (active && mql) subject.next(mql.matches);
+      if (active && mql) atom$.next(mql.matches);
     }
   };
 
@@ -105,7 +105,7 @@ export function onMediaQuery(
   /* Ref-counted subscribe override                     */
   /* -------------------------------------------------- */
 
-  const originalSubscribe = subject.subscribe;
+  const originalSubscribe = atom$.subscribe;
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
@@ -113,34 +113,34 @@ export function onMediaQuery(
     }
   };
 
-  subject.subscribe = (
-    cb?: ((value: boolean) => void) | Receiver<boolean>
+  (atom$ as any).subscribe = (
+    callback?: ((value: boolean) => void) | Receiver<boolean>
   ) => {
-    const sub = (originalSubscribe as any).call(subject, cb);
+    const callbackFn = typeof callback === "function"
+      ? callback
+      : (value: boolean) => callback?.next?.(value);
+
+    const sub = (originalSubscribe as any).call(atom$, callbackFn);
 
     scheduleStart();
 
-    const prev = sub.teardown;
+    const o = sub.teardown;
     sub.teardown = () => {
       if (--subscriberCount === 0) {
         stop();
       }
-      prev?.call(sub);
+      o?.call(sub);
     };
 
     return sub;
   };
 
-  /* -------------------------------------------------- */
-  /* Async iteration support                            */
-  /* -------------------------------------------------- */
+  (atom$ as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (r: Receiver<any>) => atom$.subscribe(r as any) })();
 
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (r: Receiver<any>) => subject.subscribe(r) })();
-
-  subject.name = 'onMediaQuery';
-  subject.type = "stream";
-  return subject;
+  (atom$ as any).name = 'onMediaQuery';
+  (atom$ as any).type = "stream";
+  return atom$ as AtomBase<boolean>;
 }
 
 

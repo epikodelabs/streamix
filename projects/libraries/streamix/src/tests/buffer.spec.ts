@@ -5,7 +5,7 @@ const wait = (ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 describe("buffer", () => {
   let source: ReturnType<typeof atom>;
 
-  beforeEach(() => {
+  beforeEach(() => { 
     source = atom<number>();
   });
 

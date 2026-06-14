@@ -179,7 +179,7 @@ describe("bufferCount", () => {
   });
 
   it("should work with different data types", async () => {
-    const objectSubject: Atom = atom<atom>();
+    const objectSubject: Atom = atom<any>();
     const buffered = pipe(objectSubject, bufferCount(2));
     const results: { id: number; name: string }[][] = [];
 
@@ -203,7 +203,7 @@ describe("bufferCount", () => {
   });
 
   it("should handle null and undefined values in buffers", async () => {
-    const nullableSubject: Atom = atom<atom>();
+    const nullableSubject: Atom = atom<any>();
     const buffered = pipe(nullableSubject, bufferCount(3));
     const results: (number | null | undefined)[][] = [];
 

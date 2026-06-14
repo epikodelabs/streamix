@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { atom, createAsyncIterator, type AtomBase, type Receiver } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the document's visibility state
@@ -17,10 +17,10 @@ import { createAsyncIterator, createSubject, type Receiver, type Stream } from "
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Stream<DocumentVisibilityState>}
+ * @returns {Atom<DocumentVisibilityState>}
  */
-export function onVisibilityChange(): Stream<DocumentVisibilityState> {
-  const subject = createSubject<DocumentVisibilityState>();
+export function onVisibilityChange(): AtomBase<DocumentVisibilityState> {
+  const atom$ = atom<DocumentVisibilityState>();
 
   let subscriberCount = 0;
   let stopped = true;
@@ -38,7 +38,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
   };
 
   const emit = () => {
-    subject.next(getState());
+    atom$.next(getState());
   };
 
   const start = () => {
@@ -66,7 +66,7 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
    * Ref-counted subscription handling
    * ---------------------------------------------------------------------- */
 
-  const originalSubscribe = subject.subscribe;
+  const originalSubscribe = atom$.subscribe;
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
@@ -74,10 +74,14 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
     }
   };
 
-  subject.subscribe = (
-    cb?: ((value: DocumentVisibilityState) => void) | Receiver<DocumentVisibilityState>
+  (atom$ as any).subscribe = (
+    callback?: ((value: DocumentVisibilityState) => void) | Receiver<DocumentVisibilityState>
   ) => {
-    const sub = (originalSubscribe as any).call(subject, cb);
+    const callbackFn = typeof callback === "function"
+      ? callback
+      : (value: DocumentVisibilityState) => callback?.next?.(value);
+
+    const sub = (originalSubscribe as any).call(atom$, callbackFn);
 
     scheduleStart();
 
@@ -92,16 +96,12 @@ export function onVisibilityChange(): Stream<DocumentVisibilityState> {
     return sub;
   };
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
+  (atom$ as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => atom$.subscribe(receiver as any) })();
 
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
-
-  subject.name = "onVisibilityChange";
-  subject.type = "stream";
-  return subject;
+  (atom$ as any).name = "onVisibilityChange";
+  (atom$ as any).type = "stream";
+  return atom$ as AtomBase<DocumentVisibilityState>;
 }
 
 

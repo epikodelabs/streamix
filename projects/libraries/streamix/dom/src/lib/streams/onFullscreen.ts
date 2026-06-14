@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { atom, createAsyncIterator, type AtomBase, type Receiver } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits fullscreen state changes.
@@ -14,10 +14,10 @@ import { createAsyncIterator, createSubject, type Receiver, type Stream } from "
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Stream<boolean>}
+ * @returns {Atom<boolean>}
  */
-export function onFullscreen(): Stream<boolean> {
-  const subject = createSubject<boolean>();
+export function onFullscreen(): AtomBase<boolean> {
+  const atom$ = atom<boolean>();
 
   let subscriberCount = 0;
   let stopped = true;
@@ -37,7 +37,7 @@ export function onFullscreen(): Stream<boolean> {
   };
 
   const emit = () => {
-    subject.next(isFullscreen());
+    atom$.next(isFullscreen());
   };
 
   const start = () => {
@@ -72,7 +72,7 @@ export function onFullscreen(): Stream<boolean> {
    * Ref-counted subscription handling
    * ---------------------------------------------------------------------- */
 
-  const originalSubscribe = subject.subscribe;
+  const originalSubscribe = atom$.subscribe;
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
@@ -80,19 +80,21 @@ export function onFullscreen(): Stream<boolean> {
     }
   };
 
-  subject.subscribe = (
-    cb?: ((v: boolean) => void) | Receiver<boolean>
+  (atom$ as any).subscribe = (
+    callback?: ((value: boolean) => void) | Receiver<boolean>
   ) => {
-    // Create subscription first
-    const sub = (originalSubscribe as any).call(subject, cb);
+    const callbackFn = typeof callback === "function"
+      ? callback
+      : (value: boolean) => callback?.next?.(value);
 
-    // Now if start() emits synchronously, the subscription variable is assigned
+    const subscription = (originalSubscribe as any).call(atom$, callbackFn);
+
     scheduleStart();
 
-    const baseUnsubscribe = sub.unsubscribe.bind(sub);
+    const baseUnsubscribe = subscription.unsubscribe.bind(subscription);
     let cleaned = false;
 
-    sub.unsubscribe = () => {
+    subscription.unsubscribe = () => {
       if (!cleaned) {
         cleaned = true;
 
@@ -101,9 +103,9 @@ export function onFullscreen(): Stream<boolean> {
           stop();
         }
 
-        // Some DOM specs expect the teardown callback to run synchronously.
-        const teardown = sub.teardown;
-        sub.teardown = undefined;
+        // Some specs expect teardown to run synchronously.
+        const teardown = subscription.teardown;
+        subscription.teardown = undefined;
         try {
           teardown?.();
         } catch {
@@ -113,19 +115,15 @@ export function onFullscreen(): Stream<boolean> {
       return baseUnsubscribe();
     };
 
-    return sub;
+    return subscription;
   };
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
+  (atom$ as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => atom$.subscribe(receiver as any) })();
 
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (receiver: Receiver<boolean>) => subject.subscribe(receiver) })();
-
-  subject.name = "onFullscreen";
-  subject.type = "stream";
-  return subject;
+  (atom$ as any).name = "onFullscreen";
+  (atom$ as any).type = "stream";
+  return atom$ as AtomBase<boolean>;
 }
 
 

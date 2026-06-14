@@ -1,4 +1,4 @@
-import type { Stream } from '@epikodelabs/streamix';
+import type { Atom } from '@epikodelabs/streamix';
 import { onMediaQuery } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 

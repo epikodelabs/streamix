@@ -277,13 +277,14 @@ export function unregisterAnalogAtom(atom: AtomBase<any>): void {
  * @see {@link AtomBase}
  */
 export function scope<T>(factory: () => T, options: ScopeOptions = {}): Scope & T {
-  const previousScope = currentScope ?? globalScope;
+  const parentScope = currentScope ?? globalScope;
+  const previousScope = currentScope;
 
   const tracked = new Set<AtomBase<any> | Scope>();
   const emittedAtoms = new Set<AtomBase<any>>();
   let localLoading = true;
 
-  const parentInternal = previousScope ? scopeInternals.get(previousScope) : undefined;
+  const parentInternal = parentScope ? scopeInternals.get(parentScope) : undefined;
   const parentMode = parentInternal?.effectiveMode ?? "discrete";
   const modeFromStrobe = options.strobe !== undefined && options.strobe > 0 ? "analog" : undefined;
   const effectiveMode = options.mode ?? modeFromStrobe ?? parentMode;
@@ -317,7 +318,7 @@ export function scope<T>(factory: () => T, options: ScopeOptions = {}): Scope & 
 
   const instance: Scope = {
     type: "scope",
-    parent: previousScope,
+    parent: parentScope,
 
     get loading() {
       if (localLoading) return true;
@@ -382,7 +383,7 @@ export function scope<T>(factory: () => T, options: ScopeOptions = {}): Scope & 
     currentScope = previousScope;
   }
 
-  if (currentScope) {
+  if (previousScope) {
     registerWithCurrentScope(instance);
   }
 

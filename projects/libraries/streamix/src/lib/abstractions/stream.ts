@@ -1,5 +1,5 @@
-import { firstValueFrom } from "../converters";
 import { atom, type Atom } from "../atoms/atom";
+import { firstValueFrom } from "../converters";
 import { createAsyncIterator } from "../utils/iterator";
 import { isPromiseLike, type MaybePromise, type Operator, type OperatorChain } from "./operator";
 import { createReceiver, type Receiver } from "./receiver";
@@ -190,7 +190,7 @@ export function createStream<T>(
   generatorFn: (signal?: AbortSignal) => AsyncGenerator<T, void, unknown>
 ): Stream<T> {
   interface ActiveRun {
-    streamAtom: Atom<T>;
+    atom$: Atom<T>;
     abortController: AbortController;
     subscriberCount: number;
   }
@@ -200,9 +200,9 @@ export function createStream<T>(
   const startNewRun = (): ActiveRun => {
     // Create new run state
     const abortController = new AbortController();
-    const streamAtom = atom<T>();
-    (streamAtom as any).name = name;
-    const run: ActiveRun = { streamAtom, abortController, subscriberCount: 0 };
+    const atom$ = atom<T>();
+    (atom$ as any).name = name;
+    const run: ActiveRun = { atom$, abortController, subscriberCount: 0 };
     
     // activeRun = run; // Caller handles this
 
@@ -217,10 +217,10 @@ export function createStream<T>(
               const result = gen.__tryNext();
               if (!result) break;
               if (result.done) {
-                run.streamAtom.dispose();
+                run.atom$.dispose();
                 return;
               }
-              run.streamAtom.next(result.value);
+              run.atom$.next(result.value);
             }
           }
 
@@ -232,15 +232,15 @@ export function createStream<T>(
           if ("aborted" in result || signal.aborted) break;
 
           if (result.result.done) {
-            run.streamAtom.dispose();
+            run.atom$.dispose();
             break;
           }
 
-          run.streamAtom.next(result.result.value);
+          run.atom$.next(result.result.value);
         }
       } catch (err) {
         if (!signal.aborted) {
-          run.streamAtom.error(err instanceof Error ? err : new Error(String(err)));
+          run.atom$.error(err instanceof Error ? err : new Error(String(err)));
         }
       } finally {
         if (gen.return) {
@@ -274,22 +274,22 @@ export function createStream<T>(
 
     // Deliver terminal signals when the underlying atom completes or errors.
     const completionHandler = () => {
-      const err = (run.streamAtom as any)._error;
+      const err = (run.atom$ as any)._error;
       if (err !== undefined) {
         receiver.error(err);
       } else {
         receiver.complete();
       }
     };
-    (run.streamAtom as any)._onDispose.add(completionHandler);
+    (run.atom$ as any)._onDispose.add(completionHandler);
 
-    const atomSub = run.streamAtom.subscribe((value) => receiver.next(value));
+    const atomSub = run.atom$.subscribe((value) => receiver.next(value));
 
     let unsubscribed = false;
     const sub = createSubscription(async () => {
       if (unsubscribed) return;
       unsubscribed = true;
-      (run.streamAtom as any)._onDispose.delete(completionHandler);
+      (run.atom$ as any)._onDispose.delete(completionHandler);
       await atomSub.unsubscribe();
       run.subscriberCount = Math.max(0, run.subscriberCount - 1);
       if (

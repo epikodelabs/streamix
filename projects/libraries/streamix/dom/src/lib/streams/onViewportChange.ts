@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { atom, createAsyncIterator, type AtomBase, type Receiver } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the visual viewport.
@@ -24,10 +24,10 @@ export type ViewportState = {
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @returns {Stream<ViewportState>}
+ * @returns {Atom<ViewportState>}
  */
-export function onViewportChange(): Stream<ViewportState> {
-  const subject = createSubject<ViewportState>();
+export function onViewportChange(): AtomBase<ViewportState> {
+  const atom$ = atom<ViewportState>();
 
   let subscriberCount = 0;
   let stopped = true;
@@ -66,7 +66,7 @@ export function onViewportChange(): Stream<ViewportState> {
   };
 
   const emit = () => {
-    subject.next(snapshot());
+    atom$.next(snapshot());
   };
 
   const start = () => {
@@ -100,7 +100,7 @@ export function onViewportChange(): Stream<ViewportState> {
    * Ref-counted subscription handling
    * ---------------------------------------------------------------------- */
 
-  const originalSubscribe = subject.subscribe;
+  const originalSubscribe = atom$.subscribe;
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
@@ -108,10 +108,14 @@ export function onViewportChange(): Stream<ViewportState> {
     }
   };
 
-  subject.subscribe = (
-    cb?: ((value: ViewportState) => void) | Receiver<ViewportState>
+  (atom$ as any).subscribe = (
+    callback?: ((value: ViewportState) => void) | Receiver<ViewportState>
   ) => {
-    const sub = (originalSubscribe as any).call(subject, cb);
+    const callbackFn = typeof callback === "function"
+      ? callback
+      : (value: ViewportState) => callback?.next?.(value);
+
+    const sub = (originalSubscribe as any).call(atom$, callbackFn);
 
     scheduleStart();
 
@@ -126,16 +130,12 @@ export function onViewportChange(): Stream<ViewportState> {
     return sub;
   };
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
-
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
+  (atom$ as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => atom$.subscribe(receiver as any) })();
   
-  subject.name = "onViewportChange";
-  subject.type = "stream";
-  return subject;
+  (atom$ as any).name = "onViewportChange";
+  (atom$ as any).type = "stream";
+  return atom$ as AtomBase<ViewportState>;
 }
 
 

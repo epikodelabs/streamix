@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { atom, createAsyncIterator, isPromiseLike, type AtomBase, type MaybePromise, type Receiver } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the dimensions of a given DOM element
@@ -16,12 +16,12 @@ import { createAsyncIterator, createSubject, isPromiseLike, type MaybePromise, t
  * - Fully compatible with async iteration.
  *
  * @param element The DOM element (or promise) to observe.
- * @returns {Stream<{ width: number; height: number }>}
+ * @returns {Atom<{ width: number; height: number }>}
  */
 export function onResize(
   element: MaybePromise<HTMLElement>
-): Stream<{ width: number; height: number }> {
-  const subject = createSubject<{ width: number; height: number }>();
+): AtomBase<{ width: number; height: number }> {
+  const atom$ = atom<{ width: number; height: number }>();
   
   let subscriberCount = 0;
   let active = false;
@@ -55,7 +55,7 @@ export function onResize(
       height = Math.round(rect.height);
     }
 
-    subject.next({ width, height });
+    atom$.next({ width, height });
   };
 
   /* -------------------------------------------------- */
@@ -107,7 +107,7 @@ export function onResize(
   /* Ref-counted subscription override                  */
   /* -------------------------------------------------- */
 
-  const originalSubscribe = subject.subscribe;
+  const originalSubscribe = atom$.subscribe;
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
@@ -115,18 +115,22 @@ export function onResize(
     }
   };
 
-  subject.subscribe = (
-    cb?: ((value: { width: number; height: number }) => void) |
-      Receiver<{ width: number; height: number }>
+  (atom$ as any).subscribe = (
+    callback?: ((value: { width: number; height: number }) => void) | Receiver<{ width: number; height: number }>
   ) => {
-    const sub = (originalSubscribe as any).call(subject, cb);
+    const receiver: Receiver<{ width: number; height: number }> | undefined =
+      typeof callback === "function" ? { next: callback } : callback;
+
+    const callbackFn = (value: { width: number; height: number }) => receiver?.next?.(value);
+
+    const subscription = (originalSubscribe as any).call(atom$, callbackFn);
 
     scheduleStart();
 
-    const baseUnsubscribe = sub.unsubscribe.bind(sub);
+    const baseUnsubscribe = subscription.unsubscribe.bind(subscription);
     let cleaned = false;
 
-    sub.unsubscribe = () => {
+    subscription.unsubscribe = () => {
       if (!cleaned) {
         cleaned = true;
 
@@ -135,31 +139,29 @@ export function onResize(
           stop();
         }
 
-        // Some DOM specs expect the teardown callback to run synchronously.
-        const teardown = sub.teardown;
-        sub.teardown = undefined;
+        // Some specs expect teardown to run synchronously.
+        const teardown = subscription.teardown;
+        subscription.teardown = undefined;
         try {
           teardown?.();
         } catch {
         }
+
+        receiver?.complete?.();
       }
 
       return baseUnsubscribe();
     };
 
-    return sub;
+    return subscription;
   };
 
-  /* -------------------------------------------------- */
-  /* Async iteration support                            */
-  /* -------------------------------------------------- */
+  (atom$ as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => atom$.subscribe(receiver as any) })();
 
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
-
-  subject.name = "onResize";
-  subject.type = "stream";
-  return subject;
+  (atom$ as any).name = "onResize";
+  (atom$ as any).type = "stream";
+  return atom$ as AtomBase<{ width: number; height: number }>;
 }
 
 

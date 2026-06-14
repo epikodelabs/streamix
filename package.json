@@ -57,5 +57,8 @@
     "vitepress": "^1.6.4"
   },
   "type": "module",
-  "sideEffects": false
+  "sideEffects": false,
+  "overrides": {
+    "shell-quote": "^1.8.4"
+  }
 }

@@ -1,13 +1,14 @@
-import { isPromiseLike, type MaybePromise } from "../abstractions";
+import { isPromiseLike, type MaybePromise, type Receiver } from "../abstractions";
 import { createSubscription, type Subscription } from "../abstractions/subscription";
-import { asyncAtom, type AtomBase } from "../atoms/atom";
+import { atom, type AtomBase } from "../atoms";
+import { createAsyncIterator } from "../utils";
 
 /**
  * Creates an atom that emits events of the specified type from the given EventTarget.
  *
- * @template T The type of the event to listen for.
- * @param target The event target to listen to.
- * @param event The name of the event to listen for.
+ * @template T The type of the event to emit.
+ * @param target The event target to listen to (or a promise that resolves to one).
+ * @param event The name of the event to listen for (or a promise that resolves to one).
  * @param options Optional event listener options.
  * @returns An atom that emits the event objects as they occur.
  */
@@ -16,7 +17,7 @@ export function fromEvent<T extends Event = Event>(
   event: MaybePromise<string>,
   options?: AddEventListenerOptions | boolean
 ): AtomBase<T> {
-  const output = asyncAtom<T>();
+  const output = atom<T>(undefined, { discrete: true });
   const originalSubscribe = output.subscribe.bind(output);
 
   let activeCount = 0;
@@ -49,15 +50,20 @@ export function fromEvent<T extends Event = Event>(
     }
   };
 
-  output.subscribe = (callback: (value: T) => void): Subscription => {
-    const baseSub = originalSubscribe(callback);
+  (output as any).subscribe = (
+    callback?: ((value: T) => void) | Receiver<T>
+  ): Subscription => {
+    const receiver: Receiver<T> | undefined =
+      typeof callback === "function" ? { next: callback } : callback;
+
+    const baseSub = originalSubscribe((value: T) => receiver?.next?.(value));
 
     if (activeCount === 0) {
       void ensureAttached();
     }
     activeCount++;
 
-    return createSubscription(() => {
+    const sub = createSubscription(() => {
       baseSub.unsubscribe();
       activeCount--;
       if (activeCount <= 0) {
@@ -65,7 +71,14 @@ export function fromEvent<T extends Event = Event>(
         detach();
       }
     });
+
+    return sub;
   };
+
+  (output as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({
+      register: (receiver: Receiver<any>) => (output as any).subscribe(receiver as any),
+    })();
 
   return output;
 }

@@ -1,4 +1,4 @@
-import { createAsyncIterator, createSubject, isPromiseLike, type MaybePromise, type Receiver, type Stream } from "@epikodelabs/streamix";
+import { atom, createAsyncIterator, isPromiseLike, type AtomBase, type MaybePromise, type Receiver } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits arrays of `MutationRecord` objects
@@ -17,13 +17,13 @@ import { createAsyncIterator, createSubject, isPromiseLike, type MaybePromise, t
  *
  * @param element The DOM element (or promise) to observe.
  * @param options Optional MutationObserver options (or promise).
- * @returns {Stream<MutationRecord[]>} A stream of mutation records.
+ * @returns {Atom<MutationRecord[]>} An atom of mutation records.
  */
 export function onMutation(
   element: MaybePromise<Element>,
   options?: MaybePromise<MutationObserverInit>
-): Stream<MutationRecord[]> {
-  const subject = createSubject<MutationRecord[]>();
+): AtomBase<MutationRecord[]> {
+  const atom$ = atom<MutationRecord[]>();
 
   let subscriberCount = 0;
   let stopped = true;
@@ -48,7 +48,7 @@ export function onMutation(
         if (stopped || !resolvedElement) return;
 
         observer = new MutationObserver(mutations => {
-          subject.next([...mutations]);
+          atom$.next([...mutations]);
         });
 
         observer.observe(resolvedElement, resolvedOptions);
@@ -59,7 +59,7 @@ export function onMutation(
       resolvedOptions = options;
 
       observer = new MutationObserver(mutations => {
-        subject.next([...mutations]);
+        atom$.next([...mutations]);
       });
 
       observer.observe(resolvedElement, resolvedOptions);
@@ -79,7 +79,7 @@ export function onMutation(
    * Ref-counted subscription handling
    * ---------------------------------------------------------------------- */
 
-  const originalSubscribe = subject.subscribe;
+  const originalSubscribe = atom$.subscribe;
   const scheduleStart = () => {
     subscriberCount += 1;
     if (subscriberCount === 1) {
@@ -87,10 +87,14 @@ export function onMutation(
     }
   };
 
-  subject.subscribe = (
-    cb?: ((value: MutationRecord[]) => void) | Receiver<MutationRecord[]>
+  (atom$ as any).subscribe = (
+    callback?: ((value: MutationRecord[]) => void) | Receiver<MutationRecord[]>
   ) => {
-    const sub = (originalSubscribe as any).call(subject, cb);
+    const callbackFn = typeof callback === "function"
+      ? callback
+      : (value: MutationRecord[]) => callback?.next?.(value);
+
+    const sub = (originalSubscribe as any).call(atom$, callbackFn);
 
     scheduleStart();
 
@@ -105,16 +109,12 @@ export function onMutation(
     return sub;
   };
 
-  /* ------------------------------------------------------------------------
-   * Async iteration support
-   * ---------------------------------------------------------------------- */
+  (atom$ as any)[Symbol.asyncIterator] = () =>
+    createAsyncIterator({ register: (receiver: Receiver<any>) => atom$.subscribe(receiver as any) })();
 
-  subject[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (receiver: Receiver<any>) => subject.subscribe(receiver) })();
-
-  subject.name = "onMutation";
-  subject.type = "stream";
-  return subject;
+  (atom$ as any).name = "onMutation";
+  (atom$ as any).type = "stream";
+  return atom$ as AtomBase<MutationRecord[]>;
 }
 
 

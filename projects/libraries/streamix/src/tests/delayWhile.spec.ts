@@ -4,7 +4,7 @@ const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('delayWhile', () => {
   it('buffers values while the predicate returns true and flushes them when it flips', async () => {
-    const subject: ReturnType<typeof atom> = atom<atom>();
+    const subject: ReturnType<typeof atom> = atom<number>();
     const results: number[] = [];
     const reader = (async () => {
       for await (const value of iterate(pipe(subject, delayWhile((value) => value < 3)))) {
@@ -24,7 +24,7 @@ describe('delayWhile', () => {
   });
 
   it('can re-enter the delayed state after emitting once', async () => {
-    const subject: ReturnType<typeof atom> = atom<atom>();
+    const subject: ReturnType<typeof atom> = atom<number>();
     const results: number[] = [];
     const reader = (async () => {
       for await (const value of iterate(pipe(subject, delayWhile((value) => value % 2 === 1)))) {
@@ -74,7 +74,7 @@ describe('delayWhile', () => {
   });
 
   it('supports index parameter in predicate', async () => {
-    const subject: ReturnType<typeof atom> = atom<atom>();
+    const subject: ReturnType<typeof atom> = atom<number>();
     const results: number[] = [];
     const indices: number[] = [];
     const reader = (async () => {
@@ -99,7 +99,7 @@ describe('delayWhile', () => {
   });
 
   it('uses index to delay based on position not value', async () => {
-    const subject: ReturnType<typeof atom> = atom<atom>();
+    const subject: ReturnType<typeof atom> = atom<string>();
     const results: string[] = [];
     const reader = (async () => {
       for await (const value of iterate(pipe(subject, delayWhile((_, index) => index < 1)))) {

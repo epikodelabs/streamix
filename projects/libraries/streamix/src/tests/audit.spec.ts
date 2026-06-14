@@ -3,7 +3,7 @@ import { atom, audit, iterate, pipe, type Atom } from '@epikodelabs/streamix';
 describe('audit', () => {
   let input: Atom;
 
-  beforeEach(() => {
+  beforeEach(() => { 
     input = atom<number>();
   });
 

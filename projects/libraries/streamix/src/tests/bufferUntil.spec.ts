@@ -1,9 +1,4 @@
-import {
-  atom,
-  bufferUntil,
-  iterate,
-  pipe,
-} from "@epikodelabs/streamix";
+import { atom, bufferUntil, iterate, pipe } from '@epikodelabs/streamix';
 
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
