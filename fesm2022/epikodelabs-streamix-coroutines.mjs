@@ -502,7 +502,7 @@ function channel(capacity = 0) {
 function createDefaultMessageHandler(_worker, pendingTasks, options) {
     return (event) => {
         const msg = event.data;
-        const { taskId, payload, error, type, workerId } = msg;
+        const { taskId, payload, error, type } = msg;
         const pending = pendingTasks.get(taskId);
         switch (type) {
             case "response":
@@ -511,13 +511,14 @@ function createDefaultMessageHandler(_worker, pendingTasks, options) {
                     pending.resolve(payload);
                 }
                 break;
-            case "error":
-                console.warn(`Error received from worker ${workerId} for task ${taskId}:`, error);
+            case "error": {
+                const errorMessage = error?.trim?.() ? error : "Unknown worker error";
                 if (pending) {
                     pendingTasks.delete(taskId);
-                    pending.reject(new Error(error ?? "Unknown worker error"));
+                    pending.reject(new Error(errorMessage));
                 }
                 break;
+            }
             case "request":
                 if (options?.onRequest) {
                     Promise.resolve(options.onRequest(msg)).catch((hookError) => {
@@ -597,6 +598,13 @@ function buildWorkerScript({ helpers, main, functions, runtime, }) {
  * Used by `coroutine()`, `compute()`, and `compose()`.
  */
 const buildCoroutineWorkerRuntime = () => `
+const __serializeWorkerError = (error) => {
+  if (error instanceof Error) return error.message || error.name || "Error";
+  if (error === undefined) return "Worker task threw undefined";
+  if (error === null) return "Worker task threw null";
+  return String(error);
+};
+
 onmessage = async (event) => {
   const { workerId, taskId, payload, type } = event.data;
 
@@ -608,7 +616,7 @@ onmessage = async (event) => {
     const result = await __mainTask(payload);
     postMessage({ workerId, taskId, payload: result, type: 'response' });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = __serializeWorkerError(error);
     postMessage({ workerId, taskId, error: message, type: 'error' });
   }
 };`;
@@ -620,6 +628,13 @@ onmessage = async (event) => {
  * by the build script.
  */
 const buildActorWorkerRuntime = () => `
+const __serializeWorkerError = (error) => {
+  if (error instanceof Error) return error.message || error.name || "Error";
+  if (error === undefined) return "Worker task threw undefined";
+  if (error === null) return "Worker task threw null";
+  return String(error);
+};
+
 const __pendingWorkerRequests = new Map();
 let __requestCounter = 0;
 
@@ -698,7 +713,7 @@ const __runBehaviorLoop = async (workerId, taskId) => {
         __postToMain({ workerId, taskId, type: "response", requestId: replyId, payload: result });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = __serializeWorkerError(error);
       if (replyId) {
         __postToMain({ workerId, taskId, type: "error", requestId: replyId, error: message });
       } else {
@@ -896,7 +911,7 @@ function createTaskRunner({ name, config, main, functions, generateWorkerScript,
     };
     const processTask = (value) => {
         if (isFinalizing) {
-            return Promise.reject(new Error(`${name} is finalizing`));
+            return Promise.reject(new Error(`${name} finalized before a worker became available`));
         }
         return new Promise((resolve, reject) => {
             queuedTasks.push({ value, resolve, reject });
@@ -924,7 +939,6 @@ function createTaskRunner({ name, config, main, functions, generateWorkerScript,
         }
         workerMessageHandler = null;
         isProcessing = false;
-        isFinalizing = false;
         releaseWorkerScript();
     };
     return {
@@ -1969,6 +1983,7 @@ function createActor(name, behavior, initialState, helpers) {
                 settled = true;
                 finishShutdown = null;
                 activeWorker.removeEventListener("message", handleMessage);
+                activeWorker.removeEventListener("error", handleError);
                 activeWorker.terminate();
                 if (worker === activeWorker) {
                     worker = null;
@@ -2029,6 +2044,9 @@ function createActor(name, behavior, initialState, helpers) {
                 void shutdown(true);
             }
         }
+    };
+    const handleError = () => {
+        // Generic error handler, specific errors are handled within the message handler
     };
     worker.addEventListener("message", handleMessage);
     postToWorker(worker, {
@@ -2379,7 +2397,6 @@ function createTaskPool({ name, config, main, functions, generateWorkerScript, c
             releaseBlobUrl(workerScript);
         }
         createdWorkersCount = 0;
-        isFinalizing = false;
         releaseBlobUrl(workerScript);
     };
     return {

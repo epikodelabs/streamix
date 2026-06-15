@@ -1,11 +1,10 @@
 {
   "name": "@epikodelabs/streamix",
-  "version": "2.0.47",
+  "version": "2.0.48",
   "description": "Pull-based reactive streams with coroutines and async iterators",
   "license": "AGPL-3.0-or-later",
   "keywords": [
-    "RxJS-like APIs",
-    "reactive programming",
+    "reactive",
     "streams",
     "atoms",
     "scopes",
@@ -23,7 +22,7 @@
   "homepage": "https://epikodelabs.github.io",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/epikodelabs/epikodelabs.github.io.git"
+    "url": "https://github.com/epikodelabs/epikodelabs.github.io"
   },
   "author": "Oleksii Shepel",
   "email": "oleksii.shepel@outlook.com",

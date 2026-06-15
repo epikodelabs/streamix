@@ -26,6 +26,16 @@
 
 ---
 
+## 🎉 Project Status: Milestone Reached
+
+streamix v2 has reached a stable and complete milestone. This release represents the final planned version of the project.
+
+While no further development or active maintenance is currently planned, we are proud of what streamix has become and grateful to everyone who used, contributed to, or supported it along the way.
+
+Thank you for being part of the journey.
+
+---
+
 ## ✨ What is streamix?
 
 **streamix** is a reactive runtime for TypeScript and JavaScript that unifies reactive state, lifecycle management, asynchronous workflows, and browser-side concurrency under a single async-iterable execution model.
@@ -42,7 +52,6 @@ Whether you are building a dashboard, CLI tool, browser application, or computat
 
 ### Highlights
 
-* ⚛️ **Atoms & Scopes** — reactive state with automatic dependency tracking and lifecycle management
 * 🧵 **Coroutines & Actors** — browser-side concurrency powered by Web Workers
 * 🔄 **Pull-based Streams** — values are computed only when consumers request them
 * 🧩 **Familiar Operators** — `map`, `filter`, `switchMap`, `debounce`, `scan`, and many more
@@ -70,51 +79,6 @@ pnpm add @epikodelabs/streamix
 
 ## ⚡ Quick Start
 
-### Reactive State with Atoms
-
-```typescript
-import { atom, derived } from '@epikodelabs/streamix';
-
-const count = atom(0);
-
-const doubled = derived(() => count.value * 2);
-
-count.set(5);
-
-console.log(doubled.value); // 10
-```
-
-### Scope-Based Lifecycle
-
-```typescript
-import { atom, scope } from '@epikodelabs/streamix';
-
-const app = scope(() => {
-  const count = atom(0);
-
-  return { count };
-});
-
-app.count.set(10);
-
-app.dispose();
-```
-
-### Browser-Side Concurrency
-
-```typescript
-import { compute } from '@epikodelabs/streamix/coroutines';
-
-const primes = compute(async function* () {
-  let n = 2;
-
-  while (true) {
-    while (!isPrime(n)) n++;
-    yield n++;
-  }
-});
-```
-
 ### Stream Processing
 
 ```typescript
@@ -134,6 +98,21 @@ const potionRecipe = range(1, 20).pipe(
 for await (const ingredient of potionRecipe) {
   console.log('Adding to cauldron:', ingredient);
 }
+```
+
+### Browser-Side Concurrency
+
+```typescript
+import { compute } from '@epikodelabs/streamix/coroutines';
+
+const primes = compute(async function* () {
+  let n = 2;
+
+  while (true) {
+    while (!isPrime(n)) n++;
+    yield n++;
+  }
+});
 ```
 
 ---
