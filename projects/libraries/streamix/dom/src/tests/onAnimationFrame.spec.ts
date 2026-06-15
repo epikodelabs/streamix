@@ -64,8 +64,11 @@ idescribe('onAnimationFrame', () => {
     try {
       await new Promise((resolve) => setTimeout(resolve, 200));
 
-      // Should have emitted 10 times with real delta values
-      expect(emittedDeltas.length).toBe(10);
+      // Should have emitted multiple times with real delta values.
+      // The exact count depends on the browser's frame scheduling, so we only
+      // assert a reasonable range rather than an exact number.
+      expect(emittedDeltas.length).toBeGreaterThanOrEqual(5);
+      expect(emittedDeltas.length).toBeLessThanOrEqual(20);
       emittedDeltas.forEach(delta => {
         expect(typeof delta).toBe('number');
         expect(delta).toBeGreaterThanOrEqual(0);
