@@ -42,7 +42,6 @@ Whether you are building a dashboard, CLI tool, browser application, or computat
 
 ### Highlights
 
-* ⚛️ **Atoms & Scopes** — reactive state with automatic dependency tracking and lifecycle management
 * 🧵 **Coroutines & Actors** — browser-side concurrency powered by Web Workers
 * 🔄 **Pull-based Streams** — values are computed only when consumers request them
 * 🧩 **Familiar Operators** — `map`, `filter`, `switchMap`, `debounce`, `scan`, and many more
