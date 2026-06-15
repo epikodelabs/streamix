@@ -26,6 +26,16 @@
 
 ---
 
+## 🎉 Project Status: Milestone Reached
+
+streamix v2 has reached a stable and complete milestone. This release represents the final planned version of the project.
+
+While no further development or active maintenance is currently planned, we are proud of what streamix has become and grateful to everyone who used, contributed to, or supported it along the way.
+
+Thank you for being part of the journey.
+
+---
+
 ## ✨ What is streamix?
 
 **streamix** is a reactive runtime for TypeScript and JavaScript that unifies reactive state, lifecycle management, asynchronous workflows, and browser-side concurrency under a single async-iterable execution model.
