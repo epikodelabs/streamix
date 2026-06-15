@@ -1,4 +1,4 @@
-import { flow } from "@epikodelabs/streamix";
+import { createStream } from "@epikodelabs/streamix";
 import {
   ChannelClosedError,
   ContextCancelledError,
@@ -177,7 +177,7 @@ idescribe('coroutine', () => {
     
     const co = coroutine(mainTask);
 
-    const stream = flow(async function* () {
+    const stream = createStream('test', async function* () {
       yield 1;
       yield 2;
       yield 3;
@@ -286,7 +286,7 @@ idescribe('coroutine', () => {
 
     const co = coroutine(mainTask);
 
-    const stream = flow(async function* () {
+    const stream = createStream('test', async function* () {
       yield 1;
       yield 2; // This will cause an error
       yield 3;
@@ -443,5 +443,4 @@ idescribe('coroutine', () => {
       /finalized before a worker became available/
     );
   });
-
 });

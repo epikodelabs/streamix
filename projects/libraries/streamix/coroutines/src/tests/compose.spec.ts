@@ -1,4 +1,4 @@
-import { flow } from "@epikodelabs/streamix";
+import { createStream } from "@epikodelabs/streamix";
 import { compose, coroutine } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
@@ -19,7 +19,7 @@ idescribe("compose", () => {
     const c1 = coroutine((x: number) => x + 1);
     const c2 = coroutine((x: number) => x * 2);
 
-    const stream = flow(async function* () {
+    const stream = createStream("test", async function* () {
       yield 1;
       yield 2;
       yield 3;
@@ -103,7 +103,7 @@ idescribe("compose", () => {
   });
 
   it("passes through values when no tasks are provided", async () => {
-    const stream = flow(async function* () {
+    const stream = createStream("test", async function* () {
       yield 1;
       yield 2;
     });
@@ -140,5 +140,3 @@ idescribe("compose", () => {
     expect(finalized).toEqual(["c1", "c2"]);
   });
 });
-
-
