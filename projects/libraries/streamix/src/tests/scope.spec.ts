@@ -265,7 +265,7 @@ describe('scope', () => {
         }, { strobe: 50 });
 
         const values: number[] = [];
-        parent.child.a.subscribe(v => values.push(v));
+        parent.child.a.subscribe((v: number) => values.push(v));
 
         parent.child.a.next(1);
         parent.child.a.next(2);

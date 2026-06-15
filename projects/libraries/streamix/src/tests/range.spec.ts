@@ -1,4 +1,4 @@
-import { range, atom } from '@epikodelabs/streamix';
+import {range} from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 

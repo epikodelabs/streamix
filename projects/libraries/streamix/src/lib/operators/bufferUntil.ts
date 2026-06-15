@@ -1,6 +1,6 @@
-import { createOperator, DONE, type Operator } from "../abstractions";
-import type { StreamInput } from "../streams/pipe";
-import { fromAny } from "../converters";
+import { createOperator, DONE, type Operator } from "../atoms";
+import type { PipeInput } from "../atoms/pipe";
+import { fromAny } from "../factories";
 import { createAsyncCoordinator } from "../utils";
 
 /**
@@ -13,7 +13,7 @@ import { createAsyncCoordinator } from "../utils";
  * @returns {Operator<T, T[]>} A Streamix operator that collects values into arrays
  *   and emits them whenever the notifier emits or the source completes.
  */
-export const bufferUntil = <T = any, N = any>(notifier: StreamInput<N>) =>
+export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
   createOperator<T, T[]>("bufferUntil", function (this: Operator, source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
     const runner = createAsyncCoordinator([source, notifierIt]);

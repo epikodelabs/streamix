@@ -1,4 +1,4 @@
-import { eachValueFrom } from "@epikodelabs/streamix";
+import { iterate } from "@epikodelabs/streamix";
 import { webSocket } from "@epikodelabs/streamix/networking";
 import { idescribe } from "./env.spec";
 
@@ -66,7 +66,7 @@ idescribe("webSocket", () => {
 
   it("should emit incoming messages", async () => {
     const stream = webSocket<any>("ws://test", factory);
-    const iterator = eachValueFrom(stream);
+    const iterator = iterate(stream)[Symbol.asyncIterator]();
 
     setTimeout(() => {
       lastWs.triggerMessage({ msg: 123 });
@@ -94,7 +94,7 @@ idescribe("webSocket", () => {
 
   it("should propagate errors", async () => {
     const stream = webSocket<any>("ws://test", factory);
-    const iterator = eachValueFrom(stream);
+    const iterator = iterate(stream)[Symbol.asyncIterator]();
 
     setTimeout(() => lastWs.triggerError(), 1);
 
@@ -109,7 +109,7 @@ idescribe("webSocket", () => {
 
   it("should close and cleanup on iterator return", async () => {
     const stream = webSocket<any>("ws://test", factory);
-    const iterator = eachValueFrom(stream);
+    const iterator = iterate(stream)[Symbol.asyncIterator]();
 
     lastWs.triggerOpen();
     spyOn(lastWs, "close").and.callThrough();
@@ -134,7 +134,7 @@ idescribe("webSocket", () => {
 
   it("should reject when incoming message is not valid JSON", async () => {
     const stream = webSocket<any>("ws://test", factory);
-    const iterator = eachValueFrom(stream);
+    const iterator = iterate(stream)[Symbol.asyncIterator]();
 
     const next = iterator.next();
     setTimeout(() => lastWs.triggerRawMessage("{"), 1);
@@ -144,7 +144,7 @@ idescribe("webSocket", () => {
 
   it("should complete gracefully when stream.close() is called", async () => {
     const stream = webSocket<any>("ws://test", factory);
-    const iterator = eachValueFrom(stream);
+    const iterator = iterate(stream)[Symbol.asyncIterator]();
 
     const next = iterator.next();
     stream.close();
@@ -226,7 +226,7 @@ idescribe("webSocket", () => {
 
   it("should error if socket fails to initialize (rejected URL promise)", async () => {
     const stream = webSocket<any>(Promise.reject(new Error("bad url")), factory);
-    const iterator = eachValueFrom(stream);
+    const iterator = iterate(stream)[Symbol.asyncIterator]();
 
     await expectAsync(iterator.next()).toBeRejectedWithError("bad url");
   });
@@ -237,7 +237,7 @@ idescribe("webSocket", () => {
 
     try {
       const stream = webSocket<any>("ws://test-default");
-      const iterator = eachValueFrom(stream);
+      const iterator = iterate(stream)[Symbol.asyncIterator]();
 
       const ws = MockWebSocket.instances.at(-1)!;
       setTimeout(() => {
@@ -260,7 +260,7 @@ idescribe("webSocket", () => {
     });
 
     const stream = webSocket<any>("ws://test", asyncFactory);
-    const iterator = eachValueFrom(stream);
+    const iterator = iterate(stream)[Symbol.asyncIterator]();
 
     setTimeout(() => {
       ws!.triggerMessage({ v: 1 });

@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
 
 type BufferRecord<T> = {
   result: IteratorResult<T>;
@@ -17,7 +17,7 @@ type BufferRecord<T> = {
  * @param predicate Function invoked for each value to decide whether the value should remain in the current buffer.
  * Receives the incoming value, the index, and the current buffer (before pushing the value). It may return a promise.
  */
-export const bufferWhile = <T = any>(
+export const bufferWhile = <T>(
   predicate: (value: T, index: number, buffer: T[]) => MaybePromise<boolean>
 ) =>
   createOperator<T, T[]>("bufferWhile", function (this: Operator, source) {

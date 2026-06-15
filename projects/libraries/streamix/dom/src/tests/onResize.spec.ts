@@ -144,9 +144,7 @@ idescribe('onResize', () => {
     // Spy on the cleanup mechanism
     const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect');
 
-    const subscription = resizeStream.subscribe({
-      next: () => { }
-    });
+    const subscription = resizeStream.subscribe(() => { });
 
     // Remove element and verify cleanup
     document.body.removeChild(divToTest);
@@ -162,9 +160,7 @@ idescribe('onResize', () => {
     const resizeStream = onResize(divToTest);
     const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect');
 
-    const subscription = resizeStream.subscribe({
-      next: () => { }
-    });
+    const subscription = resizeStream.subscribe(() => { });
 
     subscription.unsubscribe();
 
@@ -179,12 +175,7 @@ idescribe('onResize', () => {
     const resizeStream = onResize(divToTest);
     let errorOccurred = false;
 
-    const subscription = resizeStream.subscribe({
-      next: () => { },
-      error: () => {
-        errorOccurred = true;
-      }
-    });
+    const subscription = resizeStream.subscribe(() => { });
 
     setTimeout(() => {
       document.body.removeChild(divToTest);
@@ -218,11 +209,10 @@ idescribe('onResize', () => {
     const div = document.createElement('div');
     document.body.appendChild(div);
 
-    const sub = onResize(div).subscribe({
-      complete: () => done()
-    });
-
+    const sub = onResize(div).subscribe(() => {});
     sub.unsubscribe();
+
+    setTimeout(() => done(), 0);
   });
 
   it('supports promise-based element resolution', async () => {

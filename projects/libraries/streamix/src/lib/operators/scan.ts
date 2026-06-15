@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../atoms";
 
 /**
  * Creates a stream operator that accumulates values from the source stream,

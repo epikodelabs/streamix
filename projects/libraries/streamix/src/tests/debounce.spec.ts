@@ -1,4 +1,4 @@
-import { createStream, debounce, from, interval, iterate, pipe, take, atom } from '@epikodelabs/streamix';
+import { flow, debounce, from, interval, iterate, pipe, take } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -30,7 +30,7 @@ describe('debounce', () => {
 
   it('should debounce values with rapid emissions', async () => {
     const values = [1, 2, 3, 4, 5];
-    const intervalStream = createStream<number>('interval', async function* () {
+    const intervalStream = flow<number>(async function* () {
       for (const value of values) {
         yield value;
         await wait(50);
@@ -70,7 +70,7 @@ describe('debounce', () => {
   });
 
   it('should propagate errors from the source', async () => {
-    const sourceAtom = createStream<number>('boom', async function* () {
+    const sourceAtom = flow<number>(async function* () {
       yield 1;
       throw new Error('BOOM');
     });

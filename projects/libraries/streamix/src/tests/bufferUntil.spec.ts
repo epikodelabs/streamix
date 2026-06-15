@@ -187,7 +187,8 @@ describe("bufferUntil", () => {
     expect(r1.done).toBe(false);
     expect(r1.value).toEqual([1]);
 
-    await it.return?.();
+    void it.return?.();
+    await waitTick();
 
     expect(sourceReturnCalls).toBeGreaterThanOrEqual(1);
     expect(notifierReturnCalls).toBeGreaterThanOrEqual(1);

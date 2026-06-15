@@ -1,6 +1,7 @@
-import { type Operator, type Receiver } from "../abstractions";
-import { createSubscription, type Subscription } from "../abstractions/subscription";
-import { pipe as pipeSource } from "../streams/pipe";
+import { type MaybePromise, type Operator } from "./operator";
+import { createSubscription, type Subscription } from "./subscription";
+import { iterate } from "./iterate";
+import { pipe as pipeSource } from "./pipe";
 import {
   getCurrentScope,
   getScopeStrobe,
@@ -35,6 +36,9 @@ export interface AtomBase<T = any> {
   /** Discriminator for runtime type checks. */
   type: "atom";
 
+  /** Optional human-readable name (used by factory-created atoms). */
+  name?: string;
+
   /**
    * The current value.
    *
@@ -67,7 +71,7 @@ export interface AtomBase<T = any> {
    * @param callback - Function called with the new value, or a receiver with `next`/`complete`/`error`.
    * @returns A subscription that can be used to unsubscribe.
    */
-  subscribe(callback: ((value: T) => void) | Receiver<T>): Subscription;
+  subscribe(callback?: (value: T) => MaybePromise): Subscription;
 
   /** Disposes the atom, clearing all subscriptions and resources. */
   dispose(): void;
@@ -111,10 +115,6 @@ export interface Atom<T = any> extends AtomBase<T> {
 }
 
 let activeFormula: { dependencies: Set<AtomBase<any>> } | null = null;
-
-function toReceiver<T>(callback: ((value: T) => void) | Receiver<T>): Receiver<T> {
-  return typeof callback === "function" ? { next: callback } : callback;
-}
 
 /**
  * Subscribes to an atom and invokes the handler only for future emissions,
@@ -213,7 +213,7 @@ export function flow<T>(
   let error: any = undefined;
   const disposeHandlers = new Set<() => void>();
 
-  const subs = new Set<Receiver<T>>();
+  const subs = new Set<(value: T) => MaybePromise>();
   const subscriptions = new Set<Subscription>();
 
   const notify = (value: T) => {
@@ -223,11 +223,11 @@ export function flow<T>(
     current = value;
 
     runWithPropagation(() => {
-      for (const receiver of Array.from(subs)) {
+      for (const cb of Array.from(subs)) {
         try {
-          receiver.next?.(value);
+          cb(value);
         } catch (err) {
-          receiver.error?.(err);
+          // ignore user callback errors in callback-only API
         }
       }
     });
@@ -251,21 +251,8 @@ export function flow<T>(
 
     disposePromise = (async () => {
       disposed = true;
-      const currentSubs = Array.from(subs);
       subs.clear();
       activeSubCount = 0;
-
-      for (const receiver of currentSubs) {
-        try {
-          if (error !== undefined) {
-            receiver.error?.(error);
-          } else {
-            receiver.complete?.();
-          }
-        } catch {
-          // ignore terminal callback errors
-        }
-      }
 
       try {
         await stop();
@@ -382,12 +369,15 @@ export function flow<T>(
         start();
       }
 
-      const receiver = toReceiver(callback);
-      subs.add(receiver);
+      if (callback) {
+        subs.add(callback);
+      }
       activeSubCount++;
 
       const sub = createSubscription(() => {
-        subs.delete(receiver);
+        if (callback) {
+          subs.delete(callback);
+        }
         activeSubCount--;
         if (activeSubCount <= 0) {
           return disposeInstance();
@@ -458,7 +448,7 @@ export function flow<T>(
  * });
  * ```
  */
-export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
+export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> {
   const scope = getCurrentScope();
   const strobe = scope ? getScopeStrobe(scope) : undefined;
   const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
@@ -472,15 +462,16 @@ export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
   let error: any = undefined;
   const disposeHandlers = new Set<() => void>();
 
-  const subs = new Set<Receiver<T>>();
+  const subs = new Set<(value: T) => MaybePromise>();
+  const subscriptions = new Set<Subscription>();
 
   const notify = (value: T) => {
     runWithPropagation(() => {
-      for (const receiver of Array.from(subs)) {
+      for (const cb of Array.from(subs)) {
         try {
-          receiver.next?.(value);
+          cb(value);
         } catch (err) {
-          receiver.error?.(err);
+          // ignore user callback errors in callback-only API
         }
       }
     });
@@ -518,12 +509,21 @@ export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
     },
 
     subscribe(callback) {
-      const receiver = toReceiver(callback);
-      subs.add(receiver);
+      if (disposed) {
+        return createSubscription(() => {});
+      }
 
-      return createSubscription(() => {
-        subs.delete(receiver);
+      if (callback) {
+        subs.add(callback);
+      }
+
+      const sub = createSubscription(() => {
+        if (callback) {
+          subs.delete(callback);
+        }
       });
+      subscriptions.add(sub);
+      return sub;
     },
 
     pipe(...ops: Operator<any, any>[]) {
@@ -562,6 +562,14 @@ export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
         }
       }
       disposeHandlers.clear();
+      for (const sub of Array.from(subscriptions)) {
+        try {
+          sub.unsubscribe();
+        } catch {
+          // ignore
+        }
+      }
+      subscriptions.clear();
       subs.clear();
     },
 
@@ -578,6 +586,14 @@ export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
         }
       }
       disposeHandlers.clear();
+      for (const sub of Array.from(subscriptions)) {
+        try {
+          sub.unsubscribe();
+        } catch {
+          // ignore
+        }
+      }
+      subscriptions.clear();
       subs.clear();
     }
   };
@@ -789,15 +805,15 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     },
 
     subscribe(callback) {
-      const cb = typeof callback === 'function'
-        ? callback
-        : (value: T) => callback.next?.(value);
-
       ensureInit();
-      subs.add(cb);
+      if (callback) {
+        subs.add(callback);
+      }
 
       return createSubscription(() => {
-        subs.delete(cb);
+        if (callback) {
+          subs.delete(callback);
+        }
       });
     },
 
@@ -832,159 +848,3 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   return instance;
 }
 
-/* ── iterate ── */
-
-/**
- * Creates an async iterable from an atom.
- *
- * Yields the current value immediately, then yields subsequent values
- * whenever the atom emits. The iterable completes when the atom is disposed.
- *
- * @param atom - The atom to iterate over.
- * @returns An async iterable that yields atom values.
- *
- * @example
- * ```ts
- * const a = atom(0);
- * setTimeout(() => a.next(1), 10);
- * setTimeout(() => a.next(2), 20);
- * setTimeout(() => a.dispose(), 30);
- *
- * for await (const value of iterate(a)) {
- *   console.log(value); // 0, 1, 2
- * }
- * ```
- */
-export function iterate<T>(atom: AtomBase<T>): AsyncIterable<T> {
-  return {
-    [Symbol.asyncIterator]() {
-      const buffer: T[] = [];
-      let resolveNext: ((res: IteratorResult<T>) => void) | null = null;
-      let rejectNext: ((e: any) => void) | null = null;
-      let done = false;
-      let onPush: (() => void) | undefined;
-
-      const notifyPush = () => {
-        if (onPush) {
-          try {
-            onPush();
-          } catch {
-            // ignore consumer errors
-          }
-        }
-      };
-
-      const sub = atom.subscribe((value) => {
-        if (done) return;
-        if (resolveNext) {
-          resolveNext({ value, done: false });
-          resolveNext = null;
-          rejectNext = null;
-        } else {
-          buffer.push(value);
-        }
-        notifyPush();
-      });
-
-      const finish = () => {
-        if (done) return;
-        const cleanup = sub.unsubscribe();
-        const err = (atom as any)._error;
-        if (resolveNext) {
-          if (err) {
-            done = true;
-            const r = rejectNext!;
-            resolveNext = null;
-            rejectNext = null;
-            r(err);
-          } else if (buffer.length === 0) {
-            done = true;
-            resolveNext({ value: undefined as any, done: true });
-            resolveNext = null;
-            rejectNext = null;
-          }
-        }
-        notifyPush();
-        return cleanup;
-      };
-
-      (atom as any)._onDispose?.add(finish);
-
-      const checkError = () => {
-        const err = (atom as any)._error;
-        if (err !== undefined) {
-          return err;
-        }
-        return undefined;
-      };
-
-      const iterator = {
-        async next() {
-          if (done) return { value: undefined as any, done: true };
-
-          const err = checkError();
-          if (err) {
-            finish();
-            throw err;
-          }
-
-          if (buffer.length > 0) {
-            const val = buffer.shift()!;
-            if (atom.disposed && buffer.length === 0) {
-              done = true;
-            }
-            return { value: val, done: false };
-          }
-
-          if (atom.disposed) {
-            done = true;
-            return { value: undefined as any, done: true };
-          }
-
-          return new Promise<IteratorResult<T>>((resolve, reject) => {
-            resolveNext = resolve;
-            rejectNext = reject;
-          });
-        },
-        async return() {
-          await finish();
-          return { value: undefined as any, done: true };
-        },
-      };
-
-      (iterator as any).__tryNext = (): IteratorResult<T> | null => {
-        if (done) return { value: undefined as any, done: true };
-        const err = checkError();
-        if (err) {
-          throw err;
-        }
-        if (buffer.length > 0) {
-          const val = buffer.shift()!;
-          if (atom.disposed && buffer.length === 0) {
-            done = true;
-          }
-          return { value: val, done: false };
-        }
-        if (atom.disposed) {
-          done = true;
-          return { value: undefined as any, done: true };
-        }
-        return null;
-      };
-
-      (iterator as any).__hasBufferedValues = () => buffer.length > 0;
-
-      Object.defineProperty(iterator, "__onPush", {
-        get() {
-          return onPush;
-        },
-        set(cb: () => void) {
-          onPush = cb;
-        },
-        configurable: true,
-      });
-
-      return iterator;
-    },
-  };
-}

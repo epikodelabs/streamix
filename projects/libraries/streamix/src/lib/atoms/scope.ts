@@ -1,4 +1,4 @@
-import type { Subscription } from "../abstractions/subscription";
+import type { Subscription } from "./subscription";
 import type { AtomBase } from "./atom";
 
 /**

@@ -1,6 +1,6 @@
-import { createOperator, DONE, NEXT, type Operator } from "../abstractions";
-import { fromAny } from "../converters";
-import type { StreamInput } from "../streams/pipe";
+import { createOperator, DONE, NEXT, type Operator } from "../atoms";
+import { fromAny } from "../factories";
+import type { PipeInput } from "../atoms/pipe";
 import { createAsyncCoordinator } from "../utils";
 
 /**
@@ -22,11 +22,11 @@ import { createAsyncCoordinator } from "../utils";
  *
  * @template T Source/output value type.
  * @template N Notifier value type (ignored by this operator).
- * @param notifier A `Stream<N>` or `Promise<N>` that opens the gate when it emits.
+ * @param notifier A `AtomBase<N>` or `Promise<N>` that opens the gate when it emits.
  * @returns An `Operator<T, T>` that drops source values until the notifier emits.
  */
 export function skipUntil<T = any, N = any>(
-  notifier: StreamInput<N> | Promise<N>
+  notifier: PipeInput<N> | Promise<N>
 ): Operator<T, T> {
   return createOperator<T, T>("skipUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();

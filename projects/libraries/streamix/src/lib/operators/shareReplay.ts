@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator, type Subscription } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator, type Subscription } from "../atoms";
 import { atom } from '../atoms/atom';
 
 /**

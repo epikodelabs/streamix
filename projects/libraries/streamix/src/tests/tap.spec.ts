@@ -1,4 +1,4 @@
-import { catchError, createStream, endWith, finalize, from, iterate, pipe, startWith, tap, atom } from '@epikodelabs/streamix';
+import {catchError, flow, endWith, finalize, from, iterate, pipe, startWith, tap} from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -55,7 +55,7 @@ describe('tap', () => {
   it('should propagate early unsubscribe upstream', async () => {
     let cleaned = false;
 
-    const source = createStream('tap-cleanup', async function* (signal) {
+    const source = flow(async function* (signal) {
       try {
         yield 1;
         await new Promise<void>((resolve) => {

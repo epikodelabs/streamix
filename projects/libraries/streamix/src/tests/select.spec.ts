@@ -1,8 +1,8 @@
-import { atom, iterate, pipe, select } from '@epikodelabs/streamix';
+import {atom, iterate, pipe, select, type Atom} from '@epikodelabs/streamix';
 
 describe('select', () => {
-  let subject: ReturnType<typeof atom>;
-  let source: ReturnType<typeof atom>;
+  let subject: Atom<any>;
+  let source: Atom<any>;
 
   beforeEach(() => {
     subject = atom();

@@ -1,4 +1,4 @@
-import { distinctUntilChanged, from, iterate, pipe, atom } from '@epikodelabs/streamix';
+import {distinctUntilChanged, from, iterate, pipe} from '@epikodelabs/streamix';
 
 describe('distinctUntilChanged', () => {
   it('should emit values that are distinct from the previous one', async () => {

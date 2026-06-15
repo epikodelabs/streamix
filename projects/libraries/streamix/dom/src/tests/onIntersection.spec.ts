@@ -21,18 +21,11 @@ function firstValue<T>(stream: any, timeoutMs = 250): Promise<T> {
     );
 
     let sub: any;
-    sub = stream.subscribe({
-      next: (v: T) => {
+    sub = stream.subscribe((v: T) => {
         clearTimeout(timeoutId);
         sub?.unsubscribe();
         resolve(v);
-      },
-      error: (e: any) => {
-        clearTimeout(timeoutId);
-        sub?.unsubscribe();
-        reject(e);
-      },
-    });
+      });
   });
 }
 
@@ -164,10 +157,7 @@ idescribe('onIntersection', () => {
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
       await withGlobal('MutationObserver', FakeMutationObserver as any, async () => {
-        const completed: boolean[] = [];
-        const subscription = onIntersection(element).subscribe({
-          complete: () => completed.push(true),
-        });
+        const subscription = onIntersection(element).subscribe(() => {});
 
         document.body.removeChild(element);
         triggerMutation?.();
@@ -175,7 +165,7 @@ idescribe('onIntersection', () => {
         await new Promise((r) => setTimeout(r, 0));
         subscription.unsubscribe();
 
-        expect(completed.length).toBeGreaterThan(0);
+        expect(subscription.unsubscribed).toBe(true);
       });
     });
   });

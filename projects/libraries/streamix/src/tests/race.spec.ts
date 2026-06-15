@@ -1,4 +1,4 @@
-import { atom, createStream, from, race, type Atom } from '@epikodelabs/streamix';
+import {atom, flow, from, race, type Atom} from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -13,8 +13,8 @@ describe('race', () => {
   });
 
   it('should only emit values from the winning stream', async () => {
-    const stream1: Atom = atom<atom>();
-    const stream2: Atom = atom<atom>();
+    const stream1: Atom = atom<number>();
+    const stream2: Atom = atom<number>();
     const results: number[] = [];
 
     (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
@@ -29,8 +29,8 @@ describe('race', () => {
   });
 
   it('should emit the first value from the winning stream', async () => {
-    const stream1: Atom = atom<atom>();
-    const stream2: Atom = atom<atom>();
+    const stream1: Atom = atom<number>();
+    const stream2: Atom = atom<number>();
     const results: number[] = [];
 
     (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
@@ -44,8 +44,8 @@ describe('race', () => {
   });
 
   it('should complete when the winning stream completes', async () => {
-    const stream1: Atom = atom<atom>();
-    const stream2: Atom = atom<atom>();
+    const stream1: Atom = atom<number>();
+    const stream2: Atom = atom<number>();
     const results: number[] = [];
 
     const subscription = (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
@@ -61,8 +61,8 @@ describe('race', () => {
   });
 
   it('should not crash when the winning stream errors', async () => {
-    const stream1: Atom = atom<atom>();
-    const stream2: Atom = atom<atom>();
+    const stream1: Atom = atom<number>();
+    const stream2: Atom = atom<number>();
     const results: number[] = [];
 
     (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
@@ -77,9 +77,9 @@ describe('race', () => {
   });
 
   it('should handle multiple streams correctly', async () => {
-    const stream1: Atom = atom<atom>();
-    const stream2: Atom = atom<atom>();
-    const stream3: Atom = atom<atom>();
+    const stream1: Atom = atom<number>();
+    const stream2: Atom = atom<number>();
+    const stream3: Atom = atom<number>();
     const results: number[] = [];
 
     const subscription = (race(stream1, stream2, stream3) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
@@ -98,13 +98,13 @@ describe('race', () => {
   });
 
   it('should work with streams that emit after a delay', async () => {
-    const stream1 = createStream<number>('delayed1', async function* () {
+    const stream1 = flow<number>( async function* () {
       await delay(10);
       yield 1;
       yield 2;
     });
 
-    const stream2 = createStream<number>('delayed2', async function* () {
+    const stream2 = flow<number>( async function* () {
       await delay(5);
       yield 3;
       yield 4;
@@ -120,12 +120,12 @@ describe('race', () => {
   });
 
   it('should complete when the winning stream completes after a delay', async () => {
-    const stream1 = createStream<number>('delayed1', async function* () {
+    const stream1 = flow<number>( async function* () {
       await delay(100);
       yield 1;
     });
 
-    const stream2 = createStream<number>('delayed2', async function* () {
+    const stream2 = flow<number>( async function* () {
       await delay(50);
       yield 3;
     });
@@ -143,7 +143,7 @@ describe('race', () => {
     let cancelled = false;
     let returnCalls = 0;
 
-    const losing = createStream<number>('losing', async function* () {
+    const losing = flow<number>( async function* () {
       await delay(50);
       yield 123;
     });

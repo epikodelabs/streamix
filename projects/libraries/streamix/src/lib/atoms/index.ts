@@ -22,9 +22,15 @@
  * ```
  */
 
-export { atom, derived, discrete, flow, iterate } from './atom';
+export { atom, derived, discrete, flow } from './atom';
+export { iterate } from './iterate';
 export type { Atom, AtomBase, AtomOptions } from './atom';
 
 export { globalScope, scope } from './scope';
 export type { Scope, ScopeMode, ScopeOptions } from './scope';
+
+export * from './pipe';
+
+export * from './operator';
+export * from './subscription';
 

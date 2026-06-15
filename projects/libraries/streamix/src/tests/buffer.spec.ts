@@ -1,9 +1,9 @@
-import { atom, buffer, iterate, pipe } from '@epikodelabs/streamix';
+import {atom, buffer, iterate, pipe, type Atom} from '@epikodelabs/streamix';
 
 const wait = (ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 describe("buffer", () => {
-  let source: ReturnType<typeof atom>;
+  let source: Atom<any>;
 
   beforeEach(() => { 
     source = atom<number>();

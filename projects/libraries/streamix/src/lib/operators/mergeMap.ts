@@ -1,6 +1,6 @@
-import { createPushOperator, MaybePromise, type Operator } from "../abstractions";
-import { fromAny } from '../converters';
-import type { StreamInput } from "../streams/pipe";
+import { createPushOperator, MaybePromise, type Operator } from "../atoms";
+import { fromAny } from '../factories';
+import type { PipeInput } from "../atoms/pipe";
 import { createAsyncCoordinator, type RunnerEvent } from '../utils';
 
 /**
@@ -19,7 +19,7 @@ import { createAsyncCoordinator, type RunnerEvent } from '../utils';
  * @template T The type of values in the source stream.
  * @template R The type of values emitted by the inner and output streams.
  * @param project A function that maps a source value and its index to either:
- *   - a {@link Stream<R>},
+ *   - a {@link AtomBase<R>},
  *   - a {@link MaybePromise<R>},
  *   - or an array of `R`.
  * @param concurrent Maximum number of concurrent inner streams (default: Infinity).
@@ -35,7 +35,7 @@ import { createAsyncCoordinator, type RunnerEvent } from '../utils';
  * ```
  */
 export function mergeMap<T = any, R = any>(
-  project: (value: T, index: number) => StreamInput<R> | MaybePromise<R> | Array<R>,
+  project: (value: T, index: number) => PipeInput<R> | MaybePromise<R> | Array<R>,
   concurrent: number = Infinity,
   bufferSize: number = Infinity
 ) {

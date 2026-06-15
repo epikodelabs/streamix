@@ -1,4 +1,4 @@
-import { commit, createStream, iterate, atom } from '@epikodelabs/streamix';
+import { commit, flow, iterate } from '@epikodelabs/streamix';
 
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -7,7 +7,7 @@ describe("commit", () => {
     let attempt = 0;
     const factory = jasmine.createSpy("factory").and.callFake(() => {
       attempt++;
-      return createStream<number>("commitSource", async function* () {
+      return flow<number>(async function* () {
         if (attempt === 1) {
           yield 1;
           yield 2;
@@ -37,7 +37,7 @@ describe("commit", () => {
 
     const factory = jasmine.createSpy("factory").and.callFake(() => {
       attempt++;
-      return createStream<number>("delayedCommit", async function* () {
+      return flow<number>(async function* () {
         if (attempt === 1) {
           yield 1;
           throw new Error("fail once");
@@ -86,7 +86,7 @@ describe("commit", () => {
 
     const atom = commit(
       () =>
-        createStream<number>("slowCommit", async function* (signal) {
+        flow<number>(async function* (signal) {
           while (!signal?.aborted) {
             iterationCount++;
             yield iterationCount;

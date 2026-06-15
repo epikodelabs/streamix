@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
+import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from "../atoms";
 
 /**
  * Creates a stream operator that immediately throws an error with the provided message.

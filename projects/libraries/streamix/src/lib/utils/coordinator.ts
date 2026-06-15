@@ -6,7 +6,7 @@
  *
  * @module coordinator
  */
-import { DONE, NEXT } from "../abstractions";
+import { DONE, NEXT } from "../atoms";
 
 /**
 

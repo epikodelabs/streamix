@@ -9,12 +9,10 @@ idescribe('onAnimationFrame', () => {
     const emittedDeltas: number[] = [];
     let count = 0;
 
-    const subscription = stream.pipe(takeWhile(() => count < 5)).subscribe({
-      next: (delta: number) => {
+    const subscription = stream.pipe(takeWhile(() => count < 5)).subscribe((delta: number) => {
         count++;
         emittedDeltas.push(delta);
-      },
-    });
+      });
 
     try {
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -33,33 +31,28 @@ idescribe('onAnimationFrame', () => {
     }
   });
 
-  it('should stop emitting when condition is met', (done) => {
+  it('should stop emitting when condition is met', async () => {
     const stream = onAnimationFrame().pipe(takeWhile((_, index) => index < 5));
     const emittedCount: number[] = [];
 
-    const subscription = stream.subscribe({
-      next: (delta: number) => {
-        expect(delta).toBeGreaterThanOrEqual(0);
-        emittedCount.push(delta);
-      },
-      complete: () => {
-        // Should have received exactly 5 emissions before the condition became false
-        expect(emittedCount.length).toBe(5);
-        expect(() => subscription.unsubscribe()).not.toThrow();
-        done();
-      },
+    const subscription = stream.subscribe((delta: number) => {
+      expect(delta).toBeGreaterThanOrEqual(0);
+      emittedCount.push(delta);
     });
+
+    await new Promise(resolve => setTimeout(resolve, 200));
+    subscription.unsubscribe();
+
+    expect(emittedCount.length).toBe(5);
   });
 
   it('should emit multiple times when condition allows', async () => {
     const stream = onAnimationFrame().pipe(takeWhile((_, index) => index < 10));
     const emittedDeltas: number[] = [];
 
-    const subscription = stream.subscribe({
-      next: (delta: number) => {
+    const subscription = stream.subscribe((delta: number) => {
         emittedDeltas.push(delta);
-      },
-    });
+      });
 
     try {
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -252,8 +245,7 @@ idescribe('onAnimationFrame', () => {
     (globalThis as any).cancelAnimationFrame = jasmine.createSpy('cancelAnimationFrame');
 
     const deltas: number[] = [];
-    const subscription = onAnimationFrame().subscribe({
-      next: (delta: number) => {
+    const subscription = onAnimationFrame().subscribe((delta: number) => {
         deltas.push(delta);
         if (deltas.length === 3) {
           try {
@@ -270,8 +262,7 @@ idescribe('onAnimationFrame', () => {
             done.fail(err);
           }
         }
-      },
-    });
+      });
   });
   it('returns early when performance is undefined (SSR)', (done) => {
     const originalPerformance = (globalThis as any).performance;
@@ -328,8 +319,7 @@ idescribe('onAnimationFrame', () => {
     (globalThis as any).cancelAnimationFrame = jasmine.createSpy('cancelAnimationFrame');
 
     const deltas: number[] = [];
-    const subscription = onAnimationFrame().subscribe({
-      next: (delta: number) => {
+    const subscription = onAnimationFrame().subscribe((delta: number) => {
         deltas.push(delta);
         if (deltas.length === 3) {
           try {
@@ -346,8 +336,7 @@ idescribe('onAnimationFrame', () => {
             done.fail(err);
           }
         }
-      },
-    });
+      });
   });});
 
 

@@ -1,4 +1,4 @@
-import { concatMap, createStream, from, iterate, atom as makeAtom, pipe, type Atom } from '@epikodelabs/streamix';
+import {concatMap, flow, from, iterate, atom as makeAtom, pipe, type Atom, type AtomBase} from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
 
@@ -229,9 +229,9 @@ describe('concatMap', () => {
   });
 });
 
-// Error Handling Stream using library's `createStream`
-export function errorInnerStream(): Stream {
-  return createStream('errorInnerStream', async function* () {
+// Error Handling Stream using library's `flow`
+export function errorInnerStream(): AtomBase {
+  return flow(async function* () {
     throw new Error('Inner Stream Error');
   });
 }

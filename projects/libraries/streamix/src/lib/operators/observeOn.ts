@@ -1,5 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from "../abstractions";
-import { atom, iterate } from '../atoms/atom';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator, atom, iterate } from "../atoms";
 
 /**
  * Creates a stream operator that schedules the emission of each value from the source

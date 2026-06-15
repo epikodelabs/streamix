@@ -1,11 +1,9 @@
 import {
   atom,
   createAsyncIterator,
-  createStream,
   createSubscription,
+  flow,
   type AtomBase,
-  type Receiver,
-  type Stream,
 } from '@epikodelabs/streamix';
 
 const LOG_PREFIX = '[httpClient]';
@@ -29,67 +27,95 @@ function createReplayAtom<T>(): AtomBase<T> & {
   const replay: T[] = [];
   let completed = false;
   let errorValue: any;
-  const subs = new Set<Receiver<T>>();
+  const subs = new Set<(value: T) => void>();
+  const observers = new Set<{
+    next: (value: T) => void;
+    complete: () => void;
+    error: (err: any) => void;
+  }>();
   const baseNext = output.next.bind(output);
 
   const notify = (value: T) => {
     replay.push(value);
     baseNext(value);
-    for (const receiver of Array.from(subs)) {
-      receiver.next?.(value);
+    for (const callback of Array.from(subs)) {
+      callback(value);
+    }
+    for (const observer of Array.from(observers)) {
+      observer.next(value);
     }
   };
 
   const complete = () => {
     if (completed) return;
     completed = true;
-    for (const receiver of Array.from(subs)) {
-      receiver.complete?.();
+
+    for (const observer of Array.from(observers)) {
+      observer.complete();
     }
+    observers.clear();
     subs.clear();
   };
 
   const fail = (err: any) => {
     errorValue = err;
-    for (const receiver of Array.from(subs)) {
-      receiver.error?.(err);
+
+    for (const observer of Array.from(observers)) {
+      observer.error(err);
     }
+    observers.clear();
     subs.clear();
   };
 
   (output as any).subscribe = (
-    callback: ((value: T) => void) | Receiver<T>
+    callback: (value: T) => void
   ) => {
-    const receiver =
-      typeof callback === "function" ? { next: callback } : callback;
-
     if (completed) {
       for (const value of replay) {
-        receiver?.next?.(value);
+        callback(value);
       }
-      receiver?.complete?.();
       return createSubscription(() => {});
     }
 
     if (errorValue !== undefined) {
-      receiver?.error?.(errorValue);
       return createSubscription(() => {});
     }
 
-    subs.add(receiver);
+    subs.add(callback);
     for (const value of replay) {
-      receiver?.next?.(value);
+      callback(value);
     }
 
     return createSubscription(() => {
-      subs.delete(receiver);
+      subs.delete(callback);
     });
   };
 
   (output as any)[Symbol.asyncIterator] = () =>
     createAsyncIterator({
-      register: (receiver: Receiver<any>) =>
-        (output as any).subscribe(receiver as any),
+      register: (observer: any) => {
+        if (completed) {
+          for (const value of replay) {
+            observer.next(value);
+          }
+          observer.complete();
+          return createSubscription(() => {});
+        }
+
+        if (errorValue !== undefined) {
+          observer.error(errorValue);
+          return createSubscription(() => {});
+        }
+
+        observers.add(observer);
+        for (const value of replay) {
+          observer.next(value);
+        }
+
+        return createSubscription(() => {
+          observers.delete(observer);
+        });
+      },
     })();
 
   return Object.assign(output, {
@@ -106,7 +132,7 @@ function createReplayAtom<T>(): AtomBase<T> & {
  * underlying HTTP request, providing control over long-running or cancellable
  * operations.
  */
-export type HttpStream<T = any> = Stream<T> & { abort: () => void };
+export type HttpStream<T = any> = AtomBase<T> & { abort: () => void };
 
 /**
  * HTTP request options.
@@ -139,7 +165,7 @@ export type Context = {
   status?: number;
   statusText?: string;
   redirectTo?: string;
-  data?: Stream;
+  data?: AtomBase;
   [key: string]: any;
 };
 
@@ -721,7 +747,7 @@ export const createHttpClient = (): HttpClient => {
         }
       })();
 
-      context.data = data as unknown as Stream;
+      context.data = data as unknown as AtomBase;
       return context;
     });
   }
@@ -759,7 +785,7 @@ export const createHttpClient = (): HttpClient => {
 
     const promise = chainMiddleware(middlewares)(async (ctx) => ctx)(context);
 
-    const stream = createStream('httpData', async function* () {
+    const stream = flow<T>(async function* () {
       const ctx = await promise; // If middleware throws, this rejection happens here
       
       if (!ctx || !ctx.data) {

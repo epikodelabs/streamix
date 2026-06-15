@@ -1,4 +1,4 @@
-import { createStream, from, iterate, merge, atom } from '@epikodelabs/streamix';
+import {flow, from, iterate, merge} from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -54,7 +54,7 @@ describe('merge', () => {
   });
 
   it('should propagate errors from rejected sources', async () => {
-    const badStream = createStream('error', async function* () {
+    const badStream = flow(async function* () {
       throw new Error('boom');
     });
 
@@ -86,7 +86,7 @@ describe('merge', () => {
     const cleanupCalls: number[] = [];
 
     const makeStream = (id: number) =>
-      createStream(`cleanup-${id}`, async function* () {
+      flow(async function* () {
         try {
           while (true) {
             yield id;

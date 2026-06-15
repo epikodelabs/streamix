@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, type MaybePromise } from "../abstractions";
+import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
 
 /**
  * Creates a stream operator that delays the emission of each value from the source stream.

@@ -1,4 +1,4 @@
-import { createStream, delay, from, iterate, pipe, atom } from '@epikodelabs/streamix';
+import { flow, delay, from, iterate, pipe } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -85,7 +85,7 @@ describe('delay', () => {
   });
 
   it('should forward source errors through the delay operator', async () => {
-    const stream = createStream('error-source', async function* () {
+    const stream = flow(async function* () {
       yield 1;
       throw new Error('boom');
     });

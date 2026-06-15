@@ -1,4 +1,4 @@
-import { eachValueFrom, firstValueFrom } from "@epikodelabs/streamix";
+import { firstValueFrom, iterate } from "@epikodelabs/streamix";
 import { jsonp } from "@epikodelabs/streamix/networking";
 import { idescribe } from "./env.spec";
 
@@ -111,7 +111,7 @@ idescribe("jsonp", () => {
     const refs = setupJsonpMock(testData);
 
     const stream = jsonp<typeof testData>("https://example.com/data");
-    const iterator = eachValueFrom(stream);
+    const iterator = iterate(stream)[Symbol.asyncIterator]();
 
     const valuePromise = iterator.next();
     await iterator.return?.(undefined); // Early close

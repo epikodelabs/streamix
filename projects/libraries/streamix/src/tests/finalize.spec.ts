@@ -1,4 +1,4 @@
-import { createStream, finalize, from, interval, map, pipe, iterate, atom } from '@epikodelabs/streamix';
+import {flow, finalize, from, interval, map, pipe, iterate} from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -120,7 +120,7 @@ describe("finalize", () => {
   it("should keep source errors even when finalizer throws", async () => {
     const error = new Error("source error");
     const atom = pipe(
-      createStream("test", async function* () { throw error; }),
+      flow(async function* () { throw error; }),
       finalize(() => { throw new Error("finalizer error"); })
     );
 

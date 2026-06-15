@@ -1,4 +1,4 @@
-import { first, from, iterate, pipe, atom } from '@epikodelabs/streamix';
+import {first, from, iterate, pipe} from '@epikodelabs/streamix';
 
 describe('first', () => {
   it('should emit the first value even when there is a delay', async () => {

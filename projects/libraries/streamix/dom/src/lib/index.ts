@@ -1,2 +1,2 @@
-export * from './streams';
+export * from './factories';
 

@@ -1,7 +1,7 @@
-import { atom, distinctUntilKeyChanged, iterate, atom as makeAtom, pipe } from '@epikodelabs/streamix';
+import {distinctUntilKeyChanged, iterate, atom as makeAtom, pipe, type Atom} from '@epikodelabs/streamix';
 
 describe('distinctUntilKeyChanged', () => {
-  let subject: ReturnType<typeof atom>;
+  let subject: Atom<any>;
 
   beforeEach(() => {
     subject = makeAtom<any>();

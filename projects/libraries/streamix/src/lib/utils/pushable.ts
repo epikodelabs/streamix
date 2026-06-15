@@ -1,7 +1,11 @@
-import {
-  DONE,
-  StrictReceiver
-} from "../abstractions";
+import { DONE, type MaybePromise } from "../atoms";
+
+type Observer<T> = {
+  next: (value: T) => MaybePromise;
+  error: (err: any) => MaybePromise;
+  complete: () => MaybePromise;
+  readonly disposed: boolean;
+};
 import {
   AsyncIteratorState,
   asyncPull,
@@ -29,7 +33,7 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
   const state = new AsyncIteratorState<R>();
 
   // Create the receiver that will handle pushes
-  const receiver: StrictReceiver<R> = {
+  const receiver: Observer<R> = {
     next(value: R) {
       return pushValue(state, iterator, value, iterator.__onPush);
     },

@@ -1,4 +1,4 @@
-import { catchError, from, map, pipe, iterate, atom } from '@epikodelabs/streamix';
+import {catchError, from, map, pipe, iterate} from '@epikodelabs/streamix';
 
 describe('map', () => {
   it('should transform values correctly', async () => {

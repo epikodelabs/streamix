@@ -36,15 +36,13 @@ idescribe('onOrientation', () => {
 
   it('should emit initial orientation immediately', (done) => {
     const stream = onOrientation();
-    const subscription = stream.subscribe({
-      next: (value) => {
+    const subscription = stream.subscribe((value) => {
         try {
           expect(value).toBe('portrait');
         } catch (err: any) {
           done.fail(err);
         }
-      },
-    });
+      });
     subscription.unsubscribe();
     done();
   });
@@ -62,8 +60,7 @@ idescribe('onOrientation', () => {
     });
 
     let callCount = 0;
-    const subscription = stream.subscribe({
-      next: (value: any) => {
+    const subscription = stream.subscribe((value: any) => {
         callCount++;
         try {
           if (callCount === 1) {
@@ -85,8 +82,7 @@ idescribe('onOrientation', () => {
         } catch (err: any) {
           done.fail(err);
         }
-      },
-    });
+      });
   });
 
   it('should handle different orientation angles and types', (done) => {
@@ -95,15 +91,13 @@ idescribe('onOrientation', () => {
     mockOrientation.type = 'landscape-primary';
 
     const stream = onOrientation();
-    const subscription = stream.subscribe({
-      next: (value) => {
+    const subscription = stream.subscribe((value) => {
         try {
           expect(value).toBe('landscape');
         } catch (err: any) {
           done.fail(err);
         }
-      },
-    });
+      });
     subscription.unsubscribe();
     done();
   });
@@ -113,15 +107,13 @@ idescribe('onOrientation', () => {
     mockOrientation.type = 'portrait-secondary';
 
     const stream = onOrientation();
-    const subscription = stream.subscribe({
-      next: (value) => {
+    const subscription = stream.subscribe((value) => {
         try {
           expect(value).toBe('portrait');
         } catch (err: any) {
           done.fail(err);
         }
-      },
-    });
+      });
 
     subscription.unsubscribe();
     done();
@@ -132,15 +124,13 @@ idescribe('onOrientation', () => {
     mockOrientation.type = 'landscape-secondary';
 
     const stream = onOrientation();
-    const subscription = stream.subscribe({
-      next: (value) => {
+    const subscription = stream.subscribe((value) => {
         try {
           expect(value).toBe('landscape');
         } catch (err: any) {
           done.fail(err);
         }
-      },
-    });
+      });
 
     subscription.unsubscribe();
     done();
@@ -153,11 +143,9 @@ idescribe('onOrientation', () => {
     const stream = onOrientation();
     const values: any[] = [];
 
-    const subscription = stream.subscribe({
-      next: (value) => {
+    const subscription = stream.subscribe((value) => {
         values.push(value);
-      },
-    });
+      });
 
     setTimeout(() => {
       try {

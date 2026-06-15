@@ -1,8 +1,8 @@
-import { ignoreElements, iterate, atom as makeAtom, pipe } from '@epikodelabs/streamix';
+import {ignoreElements, iterate, atom as makeAtom, pipe, type Atom} from '@epikodelabs/streamix';
 
 describe('ignoreElements', () => {
   it('should ignore all emitted values and only emit complete', async () => {
-    const subject: ReturnType<typeof atom> = makeAtom<any>();
+    const subject: Atom<any> = makeAtom<any>();
     const atom = pipe(subject, ignoreElements());
 
     const results: number[] = [];
@@ -23,7 +23,7 @@ describe('ignoreElements', () => {
   });
 
   it('should pass error notifications through', async () => {
-    const subject: ReturnType<typeof atom> = makeAtom<any>();
+    const subject: Atom<any> = makeAtom<any>();
     const atom = pipe(subject, ignoreElements());
 
     let error: any = null;
@@ -48,7 +48,7 @@ describe('ignoreElements', () => {
   });
 
   it('should complete after source stream completes', async () => {
-    const subject: ReturnType<typeof atom> = makeAtom<any>();
+    const subject: Atom<any> = makeAtom<any>();
     const atom = pipe(subject, ignoreElements());
 
     const results: number[] = [];
@@ -68,7 +68,7 @@ describe('ignoreElements', () => {
   });
 
   it('should not emit any value but should handle complete', async () => {
-    const subject: ReturnType<typeof atom> = makeAtom<any>();
+    const subject: Atom<any> = makeAtom<any>();
     const atom = pipe(subject, ignoreElements());
 
     const results: string[] = [];
@@ -88,7 +88,7 @@ describe('ignoreElements', () => {
   });
 
   it('should handle error in source stream', async () => {
-    const subject: ReturnType<typeof atom> = makeAtom<any>();
+    const subject: Atom<any> = makeAtom<any>();
     const atom = pipe(subject, ignoreElements());
 
     let error: any = null;

@@ -1,6 +1,6 @@
-import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator } from "../abstractions";
-import { fromAny } from "../converters";
-import type { StreamInput } from "../streams/pipe";
+import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator } from "../atoms";
+import { fromAny } from "../factories";
+import type { PipeInput } from "../atoms/pipe";
 
 /**
  * Maps each value from the source stream to an inner stream, ignoring 
@@ -15,13 +15,13 @@ import type { StreamInput } from "../streams/pipe";
  *
  * @template T The type of values emitted by the source stream.
  * @template R The type of values emitted by the produced inner streams.
- * @param project A function that transforms a source value into a {@link Stream}, 
+ * @param project A function that transforms a source value into a {@link AtomBase}, 
  * a {@link MaybePromise<R>}, or an array. It receives the source value and a
  * zero-based index of the emission.
  * @returns An {@link Operator} that performs the "exhaust" transformation.
  */
 export const exhaustMap = <T = any, R = any>(
-  project: (value: T, index: number) => StreamInput<R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => PipeInput<R> | MaybePromise<R> | Array<R>
 ) =>
   createOperator<T, R>("exhaustMap", function (this: Operator, source) {
     let outerIndex = 0;

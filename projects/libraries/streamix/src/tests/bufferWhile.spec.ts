@@ -1,10 +1,10 @@
-import { atom, bufferWhile, iterate, pipe } from '@epikodelabs/streamix';
+import {atom, bufferWhile, iterate, pipe, type Atom} from '@epikodelabs/streamix';
 
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("bufferWhile", () => {
   it("flushes the buffer when the predicate resolves truthy", async () => {
-    const subject: ReturnType<typeof atom> = atom<number>();
+    const subject: Atom<any> = atom<number>();
     const results: number[][] = [];
     const buffered = pipe(subject, bufferWhile((_value, _index, buffer) => buffer.length < 3));
 
@@ -29,7 +29,7 @@ describe("bufferWhile", () => {
   });
 
   it("emits the trailing buffer when the source completes", async () => {
-    const subject: ReturnType<typeof atom> = atom<number>();
+    const subject: Atom<any> = atom<number>();
     const results: number[][] = [];
     const buffered = pipe(subject, bufferWhile(() => false));
 
@@ -48,7 +48,7 @@ describe("bufferWhile", () => {
   });
 
   it("supports index parameter in predicate", async () => {
-    const subject: ReturnType<typeof atom> = atom<number>();
+    const subject: Atom<any> = atom<number>();
     const results: number[][] = [];
     const indices: number[] = [];
     const buffered = pipe(
@@ -80,7 +80,7 @@ describe("bufferWhile", () => {
   });
 
   it("uses index to flush based on value position", async () => {
-    const subject: ReturnType<typeof atom> = atom<string>();
+    const subject: Atom<any> = atom<string>();
     const results: string[][] = [];
     const buffered = pipe(
       subject,
@@ -106,7 +106,7 @@ describe("bufferWhile", () => {
   });
 
   it("supports async predicates", async () => {
-    const subject: ReturnType<typeof atom> = atom<number>();
+    const subject: Atom<any> = atom<number>();
     const results: number[][] = [];
     const buffered = pipe(
       subject,
@@ -132,7 +132,7 @@ describe("bufferWhile", () => {
   });
 
   it("does not emit when source completes without values", async () => {
-    const subject: ReturnType<typeof atom> = atom<number>();
+    const subject: Atom<any> = atom<number>();
     const results: number[][] = [];
     const buffered = pipe(subject, bufferWhile(() => true));
 

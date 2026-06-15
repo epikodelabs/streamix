@@ -1,5 +1,4 @@
-import { createOperator, DONE, type Operator } from "../abstractions";
-import { atom, iterate, type Atom } from '../atoms/atom';
+import { createOperator, DONE, type Operator, atom, iterate, type Atom } from "../atoms";
 
 /**
  * Shares a single subscription to the source stream between multiple consumers.

@@ -1,4 +1,4 @@
-import { createStream, iterate, observeOn, pipe, atom } from '@epikodelabs/streamix';
+import {flow, iterate, observeOn, pipe} from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -26,7 +26,7 @@ describe('observeOn', () => {
     const values: number[] = [];
     const emissionOrder: string[] = [];
 
-    const stream = createStream('test', async function* () {
+    const stream = flow(async function* () {
       yield 1;
       yield 2;
       yield 3;
@@ -54,18 +54,20 @@ describe('observeOn', () => {
   it('should emit values using macrotask scheduling', async () => {
     const values: number[] = [];
 
-    const stream = createStream('test', async function* () {
+    const stream = flow(async function* () {
       yield 1;
       yield 2;
     });
 
     const observeOnAtom = pipe(stream, observeOn('macrotask'));
 
-    await wait(10);
+    const done = (async () => {
+      for await (const value of iterate(observeOnAtom)) {
+        values.push(value);
+      }
+    })();
 
-    for await (const value of iterate(observeOnAtom)) {
-      values.push(value);
-    }
+    await done;
 
     expect(values).toEqual([1, 2]);
   });
@@ -73,18 +75,20 @@ describe('observeOn', () => {
   it('should emit values using idle scheduling', async () => {
     const values: number[] = [];
 
-    const stream = createStream('test', async function* () {
+    const stream = flow(async function* () {
       yield 1;
       yield 2;
     });
 
     const observeOnAtom = pipe(stream, observeOn('idle'));
 
-    await wait(10);
+    const done = (async () => {
+      for await (const value of iterate(observeOnAtom)) {
+        values.push(value);
+      }
+    })();
 
-    for await (const value of iterate(observeOnAtom)) {
-      values.push(value);
-    }
+    await done;
 
     expect(values).toEqual([1, 2]);
     expect(mockRequestIdleCallback).toHaveBeenCalled();
@@ -93,7 +97,7 @@ describe('observeOn', () => {
   it('should propagate errors asynchronously', async () => {
     const error = new Error('Test error');
 
-    const stream = createStream('error', async function* () {
+    const stream = flow(async function* () {
       yield 1;
       throw error;
     });
@@ -115,7 +119,7 @@ describe('observeOn', () => {
   it('should handle empty streams', async () => {
     const values: number[] = [];
 
-    const stream = createStream('empty', async function* () {
+    const stream = flow(async function* () {
       // Empty generator
     });
 
@@ -137,7 +141,7 @@ describe('observeOn', () => {
     (globalThis as any).requestIdleCallback = undefined;
 
     const values: number[] = [];
-    const stream = createStream('idle-fallback', async function* () {
+    const stream = flow(async function* () {
       yield 1;
       yield 2;
     });

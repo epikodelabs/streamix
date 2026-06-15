@@ -1,4 +1,4 @@
-import { expand, from, map, pipe, iterate, atom } from '@epikodelabs/streamix';
+import {expand, from, map, pipe, iterate} from '@epikodelabs/streamix';
 
 describe('expand', () => {
   it('should handle errors thrown by the project function', async () => {

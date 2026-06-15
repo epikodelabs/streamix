@@ -1,5 +1,5 @@
-import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../abstractions";
-import { fromAny } from '../converters';
+import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
+import { fromAny } from '../factories';
 import type { AtomBase } from "../atoms/atom";
 
 /**

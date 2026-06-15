@@ -1,4 +1,4 @@
-import { createStream, iterate, partition, pipe, atom } from '@epikodelabs/streamix';
+import {flow, iterate, partition, pipe} from '@epikodelabs/streamix';
 
 describe('partition', () => {
 
@@ -18,7 +18,7 @@ describe('partition', () => {
   }
 
   it('should split values based on predicate', async () => {
-    const source = createStream<number>("source", async function* () {
+    const source = flow<number>( async function* () {
       yield 1;
       yield 2;
       yield 3;
@@ -33,7 +33,7 @@ describe('partition', () => {
   });
 
   it('should handle empty source stream', async () => {
-    const source = createStream<number>("test", async function* () {});
+    const source = flow<number>( async function* () {});
 
     const partitioned = pipe(source, partition(() => true));
     const { true: yes, false: no } = await collect<number>(partitioned);
@@ -43,7 +43,7 @@ describe('partition', () => {
   });
 
   it('should handle all passing the predicate', async () => {
-    const source = createStream<number>("test", async function* () {
+    const source = flow<number>( async function* () {
       yield 1;
       yield 2;
     });
@@ -56,7 +56,7 @@ describe('partition', () => {
   });
 
   it('should handle all failing the predicate', async () => {
-    const source = createStream<number>("test", async function* () {
+    const source = flow<number>( async function* () {
       yield -1;
       yield -2;
     });
@@ -69,7 +69,7 @@ describe('partition', () => {
   });
 
   it('should propagate errors from source', async () => {
-    const source = createStream<number>("test", async function* () {
+    const source = flow<number>( async function* () {
       yield 1;
       yield 2;
       throw new Error('Test error');

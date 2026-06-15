@@ -1,4 +1,4 @@
-import { createOperator, type Operator } from "../abstractions";
+import { createOperator, type Operator } from "../atoms";
 
 /**
  * Creates a stream operator that emits only the values at the specified indices from a source stream.

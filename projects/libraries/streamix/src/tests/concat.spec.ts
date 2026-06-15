@@ -1,5 +1,5 @@
-import type { Stream } from '@epikodelabs/streamix';
-import { concat, createStream, createSubscription, DONE, from, iterate, NEXT, atom } from '@epikodelabs/streamix';
+import type { AtomBase } from '@epikodelabs/streamix';
+import { concat, flow, DONE, from, iterate, NEXT } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -10,10 +10,10 @@ describe('concat', () => {
       from(['source2_value1', 'source2_value2']),
     ];
 
-    const atom = concat(...sources);
+    const source = concat(...sources);
 
     const emittedValues: string[] = [];
-    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    source.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
     await delay();
 
     expect(emittedValues).toEqual([
@@ -39,8 +39,7 @@ describe('concat', () => {
     const errorMessage = 'Test error';
 
     const sources = [
-      from([1, 2, 3]),
-      createStream('errorStream', async function* () {
+      from([1, 2, 3]), flow(async function* () {
         throw new Error(errorMessage);
       }),
       from([4, 5, 6]),
@@ -88,14 +87,11 @@ describe('concat', () => {
   });
 });
 
-function createBareIteratorStream(): Stream<string> {
-  const stream = {} as Stream<string>;
+function createBareIteratorStream(): AtomBase<string> {
+  const stream = {} as AtomBase<string>;
 
-  stream.type = 'stream';
+  stream.type = 'atom';
   stream.name = 'bare-iterator';
-  stream.pipe = (() => stream) as any;
-  stream.subscribe = () => createSubscription(async () => {});
-  stream.query = async () => 'bare';
   stream[Symbol.asyncIterator] = () => {
     let emitted = false;
 

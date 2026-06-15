@@ -154,10 +154,7 @@ idescribe('onBattery', () => {
 
     const values: any[] = [];
     const errors: any[] = [];
-    const sub = onBattery().subscribe({
-      next: v => values.push(v),
-      error: e => errors.push(e)
-    });
+    const sub = onBattery().subscribe(v => values.push(v));
 
     // Wait for rejection to be handled
     await new Promise(resolve => setTimeout(resolve, 100));

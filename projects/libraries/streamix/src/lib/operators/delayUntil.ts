@@ -3,9 +3,9 @@ import {
   DONE,
   NEXT,
   type Operator
-} from "../abstractions";
+} from "../atoms";
 import { AtomBase } from "../atoms";
-import { fromAny } from "../converters";
+import { fromAny } from "../factories";
 import { createAsyncCoordinator } from "../utils";
 
 /**
@@ -32,7 +32,7 @@ import { createAsyncCoordinator } from "../utils";
  *
  * @template T Source/output value type.
  * @template N Notifier value type (ignored by this operator).
- * @param notifier A `Stream<N>` or `Promise<N>` that gates the source.
+ * @param notifier A `AtomBase<N>` or `Promise<N>` that gates the source.
  * @returns An `Operator<T, T>` that can be used in a stream pipeline.
  */
 export function delayUntil<T = any, N = any>(

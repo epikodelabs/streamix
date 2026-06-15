@@ -1,4 +1,4 @@
-import { createOperator, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../abstractions";
+import { createOperator, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../atoms";
 import type { GroupItem } from "./groupBy";
 
 /**

@@ -1,4 +1,4 @@
-import { interval, pipe, take, atom } from '@epikodelabs/streamix';
+import {interval, pipe, take} from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 

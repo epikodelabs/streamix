@@ -1,4 +1,4 @@
-import { from, pipe, slidingPair, iterate, atom } from '@epikodelabs/streamix';
+import {from, pipe, slidingPair, iterate} from '@epikodelabs/streamix';
 
 describe('slidingPair', () => {
   it('should emit pairs of consecutive values', async () => {

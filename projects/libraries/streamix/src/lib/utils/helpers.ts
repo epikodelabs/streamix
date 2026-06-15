@@ -1,4 +1,4 @@
-import { DONE } from "../abstractions";
+import { DONE } from "../atoms";
 
 /**
  * Shared queue item structure used across all async iterator implementations

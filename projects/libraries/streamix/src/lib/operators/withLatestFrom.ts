@@ -1,6 +1,6 @@
-import { createPushOperator, isPromiseLike, type Operator } from "../abstractions";
+import { createPushOperator, isPromiseLike, type Operator } from "../atoms";
 import type { AtomBase } from '../atoms/atom';
-import { toAsyncIterable } from '../streams/pipe';
+import { toAsyncIterable } from '../atoms/pipe';
 import { createAsyncCoordinator } from '../utils';
 
 /**

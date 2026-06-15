@@ -1,4 +1,4 @@
-import { from, iterate, pipe, take, atom } from '@epikodelabs/streamix';
+import {from, iterate, pipe, take} from '@epikodelabs/streamix';
 
 describe('take', () => {
   it('should take specified number of emissions', async () => {

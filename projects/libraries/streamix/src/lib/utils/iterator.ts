@@ -1,7 +1,11 @@
-import { DONE } from "../abstractions";
+import { DONE, isPromiseLike, type MaybePromise, type Subscription } from "../atoms";
 
-import type { Receiver, StrictReceiver, Subscription } from "../abstractions";
-import { isPromiseLike } from "../abstractions";
+type Observer<T> = {
+  next: (value: T) => MaybePromise;
+  error: (err: any) => MaybePromise;
+  complete: () => MaybePromise;
+  readonly disposed: boolean;
+};
 import {
     AsyncIteratorState,
     asyncPull,
@@ -21,7 +25,7 @@ export type AsyncIteratorResult<T> =
  * Creates a factory that produces fresh `AsyncIterator` instances backed by
  * an internal queue with producer-backpressure.
  *
- * The `register` callback receives a `Receiver<T>` whose `next()`/`complete()`/
+ * The `register` callback receives an `Observer<T>` whose `next()`/`complete()`/
  * `error()` methods push into the iterator's queue. `next()` returns a
  * `Promise<void>` (or `void`) — the promise acts as a backpressure signal
  * from the consumer: it resolves only when the consumer pulls the value with
@@ -42,14 +46,14 @@ export type AsyncIteratorResult<T> =
  * @returns A function that creates a fresh AsyncIterator per call.
  */
 export function createAsyncIterator<T>(opts: {
-  register: (receiver: Receiver<T>) => Subscription;
+  register: (observer: Observer<T>) => Subscription;
 }) {
   const { register } = opts;
 
   return () => {
     const state = new AsyncIteratorState<T>();
     let sub: Subscription | null = null;
-    let receiver: StrictReceiver<T> | null = null;
+    let observer: Observer<T> | null = null;
 
     const pendingPushes: Array<{
       type: 'next' | 'complete' | 'error';
@@ -59,8 +63,8 @@ export function createAsyncIterator<T>(opts: {
 
     const ensureSubscribed = () => {
       if (state.completed) return;
-      if (!sub && !receiver) {
-        const _receiver: StrictReceiver<T> = {
+      if (!sub && !observer) {
+        const _observer: Observer<T> = {
           next(value: T) {
             return pushValue(state, iterator, value, iterator.__onPush);
           },
@@ -75,21 +79,21 @@ export function createAsyncIterator<T>(opts: {
           }
         };
 
-        receiver = _receiver;
-        sub = register(_receiver);
+        observer = _observer;
+        sub = register(_observer);
 
         for (const push of pendingPushes) {
           if (push.type === 'next') {
-            _receiver.next(push.value!);
+            _observer.next(push.value!);
           } else if (push.type === 'complete') {
-            _receiver.complete();
+            _observer.complete();
           } else if (push.type === 'error') {
-            _receiver.error(push.err);
+            _observer.error(push.err);
           }
         }
         pendingPushes.length = 0;
       }
-      return receiver;
+      return observer;
     };
 
     const handleDone = () => {
@@ -156,24 +160,24 @@ export function createAsyncIterator<T>(opts: {
     };
 
     iterator.__pushNext = (value: T) => {
-      if (receiver) {
-        receiver.next(value);
+      if (observer) {
+        observer.next(value);
       } else {
         pendingPushes.push({ type: 'next', value });
       }
     };
 
     iterator.__pushComplete = () => {
-      if (receiver) {
-        receiver.complete();
+      if (observer) {
+        observer.complete();
       } else {
         pendingPushes.push({ type: 'complete' });
       }
     };
 
     iterator.__pushError = (err: any) => {
-      if (receiver) {
-        receiver.error(err);
+      if (observer) {
+        observer.error(err);
       } else {
         pendingPushes.push({ type: 'error', err });
       }

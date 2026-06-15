@@ -1,4 +1,4 @@
-import { createStream, iterate, retry, atom } from '@epikodelabs/streamix';
+import {flow, iterate, retry} from '@epikodelabs/streamix';
 
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -7,7 +7,7 @@ describe('retry', () => {
     let attempt = 0;
     const factory = jasmine.createSpy('factory').and.callFake(() => {
       attempt++;
-      return createStream<number>('testStream', async function* () {
+      return flow<number>( async function* () {
         if (attempt === 1) {
           yield 1;
           yield 2;
@@ -32,7 +32,7 @@ describe('retry', () => {
 
   it('should not retry if stream completes successfully on first try', async () => {
     const factory = jasmine.createSpy('factory').and.callFake(() => {
-      return createStream<number>('testStream', async function* () {
+      return flow<number>( async function* () {
         yield 1;
         yield 2;
       });
@@ -51,7 +51,7 @@ describe('retry', () => {
 
   it('should emit error after max retries are reached', async () => {
     const factory = jasmine.createSpy('factory').and.callFake(() => {
-      return createStream("errorStream", async function* () {
+      return flow(async function* () {
         throw new Error('Test Error');
       });
     });
@@ -73,7 +73,7 @@ describe('retry', () => {
 
   it('should not retry when maxRetries is zero', async () => {
     const factory = jasmine.createSpy('factory').and.callFake(() => {
-      return createStream("errorStream", async function* () {
+      return flow(async function* () {
         throw new Error('Immediate failure');
       });
     });
@@ -111,7 +111,7 @@ describe('retry', () => {
 
   it('should emit values from each attempt while retrying', async () => {
     let attempt = 0;
-    const factory = () => createStream<number>("errorStream", async function* () {
+    const factory = () => flow<number>( async function* () {
       attempt++;
       if (attempt === 1) {
         yield 1;
@@ -155,7 +155,7 @@ describe('retry', () => {
     let attempt = 0;
     const factory = jasmine.createSpy('factory').and.callFake(() => {
       attempt++;
-      return createStream<number>("noDelay", async function* () {
+      return flow<number>( async function* () {
         if (attempt === 1) {
           throw new Error("fail once");
         }
@@ -178,7 +178,7 @@ describe('retry', () => {
     const factory = jasmine.createSpy('factory').and.callFake(() => {
       callTimes.push(Date.now());
       attempt++;
-      return createStream<number>("zeroDelay", async function* () {
+      return flow<number>( async function* () {
         if (attempt === 1) {
           throw new Error("fail once");
         }
@@ -214,7 +214,7 @@ describe('retry', () => {
     let attempt = 0;
     const factory = jasmine.createSpy('factory').and.callFake(() => {
       attempt++;
-      return createStream<number>("sleepyRetry", async function* () {
+      return flow<number>( async function* () {
         if (attempt === 1) {
           throw new Error("fail once");
         }
@@ -236,7 +236,7 @@ describe('retry', () => {
     let attempt = 0;
     const factory = jasmine.createSpy('factory').and.callFake(() => {
       attempt++;
-      return createStream<number>("alwaysFail", async function* () {
+      return flow<number>( async function* () {
         throw new Error("nope");
       });
     });
@@ -264,7 +264,7 @@ describe('retry', () => {
 
     const factory = jasmine.createSpy('factory').and.callFake(() => {
       attempt++;
-      return createStream<number>("delayedRetry", async function* () {
+      return flow<number>( async function* () {
         if (attempt === 1) {
           yield 1;
           throw new Error('Need retry');
@@ -294,7 +294,7 @@ describe('retry', () => {
 
   it('should abort at loop start when signal is already aborted', async () => {
     const factory = jasmine.createSpy('factory').and.callFake(() => {
-      return createStream<number>("testStream", async function* () {
+      return flow<number>( async function* () {
         yield 1;
       });
     });
@@ -313,7 +313,7 @@ describe('retry', () => {
     let iterationCount = 0;
 
     const factory = jasmine.createSpy('factory').and.callFake(() => {
-      return createStream<number>("slowStream", async function* (signal) {
+      return flow<number>( async function* (signal) {
         while (true) {
           if (signal?.aborted) {
             throw new Error("Stream aborted");
@@ -345,7 +345,7 @@ describe('retry', () => {
 
     const factory = jasmine.createSpy('factory').and.callFake(() => {
       attempt++;
-      return createStream<number>("cleanupTest", async function* () {
+      return flow<number>( async function* () {
         try {
           yield 1;
           throw new Error("Fail for retry");
@@ -378,7 +378,7 @@ describe('retry', () => {
         throw new Error("Return error");
       };
 
-      return createStream("throwOnReturn", async function* () {
+      return flow(async function* () {
         for await (const v of gen) {
           yield v;
         }

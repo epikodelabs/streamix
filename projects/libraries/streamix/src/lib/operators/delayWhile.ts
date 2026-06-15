@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, type MaybePromise } from "../abstractions";
+import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
 
 /**
  * Buffers values while a predicate returns `true` and releases them once the predicate flips to `false`.

@@ -1,5 +1,5 @@
-import { createPushOperator, type MaybePromise } from "../abstractions";
-import { timer } from "../streams";
+import { createPushOperator, type MaybePromise } from "../atoms";
+import { timer } from "../factories";
 
 /**
  * Buffers values from the source stream and emits them as arrays every `period` milliseconds.
@@ -8,7 +8,7 @@ import { timer } from "../streams";
  * @param period Time in milliseconds between each buffer flush.
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
-export function buffer<T = any>(period: MaybePromise<number>) {
+export function buffer<T>(period: MaybePromise<number>) {
   return createPushOperator<T, T[]>("buffer", (source, output) => {
     let buf: IteratorResult<T>[] = [];
 

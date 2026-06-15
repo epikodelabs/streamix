@@ -1,6 +1,6 @@
-import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../abstractions";
-import { fromAny } from '../converters';
-import type { StreamInput } from "../streams/pipe";
+import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
+import { fromAny } from '../factories';
+import type { PipeInput } from "../atoms/pipe";
 
 /**
  * Options for the expand operator.
@@ -32,7 +32,7 @@ export type ExpandOptions = {
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const expand = <T = any>(
-  project: (value: T) => MaybePromise<StreamInput<T> | Array<T> | T>,
+  project: (value: T) => MaybePromise<PipeInput<T> | Array<T> | T>,
   options: ExpandOptions = {}
 ): Operator<T, T> =>
   createOperator<T, T>('expand', function (this: Operator, source) {

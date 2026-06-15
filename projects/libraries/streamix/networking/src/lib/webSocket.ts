@@ -1,8 +1,8 @@
 import {
-  createStream,
+  flow,
   isPromiseLike,
   type MaybePromise,
-  type Stream,
+  type AtomBase,
 } from "@epikodelabs/streamix";
 
 /**
@@ -13,7 +13,7 @@ import {
  *
  * @template T Message payload type.
  */
-export type WebSocketStream<T = any> = Stream<T> & {
+export type WebSocketStream<T = any> = AtomBase<T> & {
   /**
    * Sends a JSON-serializable message to the server.
    *
@@ -345,10 +345,7 @@ export function webSocket<T = any>(
   /**
    * Base reactive stream instance.
    */
-  const stream = createStream<T>(
-    "webSocket",
-    generator
-  ) as WebSocketStream<T>;
+  const stream = flow<T>(generator) as WebSocketStream<T>;
 
   /**
    * Sends a message through the WebSocket.

@@ -1,4 +1,4 @@
-import { fromEvent, atom } from '@epikodelabs/streamix';
+import {fromEvent} from '@epikodelabs/streamix';
 import { idescribe } from './env.spec';
 
 const flushMicrotasks = () => new Promise<void>((resolve) => setTimeout(resolve, 0));

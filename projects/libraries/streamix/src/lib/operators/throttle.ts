@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, type MaybePromise } from "../abstractions";
+import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
 
 /**
  * Creates a throttle operator that emits the first value immediately, then ignores subsequent

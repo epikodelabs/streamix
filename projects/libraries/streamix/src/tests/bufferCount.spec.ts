@@ -1,9 +1,9 @@
-import { atom, bufferCount, iterate, pipe, type Atom } from '@epikodelabs/streamix';
+import {atom, bufferCount, iterate, pipe, type Atom} from '@epikodelabs/streamix';
 
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("bufferCount", () => {
-  let source: ReturnType<typeof atom>;
+  let source: Atom<any>;
 
   beforeEach(() => {
     source = atom<number>();
@@ -289,11 +289,13 @@ describe("bufferCount", () => {
     const buffered = pipe(source, bufferCount(2));
     const it = iterate(buffered)[Symbol.asyncIterator]();
 
+    const first = it.next();
+
     source.next(1);
     source.next(2);
     source.dispose();
 
-    const result1 = await it.next();
+    const result1 = await first;
     expect(result1.done).toBe(false);
     expect(result1.value).toEqual([1, 2]);
 

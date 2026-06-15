@@ -1,7 +1,7 @@
-import type { MaybePromise, Operator } from "../abstractions";
-import { createOperator, DONE, isPromiseLike } from "../abstractions";
-import { fromAny } from "../converters";
-import type { StreamInput } from "../streams/pipe";
+import type { MaybePromise, Operator } from "../atoms";
+import { createOperator, DONE, isPromiseLike } from "../atoms";
+import { fromAny } from "../factories";
+import type { PipeInput } from "../atoms/pipe";
 import { createAsyncPushable } from "../utils";
 
 /**
@@ -28,7 +28,7 @@ import { createAsyncPushable } from "../utils";
  * ```
  */
 export function switchMap<T = any, R = any>(
-  project: (value: T, index: number) => StreamInput<R> | MaybePromise<R> | Array<R>
+  project: (value: T, index: number) => PipeInput<R> | MaybePromise<R> | Array<R>
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source) {
     const output = createAsyncPushable<R>();
@@ -51,7 +51,7 @@ export function switchMap<T = any, R = any>(
     };
 
     const subscribeToInner = (
-      innerStream: StreamInput<R>,
+      innerStream: PipeInput<R>,
       token: object
     ) => {
       // Cancel the previous inner immediately so sync inner streams can't

@@ -1,4 +1,4 @@
-import { from, iterate, pipe, takeWhile, atom } from '@epikodelabs/streamix';
+import {from, iterate, pipe, takeWhile} from '@epikodelabs/streamix';
 
 describe('takeWhile', () => {
   it('should take emissions while predicate returns true', async () => {
