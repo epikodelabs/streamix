@@ -129,9 +129,14 @@ export function onIntersection(
     const receiver: Receiver<boolean> | undefined =
       typeof callback === "function" ? { next: callback } : callback;
 
-    const callbackFn = (value: boolean) => receiver?.next?.(value);
+    let active = false;
+    const callbackFn = (value: boolean) => {
+      if (!active) return;
+      receiver?.next?.(value);
+    };
 
     const subscription = (originalSubscribe as any).call(atom$, callbackFn);
+    active = true;
 
     scheduleStart();
 

@@ -1,8 +1,8 @@
 // services/image-pipeline.service.ts
 import { computed, Injectable, signal } from '@angular/core';
 import {
+    atom,
     catchError,
-    createSubject,
     filter,
     fromPromise,
     map,
@@ -41,8 +41,8 @@ export interface ImageJob {
 
 @Injectable({ providedIn: 'root' })
 export class ImagePipelineService {
-  private fileStream = createSubject<FileTask>();
-  private progressStream = createSubject<{ id: string; progress: JobProgress }>();
+  private fileStream = atom<FileTask>();
+  private progressStream = atom<{ id: string; progress: JobProgress }>();
 
   readonly settings = signal<ProcessingSettings>({ ...DEFAULT_SETTINGS });
 
@@ -155,7 +155,7 @@ export class ImagePipelineService {
           })
         )
       )
-    ).subscribe();
+    ).subscribe(() => {});
   }
 
   uploadFile(file: File) {

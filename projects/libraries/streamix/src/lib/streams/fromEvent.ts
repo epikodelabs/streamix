@@ -56,7 +56,12 @@ export function fromEvent<T extends Event = Event>(
     const receiver: Receiver<T> | undefined =
       typeof callback === "function" ? { next: callback } : callback;
 
-    const baseSub = originalSubscribe((value: T) => receiver?.next?.(value));
+    let active = false;
+    const baseSub = originalSubscribe((value: T) => {
+      if (!active) return;
+      receiver?.next?.(value);
+    });
+    active = true;
 
     if (activeCount === 0) {
       void ensureAttached();

@@ -13,8 +13,7 @@ This release introduces a complete reactive state layer as a first-class replace
 **New primitives:**
 
 - **`atom(initial)`** — writable reactive value with a known initial value. Replaces `createBehaviorSubject`.
-- **`asyncAtom()`** — writable atom without an initial value. Replaces `createSubject`.
-- **`asyncAtom({ capacity: n })`** — same, but replays the last `n` values to late subscribers. Replaces `createReplaySubject`.
+- **`atom()`** — writable atom without an initial value. Replaces `createSubject`.
 - **`derived(factory)`** — read-only atom with automatic dependency tracking. Re-evaluates when any dependency changes.
 - **`flow(stream, initial)`** — read-only atom driven by an external stream.
 - **`iterate(atom)`** — converts any atom into an async iterable for `for await...of` loops.
@@ -24,9 +23,8 @@ This release introduces a complete reactive state layer as a first-class replace
 
 | Before | After |
 |--------|-------|
-| `createSubject<T>()` | `asyncAtom<T>()` |
+| `createSubject<T>()` | `atom<T>()` |
 | `createBehaviorSubject(initial)` | `atom(initial)` |
-| `createReplaySubject(n)` | `asyncAtom<T>({ capacity: n })` |
 
 Subjects remain available for backward compatibility but are now considered legacy. New code should prefer atoms.
 

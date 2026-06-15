@@ -1,7 +1,7 @@
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { createBehaviorSubject, fromEvent, map, tap, throttle } from '@epikodelabs/streamix';
+import { atom, fromEvent, map, tap, throttle } from '@epikodelabs/streamix';
 import { onAnimationFrame, onResize } from '@epikodelabs/streamix/dom';
 import type { Subscription } from '@epikodelabs/streamix';
 
@@ -106,7 +106,7 @@ type Weather = 'sunny' | 'rainy';
 export class AppComponent implements OnInit, OnDestroy {
   @ViewChild('canvas') canvasRef!: ElementRef<HTMLCanvasElement>;
 
-  weather = createBehaviorSubject<Weather>('sunny');
+  weather = atom<Weather>('sunny');
 
   private renderer!: THREE.WebGLRenderer;
   private scene!: THREE.Scene;
@@ -136,7 +136,7 @@ export class AppComponent implements OnInit, OnDestroy {
     // Weather reaction — toggle scene elements
     this.weatherSub = this.weather.pipe(
       tap((w) => this.applyWeather(w)),
-    ).subscribe();
+    ).subscribe(() => {});
   }
 
   ngAfterViewInit(): void {
@@ -327,7 +327,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(width, height);
       })
-    ).subscribe();
+    ).subscribe(() => {});
 
     // Mouse parallax
     this.mouseSub = fromEvent(canvas, 'mousemove').pipe(
@@ -343,7 +343,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.parallaxTarget.x = x * 4;
         this.parallaxTarget.y = -y * 2;
       })
-    ).subscribe();
+    ).subscribe(() => {});
 
     this.baseCamPos = this.camera.position.clone();
   }
@@ -519,6 +519,6 @@ export class AppComponent implements OnInit, OnDestroy {
         this.controls.update();
         this.renderer.render(this.scene, this.camera);
       }),
-    ).subscribe();
+    ).subscribe(() => {});
   }
 }

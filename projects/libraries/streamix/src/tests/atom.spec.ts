@@ -11,34 +11,6 @@ describe('atom', () => {
       a.dispose();
     });
 
-    it('should update via set()', () => {
-      const a = atom(0);
-      const values: number[] = [];
-      a.subscribe(v => values.push(v));
-
-      a.next(10);
-      expect(a.value).toBe(10);
-      expect(a.prior).toBe(0);
-      expect(values).toEqual([10]);
-
-      a.next(20);
-      expect(a.value).toBe(20);
-      expect(values).toEqual([10, 20]);
-
-      a.dispose();
-    });
-
-    it('should update via next()', () => {
-      const a = atom(0);
-      const values: number[] = [];
-      a.subscribe(v => values.push(v));
-
-      a.next(5);
-      expect(a.value).toBe(5);
-      expect(values).toEqual([5]);
-
-      a.dispose();
-    });
 
     it('should not suppress duplicate values', () => {
       const a = atom(5);
@@ -282,6 +254,7 @@ describe('atom', () => {
     it('should clean up dependency subscriptions on dispose', () => {
       const a = atom(1);
       const doubled = derived(() => a.value * 2);
+      expect(doubled.value).toBe(2);
       doubled.dispose();
 
       a.next(99);

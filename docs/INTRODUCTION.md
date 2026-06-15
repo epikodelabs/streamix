@@ -62,30 +62,26 @@ for await (const value of evens) {
 Atoms are reactive values — readable, writable, and composable with `derived`. They are also streams, so they pipe and iterate like any other source.
 
 ```ts
-import { atom, asyncAtom, derived } from '@epikodelabs/streamix';
+import { atom, derived } from '@epikodelabs/streamix';
 
 const count = atom(0);         // always has a value
-const label = asyncAtom<string>(); // value arrives later
+const label = atom<string>();  // value arrives later
 
 const summary = derived(() => `count is ${count.value}`);
 
-count.set(5);
+count.next(5);
 console.log(summary.value); // "count is 5"
 
 // As a stream
 count.pipe(map(n => n * 2)).subscribe(console.log);
-
-// With replay buffer — last 10 values replayed to late subscribers
-const log = asyncAtom<string>({ capacity: 10 });
 ```
 
 **Migration from Subjects:**
 
 | Before | After |
 |--------|-------|
-| `createSubject<T>()` | `asyncAtom<T>()` |
+| `createSubject<T>()` | `atom<T>()` |
 | `createBehaviorSubject(initial)` | `atom(initial)` |
-| `createReplaySubject(n)` | `asyncAtom<T>({ capacity: n })` |
 
 ### Operators
 

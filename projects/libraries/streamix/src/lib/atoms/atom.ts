@@ -116,6 +116,20 @@ function toReceiver<T>(callback: ((value: T) => void) | Receiver<T>): Receiver<T
   return typeof callback === "function" ? { next: callback } : callback;
 }
 
+/**
+ * Subscribes to an atom and invokes the handler only for future emissions,
+ * ignoring any value that is delivered synchronously during subscription.
+ */
+function subscribeToUpdates(atom: AtomBase<any>, handler: () => void): Subscription {
+  let active = false;
+  const sub = atom.subscribe(() => {
+    if (!active) return;
+    handler();
+  });
+  active = true;
+  return sub;
+}
+
 /* ── Glitch-free propagation ── */
 
 let propagationDepth = 0;
@@ -419,41 +433,37 @@ export function flow<T>(
 /* ── atom ── */
 
 /**
- * Creates a writable atom with an initial value.
+ * Creates a writable atom.
+ *
+ * When an initial value is provided, the atom behaves like a behavior-aware
+ * primitive and is considered emitted immediately. When omitted, the atom
+ * starts empty like a Subject and emits only after the first {@link Atom.next}.
  *
  * Writable atoms can be updated via {@link Atom.next} and automatically notify
  * subscribers on change. They participate in scope tracking and dependency
  * discovery for derived atoms.
  *
- * @param initialValue - The starting value.
+ * @param initialValue - The starting value (optional).
+ * @param options - Optional atom configuration.
  * @returns A writable atom.
  *
  * @example
  * ```ts
  * const app = scope(() => {
  *   const count = atom(0);
+ *   const source = atom<number>();
  *   count.next(5);
  *   console.log(count.value); // 5
- *   return { count };
+ *   return { count, source };
  * });
  * ```
- */
-/**
- * Creates a read-only view of a writable atom from an initial value.
- *
- * This is useful when you want to expose an atom without allowing consumers
- * to mutate it directly. The underlying atom is still writable, but the
- * returned type only exposes the {@link AtomBase} interface.
- *
- * @param initialValue - The starting value.
- * @param options - Optional atom configuration.
- * @returns A read-only atom view.
  */
 export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
   const scope = getCurrentScope();
   const strobe = scope ? getScopeStrobe(scope) : undefined;
   const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
 
+  const hasInitialValue = arguments.length > 0;
   let current = initialValue as T;
   let previous = initialValue as T;
   let disposed = false;
@@ -587,15 +597,11 @@ export function atom<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
   });
 
   registerWithCurrentScope(instance);
-  markAtomAsEmitted(instance);
+  if (hasInitialValue) {
+    markAtomAsEmitted(instance);
+  }
   if (analog) {
     registerAnalogAtom(instance, flush);
-  }
-
-  // Notify scope subscribers immediately so writable atoms are
-  // considered "ready" — their value is already available.
-  for (const receiver of Array.from(subs)) {
-    receiver.next?.(current);
   }
 
   return instance;
@@ -632,242 +638,10 @@ export function atomOf<T>(initialValue: T, options?: AtomOptions): AtomBase<T> {
  * count.next(5);
  * ```
  */
-export function discrete<T>(initialValue: T, options?: AtomOptions): Atom<T> {
+export function discrete<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
   return atom(initialValue, options);
 }
 
-/* ── asyncAtom ── */
-
-/**
- * Options for creating an async atom.
- */
-export interface AsyncAtomOptions {
-  /**
-   * Maximum number of values to replay to late subscribers.
-   * Defaults to `0` (no replay). Use `Infinity` for unlimited replay.
-   */
-  capacity?: number;
-}
-
-/**
- * Async atom that buffers emissions and optionally replays them to late subscribers.
- * Unlike {@link atom}, async atoms do not require an initial value.
- *
- * @template T The type of the value held by this atom.
- */
-
-/**
- * Creates an async atom with optional replay capacity.
- *
- * Async atoms are hot atoms that do not require an initial value.
- * Values are pushed via {@link Atom.next}. Late subscribers can
- * receive buffered values based on the configured capacity.
- *
- * @param options - Configuration options.
- * @returns An async atom.
- *
- * @example
- * ```ts
- * const app = scope(() => {
- *   const count = asyncAtom<number>();
- *   count.next(5);
- *   console.log(count.value); // 5
- *   return { count };
- * });
- * ```
- */
-export function asyncAtom<T>(): Atom<T>;
-export function asyncAtom<T>(options: AsyncAtomOptions & AtomOptions): Atom<T>;
-export function asyncAtom<T>(options?: AsyncAtomOptions & AtomOptions): Atom<T> {
-  const scope = getCurrentScope();
-  const strobe = scope ? getScopeStrobe(scope) : undefined;
-  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
-
-  const capacity = options?.capacity ?? 0;
-  const isFiniteCapacity = capacity !== Infinity && capacity > 0;
-  const replay: T[] = [];
-  let replayHead = 0;
-
-  let current: T = undefined as any;
-  let previous: T = undefined as any;
-  let hasValue = false;
-  let disposed = false;
-  let dirty = false;
-  let lastNotified: T = undefined as any;
-  let error: any = undefined;
-  const disposeHandlers = new Set<() => void>();
-
-  const subs = new Set<(value: T) => void>();
-
-  const notify = (value: T) => {
-    runWithPropagation(() => {
-      for (const cb of Array.from(subs)) {
-        cb(value);
-      }
-    });
-  };
-
-  const flush = () => {
-    if (!dirty || disposed) return;
-    dirty = false;
-    if (hasValue && Object.is(lastNotified, current)) return;
-    lastNotified = current;
-    notify(current);
-  };
-
-  const pushReplay = (value: T) => {
-    if (capacity <= 0) return;
-    if (!isFiniteCapacity) {
-      replay.push(value);
-      return;
-    }
-    if (replay.length < capacity) {
-      replay.push(value);
-    } else {
-      replay[replayHead] = value;
-      replayHead = (replayHead + 1) % capacity;
-    }
-  };
-
-  const forEachReplay = (fn: (value: T) => void) => {
-    if (capacity <= 0) return;
-    if (!isFiniteCapacity) {
-      for (const value of replay) fn(value);
-      return;
-    }
-    const size = replay.length;
-    const start = size < capacity ? 0 : replayHead;
-    for (let i = 0; i < size; i++) {
-      fn(replay[(start + i) % capacity]);
-    }
-  };
-
-  const instance: Atom<T> = {
-    type: "atom",
-
-    get disposed() {
-      return disposed;
-    },
-
-    get value() {
-      if (disposed) throw new Error("Atom has been disposed");
-      if (activeFormula) {
-        activeFormula.dependencies.add(instance);
-      }
-      return current;
-    },
-
-    get safeValue() {
-      return current;
-    },
-
-    get prior() {
-      return previous;
-    },
-
-    subscribe(callback) {
-      const cb = typeof callback === 'function'
-        ? callback
-        : (value: T) => callback.next?.(value);
-
-      subs.add(cb);
-
-      // Replay buffered values to late subscribers
-      forEachReplay((value) => cb(value));
-
-      return createSubscription(() => {
-        subs.delete(cb);
-      });
-    },
-
-    pipe(...ops: Operator<any, any>[]) {
-      return pipeSource(this, ...ops);
-    },
-
-    [Symbol.asyncIterator]() {
-      return iterate(this)[Symbol.asyncIterator]();
-    },
-
-    next(value: T) {
-      if (disposed) return;
-
-      previous = current;
-      current = value;
-      const wasFirstValue = !hasValue;
-      hasValue = true;
-      pushReplay(value);
-
-      if (wasFirstValue) {
-        markAtomAsEmitted(instance);
-      }
-
-      if (analog) {
-        dirty = true;
-      } else {
-        lastNotified = current;
-        notify(value);
-      }
-    },
-
-    error(err: any) {
-      if (disposed) return;
-
-      error = err;
-      disposed = true;
-      unregisterAnalogAtom(instance);
-      for (const handler of Array.from(disposeHandlers)) {
-        try {
-          handler();
-        } catch {
-          // ignore
-        }
-      }
-      disposeHandlers.clear();
-      subs.clear();
-      replay.length = 0;
-      replayHead = 0;
-    },
-
-    dispose() {
-      if (disposed) return;
-
-      disposed = true;
-      unregisterAnalogAtom(instance);
-      for (const handler of Array.from(disposeHandlers)) {
-        try {
-          handler();
-        } catch {
-          // ignore
-        }
-      }
-      disposeHandlers.clear();
-      subs.clear();
-      // Keep the replay buffer so late subscribers/iterators can still receive
-      // the completed response.
-    }
-  };
-
-  Object.defineProperty(instance, "_error", {
-    get() {
-      return error;
-    },
-    enumerable: false,
-  });
-
-  Object.defineProperty(instance, "_onDispose", {
-    get() {
-      return disposeHandlers;
-    },
-    enumerable: false,
-  });
-
-  registerWithCurrentScope(instance);
-  if (analog) {
-    registerAnalogAtom(instance, flush);
-  }
-
-  return instance;
-}
 
 /* ── derived ── */
 
@@ -903,6 +677,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   let current: T;
   let previous: T;
   let disposed = false;
+  let initialized = false;
   let running = false;
   let dirty = false;
   const subs = new Set<(value: T) => void>();
@@ -911,6 +686,18 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
 
   const notify = () => {
     for (const cb of Array.from(subs)) cb(current);
+  };
+
+  const ensureInit = () => {
+    if (initialized || disposed) return;
+    initialized = true;
+    current = run();
+    previous = current;
+    if (analog) {
+      dirty = true;
+    } else {
+      notifyDerivedSubscribers(notify);
+    }
   };
 
   const run = (): T => {
@@ -940,12 +727,13 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       }
     }
 
-    // Subscribe to new deps
+    // Subscribe to new deps, ignoring the synchronous replay that some atoms
+    // emit on subscription because `run()` already captured their current value.
     for (const dep of dependencies) {
       if (!depSubscriptions.has(dep)) {
         depSubscriptions.set(
           dep,
-          dep.subscribe(() => {
+          subscribeToUpdates(dep, () => {
             if (disposed) return;
             const next = run();
             previous = current;
@@ -974,9 +762,6 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     run,
   };
 
-  current = run();
-  previous = current;
-
   const instance: AtomBase<T> = {
     type: "atom",
 
@@ -989,14 +774,17 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       if (activeFormula) {
         activeFormula.dependencies.add(instance);
       }
+      ensureInit();
       return current;
     },
 
     get safeValue() {
+      ensureInit();
       return current;
     },
 
     get prior() {
+      ensureInit();
       return previous;
     },
 
@@ -1005,7 +793,9 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
         ? callback
         : (value: T) => callback.next?.(value);
 
+      ensureInit();
       subs.add(cb);
+
       return createSubscription(() => {
         subs.delete(cb);
       });
@@ -1021,6 +811,9 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
 
     dispose() {
       if (disposed) return;
+      // Compute the final value before tearing down so that `safeValue` remains
+      // meaningful even if the derived atom was never read or subscribed to.
+      ensureInit();
       disposed = true;
       unregisterAnalogAtom(instance);
       for (const sub of depSubscriptions.values()) {
@@ -1032,15 +825,8 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   };
 
   registerWithCurrentScope(instance);
-  markAtomAsEmitted(instance);
   if (analog) {
     registerAnalogAtom(instance, flush);
-  }
-
-  // Notify scope subscribers immediately so derived atoms are
-  // considered "ready" — their value is already available.
-  for (const cb of Array.from(subs)) {
-    cb(current);
   }
 
   return instance;

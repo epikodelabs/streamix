@@ -144,18 +144,17 @@ for await (const ingredient of potionRecipe) {
 
 Atoms are the primary reactive primitive in streamix.
 
-* `atom()` — writable reactive value
-* `asyncAtom()` — hot reactive value without initial state
+* `atom(initial?)` — writable reactive value (omit the initial value for a hot atom)
 * `derived()` — computed reactive value
 * `flow()` — stream-backed reactive value
 
 Scopes provide lifecycle management and automatic disposal.
 
 ```typescript
-import { atom, asyncAtom, derived, scope } from '@epikodelabs/streamix';
+import { atom, derived, scope } from '@epikodelabs/streamix';
 
 const count = atom(0);
-const events = asyncAtom<string>();
+const events = atom<string>();
 
 const doubled = derived(() => count.value * 2);
 
@@ -165,8 +164,8 @@ const app = scope(() => ({
   doubled
 }));
 
-count.set(5);
-events.set('hello');
+count.next(5);
+events.next('hello')
 
 console.log(app.doubled.value);
 
@@ -189,9 +188,8 @@ for await (const value of iterate(a)) {
 
 | Subject                          | Atom Equivalent           |
 | -------------------------------- | ------------------------- |
-| `createSubject()`                | `asyncAtom()`             |
+| `createSubject()`                | `atom()`                  |
 | `createBehaviorSubject(initial)` | `atom(initial)`           |
-| `createReplaySubject(capacity)`  | `asyncAtom({ capacity })` |
 
 ---
 
@@ -254,9 +252,9 @@ Streams are pull-based by default, meaning work is performed only when values ar
 Subjects remain available for backward compatibility.
 
 ```typescript
-import { createSubject } from '@epikodelabs/streamix';
+import { atom } from '@epikodelabs/streamix';
 
-const chat = createSubject<string>();
+const chat = atom<string>();
 ```
 
 New applications should generally prefer Atoms.
@@ -282,8 +280,7 @@ projects/libraries/streamix/
 
 The atoms API is now a complete replacement for imperative Subjects:
 
-* **`asyncAtom()`** — hot atom without initial value
-* **`asyncAtom({ capacity: n })`** — replay last `n` values
+* **`atom()`** — hot atom without initial value
 * **`iterate(atom)`** — convert any atom to async iterable
 
 Subjects remain available for compatibility but are now considered legacy.

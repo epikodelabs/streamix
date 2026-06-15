@@ -16,7 +16,7 @@ if (header) {
       filter((scrolled) => scrolled !== header.classList.contains('scrolled')),
       tap((scrolled) => header.classList.toggle('scrolled', scrolled))
     )
-    .subscribe();
+    .subscribe(() => {});
 }
 
 /* ─── 2. Hero parallax + text reveal ─── */
@@ -32,7 +32,7 @@ if (heroMedia) {
         heroMedia.style.transform = `scale(${scale}) translateY(${translateY}px)`;
       })
     )
-    .subscribe();
+    .subscribe(() => {});
 }
 
 // Character-by-character text reveal
@@ -53,7 +53,7 @@ animateTextElements.forEach((el) => {
       filter((visible) => visible),
       tap(() => el.classList.add('visible'))
     )
-    .subscribe();
+    .subscribe(() => {});
 });
 
 /* ─── 3. Scroll reveal ─── */
@@ -66,7 +66,7 @@ revealElements.forEach((el, index) => {
       filter((visible) => visible),
       tap(() => el.classList.add('visible'))
     )
-    .subscribe();
+    .subscribe(() => {});
 });
 
 /* ─── 4. Destination carousel ─── */
@@ -100,7 +100,7 @@ dots.forEach((dot, i) => {
         startAutoAdvance();
       })
     )
-    .subscribe();
+    .subscribe(() => {});
 });
 
 startAutoAdvance();
@@ -123,7 +123,7 @@ postCards.forEach((card) => {
         el.style.transform = `translateY(-6px) perspective(800px) rotateX(${-y * 4}deg) rotateY(${x * 4}deg)`;
       })
     )
-    .subscribe();
+    .subscribe(() => {});
 
   fromEvent(el, 'mouseleave')
     .pipe(
@@ -131,7 +131,7 @@ postCards.forEach((card) => {
         el.style.transform = '';
       })
     )
-    .subscribe();
+    .subscribe(() => {});
 });
 
 /* ─── 6. Newsletter focus effects ─── */
@@ -146,17 +146,17 @@ if (newsletterInput) {
     fromEvent(newsletterInput, 'blur').pipe(tap(() => {
       newsletterInput.style.borderColor = '';
     }))
-  ).subscribe();
+  ).subscribe(() => {});
 }
 
 if (newsletterBtn) {
   fromEvent(newsletterBtn, 'mouseenter')
     .pipe(tap(() => newsletterBtn.style.transform = 'translateY(-2px)'))
-    .subscribe();
+    .subscribe(() => {});
 
   fromEvent(newsletterBtn, 'mouseleave')
     .pipe(tap(() => newsletterBtn.style.transform = ''))
-    .subscribe();
+    .subscribe(() => {});
 }
 
 /* ─── 7. Smooth anchor scroll offset for fixed header ─── */
@@ -173,5 +173,5 @@ document.querySelectorAll('a[href^="#"]').forEach((link) => {
         }
       })
     )
-    .subscribe();
+    .subscribe(() => {});
 });

@@ -1,9 +1,9 @@
 import { DecimalPipe } from '@angular/common';
 import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import {
+    atom,
     bufferCount,
     combineLatest,
-    createSubject,
     debounce,
     filter,
     finalize,
@@ -480,14 +480,14 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
 
   // Buffer
   batches: string[][] = [];
-  private clickSubject = createSubject<string>();
+  private clickSubject = atom<string>();
 
   // Combined
   streamAValue = 30;
   streamBValue = 60;
   combinedValue = 18;
-  private streamA = createSubject<number>();
-  private streamB = createSubject<number>();
+  private streamA = atom<number>();
+  private streamB = atom<number>();
 
   // juliabrot
   juliaGenerating = false;
@@ -597,7 +597,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         this.juliaGenerating = false;
         this.cdr.detectChanges();
       })
-    ).subscribe();
+    ).subscribe(() => {});
 
     this.subscriptions.push(sub);
   }
@@ -628,7 +628,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
           .join(' ');
         this.cdr.detectChanges();
       })
-    ).subscribe();
+    ).subscribe(() => {});
     this.subscriptions.push(s);
   }
 
@@ -643,7 +643,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     // Raw counter
     const rawSub = value$.pipe(
       tap(() => { this.rawSearchCount++; this.cdr.detectChanges(); })
-    ).subscribe();
+    ).subscribe(() => {});
     this.subscriptions.push(rawSub);
 
     // Debounced results
@@ -656,7 +656,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         if (this.searchResults.length > 5) this.searchResults.pop();
         this.cdr.detectChanges();
       })
-    ).subscribe();
+    ).subscribe(() => {});
     this.subscriptions.push(resultSub);
   }
 
@@ -668,7 +668,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         if (this.batches.length > 8) this.batches.pop();
         this.cdr.detectChanges();
       })
-    ).subscribe();
+    ).subscribe(() => {});
     this.subscriptions.push(s);
   }
 
@@ -676,7 +676,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     const s = combineLatest(this.streamA, this.streamB).pipe(
       map(([a, b]) => (a * b) / 100),
       tap(v => { this.combinedValue = v; this.cdr.detectChanges(); })
-    ).subscribe();
+    ).subscribe(() => {});
     this.subscriptions.push(s);
   }
 
@@ -708,7 +708,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
       tap(msg => this.pushLog(msg, 'combined'))
     );
 
-    const s = merge(metricLog$, searchLog$, bufferLog$, combinedLog$).subscribe();
+    const s = merge(metricLog$, searchLog$, bufferLog$, combinedLog$).subscribe(() => {});
     this.subscriptions.push(s);
   }
 

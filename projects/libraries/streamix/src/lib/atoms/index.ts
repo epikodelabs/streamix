@@ -16,7 +16,7 @@
  *   return { count, doubled };
  * });
  *
- * app.count.set(5);
+ * app.count.next(5);
  * console.log(app.doubled.value); // 10
  * app.dispose();
  * ```

@@ -15,7 +15,7 @@
  *                    utils.outbox.send('main', topic, event) pushes live events
  */
 import { Injectable } from '@angular/core';
-import { createBehaviorSubject, createSubject } from '@epikodelabs/streamix';
+import { atom } from '@epikodelabs/streamix';
 import { actor, ActorBusMessage, coroutine, main, registerActorRequestHandler, WorkerUtils } from '@epikodelabs/streamix/coroutines';
 
 export type Order = { id: string; item: string; customer: string };
@@ -345,20 +345,20 @@ const cashier = actor('cashier', async function cashier(
 
 @Injectable({ providedIn: 'root' })
 export class KitchenService {
-  private eventsSubject = createSubject<KitchenEvent>();
+  private eventsSubject = atom<KitchenEvent>();
   events$ = this.eventsSubject;
 
-  private ovensSubject = createBehaviorSubject<OvenState[]>([
+  private ovensSubject = atom<OvenState[]>([
     { id: 'Oven #1', order: null, stage: null },
     { id: 'Oven #2', order: null, stage: null },
     { id: 'Oven #3', order: null, stage: null },
   ]);
   ovens$ = this.ovensSubject;
 
-  private cancellableOrdersSubject = createBehaviorSubject<Order[]>([]);
+  private cancellableOrdersSubject = atom<Order[]>([]);
   cancellableOrders$ = this.cancellableOrdersSubject;
 
-  private statsSubject = createBehaviorSubject<KitchenStats>({
+  private statsSubject = atom<KitchenStats>({
     completed: 0,
     cancelled: 0,
     revenue: 0,
@@ -366,7 +366,7 @@ export class KitchenService {
   });
   stats$ = this.statsSubject;
 
-  private logSubject = createSubject<string>();
+  private logSubject = atom<string>();
   log$ = this.logSubject;
 
   private running = false;

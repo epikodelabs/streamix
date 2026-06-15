@@ -1,4 +1,4 @@
-import { createSubject } from '@epikodelabs/streamix';
+import { atom } from '@epikodelabs/streamix';
 import { actor, ActorBusMessage, main, WorkerUtils } from '@epikodelabs/streamix/coroutines';
 
 export type PlayerId = 'user' | 'rival';
@@ -878,7 +878,7 @@ const gameActor = actor(
 );
 
 export class TerritoryWarsService {
-  private readonly stateSubject = createSubject<TerritoryWarsState>();
+  private readonly stateSubject = atom<TerritoryWarsState>();
   readonly state$ = this.stateSubject;
 
   private readonly unsubscribeInbox: () => void;

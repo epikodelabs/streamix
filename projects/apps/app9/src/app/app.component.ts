@@ -41,7 +41,7 @@ type Tab = 'tree' | 'state';
               <label [class.lit]="personal.name.value">Codename</label>
               <input
                 [value]="personal.name.value"
-                (input)="personal.name.set($any($event.target).value)"
+                (input)="personal.name.next($any($event.target).value)"
                 placeholder="Enter codename"
               />
               <div class="pulse-bar" [style.width.%]="personal.name.value.length * 5"></div>
@@ -50,7 +50,7 @@ type Tab = 'tree' | 'state';
               <label [class.lit]="personal.email.value">Channel</label>
               <input
                 [value]="personal.email.value"
-                (input)="personal.email.set($any($event.target).value)"
+                (input)="personal.email.next($any($event.target).value)"
                 placeholder="secure@node.net"
               />
               <div class="pulse-bar" [style.width.%]="personal.email.value.length * 3"></div>
@@ -64,7 +64,7 @@ type Tab = 'tree' | 'state';
               <label [class.lit]="address.street.value">Sector</label>
               <input
                 [value]="address.street.value"
-                (input)="address.street.set($any($event.target).value)"
+                (input)="address.street.next($any($event.target).value)"
                 placeholder="Sector 7-G"
               />
             </div>
@@ -75,7 +75,7 @@ type Tab = 'tree' | 'state';
               } @else {
                 <select
                   [value]="address.country.value"
-                  (change)="address.country.set($any($event.target).value)"
+                  (change)="address.country.next($any($event.target).value)"
                 >
                   <option value="">Select zone</option>
                   @for (c of wizard.async.countries.value; track c) {
@@ -94,7 +94,7 @@ type Tab = 'tree' | 'state';
                 <input
                   type="checkbox"
                   [checked]="preferences.notifications.value"
-                  (change)="preferences.notifications.set($any($event.target).checked)"
+                  (change)="preferences.notifications.next($any($event.target).checked)"
                 />
                 <span class="toggle-glow" [class.on]="preferences.notifications.value"></span>
                 <span>Signal beacon</span>
@@ -110,7 +110,7 @@ type Tab = 'tree' | 'state';
                       name="theme"
                       [value]="opt"
                       [checked]="preferences.theme.value === opt"
-                      (change)="preferences.theme.set(opt)"
+                      (change)="preferences.theme.next(opt)"
                     />
                     <span class="radio-glow" [class.on]="preferences.theme.value === opt"></span>
                     <span>{{ opt }}</span>
@@ -234,7 +234,7 @@ type Tab = 'tree' | 'state';
       <!-- Navigation -->
       <footer class="nav">
         <button
-          (click)="wizard.step.set(wizard.step.value - 1)"
+          (click)="wizard.step.next(wizard.step.value - 1)"
           [disabled]="wizard.step.value === 0"
         >← Back</button>
         <div class="step-dots">
@@ -243,7 +243,7 @@ type Tab = 'tree' | 'state';
           }
         </div>
         <button
-          (click)="wizard.step.set(wizard.step.value + 1)"
+          (click)="wizard.step.next(wizard.step.value + 1)"
           [disabled]="wizard.step.value === 2"
         >Next →</button>
       </footer>

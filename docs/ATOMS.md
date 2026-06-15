@@ -41,56 +41,26 @@ Internal tracking remains separate from public structure.
 
 ## API
 
-### `atom(initialValue)`
+### `atom(initialValue?)`
 
-Creates a writable reactive state node.
+Creates a writable reactive state node. With an initial value it behaves like a behavior-aware primitive; without one it starts empty like a Subject.
 
 ```ts
 const count = atom(0);
+const source = atom<number>(); // starts empty (like a Subject)
 ```
 
 ```ts
-count.value;   // current value
-count.prior;   // previous value
-count.set(10); // update value
-```
-
-Subscribe to changes:
-
-```ts
-const sub = count.subscribe(v => console.log(v));
-count.set(10);
-sub.unsubscribe();
-```
-
-Dispose:
-
-```ts
-count.dispose();
-```
-
----
-
-### `atom(initialValue?)`
-
-Creates a hot, writable atom. If no initial value is provided, it starts in an empty state, similar to a Subject.
-
-```ts
-const count = atom<number>();           // Starts with no initial value (like a Subject)
-const withInitial = atom(0);            // Starts with an initial value
-```
-
-```ts
-count.set(10);
-count.value;   // 10
-count.prior;   // undefined (no initial value)
+count.value;    // current value
+count.prior;    // previous value
+count.next(10); // update value
 ```
 
 Subscribe to changes:
 
 ```ts
 const sub = count.subscribe(v => console.log(v));
-count.set(10);
+count.next(10);
 sub.unsubscribe();
 ```
 
@@ -107,7 +77,7 @@ count.dispose();
 Creates a reactive state node connected to a stream.
 
 ```ts
-const source = createSubject<number>();
+const source = atom<number>();
 const count = flow(source.pipe(startWith(0)));
 ```
 
@@ -144,7 +114,7 @@ const full = derived(() => `${first.value} ${last.value}`);
 
 ```ts
 full.value; // 'Ada Lovelace'
-first.set('Grace');
+first.next('Grace');
 full.value; // 'Grace Lovelace'
 ```
 
@@ -164,8 +134,8 @@ Creates an async iterable from any atom. Yields the current value immediately, t
 import { atom, iterate } from '@epikodelabs/streamix';
 
 const a = atom(0);
-setTimeout(() => a.set(1), 10);
-setTimeout(() => a.set(2), 20);
+setTimeout(() => a.next(1), 10);
+setTimeout(() => a.next(2), 20);
 setTimeout(() => a.dispose(), 30);
 
 for await (const value of iterate(a)) {

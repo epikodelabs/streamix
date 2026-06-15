@@ -20,15 +20,16 @@ function firstValue<T>(stream: any, timeoutMs = 250): Promise<T> {
       timeoutMs
     );
 
-    const sub = stream.subscribe({
+    let sub: any;
+    sub = stream.subscribe({
       next: (v: T) => {
         clearTimeout(timeoutId);
-        sub.unsubscribe();
+        sub?.unsubscribe();
         resolve(v);
       },
       error: (e: any) => {
         clearTimeout(timeoutId);
-        sub.unsubscribe();
+        sub?.unsubscribe();
         reject(e);
       },
     });

@@ -8,7 +8,7 @@ Real-time operator demos powered by Streamix.
 |---------|-----------|
 | Live Metrics | `interval` + `scan` + `tap` |
 | Search Stream | `fromEvent` + `map` + `debounce` + `filter` |
-| Event Buffer | `createSubject` + `bufferCount` + `merge` |
+| Event Buffer | `atom` + `bufferCount` + `merge` |
 | Combined Stream | `combineLatest` + `map` |
 | Activity Log | `merge` + `tap` + `throttle` |
 | Julia Set (Non-optimized) | `range` + `map` + `bufferCount` + `delay` + `finalize` |
