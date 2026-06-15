@@ -70,51 +70,6 @@ pnpm add @epikodelabs/streamix
 
 ## ⚡ Quick Start
 
-### Reactive State with Atoms
-
-```typescript
-import { atom, derived } from '@epikodelabs/streamix';
-
-const count = atom(0);
-
-const doubled = derived(() => count.value * 2);
-
-count.set(5);
-
-console.log(doubled.value); // 10
-```
-
-### Scope-Based Lifecycle
-
-```typescript
-import { atom, scope } from '@epikodelabs/streamix';
-
-const app = scope(() => {
-  const count = atom(0);
-
-  return { count };
-});
-
-app.count.set(10);
-
-app.dispose();
-```
-
-### Browser-Side Concurrency
-
-```typescript
-import { compute } from '@epikodelabs/streamix/coroutines';
-
-const primes = compute(async function* () {
-  let n = 2;
-
-  while (true) {
-    while (!isPrime(n)) n++;
-    yield n++;
-  }
-});
-```
-
 ### Stream Processing
 
 ```typescript
@@ -134,6 +89,21 @@ const potionRecipe = range(1, 20).pipe(
 for await (const ingredient of potionRecipe) {
   console.log('Adding to cauldron:', ingredient);
 }
+```
+
+### Browser-Side Concurrency
+
+```typescript
+import { compute } from '@epikodelabs/streamix/coroutines';
+
+const primes = compute(async function* () {
+  let n = 2;
+
+  while (true) {
+    while (!isPrime(n)) n++;
+    yield n++;
+  }
+});
 ```
 
 ---

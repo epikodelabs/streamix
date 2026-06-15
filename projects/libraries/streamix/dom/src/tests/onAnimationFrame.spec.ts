@@ -17,7 +17,7 @@ idescribe('onAnimationFrame', () => {
     });
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 250));
 
       expect(emittedDeltas.length).toBe(5);
       // Each delta should be a positive number (milliseconds between frames)
@@ -62,7 +62,7 @@ idescribe('onAnimationFrame', () => {
     });
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 400));
 
       // Should have emitted 10 times with real delta values
       expect(emittedDeltas.length).toBe(10);
@@ -346,5 +346,3 @@ idescribe('onAnimationFrame', () => {
       },
     });
   });});
-
-

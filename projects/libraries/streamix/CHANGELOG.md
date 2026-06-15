@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.48
+
+- **Feature Complete**: This release marks the final feature-complete version of the 2.x series. The API is now considered stable and will enter a long-term support (LTS) phase, receiving only critical bug fixes. Future feature development and breaking changes will be targeted for the 3.x series.
+
 ## 2.0.46
 
 - Reworked coroutines into a first-class concurrency layer for streamix: `compute()` now makes worker-pool offloading practical for real workloads, `compose()` lets whole background pipelines run as one unit, and `actor()` adds long-lived stateful workers with structured messaging.
