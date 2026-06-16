@@ -1,6 +1,5 @@
-import { type MaybePromise, type Operator } from "./operator";
-import { createSubscription, type Subscription } from "./subscription";
 import { iterate } from "./iterate";
+import { type MaybePromise, type Operator } from "./operator";
 import { pipe as pipeSource } from "./pipe";
 import {
   getCurrentScope,
@@ -10,6 +9,7 @@ import {
   registerWithCurrentScope,
   unregisterAnalogAtom,
 } from "./scope";
+import { createSubscription, type Subscription } from "./subscription";
 
 /**
  * Common options for atom factories.
