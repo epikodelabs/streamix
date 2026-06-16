@@ -1,4 +1,4 @@
-import {flow, iterate, retry} from '@epikodelabs/streamix';
+import { flow, iterate, retry } from '@epikodelabs/streamix';
 
 const sleep = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -23,10 +23,10 @@ describe('retry', () => {
     const atom = retry(factory, 3, 1000);
 
     for await (const value of iterate(atom)) {
-      if (value !== undefined) result.push(value);
+      result.push(value);
     }
 
-    expect(result).toEqual([1, 2, 3, 4]);
+    expect(result).toEqual([1, 3, 4]);
     expect(factory).toHaveBeenCalledTimes(2);
   });
 
@@ -42,7 +42,7 @@ describe('retry', () => {
     const atom = retry(factory, 3, 1000);
 
     for await (const value of iterate(atom)) {
-      if (value !== undefined) result.push(value);
+      result.push(value);
     }
 
     expect(result).toEqual([1, 2]);
@@ -61,7 +61,7 @@ describe('retry', () => {
 
     try {
       for await (const value of iterate(atom)) {
-        if (value !== undefined) result.push(value);
+        result.push(value);
       }
     } catch (error: any) {
       result.push(error.message);
@@ -128,13 +128,13 @@ describe('retry', () => {
 
     try {
       for await (const value of iterate(atom)) {
-        if (value !== undefined) result.push(value);
+        result.push(value);
       }
     } catch {
       // ignore
     }
 
-    expect(result).toEqual([1, 2, 3, 4]);
+    expect(result).toEqual([1, 3, 4]);
   });
 
   it('should support promise-like options and a promise-produced plain value', async () => {
@@ -144,7 +144,7 @@ describe('retry', () => {
     const atom = retry(factory, Promise.resolve(0), undefined as any);
 
     for await (const value of iterate(atom)) {
-      if (value !== undefined) result.push(value);
+      result.push(value);
     }
 
     expect(result).toEqual([5]);
@@ -276,7 +276,7 @@ describe('retry', () => {
     const result: number[] = [];
     void (async () => {
       for await (const value of iterate(retry(factory, 1, delayPromise))) {
-        if (value !== undefined) result.push(value);
+        result.push(value);
       }
     })();
 

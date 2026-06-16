@@ -1,5 +1,6 @@
 import { atom, bufferUntil, iterate, pipe } from '@epikodelabs/streamix';
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("bufferUntil", () => {
@@ -178,6 +179,8 @@ describe("bufferUntil", () => {
 
     const buffered = pipe(source, bufferUntil(notifier));
     const it = iterate(buffered)[Symbol.asyncIterator]();
+
+    await sleep(50);
 
     source.next(1);
     notifier.next();
