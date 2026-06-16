@@ -26,7 +26,7 @@ describe('retry', () => {
       result.push(value);
     }
 
-    expect(result).toEqual([1, 3, 4]);
+    expect(result).toEqual([1, 2, 3, 4]);
     expect(factory).toHaveBeenCalledTimes(2);
   });
 
@@ -134,7 +134,7 @@ describe('retry', () => {
       // ignore
     }
 
-    expect(result).toEqual([1, 3, 4]);
+    expect(result).toEqual([1, 2, 3, 4]);
   });
 
   it('should support promise-like options and a promise-produced plain value', async () => {
