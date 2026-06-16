@@ -15,7 +15,7 @@ import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
  */
 export const throttle = <T = any>(duration: MaybePromise<number>) =>
   createPushOperator<T>('throttle', (source, output) => {
-    let lastEmit = 0;
+    let lastEmit = -Infinity; // Initialize to -Infinity to ensure the first value is always emitted as a leading value
     let pendingResult: IteratorResult<T> | undefined;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let resolvedDuration: number | undefined = undefined;
@@ -34,11 +34,8 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
       if (pendingResult !== undefined) {
         output.push(pendingResult.value);
         pendingResult = undefined;
-        // Use the scheduled expiry time rather than Date.now() to avoid clock
-        // drift: if the JS event loop fires the callback late, the next window
-        // would start from the wrong baseline and incorrectly gate values that
-        // arrived after the intended boundary.
-        lastEmit = lastEmit + resolvedDuration!;
+        // After a trailing emit, the cooldown should start from now.
+        lastEmit = Date.now();
       }
       timer = null;
     };

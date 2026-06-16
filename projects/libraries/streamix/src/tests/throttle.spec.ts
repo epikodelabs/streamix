@@ -1,4 +1,4 @@
-import {atom, iterate, pipe, throttle, type Atom} from '@epikodelabs/streamix';
+import { atom, iterate, pipe, throttle, type Atom } from '@epikodelabs/streamix';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -28,33 +28,30 @@ describe('throttle', () => {
 
   it('should complete after source completes', async () => {
     const subject: Atom<any> = atom<number>();
-    let completed = false;
 
-    (async () => {
+    const reader = (async () => {
       for await (const _ of iterate(pipe(subject, throttle<number>(50)))) {
         void _;
       }
-      completed = true;
     })();
 
     subject.next(1);
     subject.next(2);
     subject.dispose();
 
-    await sleep(100);
-
-    expect(completed).toBe(true);
+    await reader; // This will resolve when the loop completes.
   });
 
   it('should forward errors from the source', async () => {
     const subject: Atom<any> = atom<number>();
     let caught: any = null;
 
-    (async () => {
+    const reader = (async () => {
       try {
         for await (const _ of iterate(pipe(subject, throttle<number>(50)))) {
           void _;
         }
+        fail('The promise should have been rejected');
       } catch (err) {
         caught = err;
       }
@@ -63,7 +60,7 @@ describe('throttle', () => {
     const error = new Error('test error');
     subject.error(error);
 
-    await sleep(50);
+    await reader;
 
     expect(caught).toBe(error);
   });
@@ -102,47 +99,56 @@ describe('throttle', () => {
     subject.next(3);
     subject.dispose();
 
-    await reader;
-    expect(output).toEqual([1, 2, 3]);
+    await reader; // Wait for the stream to finish
+    expect(output).toEqual([1, 2, 3]); // Assert the final output
   });
 
   it('should not throttle when duration is 0', async () => {
     const output: number[] = [];
     const subject: Atom<any> = atom<number>();
+
     const reader = (async () => {
       for await (const v of iterate(pipe(subject, throttle<number>(0)))) {
         output.push(v);
       }
     })();
 
+    await sleep(50);
+
     subject.next(1);
     subject.next(2);
     subject.next(3);
+    
     subject.dispose();
-
     await reader;
+
     expect(output).toEqual([1, 2, 3]);
   });
 
-  it('should support promised duration', async () => {
+  it('should wait for promised duration before starting throttle window', async () => {
     const output: number[] = [];
-    const subject: Atom<any> = atom<number>();
+    const subject = atom<number>();
+
+    const duration = new Promise<number>((resolve) =>
+      setTimeout(() => resolve(100), 50)
+    );
+
     const reader = (async () => {
-      for await (const v of iterate(pipe(subject, throttle<number>(Promise.resolve(200))))) {
+      for await (const v of iterate(pipe(subject, throttle(duration)))) {
         output.push(v);
       }
     })();
 
+    await sleep(50);
+     // Ensure the duration promise hasn't resolved yet
     subject.next(1);
     subject.next(2);
-    await sleep(20);
-    subject.next(3);
+
+    await sleep(200);
+
     subject.dispose();
-
     await reader;
-
-    expect(output[0]).toBe(1);
-    expect(output).toContain(3);
-    expect(output.length).toBe(2);
+    
+    expect(output).toEqual([1, 2]);
   });
 });
