@@ -1,11 +1,6 @@
-import { DONE, type MaybePromise } from "../atoms";
-
-type Observer<T> = {
-  next: (value: T) => MaybePromise;
-  error: (err: any) => MaybePromise;
-  complete: () => MaybePromise;
-  readonly disposed: boolean;
-};
+import {
+  DONE
+} from "../atoms";
 import {
   AsyncIteratorState,
   asyncPull,
@@ -21,8 +16,8 @@ import {
 export type AsyncPushable<R> = AsyncIterator<R> & AsyncIterable<R> & {
   push(value: R): void | Promise<void>;
   error(err: any): void;
-  disposed: boolean;
   dispose(): void;
+  get disposed(): boolean;
 };
 
 /**
@@ -33,12 +28,12 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
   const state = new AsyncIteratorState<R>();
 
   // Create the receiver that will handle pushes
-  const receiver: Observer<R> = {
+  const receiver = {
     next(value: R) {
       return pushValue(state, iterator, value, iterator.__onPush);
     },
     
-    complete() {
+    dispose() {
       pushComplete(state, iterator, iterator.__onPush);
     },
     
@@ -59,8 +54,8 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
     __onPush?: () => void;
     push?: any;
     error?: any;
+    dispose?: any;
     disposed?: boolean;
-    dispose?: () => void;
   } = {
     next() {
       return asyncPull(state, iterator);
@@ -105,20 +100,13 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
     receiver.error(err);
   };
 
-  iterator.disposed = false;
-
   iterator.dispose = function() {
-    if (iterator.disposed) return;
-    iterator.disposed = true;
-    state.markCompleted();
-    if (iterator.__onPush) {
-      try {
-        iterator.__onPush();
-      } catch {
-        // ignore
-      }
-    }
+    receiver.dispose();
   };
+
+  Object.defineProperty(iterator, "disposed", {
+    get: () => receiver.disposed
+  });
 
   // Add optional hook for push notifications
   iterator.__onPush = () => {};
