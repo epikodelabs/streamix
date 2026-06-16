@@ -75,7 +75,10 @@ export function iterate<T>(source: AtomBase<T> | AsyncIterable<T>): AsyncIterabl
           resolveNext = null;
           rejectNext = null;
           r(err);
-        } else if (buffer.length === 0) {
+        } else {
+          // When resolveNext is set the buffer is always empty (values
+          // resolve the promise instead of buffering), so we can safely
+          // complete immediately.
           done = true;
           resolveNext({ value: undefined as any, done: true });
           resolveNext = null;
@@ -105,18 +108,27 @@ export function iterate<T>(source: AtomBase<T> | AsyncIterable<T>): AsyncIterabl
       ensureInit();
       if (done) return { value: undefined as any, done: true };
 
-      const err = checkError!();
-      if (err) {
-        await finish!();
-        throw err;
-      }
-
+      // Drain buffered values first, even if the atom has errored or been
+      // disposed, so that no values are silently dropped before an error.
       if (buffer.length > 0) {
         const val = buffer.shift()!;
         if (atom.disposed && buffer.length === 0) {
-          done = true;
+          const err = checkError!();
+          if (!err) {
+            done = true;
+          }
+          // If there *is* an error, don't set done yet — the next call
+          // to next() will surface it.
         }
         return { value: val, done: false };
+      }
+
+      // Buffer is empty — surface any pending error.
+      const err = checkError!();
+      if (err) {
+        if (finish) await finish();
+        done = true;
+        throw err;
       }
 
       if (atom.disposed) {
@@ -131,7 +143,8 @@ export function iterate<T>(source: AtomBase<T> | AsyncIterable<T>): AsyncIterabl
     },
     async return() {
       ensureInit();
-      await finish!();
+      if (finish) await finish();
+      done = true;
       return { value: undefined as any, done: true };
     },
   };
@@ -139,16 +152,24 @@ export function iterate<T>(source: AtomBase<T> | AsyncIterable<T>): AsyncIterabl
   (iterator as any).__tryNext = (): IteratorResult<T> | null => {
     ensureInit();
     if (done) return { value: undefined as any, done: true };
-    const err = checkError!();
-    if (err) {
-      throw err;
-    }
+
+    // Drain buffered values first
     if (buffer.length > 0) {
       const val = buffer.shift()!;
       if (atom.disposed && buffer.length === 0) {
-        done = true;
+        const err = checkError!();
+        if (!err) {
+          done = true;
+        }
       }
       return { value: val, done: false };
+    }
+
+    // Buffer is empty — surface any pending error.
+    const err = checkError!();
+    if (err) {
+      done = true;
+      throw err;
     }
     if (atom.disposed) {
       done = true;

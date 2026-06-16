@@ -20,81 +20,85 @@ export function retry<T = any>(
   delay: MaybePromise<number> = 1000
 ): AtomBase<T> {
   return flow<T>(async function* (signal?: AbortSignal) {
-      const resolvedMaxRetries = isPromiseLike(maxRetries) ? await maxRetries : maxRetries;
-      let resolvedDelayValue: number | undefined;
+    const resolvedMaxRetries = isPromiseLike(maxRetries) ? await maxRetries : maxRetries;
+    let resolvedDelayValue: number | undefined;
 
-      const resolveDelayValue = async () => {
-        if (resolvedDelayValue !== undefined) return resolvedDelayValue;
-        if (delay === undefined) return undefined;
-        resolvedDelayValue = isPromiseLike(delay) ? await delay : delay;
-        return resolvedDelayValue;
-      };
+    const resolveDelayValue = async () => {
+      if (resolvedDelayValue !== undefined) return resolvedDelayValue;
+      if (delay === undefined) return undefined;
+      resolvedDelayValue = isPromiseLike(delay) ? await delay : delay;
+      return resolvedDelayValue;
+    };
 
-      let retryCount = 0;
-      let lastError: Error | null = null;
+    let retryCount = 0;
+    let lastError: Error | null = null;
 
-      while (retryCount <= resolvedMaxRetries) {
-        let iterator: AsyncIterator<T> | null = null;
+    while (retryCount <= resolvedMaxRetries) {
+      let iterator: AsyncIterator<T> | null = null;
 
+      try {
+        let produced: PipeInput<T>;
         try {
-          let produced: PipeInput<T>;
-          try {
-            produced = factory();
-          } catch (factoryError) {
-            throw factoryError instanceof Error ? factoryError : new Error(String(factoryError));
-          }
+          produced = factory();
+        } catch (factoryError) {
+          throw factoryError instanceof Error ? factoryError : new Error(String(factoryError));
+        }
 
-          const source = toAsyncIterable(produced);
-          iterator = source[Symbol.asyncIterator]() as AsyncIterator<T>;
+        const source = toAsyncIterable(produced);
+        iterator = source[Symbol.asyncIterator]() as AsyncIterator<T>;
 
-          while (true) {
-            const next = await iterator.next();
-            if (next.done) break;
+        while (true) {
+          const next = await iterator.next();
+          if (next.done) break;
 
-            yield next.value;
-          }
+          yield next.value;
+        }
 
-          lastError = null;
+        lastError = null;
+        break;
+      } catch (error) {
+        if (signal?.aborted) {
           break;
-        } catch (error) {
-          if (signal?.aborted) {
+        }
+
+        lastError = error instanceof Error ? error : new Error(String(error));
+        retryCount++;
+
+        const resolvedDelay = await resolveDelayValue();
+        if (retryCount <= resolvedMaxRetries && resolvedDelay !== undefined && resolvedDelay > 0) {
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const onAbort = () => {
+                clearTimeout(id);
+                reject(new Error("Aborted"));
+              };
+
+              const id = setTimeout(() => {
+                signal?.removeEventListener("abort", onAbort);
+                resolve();
+              }, resolvedDelay);
+
+              if (signal) {
+                signal.addEventListener("abort", onAbort, { once: true });
+              }
+            });
+          } catch {
             break;
           }
-
-          lastError = error instanceof Error ? error : new Error(String(error));
-          retryCount++;
-
-          const resolvedDelay = await resolveDelayValue();
-          if (retryCount <= resolvedMaxRetries && resolvedDelay !== undefined && resolvedDelay > 0) {
-            try {
-              await new Promise<void>((resolve, reject) => {
-                const id = setTimeout(() => resolve(), resolvedDelay);
-                signal!.addEventListener(
-                  "abort",
-                  () => {
-                    clearTimeout(id);
-                    reject(new Error("Aborted"));
-                  },
-                  { once: true }
-                );
-              });
-            } catch {
-              break;
-            }
-          }
-        } finally {
-          if (iterator?.return) {
-            try {
-              await iterator.return(undefined);
-            } catch {
-              // Suppress secondary exceptions to protect the core error trace
-            }
+        }
+      } finally {
+        if (iterator?.return) {
+          try {
+            await iterator.return(undefined);
+          } catch {
+            // Suppress secondary exceptions to protect the core error trace
           }
         }
       }
+    }
 
-      if (lastError && !signal!.aborted) {
-        throw lastError;
-      }
+    if (lastError && !signal?.aborted) {
+      throw lastError;
+    }
   });
 }
