@@ -25,101 +25,30 @@ export interface AtomOptions {
 
 /**
  * Base interface for all atoms.
- *
- * Atoms are reactive values that can be read, subscribed to, and disposed.
- * They automatically track dependencies for derived atoms and participate in
- * scope-based lifecycle management.
- *
- * @template T The type of the value held by this atom.
  */
 export interface AtomBase<T = any> {
-  /** Discriminator for runtime type checks. */
   type: "atom";
-
-  /** Optional human-readable name (used by factory-created atoms). */
   name?: string;
-
-  /**
-   * The current value.
-   *
-   * When accessed inside a {@link derived} factory, this atom is automatically
-   * registered as a dependency.
-   *
-   * @throws {Error} If the atom has been disposed.
-   */
   readonly value: T;
-
-  /**
-   * The current value, or the last known value if the atom has been disposed.
-   *
-   * Unlike {@link value}, this never throws. Use it when you need a defensive
-   * read (e.g. snapshots, cleanup handlers).
-   */
   readonly safeValue: T;
-
-  /** The previous value (before the most recent change). */
   readonly prior: T;
-
-  /** Whether the atom has been disposed. */
   readonly disposed: boolean;
-
-  /**
-   * Subscribes to value changes.
-   *
-   * The callback is invoked synchronously whenever the atom's value changes.
-   *
-   * @param callback - Function called with the new value, or a receiver with `next`/`complete`/`error`.
-   * @returns A subscription that can be used to unsubscribe.
-   */
   subscribe(callback?: (value: T) => MaybePromise): Subscription;
-
-  /** Disposes the atom, clearing all subscriptions and resources. */
   dispose(): void;
-
-  /**
-   * Pipes this atom through one or more operators.
-   *
-   * This is a convenience wrapper around the standalone {@link pipe} function.
-   */
   pipe<R = any>(...ops: Operator<any, any>[]): AtomBase<R>;
-
-  /**
-   * Returns an async iterator over the atom's future values.
-   *
-   * This makes atoms directly usable in `for await` loops.
-   */
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
 /**
- * Writable atom that extends {@link AtomBase} with a {@link next} method.
- *
- * @template T The type of the value held by this atom.
+ * Writable atom.
  */
 export interface Atom<T = any> extends AtomBase<T> {
-  /**
-   * Updates the atom's value and notifies subscribers.
-   *
-   * If the new value is the same as the current value.
-   * @param value - The new value to set.
-   */
   next(value: T): void;
-
-  /**
-   * Signals that the atom has failed with the given error. The error is
-   * propagated to consumers iterating the atom, and the atom is disposed.
-   *
-   * @param err - The error to emit.
-   */
   error(err: any): void;
 }
 
 let activeFormula: { dependencies: Set<AtomBase<any>> } | null = null;
 
-/**
- * Subscribes to an atom and invokes the handler only for future emissions,
- * ignoring any value that is delivered synchronously during subscription.
- */
 function subscribeToUpdates(atom: AtomBase<any>, handler: () => void): Subscription {
   let active = false;
   const sub = atom.subscribe(() => {
@@ -130,12 +59,102 @@ function subscribeToUpdates(atom: AtomBase<any>, handler: () => void): Subscript
   return sub;
 }
 
-/* ── Glitch-free propagation ── */
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Glitch-free propagation
+ *
+ * Two-phase commit:
+ *
+ *   Phase 1 – "mark"   Every atom whose upstream changed marks itself dirty
+ *                       and records the new value, but does NOT notify its own
+ *                       subscribers yet.  This is the depth-first traversal.
+ *
+ *   Phase 2 – "sweep"  After the outermost transaction() returns (depth → 0)
+ *                       we walk the dirty set in registration order and notify
+ *                       each atom's subscribers exactly once, with its final
+ *                       settled value.
+ *
+ * `transaction()` is the public entry-point.  All internal mutations that
+ * should compose glitch-freely must be wrapped inside it.  Nested calls are
+ * free – only the outermost flush triggers the sweep.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+/** Depth counter for nested transactions. */
+let txDepth = 0;
+
+/**
+ * Ordered set of flush callbacks queued during an active transaction.
+ * Using a Map keyed by identity so the same atom never queues twice.
+ */
+const pendingFlush = new Map<object, () => void>();
+
+/**
+ * Run `fn` inside a transaction.  All atom notifications are deferred until
+ * the outermost transaction completes, guaranteeing that every derived atom
+ * sees only fully-settled upstream values (no glitches).
+ *
+ * Transactions compose: calling `transaction()` inside an already-active
+ * transaction is a no-op at the boundary level – the flush happens once at
+ * the outermost exit.
+ *
+ * @example
+ * ```ts
+ * transaction(() => {
+ *   x.next(1);
+ *   y.next(2);
+ * });
+ * // derived atoms that depend on both x and y are notified only once,
+ * // after both writes have landed.
+ * ```
+ */
+export function transaction(fn: () => void): void {
+  txDepth++;
+  try {
+    fn();
+  } finally {
+    txDepth--;
+    if (txDepth === 0) {
+      flushTransaction();
+    }
+  }
+}
+
+/** Flush all pending notifications accumulated during the transaction. */
+function flushTransaction(): void {
+  // Snapshot and clear before iterating so re-entrant writes (from
+  // subscribers that themselves call next()) get queued into a fresh batch.
+  while (pendingFlush.size > 0) {
+    const batch = Array.from(pendingFlush.values());
+    pendingFlush.clear();
+    for (const flush of batch) {
+      flush();
+    }
+  }
+}
+
+/**
+ * Schedule a notification callback for `owner`.
+ *
+ * - Inside a transaction (txDepth > 0) the callback is queued; the same owner
+ *   replacing a previous entry is idempotent (last write wins, which is
+ *   correct because by the time we flush, `current` already holds the final
+ *   value).
+ * - Outside a transaction the callback fires immediately (legacy behaviour for
+ *   direct, single-atom writes that don't need batching).
+ */
+function scheduleNotify(owner: object, notify: () => void): void {
+  if (txDepth > 0) {
+    // Replace any previously queued flush for this atom – last write wins.
+    pendingFlush.set(owner, notify);
+  } else {
+    notify();
+  }
+}
+
+/* ── Legacy propagation helpers (kept for flow / derived internal use) ────── */
 
 let propagationDepth = 0;
 let deferredNotifications = new Set<() => void>();
 
-/** Flushes all deferred notifications that were queued during propagation. */
 function flushDeferred() {
   const notifications = Array.from(deferredNotifications);
   deferredNotifications = new Set();
@@ -144,14 +163,6 @@ function flushDeferred() {
   }
 }
 
-/**
- * Runs a function inside a propagation context.
- *
- * Notifications are deferred until the outermost propagation completes,
- * ensuring glitch-free updates where derived atoms see a consistent state.
- *
- * @param fn - The function to run.
- */
 function runWithPropagation(fn: () => void) {
   propagationDepth++;
   try {
@@ -164,11 +175,6 @@ function runWithPropagation(fn: () => void) {
   }
 }
 
-/**
- * Notifies derived subscribers, deferring if inside a propagation.
- *
- * @param notify - Callback that performs the actual notification.
- */
 function notifyDerivedSubscribers(notify: () => void) {
   if (propagationDepth > 0) {
     deferredNotifications.add(notify);
@@ -179,17 +185,6 @@ function notifyDerivedSubscribers(notify: () => void) {
 
 /* ── flow ── */
 
-/**
- * Creates an atom backed by a stream.
- *
- * The atom's value is updated whenever the stream emits. The initial value is
- * used until the first emission. If the stream emits synchronously during
- * subscription, the value is replayed to scope subscribers.
- *
- * @param stream - The stream to subscribe to.
- * @param initialValue - The starting value before any stream emission.
- * @returns An atom that reflects the stream's latest value.
- */
 export function flow<T>(
   source: AsyncIterable<T> | Iterable<T> | ((signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>),
   initialValue?: T,
@@ -218,8 +213,8 @@ export function flow<T>(
       for (const cb of Array.from(subs)) {
         try {
           cb(value);
-        } catch (err) {
-          // ignore user callback errors in callback-only API
+        } catch {
+          // ignore user callback errors
         }
       }
     });
@@ -249,22 +244,14 @@ export function flow<T>(
       try {
         await stop();
       } catch {
-        // ignore cleanup errors
+        // ignore
       }
       for (const handler of Array.from(disposeHandlers)) {
-        try {
-          handler();
-        } catch {
-          // ignore
-        }
+        try { handler(); } catch { /* ignore */ }
       }
       disposeHandlers.clear();
       for (const sub of Array.from(subscriptions)) {
-        try {
-          await sub.unsubscribe();
-        } catch {
-          // ignore
-        }
+        try { await sub.unsubscribe(); } catch { /* ignore */ }
       }
       subscriptions.clear();
     })();
@@ -296,11 +283,7 @@ export function flow<T>(
       cancelled = true;
       abortController?.abort();
       if (typeof (iterator as any).return === "function") {
-        try {
-          return (iterator as any).return();
-        } catch {
-          // ignore
-        }
+        try { return (iterator as any).return(); } catch { /* ignore */ }
       }
     };
 
@@ -326,104 +309,49 @@ export function flow<T>(
   const instance: AtomBase<T> & { _error?: any } = {
     type: "atom",
 
-    get disposed() {
-      return disposed;
-    },
+    get disposed() { return disposed; },
 
     get value() {
       if (disposed) throw new Error("Atom has been disposed");
-      if (activeFormula) {
-        activeFormula.dependencies.add(instance);
-      }
+      if (activeFormula) activeFormula.dependencies.add(instance);
       return current;
     },
 
-    get safeValue() {
-      return current;
-    },
-
-    get prior() {
-      return previous;
-    },
+    get safeValue() { return current; },
+    get prior() { return previous; },
 
     subscribe(callback) {
-      if (disposed) {
-        return createSubscription(() => {});
-      }
+      if (disposed) return createSubscription(() => {});
+      if (!started) start();
 
-      if (!started) {
-        start();
-      }
-
-      if (callback) {
-        subs.add(callback);
-      }
+      if (callback) subs.add(callback);
       activeSubCount++;
 
       const sub = createSubscription(() => {
-        if (callback) {
-          subs.delete(callback);
-        }
-        subscriptions.delete(sub); // Clear tracking link to prevent leak
+        if (callback) subs.delete(callback);
+        subscriptions.delete(sub);
         activeSubCount--;
-        if (activeSubCount <= 0) {
-          return disposeInstance();
-        }
+        if (activeSubCount <= 0) return disposeInstance();
         return undefined;
       });
       subscriptions.add(sub);
       return sub;
     },
 
-    pipe(...ops: Operator<any, any>[]) {
-      return pipeSource(this, ...ops);
-    },
-
-    [Symbol.asyncIterator]() {
-      return iterate(this)[Symbol.asyncIterator]();
-    },
-
-    dispose() {
-      void disposeInstance();
-    }
+    pipe(...ops: Operator<any, any>[]) { return pipeSource(this, ...ops); },
+    [Symbol.asyncIterator]() { return iterate(this)[Symbol.asyncIterator](); },
+    dispose() { void disposeInstance(); },
   };
 
-  Object.defineProperty(instance, "_error", {
-    get() {
-      return error;
-    },
-    enumerable: false,
-  });
-
-  Object.defineProperty(instance, "_onDispose", {
-    get() {
-      return disposeHandlers;
-    },
-    enumerable: false,
-  });
+  Object.defineProperty(instance, "_error", { get() { return error; }, enumerable: false });
+  Object.defineProperty(instance, "_onDispose", { get() { return disposeHandlers; }, enumerable: false });
 
   registerWithCurrentScope(instance);
-
   return instance;
 }
 
 /* ── atom ── */
 
-/**
- * Creates a writable atom.
- *
- * When an initial value is provided, the atom behaves like a behavior-aware
- * primitive and is considered emitted immediately. When omitted, the atom
- * starts empty like a Subject and emits only after the first {@link Atom.next}.
- *
- * Writable atoms can be updated via {@link Atom.next} and automatically notify
- * subscribers on change. They participate in scope tracking and dependency
- * discovery for derived atoms.
- *
- * @param initialValue - The starting value (optional).
- * @param options - Optional atom configuration.
- * @returns A writable atom.
- */
 export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> {
   const scope = getCurrentScope();
   const strobe = scope ? getScopeStrobe(scope) : undefined;
@@ -441,110 +369,90 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
   const subs = new Set<(value: T) => MaybePromise>();
   const subscriptions = new Set<Subscription>();
 
-  const notify = (value: T) => {
-    runWithPropagation(() => {
-      for (const cb of Array.from(subs)) {
-        try {
-          cb(value);
-        } catch (err) {
-          // ignore user callback errors in callback-only API
-        }
-      }
-    });
+  /** Broadcast current value to all direct subscribers. */
+  const broadcastNow = () => {
+    const snap = current;
+    for (const cb of Array.from(subs)) {
+      try { cb(snap); } catch { /* ignore */ }
+    }
   };
 
-  const flush = () => {
+  /** Strobe flush – called by the scope on every tick for analog atoms. */
+  const strobeFlush = () => {
     if (!dirty || disposed) return;
     dirty = false;
     if (Object.is(lastNotified, current)) return;
     lastNotified = current;
-    notify(current);
+    broadcastNow();
   };
 
   const instance: Atom<T> = {
     type: "atom",
 
-    get disposed() {
-      return disposed;
-    },
+    get disposed() { return disposed; },
 
     get value() {
       if (disposed) throw new Error("Atom has been disposed");
-      if (activeFormula) {
-        activeFormula.dependencies.add(instance);
-      }
+      if (activeFormula) activeFormula.dependencies.add(instance);
       return current;
     },
 
-    get safeValue() {
-      return current;
-    },
-
-    get prior() {
-      return previous;
-    },
+    get safeValue() { return current; },
+    get prior() { return previous; },
 
     subscribe(callback) {
-      if (disposed) {
-        return createSubscription(() => {});
-      }
-
-      if (callback) {
-        subs.add(callback);
-      }
+      if (disposed) return createSubscription(() => {});
+      if (callback) subs.add(callback);
 
       const sub = createSubscription(() => {
-        if (callback) {
-          subs.delete(callback);
-        }
-        subscriptions.delete(sub); // Remove reference to prevent growth over time
+        if (callback) subs.delete(callback);
+        subscriptions.delete(sub);
       });
       subscriptions.add(sub);
       return sub;
     },
 
-    pipe(...ops: Operator<any, any>[]) {
-      return pipeSource(this, ...ops);
-    },
-
-    [Symbol.asyncIterator]() {
-      return iterate(this)[Symbol.asyncIterator]();
-    },
+    pipe(...ops: Operator<any, any>[]) { return pipeSource(this, ...ops); },
+    [Symbol.asyncIterator]() { return iterate(this)[Symbol.asyncIterator](); },
 
     next(value: T) {
-      if (disposed || Object.is(current, value)) return; // Deduplicate equivalent states
+      if (disposed || Object.is(current, value)) return;
 
       previous = current;
       current = value;
+      dirty = true;
 
-      if (analog) {
-        dirty = true;
-      } else {
-        lastNotified = current;
-        notify(value);
+      if (analog && txDepth === 0) {
+        // Analog outside a transaction: leave dirty for the strobe, nothing more.
+        return;
       }
+
+      // Discrete, OR analog inside a transaction: queue a flush so this atom
+      // lands in the same sweep as every other write in the batch.
+      // The callback clears dirty, notifies, then re-marks dirty for the strobe
+      // (analog only) so downstream analog consumers still get their tick.
+      scheduleNotify(instance, () => {
+        if (disposed) return;
+        dirty = false;
+        if (Object.is(lastNotified, current)) return;
+        lastNotified = current;
+        broadcastNow();
+        // Re-arm the strobe for any analog downstream that wasn't in this tx.
+        if (analog) dirty = true;
+      });
     },
 
     error(err: any) {
       if (disposed) return;
-
       error = err;
       disposed = true;
       unregisterAnalogAtom(instance);
       for (const handler of Array.from(disposeHandlers)) {
-        try {
-          handler();
-        } catch {
-          // ignore
-        }
+        try { handler(); } catch { /* ignore */ }
       }
       disposeHandlers.clear();
       for (const sub of Array.from(subscriptions)) {
-        try {
-          sub.unsubscribe();
-        } catch {
-          // ignore
-        }
+        try { sub.unsubscribe(); } catch { /* ignore */ }
       }
       subscriptions.clear();
       subs.clear();
@@ -552,74 +460,36 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
 
     dispose() {
       if (disposed) return;
-
       disposed = true;
       unregisterAnalogAtom(instance);
       for (const handler of Array.from(disposeHandlers)) {
-        try {
-          handler();
-        } catch {
-          // ignore
-        }
+        try { handler(); } catch { /* ignore */ }
       }
       disposeHandlers.clear();
       for (const sub of Array.from(subscriptions)) {
-        try {
-          sub.unsubscribe();
-        } catch {
-          // ignore
-        }
+        try { sub.unsubscribe(); } catch { /* ignore */ }
       }
       subscriptions.clear();
       subs.clear();
-    }
+    },
   };
 
-  Object.defineProperty(instance, "_error", {
-    get() {
-      return error;
-    },
-    enumerable: false,
-  });
-
-  Object.defineProperty(instance, "_onDispose", {
-    get() {
-      return disposeHandlers;
-    },
-    enumerable: false,
-  });
+  Object.defineProperty(instance, "_error", { get() { return error; }, enumerable: false });
+  Object.defineProperty(instance, "_onDispose", { get() { return disposeHandlers; }, enumerable: false });
 
   registerWithCurrentScope(instance);
-  if (hasInitialValue) {
-    markAtomAsEmitted(instance);
-  }
-  if (analog) {
-    registerAnalogAtom(instance, flush);
-  }
+  if (hasInitialValue) markAtomAsEmitted(instance);
+  if (analog) registerAnalogAtom(instance, strobeFlush);
 
   return instance;
 }
 
-export function atomOf<T>(initialValue: T, options?: AtomOptions): AtomBase<T> {
-  return atom(initialValue, options);
-}
-
 export function discrete<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
-  return atom(initialValue, options);
+  return atom(initialValue, { ...options, discrete: true });
 }
 
 /* ── derived ── */
 
-/**
- * Creates a derived atom with automatic dependency tracking.
- *
- * The factory is re-evaluated synchronously whenever any atom read inside it
- * changes. Dependencies are discovered automatically — no manual array is
- * required.
- *
- * @param fn - Pure function that reads atom values and returns the derived value.
- * @returns A derived atom.
- */
 export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   const scope = getCurrentScope();
   const strobe = scope ? getScopeStrobe(scope) : undefined;
@@ -635,8 +505,18 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   const dependencies = new Set<AtomBase<any>>();
   const depSubscriptions = new Map<AtomBase<any>, Subscription>();
 
-  const notify = () => {
-    for (const cb of Array.from(subs)) cb(current);
+  const broadcastNow = () => {
+    const snap = current;
+    for (const cb of Array.from(subs)) cb(snap);
+  };
+
+  const scheduleNotifyDerived = () => {
+    // Derived atoms always go through both layers:
+    // 1. transaction() – batch multiple upstream writes
+    // 2. propagation depth – prevent mid-propagation glitches within a single write
+    scheduleNotify(instance, () => {
+      notifyDerivedSubscribers(broadcastNow);
+    });
   };
 
   const ensureInit = () => {
@@ -644,17 +524,15 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     initialized = true;
     current = run();
     previous = current;
-    if (analog) {
-      dirty = true;
+    if (!analog) {
+      scheduleNotifyDerived();
     } else {
-      notifyDerivedSubscribers(notify);
+      dirty = true;
     }
   };
 
   const run = (): T => {
-    if (running) {
-      throw new Error("Circular dependency detected in derived()");
-    }
+    if (running) throw new Error("Circular dependency detected in derived()");
 
     const oldDeps = new Set(depSubscriptions.keys());
     dependencies.clear();
@@ -670,7 +548,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       running = false;
     }
 
-    // Unsubscribe from removed deps
+    // Unsubscribe removed deps
     for (const dep of oldDeps) {
       if (!dependencies.has(dep)) {
         depSubscriptions.get(dep)?.unsubscribe();
@@ -678,7 +556,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       }
     }
 
-    // Subscribe to new deps, ignoring the synchronous replay
+    // Subscribe new deps
     for (const dep of dependencies) {
       if (!depSubscriptions.has(dep)) {
         depSubscriptions.set(
@@ -686,15 +564,22 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
           subscribeToUpdates(dep, () => {
             if (disposed) return;
             const next = run();
-            
-            if (Object.is(current, next)) return; // Block calculation propagation down if output matches
+            if (Object.is(current, next)) return;
 
             previous = current;
             current = next;
-            if (analog) {
+
+            if (analog && txDepth === 0) {
+              // Analog outside a transaction: mark dirty, let the strobe flush.
               dirty = true;
             } else {
-              notifyDerivedSubscribers(notify);
+              // Discrete, OR analog inside a transaction: participate in the
+              // current transaction sweep so all modes land together.
+              scheduleNotify(instance, () => {
+                notifyDerivedSubscribers(broadcastNow);
+                // Re-arm for the strobe if analog.
+                if (analog) dirty = true;
+              });
             }
           })
         );
@@ -704,81 +589,53 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     return result;
   };
 
-  const flush = () => {
+  const flushAnalog = () => {
     if (!dirty || disposed) return;
     dirty = false;
-    notifyDerivedSubscribers(notify);
+    notifyDerivedSubscribers(broadcastNow);
   };
 
-  const context = {
-    dependencies,
-    run,
-  };
+  const context = { dependencies, run };
 
   const instance: AtomBase<T> = {
     type: "atom",
 
-    get disposed() {
-      return disposed;
-    },
+    get disposed() { return disposed; },
 
     get value() {
       if (disposed) throw new Error("Atom has been disposed");
-      if (activeFormula) {
-        activeFormula.dependencies.add(instance);
-      }
+      if (activeFormula) activeFormula.dependencies.add(instance);
       ensureInit();
       return current;
     },
 
-    get safeValue() {
-      ensureInit();
-      return current;
-    },
-
-    get prior() {
-      ensureInit();
-      return previous;
-    },
+    get safeValue() { ensureInit(); return current; },
+    get prior() { ensureInit(); return previous; },
 
     subscribe(callback) {
       ensureInit();
-      if (callback) {
-        subs.add(callback);
-      }
-
+      if (callback) subs.add(callback);
       return createSubscription(() => {
-        if (callback) {
-          subs.delete(callback);
-        }
+        if (callback) subs.delete(callback);
       });
     },
 
-    pipe(...ops: Operator<any, any>[]) {
-      return pipeSource(this, ...ops);
-    },
-
-    [Symbol.asyncIterator]() {
-      return iterate(this)[Symbol.asyncIterator]();
-    },
+    pipe(...ops: Operator<any, any>[]) { return pipeSource(this, ...ops); },
+    [Symbol.asyncIterator]() { return iterate(this)[Symbol.asyncIterator](); },
 
     dispose() {
       if (disposed) return;
       ensureInit();
       disposed = true;
       unregisterAnalogAtom(instance);
-      for (const sub of depSubscriptions.values()) {
-        sub.unsubscribe();
-      }
+      for (const sub of depSubscriptions.values()) sub.unsubscribe();
       depSubscriptions.clear();
       subs.clear();
-    }
+    },
   };
 
   registerWithCurrentScope(instance);
-  if (analog) {
-    registerAnalogAtom(instance, flush);
-  }
+  if (analog) registerAnalogAtom(instance, flushAnalog);
 
   return instance;
 }
