@@ -189,14 +189,6 @@ function notifyDerivedSubscribers(notify: () => void) {
  * @param stream - The stream to subscribe to.
  * @param initialValue - The starting value before any stream emission.
  * @returns An atom that reflects the stream's latest value.
- *
- * @example
- * ```ts
- * const app = scope(() => {
- *   const count = flow(counterStream, 0);
- *   return { count };
- * });
- * ```
  */
 export function flow<T>(
   source: AsyncIterable<T> | Iterable<T> | ((signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>),
@@ -217,7 +209,7 @@ export function flow<T>(
   const subscriptions = new Set<Subscription>();
 
   const notify = (value: T) => {
-    if (disposed) return;
+    if (disposed || Object.is(current, value)) return;
 
     previous = current;
     current = value;
@@ -312,10 +304,6 @@ export function flow<T>(
       }
     };
 
-    // Prime the iterator synchronously so generators can attach listeners or
-    // perform other setup before the consumer starts pulling values. The result
-    // is processed asynchronously so subscribers are added before any values
-    // are emitted.
     pending = iterator.next();
 
     (async () => {
@@ -330,8 +318,6 @@ export function flow<T>(
         error = err;
         await disposeInstance();
       } finally {
-        // Mark as disposed before awaiting cleanup so consumers see completion
-        // synchronously and any pending iterators can resolve to done.
         await disposeInstance();
       }
     })();
@@ -378,6 +364,7 @@ export function flow<T>(
         if (callback) {
           subs.delete(callback);
         }
+        subscriptions.delete(sub); // Clear tracking link to prevent leak
         activeSubCount--;
         if (activeSubCount <= 0) {
           return disposeInstance();
@@ -436,17 +423,6 @@ export function flow<T>(
  * @param initialValue - The starting value (optional).
  * @param options - Optional atom configuration.
  * @returns A writable atom.
- *
- * @example
- * ```ts
- * const app = scope(() => {
- *   const count = atom(0);
- *   const source = atom<number>();
- *   count.next(5);
- *   console.log(count.value); // 5
- *   return { count, source };
- * });
- * ```
  */
 export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> {
   const scope = getCurrentScope();
@@ -521,6 +497,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
         if (callback) {
           subs.delete(callback);
         }
+        subscriptions.delete(sub); // Remove reference to prevent growth over time
       });
       subscriptions.add(sub);
       return sub;
@@ -535,7 +512,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
     },
 
     next(value: T) {
-      if (disposed) return;
+      if (disposed || Object.is(current, value)) return; // Deduplicate equivalent states
 
       previous = current;
       current = value;
@@ -623,41 +600,13 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
   return instance;
 }
 
-/**
- * Creates a read-only view of a writable atom from an initial value.
- *
- * This is useful when you want to expose an atom without allowing consumers
- * to mutate it directly. The underlying atom is still writable, but the
- * returned type only exposes the {@link AtomBase} interface.
- *
- * @param initialValue - The starting value.
- * @param options - Optional atom configuration.
- * @returns A read-only atom view.
- */
 export function atomOf<T>(initialValue: T, options?: AtomOptions): AtomBase<T> {
   return atom(initialValue, options);
 }
 
-/**
- * Alias for {@link atom}.
- *
- * Use `discrete` when you want to emphasize that the value is updated by
- * explicit, discrete events rather than a continuous/analog stream.
- *
- * @param initialValue - The starting value.
- * @param options - Optional atom configuration.
- * @returns A writable discrete atom.
- *
- * @example
- * ```ts
- * const count = discrete(0);
- * count.next(5);
- * ```
- */
 export function discrete<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
   return atom(initialValue, options);
 }
-
 
 /* ── derived ── */
 
@@ -666,24 +615,10 @@ export function discrete<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
  *
  * The factory is re-evaluated synchronously whenever any atom read inside it
  * changes. Dependencies are discovered automatically — no manual array is
- * required. The result is itself an atom — it can be subscribed to,
- * snapshotted, and disposed like any other.
+ * required.
  *
  * @param fn - Pure function that reads atom values and returns the derived value.
  * @returns A derived atom.
- *
- * @example
- * ```ts
- * const app = scope(() => {
- *   const first = atom('Ada');
- *   const last = atom('Lovelace');
- *   const full = derived(() => `${first.value} ${last.value}`);
- *   return { first, last, full };
- * });
- *
- * app.first.next('Grace');
- * console.log(app.full.value); // 'Grace Lovelace'
- * ```
  */
 export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   const scope = getCurrentScope();
@@ -743,8 +678,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       }
     }
 
-    // Subscribe to new deps, ignoring the synchronous replay that some atoms
-    // emit on subscription because `run()` already captured their current value.
+    // Subscribe to new deps, ignoring the synchronous replay
     for (const dep of dependencies) {
       if (!depSubscriptions.has(dep)) {
         depSubscriptions.set(
@@ -752,6 +686,9 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
           subscribeToUpdates(dep, () => {
             if (disposed) return;
             const next = run();
+            
+            if (Object.is(current, next)) return; // Block calculation propagation down if output matches
+
             previous = current;
             current = next;
             if (analog) {
@@ -827,8 +764,6 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
 
     dispose() {
       if (disposed) return;
-      // Compute the final value before tearing down so that `safeValue` remains
-      // meaningful even if the derived atom was never read or subscribed to.
       ensureInit();
       disposed = true;
       unregisterAnalogAtom(instance);
@@ -847,4 +782,3 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
 
   return instance;
 }
-

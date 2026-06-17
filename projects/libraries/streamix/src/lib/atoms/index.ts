@@ -23,11 +23,11 @@
  */
 
 export { atom, derived, discrete, flow } from './atom';
-export { iterate } from './iterate';
 export type { Atom, AtomBase, AtomOptions } from './atom';
+export { iterate } from './iterate';
 
-export { globalScope, scope } from './scope';
-export type { Scope, ScopeMode, ScopeOptions } from './scope';
+export { scope } from './scope';
+export type { Scope } from './scope';
 
 export * from './pipe';
 

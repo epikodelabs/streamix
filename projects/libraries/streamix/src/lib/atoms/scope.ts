@@ -1,497 +1,196 @@
-import type { Subscription } from "./subscription";
-import type { AtomBase } from "./atom";
+import { type AtomBase } from "./atom"; // Adjust import path to match your structure
 
 /**
- * Checks whether a value is an atom.
- *
- * @param value - The value to check.
- * @returns `true` if the value is an atom, otherwise `false`.
- */
-function isAtom(value: unknown): value is AtomBase<any> {
-  return typeof value === "object" && value !== null && (value as any).type === "atom";
-}
-
-/**
- * Checks whether a value is a scope.
- *
- * @param value - The value to check.
- * @returns `true` if the value is a scope, otherwise `false`.
- */
-function isScope(value: unknown): value is Scope {
-  return typeof value === "object" && value !== null && (value as any).type === "scope";
-}
-
-/**
- * A composite container that owns atoms and child scopes.
- *
- * Scopes form a tree via {@link parent}. Each scope automatically tracks
- * every {@link AtomBase} and nested `Scope` created inside its factory.
- *
- * **Loading state**
- *
- * A scope's {@link loading} flag is `true` until every atom in its entire
- * subtree has emitted at least once. Inner scopes can resolve independently;
- * the outer scope waits for everything. Empty scopes (no atoms) are
- * immediately `false`.
- *
- * **Snapshot**
- *
- * {@link snapshot} walks the factory's return object, reading atom values
- * and recursing into child scopes. Non-atom/scope values are passed through
- * unchanged.
- *
- * **Strobe / analog mode**
- *
- * A scope can be configured with a `strobe` interval. When set, every atom
- * created inside the scope (or a child scope that does not override it)
- * behaves as an analog signal: value changes are batched and emitted once
- * per strobe period. Use `{ discrete: true }` on an individual atom to
- * opt out and emit every change immediately.
- *
- * **Disposal**
- *
- * {@link dispose} tears down every tracked atom or child scope recursively.
- * After disposal the scope should not be used.
- *
- * All tracking happens automatically — no manual bookkeeping is required.
+ * Interface definition for a lifecycle scope execution context.
  */
 export interface Scope {
-  /** Discriminator for runtime type checks. */
-  readonly type: "scope";
-
-  /** The scope that was active when this one was created, if any. */
-  readonly parent?: Scope;
-
-  /**
-   * `true` while any tracked atom (in this scope or a descendant)
-   * has not yet emitted its first value.
-   */
-  readonly loading: boolean;
-
-  /**
-   * Captures the current values of all tracked items.
-   *
-   * For atoms this reads {@link AtomBase.value};
-   * for child scopes this recurses into their snapshot.
-   * Non-atom/scope values are passed through as-is.
-   */
-  snapshot(): Record<string, any>;
-
-  /** Disposes every tracked atom or child scope recursively. */
-  dispose(): void;
-}
-
-interface ScopeInternal {
-  tracked: Set<AtomBase<any> | Scope>;
-  emittedAtoms: Set<AtomBase<any>>;
-  localLoading: boolean;
-  snapshotSource?: Record<string, any>;
-  checkLoading(): void;
-  loadingSubscriptions: Subscription[];
-  options: ScopeOptions;
-  effectiveMode: ScopeMode;
-  effectiveStrobe: number | undefined;
-  strobeOwner: Scope | undefined;
-  strobeId: ReturnType<typeof setInterval> | undefined;
-  analogAtoms: Map<AtomBase<any>, () => void>;
-}
-
-/**
- * Operational mode for a scope.
- *
- * - `discrete`: atoms emit every change immediately.
- * - `analog`: atoms are strobed and batched to the configured interval.
- */
-export type ScopeMode = "discrete" | "analog";
-
-/**
- * Optional configuration for a scope.
- */
-export interface ScopeOptions {
-  /**
-   * Operational mode.
-   *
-   * `analog` enables strobed, batched updates. `discrete` disables strobing
-   * and emits every change immediately. Defaults to inheriting from the
-   * parent scope, or `discrete` if no ancestor has a mode.
-   */
-  mode?: ScopeMode;
-
-  /**
-   * Strobe period in milliseconds.
-   *
-   * When the effective mode is `analog`, every atom created inside this scope
-   * (or a child scope that does not override it) is batched to this interval.
-   * `0` disables the strobe even in analog mode.
+  /** Unique discriminator for the runtime context. */
+  type: "scope";
+  /** State container for active elements captured by this window. */
+  atoms: Set<AtomBase<any>>;
+  /** Registered callbacks triggered when this context collapses. */
+  cleanups: Set<() => void>;
+  /** * Strobe interval value or mode identifier. 
+   * A value > 0 flags an analog deferred/batched notification window.
    */
   strobe?: number;
 }
 
-const scopeInternals = new WeakMap<Scope, ScopeInternal>();
-const analogOwners = new WeakMap<AtomBase<any>, Scope>();
+// Active execution context tracking frames
+let currentScope: Scope | null = null;
+const scopeStack: Scope[] = [];
 
-/** The scope currently executing its factory, if any. */
-let currentScope: Scope | undefined;
+// Analog state registration tracking
+const analogFlushRegistry = new Map<Scope, Map<AtomBase<any>, () => void>>();
+const emittedAtomsRegistry = new WeakSet<AtomBase<any>>();
 
-/** The implicit root scope that owns global defaults. */
-let globalScope: (Scope & { mode: ScopeMode; strobe: number }) | undefined;
+/* ── Active Window Accessors ── */
 
-/** @internal Returns the scope currently executing its factory. */
-export function getCurrentScope(): Scope | undefined {
+/**
+ * Retrieves the currently active tracking scope context from the execution frame.
+ */
+export function getCurrentScope(): Scope | null {
   return currentScope;
 }
 
-/** @internal Returns the scope that owns the active strobe for the given scope. */
-export function getStrobeOwner(scope: Scope): Scope | undefined {
-  return scopeInternals.get(scope)?.strobeOwner;
-}
-
 /**
- * Resolves the effective mode for a scope by walking up the parent chain.
- *
- * @internal
- */
-export function getScopeMode(scope: Scope): ScopeMode {
-  return scopeInternals.get(scope)?.effectiveMode ?? "discrete";
-}
-
-/**
- * Resolves the effective strobe for a scope by walking up the parent chain.
- *
- * @internal
+ * Grabs the strobe value or strategy assigned to a designated scope context.
  */
 export function getScopeStrobe(scope: Scope): number | undefined {
-  const internal = scopeInternals.get(scope);
-  if (!internal || internal.effectiveMode === "discrete") {
-    return undefined;
+  return scope.strobe;
+}
+
+/* ── Context Lifecycle Management ── */
+
+/**
+ * Creates an execution boundary to encapsulate, track, and bulk-dispose reactive units.
+ * Supports strobe settings for analog/deferred graph execution.
+ */
+export function scope<T>(factory: () => T, strobe?: number): T {
+  const newScope: Scope = {
+    type: "scope",
+    atoms: new Set(),
+    cleanups: new Set(),
+    strobe,
+  };
+
+  // Push onto active execution context layout stack
+  if (currentScope) {
+    scopeStack.push(currentScope);
   }
-  return internal.effectiveStrobe;
+  currentScope = newScope;
+
+  if (strobe !== undefined && strobe > 0) {
+    analogFlushRegistry.set(newScope, new Map());
+  }
+
+  try {
+    const result = factory();
+
+    // If the factory returns an object with a tear-down handler or an active composition,
+    // we can attach an explicit cleanup hook back to this scope.
+    return result;
+  } catch (error) {
+    // If the creation block panics, clean up the scope immediately to avoid memory leaks
+    disposeScope(newScope);
+    throw error;
+  } finally {
+    // Pop back to the previous running scope framework safely
+    currentScope = scopeStack.pop() || null;
+  }
 }
 
 /**
- * Marks an atom as having emitted its first value for scope loading tracking.
- *
- * @internal
+ * Tears down a scope, clearing all registered atoms, executing internal cleanup hooks,
+ * and decoupling analog strobe frames to guarantee a clean exit.
+ */
+export function disposeScope(scope: Scope): void {
+  // Clear any existing analog flush intervals or batches assigned to this scope
+  analogFlushRegistry.delete(scope);
+
+  // Safely unwind all registered cleanup hooks
+  for (const cleanup of Array.from(scope.cleanups)) {
+    try {
+      cleanup();
+    } catch {
+      // Suppress secondary cleanup exceptions to guarantee complete tear-down
+    }
+  }
+  scope.cleanups.clear();
+
+  // Dispose all captured primitive blocks owned by this context boundary
+  for (const atom of Array.from(scope.atoms)) {
+    try {
+      if (!atom.disposed) {
+        atom.dispose();
+      }
+    } catch {
+      // Suppress structural errors during total engine sweep
+    }
+  }
+  scope.atoms.clear();
+}
+
+/* ── Registry Linkage Handlers ── */
+
+/**
+ * Links a newly generated atom node to the active tracking scope window.
+ */
+export function registerWithCurrentScope(atom: AtomBase<any>): void {
+  if (!currentScope) return;
+
+  currentScope.atoms.add(atom);
+
+  // Automatically detach the atom from the scope's tracked set if it's manually disposed early
+  const onDisposeHandlers = (atom as any)._onDispose;
+  if (onDisposeHandlers instanceof Set) {
+    const scopeRef = currentScope;
+    const trackingCleanup = () => {
+      scopeRef.atoms.delete(atom);
+    };
+    onDisposeHandlers.add(trackingCleanup);
+    
+    // Ensure the cleanup hook itself is un-registered if the scope collapses first
+    scopeRef.cleanups.add(() => {
+      onDisposeHandlers.delete(trackingCleanup);
+    });
+  }
+}
+
+/**
+ * Identifies whether an atom was initialized with a baseline state or 
+ * has already broadcast its first default value payload.
  */
 export function markAtomAsEmitted(atom: AtomBase<any>): void {
-  const scope = currentScope;
-  if (!scope) return;
-
-  const internal = scopeInternals.get(scope);
-  if (!internal) return;
-
-  internal.emittedAtoms.add(atom);
-  internal.checkLoading();
+  emittedAtomsRegistry.add(atom);
 }
 
-/** @internal Registers a value with the scope that is currently active. */
-export function registerWithCurrentScope(value: AtomBase<any> | Scope): void {
-  const scope = currentScope;
-  if (!scope) return;
+/**
+ * Checks if an atom has previously emitted or been pre-loaded with an explicit setup state.
+ */
+export function hasAtomEmitted(atom: AtomBase<any>): boolean {
+  return emittedAtomsRegistry.has(atom);
+}
 
-  const internal = scopeInternals.get(scope);
-  if (!internal) return;
+/**
+ * Registers an analog or continuous atom flush coordinator inside the current scope frame.
+ * Used exclusively when a scope-level or global strobe deferral engine is operational.
+ */
+export function registerAnalogAtom(atom: AtomBase<any>, flushFn: () => void): void {
+  if (!currentScope) return;
 
-  internal.tracked.add(value);
-
-  if (isAtom(value)) {
-    const sub = value.subscribe(() => {
-      internal.emittedAtoms.add(value);
-      internal.checkLoading();
-    });
-    internal.loadingSubscriptions.push(sub);
+  const scopeMap = analogFlushRegistry.get(currentScope);
+  if (scopeMap) {
+    scopeMap.set(atom, flushFn);
   }
 }
 
 /**
- * Registers an atom's flush callback with the scope that owns its strobe.
- *
- * @internal
- */
-export function registerAnalogAtom(atom: AtomBase<any>, flush: () => void): void {
-  const scope = currentScope;
-  if (!scope) return;
-
-  const owner = getStrobeOwner(scope);
-  if (!owner) return;
-
-  const internal = scopeInternals.get(owner);
-  if (!internal) return;
-
-  internal.analogAtoms.set(atom, flush);
-  analogOwners.set(atom, owner);
-}
-
-/**
- * Removes an atom's flush callback from its strobe owner.
- *
- * @internal
+ * Disconnects an analog flush coordinator from all operational frames.
+ * Ensures that dead or manually closed atoms don't block the engine batch processing loops.
  */
 export function unregisterAnalogAtom(atom: AtomBase<any>): void {
-  const owner = analogOwners.get(atom);
-  if (!owner) return;
-
-  const internal = scopeInternals.get(owner);
-  if (!internal) return;
-
-  internal.analogAtoms.delete(atom);
-  analogOwners.delete(atom);
+  // Linear check is rare because atoms usually exist inside the immediate active running scope
+  for (const scopeMap of analogFlushRegistry.values()) {
+    scopeMap.delete(atom);
+  }
 }
 
 /**
- * Creates a scope.
- *
- * The factory runs with the new scope as the active context. Any atoms or
- * nested scopes created inside the factory are automatically tracked and
- * will be disposed when this scope is disposed. The factory's return value
- * is merged onto the scope object for typed access.
- *
- * @param factory - Setup function that creates atoms and nested scopes.
- * @returns A scope object merged with the factory's return value.
- *
- * @example
- * ```ts
- * const app = scope(() => {
- *   const count = flow(counterStream, 0);
- *   const label = flow(labelStream, 'hello');
- *   return { count, label };
- * });
- *
- * console.log(app.count.value);
- * app.dispose(); // disposes count and label
- * ```
- *
- * @example
- * ```ts
- * // Nested scopes and loading
- * const parent = scope(() => {
- *   const child = scope(() => ({
- *     value: flow(delayedStream, 0)
- *   }));
- *   return { child };
- * });
- *
- * console.log(parent.loading); // true until delayedStream emits
- * ```
- *
- * @see {@link AtomBase}
+ * Explicit execution trigger to force-flush all buffered updates inside an analog scope framework.
  */
-export function scope<T>(factory: () => T, options: ScopeOptions = {}): Scope & T {
-  const parentScope = currentScope ?? globalScope;
-  const previousScope = currentScope;
+export function flushScopeStrobe(scope: Scope): void {
+  const scopeMap = analogFlushRegistry.get(scope);
+  if (!scopeMap || scopeMap.size === 0) return;
 
-  const tracked = new Set<AtomBase<any> | Scope>();
-  const emittedAtoms = new Set<AtomBase<any>>();
-  let localLoading = true;
-
-  const parentInternal = parentScope ? scopeInternals.get(parentScope) : undefined;
-  const parentMode = parentInternal?.effectiveMode ?? "discrete";
-  const modeFromStrobe = options.strobe !== undefined && options.strobe > 0 ? "analog" : undefined;
-  const effectiveMode = options.mode ?? modeFromStrobe ?? parentMode;
-  const parentStrobe = effectiveMode === "analog" ? parentInternal?.effectiveStrobe : undefined;
-  const inheritedStrobe = effectiveMode === "analog" ? parentStrobe : undefined;
-  const effectiveStrobe = effectiveMode === "analog"
-    ? (options.strobe !== undefined ? options.strobe : inheritedStrobe)
-    : undefined;
-  const ownsStrobe = effectiveStrobe !== undefined && effectiveStrobe > 0;
-
-  const internal: ScopeInternal = {
-    tracked,
-    emittedAtoms,
-    localLoading,
-    loadingSubscriptions: [],
-    options,
-    effectiveMode,
-    effectiveStrobe,
-    strobeOwner: undefined,
-    strobeId: undefined,
-    analogAtoms: new Map(),
-
-    checkLoading() {
-      if (!localLoading) return;
-      const atomCount = Array.from(tracked).filter(isAtom).length;
-      if (atomCount === 0 || emittedAtoms.size === atomCount) {
-        localLoading = false;
-      }
+  // Clone tasks to safeguard against mid-loop deletions or target structural state shifts
+  const flushActions = Array.from(scopeMap.values());
+  
+  for (const flush of flushActions) {
+    try {
+      flush();
+    } catch {
+      // Suppress mid-frame update execution panics to isolate mutations
     }
-  };
-
-  const instance: Scope = {
-    type: "scope",
-    parent: parentScope,
-
-    get loading() {
-      if (localLoading) return true;
-      for (const item of Array.from(tracked)) {
-        if (isScope(item) && item.loading) return true;
-      }
-      return false;
-    },
-
-    snapshot() {
-      const source = internal.snapshotSource;
-      if (!source) return {};
-
-      const result: Record<string, any> = {};
-      for (const [key, value] of Object.entries(source)) {
-        if (isAtom(value)) {
-          result[key] = value.disposed ? undefined : value.value;
-        } else if (isScope(value)) {
-          result[key] = value.snapshot();
-        } else {
-          result[key] = value;
-        }
-      }
-      return result;
-    },
-
-    dispose() {
-      if (internal.strobeId !== undefined) {
-        clearInterval(internal.strobeId);
-        internal.strobeId = undefined;
-      }
-      internal.analogAtoms.clear();
-      for (const sub of internal.loadingSubscriptions) {
-        sub.unsubscribe();
-      }
-      internal.loadingSubscriptions.length = 0;
-      for (const item of Array.from(tracked)) {
-        item.dispose();
-      }
-      tracked.clear();
-      emittedAtoms.clear();
-      internal.snapshotSource = undefined;
-    }
-  };
-
-  scopeInternals.set(instance, internal);
-  internal.strobeOwner = ownsStrobe ? instance : parentInternal?.strobeOwner;
-  if (ownsStrobe && effectiveStrobe !== undefined) {
-    internal.strobeId = setInterval(() => {
-      for (const flush of internal.analogAtoms.values()) {
-        flush();
-      }
-    }, effectiveStrobe);
-  }
-
-  currentScope = instance;
-
-  let result: T;
-  try {
-    result = factory();
-  } finally {
-    currentScope = previousScope;
-  }
-
-  if (previousScope) {
-    registerWithCurrentScope(instance);
-  }
-
-  if (
-    typeof result === "object" &&
-    result !== null &&
-    !Array.isArray(result)
-  ) {
-    internal.snapshotSource = result as Record<string, any>;
-  }
-
-  // Warn about properties that would overwrite Scope methods
-  if (typeof result === "object" && result !== null && !Array.isArray(result)) {
-    for (const key of Object.keys(result)) {
-      if (key in instance) {
-        console.warn(
-          `Scope factory property "${key}" conflicts with the Scope interface and will overwrite it.`
-        );
-      }
-    }
-  }
-
-  // Empty scopes are immediately not loading
-  if (Array.from(tracked).filter(isAtom).length === 0) {
-    localLoading = false;
-  }
-
-  return Object.assign(instance, result);
-}
-
-/**
- * Global root scope that carries default mode/strobe configuration for all
- * top-level scopes.
- *
- * Mutating `globalScope.mode` or `globalScope.strobe` affects scopes created
- * after the change. Already-created scopes keep the configuration they were
- * created with.
- *
- * @example
- * ```ts
- * globalScope.mode = 'analog';
- * globalScope.strobe = 100;
- *
- * const app = scope(() => ({
- *   count: atom(0), // analog, batched to 100ms
- * }));
- * ```
- */
-(() => {
-  const scope = scopeImpl(() => ({}));
-  globalScope = scope as Scope & { mode: ScopeMode; strobe: number };
-
-  Object.defineProperties(scope, {
-    mode: {
-      get(): ScopeMode {
-        return scopeInternals.get(scope)?.effectiveMode ?? "discrete";
-      },
-      set(mode: ScopeMode) {
-        const internal = scopeInternals.get(scope);
-        if (!internal) return;
-        internal.options.mode = mode;
-        internal.effectiveMode = mode;
-        updateGlobalStrobe(scope);
-      },
-      enumerable: true,
-      configurable: true,
-    },
-    strobe: {
-      get(): number {
-        return scopeInternals.get(scope)?.effectiveStrobe ?? 0;
-      },
-      set(strobe: number) {
-        const internal = scopeInternals.get(scope);
-        if (!internal) return;
-        internal.options.strobe = strobe;
-        internal.effectiveStrobe = internal.effectiveMode === "analog" ? strobe : undefined;
-        updateGlobalStrobe(scope);
-      },
-      enumerable: true,
-      configurable: true,
-    },
-  });
-})();
-
-export { globalScope };
-
-function scopeImpl<T>(factory: () => T, options?: ScopeOptions): Scope & T {
-  return scope(factory, options);
-}
-
-function updateGlobalStrobe(scope: Scope): void {
-  const internal = scopeInternals.get(scope);
-  if (!internal) return;
-
-  if (internal.strobeId !== undefined) {
-    clearInterval(internal.strobeId);
-    internal.strobeId = undefined;
-  }
-
-  const strobe = internal.effectiveStrobe;
-  if (internal.effectiveMode === "analog" && strobe !== undefined && strobe > 0) {
-    internal.strobeOwner = scope;
-    internal.strobeId = setInterval(() => {
-      for (const flush of internal.analogAtoms.values()) {
-        flush();
-      }
-    }, strobe);
-  } else {
-    internal.strobeOwner = undefined;
   }
 }
