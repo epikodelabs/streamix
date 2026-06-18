@@ -60,6 +60,8 @@ interface AtomNode {
   isResource: boolean;
   isAnalog: boolean;
   flush: () => void;
+  /** Track if flush is currently in progress to prevent reentrancy */
+  flushing?: boolean;
 }
 
 /** Engine-facing container wrapper interface */
@@ -78,6 +80,8 @@ export interface Scheduler {
   queueFlush(node: AtomNode): void;
   flush(): void;
   remove(node: AtomNode): void;
+  /** Add immediate flush for discrete updates */
+  flushImmediately(node: AtomNode): void;
   get isDirty(): boolean;
   get depth(): number;
 }
@@ -86,6 +90,8 @@ class DefaultScheduler implements Scheduler {
   private txDepth = 0;
   private isBatchScheduled = false;
   private dirtyNodes = new Set<AtomNode>();
+  /** Track nodes being flushed to prevent reentrancy */
+  private flushingNodes = new Set<AtomNode>();
 
   transaction<T>(fn: () => T): T {
     this.txDepth++;
@@ -100,6 +106,8 @@ class DefaultScheduler implements Scheduler {
   }
 
   flush(): void {
+    if (this.txDepth > 0) return;
+
     this.txDepth++;
     try {
       while (this.dirtyNodes.size > 0) {
@@ -107,11 +115,15 @@ class DefaultScheduler implements Scheduler {
         this.dirtyNodes.clear();
 
         for (const node of sorted) {
-          if (node.dirty) {
+          if (node.dirty && !this.flushingNodes.has(node)) {
             try {
+              this.flushingNodes.add(node);
               node.flush();
+              node.dirty = false;
             } catch (error) {
               console.error("Error flushing node:", error);
+            } finally {
+              this.flushingNodes.delete(node);
             }
           }
         }
@@ -120,6 +132,26 @@ class DefaultScheduler implements Scheduler {
       this.txDepth--;
     }
     this.isBatchScheduled = false;
+  }
+
+  /** Implement immediate flush for discrete updates */
+  flushImmediately(node: AtomNode): void {
+    if (this.txDepth > 0) {
+      this.queueFlush(node);
+      return;
+    }
+
+    if (node.dirty && !this.flushingNodes.has(node)) {
+      try {
+        this.flushingNodes.add(node);
+        node.flush();
+        node.dirty = false;
+      } catch (error) {
+        console.error("Error flushing node:", error);
+      } finally {
+        this.flushingNodes.delete(node);
+      }
+    }
   }
 
   queueFlush(node: AtomNode): void {
@@ -139,6 +171,7 @@ class DefaultScheduler implements Scheduler {
 
   remove(node: AtomNode): void {
     this.dirtyNodes.delete(node);
+    this.flushingNodes.delete(node);
   }
 
   get isDirty(): boolean {
@@ -192,6 +225,20 @@ function subscribeToUpdates(atom: AtomBase<any>, handler: () => void): Subscript
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+ * Add WeakMap for tracking disposed state to prevent memory leaks
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+const disposedWeakMap = new WeakMap<object, boolean>();
+
+function isDisposed(obj: object): boolean {
+  return disposedWeakMap.get(obj) === true;
+}
+
+function markDisposed(obj: object): void {
+  disposedWeakMap.set(obj, true);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
  * flow() - Async Resource Lifecycle Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
@@ -228,13 +275,15 @@ export function flow<T>(
   };
 
   const broadcastNow = (value: T) => {
+    // Take a snapshot of handlers to prevent mutation during iteration
     const handlers = Array.from(subs);
     for (const cb of handlers) {
       try {
         cb(value);
       } catch (error: unknown) {
+        // Don't swallow errors, propagate them
         for (const handler of Array.from(errorHandlers)) {
-          try { handler(error); } catch { /* ignore */ }
+          try { handler(error); } catch { /* ignore nested errors */ }
         }
       }
     }
@@ -242,7 +291,8 @@ export function flow<T>(
 
   const notifyError = (err: any) => {
     errorValue = err instanceof Error ? err : new Error(String(err));
-    for (const handler of Array.from(errorHandlers)) {
+    const handlers = Array.from(errorHandlers);
+    for (const handler of handlers) {
       try { handler(errorValue); } catch { /* ignore */ }
     }
     if (options?.onError) {
@@ -250,9 +300,6 @@ export function flow<T>(
     }
   };
 
-  // FIX 1: call markAtomAsEmitted on the first value that comes through.
-  // Using a WeakSet internally so this is safe to call on every emission —
-  // subsequent calls are idempotent.
   const notify = (value: T) => {
     if (disposed) return;
     previous = current;
@@ -267,6 +314,8 @@ export function flow<T>(
   let disposePromise: Promise<void> | null = null;
   let abortController: AbortController | undefined;
   let iterationAbortController: AbortController | undefined;
+  /** Track iteration version to prevent stale iterations */
+  let currentIterationVersion = 0;
 
   const stop = async () => {
     cancelled = true;
@@ -282,8 +331,10 @@ export function flow<T>(
     if (disposed) return;
     if (disposePromise) return disposePromise;
 
+    // Create promise and store it before any async work
     disposePromise = (async () => {
       disposed = true;
+      markDisposed(instance);
       node.version++;
       subs.clear();
       activeSubCount = 0;
@@ -301,16 +352,21 @@ export function flow<T>(
       subscriptions.clear();
       const scheduler = getScheduler();
       scheduler.remove(node);
-      disposePromise = null;
     })();
 
-    return disposePromise;
+    try {
+      await disposePromise;
+    } finally {
+      // Only clear after the promise resolves
+      disposePromise = null;
+    }
   };
 
   const restart = async (): Promise<void> => {
     if (disposed || activeSubCount <= 0) return;
 
     const currentVersion = ++node.version;
+    currentIterationVersion = currentVersion;
 
     cancelled = true;
     iterationAbortController?.abort();
@@ -327,7 +383,8 @@ export function flow<T>(
   };
 
   const startIteration = (version: number) => {
-    if (disposed || version !== node.version) return;
+    // Check if this iteration is still current
+    if (disposed || version !== node.version || version !== currentIterationVersion) return;
 
     iterationAbortController = new AbortController();
     abortController = new AbortController();
@@ -352,7 +409,8 @@ export function flow<T>(
       return;
     }
 
-    if (version !== node.version) {
+    // Check if this iteration is still current after potential async operations
+    if (version !== node.version || version !== currentIterationVersion) {
       popFormulaContext();
       return;
     }
@@ -413,20 +471,22 @@ export function flow<T>(
       try {
         let result = await iterator!.next();
 
-        while (!cancelled && version === node.version && !iterationSignal.aborted && !result.done) {
+        // Check currentIterationVersion in the loop
+        while (!cancelled && version === node.version && version === currentIterationVersion && !iterationSignal.aborted && !result.done) {
           notify(result.value);
-          // FIX 2: removed duplicate `await Promise.resolve(notify(result.value))`.
-          // Just yield the microtask without double-broadcasting.
-          await Promise.resolve();
+          // Use queueMicrotask consistently
+          await new Promise<void>(resolve => queueMicrotask(resolve));
 
           result = await iterator!.next();
         }
 
-        if (!cancelled && version === node.version && !iterationSignal.aborted) {
+        // Only dispose if this is still the current iteration
+        if (!cancelled && version === node.version && version === currentIterationVersion && !iterationSignal.aborted && !disposed) {
           await disposeInstance();
         }
       } catch (err: unknown) {
-        if (version === node.version && !disposed) {
+        // Only handle errors if this iteration is still current
+        if (version === node.version && version === currentIterationVersion && !disposed) {
           notifyError(err);
           instance.fail(err, { terminate: true });
         }
@@ -434,7 +494,8 @@ export function flow<T>(
     };
 
     runIteration().catch(() => {
-      if (version !== node.version || disposed) {
+      // Only dispose if this is still the current iteration
+      if (version !== node.version || version !== currentIterationVersion || disposed) {
         void disposeInstance();
       }
     });
@@ -450,19 +511,25 @@ export function flow<T>(
     depth: 0,
     version: 0,
     dirty: false,
+    flushing: false,
     isResource: true,
     isAnalog: false,
     flush() {
-      if (disposed || !node.dirty) return;
-      node.dirty = false;
-      void restart();
+      if (disposed || !node.dirty || node.flushing) return;
+      node.flushing = true;
+      try {
+        node.dirty = false;
+        void restart();
+      } finally {
+        node.flushing = false;
+      }
     },
   };
 
   const instance: InternalFlowAtom<T> = {
     type: "atom",
 
-    get disposed() { return disposed; },
+    get disposed() { return disposed || isDisposed(this); },
 
     get error() { return errorValue; },
 
@@ -540,10 +607,28 @@ export function flow<T>(
       }
 
       if (shouldTerminate) {
+        // Stop the iterator immediately
+        cancelled = true;
+        iterationAbortController?.abort();
+        abortController?.abort();
+        
+        // Try to clean up the iterator
+        if (iterator && typeof (iterator as any).return === "function") {
+          try {
+            const result = (iterator as any).return();
+            if (result instanceof Promise) {
+              result.catch(() => {}); // Ignore errors
+            }
+          } catch { /* ignore */ }
+        }
+        
+        // Mark as disposed and clean up synchronously
         disposed = true;
+        markDisposed(instance);
         const scheduler = getScheduler();
         scheduler.remove(node);
 
+        // Clean up all handlers and subscriptions
         for (const handler of Array.from(disposeHandlers)) {
           try { Promise.resolve(handler()); } catch { /* ignore */ }
         }
@@ -554,6 +639,10 @@ export function flow<T>(
         subscriptions.clear();
         subs.clear();
         errorHandlers.clear();
+        clearDepSubscriptions();
+        
+        // Clear the dispose promise if it exists
+        disposePromise = null;
       }
     },
 
@@ -602,6 +691,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
       try {
         cb(snap);
       } catch (err) {
+        // Propagate errors to error handlers
         for (const handler of Array.from(errorHandlers)) {
           try { handler(err as Error); } catch { /* ignore */ }
         }
@@ -622,24 +712,30 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
     depth: 0,
     version: 0,
     dirty: false,
+    flushing: false,
     isResource: false,
     isAnalog: analog,
     flush() {
-      if (disposed || !node.dirty) return;
+      if (disposed || !node.dirty || node.flushing) return;
       if (node.isAnalog) return;
 
-      node.dirty = false;
-      if (Object.is(lastNotified, current)) return;
-      lastNotified = current;
-      node.version++;
-      broadcastNow();
+      node.flushing = true;
+      try {
+        node.dirty = false;
+        if (Object.is(lastNotified, current)) return;
+        lastNotified = current;
+        node.version++;
+        broadcastNow();
+      } finally {
+        node.flushing = false;
+      }
     },
   };
 
   const instance: Atom<T> & InternalAtomContainer = {
     type: "atom",
 
-    get disposed() { return disposed; },
+    get disposed() { return disposed || isDisposed(this); },
 
     get error() { return errorValue; },
 
@@ -716,9 +812,8 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
       previous = current;
       current = value;
 
-      // Discrete atoms outside a transaction should notify synchronously to
-      // preserve the per-emission semantics that operators and tests rely on.
-      // Analog atoms and transaction-batched updates keep the deferred flush.
+      // Analog mode or inside a transaction: queue for batched flush.
+      // Otherwise (discrete, outside transaction): broadcast synchronously.
       if (node.isAnalog || getScheduler().depth > 0) {
         instance[MARK_DIRTY]();
       } else {
@@ -726,9 +821,8 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
         lastNotified = current;
         node.version++;
         broadcastNow();
-        // Keep the scheduler aware of the emission so test schedulers can
-        // observe dirty state and flush it even though the broadcast was
-        // synchronous.
+        // Keep the scheduler aware so test schedulers can observe dirty state
+        // and flush it even though the broadcast already happened.
         instance[MARK_DIRTY]();
       }
     },
@@ -750,6 +844,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
 
       if (shouldTerminate) {
         disposed = true;
+        markDisposed(instance);
         unregisterAnalogAtom(instance as any);
         const scheduler = getScheduler();
         scheduler.remove(node);
@@ -785,6 +880,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
     dispose() {
       if (disposed) return;
       disposed = true;
+      markDisposed(instance);
       unregisterAnalogAtom(instance as any);
       const scheduler = getScheduler();
       scheduler.remove(node);
@@ -837,6 +933,8 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   const errorHandlers = new Set<(error: any) => void>();
   const dependencies = new Set<InternalAtomContainer>();
   const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
+  /** Track if we're currently recomputing to prevent cycles */
+  let recomputing = false;
 
   const broadcastNow = () => {
     const snap = current;
@@ -863,10 +961,9 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     }
   };
 
-  // FIX 3: call markAtomAsEmitted after the first successful synchronous computation.
-  // derived always produces a value immediately, so it should never block scope.loading.
   const ensureInit = () => {
-    if (initialized || disposed || running) return;
+    if (initialized || disposed || running || recomputing) return;
+    recomputing = true;
     try {
       current = run();
       if (!initialized) previous = current;
@@ -881,6 +978,8 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       if (terminateOnError) {
         throw err;
       }
+    } finally {
+      recomputing = false;
     }
   };
 
@@ -938,8 +1037,9 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   };
 
   const flushAnalog = () => {
-    if (!node.dirty || disposed) return;
+    if (!node.dirty || disposed || node.flushing) return;
 
+    node.flushing = true;
     try {
       const next = run();
       node.dirty = false;
@@ -960,6 +1060,8 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       if (!terminateOnError && propagateErrors) {
         broadcastNow();
       }
+    } finally {
+      node.flushing = false;
     }
   };
 
@@ -967,12 +1069,14 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     depth: 0,
     version: 0,
     dirty: false,
+    flushing: false,
     isResource: false,
     isAnalog: analog,
     flush() {
-      if (disposed || !node.dirty) return;
+      if (disposed || !node.dirty || node.flushing) return;
       if (node.isAnalog) return;
 
+      node.flushing = true;
       try {
         const next = run();
         node.dirty = false;
@@ -993,6 +1097,8 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
         if (!terminateOnError && propagateErrors) {
           broadcastNow();
         }
+      } finally {
+        node.flushing = false;
       }
     },
   };
@@ -1000,7 +1106,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   const instance: AtomBase<T> & InternalAtomContainer = {
     type: "atom",
 
-    get disposed() { return disposed; },
+    get disposed() { return disposed || isDisposed(this); },
 
     get error() { return errorValue; },
 
@@ -1016,13 +1122,9 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       const context = getCurrentFormulaContext();
       if (context) context.dependencies.add(instance);
 
-      ensureInit();
-
-      if (isErrorState && errorValue !== undefined) {
-        throw errorValue;
-      }
-
-      if (node.dirty && !node.isAnalog) {
+      // Check and attempt to recompute BEFORE checking error state
+      if (node.dirty && !node.isAnalog && !recomputing) {
+        recomputing = true;
         try {
           const next = run();
           node.dirty = false;
@@ -1043,9 +1145,15 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
           if (terminateOnError) {
             throw err;
           }
+        } finally {
+          recomputing = false;
         }
       }
 
+      // Ensure initialization if needed
+      ensureInit();
+
+      // Now check error state after potential recovery
       if (isErrorState && errorValue !== undefined) {
         throw errorValue;
       }
@@ -1054,6 +1162,32 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     },
 
     get safeValue() {
+      // Try to recompute if dirty, but don't throw on error
+      if (node.dirty && !node.isAnalog && !recomputing) {
+        recomputing = true;
+        try {
+          const next = run();
+          node.dirty = false;
+          isErrorState = false;
+          errorValue = undefined;
+          
+          if (!Object.is(current, next)) {
+            previous = current;
+            current = next;
+            node.version++;
+            if (subs.size > 0) {
+              broadcastNow();
+            }
+          }
+        } catch (err) {
+          // Keep old value on error, but update error state
+          notifyError(err);
+          node.dirty = false;
+        } finally {
+          recomputing = false;
+        }
+      }
+      
       ensureInit();
       return current;
     },
@@ -1112,6 +1246,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       if (disposed) return;
       ensureInit();
       disposed = true;
+      markDisposed(instance);
       unregisterAnalogAtom(instance as any);
       const scheduler = getScheduler();
       scheduler.remove(node);
