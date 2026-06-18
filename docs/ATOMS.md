@@ -222,9 +222,102 @@ Example:
 
 ---
 
+## How atoms synchronize
+
+Atoms form a push-based reactive graph. Understanding the synchronization rules helps avoid surprises when combining `atom`, `derived`, `flow`, scopes, and transactions.
+
+### Three kinds of atom
+
+| Kind | Created with | Value source | Notifies on |
+|---|---|---|---|
+| Writable | `atom(initialValue?)` | `next(value)` | every `next()` |
+| Derived | `derived(factory)` | re-runs factory when dependencies change | value actually changes |
+| Stream | `flow(source, initialValue?)` | async iterable / promise / atom | every emitted value |
+
+### Discrete mode (default)
+
+By default, atoms are **discrete**: every `next()` call broadcasts synchronously to subscribers.
+
+```ts
+const a = atom(0);
+let calls = 0;
+a.subscribe(() => calls++);
+a.next(0); // same value still notifies
+calls; // 1
+```
+
+This synchronous broadcast also marks dependent `derived` atoms dirty; they are flushed in the next scheduler microtask so sources are never observed in an inconsistent state.
+
+### Analog mode
+
+A scope can be created with a `strobe` interval:
+
+```ts
+const analogScope = scope(() => { ... }, { strobe: 16 });
+```
+
+Atoms created inside an analog scope become **analog**: `next()` only marks the atom dirty. A periodic `setInterval` (the strobe) drains all buffered analog atoms at once. This batches rapid updates so subscribers see only the latest value per tick.
+
+Use `discrete(initialValue?)` or `atom(..., { discrete: true })` to force a single atom to stay discrete even inside an analog scope.
+
+### Transactions
+
+`transaction(fn)` batches all discrete updates inside `fn` into a single flush.
+
+```ts
+const a = atom(0);
+const b = atom(0);
+a.subscribe(() => { ... });
+b.subscribe(() => { ... });
+
+transaction(() => {
+  a.next(1);
+  b.next(2);
+  // no subscriber has been called yet
+});
+// both subscribers are called once, in depth order
+```
+
+The scheduler orders dirty nodes by depth (sources before dependents), then flushes them. Nested transactions collapse into the outermost one.
+
+### Derived atoms
+
+`derived` tracks its dependencies automatically:
+
+1. On first read it pushes a formula context.
+2. Running `factory()` records every `.value` read.
+3. It subscribes to each dependency with a callback that marks itself dirty.
+4. `node.depth = max(dep.depth) + 1` so the scheduler always flushes dependencies first.
+5. On each re-run it unsubscribes from dependencies that are no longer read.
+
+A derived atom only notifies subscribers when its computed value actually changes (`Object.is` comparison).
+
+### Flow atoms
+
+`flow(source)` starts consuming its source lazily on the first subscription. Each yielded value updates the atom and broadcasts. The source can be:
+
+- another atom
+- an async iterable
+- a sync iterable
+- a promise
+- a factory returning any of the above
+
+`pipe(source, ...operators)` builds a flow pipeline by normalizing input into an async iterable, applying operators, and wrapping the result in `flow()`.
+
+### Scope disposal
+
+When a scope is disposed:
+
+1. The strobe interval is cleared (if any).
+2. All cleanup hooks run.
+3. Every owned atom and nested scope is disposed recursively.
+
+`scope()` automatically registers atoms created inside its factory. It also subscribes to them so derived atoms initialize eagerly, flows stay active, and emissions are recorded for `scope.loading`.
+
+---
+
 ## What Scopes do NOT do
 
 * No manual registration — tracking is implicit
 * No query/navigation API — structure is defined at creation time
-* No batching — updates are synchronous and stream-driven
 * No hidden mutation of public API shape
