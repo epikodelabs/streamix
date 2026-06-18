@@ -19,7 +19,7 @@ describe('eachValueFrom', () => {
 
     source.push(10);
     source.push(20);
-    source.error(expectedError);
+    source.fail(expectedError);
 
     let caught: Error | undefined;
     try {
@@ -81,7 +81,7 @@ describe('eachValueFrom', () => {
     })();
 
     source.push(1);
-    source.error(expectedError);
+    source.fail(expectedError);
     const caught = await finished;
 
     expect(values).toEqual([1]);

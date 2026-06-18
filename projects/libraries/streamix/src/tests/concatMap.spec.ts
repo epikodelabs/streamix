@@ -1,4 +1,4 @@
-import {concatMap, flow, from, iterate, atom as makeAtom, pipe, type Atom, type AtomBase} from '@epikodelabs/streamix';
+import { concatMap, flow, from, iterate, atom as makeAtom, pipe, type Atom, type AtomBase } from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
 
@@ -197,7 +197,7 @@ describe('concatMap', () => {
         const inner: Atom = makeAtom<number>();
         setTimeout(() => {
           if (val === 2) {
-            inner.error(new Error('Error at 2'));
+            inner.fail(new Error('Error at 2'));
           } else {
             inner.next(val * 10);
             inner.dispose();

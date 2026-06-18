@@ -1,19 +1,19 @@
 import { DONE, isPromiseLike, type MaybePromise, type Subscription } from "../atoms";
+import {
+  AsyncIteratorState,
+  asyncPull,
+  pushComplete,
+  pushError,
+  pushValue,
+  syncPull
+} from "./helpers";
 
 type Observer<T> = {
   next: (value: T) => MaybePromise;
-  error: (err: any) => MaybePromise;
+  fail: (err: any) => MaybePromise;
   complete: () => MaybePromise;
   readonly disposed: boolean;
 };
-import {
-    AsyncIteratorState,
-    asyncPull,
-    pushComplete,
-    pushError,
-    pushValue,
-    syncPull
-} from "./helpers";
 
 export type AsyncIteratorYieldResult<T> = { value: T; done?: false };
 

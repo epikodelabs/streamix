@@ -101,7 +101,7 @@ describe('catchError', () => {
     })();
 
     source.push(1);
-    source.error(error);
+    source.fail(error);
     await finished;
 
     expect(results).toEqual([1]);
@@ -123,7 +123,7 @@ describe('catchError', () => {
     })();
 
     source.push(1);
-    source.error(error);
+    source.fail(error);
     await finished;
 
     expect(handlerMock).toHaveBeenCalledTimes(1);

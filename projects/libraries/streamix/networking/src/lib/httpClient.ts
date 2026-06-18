@@ -1,9 +1,9 @@
 import {
-  atom,
-  createAsyncIterator,
-  createSubscription,
-  flow,
-  type AtomBase,
+    atom,
+    createAsyncIterator,
+    createSubscription,
+    flow,
+    type AtomBase,
 } from '@epikodelabs/streamix';
 
 const LOG_PREFIX = '[httpClient]';
@@ -20,7 +20,7 @@ const logWarning = (message: string, ...details: any[]) => {
  */
 function createReplayAtom<T>(): AtomBase<T> & {
   set(value: T): void;
-  error(err: any): void;
+  fail(err: any): void;
   dispose(): void;
 } {
   const output = atom<T>(undefined, { discrete: true });
@@ -120,7 +120,7 @@ function createReplayAtom<T>(): AtomBase<T> & {
 
   return Object.assign(output, {
     set: notify,
-    error: fail,
+    fail: fail,
     dispose: complete,
   }) as any;
 }
@@ -743,7 +743,7 @@ export const createHttpClient = (): HttpClient => {
           }
           data.dispose();
         } catch (error) {
-          data.error(error);
+          data.fail(error);
         }
       })();
 

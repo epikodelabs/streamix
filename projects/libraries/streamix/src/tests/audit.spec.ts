@@ -97,7 +97,7 @@ describe('audit', () => {
       }
     })();
 
-    input.error(new Error('Test Error'));
+    input.fail(new Error('Test Error'));
 
     await reader;
     expect(caught).toEqual(new Error('Test Error'));

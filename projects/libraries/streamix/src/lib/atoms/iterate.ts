@@ -37,6 +37,7 @@ export function iterate<T>(source: AtomBase<T> | AsyncIterable<T>): AsyncIterabl
   let onPush: (() => void) | undefined;
   let finish: (() => MaybePromise<void>) | undefined;
   let checkError: (() => any) | undefined;
+  let errorSub: any;
 
   const notifyPush = () => {
     if (onPush) {
@@ -67,7 +68,11 @@ export function iterate<T>(source: AtomBase<T> | AsyncIterable<T>): AsyncIterabl
     finish = () => {
       if (done) return;
       const cleanup = sub.unsubscribe();
-      const err = (atom as any)._error;
+      if (errorSub) {
+        errorSub.unsubscribe();
+        errorSub = undefined;
+      }
+      const err = atom.error;
       if (resolveNext) {
         if (err) {
           done = true;
@@ -76,23 +81,32 @@ export function iterate<T>(source: AtomBase<T> | AsyncIterable<T>): AsyncIterabl
           rejectNext = null;
           r(err);
         } else {
-          // When resolveNext is set the buffer is always empty (values
-          // resolve the promise instead of buffering), so we can safely
-          // complete immediately.
-          done = true;
-          resolveNext({ value: undefined as any, done: true });
-          resolveNext = null;
-          rejectNext = null;
+          if (buffer.length === 0) {
+            // When resolveNext is set the buffer is always empty (values
+            // resolve the promise instead of buffering), so we can safely
+            // complete immediately.
+            done = true;
+            resolveNext({ value: undefined as any, done: true });
+            resolveNext = null;
+            rejectNext = null;
+          }
         }
+      } else if (buffer.length === 0 && !atom.error) {
+        done = true;
       }
       notifyPush();
       return cleanup;
     };
 
+    errorSub = atom.onError(() => {
+      if (done) return;
+      if (finish) finish();
+    });
+
     (atom as any)._onDispose?.add(finish);
 
     checkError = () => {
-      const err = (atom as any)._error;
+      const err = atom.error;
       if (err !== undefined) {
         return err;
       }

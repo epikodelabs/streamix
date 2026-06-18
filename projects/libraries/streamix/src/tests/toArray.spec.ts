@@ -54,7 +54,7 @@ describe('toArray', () => {
       }
     })();
 
-    source.error(expectedError);
+    source.fail(expectedError);
     await finished;
 
     expect(caught).toBe(expectedError);

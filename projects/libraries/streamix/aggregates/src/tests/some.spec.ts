@@ -79,7 +79,7 @@ describe('some', () => {
       }
     })();
 
-    subject.error(new Error('Test Error'));
+    subject.fail(new Error('Test Error'));
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(error).toEqual(new Error('Test Error')); // Propagate error

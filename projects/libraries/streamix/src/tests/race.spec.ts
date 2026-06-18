@@ -1,4 +1,4 @@
-import {atom, flow, from, race, type Atom} from '@epikodelabs/streamix';
+import { atom, flow, from, race, type Atom } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -68,7 +68,7 @@ describe('race', () => {
     (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
-    stream1.error(new Error('test error'));
+    stream1.fail(new Error('test error'));
     stream2.next(2);
 
     await delay();

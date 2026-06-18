@@ -1,4 +1,4 @@
-import {atom, defer, from, iterate, type Atom} from '@epikodelabs/streamix';
+import { atom, defer, from, iterate, type Atom } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -7,7 +7,7 @@ function mockStream(values: any[], completed = false, error?: Error): any {
 
   setTimeout(() => {
     if (error) {
-      subject.error(error);
+      subject.fail(error);
       return;
     }
 

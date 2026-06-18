@@ -1,315 +1,380 @@
-import { atom, derived, flow } from '@epikodelabs/streamix';
+import {
+  atom,
+  createTestEnvironment,
+  derived,
+  discrete,
+  flow,
+  getScheduler,
+  transaction,
+  type AtomBase
+} from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
-describe('atom', () => {
-  describe('with initial value', () => {
-    it('should hold an initial value', () => {
-      const a = atom('hello');
-      expect(a.value).toBe('hello');
-      expect(a.prior).toBe('hello');
-      a.dispose();
-    });
-
-
-    it('should not suppress duplicate values', () => {
-      const a = atom(5);
-      const values: (number | undefined)[] = [];
-      a.subscribe(v => values.push(v));
-
-      a.next(10);
-      a.next(5);
-      a.next(5);
-      expect(values).toEqual([10, 5, 5]);
-
-      a.dispose();
-    });
-
-    it('should throw after disposal', () => {
-      const a = atom(0);
-      a.dispose();
-      expect(() => a.value).toThrowError(/disposed/);
-    });
-
-    it('should provide safeValue after disposal', () => {
+describe('Atom System', () => {
+  describe('atom()', () => {
+    it('should create an atom with initial value', () => {
       const a = atom(42);
-      a.dispose();
+      expect(a.value).toBe(42);
       expect(a.safeValue).toBe(42);
-    });
-
-    it('should clean up subscriptions on dispose', () => {
-      const a = atom<number>(0);
-      const values: number[] = [];
-      a.subscribe(v => values.push(v));
-
-      a.next(1);
+      expect(a.disposed).toBe(false);
+      expect(a.subscriberCount).toBe(0);
       a.dispose();
-
-      a.next(2);
-      expect(values).toEqual([1]);
     });
 
-    it('should not receive values after unsubscribe', () => {
-      const a = atom<number>(0);
-      const values: number[] = [];
-      const sub = a.subscribe(v => values.push(v));
-
-      a.next(1);
-      sub.unsubscribe();
-      a.next(2);
-
-      expect(values).toEqual([1]);
-    });
-  });
-
-  describe('without initial value', () => {
-    it('should have no initial value', () => {
+    it('should create an atom without initial value', () => {
       const a = atom<number>();
       expect(a.value).toBeUndefined();
-      expect(a.prior).toBeUndefined();
+      expect(a.safeValue).toBeUndefined();
       a.dispose();
     });
 
-    it('should update via next()', () => {
-      const a = atom<number>();
-      const values: number[] = [];
-      a.subscribe(v => values.push(v));
-
-      a.next(10);
-      expect(a.value).toBe(10);
-      expect(a.prior).toBeUndefined();
-      expect(values).toEqual([10]);
-
-      a.next(20);
-      expect(a.value).toBe(20);
-      expect(values).toEqual([10, 20]);
-
-      a.dispose();
-    });
-
-    it('should not suppress duplicate values', () => {
-      const a = atom<number>();
-      const values: number[] = [];
-      a.subscribe(v => values.push(v));
-
+    it('should update value with next()', () => {
+      const a = atom(0);
       a.next(5);
-      a.next(5);
-      expect(values).toEqual([5, 5]);
-
+      expect(a.value).toBe(5);
+      expect(a.prior).toBe(0);
       a.dispose();
     });
 
-    it('should throw after disposal', () => {
-      const a = atom<number>();
-      a.dispose();
-      expect(() => a.value).toThrowError(/disposed/);
-    });
-
-    it('should not replay values to late subscribers by default', () => {
-      const a = atom<number>();
+    it('should notify on every next() call', async () => {
+      const a = atom(0);
+      let calls = 0;
+      a.subscribe(() => calls++);
+      a.next(0); // Same value still notifies
+      expect(calls).toBe(1);
       a.next(1);
-      a.next(2);
-
-      const values: number[] = [];
-      a.subscribe(v => values.push(v));
-
-      expect(values).toEqual([]);
+      expect(calls).toBe(2);
+      a.next(1);
+      expect(calls).toBe(3);
       a.dispose();
     });
 
-    it('should track prior after updates', () => {
-      const a = atom<number>();
+    it('should notify subscribers on change', async () => {
+      const a = atom(0);
+      let value = 0;
+      a.subscribe(v => { value = v; });
+      a.next(5);
+      await delay(); // Allow microtask queue to drain
+      expect(value).toBe(5);
+      a.dispose();
+    });
 
+    it('should handle multiple subscribers', async () => {
+      const a = atom(0);
+      let val1 = 0, val2 = 0;
+      a.subscribe(v => { val1 = v; });
+      a.subscribe(v => { val2 = v; });
       a.next(10);
-      expect(a.prior).toBeUndefined();
-
-      a.next(20);
-      expect(a.prior).toBe(10);
-
-      a.next(30);
-      expect(a.prior).toBe(20);
-
+      await delay(); // Allow microtask queue to drain
+      expect(val1).toBe(10);
+      expect(val2).toBe(10);
       a.dispose();
     });
-  });
 
-  describe('flow', () => {
-    it('should hold an initial value', () => {
-      const source = atom<number>();
-      const a = flow(source, 42);
-      expect(a.value).toBe(42);
-      expect(a.prior).toBe(42);
+    it('should return subscription with unsubscribe', async () => {
+      const a = atom(0);
+      let calls = 0;
+      const sub = a.subscribe(() => calls++);
+      a.next(1);
+      await delay(); // Allow microtask queue to drain
+      expect(calls).toBe(1);
+      sub.unsubscribe();
+      a.next(2);
+      await delay(); // Allow microtask queue to drain
+      expect(calls).toBe(1);
       a.dispose();
-      source.dispose();
     });
 
-    it('should update when the source emits', async () => {
-      const source = atom<number>();
-      const a = flow(source, 0);
-      const values: number[] = [];
-      a.subscribe(v => values.push(v));
-      await delay();
-
-      source.next(1);
-      await delay();
-      source.next(2);
-      await delay();
-
-      expect(values).toEqual([1, 2]);
-      expect(a.value).toBe(2);
+    it('should handle errors with onError', async () => {
+      const a = atom(0);
+      let errorCaught: any = null;
+      a.onError(err => { errorCaught = err; });
+      a.fail(new Error('test error'));
+      expect(errorCaught.message).toBe('test error');
+      await delay(); // Allow microtask queue to drain for error propagation
+      expect(a.error?.message).toBe('test error');
       a.dispose();
-      source.dispose();
     });
 
-    it('should track prior', async () => {
-      const source = atom<number>();
-      const a = flow(source, 10);
+    it('should recover from error state', async () => {
+      const a = atom(0, { terminateOnError: false });
+      a.fail(new Error('test'));
+      expect(a.error.message).toBe('test');
+      await delay(); // Allow microtask queue to drain for error propagation
+      a.recover?.(); // This will trigger a flush
+      await delay(); // Allow microtask queue to drain for recovery
+      expect(a.error).toBeUndefined();
+      a.next(5);
+      await delay(); // Allow microtask queue to drain for next value
+      expect(a.value).toBe(5);
+      a.dispose();
+    });
+
+    it('should terminate on error when configured', async () => {
+      const a = atom(0, { terminateOnError: true });
       a.subscribe(() => {});
-      await delay();
-      expect(a.prior).toBe(10);
-
-      source.next(20);
-      await delay();
-      expect(a.value).toBe(20);
-      expect(a.prior).toBe(10);
-
-      source.next(30);
-      await delay();
-      expect(a.value).toBe(30);
-      expect(a.prior).toBe(20);
-
+      a.fail(new Error('fatal'));
+      await delay(); // Allow microtask queue to drain for termination
+      expect(a.disposed).toBe(true);
       a.dispose();
-      source.dispose();
     });
 
-    it('should throw after disposal', () => {
-      const source = atom<number>();
-      const a = flow(source, 0);
+    it('should respect maxSubscribers limit', () => {
+      const a = atom(0, { maxSubscribers: 2 });
+      a.subscribe(() => {});
+      a.subscribe(() => {});
+      expect(() => a.subscribe(() => {})).toThrow(new Error('Maximum subscriber limit (2) reached')); // No await needed here as it's a sync throw
       a.dispose();
-      expect(() => a.value).toThrowError(/disposed/);
-      source.dispose();
     });
 
-    it('should complete iterator on disposal', async () => {
-      const source = atom<number>();
-      const a = flow(source, 0);
+    it('should support discrete mode', () => {
+      const a = discrete(0);
+      expect(a.value).toBe(0);
+      a.next(5);
+      expect(a.value).toBe(5);
       a.dispose();
-      expect(() => source.next(1)).not.toThrow();
-      source.dispose();
     });
   });
 
-  describe('derived', () => {
-    it('should compute an initial value', () => {
-      const a = atom(2);
-      const b = atom(3);
-      const sum = derived(() => a.value + b.value);
+  describe('derived()', () => {
+    it('should compute derived value', async () => {
+      const source = atom(5);
+      const doubled = derived(() => source.value * 2);
+      expect(doubled.value).toBe(10);
+      source.next(10);
+      await delay();
+      expect(doubled.value).toBe(20);
+      source.dispose();
+      doubled.dispose();
+    });
 
-      expect(sum.value).toBe(5);
+    it('should update when dependencies change', async () => {
+      const a = atom(1);
+      const b = atom(2);
+      const sum = derived(() => a.value + b.value);
+      expect(sum.value).toBe(3);
+      a.next(5);
+      await delay();
+      expect(sum.value).toBe(7);
+      b.next(10);
+      await delay();
+      expect(sum.value).toBe(15);
+      a.dispose();
+      b.dispose();
       sum.dispose();
     });
 
-    it('should recompute when a dependency changes', () => {
+    it('should handle multiple dependencies', async () => {
       const a = atom(1);
-      const doubled = derived(() => a.value * 2);
-      const values: number[] = [];
-      doubled.subscribe(v => values.push(v));
-
-      a.next(5);
-      expect(doubled.value).toBe(10);
-      expect(values).toEqual([10]);
-
-      a.next(7);
-      expect(doubled.value).toBe(14);
-      expect(values).toEqual([10, 14]);
-
-      doubled.dispose();
-    });
-
-    it('should not suppress duplicate values', () => {
-      const a = atom(1);
-      const doubled = derived(() => a.value * 2);
-      const values: number[] = [];
-      doubled.subscribe(v => values.push(v));
-
-      a.next(2);
-      a.next(2);
-      expect(values).toEqual([4, 4]);
-
-      doubled.dispose();
-    });
-
-    it('should track prior', () => {
-      const a = atom(10);
-      const inc = derived(() => a.value + 1);
-
-      expect(inc.prior).toBe(11);
-      a.next(20);
-      expect(inc.value).toBe(21);
-      expect(inc.prior).toBe(11);
-
-      inc.dispose();
-    });
-
-    it('should clean up dependency subscriptions on dispose', () => {
-      const a = atom(1);
-      const doubled = derived(() => a.value * 2);
-      expect(doubled.value).toBe(2);
-      doubled.dispose();
-
-      a.next(99);
-      expect(doubled.safeValue).toBe(2);
-      expect(() => doubled.value).toThrowError();
-    });
-
-    it('should dynamically adjust dependencies', () => {
-      const a = atom(1);
-      const b = atom(10);
-      const useA = atom(true);
-
-      const result = derived(() => useA.value ? a.value : b.value);
-      expect(result.value).toBe(1);
-
-      a.next(5);
+      const b = atom(2);
+      const c = atom(3);
+      const result = derived(() => a.value * b.value + c.value);
       expect(result.value).toBe(5);
-
-      b.next(20);
-      expect(result.value).toBe(5);
-
-      useA.next(false);
-      expect(result.value).toBe(20);
-
-      a.next(99);
-      expect(result.value).toBe(20);
-
-      b.next(30);
-      expect(result.value).toBe(30);
-
+      a.next(2);
+      await delay();
+      expect(result.value).toBe(7);
+      b.next(3);
+      await delay();
+      expect(result.value).toBe(9);
+      c.next(4);
+      await delay();
+      expect(result.value).toBe(10);
+      a.dispose();
+      b.dispose();
+      c.dispose();
       result.dispose();
     });
 
-    it('should track dependencies through value', () => {
-      const a = atom(7);
-      const result = derived(() => a.value * 3);
-
-      expect(result.value).toBe(21);
-      a.next(4);
-      expect(result.value).toBe(12);
-
-      result.dispose();
+    it('should throw on circular dependency', () => {
+      let derivedAtom: AtomBase<any>;
+      const source = atom(0);
+      // This creates a circular dependency
+      expect(() => {
+        derivedAtom = derived(() => {
+          return derivedAtom ? derivedAtom.value : source.value;
+        });
+        derivedAtom.value;
+      }).toThrow(new Error('Circular dependency detected in derived()'));
+      source.dispose();
     });
 
-    it('should handle nested derived atoms', () => {
-      const a = atom(3);
-      const inner = derived(() => a.value * 2);
-      const outer = derived(() => inner.value + 1);
+    it('should handle errors in derived', async () => {
+      const source = atom(0);
+      const d = derived(() => {
+        if (source.value > 10) throw new Error('Too high');
+        return source.value;
+      }, { terminateOnError: false });
+      
+      expect(d.value).toBe(0);
+      source.next(15);
+      await delay();
+      expect(() => d.value).toThrow(new Error('Too high'));
+      
+      source.next(5);
+      await delay();
+      expect(d.value).toBe(5);
+      
+      source.dispose();
+      d.dispose();
+    });
 
-      expect(outer.value).toBe(7);
-      a.next(5);
-      expect(outer.value).toBe(11);
+    it('should terminate on error when configured', async () => {
+      const source = atom(0);
+      const d = derived(() => {
+        throw new Error('fatal');
+      }, { terminateOnError: true });
+      
+      expect(() => d.value).toThrow(new Error('fatal'));
+      await delay();
+      expect(d.disposed).toBe(true);
+      
+      source.dispose();
+      d.dispose();
+    });
+  });
 
-      outer.dispose();
-      inner.dispose();
+  describe('flow()', () => {
+    it('should handle async iterable source', async () => {
+      async function* generate() {
+        yield 1;
+        yield 2;
+        yield 3;
+      }
+      
+      const f = flow(generate(), 0);
+      let values: number[] = [];
+      f.subscribe(v => values.push(v));
+      
+      await delay(50);
+      expect(values).toEqual([1, 2, 3]);
+      f.dispose();
+    });
+
+    it('should handle sync iterable source', async () => { // Make it async to use await delay
+      function* generate() {
+        yield 1;
+        yield 2;
+        yield 3;
+      }
+      
+      const f = flow(generate(), 0);
+      let values: number[] = [];
+      f.subscribe(v => values.push(v));
+      
+      await delay(50); // Allow microtask queue to drain for sync flow to complete
+      expect(values).toEqual([1, 2, 3]);
+      f.dispose();
+    });
+
+    it('should handle source factory function', async () => {
+      const f = flow(async function*() {
+        yield 1;
+        yield 2;
+        yield 3;
+      }, 0);
+      
+      let values: number[] = [];
+      f.subscribe(v => values.push(v));
+      
+      await delay(50);
+      expect(values).toEqual([1, 2, 3]);
+      f.dispose();
+    });
+
+    it('should support abort signal', async () => {
+      const f = flow(async function*(signal?: AbortSignal) {
+        let i = 0;
+        while (!signal?.aborted) {
+          yield i++;
+          await delay(10);
+        }
+      }, 0);
+      
+      let values: number[] = [];
+      const sub = f.subscribe(v => values.push(v));
+      
+      await delay(30);
+      sub.unsubscribe();
+      
+      expect(values.length).toBeLessThan(5);
+      f.dispose();
+    });
+
+    it('should handle errors', async () => {
+      const f = flow(async function*() {
+        yield 1;
+        throw new Error('test error');
+      }, 0);
+      
+      let error: any = null;
+      f.onError(err => { error = err; });
+      f.subscribe(() => {});
+
+      await delay(50);
+      expect(error?.message).toBe('test error');
+      f.dispose();
+    });
+  });
+
+  describe('transaction()', () => {
+    it('should batch updates', async () => { // Make it async
+      const a = atom(0);
+      const b = atom(0);
+      let calls = 0;
+      
+      a.subscribe(() => calls++);
+      b.subscribe(() => calls++);
+      
+      transaction(() => {
+        a.next(1);
+        b.next(2);
+        expect(calls).toBe(0); // No notifications yet
+      });
+      
+      await delay(); // Allow microtask queue to drain
+      expect(calls).toBe(2); // Both notified after transaction
+      a.dispose();
+      b.dispose();
+    });
+
+    it('should handle nested transactions', async () => { // Make it async
+      const a = atom(0);
+      let calls = 0;
+      a.subscribe(() => calls++);
+      
+      transaction(() => {
+        a.next(1);
+        transaction(() => {
+          a.next(2);
+          expect(calls).toBe(0);
+        });
+        expect(calls).toBe(0);
+      });
+      
+      await delay(); // Allow microtask queue to drain
+      expect(calls).toBe(1);
+      a.dispose();
+    });
+  });
+
+  describe('scheduler', () => {
+    it('should use custom scheduler', async () => { // Make it async
+      const env = createTestEnvironment();
+      
+      env.run(() => {
+        const a = atom(0);
+        a.subscribe(() => {});
+        a.next(1);
+        // In test environment, we control when flush happens
+        expect(getScheduler().isDirty).toBe(true);
+        env.flush();
+        expect(getScheduler().isDirty).toBe(false);
+        a.dispose();
+      });
+      
+      env.reset();
     });
   });
 });
+

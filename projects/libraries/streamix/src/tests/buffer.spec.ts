@@ -1,4 +1,4 @@
-import {atom, buffer, iterate, pipe, type Atom} from '@epikodelabs/streamix';
+import { atom, buffer, iterate, pipe, type Atom } from '@epikodelabs/streamix';
 
 const wait = (ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -93,7 +93,7 @@ describe("buffer", () => {
 
     source.next(1);
     await wait(50);
-    source.error(new Error("Test error"));
+    source.fail(new Error("Test error"));
 
     await completed;
     expect(error?.message).toBe("Test error");

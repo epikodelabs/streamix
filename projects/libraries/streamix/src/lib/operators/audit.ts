@@ -54,7 +54,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
           startTimer();
         }
       } catch (err) {
-        output.error(err);
+        output.fail(err);
       } finally {
         if (timerId) { clearTimeout(timerId); timerId = undefined; }
         if (!output.disposed) output.dispose();

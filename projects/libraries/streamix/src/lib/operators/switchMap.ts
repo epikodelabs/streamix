@@ -1,7 +1,7 @@
 import type { MaybePromise, Operator } from "../atoms";
 import { createOperator, DONE, isPromiseLike } from "../atoms";
-import { fromAny } from "../factories";
 import type { PipeInput } from "../atoms/pipe";
+import { fromAny } from "../factories";
 import { createAsyncPushable } from "../utils";
 
 /**
@@ -75,7 +75,7 @@ export function switchMap<T = any, R = any>(
           }
         } catch (err) {
           if (!stopped && token === currentInnerToken) {
-            output.error(err);
+            output.fail(err);
           }
         } finally {
           if (currentInner?.token === token) {
@@ -94,7 +94,7 @@ export function switchMap<T = any, R = any>(
       try {
         projected = project(value, index++);
       } catch (err) {
-        output.error(err);
+        output.fail(err);
         return;
       }
 
@@ -107,7 +107,7 @@ export function switchMap<T = any, R = any>(
           },
           (err) => {
             if (stopped || capturedToken !== currentInnerToken) return;
-            output.error(err);
+            output.fail(err);
           }
         );
       } else {
@@ -124,7 +124,7 @@ export function switchMap<T = any, R = any>(
           try {
             result = tryNext.call(source);
           } catch (err) {
-            output.error(err);
+            output.fail(err);
             return;
           }
 
@@ -153,7 +153,7 @@ export function switchMap<T = any, R = any>(
           inputCompleted = true;
           checkComplete();
         } catch (err) {
-          output.error(err);
+          output.fail(err);
         }
       })();
     }

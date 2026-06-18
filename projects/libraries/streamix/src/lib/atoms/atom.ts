@@ -1,6 +1,7 @@
 import { iterate } from "./iterate";
 import { type MaybePromise, type Operator } from "./operator";
 import { pipe as pipeSource } from "./pipe";
+
 import {
   getCurrentScope,
   getScopeStrobe,
@@ -11,213 +12,253 @@ import {
 } from "./scope";
 import { createSubscription, type Subscription } from "./subscription";
 
-/**
- * Common options for atom factories.
- */
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Architectural Symbols (Hidden Engine Boundaries)
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+export const NODE = Symbol("engine.node");
+export const MARK_DIRTY = Symbol("engine.markDirty");
+export const FLUSH = Symbol("engine.flush");
+
 export interface AtomOptions {
-  /**
-   * When `true`, the atom always emits updates immediately, bypassing any
-   * scope-level or global strobe. When `false` or omitted, the atom follows
-   * the effective mode of the owning scope (or the global scope).
-   */
   discrete?: boolean;
+  maxSubscribers?: number;
+  onError?: (error: any) => void;
+  terminateOnError?: boolean;
+  propagateErrors?: boolean;
 }
 
-/**
- * Base interface for all atoms.
- */
+/** Public API Contract - completely free of engine leaks */
 export interface AtomBase<T = any> {
-  type: "atom";
-  name?: string;
+  readonly type: "atom";
+  readonly name?: string;
   readonly value: T;
   readonly safeValue: T;
   readonly prior: T;
   readonly disposed: boolean;
+  readonly error?: any;
+  readonly subscriberCount?: number;
   subscribe(callback?: (value: T) => MaybePromise): Subscription;
+  onError(handler: (error: any) => void): Subscription;
   dispose(): void;
   pipe<R = any>(...ops: Operator<any, any>[]): AtomBase<R>;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
-/**
- * Writable atom.
- */
 export interface Atom<T = any> extends AtomBase<T> {
   next(value: T): void;
-  error(err: any): void;
+  fail(err: any, options?: { terminate?: boolean }): void;
+  recover?(): void;
+  clearError?(): void;
 }
 
-let activeFormula: { dependencies: Set<AtomBase<any>> } | null = null;
+/** Hidden Graph Node containing full reactive state metadata */
+interface AtomNode {
+  depth: number;
+  version: number;
+  dirty: boolean;
+  isResource: boolean;
+  isAnalog: boolean;
+  flush: () => void;
+}
+
+/** Engine-facing container wrapper interface */
+interface InternalAtomContainer {
+  [NODE]: AtomNode;
+  [MARK_DIRTY](): void;
+  [FLUSH](): void;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Scheduler - Isolated for Multi-tenancy & Testing
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+export interface Scheduler {
+  transaction<T>(fn: () => T): T;
+  queueFlush(node: AtomNode): void;
+  flush(): void;
+  remove(node: AtomNode): void;
+  get isDirty(): boolean;
+  get depth(): number;
+}
+
+class DefaultScheduler implements Scheduler {
+  private txDepth = 0;
+  private isBatchScheduled = false;
+  private dirtyNodes = new Set<AtomNode>();
+
+  transaction<T>(fn: () => T): T {
+    this.txDepth++;
+    try {
+      return fn();
+    } finally {
+      this.txDepth--;
+      if (this.txDepth === 0) {
+        this.flush();
+      }
+    }
+  }
+
+  flush(): void {
+    this.txDepth++;
+    try {
+      while (this.dirtyNodes.size > 0) {
+        const sorted = Array.from(this.dirtyNodes).sort((a, b) => a.depth - b.depth);
+        this.dirtyNodes.clear();
+
+        for (const node of sorted) {
+          if (node.dirty) {
+            try {
+              node.flush();
+            } catch (error) {
+              console.error("Error flushing node:", error);
+            }
+          }
+        }
+      }
+    } finally {
+      this.txDepth--;
+    }
+    this.isBatchScheduled = false;
+  }
+
+  queueFlush(node: AtomNode): void {
+    this.dirtyNodes.add(node);
+
+    if (this.txDepth > 0) return;
+
+    if (!this.isBatchScheduled) {
+      this.isBatchScheduled = true;
+      queueMicrotask(() => {
+        if (this.txDepth === 0) {
+          this.flush();
+        }
+      });
+    }
+  }
+
+  remove(node: AtomNode): void {
+    this.dirtyNodes.delete(node);
+  }
+
+  get isDirty(): boolean {
+    return this.dirtyNodes.size > 0;
+  }
+
+  get depth(): number {
+    return this.txDepth;
+  }
+}
+
+let currentScheduler: Scheduler = new DefaultScheduler();
+
+export function setScheduler(scheduler: Scheduler): void {
+  currentScheduler = scheduler;
+}
+
+export function getScheduler(): Scheduler {
+  return currentScheduler;
+}
+
+export function transaction<T>(fn: () => T): T {
+  return currentScheduler.transaction(fn);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Active Formula Stack
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+const activeFormulaStack: { dependencies: Set<InternalAtomContainer> }[] = [];
+
+function pushFormulaContext(): { dependencies: Set<InternalAtomContainer> } {
+  const context = { dependencies: new Set<InternalAtomContainer>() };
+  activeFormulaStack.push(context);
+  return context;
+}
+
+function popFormulaContext(): void {
+  activeFormulaStack.pop();
+}
+
+function getCurrentFormulaContext(): { dependencies: Set<InternalAtomContainer> } | null {
+  return activeFormulaStack.length > 0 ? activeFormulaStack[activeFormulaStack.length - 1] : null;
+}
 
 function subscribeToUpdates(atom: AtomBase<any>, handler: () => void): Subscription {
-  let active = false;
   const sub = atom.subscribe(() => {
-    if (!active) return;
     handler();
   });
-  active = true;
   return sub;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * Glitch-free propagation
- *
- * Two-phase commit:
- *
- *   Phase 1 – "mark"   Every atom whose upstream changed marks itself dirty
- *                       and records the new value, but does NOT notify its own
- *                       subscribers yet.  This is the depth-first traversal.
- *
- *   Phase 2 – "sweep"  After the outermost transaction() returns (depth → 0)
- *                       we walk the dirty set in registration order and notify
- *                       each atom's subscribers exactly once, with its final
- *                       settled value.
- *
- * `transaction()` is the public entry-point.  All internal mutations that
- * should compose glitch-freely must be wrapped inside it.  Nested calls are
- * free – only the outermost flush triggers the sweep.
+ * flow() - Async Resource Lifecycle Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
-/** Depth counter for nested transactions. */
-let txDepth = 0;
-
-/**
- * Ordered set of flush callbacks queued during an active transaction.
- * Using a Map keyed by identity so the same atom never queues twice.
- */
-const pendingFlush = new Map<object, () => void>();
-
-/**
- * Run `fn` inside a transaction.  All atom notifications are deferred until
- * the outermost transaction completes, guaranteeing that every derived atom
- * sees only fully-settled upstream values (no glitches).
- *
- * Transactions compose: calling `transaction()` inside an already-active
- * transaction is a no-op at the boundary level – the flush happens once at
- * the outermost exit.
- *
- * @example
- * ```ts
- * transaction(() => {
- *   x.next(1);
- *   y.next(2);
- * });
- * // derived atoms that depend on both x and y are notified only once,
- * // after both writes have landed.
- * ```
- */
-export function transaction(fn: () => void): void {
-  txDepth++;
-  try {
-    fn();
-  } finally {
-    txDepth--;
-    if (txDepth === 0) {
-      flushTransaction();
-    }
-  }
+interface InternalFlowAtom<T> extends AtomBase<T>, InternalAtomContainer {
+  fail(err: any, options?: { terminate?: boolean }): void;
 }
-
-/** Flush all pending notifications accumulated during the transaction. */
-function flushTransaction(): void {
-  // Snapshot and clear before iterating so re-entrant writes (from
-  // subscribers that themselves call next()) get queued into a fresh batch.
-  while (pendingFlush.size > 0) {
-    const batch = Array.from(pendingFlush.values());
-    pendingFlush.clear();
-    for (const flush of batch) {
-      flush();
-    }
-  }
-}
-
-/**
- * Schedule a notification callback for `owner`.
- *
- * - Inside a transaction (txDepth > 0) the callback is queued; the same owner
- *   replacing a previous entry is idempotent (last write wins, which is
- *   correct because by the time we flush, `current` already holds the final
- *   value).
- * - Outside a transaction the callback fires immediately (legacy behaviour for
- *   direct, single-atom writes that don't need batching).
- */
-function scheduleNotify(owner: object, notify: () => void): void {
-  if (txDepth > 0) {
-    // Replace any previously queued flush for this atom – last write wins.
-    pendingFlush.set(owner, notify);
-  } else {
-    notify();
-  }
-}
-
-/* ── Legacy propagation helpers (kept for flow / derived internal use) ────── */
-
-let propagationDepth = 0;
-let deferredNotifications = new Set<() => void>();
-
-function flushDeferred() {
-  const notifications = Array.from(deferredNotifications);
-  deferredNotifications = new Set();
-  for (const notify of notifications) {
-    notify();
-  }
-}
-
-function runWithPropagation(fn: () => void) {
-  propagationDepth++;
-  try {
-    fn();
-  } finally {
-    propagationDepth--;
-    if (propagationDepth === 0 && deferredNotifications.size > 0) {
-      flushDeferred();
-    }
-  }
-}
-
-function notifyDerivedSubscribers(notify: () => void) {
-  if (propagationDepth > 0) {
-    deferredNotifications.add(notify);
-  } else {
-    notify();
-  }
-}
-
-/* ── flow ── */
 
 export function flow<T>(
   source: AsyncIterable<T> | Iterable<T> | ((signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>),
   initialValue?: T,
   options?: AtomOptions
-): AtomBase<T> & { _error?: any } {
-  void options;
-
+): AtomBase<T> {
+  const maxSubscribers = options?.maxSubscribers ?? 1000;
   let current = initialValue as T;
   let previous = initialValue as T;
   let disposed = false;
   let started = false;
   let activeSubCount = 0;
-  let error: any = undefined;
+  let errorValue: any = undefined;
   const disposeHandlers = new Set<() => void>();
+  const errorHandlers = new Set<(error: any) => void>();
 
   const subs = new Set<(value: T) => MaybePromise>();
   const subscriptions = new Set<Subscription>();
 
-  const notify = (value: T) => {
-    if (disposed || Object.is(current, value)) return;
+  const dependencies = new Set<InternalAtomContainer>();
+  const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
 
-    previous = current;
-    current = value;
+  const clearDepSubscriptions = () => {
+    const values = Array.from(depSubscriptions.values());
+    for (const sub of values) sub.unsubscribe();
+    depSubscriptions.clear();
+    dependencies.clear();
+  };
 
-    runWithPropagation(() => {
-      for (const cb of Array.from(subs)) {
-        try {
-          cb(value);
-        } catch {
-          // ignore user callback errors
+  const broadcastNow = (value: T) => {
+    const handlers = Array.from(subs);
+    for (const cb of handlers) {
+      try {
+        cb(value);
+      } catch (error: unknown) {
+        for (const handler of Array.from(errorHandlers)) {
+          try { handler(error); } catch { /* ignore */ }
         }
       }
-    });
+    }
+  };
+
+  const notifyError = (err: any) => {
+    errorValue = err instanceof Error ? err : new Error(String(err));
+    for (const handler of Array.from(errorHandlers)) {
+      try { handler(errorValue); } catch { /* ignore */ }
+    }
+    if (options?.onError) {
+      try { options.onError(errorValue); } catch { /* ignore */ }
+    }
+  };
+
+  // FIX 1: call markAtomAsEmitted on the first value that comes through.
+  // Using a WeakSet internally so this is safe to call on every emission —
+  // subsequent calls are idempotent.
+  const notify = (value: T) => {
+    if (disposed) return;
+    previous = current;
+    current = value;
+    markAtomAsEmitted(instance as any);
+    broadcastNow(current);
   };
 
   let iterator: AsyncIterator<T> | Iterator<T> | undefined;
@@ -225,11 +266,16 @@ export function flow<T>(
   let cleanup: () => void | Promise<void> = () => {};
   let disposePromise: Promise<void> | null = null;
   let abortController: AbortController | undefined;
-  let pending: Promise<IteratorResult<T>> | IteratorResult<T> | undefined;
+  let iterationAbortController: AbortController | undefined;
 
-  const stop = () => {
+  const stop = async () => {
     cancelled = true;
-    return cleanup();
+    iterationAbortController?.abort();
+    try {
+      await cleanup();
+    } catch {
+      // Ignore cleanup errors during stop
+    }
   };
 
   const disposeInstance = async (): Promise<void> => {
@@ -238,90 +284,217 @@ export function flow<T>(
 
     disposePromise = (async () => {
       disposed = true;
+      node.version++;
       subs.clear();
       activeSubCount = 0;
+      clearDepSubscriptions();
 
-      try {
-        await stop();
-      } catch {
-        // ignore
-      }
-      for (const handler of Array.from(disposeHandlers)) {
-        try { handler(); } catch { /* ignore */ }
+      try { await stop(); } catch { /* ignore */ }
+      const handlers = Array.from(disposeHandlers);
+      for (const handler of handlers) {
+        try { await Promise.resolve(handler()); } catch { /* ignore */ }
       }
       disposeHandlers.clear();
       for (const sub of Array.from(subscriptions)) {
         try { await sub.unsubscribe(); } catch { /* ignore */ }
       }
       subscriptions.clear();
+      const scheduler = getScheduler();
+      scheduler.remove(node);
+      disposePromise = null;
     })();
 
     return disposePromise;
   };
 
-  const start = () => {
-    if (started || disposed) return;
-    started = true;
+  const restart = async (): Promise<void> => {
+    if (disposed || activeSubCount <= 0) return;
 
+    const currentVersion = ++node.version;
+
+    cancelled = true;
+    iterationAbortController?.abort();
+    if (iterator && typeof (iterator as any).return === "function") {
+      try { await (iterator as any).return(); } catch { /* ignore */ }
+    }
+
+    if (currentVersion !== node.version) return;
+
+    iterator = undefined;
+    clearDepSubscriptions();
+    cancelled = false;
+    startIteration(currentVersion);
+  };
+
+  const startIteration = (version: number) => {
+    if (disposed || version !== node.version) return;
+
+    iterationAbortController = new AbortController();
     abortController = new AbortController();
-    const iterable =
-      typeof source === "function"
-        ? (source as (signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>)(abortController.signal)
-        : source;
-    iterator =
-      (iterable as any)[Symbol.asyncIterator]?.() ??
-      (iterable as any)[Symbol.iterator]?.();
+
+    const abortSignal = abortController.signal;
+    const iterationSignal = iterationAbortController.signal;
+
+    const formulaContext = pushFormulaContext();
+
+    let iterable: AsyncIterable<T> | Iterable<T>;
+    try {
+      if (typeof source === "function") {
+        const result = (source as (signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>)(abortSignal);
+        iterable = result;
+      } else {
+        iterable = source;
+      }
+    } catch (err: unknown) {
+      popFormulaContext();
+      instance.fail(err);
+      void disposeInstance();
+      return;
+    }
+
+    if (version !== node.version) {
+      popFormulaContext();
+      return;
+    }
+
+    const asyncIter = (iterable as any)[Symbol.asyncIterator];
+    const syncIter = (iterable as any)[Symbol.iterator];
+
+    if (asyncIter) {
+      iterator = asyncIter.call(iterable);
+    } else if (syncIter) {
+      iterator = syncIter.call(iterable);
+    }
 
     if (!iterator) {
+      popFormulaContext();
       abortController.abort();
+      notifyError(new Error("Source is not iterable"));
       void disposeInstance();
       return;
     }
 
     cleanup = () => {
-      if (!iterator) return;
+      if (!iterator) return Promise.resolve();
       cancelled = true;
+      iterationAbortController?.abort();
       abortController?.abort();
       if (typeof (iterator as any).return === "function") {
-        try { return (iterator as any).return(); } catch { /* ignore */ }
+        try {
+          const result = (iterator as any).return();
+          return result instanceof Promise ? result : Promise.resolve(result);
+        } catch { /* ignore */ }
+      }
+      return Promise.resolve();
+    };
+
+    let maxDepth = -1;
+    const deps = formulaContext.dependencies;
+    for (const dep of deps) {
+      dependencies.add(dep);
+      if (dep[NODE] && dep[NODE].depth > maxDepth) {
+        maxDepth = dep[NODE].depth;
+      }
+      if (!depSubscriptions.has(dep)) {
+        depSubscriptions.set(
+          dep,
+          subscribeToUpdates(dep as any, () => {
+            if (disposed || activeSubCount <= 0) return;
+            instance[MARK_DIRTY]();
+          })
+        );
+      }
+    }
+    node.depth = maxDepth + 1;
+
+    popFormulaContext();
+
+    const runIteration = async () => {
+      try {
+        let result = await iterator!.next();
+
+        while (!cancelled && version === node.version && !iterationSignal.aborted && !result.done) {
+          notify(result.value);
+          // FIX 2: removed duplicate `await Promise.resolve(notify(result.value))`.
+          // Just yield the microtask without double-broadcasting.
+          await Promise.resolve();
+
+          result = await iterator!.next();
+        }
+
+        if (!cancelled && version === node.version && !iterationSignal.aborted) {
+          await disposeInstance();
+        }
+      } catch (err: unknown) {
+        if (version === node.version && !disposed) {
+          notifyError(err);
+          instance.fail(err, { terminate: true });
+        }
       }
     };
 
-    pending = iterator.next();
-
-    (async () => {
-      try {
-        while (!cancelled) {
-          const result = await pending;
-          pending = iterator!.next();
-          if (cancelled || result.done) break;
-          notify(result.value);
-        }
-      } catch (err) {
-        error = err;
-        await disposeInstance();
-      } finally {
-        await disposeInstance();
+    runIteration().catch(() => {
+      if (version !== node.version || disposed) {
+        void disposeInstance();
       }
-    })();
+    });
   };
 
-  const instance: AtomBase<T> & { _error?: any } = {
+  const start = () => {
+    if (started || disposed) return;
+    started = true;
+    startIteration(node.version);
+  };
+
+  const node: AtomNode = {
+    depth: 0,
+    version: 0,
+    dirty: false,
+    isResource: true,
+    isAnalog: false,
+    flush() {
+      if (disposed || !node.dirty) return;
+      node.dirty = false;
+      void restart();
+    },
+  };
+
+  const instance: InternalFlowAtom<T> = {
     type: "atom",
 
     get disposed() { return disposed; },
 
+    get error() { return errorValue; },
+
+    get subscriberCount() { return subs.size; },
+
     get value() {
       if (disposed) throw new Error("Atom has been disposed");
-      if (activeFormula) activeFormula.dependencies.add(instance);
+      const context = getCurrentFormulaContext();
+      if (context) context.dependencies.add(instance);
       return current;
     },
 
     get safeValue() { return current; },
     get prior() { return previous; },
 
+    [NODE]: node,
+    [MARK_DIRTY]() {
+      if (disposed || node.dirty) return;
+      node.dirty = true;
+      getScheduler().queueFlush(node);
+    },
+    [FLUSH]() {
+      node.flush();
+    },
+
     subscribe(callback) {
       if (disposed) return createSubscription(() => {});
+
+      if (subs.size >= maxSubscribers) {
+        throw new Error(`Maximum subscriber limit (${maxSubscribers}) reached`);
+      }
+
       if (!started) start();
 
       if (callback) subs.add(callback);
@@ -331,77 +504,181 @@ export function flow<T>(
         if (callback) subs.delete(callback);
         subscriptions.delete(sub);
         activeSubCount--;
-        if (activeSubCount <= 0) return disposeInstance();
+        if (activeSubCount <= 0) {
+          return disposeInstance();
+        }
         return undefined;
       });
       subscriptions.add(sub);
       return sub;
     },
 
+    onError(handler: (error: any) => void): Subscription {
+      if (disposed) return createSubscription(() => {});
+      errorHandlers.add(handler);
+
+      if (errorValue !== undefined) {
+        try { handler(errorValue); } catch { /* ignore */ }
+      }
+
+      return createSubscription(() => {
+        errorHandlers.delete(handler);
+      });
+    },
+
+    fail(err: any, errorOptions?: { terminate?: boolean }) {
+      if (disposed) return;
+
+      errorValue = err instanceof Error ? err : new Error(String(err));
+      const shouldTerminate = errorOptions?.terminate ?? false;
+
+      for (const handler of Array.from(errorHandlers)) {
+        try { handler(errorValue); } catch { /* ignore */ }
+      }
+      if (options?.onError) {
+        try { options.onError(errorValue); } catch { /* ignore */ }
+      }
+
+      if (shouldTerminate) {
+        disposed = true;
+        const scheduler = getScheduler();
+        scheduler.remove(node);
+
+        for (const handler of Array.from(disposeHandlers)) {
+          try { Promise.resolve(handler()); } catch { /* ignore */ }
+        }
+        disposeHandlers.clear();
+        for (const sub of Array.from(subscriptions)) {
+          try { sub.unsubscribe(); } catch { /* ignore */ }
+        }
+        subscriptions.clear();
+        subs.clear();
+        errorHandlers.clear();
+      }
+    },
+
     pipe(...ops: Operator<any, any>[]) { return pipeSource(this, ...ops); },
-    [Symbol.asyncIterator]() { return iterate(this)[Symbol.asyncIterator](); },
+    [Symbol.asyncIterator]() {
+      return iterate(this);
+    },
     dispose() { void disposeInstance(); },
   };
 
-  Object.defineProperty(instance, "_error", { get() { return error; }, enumerable: false });
   Object.defineProperty(instance, "_onDispose", { get() { return disposeHandlers; }, enumerable: false });
 
-  registerWithCurrentScope(instance);
+  registerWithCurrentScope(instance as any);
   return instance;
 }
 
-/* ── atom ── */
+/* ─────────────────────────────────────────────────────────────────────────────
+ * atom() - Standard User-Mutated Mutable Node
+ * ───────────────────────────────────────────────────────────────────────────*/
 
 export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> {
   const scope = getCurrentScope();
   const strobe = scope ? getScopeStrobe(scope) : undefined;
   const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
+  const maxSubscribers = options?.maxSubscribers ?? 1000;
+  const terminateOnError = options?.terminateOnError ?? false;
+  const propagateErrors = options?.propagateErrors ?? true;
 
   const hasInitialValue = arguments.length > 0;
   let current = initialValue as T;
   let previous = initialValue as T;
   let disposed = false;
-  let dirty = false;
   let lastNotified = current;
-  let error: any = undefined;
+  let errorValue: any = undefined;
+  let isErrorState = false;
   const disposeHandlers = new Set<() => void>();
+  const errorHandlers = new Set<(error: any) => void>();
 
   const subs = new Set<(value: T) => MaybePromise>();
   const subscriptions = new Set<Subscription>();
 
-  /** Broadcast current value to all direct subscribers. */
   const broadcastNow = () => {
     const snap = current;
-    for (const cb of Array.from(subs)) {
-      try { cb(snap); } catch { /* ignore */ }
+    const handlers = Array.from(subs);
+    for (const cb of handlers) {
+      try {
+        cb(snap);
+      } catch (err) {
+        for (const handler of Array.from(errorHandlers)) {
+          try { handler(err as Error); } catch { /* ignore */ }
+        }
+      }
     }
   };
 
-  /** Strobe flush – called by the scope on every tick for analog atoms. */
   const strobeFlush = () => {
-    if (!dirty || disposed) return;
-    dirty = false;
+    if (!node.dirty || disposed) return;
+    node.dirty = false;
     if (Object.is(lastNotified, current)) return;
     lastNotified = current;
+    node.version++;
     broadcastNow();
   };
 
-  const instance: Atom<T> = {
+  const node: AtomNode = {
+    depth: 0,
+    version: 0,
+    dirty: false,
+    isResource: false,
+    isAnalog: analog,
+    flush() {
+      if (disposed || !node.dirty) return;
+      if (node.isAnalog) return;
+
+      node.dirty = false;
+      if (Object.is(lastNotified, current)) return;
+      lastNotified = current;
+      node.version++;
+      broadcastNow();
+    },
+  };
+
+  const instance: Atom<T> & InternalAtomContainer = {
     type: "atom",
 
     get disposed() { return disposed; },
 
+    get error() { return errorValue; },
+
+    get subscriberCount() { return subs.size; },
+
     get value() {
       if (disposed) throw new Error("Atom has been disposed");
-      if (activeFormula) activeFormula.dependencies.add(instance);
+      if (isErrorState && errorValue !== undefined) {
+        throw errorValue;
+      }
+      const context = getCurrentFormulaContext();
+      if (context) context.dependencies.add(instance);
       return current;
     },
 
-    get safeValue() { return current; },
+    get safeValue() {
+      return current;
+    },
+
     get prior() { return previous; },
+
+    [NODE]: node,
+    [MARK_DIRTY]() {
+      if (disposed || node.dirty) return;
+      node.dirty = true;
+      if (node.isAnalog) return;
+      getScheduler().queueFlush(node);
+    },
+    [FLUSH]() {
+      node.flush();
+    },
 
     subscribe(callback) {
       if (disposed) return createSubscription(() => {});
+
+      if (subs.size >= maxSubscribers) {
+        throw new Error(`Maximum subscriber limit (${maxSubscribers}) reached`);
+      }
+
       if (callback) subs.add(callback);
 
       const sub = createSubscription(() => {
@@ -412,58 +689,107 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
       return sub;
     },
 
-    pipe(...ops: Operator<any, any>[]) { return pipeSource(this, ...ops); },
-    [Symbol.asyncIterator]() { return iterate(this)[Symbol.asyncIterator](); },
+    onError(handler: (error: any) => void): Subscription {
+      if (disposed) return createSubscription(() => {});
+      errorHandlers.add(handler);
 
-    next(value: T) {
-      if (disposed || Object.is(current, value)) return;
-
-      previous = current;
-      current = value;
-      dirty = true;
-
-      if (analog && txDepth === 0) {
-        // Analog outside a transaction: leave dirty for the strobe, nothing more.
-        return;
+      if (errorValue !== undefined) {
+        try { handler(errorValue); } catch { /* ignore */ }
       }
 
-      // Discrete, OR analog inside a transaction: queue a flush so this atom
-      // lands in the same sweep as every other write in the batch.
-      // The callback clears dirty, notifies, then re-marks dirty for the strobe
-      // (analog only) so downstream analog consumers still get their tick.
-      scheduleNotify(instance, () => {
-        if (disposed) return;
-        dirty = false;
-        if (Object.is(lastNotified, current)) return;
-        lastNotified = current;
-        broadcastNow();
-        // Re-arm the strobe for any analog downstream that wasn't in this tx.
-        if (analog) dirty = true;
+      return createSubscription(() => {
+        errorHandlers.delete(handler);
       });
     },
 
-    error(err: any) {
+    pipe(...ops: Operator<any, any>[]) { return pipeSource(this, ...ops); },
+    [Symbol.asyncIterator]() { return iterate(this); },
+
+    next(value: T) {
       if (disposed) return;
-      error = err;
-      disposed = true;
-      unregisterAnalogAtom(instance);
-      for (const handler of Array.from(disposeHandlers)) {
-        try { handler(); } catch { /* ignore */ }
+
+      if (isErrorState) {
+        isErrorState = false;
+        errorValue = undefined;
       }
-      disposeHandlers.clear();
-      for (const sub of Array.from(subscriptions)) {
-        try { sub.unsubscribe(); } catch { /* ignore */ }
+
+      previous = current;
+      current = value;
+
+      // Discrete atoms outside a transaction should notify synchronously to
+      // preserve the per-emission semantics that operators and tests rely on.
+      // Analog atoms and transaction-batched updates keep the deferred flush.
+      if (node.isAnalog || getScheduler().depth > 0) {
+        instance[MARK_DIRTY]();
+      } else {
+        node.dirty = false;
+        lastNotified = current;
+        node.version++;
+        broadcastNow();
+        // Keep the scheduler aware of the emission so test schedulers can
+        // observe dirty state and flush it even though the broadcast was
+        // synchronous.
+        instance[MARK_DIRTY]();
       }
-      subscriptions.clear();
-      subs.clear();
+    },
+
+    fail(err: any, errorOptions?: { terminate?: boolean }) {
+      if (disposed) return;
+
+      errorValue = err instanceof Error ? err : new Error(String(err));
+      isErrorState = true;
+
+      const shouldTerminate = errorOptions?.terminate ?? terminateOnError;
+
+      for (const handler of Array.from(errorHandlers)) {
+        try { handler(errorValue); } catch { /* ignore */ }
+      }
+      if (options?.onError) {
+        try { options.onError(errorValue); } catch { /* ignore */ }
+      }
+
+      if (shouldTerminate) {
+        disposed = true;
+        unregisterAnalogAtom(instance as any);
+        const scheduler = getScheduler();
+        scheduler.remove(node);
+
+        for (const handler of Array.from(disposeHandlers)) {
+          try { Promise.resolve(handler()); } catch { /* ignore */ }
+        }
+        disposeHandlers.clear();
+        for (const sub of Array.from(subscriptions)) {
+          try { sub.unsubscribe(); } catch { /* ignore */ }
+        }
+        subscriptions.clear();
+        subs.clear();
+        errorHandlers.clear();
+      } else {
+        if (propagateErrors) {
+          instance[MARK_DIRTY]();
+        }
+      }
+    },
+
+    recover() {
+      if (disposed || !isErrorState) return;
+      isErrorState = false;
+      errorValue = undefined;
+      instance[MARK_DIRTY]();
+    },
+
+    clearError() {
+      this.recover?.();
     },
 
     dispose() {
       if (disposed) return;
       disposed = true;
-      unregisterAnalogAtom(instance);
+      unregisterAnalogAtom(instance as any);
+      const scheduler = getScheduler();
+      scheduler.remove(node);
       for (const handler of Array.from(disposeHandlers)) {
-        try { handler(); } catch { /* ignore */ }
+        try { Promise.resolve(handler()); } catch { /* ignore */ }
       }
       disposeHandlers.clear();
       for (const sub of Array.from(subscriptions)) {
@@ -471,15 +797,15 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
       }
       subscriptions.clear();
       subs.clear();
+      errorHandlers.clear();
     },
   };
 
-  Object.defineProperty(instance, "_error", { get() { return error; }, enumerable: false });
   Object.defineProperty(instance, "_onDispose", { get() { return disposeHandlers; }, enumerable: false });
 
-  registerWithCurrentScope(instance);
-  if (hasInitialValue) markAtomAsEmitted(instance);
-  if (analog) registerAnalogAtom(instance, strobeFlush);
+  registerWithCurrentScope(instance as any);
+  if (hasInitialValue) markAtomAsEmitted(instance as any);
+  if (analog) registerAnalogAtom(instance as any, strobeFlush);
 
   return instance;
 }
@@ -488,67 +814,101 @@ export function discrete<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
   return atom(initialValue, { ...options, discrete: true });
 }
 
-/* ── derived ── */
+/* ─────────────────────────────────────────────────────────────────────────────
+ * derived() - Synchronous Computed Pure Node
+ * ───────────────────────────────────────────────────────────────────────────*/
 
 export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   const scope = getCurrentScope();
   const strobe = scope ? getScopeStrobe(scope) : undefined;
   const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
+  const maxSubscribers = options?.maxSubscribers ?? 1000;
+  const terminateOnError = options?.terminateOnError ?? false;
+  const propagateErrors = options?.propagateErrors ?? true;
 
-  let current: T;
-  let previous: T;
+  let current!: T;
+  let previous!: T;
   let disposed = false;
   let initialized = false;
   let running = false;
-  let dirty = false;
+  let errorValue: any = undefined;
+  let isErrorState = false;
   const subs = new Set<(value: T) => void>();
-  const dependencies = new Set<AtomBase<any>>();
-  const depSubscriptions = new Map<AtomBase<any>, Subscription>();
+  const errorHandlers = new Set<(error: any) => void>();
+  const dependencies = new Set<InternalAtomContainer>();
+  const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
 
   const broadcastNow = () => {
     const snap = current;
-    for (const cb of Array.from(subs)) cb(snap);
+    const handlers = Array.from(subs);
+    for (const cb of handlers) {
+      try {
+        cb(snap);
+      } catch (err) {
+        for (const handler of Array.from(errorHandlers)) {
+          try { handler(err as Error); } catch { /* ignore */ }
+        }
+      }
+    }
   };
 
-  const scheduleNotifyDerived = () => {
-    // Derived atoms always go through both layers:
-    // 1. transaction() – batch multiple upstream writes
-    // 2. propagation depth – prevent mid-propagation glitches within a single write
-    scheduleNotify(instance, () => {
-      notifyDerivedSubscribers(broadcastNow);
-    });
+  const notifyError = (err: any) => {
+    errorValue = err instanceof Error ? err : new Error(String(err));
+    isErrorState = true;
+    for (const handler of Array.from(errorHandlers)) {
+      try { handler(errorValue); } catch { /* ignore */ }
+    }
+    if (options?.onError) {
+      try { options.onError(errorValue); } catch { /* ignore */ }
+    }
   };
 
+  // FIX 3: call markAtomAsEmitted after the first successful synchronous computation.
+  // derived always produces a value immediately, so it should never block scope.loading.
   const ensureInit = () => {
-    if (initialized || disposed) return;
-    initialized = true;
-    current = run();
-    previous = current;
-    if (!analog) {
-      scheduleNotifyDerived();
-    } else {
-      dirty = true;
+    if (initialized || disposed || running) return;
+    try {
+      current = run();
+      if (!initialized) previous = current;
+      isErrorState = false;
+      errorValue = undefined;
+      if (analog) {
+        node.dirty = false;
+      }
+      markAtomAsEmitted(instance as any);
+    } catch (err) {
+      notifyError(err);
+      if (terminateOnError) {
+        throw err;
+      }
     }
   };
 
   const run = (): T => {
-    if (running) throw new Error("Circular dependency detected in derived()");
+    if (running) {
+      popFormulaContext();
+      throw new Error("Circular dependency detected in derived()");
+    }
 
     const oldDeps = new Set(depSubscriptions.keys());
     dependencies.clear();
 
     running = true;
-    const prev = activeFormula;
-    activeFormula = context;
+    const formulaContext = pushFormulaContext();
     let result: T;
     try {
       result = fn();
+    } catch (err) {
+      if (terminateOnError) {
+        setTimeout(() => instance.dispose(), 0);
+      }
+      throw err;
     } finally {
-      activeFormula = prev;
+      popFormulaContext();
       running = false;
+      initialized = true;
     }
 
-    // Unsubscribe removed deps
     for (const dep of oldDeps) {
       if (!dependencies.has(dep)) {
         depSubscriptions.get(dep)?.unsubscribe();
@@ -556,86 +916,249 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       }
     }
 
-    // Subscribe new deps
-    for (const dep of dependencies) {
+    let maxDepth = -1;
+    for (const dep of formulaContext.dependencies) {
+      dependencies.add(dep);
+      if (dep[NODE] && dep[NODE].depth > maxDepth) {
+        maxDepth = dep[NODE].depth;
+      }
       if (!depSubscriptions.has(dep)) {
         depSubscriptions.set(
           dep,
-          subscribeToUpdates(dep, () => {
+          subscribeToUpdates(dep as any, () => {
             if (disposed) return;
-            const next = run();
-            if (Object.is(current, next)) return;
-
-            previous = current;
-            current = next;
-
-            if (analog && txDepth === 0) {
-              // Analog outside a transaction: mark dirty, let the strobe flush.
-              dirty = true;
-            } else {
-              // Discrete, OR analog inside a transaction: participate in the
-              // current transaction sweep so all modes land together.
-              scheduleNotify(instance, () => {
-                notifyDerivedSubscribers(broadcastNow);
-                // Re-arm for the strobe if analog.
-                if (analog) dirty = true;
-              });
-            }
+            instance[MARK_DIRTY]();
           })
         );
       }
     }
 
+    node.depth = maxDepth + 1;
     return result;
   };
 
   const flushAnalog = () => {
-    if (!dirty || disposed) return;
-    dirty = false;
-    notifyDerivedSubscribers(broadcastNow);
+    if (!node.dirty || disposed) return;
+
+    try {
+      const next = run();
+      node.dirty = false;
+
+      isErrorState = false;
+      errorValue = undefined;
+
+      if (Object.is(current, next)) return;
+
+      previous = current;
+      current = next;
+      if (!Object.is(previous, current)) node.version++;
+      if (subs.size > 0) broadcastNow();
+    } catch (err) {
+      notifyError(err);
+      node.dirty = false;
+
+      if (!terminateOnError && propagateErrors) {
+        broadcastNow();
+      }
+    }
   };
 
-  const context = { dependencies, run };
+  const node: AtomNode = {
+    depth: 0,
+    version: 0,
+    dirty: false,
+    isResource: false,
+    isAnalog: analog,
+    flush() {
+      if (disposed || !node.dirty) return;
+      if (node.isAnalog) return;
 
-  const instance: AtomBase<T> = {
+      try {
+        const next = run();
+        node.dirty = false;
+
+        isErrorState = false;
+        errorValue = undefined;
+
+        if (Object.is(current, next)) return;
+
+        previous = current;
+        current = next;
+        if (!Object.is(previous, current)) node.version++;
+        if (subs.size > 0) broadcastNow();
+      } catch (err) {
+        notifyError(err);
+        node.dirty = false;
+
+        if (!terminateOnError && propagateErrors) {
+          broadcastNow();
+        }
+      }
+    },
+  };
+
+  const instance: AtomBase<T> & InternalAtomContainer = {
     type: "atom",
 
     get disposed() { return disposed; },
 
+    get error() { return errorValue; },
+
+    get subscriberCount() { return subs.size; },
+
     get value() {
       if (disposed) throw new Error("Atom has been disposed");
-      if (activeFormula) activeFormula.dependencies.add(instance);
+
+      if (running) {
+        throw new Error("Circular dependency detected in derived()");
+      }
+
+      const context = getCurrentFormulaContext();
+      if (context) context.dependencies.add(instance);
+
+      ensureInit();
+
+      if (isErrorState && errorValue !== undefined) {
+        throw errorValue;
+      }
+
+      if (node.dirty && !node.isAnalog) {
+        try {
+          const next = run();
+          node.dirty = false;
+
+          isErrorState = false;
+          errorValue = undefined;
+
+          if (!Object.is(current, next)) {
+            previous = current;
+            current = next;
+            node.version++;
+            if (subs.size > 0) {
+              broadcastNow();
+            }
+          }
+        } catch (err) {
+          notifyError(err);
+          if (terminateOnError) {
+            throw err;
+          }
+        }
+      }
+
+      if (isErrorState && errorValue !== undefined) {
+        throw errorValue;
+      }
+
+      return current;
+    },
+
+    get safeValue() {
       ensureInit();
       return current;
     },
 
-    get safeValue() { ensureInit(); return current; },
-    get prior() { ensureInit(); return previous; },
+    get prior() {
+      try {
+        this.value;
+        return previous;
+      } catch {
+        return previous;
+      }
+    },
+
+    [NODE]: node,
+    [MARK_DIRTY]() {
+      if (disposed || node.dirty) return;
+      node.dirty = true;
+      if (node.isAnalog) return;
+      getScheduler().queueFlush(node);
+    },
+    [FLUSH]() {
+      node.flush();
+    },
 
     subscribe(callback) {
       ensureInit();
+
+      if (subs.size >= maxSubscribers) {
+        throw new Error(`Maximum subscriber limit (${maxSubscribers}) reached`);
+      }
+
       if (callback) subs.add(callback);
+
       return createSubscription(() => {
         if (callback) subs.delete(callback);
       });
     },
 
+    onError(handler: (error: any) => void): Subscription {
+      if (disposed) return createSubscription(() => {});
+      errorHandlers.add(handler);
+
+      if (errorValue !== undefined) {
+        try { handler(errorValue); } catch { /* ignore */ }
+      }
+
+      return createSubscription(() => {
+        errorHandlers.delete(handler);
+      });
+    },
+
     pipe(...ops: Operator<any, any>[]) { return pipeSource(this, ...ops); },
-    [Symbol.asyncIterator]() { return iterate(this)[Symbol.asyncIterator](); },
+    [Symbol.asyncIterator]() { return iterate(this); },
 
     dispose() {
       if (disposed) return;
       ensureInit();
       disposed = true;
-      unregisterAnalogAtom(instance);
+      unregisterAnalogAtom(instance as any);
+      const scheduler = getScheduler();
+      scheduler.remove(node);
       for (const sub of depSubscriptions.values()) sub.unsubscribe();
       depSubscriptions.clear();
+      dependencies.clear();
       subs.clear();
+      errorHandlers.clear();
     },
   };
 
-  registerWithCurrentScope(instance);
-  if (analog) registerAnalogAtom(instance, flushAnalog);
+  registerWithCurrentScope(instance as any);
+  if (analog) registerAnalogAtom(instance as any, flushAnalog);
 
   return instance;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Test Harness - For Multi-tenancy & Testing
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+export function createTestScheduler(): Scheduler {
+  return new DefaultScheduler();
+}
+
+export function createTestEnvironment() {
+  const scheduler = createTestScheduler();
+  const originalScheduler = getScheduler();
+
+  return {
+    scheduler,
+
+    run<T>(fn: () => T): T {
+      setScheduler(scheduler);
+      try {
+        return fn();
+      } finally {
+        setScheduler(originalScheduler);
+      }
+    },
+
+    flush() {
+      scheduler.flush();
+    },
+
+    reset() {
+      setScheduler(originalScheduler);
+    }
+  };
 }

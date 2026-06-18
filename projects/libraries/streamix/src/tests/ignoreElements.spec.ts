@@ -1,4 +1,4 @@
-import {ignoreElements, iterate, atom as makeAtom, pipe, type Atom} from '@epikodelabs/streamix';
+import { ignoreElements, iterate, atom as makeAtom, pipe, type Atom } from '@epikodelabs/streamix';
 
 describe('ignoreElements', () => {
   it('should ignore all emitted values and only emit complete', async () => {
@@ -39,7 +39,7 @@ describe('ignoreElements', () => {
 
     subject.next(1);
     subject.next(2);
-    subject.error(new Error('Test error'));
+    subject.fail(new Error('Test error'));
 
     await consumptionPromise;
 
@@ -104,7 +104,7 @@ describe('ignoreElements', () => {
 
     subject.next('value1');
     subject.next('value2');
-    subject.error(new Error('Some error'));
+    subject.fail(new Error('Some error'));
 
     await consumptionPromise;
 

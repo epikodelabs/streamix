@@ -50,7 +50,7 @@ export function buffer<T>(period: MaybePromise<number>) {
 
     const fail = (err: any) => {
       buf = [];
-      output.error(err);
+      output.fail(err);
       cleanup();
     };
 

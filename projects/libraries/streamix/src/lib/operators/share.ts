@@ -1,4 +1,4 @@
-import { createOperator, DONE, type Operator, atom, iterate, type Atom } from "../atoms";
+import { atom, createOperator, DONE, iterate, type Atom, type Operator } from "../atoms";
 
 /**
  * Shares a single subscription to the source stream between multiple consumers.
@@ -38,7 +38,7 @@ export function share<T = any>() {
           shared!.next(result.value);
         }
       } catch (err) {
-        shared!.error(err);
+        shared!.fail(err);
         return;
       } finally {
         if (shared && !shared.disposed) shared.dispose();

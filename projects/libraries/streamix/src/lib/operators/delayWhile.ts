@@ -52,7 +52,7 @@ export const delayWhile = <T = any>(
 
         if (queue.length > 0) flushQueue();
       } catch (err) {
-        output.error(err);
+        output.fail(err);
       } finally {
         if (!output.disposed) output.dispose();
       }

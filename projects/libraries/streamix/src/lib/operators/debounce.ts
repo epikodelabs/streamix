@@ -51,7 +51,7 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
           }
         }
       } catch (err) {
-        output.error(err);
+        output.fail(err);
       } finally {
         completed = true;
         if (timeoutId) { clearTimeout(timeoutId); timeoutId = undefined; }

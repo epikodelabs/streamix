@@ -97,7 +97,7 @@ describe("bufferUntil", () => {
       }
     })();
 
-    notifier.error(new Error("NOTIFIER"));
+    notifier.fail(new Error("NOTIFIER"));
     await waitTick();
     await completed;
 
@@ -136,7 +136,7 @@ describe("bufferUntil", () => {
       }
     })();
 
-    source.error(new Error("SOURCE"));
+    source.fail(new Error("SOURCE"));
     await waitTick();
     await completed;
 

@@ -129,7 +129,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = readonly 
           if (ev.type === 'error') {
             if (!isSettled) {
               isSettled = true;
-              output.error(ev.error instanceof Error ? ev.error : new Error(String(ev.error)));
+              output.fail(ev.error instanceof Error ? ev.error : new Error(String(ev.error)));
             }
             return;
           }
@@ -162,7 +162,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = readonly 
         // Safe lock catchment blocks for out-of-band exceptions during async scheduling phases
         if (!isSettled) {
           isSettled = true;
-          output.error(err instanceof Error ? err : new Error(String(err)));
+          output.fail(err instanceof Error ? err : new Error(String(err)));
         }
       } finally {
         abortController.abort();

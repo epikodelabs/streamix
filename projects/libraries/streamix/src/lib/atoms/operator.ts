@@ -233,7 +233,7 @@ export function createPushOperator<T, R = T>(
       } catch (cleanupErr) {
         console.warn(`Operator '${name}': source.return() threw during output.throw():`, cleanupErr);
       }
-      if (!output.disposed) output.error(err);
+      if (!output.disposed) output.fail(err);
       if (baseThrow) return baseThrow(err);
       throw err;
     };

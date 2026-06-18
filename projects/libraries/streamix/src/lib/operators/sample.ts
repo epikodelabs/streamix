@@ -52,7 +52,7 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
         // Emit the last value if pending when source completes.
         emit();
       } catch (err) {
-        output.error(err);
+        output.fail(err);
       } finally {
         stopSampling();
         if (!output.disposed) output.dispose();

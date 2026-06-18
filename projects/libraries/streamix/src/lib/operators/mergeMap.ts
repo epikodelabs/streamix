@@ -1,6 +1,6 @@
 import { createPushOperator, MaybePromise, type Operator } from "../atoms";
-import { fromAny } from '../factories';
 import type { PipeInput } from "../atoms/pipe";
+import { fromAny } from '../factories';
 import { createAsyncCoordinator, type RunnerEvent } from '../utils';
 
 /**
@@ -107,7 +107,7 @@ export function mergeMap<T = any, R = any>(
 
         if (!output.disposed) output.dispose();
       } catch (err) {
-        if (!output.disposed) output.error(err);
+        if (!output.disposed) output.fail(err);
       } finally {
         await coordinator.return?.();
       }

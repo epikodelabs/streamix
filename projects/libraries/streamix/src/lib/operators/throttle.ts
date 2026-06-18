@@ -74,7 +74,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
         if (pendingResult !== undefined) flushPending();
       } catch (err) {
         // Normalise to Error, consistent with every other operator.
-        output.error(err instanceof Error ? err : new Error(String(err)));
+        output.fail(err instanceof Error ? err : new Error(String(err)));
       } finally {
         aborted = true;
         if (timer) { clearTimeout(timer); timer = null; }

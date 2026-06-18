@@ -45,7 +45,7 @@ describe('max', () => {
       }
     })();
 
-    subject.error(new Error('Test Error'));
+    subject.fail(new Error('Test Error'));
     await settle();
 
     expect(error).toEqual(new Error('Test Error'));

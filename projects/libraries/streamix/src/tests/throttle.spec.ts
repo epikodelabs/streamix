@@ -58,7 +58,7 @@ describe('throttle', () => {
     })();
 
     const error = new Error('test error');
-    subject.error(error);
+    subject.fail(error);
 
     await reader;
 

@@ -141,7 +141,7 @@ describe('withLatestFrom', () => {
       }
     })();
 
-    aux.error(new Error('AUX'));
+    aux.fail(new Error('AUX'));
     await finished;
 
     expect(caught?.message).toBe('AUX');
@@ -166,7 +166,7 @@ describe('withLatestFrom', () => {
 
     aux.push('A');
     main.push(1);
-    main.error(new Error('MAIN'));
+    main.fail(new Error('MAIN'));
     await finished;
 
     expect(caught?.message).toBe('MAIN');

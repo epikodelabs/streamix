@@ -15,7 +15,7 @@ import {
  */
 export type AsyncPushable<R> = AsyncIterator<R> & AsyncIterable<R> & {
   push(value: R): void | Promise<void>;
-  error(err: any): void;
+  fail(err: any): void;
   dispose(): void;
   get disposed(): boolean;
 };
@@ -97,6 +97,10 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
   };
 
   iterator.error = function(err: any) {
+    receiver.error(err);
+  };
+
+  iterator.fail = function(err: any) {
     receiver.error(err);
   };
 

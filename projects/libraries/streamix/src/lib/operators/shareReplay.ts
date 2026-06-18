@@ -68,7 +68,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
         }
       } catch (err) {
         errorValue = err;
-        live.error(err);
+        live.fail(err);
         return;
       } finally {
         sourceIterator = null;

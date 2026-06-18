@@ -27,7 +27,7 @@ export function delay<T = any>(ms: MaybePromise<number>) {
           output.push(result.value!);
         }
       } catch (err) {
-        output.error(err);
+        output.fail(err);
       } finally {
         if (!output.disposed) output.dispose();
       }

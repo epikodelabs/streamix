@@ -100,7 +100,7 @@ describe('delayUntil', () => {
     })();
 
     sourceStream.next(1);
-    sourceStream.error(new Error('Something went wrong'));
+    sourceStream.fail(new Error('Something went wrong'));
     conditionStream.next('start');
 
     await expectAsync(reader).toBeRejectedWith(jasmine.objectContaining({ message: 'Something went wrong' }));
@@ -117,7 +117,7 @@ describe('delayUntil', () => {
     })();
 
     sourceStream.next(7);
-    conditionStream.error(new Error('Notifier failed'));
+    conditionStream.fail(new Error('Notifier failed'));
 
     await expectAsync(reader).toBeRejectedWith(jasmine.objectContaining({ message: 'Notifier failed' }));
   });

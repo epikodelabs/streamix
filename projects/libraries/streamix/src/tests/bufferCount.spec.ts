@@ -1,4 +1,4 @@
-import {atom, bufferCount, iterate, pipe, type Atom} from '@epikodelabs/streamix';
+import { atom, bufferCount, iterate, pipe, type Atom } from '@epikodelabs/streamix';
 
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -65,7 +65,7 @@ describe("bufferCount", () => {
       }
     })();
 
-    source.error(new Error("Test error"));
+    source.fail(new Error("Test error"));
     await waitTick();
 
     await completed;
@@ -170,7 +170,7 @@ describe("bufferCount", () => {
 
     source.next(1);
     source.next(2);
-    source.error(new Error("Error during buffering"));
+    source.fail(new Error("Error during buffering"));
     await waitTick();
 
     await completed;
