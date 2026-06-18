@@ -71,7 +71,7 @@ export function createAsyncIterator<T>(opts: {
           complete() {
             pushComplete(state, iterator, iterator.__onPush);
           },
-          error(err: any) {
+          fail(err: any) {
             pushError(state, iterator, err, iterator.__onPush);
           },
           get disposed() {
@@ -88,7 +88,7 @@ export function createAsyncIterator<T>(opts: {
           } else if (push.type === 'complete') {
             _observer.complete();
           } else if (push.type === 'error') {
-            _observer.error(push.err);
+            _observer.fail(push.err);
           }
         }
         pendingPushes.length = 0;
@@ -177,7 +177,7 @@ export function createAsyncIterator<T>(opts: {
 
     iterator.__pushError = (err: any) => {
       if (observer) {
-        observer.error(err);
+        observer.fail(err);
       } else {
         pendingPushes.push({ type: 'error', err });
       }

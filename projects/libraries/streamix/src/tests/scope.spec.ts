@@ -32,7 +32,7 @@ describe('Scope System', () => {
         return { count };
       });
       const snapshot = s.snapshot();
-      expect(snapshot['count']).toBe(0);
+      expect(snapshot.count).toBe(0);
       expect(s.count).toBeDefined();
       s.dispose();
     });
@@ -134,9 +134,9 @@ describe('Scope System', () => {
       });
       
       const snap = s.snapshot();
-      expect(snap['count']).toBe(10);
-      expect(snap['name']).toBe('test');
-      expect(snap['doubled']).toBe(20);
+      expect(snap.count).toBe(10);
+      expect(snap.name).toBe('test');
+      expect(snap.doubled).toBe(20);
       s.dispose();
     });
 
@@ -151,8 +151,8 @@ describe('Scope System', () => {
       });
       
       const snap = s.snapshot();
-      expect(snap['child']['x']).toBe(42);
-      expect(snap['child']['y']).toBe('hello');
+      expect(snap.child.x).toBe(42);
+      expect(snap.child.y).toBe('hello');
       s.dispose();
     });
 
@@ -169,7 +169,7 @@ describe('Scope System', () => {
       source.next(15);
       const snap = await s.snapshot();
       // Should still return something even with error
-      expect(snap['d']).toBeDefined();
+      expect(snap.d).toBeDefined();
       s.dispose();
       source.dispose();
     });

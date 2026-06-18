@@ -54,6 +54,7 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
     __onPush?: () => void;
     push?: any;
     error?: any;
+    fail?: any;
     dispose?: any;
     disposed?: boolean;
   } = {

@@ -1,9 +1,9 @@
 import {
-    atom,
-    createAsyncIterator,
-    createSubscription,
-    flow,
-    type AtomBase,
+  atom,
+  createAsyncIterator,
+  createSubscription,
+  flow,
+  type AtomBase,
 } from '@epikodelabs/streamix';
 
 const LOG_PREFIX = '[httpClient]';
@@ -31,7 +31,7 @@ function createReplayAtom<T>(): AtomBase<T> & {
   const observers = new Set<{
     next: (value: T) => void;
     complete: () => void;
-    error: (err: any) => void;
+    fail: (err: any) => void;
   }>();
   const baseNext = output.next.bind(output);
 
@@ -61,7 +61,7 @@ function createReplayAtom<T>(): AtomBase<T> & {
     errorValue = err;
 
     for (const observer of Array.from(observers)) {
-      observer.error(err);
+      observer.fail(err);
     }
     observers.clear();
     subs.clear();
@@ -103,7 +103,7 @@ function createReplayAtom<T>(): AtomBase<T> & {
         }
 
         if (errorValue !== undefined) {
-          observer.error(errorValue);
+          observer.fail(errorValue);
           return createSubscription(() => {});
         }
 

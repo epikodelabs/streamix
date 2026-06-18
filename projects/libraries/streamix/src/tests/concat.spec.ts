@@ -90,8 +90,8 @@ describe('concat', () => {
 function createBareIteratorStream(): AtomBase<string> {
   const stream = {} as AtomBase<string>;
 
-  stream.type = 'atom';
-  stream.name = 'bare-iterator';
+  (stream as any).type = 'atom';
+  (stream as any).name = 'bare-iterator';
   stream[Symbol.asyncIterator] = () => {
     let emitted = false;
 

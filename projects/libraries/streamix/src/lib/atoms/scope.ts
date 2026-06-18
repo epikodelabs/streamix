@@ -1,5 +1,16 @@
 import { AtomBase } from "./atom";
 
+// Define a recursive type to unwrap atom values and handle nested scopes
+type UnwrapSnapshotValues<T> = {
+  [K in keyof T]: T[K] extends Scope & Record<string, any>
+    ? UnwrapSnapshotValues<T[K]>
+    : T[K] extends { value: infer U }
+      ? U
+      : T[K] extends Record<string, any>
+        ? UnwrapSnapshotValues<T[K]>
+        : T[K];
+};
+
 /**
  * Interface definition for a lifecycle scope execution context.
  */
@@ -14,9 +25,9 @@ export interface Scope {
    * Strobe interval value or mode identifier.
    * A value > 0 flags an analog deferred/batched notification window.
    */
-  strobe?: number;
+  strobe: number;
   /** Scope mode: 'discrete' or 'analog' */
-  mode?: 'discrete' | 'analog';
+  mode: 'discrete' | 'analog';
   /** Parent scope reference */
   parent: Scope | null;
   /**
@@ -26,7 +37,7 @@ export interface Scope {
    */
   loading: boolean;
   /** Returns a plain object snapshot of all current atom values. */
-  snapshot(): Record<string, any>;
+  snapshot(): this extends (infer T extends Record<string, any>) ? UnwrapSnapshotValues<T> : Record<string, any>;
   /** Disposes the scope and all of its atoms. */
   dispose(): void;
   /** Internal: active strobe interval id when the scope is analog. */
@@ -118,22 +129,24 @@ export function scope<T extends Record<string, any>>(
   const parent = currentScope ?? getGlobalScope();
   const { mode, strobe } = resolveStrobeAndMode(options, parent);
 
-  const newScope: Scope & T = {
+  // Create the base scope structure
+  const newScope: Scope = {
     type: "scope",
     atoms: new Set(),
     cleanups: new Set(),
-    strobe: strobe > 0 ? strobe : undefined,
+    strobe: strobe > 0 ? strobe : 0,
     mode,
     parent,
+    loading: false,
     snapshot() {
       const result: Record<string, any> = {};
-      collectScopeValues(this, result);
-      return result;
+      collectScopeValues(this as Scope & T, result);
+      return result as any; // TypeScript should infer the return type from the function signature
     },
     dispose() {
-      disposeScope(this);
+      disposeScope(this as Scope & T);
     },
-  } as Scope & T;
+  };
 
   // `loading` is a computed getter so it is always up-to-date without any
   // subscription wiring. The setter is a no-op to absorb any legacy writes.
@@ -346,7 +359,7 @@ function collectScopeValues(sc: Scope, result: Record<string, any>): void {
 
 let _globalScope: any = null;
 
-export function getGlobalScope(): any {
+export function getGlobalScope(): Scope {
   if (!_globalScope) {
     _globalScope = {
       type: "scope",
@@ -356,7 +369,9 @@ export function getGlobalScope(): any {
       mode: 'discrete',
       parent: null,
       loading: false,
-      snapshot() { return {}; },
+      snapshot<T extends Record<string, any> = {}>(): T {
+        return {} as T;
+      },
       dispose() { /* global scope is never disposed */ },
     };
   }
