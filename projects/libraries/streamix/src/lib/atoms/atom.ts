@@ -264,14 +264,12 @@ export function flow<T>(
   const subs = new Set<(value: T) => MaybePromise>();
   const subscriptions = new Set<Subscription>();
 
-  const dependencies = new Set<InternalAtomContainer>();
   const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
 
   const clearDepSubscriptions = () => {
     const values = Array.from(depSubscriptions.values());
     for (const sub of values) sub.unsubscribe();
     depSubscriptions.clear();
-    dependencies.clear();
   };
 
   const broadcastNow = (value: T) => {
@@ -446,7 +444,6 @@ export function flow<T>(
     let maxDepth = -1;
     const deps = formulaContext.dependencies;
     for (const dep of deps) {
-      dependencies.add(dep);
       if (dep[NODE] && dep[NODE].depth > maxDepth) {
         maxDepth = dep[NODE].depth;
       }
