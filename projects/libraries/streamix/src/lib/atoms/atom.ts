@@ -314,8 +314,6 @@ export function flow<T>(
   let disposePromise: Promise<void> | null = null;
   let abortController: AbortController | undefined;
   let iterationAbortController: AbortController | undefined;
-  /** Track iteration version to prevent stale iterations */
-  let currentIterationVersion = 0;
 
   const stop = async () => {
     cancelled = true;
@@ -366,7 +364,6 @@ export function flow<T>(
     if (disposed || activeSubCount <= 0) return;
 
     const currentVersion = ++node.version;
-    currentIterationVersion = currentVersion;
 
     cancelled = true;
     iterationAbortController?.abort();
@@ -384,7 +381,7 @@ export function flow<T>(
 
   const startIteration = (version: number) => {
     // Check if this iteration is still current
-    if (disposed || version !== node.version || version !== currentIterationVersion) return;
+    if (disposed || version !== node.version) return;
 
     iterationAbortController = new AbortController();
     abortController = new AbortController();
@@ -410,7 +407,7 @@ export function flow<T>(
     }
 
     // Check if this iteration is still current after potential async operations
-    if (version !== node.version || version !== currentIterationVersion) {
+    if (version !== node.version) {
       popFormulaContext();
       return;
     }
@@ -471,8 +468,7 @@ export function flow<T>(
       try {
         let result = await iterator!.next();
 
-        // Check currentIterationVersion in the loop
-        while (!cancelled && version === node.version && version === currentIterationVersion && !iterationSignal.aborted && !result.done) {
+        while (!cancelled && version === node.version && !iterationSignal.aborted && !result.done) {
           notify(result.value);
           // Use queueMicrotask consistently
           await new Promise<void>(resolve => queueMicrotask(resolve));
@@ -481,12 +477,12 @@ export function flow<T>(
         }
 
         // Only dispose if this is still the current iteration
-        if (!cancelled && version === node.version && version === currentIterationVersion && !iterationSignal.aborted && !disposed) {
+        if (!cancelled && version === node.version && !iterationSignal.aborted && !disposed) {
           await disposeInstance();
         }
       } catch (err: unknown) {
         // Only handle errors if this iteration is still current
-        if (version === node.version && version === currentIterationVersion && !disposed) {
+        if (version === node.version && !disposed) {
           notifyError(err);
           instance.fail(err, { terminate: true });
         }
@@ -495,7 +491,7 @@ export function flow<T>(
 
     runIteration().catch(() => {
       // Only dispose if this is still the current iteration
-      if (version !== node.version || version !== currentIterationVersion || disposed) {
+      if (version !== node.version || disposed) {
         void disposeInstance();
       }
     });
