@@ -89,11 +89,11 @@ export function createSubscription(
      * 2. Executes the `teardown` callback (if present)
      * 3. Suppresses and logs any errors thrown during cleanup
      */
-    unsubscribe: async function (): Promise<void> {
+    unsubscribe: function (): MaybePromise {
       if (!_unsubscribed) {
         _unsubscribed = true;
         try {
-          await this.teardown?.();
+          return this.teardown?.();
         } catch (err) {
           console.error("Error during unsubscribe callback:", err);
         }
