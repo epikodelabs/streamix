@@ -3,12 +3,14 @@ import { type MaybePromise, type Operator } from "./operator";
 import { pipe as pipeSource } from "./pipe";
 
 import {
+  registerAnalogFlush,
+  unregisterAnalogAtom,
+} from "./scope-scheduler";
+import {
   getCurrentScope,
   getScopeStrobe,
   markAtomAsEmitted,
-  registerAnalogAtom,
   registerWithCurrentScope,
-  unregisterAnalogAtom,
 } from "./scope";
 import { createSubscription, type Subscription } from "./subscription";
 
@@ -657,7 +659,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
   Object.defineProperty(instance, "_onDispose", { get: () => disposeHandlers, enumerable: false });
   registerWithCurrentScope(instance as any);
   if (hasInitialValue) markAtomAsEmitted(instance as any);
-  if (analog) registerAnalogAtom(instance as any, flushInternal);
+  if (scope && analog) registerAnalogFlush(scope, instance as any, flushInternal);
 
   return instance;
 }
@@ -894,7 +896,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   };
 
   registerWithCurrentScope(instance as any);
-  if (analog) registerAnalogAtom(instance as any, flushInternal);
+  if (scope && analog) registerAnalogFlush(scope, instance as any, flushInternal);
 
   return instance;
 }
