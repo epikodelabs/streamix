@@ -313,6 +313,41 @@ describe('Atom System', () => {
       expect(error?.message).toBe('test error');
       f.dispose();
     });
+
+    it('should teardown previous iteration on dependency-triggered restart', async () => {
+      const dep = atom(0);
+      let cleanups = 0;
+      let starts = 0;
+
+      const f = flow((signal?: AbortSignal) => {
+        starts++;
+        dep.value; // track dependency
+        return (async function* () {
+          try {
+            yield starts;
+            while (!signal?.aborted) {
+              await delay(10);
+            }
+          } finally {
+            cleanups++;
+          }
+        })();
+      }, 0);
+
+      f.subscribe(() => {});
+      await delay(30);
+      expect(starts).toBe(1);
+      expect(cleanups).toBe(0);
+
+      dep.next(1); // trigger restart
+      await delay(30);
+
+      expect(starts).toBe(2);
+      expect(cleanups).toBe(1); // old iteration cleaned up
+
+      f.dispose();
+      dep.dispose();
+    });
   });
 
 

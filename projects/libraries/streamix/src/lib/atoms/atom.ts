@@ -277,10 +277,13 @@ export function flow<T>(
     broadcast(current);
   };
 
-  const stop = async (): Promise<void> => {
-    abortController?.abort();
-    if (iterator && typeof (iterator as any).return === "function") {
-      try { await (iterator as any).return(); } catch { /* ignore */ }
+  const stop = async (
+    controller: AbortController | undefined = abortController,
+    iter: AsyncIterator<T> | Iterator<T> | undefined = iterator
+  ): Promise<void> => {
+    controller?.abort();
+    if (iter && typeof (iter as any).return === "function") {
+      try { await (iter as any).return(); } catch { /* ignore */ }
     }
   };
 
@@ -412,6 +415,15 @@ export function flow<T>(
         broadcastLatest();
         if (restartPending) {
           restartPending = false;
+          // Tear down the previous iteration before starting a new one so that
+          // sources with real cleanup (subscriptions, generators, sockets) are
+          // not leaked on every dependency-triggered restart.
+          const oldController = abortController;
+          const oldIterator = iterator;
+          abortController = undefined;
+          iterator = undefined;
+          void stop(oldController, oldIterator).catch(() => {});
+
           // Restart triggers a new iteration version
           const targetVersion = ++node.version;
           startIteration(targetVersion).catch(() => {
