@@ -5,7 +5,7 @@ import { pipe as pipeSource } from "./pipe";
 import {
   registerAnalogFlush,
   unregisterAnalogAtom,
-} from "./scope-scheduler";
+} from "./scheduler";
 import {
   getCurrentScope,
   getScopeStrobe,

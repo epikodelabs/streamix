@@ -1,6 +1,6 @@
 import type { AtomBase } from "./atom";
-import { getGlobalScope, isScope, resolveStrobeAndMode, type RootScope } from "./scope-global";
-import { registerAnalogFlush, startStrobe, stopStrobe } from "./scope-scheduler";
+import { getGlobalScope, isScope, resolveStrobeAndMode, type RootScope } from "./root";
+import { registerAnalogFlush, startStrobe, stopStrobe } from "./scheduler";
 
 // Define a recursive type to unwrap atom values and handle nested scopes
 type UnwrapSnapshotValues<T> = {
