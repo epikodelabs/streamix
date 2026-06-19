@@ -214,6 +214,32 @@ function normalizeError(err: any): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
+// Dependency invalidation channel: separate from public subscriber broadcast.
+// Dependent atoms register here so they are marked dirty immediately when a
+// dependency changes, even in analog mode where public broadcasts are batched.
+const atomChangeHandlers = new WeakMap<AtomBase<any>, Set<() => void>>();
+
+function addAtomChangeHandler(atom: AtomBase<any>, handler: () => void): void {
+  let handlers = atomChangeHandlers.get(atom);
+  if (!handlers) {
+    handlers = new Set();
+    atomChangeHandlers.set(atom, handlers);
+  }
+  handlers.add(handler);
+}
+
+function removeAtomChangeHandler(atom: AtomBase<any>, handler: () => void): void {
+  atomChangeHandlers.get(atom)?.delete(handler);
+}
+
+function notifyChangeHandlers(atom: AtomBase<any>): void {
+  const handlers = atomChangeHandlers.get(atom);
+  if (!handlers) return;
+  for (const h of Array.from(handlers)) {
+    try { h(); } catch { /* suppress dependent errors */ }
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
  * flow() - Async Resource Node
  * ───────────────────────────────────────────────────────────────────────────*/
@@ -227,11 +253,17 @@ export function flow<T>(
   initialValue?: T,
   options?: AtomOptions
 ): AtomBase<T> {
+  const scope = getCurrentScope();
+  const strobe = scope ? getScopeStrobe(scope) : undefined;
+  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
+
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   
   // State
   let current = initialValue as T;
   let previous = initialValue as T;
+  let lastNotified = current;
+  let hasNewValue = false;
   let disposed = false;
   let started = false;
   let activeSubCount = 0;
@@ -262,6 +294,15 @@ export function flow<T>(
     }
   };
 
+  const flushInternal = () => {
+    if (!hasNewValue || disposed) return;
+    hasNewValue = false;
+    if (Object.is(lastNotified, current)) return;
+    lastNotified = current;
+    node.version++;
+    broadcast(current);
+  };
+
   const stop = async (): Promise<void> => {
     abortController?.abort();
     if (iterator && typeof (iterator as any).return === "function") {
@@ -289,6 +330,7 @@ export function flow<T>(
       for (const sub of subscriptions) await sub.unsubscribe().catch(() => {});
       subscriptions.clear();
       
+      unregisterAnalogAtom(instance as any);
       getScheduler().remove(node);
     })();
 
@@ -354,7 +396,12 @@ export function flow<T>(
         previous = current;
         current = result.value;
         markAtomAsEmitted(instance as any);
-        broadcast(current);
+        notifyChangeHandlers(instance);
+        if (analog) {
+          hasNewValue = true;
+        } else {
+          broadcast(current);
+        }
 
         // Yield to event loop
         await new Promise<void>(r => queueMicrotask(r));
@@ -373,7 +420,7 @@ export function flow<T>(
 
   const node: AtomNode = {
     depth: 0, version: 0, dirty: false, flushing: false,
-    isResource: true, isAnalog: false,
+    isResource: true, isAnalog: analog,
     flush() {
       if (disposed || !node.dirty || node.flushing) return;
       node.flushing = true;
@@ -451,6 +498,7 @@ export function flow<T>(
       if (errorOptions?.terminate ?? false) {
         disposed = true;
         markDisposed(instance);
+        unregisterAnalogAtom(instance as any);
         getScheduler().remove(node);
         abortController?.abort();
         stop().catch(() => {}); // Best effort stop
@@ -472,6 +520,7 @@ export function flow<T>(
 
   Object.defineProperty(instance, "_onDispose", { get: () => disposeHandlers, enumerable: false });
   registerWithCurrentScope(instance as any);
+  if (scope && analog) registerAnalogFlush(scope, instance as any, flushInternal);
   return instance;
 }
 
@@ -593,8 +642,12 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
       previous = current;
       current = value;
 
+      // Notify dependents immediately so derived atoms stay dirty-tracked
+      // regardless of whether public broadcasts are discrete or analog-batched.
+      notifyChangeHandlers(instance);
+
       if (node.isAnalog || getScheduler().depth > 0) {
-        // Analog or Transactional: Defer
+        // Analog or Transactional: Defer public broadcast
         instance[MARK_DIRTY]();
       } else {
         // Discrete: Immediate broadcast
@@ -688,6 +741,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   let running = false;
   let errorValue: any = undefined;
   let isErrorState = false;
+  let notifyPending = false;
 
   const subs = new Set<(value: T) => void>();
   const errorHandlers = new Set<(error: any) => void>();
@@ -739,9 +793,13 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
         if (dep[NODE]?.depth > maxDepth) maxDepth = dep[NODE].depth;
 
         if (!depSubscriptions.has(dep)) {
-          depSubscriptions.set(dep, subscribeToUpdates(dep as any, () => {
+          const handler = () => {
             if (disposed) return;
             instance[MARK_DIRTY]();
+          };
+          addAtomChangeHandler(dep as any, handler);
+          depSubscriptions.set(dep, createSubscription(() => {
+            removeAtomChangeHandler(dep as any, handler);
           }));
         }
       }
@@ -760,23 +818,38 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     isErrorState = false;
     errorValue = undefined;
 
-    if (Object.is(current, next)) return;
+    if (Object.is(current, next)) {
+      notifyPending = false;
+      return;
+    }
 
     previous = current;
     current = next;
     node.version++;
-    if (subs.size > 0) broadcast();
+
+    notifyChangeHandlers(instance);
+
+    if (node.isAnalog) {
+      notifyPending = true;
+    } else if (subs.size > 0) {
+      broadcast();
+    }
   };
 
   const flushInternal = () => {
-    if (!node.dirty || disposed || node.flushing) return;
+    if ((!node.dirty && !notifyPending) || disposed || node.flushing) return;
     node.flushing = true;
     try {
-      recompute();
+      if (node.dirty) recompute();
+      if (notifyPending && subs.size > 0) {
+        broadcast();
+        notifyPending = false;
+      }
     } catch (err) {
       errorValue = normalizeError(err);
       isErrorState = true;
       node.dirty = false; // Reset dirty even on error
+      notifyPending = false;
       if (terminateOnError) {
         instance.dispose();
       } else if (propagateErrors) {
@@ -811,7 +884,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       if (ctx) ctx.dependencies.add(instance);
 
       // Lazy pull-to-refresh
-      if (node.dirty && !node.isAnalog) {
+      if (node.dirty) {
         try {
           recompute();
         } catch (err) {

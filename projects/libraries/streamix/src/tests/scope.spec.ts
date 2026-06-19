@@ -328,6 +328,55 @@ describe('Scope System', () => {
       
       parent.dispose();
     });
+
+    it('should keep derived values live in analog mode', async () => {
+      const s = scope(() => {
+        const a = atom(0);
+        const doubled = derived(() => a.value * 2);
+        return { a, doubled };
+      }, { strobe: 50 });
+      
+      const values: number[] = [];
+      s.doubled.subscribe(v => values.push(v));
+      
+      s.a.next(5);
+      
+      // Value is recomputed on read even before the strobe fires
+      expect(s.doubled.value).toBe(10);
+      expect(values).toEqual([]);
+      
+      await delay(70);
+      expect(values).toEqual([10]);
+      
+      s.dispose();
+    });
+
+    it('should batch flow emissions in analog mode', async () => {
+      const source = atom<number>();
+      
+      const s = scope(() => {
+        const a = flow(source, 0);
+        return { a };
+      }, { strobe: 50 });
+      
+      const values: number[] = [];
+      s.a.subscribe(v => values.push(v));
+      
+      source.next(1);
+      source.next(2);
+      source.next(3);
+      
+      // Value reflects latest source emission immediately
+      await delay();
+      expect(s.a.value).toBe(3);
+      expect(values).toEqual([]);
+      
+      await delay(70);
+      expect(values).toEqual([3]);
+      
+      s.dispose();
+      source.dispose();
+    });
   });
 
   describe('globalScope', () => {
