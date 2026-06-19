@@ -347,27 +347,28 @@ describe('Scope System', () => {
       s.dispose();
     });
 
-    it('should keep flow discrete even inside analog scope', async () => {
-      const source = atom<number>();
-      
+    it('should batch flow emissions in analog mode', async () => {
       const s = scope(() => {
+        const source = atom<number>();
         const a = flow(source, 0);
-        return { a };
+        return { a, source };
       }, { mode: 'analog' });
       
       const values: number[] = [];
       s.a.subscribe(v => values.push(v));
       
-      source.next(1);
-      source.next(2);
+      s.source.next(1);
+      s.source.next(2);
+      s.source.next(3);
       
-      // Flows are discrete: each source value is broadcast as it arrives
+      // In analog mode, rapid source emissions are batched to a single scheduler
+      // flush; the flow broadcasts only the latest value.
+      expect(values).toEqual([]);
       await delay();
-      expect(s.a.value).toBe(2);
-      expect(values).toEqual([1, 2]);
+      expect(s.a.value).toBe(3);
+      expect(values).toEqual([3]);
       
       s.dispose();
-      source.dispose();
     });
   });
 

@@ -247,6 +247,9 @@ export function flow<T>(
 ): AtomBase<T> {
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   
+  const scope = getCurrentScope();
+  const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
+
   // State
   let current = initialValue as T;
   let previous = initialValue as T;
@@ -254,6 +257,8 @@ export function flow<T>(
   let started = false;
   let activeSubCount = 0;
   let errorValue: any = undefined;
+  let hasNewValue = false;
+  let restartPending = false;
   const disposeHandlers = new Set<() => void>();
   const errorHandlers = new Set<(error: any) => void>();
   const subs = new Set<(value: T) => MaybePromise>();
@@ -278,6 +283,12 @@ export function flow<T>(
         for (const h of Array.from(errorHandlers)) try { h(e); } catch {}
       }
     }
+  };
+
+  const broadcastLatest = () => {
+    if (!hasNewValue) return;
+    hasNewValue = false;
+    broadcast(current);
   };
 
   const stop = async (): Promise<void> => {
@@ -356,6 +367,7 @@ export function flow<T>(
       if (!depSubscriptions.has(dep)) {
         const handler = () => {
           if (disposed || activeSubCount <= 0) return;
+          restartPending = true;
           instance[MARK_DIRTY]();
         };
         addAtomChangeHandler(dep as any, handler);
@@ -377,7 +389,15 @@ export function flow<T>(
         current = result.value;
         markAtomAsEmitted(instance as any);
         notifyChangeHandlers(instance);
-        broadcast(current);
+
+        if (analog) {
+          // In analog mode, buffer the emission and broadcast the latest value
+          // once per scheduler flush instead of on every source emission.
+          hasNewValue = true;
+          instance[MARK_DIRTY]();
+        } else {
+          broadcast(current);
+        }
 
         // Yield to event loop
         await new Promise<void>(r => queueMicrotask(r));
@@ -396,17 +416,22 @@ export function flow<T>(
 
   const node: AtomNode = {
     depth: 0, version: 0, dirty: false, flushing: false,
-    isResource: true, isAnalog: false,
+    isResource: true, isAnalog: analog,
     flush() {
-      if (disposed || !node.dirty || node.flushing) return;
+      if (disposed || (!node.dirty && !hasNewValue) || node.flushing) return;
       node.flushing = true;
       try {
-        node.dirty = false;
-        // Restart triggers a new iteration version
-        const targetVersion = ++node.version;
-        startIteration(targetVersion).catch(() => {
-           if (node.version !== targetVersion || disposed) void disposeInstance();
-        });
+        // Analog mode: broadcast the latest buffered value first, then restart
+        // if a dependency change requested it.
+        broadcastLatest();
+        if (restartPending) {
+          restartPending = false;
+          // Restart triggers a new iteration version
+          const targetVersion = ++node.version;
+          startIteration(targetVersion).catch(() => {
+             if (node.version !== targetVersion || disposed) void disposeInstance();
+          });
+        }
       } finally {
         node.flushing = false;
       }

@@ -295,7 +295,7 @@ Use `discrete(initialValue?)` or `atom(..., { discrete: true })` to force a sing
 
 Derived atoms inside an analog scope also defer subscriber notifications to the scheduler, but their `.value` getter still recomputes on read so values remain live.
 
-Flows are always discrete: each emitted value is broadcast as it arrives, regardless of the surrounding scope's mode.
+Flows created inside an analog scope buffer source emissions and broadcast only the latest value per scheduler flush, just like atoms and derived atoms.
 
 ### Global mode default
 
