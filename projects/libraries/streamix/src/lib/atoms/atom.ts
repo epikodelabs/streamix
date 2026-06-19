@@ -3,12 +3,8 @@ import { type MaybePromise, type Operator } from "./operator";
 import { pipe as pipeSource } from "./pipe";
 
 import {
-  registerAnalogFlush,
-  unregisterAnalogAtom,
-} from "./scheduler";
-import {
   getCurrentScope,
-  getScopeStrobe,
+  getScopeMode,
   markAtomAsEmitted,
   registerWithCurrentScope,
 } from "./scope";
@@ -197,10 +193,6 @@ function getCurrentFormulaContext(): FormulaContext | null {
   return activeFormulaStack.length > 0 ? activeFormulaStack[activeFormulaStack.length - 1] : null;
 }
 
-function subscribeToUpdates(atom: AtomBase<any>, handler: () => void): Subscription {
-  return atom.subscribe(() => { handler(); });
-}
-
 /* ─────────────────────────────────────────────────────────────────────────────
  * Shared Internals
  * ───────────────────────────────────────────────────────────────────────────*/
@@ -253,17 +245,11 @@ export function flow<T>(
   initialValue?: T,
   options?: AtomOptions
 ): AtomBase<T> {
-  const scope = getCurrentScope();
-  const strobe = scope ? getScopeStrobe(scope) : undefined;
-  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
-
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   
   // State
   let current = initialValue as T;
   let previous = initialValue as T;
-  let lastNotified = current;
-  let hasNewValue = false;
   let disposed = false;
   let started = false;
   let activeSubCount = 0;
@@ -294,15 +280,6 @@ export function flow<T>(
     }
   };
 
-  const flushInternal = () => {
-    if (!hasNewValue || disposed) return;
-    hasNewValue = false;
-    if (Object.is(lastNotified, current)) return;
-    lastNotified = current;
-    node.version++;
-    broadcast(current);
-  };
-
   const stop = async (): Promise<void> => {
     abortController?.abort();
     if (iterator && typeof (iterator as any).return === "function") {
@@ -330,7 +307,6 @@ export function flow<T>(
       for (const sub of subscriptions) await sub.unsubscribe().catch(() => {});
       subscriptions.clear();
       
-      unregisterAnalogAtom(instance as any);
       getScheduler().remove(node);
     })();
 
@@ -378,9 +354,13 @@ export function flow<T>(
     for (const dep of context.dependencies) {
       if (dep[NODE]?.depth > maxDepth) maxDepth = dep[NODE].depth;
       if (!depSubscriptions.has(dep)) {
-        depSubscriptions.set(dep, subscribeToUpdates(dep as any, () => {
+        const handler = () => {
           if (disposed || activeSubCount <= 0) return;
           instance[MARK_DIRTY]();
+        };
+        addAtomChangeHandler(dep as any, handler);
+        depSubscriptions.set(dep, createSubscription(() => {
+          removeAtomChangeHandler(dep as any, handler);
         }));
       }
     }
@@ -397,11 +377,7 @@ export function flow<T>(
         current = result.value;
         markAtomAsEmitted(instance as any);
         notifyChangeHandlers(instance);
-        if (analog) {
-          hasNewValue = true;
-        } else {
-          broadcast(current);
-        }
+        broadcast(current);
 
         // Yield to event loop
         await new Promise<void>(r => queueMicrotask(r));
@@ -420,7 +396,7 @@ export function flow<T>(
 
   const node: AtomNode = {
     depth: 0, version: 0, dirty: false, flushing: false,
-    isResource: true, isAnalog: analog,
+    isResource: true, isAnalog: false,
     flush() {
       if (disposed || !node.dirty || node.flushing) return;
       node.flushing = true;
@@ -498,7 +474,6 @@ export function flow<T>(
       if (errorOptions?.terminate ?? false) {
         disposed = true;
         markDisposed(instance);
-        unregisterAnalogAtom(instance as any);
         getScheduler().remove(node);
         abortController?.abort();
         stop().catch(() => {}); // Best effort stop
@@ -520,7 +495,6 @@ export function flow<T>(
 
   Object.defineProperty(instance, "_onDispose", { get: () => disposeHandlers, enumerable: false });
   registerWithCurrentScope(instance as any);
-  if (scope && analog) registerAnalogFlush(scope, instance as any, flushInternal);
   return instance;
 }
 
@@ -530,8 +504,7 @@ export function flow<T>(
 
 export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> {
   const scope = getCurrentScope();
-  const strobe = scope ? getScopeStrobe(scope) : undefined;
-  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
+  const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
   
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   const terminateOnError = options?.terminateOnError ?? false;
@@ -574,7 +547,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
     depth: 0, version: 0, dirty: false, flushing: false,
     isResource: false, isAnalog: analog,
     flush() {
-      if (disposed || !node.dirty || node.flushing || node.isAnalog) return;
+      if (disposed || !node.dirty || node.flushing) return;
       
       node.flushing = true;
       try {
@@ -607,7 +580,6 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
     [MARK_DIRTY]() {
       if (disposed || node.dirty) return;
       node.dirty = true;
-      if (node.isAnalog) return;
       getScheduler().queueFlush(node);
     },
     [FLUSH]() { node.flush(); },
@@ -672,7 +644,6 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
       if (shouldTerminate) {
         disposed = true;
         markDisposed(instance);
-        unregisterAnalogAtom(instance as any);
         getScheduler().remove(node);
         
         for (const h of disposeHandlers) Promise.resolve(h()).catch(() => {});
@@ -698,7 +669,6 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
       if (disposed) return;
       disposed = true;
       markDisposed(instance);
-      unregisterAnalogAtom(instance as any);
       getScheduler().remove(node);
       for (const h of disposeHandlers) Promise.resolve(h()).catch(() => {});
       disposeHandlers.clear();
@@ -712,8 +682,6 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
   Object.defineProperty(instance, "_onDispose", { get: () => disposeHandlers, enumerable: false });
   registerWithCurrentScope(instance as any);
   if (hasInitialValue) markAtomAsEmitted(instance as any);
-  if (scope && analog) registerAnalogFlush(scope, instance as any, flushInternal);
-
   return instance;
 }
 
@@ -727,8 +695,7 @@ export function discrete<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
 
 export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   const scope = getCurrentScope();
-  const strobe = scope ? getScopeStrobe(scope) : undefined;
-  const analog = strobe !== undefined && strobe > 0 && !options?.discrete;
+  const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
   
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   const terminateOnError = options?.terminateOnError ?? false;
@@ -818,10 +785,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     isErrorState = false;
     errorValue = undefined;
 
-    if (Object.is(current, next)) {
-      notifyPending = false;
-      return;
-    }
+    if (Object.is(current, next)) return;
 
     previous = current;
     current = next;
@@ -864,7 +828,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     depth: 0, version: 0, dirty: false, flushing: false,
     isResource: false, isAnalog: analog,
     flush() {
-      if (disposed || !node.dirty || node.flushing || node.isAnalog) return;
+      if (disposed || (!node.dirty && !notifyPending) || node.flushing) return;
       flushInternal();
     },
   };
@@ -887,6 +851,9 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       if (node.dirty) {
         try {
           recompute();
+          // In analog mode, value reads make the result live but still defer
+          // subscriber notification to the scheduler.
+          if (notifyPending) instance[MARK_DIRTY]();
         } catch (err) {
           errorValue = normalizeError(err);
           isErrorState = true;
@@ -902,7 +869,6 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
         try {
           current = compute();
           previous = current;
-          if (analog) node.dirty = false;
           markAtomAsEmitted(instance as any);
         } catch (err) {
           errorValue = normalizeError(err);
@@ -930,7 +896,6 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     [MARK_DIRTY]() {
       if (disposed || node.dirty) return;
       node.dirty = true;
-      if (node.isAnalog) return;
       getScheduler().queueFlush(node);
     },
     [FLUSH]() { node.flush(); },
@@ -957,7 +922,6 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
       if (disposed) return;
       disposed = true;
       markDisposed(instance);
-      unregisterAnalogAtom(instance as any);
       getScheduler().remove(node);
       
       for (const sub of depSubscriptions.values()) sub.unsubscribe();
@@ -969,7 +933,6 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   };
 
   registerWithCurrentScope(instance as any);
-  if (scope && analog) registerAnalogFlush(scope, instance as any, flushInternal);
 
   return instance;
 }

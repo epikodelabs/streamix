@@ -13,7 +13,6 @@ describe('Scope System', () => {
   afterEach(() => {
     if (globalScope) {
       globalScope.mode = 'discrete';
-      globalScope.strobe = 0;
     }
   });
 
@@ -224,12 +223,12 @@ describe('Scope System', () => {
     });
   });
 
-  describe('strobe mode', () => {
-    it('should batch atom emissions with strobe', async () => {
+  describe('analog mode', () => {
+    it('should batch atom emissions to the scheduler', async () => {
       const s = scope(() => {
         const a = atom(0);
         return { a };
-      }, { strobe: 50 });
+      }, { mode: 'analog' });
       
       const values: number[] = [];
       s.a.subscribe(v => values.push(v));
@@ -238,8 +237,8 @@ describe('Scope System', () => {
       s.a.next(2);
       s.a.next(3);
       
-      await delay(); // Let microtasks run for initial values
-      await delay(70);
+      expect(values).toEqual([]);
+      await delay();
       expect(values).toEqual([3]);
       s.dispose();
     });
@@ -249,7 +248,7 @@ describe('Scope System', () => {
         const a = atom(0);
         const doubled = derived(() => a.value * 2);
         return { a, doubled };
-      }, { strobe: 50 });
+      }, { mode: 'analog' });
       
       const values: number[] = [];
       s.doubled.subscribe(v => values.push(v));
@@ -258,12 +257,10 @@ describe('Scope System', () => {
       s.a.next(2);
       s.a.next(3);
       
-      // Initial value is computed synchronously
-      await delay();
       expect(values).toEqual([]);
-      
-      await delay(70);
       expect(s.doubled.value).toBe(6);
+      
+      await delay();
       expect(values).toEqual([6]);
       s.dispose();
     });
@@ -272,7 +269,7 @@ describe('Scope System', () => {
       const s = scope(() => {
         const a = atom(0, { discrete: true });
         return { a };
-      }, { strobe: 50 });
+      }, { mode: 'analog' });
       
       const values: number[] = [];
       s.a.subscribe(v => values.push(v));
@@ -284,35 +281,37 @@ describe('Scope System', () => {
       s.dispose();
     });
 
-    it('should inherit strobe from parent', async () => {
-      const source = atom<number>();
-      const parent = scope(() => {
-        const child = scope(() => {
-          const a = flow(source, 0);
-          return { a };
-        });
-        return { child };
-      }, { strobe: 50 });
-      
-      source.next(1);
-      source.next(2);
-      
-      await delay();
-      await delay(70);
-      expect(parent.child.a.value).toBe(2);
-      
-      parent.dispose();
-      source.dispose();
-    });
-
-    it('should allow child to override parent strobe', async () => {
+    it('should inherit analog mode from parent', async () => {
       const parent = scope(() => {
         const child = scope(() => {
           const a = atom(0);
           return { a };
-        }, { strobe: 150 });
+        });
         return { child };
-      }, { strobe: 50 });
+      }, { mode: 'analog' });
+      
+      const childValues: number[] = [];
+      parent.child.a.subscribe(v => childValues.push(v));
+      
+      parent.child.a.next(1);
+      parent.child.a.next(2);
+      parent.child.a.next(3);
+      
+      await delay();
+      expect(parent.child.a.value).toBe(3);
+      expect(childValues).toEqual([3]);
+      
+      parent.dispose();
+    });
+
+    it('should allow child to override parent analog mode', async () => {
+      const parent = scope(() => {
+        const child = scope(() => {
+          const a = atom(0);
+          return { a };
+        }, { mode: 'discrete' });
+        return { child };
+      }, { mode: 'analog' });
       
       const values: number[] = [];
       parent.child.a.subscribe(v => values.push(v));
@@ -320,11 +319,8 @@ describe('Scope System', () => {
       parent.child.a.next(1);
       parent.child.a.next(2);
       
-      expect(values).toEqual([]);
-      await delay(80);
-      expect(values).toEqual([]);
-      await delay(100);
-      expect(values).toEqual([2]);
+      await delay();
+      expect(values).toEqual([1, 2]);
       
       parent.dispose();
     });
@@ -334,45 +330,41 @@ describe('Scope System', () => {
         const a = atom(0);
         const doubled = derived(() => a.value * 2);
         return { a, doubled };
-      }, { strobe: 50 });
+      }, { mode: 'analog' });
       
       const values: number[] = [];
       s.doubled.subscribe(v => values.push(v));
       
       s.a.next(5);
       
-      // Value is recomputed on read even before the strobe fires
+      // Value is recomputed on read even before the scheduler flushes
       expect(s.doubled.value).toBe(10);
       expect(values).toEqual([]);
       
-      await delay(70);
+      await delay();
       expect(values).toEqual([10]);
       
       s.dispose();
     });
 
-    it('should batch flow emissions in analog mode', async () => {
+    it('should keep flow discrete even inside analog scope', async () => {
       const source = atom<number>();
       
       const s = scope(() => {
         const a = flow(source, 0);
         return { a };
-      }, { strobe: 50 });
+      }, { mode: 'analog' });
       
       const values: number[] = [];
       s.a.subscribe(v => values.push(v));
       
       source.next(1);
       source.next(2);
-      source.next(3);
       
-      // Value reflects latest source emission immediately
+      // Flows are discrete: each source value is broadcast as it arrives
       await delay();
-      expect(s.a.value).toBe(3);
-      expect(values).toEqual([]);
-      
-      await delay(70);
-      expect(values).toEqual([3]);
+      expect(s.a.value).toBe(2);
+      expect(values).toEqual([1, 2]);
       
       s.dispose();
       source.dispose();
@@ -382,12 +374,10 @@ describe('Scope System', () => {
   describe('globalScope', () => {
     it('should default to discrete mode', () => {
       expect(globalScope.mode).toBe('discrete');
-      expect(globalScope.strobe).toBe(0);
     });
 
     it('should make top-level scopes analog via global config', async () => {
       globalScope.mode = 'analog';
-      globalScope.strobe = 50;
       
       const s = scope(() => {
         const a = atom(0);
@@ -402,7 +392,7 @@ describe('Scope System', () => {
       s.a.next(3);
       
       expect(values).toEqual([]);
-      await delay(70);
+      await delay();
       expect(values).toEqual([3]);
       
       s.dispose();
@@ -410,7 +400,6 @@ describe('Scope System', () => {
 
     it('should let child scopes override global analog mode', async () => {
       globalScope.mode = 'analog';
-      globalScope.strobe = 50;
       
       const s = scope(() => {
         const a = atom(0);

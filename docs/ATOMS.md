@@ -283,39 +283,42 @@ This synchronous broadcast also marks dependent `derived` atoms dirty; they are 
 
 ### Analog mode
 
-A scope can be created with a `strobe` interval:
+A scope can be created with `{ mode: 'analog' }`:
 
 ```ts
-const analogScope = scope(() => { ... }, { strobe: 16 });
+const analogScope = scope(() => { ... }, { mode: 'analog' });
 ```
 
-Atoms created inside an analog scope become **analog**: `next()` only marks the atom dirty. A periodic `setInterval` (the strobe) drains all buffered analog atoms at once. This batches rapid updates so subscribers see only the latest value per tick.
+Atoms created inside an analog scope become **analog**: `next()` updates the value but defers the public broadcast to the scheduler's next microtask flush. Multiple synchronous `next()` calls collapse into a single subscriber notification with the latest value. This batches rapid updates so subscribers see only the final value per task.
 
 Use `discrete(initialValue?)` or `atom(..., { discrete: true })` to force a single atom to stay discrete even inside an analog scope.
 
-### Global timing defaults
+Derived atoms inside an analog scope also defer subscriber notifications to the scheduler, but their `.value` getter still recomputes on read so values remain live.
 
-The global root context supplies default timing for scopes created outside any other scope. Mutating it lets you opt an entire application into analog mode without repeating `strobe` on every `scope()` call:
+Flows are always discrete: each emitted value is broadcast as it arrives, regardless of the surrounding scope's mode.
+
+### Global mode default
+
+The global root context supplies the default mode for scopes created outside any other scope. Mutating it lets you opt an entire application into analog mode without repeating `{ mode: 'analog' }` on every `scope()` call:
 
 ```ts
 import { globalScope, scope, atom } from '@epikodelabs/streamix';
 
 globalScope.mode = 'analog';
-globalScope.strobe = 16;
 
 const app = scope(() => {
   const count = atom(0);
   return { count };
 });
 
-// app is analog with a 16ms strobe
+// app is analog
 ```
 
-A child scope can still override the default with `{ mode: 'discrete' }` or its own `strobe`.
+A child scope can still override the default with `{ mode: 'discrete' }`.
 
-### Strobe inheritance
+### Mode inheritance
 
-A scope inherits strobe and mode from its nearest non-root parent unless it provides its own options:
+A scope inherits `mode` from its nearest non-root parent unless it provides its own option:
 
 ```ts
 const parent = scope(() => {
@@ -328,9 +331,9 @@ const parent = scope(() => {
   }), { mode: 'discrete' });
 
   return { child, discreteChild };
-}, { strobe: 16 });
+}, { mode: 'analog' });
 
-// child is analog (inherits 16ms strobe)
+// child is analog (inherits from parent)
 // discreteChild is discrete (opts out)
 ```
 
@@ -382,11 +385,10 @@ A derived atom only notifies subscribers when its computed value actually change
 
 When a scope is disposed:
 
-1. The strobe scheduler is detached (if any).
-2. All cleanup hooks run.
-3. Every owned atom and nested scope is disposed recursively.
+1. All cleanup hooks run.
+2. Every owned atom and nested scope is disposed recursively.
 
-Scope lifecycle and analog scheduling are separate concerns: the scope owns the tree and its teardown, while the scheduler owns the strobe interval and batching.
+Scope lifecycle and scheduling are separate concerns: the scope owns the tree and its teardown, while the scheduler owns the microtask flush that drains dirty analog atoms.
 
 `scope()` automatically registers atoms created inside its factory. It also subscribes to them so derived atoms initialize eagerly, flows stay active, and emissions are recorded for `scope.loading`.
 

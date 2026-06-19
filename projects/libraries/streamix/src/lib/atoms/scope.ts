@@ -1,6 +1,5 @@
 import type { AtomBase } from "./atom";
-import { getGlobalScope, isScope, resolveStrobeAndMode, type RootScope } from "./root";
-import { registerAnalogFlush, startStrobe, stopStrobe } from "./scheduler";
+import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
 
 // Define a recursive type to unwrap atom values and handle nested scopes
 type UnwrapSnapshotValues<T> = {
@@ -23,11 +22,6 @@ export interface Scope {
   atoms: Set<AtomBase<any> | Scope>;
   /** Registered callbacks triggered when this context collapses. */
   cleanups: Set<() => void>;
-  /**
-   * Strobe interval value or mode identifier.
-   * A value > 0 flags an analog deferred/batched notification window.
-   */
-  strobe: number;
   /** Scope mode: 'discrete' or 'analog' */
   mode: "discrete" | "analog";
   /** Parent scope reference */
@@ -42,8 +36,6 @@ export interface Scope {
   snapshot(): this extends (infer T extends Record<string, any>) ? UnwrapSnapshotValues<T> : Record<string, any>;
   /** Disposes the scope and all of its atoms. */
   dispose(): void;
-  /** Internal: active strobe interval id when the scope is analog. */
-  strobeInterval?: ReturnType<typeof setInterval>;
   /** @internal Number of atoms in this scope's subtree that have not yet emitted. */
   _pendingCount: number;
   /** @internal Factory keys that belong in snapshots. */
@@ -67,10 +59,6 @@ export function getCurrentScope(): Scope | null {
   return currentScope;
 }
 
-export function getScopeStrobe(scope: Scope): number | undefined {
-  return scope.strobe;
-}
-
 export function getScopeMode(scope: Scope): "discrete" | "analog" {
   return scope.mode ?? "discrete";
 }
@@ -85,22 +73,21 @@ export function setCurrentScope(scope: Scope | null): Scope | null {
 
 /**
  * Creates an execution boundary to encapsulate, track, and bulk-dispose reactive
- * units. When `strobe > 0` (analog mode) the scope delegates timing to the
- * scope scheduler, which periodically drains buffered atom updates.
+ * units. Atoms created inside an analog scope defer public broadcasts to the
+ * scheduler instead of notifying subscribers synchronously.
  */
 export function scope<T extends Record<string, any>>(
   factory: () => T,
-  options?: { mode?: "discrete" | "analog"; strobe?: number },
+  options?: { mode?: "discrete" | "analog" },
 ): Scope & T {
   const parent = currentScope ?? getGlobalScope();
-  const { mode, strobe } = resolveStrobeAndMode(options, parent);
+  const mode = resolveMode(options, parent);
 
   // Create the base scope structure
   const newScope: Scope = {
     type: "scope",
     atoms: new Set(),
     cleanups: new Set(),
-    strobe: strobe > 0 ? strobe : 0,
     mode,
     parent,
     loading: false,
@@ -136,10 +123,6 @@ export function scope<T extends Record<string, any>>(
     parent.atoms.add(newScope);
   }
 
-  if (strobe > 0) {
-    startStrobe(newScope);
-  }
-
   // Swap the active execution context. The factory is synchronous, so a single
   // saved previous value is enough; no stack is required.
   const previous = currentScope;
@@ -169,14 +152,12 @@ export function scope<T extends Record<string, any>>(
 /* ── Scope Disposal ───────────────────────────────────────────────────────── */
 
 /**
- * Tears down a scope: stops strobe intervals, runs cleanup hooks, and disposes
- * all owned atoms and nested scopes recursively.
+ * Tears down a scope: runs cleanup hooks and disposes all owned atoms and
+ * nested scopes recursively.
  */
 export function disposeScope(sc: Scope): void {
   if (sc._disposed) return;
   sc._disposed = true;
-
-  stopStrobe(sc);
 
   for (const cleanup of Array.from(sc.cleanups)) {
     try {
@@ -271,16 +252,6 @@ export function markAtomAsEmitted(atom: AtomBase<any>): void {
 
   const scope = atomScopeRegistry.get(atom);
   if (scope) decrementPending(scope);
-}
-
-/**
- * Public wrapper that registers an analog flush callback using the current scope.
- * Prefer {@link registerAnalogFlush} from `./scope-scheduler` when the scope is
- * already known.
- */
-export function registerAnalogAtom(atom: AtomBase<any>, flushFn: () => void): void {
-  if (!currentScope) return;
-  registerAnalogFlush(currentScope, atom, flushFn);
 }
 
 /* ── Loading State ────────────────────────────────────────────────────────── */
