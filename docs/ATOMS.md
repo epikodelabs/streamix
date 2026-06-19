@@ -11,7 +11,7 @@ Lightweight reactive state for Streamix.
 
 * **Atoms are reactive state nodes** — `atom` for writable values, `flow` for stream-backed values, `derived` for derived values.
 * **Scopes form a tree** — each scope owns atoms and nested scopes created within its factory.
-* **Loading state** — `scope.loading` is `true` until every tracked atom (recursively) has emitted at least once.
+* **Loading state** — `scope.loading` is `true` until every tracked atom (recursively) has emitted at least once. It is computed in O(1) from an internal pending-atom counter.
 * **Implicit registration** — items are tracked automatically via execution context; no manual wiring required.
 * **Public API is explicit** — only values returned from the factory are exposed on the scope object.
 
@@ -201,6 +201,24 @@ const app = scope(() => {
 app.loading; // true until both emit
 ```
 
+### Loading at scale
+
+`scope.loading` reads an internal counter, so it stays O(1) regardless of how many atoms or nested scopes are inside the tree. You can poll it freely in render loops or derived computations:
+
+```ts
+const dashboard = scope(() => {
+  const kpis = Array.from({ length: 1000 }, (_, i) =>
+    flow(loadKpi(i), 0)
+  );
+  return { kpis };
+});
+
+// Cheap even with thousands of tracked atoms
+if (dashboard.loading) {
+  renderSpinner();
+}
+```
+
 ---
 
 ## Snapshots
@@ -218,6 +236,21 @@ Example:
   header: { title: "" },
   main: { count: 0, label: "hello" }
 }
+```
+
+### Snapshot exports
+
+Only keys returned from the scope factory are included in snapshots. Atoms and nested scopes created for internal bookkeeping are still tracked for lifecycle and loading, but they do not leak into the snapshot.
+
+```ts
+const page = scope(() => {
+  const count = atom(0);
+  const internal = atom('secret'); // used locally, not returned
+
+  return { count };
+});
+
+page.snapshot(); // { count: 0 }
 ```
 
 ---
@@ -259,6 +292,47 @@ const analogScope = scope(() => { ... }, { strobe: 16 });
 Atoms created inside an analog scope become **analog**: `next()` only marks the atom dirty. A periodic `setInterval` (the strobe) drains all buffered analog atoms at once. This batches rapid updates so subscribers see only the latest value per tick.
 
 Use `discrete(initialValue?)` or `atom(..., { discrete: true })` to force a single atom to stay discrete even inside an analog scope.
+
+### Global timing defaults
+
+The global root context supplies default timing for scopes created outside any other scope. Mutating it lets you opt an entire application into analog mode without repeating `strobe` on every `scope()` call:
+
+```ts
+import { globalScope, scope, atom } from '@epikodelabs/streamix';
+
+globalScope.mode = 'analog';
+globalScope.strobe = 16;
+
+const app = scope(() => {
+  const count = atom(0);
+  return { count };
+});
+
+// app is analog with a 16ms strobe
+```
+
+A child scope can still override the default with `{ mode: 'discrete' }` or its own `strobe`.
+
+### Strobe inheritance
+
+A scope inherits strobe and mode from its nearest non-root parent unless it provides its own options:
+
+```ts
+const parent = scope(() => {
+  const child = scope(() => ({
+    a: atom(0)
+  }));
+
+  const discreteChild = scope(() => ({
+    b: atom(0)
+  }), { mode: 'discrete' });
+
+  return { child, discreteChild };
+}, { strobe: 16 });
+
+// child is analog (inherits 16ms strobe)
+// discreteChild is discrete (opts out)
+```
 
 ### Transactions
 
@@ -308,9 +382,11 @@ A derived atom only notifies subscribers when its computed value actually change
 
 When a scope is disposed:
 
-1. The strobe interval is cleared (if any).
+1. The strobe scheduler is detached (if any).
 2. All cleanup hooks run.
 3. Every owned atom and nested scope is disposed recursively.
+
+Scope lifecycle and analog scheduling are separate concerns: the scope owns the tree and its teardown, while the scheduler owns the strobe interval and batching.
 
 `scope()` automatically registers atoms created inside its factory. It also subscribes to them so derived atoms initialize eagerly, flows stay active, and emissions are recorded for `scope.loading`.
 
