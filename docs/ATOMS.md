@@ -257,7 +257,7 @@ page.snapshot(); // { count: 0 }
 
 ## How atoms synchronize
 
-Atoms form a push-based reactive graph. Understanding the synchronization rules helps avoid surprises when combining `atom`, `derived`, `flow`, scopes, and transactions.
+Atoms form a push-based reactive graph. Understanding the synchronization rules helps avoid surprises when combining `atom`, `derived`, `flow`, and scopes.
 
 ### Three kinds of atom
 
@@ -336,26 +336,6 @@ const parent = scope(() => {
 // child is analog (inherits from parent)
 // discreteChild is discrete (opts out)
 ```
-
-### Transactions
-
-`transaction(fn)` batches all discrete updates inside `fn` into a single flush.
-
-```ts
-const a = atom(0);
-const b = atom(0);
-a.subscribe(() => { ... });
-b.subscribe(() => { ... });
-
-transaction(() => {
-  a.next(1);
-  b.next(2);
-  // no subscriber has been called yet
-});
-// both subscribers are called once, in depth order
-```
-
-The scheduler orders dirty nodes by depth (sources before dependents), then flushes them. Nested transactions collapse into the outermost one.
 
 ### Derived atoms
 

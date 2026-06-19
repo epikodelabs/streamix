@@ -3,7 +3,7 @@ import { flow, type AtomBase } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
- * Creates a transactional retrying atom that commits values only after a full
+ * Creates an atomic retrying atom that commits values only after a full
  * attempt completes successfully.
  *
  * Unlike {@link retry}, this operator buffers values produced during each

@@ -2,10 +2,8 @@ import {
   atom,
   createTestEnvironment,
   derived,
-  discrete,
   flow,
   getScheduler,
-  transaction,
   type AtomBase
 } from '@epikodelabs/streamix';
 
@@ -128,8 +126,8 @@ describe('Atom System', () => {
       a.dispose();
     });
 
-    it('should support discrete mode', () => {
-      const a = discrete(0);
+    it('should support discrete option', () => {
+      const a = atom(0, { discrete: true });
       expect(a.value).toBe(0);
       a.next(5);
       expect(a.value).toBe(5);
@@ -317,46 +315,6 @@ describe('Atom System', () => {
     });
   });
 
-  describe('transaction()', () => {
-    it('should batch updates', async () => { // Make it async
-      const a = atom(0);
-      const b = atom(0);
-      let calls = 0;
-      
-      a.subscribe(() => calls++);
-      b.subscribe(() => calls++);
-      
-      transaction(() => {
-        a.next(1);
-        b.next(2);
-        expect(calls).toBe(0); // No notifications yet
-      });
-      
-      await delay(); // Allow microtask queue to drain
-      expect(calls).toBe(2); // Both notified after transaction
-      a.dispose();
-      b.dispose();
-    });
-
-    it('should handle nested transactions', async () => { // Make it async
-      const a = atom(0);
-      let calls = 0;
-      a.subscribe(() => calls++);
-      
-      transaction(() => {
-        a.next(1);
-        transaction(() => {
-          a.next(2);
-          expect(calls).toBe(0);
-        });
-        expect(calls).toBe(0);
-      });
-      
-      await delay(); // Allow microtask queue to drain
-      expect(calls).toBe(1);
-      a.dispose();
-    });
-  });
 
   describe('scheduler', () => {
     it('should use custom scheduler', async () => { // Make it async

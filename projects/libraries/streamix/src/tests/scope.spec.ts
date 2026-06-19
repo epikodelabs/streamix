@@ -3,8 +3,7 @@ import {
   derived,
   flow,
   getCurrentScope,
-  globalScope, scope,
-  transaction
+  globalScope, scope
 } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -420,27 +419,6 @@ describe('Scope System', () => {
   });
 
   describe('integration', () => {
-    it('should work with transaction inside scope', () => {
-      const s = scope(() => {
-        const a = atom(0);
-        const b = atom(0);
-        return { a, b };
-      });
-      
-      let calls = 0;
-      s.a.subscribe(() => calls++);
-      s.b.subscribe(() => calls++);
-      
-      transaction(() => {
-        s.a.next(1);
-        s.b.next(2);
-        expect(calls).toBe(0);
-      });
-      
-      expect(calls).toBe(2);
-      s.dispose();
-    });
-
     it('should maintain reactivity after scope disposal', async () => {
       const source = atom(0);
       const s = scope(() => {

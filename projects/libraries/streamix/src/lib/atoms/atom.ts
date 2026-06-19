@@ -73,33 +73,22 @@ interface InternalAtomContainer {
  * ───────────────────────────────────────────────────────────────────────────*/
 
 export interface Scheduler {
-  transaction<T>(fn: () => T): T;
   queueFlush(node: AtomNode): void;
   flush(): void;
   remove(node: AtomNode): void;
   flushImmediately(node: AtomNode): void;
   get isDirty(): boolean;
-  get depth(): number;
 }
 
 class DefaultScheduler implements Scheduler {
-  private txDepth = 0;
   private isBatchScheduled = false;
+  private isFlushing = false;
   private dirtyNodes = new Set<AtomNode>();
   private flushingNodes = new Set<AtomNode>();
 
-  transaction<T>(fn: () => T): T {
-    this.txDepth++;
-    try {
-      return fn();
-    } finally {
-      if (--this.txDepth === 0) this.flush();
-    }
-  }
-
   flush(): void {
-    if (this.txDepth > 0) return;
-    this.txDepth++; // Re-entrancy guard
+    if (this.isFlushing) return;
+    this.isFlushing = true;
 
     try {
       while (this.dirtyNodes.size > 0) {
@@ -120,13 +109,13 @@ class DefaultScheduler implements Scheduler {
         }
       }
     } finally {
-      this.txDepth--;
+      this.isFlushing = false;
       this.isBatchScheduled = false;
     }
   }
 
   flushImmediately(node: AtomNode): void {
-    if (this.txDepth > 0) {
+    if (this.isFlushing) {
       this.queueFlush(node);
       return;
     }
@@ -144,14 +133,12 @@ class DefaultScheduler implements Scheduler {
 
   queueFlush(node: AtomNode): void {
     this.dirtyNodes.add(node);
-    if (this.txDepth > 0) return;
+    if (this.isBatchScheduled) return;
 
-    if (!this.isBatchScheduled) {
-      this.isBatchScheduled = true;
-      queueMicrotask(() => {
-        if (this.txDepth === 0) this.flush();
-      });
-    }
+    this.isBatchScheduled = true;
+    queueMicrotask(() => {
+      if (!this.isFlushing) this.flush();
+    });
   }
 
   remove(node: AtomNode): void {
@@ -160,14 +147,13 @@ class DefaultScheduler implements Scheduler {
   }
 
   get isDirty(): boolean { return this.dirtyNodes.size > 0; }
-  get depth(): number { return this.txDepth; }
 }
 
 let currentScheduler: Scheduler = new DefaultScheduler();
 
 export function setScheduler(scheduler: Scheduler): void { currentScheduler = scheduler; }
 export function getScheduler(): Scheduler { return currentScheduler; }
-export function transaction<T>(fn: () => T): T { return currentScheduler.transaction(fn); }
+
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * Dependency Tracking
@@ -643,8 +629,8 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
       // regardless of whether public broadcasts are discrete or analog-batched.
       notifyChangeHandlers(instance);
 
-      if (node.isAnalog || getScheduler().depth > 0) {
-        // Analog or Transactional: Defer public broadcast
+      if (node.isAnalog) {
+        // Analog: Defer public broadcast to scheduler flush
         instance[MARK_DIRTY]();
       } else {
         // Discrete: Immediate broadcast
@@ -708,10 +694,6 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
   registerWithCurrentScope(instance as any);
   if (hasInitialValue) markAtomAsEmitted(instance as any);
   return instance;
-}
-
-export function discrete<T>(initialValue?: T, options?: AtomOptions): Atom<T> {
-  return atom(initialValue, { ...options, discrete: true });
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
