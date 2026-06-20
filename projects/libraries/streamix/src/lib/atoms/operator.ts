@@ -131,9 +131,10 @@ export function createOperator<T = any, R = T>(
 
       if (typeof iterator.throw !== 'function') {
         iterator.throw = async (err?: any) => {
+          const error = err instanceof Error ? err : new Error(String(err));
           try {
             if (typeof source.throw === 'function') {
-              const result = await source.throw(err);
+              const result = await source.throw(error);
               // Source handled the throw — forward its result
               if (result.done) return DONE;
               // Cast the result to IteratorResult<R> since the operator transforms T → R
@@ -143,7 +144,7 @@ export function createOperator<T = any, R = T>(
           } catch (sourceErr) {
             // source.throw() re-threw or threw a different error.
             // Fall through to cleanup + re-throw the original error.
-            if (sourceErr !== err) {
+            if (sourceErr !== error) {
               console.warn(`Operator '${name}': source.throw() threw an unexpected error:`, sourceErr);
             }
           }
@@ -155,7 +156,7 @@ export function createOperator<T = any, R = T>(
           } catch (cleanupErr) {
             console.warn(`Operator '${name}': source.return() threw during throw cleanup:`, cleanupErr);
           }
-          throw err;
+          throw error;
         };
       }
 
@@ -227,15 +228,16 @@ export function createPushOperator<T, R = T>(
     };
 
     (output as any).throw = async (err: any) => {
+      const error = err instanceof Error ? err : new Error(String(err));
       await runCleanup();
       try {
         if (typeof source.return === 'function') await source.return();
       } catch (cleanupErr) {
         console.warn(`Operator '${name}': source.return() threw during output.throw():`, cleanupErr);
       }
-      if (!output.disposed) output.fail(err);
-      if (baseThrow) return baseThrow(err);
-      throw err;
+      if (!output.disposed) output.fail(error);
+      if (baseThrow) return baseThrow(error);
+      throw error;
     };
 
     return output;

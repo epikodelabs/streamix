@@ -1,6 +1,7 @@
 import {
   flow,
   isPromiseLike,
+  normalizeError,
   type MaybePromise,
   type AtomBase,
 } from "@epikodelabs/streamix";
@@ -160,11 +161,12 @@ export function webSocket<T = any>(
    * @param error Terminal stream error.
    */
   const fail = (error: unknown) => {
-    terminalError = error;
+    const err = normalizeError(error);
+    terminalError = err;
     closed = true;
     isOpen = false;
 
-    rejectPending(error);
+    rejectPending(err);
   };
 
   /**
@@ -278,8 +280,9 @@ export function webSocket<T = any>(
       }
     } catch (error) {
       sendQueue.length = 0;
-      fail(error);
-      throw error;
+      const err = normalizeError(error);
+      fail(err);
+      throw err;
     }
   })();
 

@@ -3,6 +3,7 @@ import { createOperator, DONE, isPromiseLike } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { fromAny } from "../factories";
 import { createAsyncPushable } from "../utils";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Transforms each value from the source stream into a new inner stream, promise, or array,
@@ -75,7 +76,7 @@ export function switchMap<T = any, R = any>(
           }
         } catch (err) {
           if (!stopped && token === currentInnerToken) {
-            output.fail(err);
+            output.fail(normalizeError(err));
           }
         } finally {
           if (currentInner?.token === token) {
@@ -94,7 +95,7 @@ export function switchMap<T = any, R = any>(
       try {
         projected = project(value, index++);
       } catch (err) {
-        output.fail(err);
+        output.fail(normalizeError(err));
         return;
       }
 
@@ -107,7 +108,7 @@ export function switchMap<T = any, R = any>(
           },
           (err) => {
             if (stopped || capturedToken !== currentInnerToken) return;
-            output.fail(err);
+            output.fail(normalizeError(err));
           }
         );
       } else {
@@ -124,7 +125,7 @@ export function switchMap<T = any, R = any>(
           try {
             result = tryNext.call(source);
           } catch (err) {
-            output.fail(err);
+            output.fail(normalizeError(err));
             return;
           }
 
@@ -153,7 +154,7 @@ export function switchMap<T = any, R = any>(
           inputCompleted = true;
           checkComplete();
         } catch (err) {
-          output.fail(err);
+          output.fail(normalizeError(err));
         }
       })();
     }
@@ -177,6 +178,7 @@ export function switchMap<T = any, R = any>(
     };
 
     (outputIterator as any).throw = async (err: any) => {
+      const error = normalizeError(err);
       stopped = true;
       try {
         try {
@@ -185,8 +187,8 @@ export function switchMap<T = any, R = any>(
       } finally {
         currentInner = null;
       }
-      if (baseThrow) return baseThrow(err);
-      throw err;
+      if (baseThrow) return baseThrow(error);
+      throw error;
     };
 
     return outputIterator;

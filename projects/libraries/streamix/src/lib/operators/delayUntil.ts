@@ -7,6 +7,7 @@ import {
 import { AtomBase } from "../atoms";
 import { fromAny } from "../factories";
 import { createAsyncCoordinator } from "../utils";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Delay values from the source until a notifier emits.
@@ -54,7 +55,7 @@ export function delayUntil<T = any, N = any>(
     const handleEvent = (event: any): IteratorResult<T> | null => {
       if (event.type === 'error') {
         isDone = true;
-        throw event.error;
+        throw normalizeError(event.error);
       }
 
       if (event.type === 'complete') {
@@ -185,9 +186,10 @@ export function delayUntil<T = any, N = any>(
       },
 
       async throw(err) {
+        const error = normalizeError(err);
         isDone = true;
-        await runner.throw?.(err);
-        return Promise.reject(err);
+        await runner.throw?.(error);
+        return Promise.reject(error);
       }
     };
 

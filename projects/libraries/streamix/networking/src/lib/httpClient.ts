@@ -3,6 +3,7 @@ import {
   createAsyncIterator,
   createSubscription,
   flow,
+  normalizeError,
   type AtomBase,
 } from '@epikodelabs/streamix';
 
@@ -58,10 +59,11 @@ function createReplayAtom<T>(): AtomBase<T> & {
   };
 
   const fail = (err: any) => {
-    errorValue = err;
+    const error = normalizeError(err);
+    errorValue = error;
 
     for (const observer of Array.from(observers)) {
-      observer.fail(err);
+      observer.fail(error);
     }
     observers.clear();
     subs.clear();
@@ -331,7 +333,7 @@ export const useOauth = ({
         retryContext.headers["Authorization"] = `Bearer ${await refreshToken()}`;
         return await next(retryContext);
       }
-      throw error;
+      throw normalizeError(error);
     }
 
     // If unauthorized and shouldRetry allows, refresh the token and retry
@@ -364,11 +366,11 @@ export const useRetry = (
         return await next(context); // Attempt the request
       } catch (error: any) {
         if (!shouldRetry(error, context)) {
-          throw error; // Do not retry if the error is not retryable
+          throw normalizeError(error); // Do not retry if the error is not retryable
         }
 
         if (retryCount === maxRetries) {
-          throw error; // Max retries reached, rethrow the error
+          throw normalizeError(error); // Max retries reached, rethrow the error
         }
 
         // Calculate exponential backoff delay
@@ -579,7 +581,7 @@ export const useTimeout = (ms: number): Middleware => {
       if (error.name === 'AbortError') {
         throw new Error(`${LOG_PREFIX} Request timed out for ${context.method ?? 'UNKNOWN'} ${context.url}`);
       }
-      throw error;
+      throw normalizeError(error);
     }
   };
 };
@@ -743,7 +745,7 @@ export const createHttpClient = (): HttpClient => {
           }
           data.dispose();
         } catch (error) {
-          data.fail(error);
+          data.fail(normalizeError(error));
         }
       })();
 

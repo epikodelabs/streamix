@@ -1,4 +1,5 @@
 import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../atoms";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Creates a stream operator that catches errors from the source stream and handles them.
@@ -44,15 +45,16 @@ export const catchError = <T = any>(
 
           return NEXT(result.value);
         } catch (error) {
+          const normalizedError = normalizeError(error);
           if (!errorCaughtAndHandled) {
             errorCaughtAndHandled = true;
-            const handlerResult = handler(error);
+            const handlerResult = handler(normalizedError);
             if (isPromiseLike(handlerResult)) await handlerResult;
             completed = true;
             return DONE;
           }
 
-          throw error;
+          throw normalizedError;
         }
       }
     };

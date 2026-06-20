@@ -1,5 +1,6 @@
 import { flow, type AtomBase } from '../atoms/atom';
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Combine multiple sources into a single atom that emits arrays of the latest values
@@ -34,7 +35,7 @@ export function zip<T extends readonly unknown[] = any[]>(
             await Promise.all(iterators.map((it, j) =>
               j !== i ? it.return?.(undefined).catch(() => { }) : Promise.resolve()
             ));
-            throw r.reason;
+            throw normalizeError(r.reason);
           }
           if (r.value.done) {
             completed = true;

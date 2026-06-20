@@ -76,6 +76,15 @@ export class AsyncIteratorState<T> {
 }
 
 /**
+ * Safely normalizes any thrown/rejected value to an Error instance.
+ * Preserves real Error instances (and their stack traces); otherwise wraps
+ * primitives and objects in `new Error(String(err))`.
+ */
+export function normalizeError(err: any): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+/**
  * Synchronous pull handler - implements __tryNext logic
  */
 export function syncPull<T>(
@@ -222,16 +231,18 @@ export function pushError<T>(
   if (state.completed) return;
   state.completed = true;
 
+  const error = normalizeError(err);
+
   // If someone is waiting, reject immediately
   if (state.pullReject) {
     const r = state.pullReject;
     state.pullResolve = state.pullReject = null;
-    r(err);
+    r(error);
     return;
   }
 
   // Otherwise store it
-  state.pendingError = { err };
+  state.pendingError = { err: error };
   onPush?.();
 }
 

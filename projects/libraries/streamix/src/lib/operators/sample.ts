@@ -1,4 +1,5 @@
 import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Creates a stream operator that emits the most recent value from the source stream
@@ -52,7 +53,7 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
         // Emit the last value if pending when source completes.
         emit();
       } catch (err) {
-        output.fail(err);
+        output.fail(normalizeError(err));
       } finally {
         stopSampling();
         if (!output.disposed) output.dispose();

@@ -1,4 +1,5 @@
 import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Buffers values while a predicate returns `true` and releases them once the predicate flips to `false`.
@@ -52,7 +53,7 @@ export const delayWhile = <T = any>(
 
         if (queue.length > 0) flushQueue();
       } catch (err) {
-        output.fail(err);
+        output.fail(normalizeError(err));
       } finally {
         if (!output.disposed) output.dispose();
       }

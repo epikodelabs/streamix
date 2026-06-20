@@ -1,4 +1,5 @@
 import { atom, createOperator, DONE, iterate, type Atom, type Operator } from "../atoms";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Shares a single subscription to the source stream between multiple consumers.
@@ -38,7 +39,7 @@ export function share<T = any>() {
           shared!.next(result.value);
         }
       } catch (err) {
-        shared!.fail(err);
+        shared!.fail(normalizeError(err));
         return;
       } finally {
         if (shared && !shared.disposed) shared.dispose();
@@ -71,8 +72,9 @@ export function share<T = any>() {
     };
 
     (outputIterator as any).throw = async (err: any) => {
-      if (baseThrow) return baseThrow(err);
-      throw err;
+      const error = normalizeError(err);
+      if (baseThrow) return baseThrow(error);
+      throw error;
     };
 
     return outputIterator;

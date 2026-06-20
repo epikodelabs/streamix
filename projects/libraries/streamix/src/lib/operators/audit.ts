@@ -1,4 +1,5 @@
 import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Creates a stream operator that emits the latest value from the source stream
@@ -54,7 +55,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
           startTimer();
         }
       } catch (err) {
-        output.fail(err);
+        output.fail(normalizeError(err));
       } finally {
         if (timerId) { clearTimeout(timerId); timerId = undefined; }
         if (!output.disposed) output.dispose();

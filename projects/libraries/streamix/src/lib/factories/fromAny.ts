@@ -1,5 +1,6 @@
 import { flow, isPromiseLike, type MaybePromise } from "../atoms";
 import type { AtomBase } from "../atoms/atom";
+import { normalizeError } from "../utils/helpers";
 
 function isAtomLike(value: unknown): value is AtomBase<any> {
   return value != null && (value as any).type === "atom";
@@ -55,9 +56,9 @@ export function fromAny<R = any>(
         }
         resolved = true;
       } catch (err) {
-        error = err;
+        error = normalizeError(err);
         resolved = true;
-        throw err;
+        throw error;
       }
     })();
 

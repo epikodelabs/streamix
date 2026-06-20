@@ -2,6 +2,7 @@ import { createOperator, DONE, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { fromAny } from "../factories";
 import { createAsyncCoordinator } from "../utils";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Buffers values from the source iterator until the notifier emits.
@@ -119,7 +120,7 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
               try {
                 await runner.return?.();
               } catch {}
-              throw event.error;
+              throw normalizeError(event.error);
           }
         }
       },
@@ -146,12 +147,13 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
        * @returns {Promise<never>} Rejected promise with the error
        */
       async throw(err?: any) {
-        if (cancelled) return Promise.reject(err);
+        const error = normalizeError(err);
+        if (cancelled) return Promise.reject(error);
         cancelled = true;
         try {
-          await runner.throw?.(err);
+          await runner.throw?.(error);
         } catch {}
-        return Promise.reject(err);
+        return Promise.reject(error);
       },
 
       /**
@@ -193,7 +195,7 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
             case "error":
               cancelled = true;
               runner.return?.().catch(() => {});
-              throw event.error;
+              throw normalizeError(event.error);
           }
         }
       },

@@ -1,5 +1,6 @@
 import { flow, type AtomBase } from "../atoms/atom";
 import { createAsyncCoordinator } from "../utils";
+import { normalizeError } from "../utils/helpers";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
@@ -40,7 +41,7 @@ export function race<T extends readonly unknown[] = any[]>(
 
         // 1. Handle errors immediately regardless of winner
         if (event.type === 'error') {
-          throw event.error;
+          throw normalizeError(event.error);
         }
 
         // 2. Identify the winner from the first real value or completion

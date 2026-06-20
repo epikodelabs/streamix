@@ -1,6 +1,7 @@
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
 import { fromAny } from '../factories';
 import type { AtomBase } from "../atoms/atom";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Result type accepted from a fork handler. Includes stream/atom/iterable/promise
@@ -129,6 +130,7 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
       },
 
       async throw(err: any) {
+        const error = normalizeError(err);
         try {
           await innerIterator?.return?.();
         } catch {}
@@ -136,7 +138,7 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
           await source.return?.();
         } catch {}
         innerIterator = null;
-        throw err;
+        throw error;
       }
     };
 

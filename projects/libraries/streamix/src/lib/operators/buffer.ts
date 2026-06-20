@@ -1,5 +1,6 @@
 import { createPushOperator, type MaybePromise } from "../atoms";
 import { timer } from "../factories";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Buffers values from the source stream and emits them as arrays every `period` milliseconds.
@@ -50,7 +51,7 @@ export function buffer<T>(period: MaybePromise<number>) {
 
     const fail = (err: any) => {
       buf = [];
-      output.fail(err);
+      output.fail(normalizeError(err));
       cleanup();
     };
 

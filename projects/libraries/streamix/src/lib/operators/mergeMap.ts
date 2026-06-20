@@ -1,7 +1,7 @@
 import { createPushOperator, MaybePromise, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { fromAny } from '../factories';
-import { createAsyncCoordinator, type RunnerEvent } from '../utils';
+import { createAsyncCoordinator, normalizeError, type RunnerEvent } from '../utils';
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream
@@ -87,7 +87,7 @@ export function mergeMap<T = any, R = any>(
                 break;
               }
             } else if (event.type === 'error') {
-              throw event.error;
+              throw normalizeError(event.error);
             }
           } else {
             if (event.type === 'value') {
@@ -100,14 +100,14 @@ export function mergeMap<T = any, R = any>(
                 break;
               }
             } else if (event.type === 'error') {
-              throw event.error;
+              throw normalizeError(event.error);
             }
           }
         }
 
         if (!output.disposed) output.dispose();
       } catch (err) {
-        if (!output.disposed) output.fail(err);
+        if (!output.disposed) output.fail(normalizeError(err));
       } finally {
         await coordinator.return?.();
       }

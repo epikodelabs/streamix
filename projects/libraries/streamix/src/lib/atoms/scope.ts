@@ -1,5 +1,6 @@
 import type { AtomBase } from "./atom";
 import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
+import { normalizeError } from "../utils/helpers";
 
 // Define a recursive type to unwrap atom values and handle nested scopes
 type UnwrapSnapshotValues<T> = {
@@ -143,7 +144,7 @@ export function scope<T extends Record<string, any>>(
     return newScope as Scope & T;
   } catch (error) {
     disposeScope(newScope);
-    throw error;
+    throw normalizeError(error);
   } finally {
     currentScope = previous;
   }

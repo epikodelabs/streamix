@@ -411,7 +411,7 @@ export function flow<T>(
       else iterable = source;
     } catch (err) {
       popFormulaContext();
-      instance.fail(err);
+      instance.fail(normalizeError(err));
       void disposeInstance();
       return;
     }
@@ -489,7 +489,7 @@ export function flow<T>(
         errorValue = normalizeError(err);
         for (const h of errorHandlers) try { h(errorValue); } catch {}
         if (options?.onError) try { options.onError(errorValue); } catch {}
-        instance.fail(err, { terminate: true });
+        instance.fail(errorValue, { terminate: true });
       }
     }
   };
@@ -961,7 +961,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
           isErrorState = true;
           if (terminateOnError) {
             instance.dispose();
-            throw err;
+            throw errorValue;
           }
         }
       }
@@ -977,7 +977,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
           isErrorState = true;
           if (terminateOnError) {
             instance.dispose();
-            throw err;
+            throw errorValue;
           }
         }
       }

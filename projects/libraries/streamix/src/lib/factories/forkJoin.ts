@@ -1,5 +1,6 @@
 import { flow, type AtomBase } from "../atoms/atom";
 import { createAsyncCoordinator } from "../utils";
+import { normalizeError } from "../utils/helpers";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
@@ -64,7 +65,7 @@ export function forkJoin<R extends readonly unknown[] = any[]>(
 
         const event = next.value;
         if (event.type === "error") {
-          throw event.error;
+          throw normalizeError(event.error);
         }
 
         if (event.type === "value") {

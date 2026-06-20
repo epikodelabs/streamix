@@ -1,5 +1,6 @@
 import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator, type Subscription } from "../atoms";
 import { atom } from '../atoms/atom';
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Creates a stream operator that shares a single subscription to the source stream
@@ -67,8 +68,8 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
           live.next(result.value);
         }
       } catch (err) {
-        errorValue = err;
-        live.fail(err);
+        errorValue = normalizeError(err);
+        live.fail(errorValue);
         return;
       } finally {
         sourceIterator = null;
@@ -153,11 +154,12 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
           liveCompletionHandler = () => {
             const err = (live as any)._error;
             if (err !== undefined) {
-              errorValue = err;
+              const error = normalizeError(err);
+              errorValue = error;
               if (pendingReject) {
                 const reject = pendingReject;
                 pendingResolve = pendingReject = null;
-                reject(err);
+                reject(error);
               }
             } else {
               completed = true;
@@ -184,7 +186,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
 
       async throw(err: any) {
         cleanup();
-        throw err;
+        throw normalizeError(err);
       }
     };
 

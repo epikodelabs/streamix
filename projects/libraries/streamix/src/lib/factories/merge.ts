@@ -1,5 +1,6 @@
 import { flow, type AtomBase } from "../atoms/atom";
 import { createAsyncCoordinator } from "../utils";
+import { normalizeError } from "../utils/helpers";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
@@ -50,7 +51,7 @@ export function merge<T = any>(...sources: PipeInput<T>[]): AtomBase<T> {
       for (let i = 0; i < initialResults.length; i++) {
         const settled = initialResults[i];
         if (settled.status === 'rejected') {
-          throw settled.reason;
+          throw normalizeError(settled.reason);
         }
 
         const result = settled.value;
@@ -70,7 +71,7 @@ export function merge<T = any>(...sources: PipeInput<T>[]): AtomBase<T> {
 
         const event = result.value;
         if (event.type === 'error') {
-          throw event.error;
+          throw normalizeError(event.error);
         }
         if (event.type === 'value') {
           yield event.value;

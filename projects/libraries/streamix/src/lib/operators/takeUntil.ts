@@ -27,6 +27,7 @@ export function takeUntil<T = any, N = any>(
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
     const runner = createAsyncCoordinator([source, notifierIt]);
 
+    const normalizeError = (err: any): Error => err instanceof Error ? err : new Error(String(err));
     let isDone = false;
 
     const iterator: AsyncIterator<T> & {
@@ -71,7 +72,7 @@ export function takeUntil<T = any, N = any>(
               
             case 'error':
               isDone = true;
-              throw event.error;
+              throw normalizeError(event.error);
           }
         }
       },
@@ -106,7 +107,7 @@ export function takeUntil<T = any, N = any>(
               
             case 'error':
               isDone = true;
-              throw event.error;
+              throw normalizeError(event.error);
           }
         }
         
@@ -129,13 +130,14 @@ export function takeUntil<T = any, N = any>(
       },
 
       async throw(err?: any) {
-        if (isDone) return Promise.reject(err);
+        const error = normalizeError(err);
+        if (isDone) return Promise.reject(error);
         isDone = true;
         
-        await runner.throw?.(err);
+        await runner.throw?.(error);
         await notifierIt.return?.();
         
-        return Promise.reject(err);
+        return Promise.reject(error);
       }
     };
 

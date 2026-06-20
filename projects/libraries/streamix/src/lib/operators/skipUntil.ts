@@ -36,10 +36,12 @@ export function skipUntil<T = any, N = any>(
     let droppingBacklog = false;
     let isDone = false;
 
+    const normalizeError = (err: any): Error => err instanceof Error ? err : new Error(String(err));
+
     const handleEvent = (event: any): IteratorResult<T> | null => {
       if (event.type === 'error') {
         isDone = true;
-        throw event.error;
+        throw normalizeError(event.error);
       }
 
       if (event.type === 'complete') {
