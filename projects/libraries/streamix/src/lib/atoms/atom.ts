@@ -228,7 +228,6 @@ interface InternalFlowAtom<T> extends AtomBase<T>, InternalAtomContainer {
 
 export function flow<T>(
   source: AsyncIterable<T> | Iterable<T> | ((signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>),
-  initialValue?: T,
   options?: AtomOptions
 ): AtomBase<T> {
   const maxSubscribers = options?.maxSubscribers ?? 1000;
@@ -237,8 +236,23 @@ export function flow<T>(
   const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
 
   // State
-  let current = initialValue as T;
-  let previous = initialValue as T;
+  let current: T;
+  let previous: T;
+
+  // If the source is an atom, initialize the flow's current value from the
+  // atom's current value so consumers see the latest value immediately.
+  if (source != null && typeof source === "object" && (source as any).type === "atom") {
+    try {
+      current = (source as any).safeValue;
+      previous = current;
+    } catch {
+      current = undefined as T;
+      previous = undefined as T;
+    }
+  } else {
+    current = undefined as T;
+    previous = undefined as T;
+  }
   let disposed = false;
   let started = false;
   let activeSubCount = 0;

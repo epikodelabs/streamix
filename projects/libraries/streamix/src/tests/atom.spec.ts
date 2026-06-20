@@ -225,7 +225,7 @@ describe('Atom System', () => {
         yield 3;
       }
       
-      const f = flow(generate(), 0);
+      const f = flow(generate());
       let values: number[] = [];
       f.subscribe(v => values.push(v));
       
@@ -241,7 +241,7 @@ describe('Atom System', () => {
         yield 3;
       }
       
-      const f = flow(generate(), 0);
+      const f = flow(generate());
       let values: number[] = [];
       f.subscribe(v => values.push(v));
       
@@ -255,7 +255,7 @@ describe('Atom System', () => {
         yield 1;
         yield 2;
         yield 3;
-      }, 0);
+      });
       
       let values: number[] = [];
       f.subscribe(v => values.push(v));
@@ -272,7 +272,7 @@ describe('Atom System', () => {
           yield i++;
           await delay(10);
         }
-      }, 0);
+      });
       
       let values: number[] = [];
       const sub = f.subscribe(v => values.push(v));
@@ -288,7 +288,7 @@ describe('Atom System', () => {
       const f = flow(async function*() {
         yield 1;
         throw new Error('test error');
-      }, 0);
+      });
       
       let error: any = null;
       f.onError(err => { error = err; });
@@ -317,7 +317,7 @@ describe('Atom System', () => {
             cleanups++;
           }
         })();
-      }, 0);
+      });
 
       f.subscribe(() => {});
       await delay(30);

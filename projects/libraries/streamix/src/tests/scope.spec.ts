@@ -70,8 +70,8 @@ describe('Scope System', () => {
       const s2 = atom<string>();
       
       const s = scope(() => {
-        const a = flow(s1, 0);
-        const b = flow(s2, '');
+        const a = flow(s1);
+        const b = flow(s2);
         return { a, b };
       });
       
@@ -427,7 +427,7 @@ describe('Scope System', () => {
       });
       
       await delay();
-      
+
       // Dispose scope
       s.dispose();
       
