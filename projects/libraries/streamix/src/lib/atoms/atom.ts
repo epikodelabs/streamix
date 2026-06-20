@@ -440,8 +440,12 @@ export function flow<T>(
       if (!depSubscriptions.has(dep)) {
         const handler = () => {
           if (disposed || activeSubCount <= 0) return;
+
           restartPending = true;
-          instance[MARK_DIRTY]();
+
+          if (subs.size > 0) {
+            instance[MARK_DIRTY]();
+          }
         };
         addAtomChangeHandler(dep as any, handler);
         depSubscriptions.set(dep, createSubscription(() => {
@@ -467,7 +471,10 @@ export function flow<T>(
           // In analog mode, buffer the emission and broadcast the latest value
           // once per scheduler flush instead of on every source emission.
           hasNewValue = true;
-          instance[MARK_DIRTY]();
+
+          if (subs.size > 0) {
+            instance[MARK_DIRTY]();
+          }
         } else {
           broadcast(current);
         }
@@ -719,7 +726,9 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
 
       if (node.isAnalog) {
         // Analog: Defer public broadcast to scheduler flush
-        instance[MARK_DIRTY]();
+        if (subs.size > 0) {
+          instance[MARK_DIRTY]();
+        }
       } else {
         // Discrete: Immediate broadcast
         node.dirty = false;
@@ -849,6 +858,12 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
         if (!depSubscriptions.has(dep)) {
           const handler = () => {
             if (disposed) return;
+
+            if (node.isAnalog && subs.size === 0) {
+              node.dirty = true;
+              return;
+            }
+
             instance[MARK_DIRTY]();
           };
           addAtomChangeHandler(dep as any, handler);
@@ -940,7 +955,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
           recompute();
           // In analog mode, value reads make the result live but still defer
           // subscriber notification to the scheduler.
-          if (notifyPending) instance[MARK_DIRTY]();
+          if (notifyPending && subs.size > 0) instance[MARK_DIRTY]();
         } catch (err) {
           errorValue = normalizeError(err);
           isErrorState = true;
