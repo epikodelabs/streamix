@@ -5,6 +5,7 @@ import {
 import {
   AsyncIteratorState,
   asyncPull,
+  normalizeError,
   pushComplete,
   pushError,
   pushValue,
@@ -68,14 +69,15 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
     },
     
     async throw(err) {
+      const error = normalizeError(err);
       state.completed = true;
       if (state.pullReject) {
         const r = state.pullReject;
         state.pullResolve = state.pullReject = null;
-        r(err);
+        r(error);
       }
       state.clear();
-      return Promise.reject(err);
+      return Promise.reject(error);
     },
     
     __tryNext() {

@@ -6,7 +6,7 @@ import {
   type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
-import { createAsyncCoordinator } from "../utils";
+import { createAsyncCoordinator, normalizeError } from "../utils";
 
 /**
  * Delay values from the source until a notifier emits.
@@ -185,9 +185,10 @@ export function delayUntil<T = any, N = any>(
       },
 
       async throw(err) {
+        const error = normalizeError(err);
         isDone = true;
-        await runner.throw?.(err);
-        return Promise.reject(err);
+        await runner.throw?.(error);
+        return Promise.reject(error);
       }
     };
 

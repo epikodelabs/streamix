@@ -1,5 +1,6 @@
 import { createOperator, DONE, type Operator } from '../abstractions';
 import { createSubject, type Subject } from '../subjects';
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Shares a single subscription to the source stream between multiple consumers.
@@ -39,7 +40,7 @@ export function share<T = any>() {
           shared!.next(result.value);
         }
       } catch (err) {
-        shared!.error(err);
+        shared!.error(normalizeError(err));
         return;
       } finally {
         if (shared && !shared.completed()) shared.complete();
@@ -72,8 +73,9 @@ export function share<T = any>() {
     };
 
     (outputIterator as any).throw = async (err: any) => {
-      if (baseThrow) return baseThrow(err);
-      throw err;
+      const error = normalizeError(err);
+      if (baseThrow) return baseThrow(error);
+      throw error;
     };
 
     return outputIterator;

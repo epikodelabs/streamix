@@ -1,5 +1,6 @@
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator, type Stream } from "../abstractions";
 import { fromAny } from '../converters';
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Represents a conditional branch for the `fork` operator.
@@ -116,6 +117,7 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
       },
 
       async throw(err: any) {
+        const error = normalizeError(err);
         try {
           await innerIterator?.return?.();
         } catch {}
@@ -123,7 +125,7 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
           await source.return?.();
         } catch {}
         innerIterator = null;
-        throw err;
+        throw error;
       }
     };
 

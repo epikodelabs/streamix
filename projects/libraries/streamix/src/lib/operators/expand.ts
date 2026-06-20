@@ -8,6 +8,7 @@ import {
   type Stream,
 } from "../abstractions";
 import { fromAny } from '../converters';
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Options for the expand operator.
@@ -112,11 +113,12 @@ export const expand = <T = any>(
       },
 
       async throw(err: any) {
+        const error = normalizeError(err);
         queue.length = 0;
         try {
           await source.return?.();
         } catch {}
-        throw err;
+        throw error;
       }
     };
 

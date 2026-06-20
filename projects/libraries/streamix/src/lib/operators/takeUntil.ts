@@ -6,7 +6,7 @@ import {
   type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
-import { createAsyncCoordinator } from "../utils";
+import { createAsyncCoordinator, normalizeError } from "../utils";
 
 /**
  * Take values from the source until a notifier emits.
@@ -134,13 +134,14 @@ export function takeUntil<T = any, N = any>(
       },
 
       async throw(err?: any) {
-        if (isDone) return Promise.reject(err);
+        const error = normalizeError(err);
+        if (isDone) return Promise.reject(error);
         isDone = true;
         
-        await runner.throw?.(err);
+        await runner.throw?.(error);
         await notifierIt.return?.();
         
-        return Promise.reject(err);
+        return Promise.reject(error);
       }
     };
 

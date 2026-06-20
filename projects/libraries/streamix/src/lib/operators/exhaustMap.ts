@@ -8,6 +8,7 @@ import {
   type Stream
 } from "../abstractions";
 import { fromAny } from "../converters";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Maps each value from the source stream to an inner stream, ignoring 
@@ -77,14 +78,14 @@ export const exhaustMap = <T = any, R = any>(
             projected = project(result.value, outerIndex++);
           } catch (err) {
             isSourceDone = true;
-            throw err;
+            throw normalizeError(err);
           }
           if (isPromiseLike(projected)) {
             try {
               projected = await projected;
             } catch (err) {
               isSourceDone = true;
-              throw err;
+              throw normalizeError(err);
             }
           }
 
@@ -105,6 +106,7 @@ export const exhaustMap = <T = any, R = any>(
       },
 
       async throw(err: any) {
+        const error = normalizeError(err);
         try {
           await innerIterator?.return?.();
         } catch {}
@@ -112,7 +114,7 @@ export const exhaustMap = <T = any, R = any>(
           await source.return?.();
         } catch {}
         innerIterator = null;
-        throw err;
+        throw error;
       }
     };
   });

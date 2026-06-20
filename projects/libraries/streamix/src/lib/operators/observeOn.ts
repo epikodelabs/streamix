@@ -1,5 +1,6 @@
 import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 import { createSubject } from '../subjects';
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Creates a stream operator that schedules the emission of each value from the source
@@ -143,7 +144,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
         // Wait for all scheduled emissions before completing
         await waitForPending();
       } catch (err) {
-        output.error(err);
+        output.error(normalizeError(err));
       } finally {
         if (!output.completed()) output.complete();
       }
@@ -180,6 +181,7 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
       },
 
       async throw(err: any) {
+        const error = normalizeError(err);
         completed = true;
         stopped = true;
         for (const cancel of pendingCancels) {
@@ -189,8 +191,8 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
         try {
           await source.return?.();
         } catch {}
-        if (!output.completed()) output.error(err);
-        throw err;
+        if (!output.completed()) output.error(error);
+        throw error;
       }
     };
 

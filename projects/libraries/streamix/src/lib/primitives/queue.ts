@@ -9,6 +9,8 @@
  * @property {number} pending The number of operations currently in the queue (including the one running).
  * @property {boolean} isEmpty A boolean indicating whether the queue is empty.
  */
+import { normalizeError } from "../utils/helpers";
+
 export function createQueue() {
   let last = Promise.resolve();
   let pendingCount = 0;
@@ -21,7 +23,7 @@ export function createQueue() {
       // Create the chained promise that will execute the operation
       result = last.then(() => operation());
     } catch (err) {
-      result = Promise.reject(err);
+      result = Promise.reject(normalizeError(err));
     }
 
     // Ensure pendingCount decrements even if the operation throws synchronously

@@ -89,13 +89,15 @@ async function drainIterator<T>(
           // buffering (e.g. Subject's AsyncPushable queue).
           if (isPromiseLike(ret)) {
             (ret  as Promise<unknown>).catch((err: any) => {
-              console.log('Subscriber callback error', err);
-              receiver.error?.(err);
+              const error = err instanceof Error ? err : new Error(String(err));
+              console.log('Subscriber callback error', error);
+              receiver.error?.(error);
             });
           }
         } catch (err) {
-          console.log('Subscriber callback error', err);
-          receiver.error?.(err);
+          const error = err instanceof Error ? err : new Error(String(err));
+          console.log('Subscriber callback error', error);
+          receiver.error?.(error);
         }
       }
     }
@@ -385,10 +387,11 @@ export function pipeSourceThrough<TIn, TOut = TIn, Ops extends Operator<any, any
           return { done: true, value };
         },
         async throw(err?: any) {
+          const error = err instanceof Error ? err : new Error(String(err));
           if (iterator.throw) {
-            return iterator.throw(err);
+            return iterator.throw(error);
           }
-          throw err;
+          throw error;
         },
       };
       (publicIterator as any)[Symbol.asyncIterator] = () => publicIterator;

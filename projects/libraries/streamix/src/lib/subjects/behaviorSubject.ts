@@ -11,7 +11,7 @@ import {
     type Stream,
 } from "../abstractions";
 import { firstValueFrom } from "../converters";
-import { AsyncPushable, createAsyncPushable } from "../utils";
+import { AsyncPushable, createAsyncPushable, normalizeError } from "../utils";
 
 /**
  * BehaviorSubject holds a current value and emits it immediately to new
@@ -68,9 +68,10 @@ export function createBehaviorSubject<T = any>(initialValue: T): BehaviorSubject
   const error = (err: any) => {
     if (isCompleted) return;
     isCompleted = true;
-    completionInfo = { kind: 'error', error: err };
+    const error = normalizeError(err);
+    completionInfo = { kind: 'error', error };
     for (const listener of listeners) {
-      listener.error(err);
+      listener.error(error);
     }
     listeners.clear();
   };

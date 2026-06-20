@@ -3,6 +3,7 @@ import {
     isPromiseLike,
     type MaybePromise,
 } from '../abstractions';
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Buffers values while a predicate returns `true` and releases them once the predicate flips to `false`.
@@ -56,7 +57,7 @@ export const delayWhile = <T = any>(
 
         if (queue.length > 0) flushQueue();
       } catch (err) {
-        output.error(err);
+        output.error(normalizeError(err));
       } finally {
         if (!output.completed()) output.complete();
       }

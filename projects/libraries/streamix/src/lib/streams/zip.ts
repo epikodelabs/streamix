@@ -1,5 +1,6 @@
 import { createStream, type Stream } from '../abstractions';
 import { fromAny } from '../converters';
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Combine multiple streams into a single stream that emits arrays of the latest values
@@ -36,7 +37,7 @@ export function zip<T extends readonly unknown[] = any[]>(
             await Promise.all(iterators.map((it, j) =>
               j !== i ? it.return?.(undefined).catch(() => { }) : Promise.resolve()
             ));
-            throw r.reason;
+            throw normalizeError(r.reason);
           }
           if (r.value.done) {
             completed = true;

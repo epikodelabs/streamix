@@ -1,4 +1,5 @@
 import { createPushOperator, isPromiseLike, type MaybePromise } from "../abstractions";
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Creates a stream operator that emits the most recent value from the source stream
@@ -51,7 +52,7 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
           }
         }
       } catch (err) {
-        output.error(err);
+        output.error(normalizeError(err));
       } finally {
         completed = true;
         if (timeoutId) { clearTimeout(timeoutId); timeoutId = undefined; }

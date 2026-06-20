@@ -1,5 +1,6 @@
 import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 import { createReplaySubject, type ReplaySubject } from '../subjects';
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Creates a stream operator that shares a single subscription to the source stream
@@ -47,7 +48,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
           output!.next(result.value);
         }
       } catch (err) {
-        output!.error(err);
+        output!.error(normalizeError(err));
       } finally {
         sourceIterator = null;
         if (output && !output.completed()) output.complete();
@@ -99,10 +100,11 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       },
 
       async throw(err: any) {
+        const error = normalizeError(err);
         const it = await ensureOutputIterator();
-        if (output && !output.completed()) output.error(err);
-        if (it.throw) return it.throw(err);
-        throw err;
+        if (output && !output.completed()) output.error(error);
+        if (it.throw) return it.throw(error);
+        throw error;
       }
     };
 

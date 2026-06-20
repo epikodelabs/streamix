@@ -1,5 +1,6 @@
 import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Creates a stream operator that maps each value from the source stream to a new
@@ -70,6 +71,7 @@ export const concatMap = <T = any, R = any>(
       },
 
       async throw(err: any) {
+        const error = normalizeError(err);
         try {
           await innerIterator?.return?.();
         } catch {}
@@ -77,7 +79,7 @@ export const concatMap = <T = any, R = any>(
           await source.return?.();
         } catch {}
         innerIterator = null;
-        throw err;
+        throw error;
       }
     };
 

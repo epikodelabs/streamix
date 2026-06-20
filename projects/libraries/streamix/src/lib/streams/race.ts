@@ -1,6 +1,6 @@
 import { createStream, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
-import { createAsyncCoordinator } from "../utils";
+import { createAsyncCoordinator, normalizeError } from "../utils";
 
 /**
  * Returns a stream that races multiple input streams.
@@ -41,7 +41,7 @@ export function race<T extends readonly unknown[] = any[]>(
 
         // 1. Handle errors immediately regardless of winner
         if (event.type === 'error') {
-          throw event.error;
+          throw normalizeError(event.error);
         }
 
         // 2. Identify the winner from the first real value or completion

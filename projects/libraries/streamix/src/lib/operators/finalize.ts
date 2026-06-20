@@ -1,4 +1,5 @@
 import { createOperator, DONE, type MaybePromise, type Operator } from "../abstractions";
+import { normalizeError } from "../utils/helpers";
 
 /**
  * Creates a stream operator that invokes a finalizer callback upon stream termination.
@@ -58,7 +59,7 @@ export const finalize = <T = any>(callback: () => MaybePromise<void>) => {
           return result;
         } catch (err) {
           await doFinalize();
-          throw err;
+          throw normalizeError(err);
         }
       },
       async return(value?: unknown) {
@@ -72,12 +73,13 @@ export const finalize = <T = any>(callback: () => MaybePromise<void>) => {
       },
       async throw(error?: unknown) {
         await doFinalize();
+        const normalizedError = normalizeError(error);
 
         if (source.throw) {
-          return source.throw(error);
+          return source.throw(normalizedError);
         }
 
-        throw error;
+        throw normalizedError;
       }
     };
 

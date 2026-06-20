@@ -1,4 +1,5 @@
 import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Creates a stream operator that delays the emission of each value from the source stream.
@@ -27,7 +28,7 @@ export function delay<T = any>(ms: MaybePromise<number>) {
           output.push(result.value!);
         }
       } catch (err) {
-        output.error(err);
+        output.error(normalizeError(err));
       } finally {
         if (!output.completed()) output.complete();
       }

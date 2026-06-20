@@ -5,7 +5,7 @@ import {
   isPromiseLike,
 } from "../abstractions";
 import { fromAny } from "../converters";
-import { createAsyncPushable } from "../utils";
+import { createAsyncPushable, normalizeError } from "../utils";
 
 /**
  * Transforms each value from the source stream into a new inner stream, promise, or array,
@@ -78,7 +78,7 @@ export function switchMap<T = any, R = any>(
           }
         } catch (err) {
           if (!stopped && token === currentInnerToken) {
-            output.error(err);
+            output.error(normalizeError(err));
           }
         } finally {
           if (currentInner?.token === token) {
@@ -97,7 +97,7 @@ export function switchMap<T = any, R = any>(
       try {
         projected = project(value, index++);
       } catch (err) {
-        output.error(err);
+        output.error(normalizeError(err));
         return;
       }
 
@@ -110,7 +110,7 @@ export function switchMap<T = any, R = any>(
           },
           (err) => {
             if (stopped || capturedToken !== currentInnerToken) return;
-            output.error(err);
+            output.error(normalizeError(err));
           }
         );
       } else {
@@ -127,7 +127,7 @@ export function switchMap<T = any, R = any>(
           try {
             result = tryNext.call(source);
           } catch (err) {
-            output.error(err);
+            output.error(normalizeError(err));
             return;
           }
 
@@ -156,7 +156,7 @@ export function switchMap<T = any, R = any>(
           inputCompleted = true;
           checkComplete();
         } catch (err) {
-          output.error(err);
+          output.error(normalizeError(err));
         }
       })();
     }
@@ -180,6 +180,7 @@ export function switchMap<T = any, R = any>(
     };
 
     (outputIterator as any).throw = async (err: any) => {
+      const error = normalizeError(err);
       stopped = true;
       try {
         try {
@@ -188,8 +189,8 @@ export function switchMap<T = any, R = any>(
       } finally {
         currentInner = null;
       }
-      if (baseThrow) return baseThrow(err);
-      throw err;
+      if (baseThrow) return baseThrow(error);
+      throw error;
     };
 
     return outputIterator;

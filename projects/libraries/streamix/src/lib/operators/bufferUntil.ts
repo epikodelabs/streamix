@@ -5,7 +5,7 @@ import {
   type Stream,
 } from "../abstractions";
 import { fromAny } from "../converters";
-import { createAsyncCoordinator } from "../utils";
+import { createAsyncCoordinator, normalizeError } from "../utils";
 
 /**
  * Buffers values from the source iterator until the notifier emits.
@@ -130,12 +130,13 @@ export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
        * @returns {Promise<never>} Rejected promise with the error
        */
       async throw(err?: any) {
-        if (cancelled) return Promise.reject(err);
+        const error = normalizeError(err);
+        if (cancelled) return Promise.reject(error);
         cancelled = true;
         try {
-          await runner.throw?.(err);
+          await runner.throw?.(error);
         } catch {}
-        return Promise.reject(err);
+        return Promise.reject(error);
       },
 
       /**

@@ -7,6 +7,7 @@
  * @module coordinator
  */
 import { DONE, NEXT } from "../abstractions";
+import { normalizeError } from "./helpers";
 
 /**
 
@@ -185,7 +186,7 @@ export function createAsyncCoordinator(
           completed[i] = true;
           activeCount--;
         }
-        pushEvent({ type: "error", error: err, sourceIndex: i }, i);
+        pushEvent({ type: "error", error: normalizeError(err), sourceIndex: i }, i);
         notify();
       }
     );
@@ -214,7 +215,7 @@ export function createAsyncCoordinator(
           completed[i] = true;
           activeCount--;
         }
-        pushEvent({ type: "error", error: err, sourceIndex: i }, i);
+        pushEvent({ type: "error", error: normalizeError(err), sourceIndex: i }, i);
       }
       return;
     }

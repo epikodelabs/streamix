@@ -5,6 +5,7 @@ import { isPromiseLike } from "../abstractions";
 import {
   AsyncIteratorState,
   asyncPull,
+  normalizeError,
   pushComplete,
   pushError,
   pushValue,
@@ -129,13 +130,14 @@ export function createAsyncIterator<T>(opts: {
       },
 
       async throw(err) {
+        const error = normalizeError(err);
         state.completed = true;
         const unsubscribePromise = sub?.unsubscribe();
         sub = null;
         if (state.pullReject) {
           const r = state.pullReject;
           state.pullResolve = state.pullReject = null;
-          r(err);
+          r(error);
         }
         state.clear();
         try {
@@ -143,7 +145,7 @@ export function createAsyncIterator<T>(opts: {
         } catch (e: any) {
           console.log('AsyncIterator throw error', e);
         }
-        return Promise.reject(err);
+        return Promise.reject(error);
       }
     };
 

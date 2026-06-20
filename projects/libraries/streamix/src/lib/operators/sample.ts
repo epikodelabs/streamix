@@ -1,4 +1,5 @@
 import { createPushOperator, isPromiseLike, type MaybePromise } from '../abstractions';
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Creates a stream operator that emits the most recent value from the source stream
@@ -52,7 +53,7 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
         // Emit the last value if pending when source completes.
         emit();
       } catch (err) {
-        output.error(err);
+        output.error(normalizeError(err));
       } finally {
         stopSampling();
         if (!output.completed()) output.complete();

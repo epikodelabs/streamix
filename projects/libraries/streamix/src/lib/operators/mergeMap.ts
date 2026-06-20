@@ -5,7 +5,7 @@ import {
   type Stream
 } from '../abstractions';
 import { fromAny } from '../converters';
-import { createAsyncCoordinator, type RunnerEvent } from '../utils';
+import { createAsyncCoordinator, normalizeError, type RunnerEvent } from '../utils';
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream
@@ -111,7 +111,7 @@ export function mergeMap<T = any, R = any>(
 
         if (!output.completed()) output.complete();
       } catch (err) {
-        if (!output.completed()) output.error(err);
+        if (!output.completed()) output.error(normalizeError(err));
       } finally {
         await coordinator.return?.();
       }

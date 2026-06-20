@@ -1,5 +1,6 @@
 import { createStream, isPromiseLike, type MaybePromise, type Stream } from '../abstractions';
 import { fromAny } from '../converters';
+import { normalizeError } from '../utils/helpers';
 
 /**
  * Creates a stream that defers the creation of an inner stream until it is
@@ -38,7 +39,7 @@ export function defer<T = any>(factory: () => Stream<T> | MaybePromise<T>): Stre
         }
       }
     } catch (error) {
-      throw error;
+      throw normalizeError(error);
     }
   }
 

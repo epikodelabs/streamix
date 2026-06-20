@@ -1,6 +1,6 @@
 import { createStream, type Stream } from "../abstractions";
 import { fromAny } from "../converters";
-import { createAsyncCoordinator } from "../utils";
+import { createAsyncCoordinator, normalizeError } from "../utils";
 
 /**
  * Merges multiple source streams into a single stream, emitting values as they arrive from any source.
@@ -51,7 +51,7 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
       for (let i = 0; i < initialResults.length; i++) {
         const settled = initialResults[i];
         if (settled.status === 'rejected') {
-          throw settled.reason;
+          throw normalizeError(settled.reason);
         }
 
         const result = settled.value;
@@ -71,7 +71,7 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
 
         const event = result.value;
         if (event.type === 'error') {
-          throw event.error;
+          throw normalizeError(event.error);
         }
         if (event.type === 'value') {
           yield event.value;
