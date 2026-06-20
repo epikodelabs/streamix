@@ -105,7 +105,7 @@ describe('Scope System', () => {
       
       const parent = scope(() => {
         const child = scope(() => {
-          const a = flow(source, 0);
+          const a = flow(source);
           return { a };
         });
         return { child };
@@ -194,7 +194,7 @@ describe('Scope System', () => {
       const parent = scope(() => {
         const child = scope(() => {
           const grandchild = scope(() => {
-            const x = flow(source, 0);
+            const x = flow(source);
             return { x };
           });
           return { grandchild };
@@ -349,7 +349,7 @@ describe('Scope System', () => {
     it('should batch flow emissions in analog mode', async () => {
       const s = scope(() => {
         const source = atom<number>();
-        const a = flow(source, 0);
+        const a = flow(source);
         return { a, source };
       }, { mode: 'analog' });
       
@@ -422,16 +422,17 @@ describe('Scope System', () => {
     it('should maintain reactivity after scope disposal', async () => {
       const source = atom(0);
       const s = scope(() => {
-        const a = flow(source, 0);
+        const a = flow(source);
         return { a };
       });
+      
+      await delay();
       
       // Dispose scope
       s.dispose();
       
       // Source updates should not affect disposed atom
       source.next(42);
-      await delay(20);
       expect(s.a.safeValue).toBe(0);
       expect(() => s.a.value).toThrow();
       
