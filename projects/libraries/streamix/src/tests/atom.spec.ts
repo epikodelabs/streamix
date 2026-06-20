@@ -53,7 +53,6 @@ describe('Atom System', () => {
       let value = 0;
       a.subscribe(v => { value = v; });
       a.next(5);
-      await delay(); // Allow microtask queue to drain
       expect(value).toBe(5);
       a.dispose();
     });
@@ -90,7 +89,6 @@ describe('Atom System', () => {
       a.onError(err => { errorCaught = err; });
       a.fail(new Error('test error'));
       expect(errorCaught.message).toBe('test error');
-      await delay(); // Allow microtask queue to drain for error propagation
       expect(a.error?.message).toBe('test error');
       a.dispose();
     });
@@ -99,12 +97,9 @@ describe('Atom System', () => {
       const a = atom(0, { terminateOnError: false });
       a.fail(new Error('test'));
       expect(a.error.message).toBe('test');
-      await delay(); // Allow microtask queue to drain for error propagation
       a.recover?.(); // This will trigger a flush
-      await delay(); // Allow microtask queue to drain for recovery
       expect(a.error).toBeUndefined();
       a.next(5);
-      await delay(); // Allow microtask queue to drain for next value
       expect(a.value).toBe(5);
       a.dispose();
     });
@@ -113,7 +108,6 @@ describe('Atom System', () => {
       const a = atom(0, { terminateOnError: true });
       a.subscribe(() => {});
       a.fail(new Error('fatal'));
-      await delay(); // Allow microtask queue to drain for termination
       expect(a.disposed).toBe(true);
       a.dispose();
     });
@@ -141,7 +135,6 @@ describe('Atom System', () => {
       const doubled = derived(() => source.value * 2);
       expect(doubled.value).toBe(10);
       source.next(10);
-      await delay();
       expect(doubled.value).toBe(20);
       source.dispose();
       doubled.dispose();
@@ -153,10 +146,8 @@ describe('Atom System', () => {
       const sum = derived(() => a.value + b.value);
       expect(sum.value).toBe(3);
       a.next(5);
-      await delay();
       expect(sum.value).toBe(7);
       b.next(10);
-      await delay();
       expect(sum.value).toBe(15);
       a.dispose();
       b.dispose();
@@ -170,13 +161,10 @@ describe('Atom System', () => {
       const result = derived(() => a.value * b.value + c.value);
       expect(result.value).toBe(5);
       a.next(2);
-      await delay();
       expect(result.value).toBe(7);
       b.next(3);
-      await delay();
       expect(result.value).toBe(9);
       c.next(4);
-      await delay();
       expect(result.value).toBe(10);
       a.dispose();
       b.dispose();
@@ -206,11 +194,9 @@ describe('Atom System', () => {
       
       expect(d.value).toBe(0);
       source.next(15);
-      await delay();
       expect(() => d.value).toThrow(new Error('Too high'));
       
       source.next(5);
-      await delay();
       expect(d.value).toBe(5);
       
       source.dispose();
@@ -224,7 +210,6 @@ describe('Atom System', () => {
       }, { terminateOnError: true });
       
       expect(() => d.value).toThrow(new Error('fatal'));
-      await delay();
       expect(d.disposed).toBe(true);
       
       source.dispose();

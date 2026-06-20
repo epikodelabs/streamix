@@ -14,9 +14,9 @@ import { createSubscription, type Subscription } from "./subscription";
  * Architectural Symbols
  * ───────────────────────────────────────────────────────────────────────────*/
 
-export const NODE = Symbol("engine.node");
-export const MARK_DIRTY = Symbol("engine.markDirty");
-export const FLUSH = Symbol("engine.flush");
+const NODE = Symbol("engine.node");
+const MARK_DIRTY = Symbol("engine.markDirty");
+const FLUSH = Symbol("engine.flush");
 
 export interface AtomOptions {
   discrete?: boolean;
