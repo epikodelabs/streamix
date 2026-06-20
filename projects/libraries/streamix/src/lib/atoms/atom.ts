@@ -192,6 +192,84 @@ function normalizeError(err: any): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Subscriber Set
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, conflate: boolean) {
+  type Callback = (value: T) => MaybePromise;
+
+  type Subscriber = {
+    callback: Callback;
+    busy: boolean;
+    hasPending: boolean;
+    pending: T | undefined;
+  };
+
+  const subs = new Map<Callback, Subscriber>();
+
+  const finish = (sub: Subscriber): void => {
+    if (!subs.has(sub.callback)) return;
+    sub.busy = false;
+    while (sub.hasPending) {
+      const value = sub.pending as T;
+      sub.hasPending = false;
+      sub.pending = undefined;
+      invoke(sub, value);
+    }
+  };
+
+  const invoke = (sub: Subscriber, value: T): void => {
+    sub.busy = true;
+    sub.hasPending = false;
+    sub.pending = undefined;
+
+    try {
+      const result = sub.callback(value);
+      const thenable = result && typeof (result as any).then === "function"
+        ? (result as PromiseLike<void>)
+        : null;
+
+      if (thenable) {
+        thenable.then(
+          () => finish(sub),
+          (err: any) => {
+            const e = normalizeError(err);
+            for (const h of Array.from(errorHandlers)) try { h(e); } catch {}
+            finish(sub);
+          }
+        );
+      } else {
+        finish(sub);
+      }
+    } catch (err) {
+      const e = normalizeError(err);
+      for (const h of Array.from(errorHandlers)) try { h(e); } catch {}
+      finish(sub);
+    }
+  };
+
+  return {
+    get size() { return subs.size; },
+    add(callback: Callback) {
+      subs.set(callback, { callback, busy: false, hasPending: false, pending: undefined });
+    },
+    delete(callback: Callback) { subs.delete(callback); },
+    clear() { subs.clear(); },
+    has(callback: Callback) { return subs.has(callback); },
+    broadcast(value: T) {
+      for (const sub of Array.from(subs.values())) {
+        if (conflate && sub.busy) {
+          sub.hasPending = true;
+          sub.pending = value;
+        } else {
+          invoke(sub, value);
+        }
+      }
+    }
+  };
+}
+
 // Dependency invalidation channel: separate from public subscriber broadcast.
 // Dependent atoms register here so they are marked dirty immediately when a
 // dependency changes, even in analog mode where public broadcasts are batched.
@@ -261,7 +339,7 @@ export function flow<T>(
   let restartPending = false;
   const disposeHandlers = new Set<() => void>();
   const errorHandlers = new Set<(error: any) => void>();
-  const subs = new Set<(value: T) => MaybePromise>();
+  const subs = createSubscriberSet<T>(errorHandlers, analog);
   const subscriptions = new Set<Subscription>();
   const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
 
@@ -275,15 +353,7 @@ export function flow<T>(
     depSubscriptions.clear();
   };
 
-  const broadcast = (val: T) => {
-    for (const cb of Array.from(subs)) {
-      try { cb(val); } catch (err) {
-        // Emit user callback errors to error handlers
-        const e = normalizeError(err);
-        for (const h of Array.from(errorHandlers)) try { h(e); } catch {}
-      }
-    }
-  };
+  const broadcast = (val: T) => subs.broadcast(val);
 
   const broadcastLatest = () => {
     if (!hasNewValue) return;
@@ -557,18 +627,10 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
 
   const disposeHandlers = new Set<() => void>();
   const errorHandlers = new Set<(error: any) => void>();
-  const subs = new Set<(value: T) => MaybePromise>();
+  const subs = createSubscriberSet<T>(errorHandlers, analog);
   const subscriptions = new Set<Subscription>();
 
-  const broadcast = () => {
-    const val = current;
-    for (const cb of Array.from(subs)) {
-      try { cb(val); } catch (err) {
-        const e = normalizeError(err);
-        for (const h of errorHandlers) try { h(e); } catch {}
-      }
-    }
-  };
+  const broadcast = () => subs.broadcast(current);
 
   const flushInternal = () => {
     if (!node.dirty || disposed) return;
@@ -743,20 +805,12 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
   let isErrorState = false;
   let notifyPending = false;
 
-  const subs = new Set<(value: T) => void>();
   const errorHandlers = new Set<(error: any) => void>();
+  const subs = createSubscriberSet<T>(errorHandlers, analog);
   const dependencies = new Set<InternalAtomContainer>();
   const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
 
-  const broadcast = () => {
-    const val = current;
-    for (const cb of Array.from(subs)) {
-      try { cb(val); } catch (err) {
-        const e = normalizeError(err);
-        for (const h of errorHandlers) try { h(e); } catch {}
-      }
-    }
-  };
+  const broadcast = () => subs.broadcast(current);
 
   /** Core computation: tracks deps, runs fn, returns value */
   const compute = (): T => {
