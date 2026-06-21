@@ -4,18 +4,18 @@ export type CyclicBufferMode = "discrete" | "analog";
 
 export interface CyclicBuffer<T> extends AsyncIterable<T> {
   push(value: T): void;
+  tryPush(value: T): boolean;
   close(): void;
   get length(): number;
 }
 
 export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "discrete"): CyclicBuffer<T> {
-  const lock: Semaphore = createSemaphore(capacity);
+  const semaphore: Semaphore = createSemaphore(capacity);
   const buffer: (T | undefined)[] = new Array(capacity);
   let readIdx = 0;
   let writeIdx = 0;
   let size = 0;
   const waiters: Array<{ resolve: (v: T) => void; reject: (e: Error) => void }> = [];
-  const writeQueue: T[] = [];
   let closed = false;
 
   function write(value: T): void {
@@ -29,9 +29,7 @@ export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "disc
     buffer[readIdx] = undefined;
     readIdx = (readIdx + 1) % capacity;
     size--;
-    if (writeQueue.length > 0) {
-      write(writeQueue.shift()!);
-    }
+    semaphore.release();
     return value;
   }
 
@@ -41,26 +39,37 @@ export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "disc
     }
   }
 
+  function tryPush(value: T): boolean {
+    if (closed) return false;
+
+    const release = semaphore.tryAcquire();
+    if (release) {
+      write(value);
+      notify();
+      return true;
+    }
+
+    if (mode === "analog") {
+      // Skip intermittent values: keep only the latest one.
+      buffer[readIdx] = value;
+      return true;
+    }
+
+    // Discrete mode: preserve every value, so drop the overflow.
+    return false;
+  }
+
   return {
     push(value: T): void {
-      if (closed) return;
-      if (size < capacity) {
-        write(value);
-        notify();
-      } else if (mode === "analog") {
-        // Skip intermittent values: keep only the latest one.
-        buffer[readIdx] = value;
-      } else {
-        // Discrete mode: preserve every value in the overflow queue.
-        writeQueue.push(value);
-      }
+      tryPush(value);
     },
+
+    tryPush,
 
     close(): void {
       closed = true;
       for (const w of waiters) w.reject(new Error("Buffer closed"));
       waiters.length = 0;
-      writeQueue.length = 0;
     },
 
     get length(): number {
@@ -70,16 +79,11 @@ export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "disc
     [Symbol.asyncIterator](): AsyncIterator<T> {
       return {
         next: async (): Promise<IteratorResult<T>> => {
-          const release = await lock.acquire();
-          try {
-            if (size > 0) {
-              return { value: dequeue(), done: false };
-            }
-            if (closed) {
-              return { value: undefined as any, done: true };
-            }
-          } finally {
-            release();
+          if (size > 0) {
+            return { value: dequeue(), done: false };
+          }
+          if (closed) {
+            return { value: undefined as any, done: true };
           }
 
           return new Promise<T>((resolve, reject) => {

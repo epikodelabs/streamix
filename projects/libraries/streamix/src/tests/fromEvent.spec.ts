@@ -88,6 +88,28 @@ idescribe('fromEvent', () => {
     subscription.unsubscribe();
   });
 
+  it('should emit to multiple subscribers', async () => {
+    const element = document.createElement('button');
+    const atom = fromEvent(element, 'click');
+
+    const received1: Event[] = [];
+    const received2: Event[] = [];
+    const sub1 = atom.subscribe(ev => received1.push(ev));
+    const sub2 = atom.subscribe(ev => received2.push(ev));
+
+    element.click();
+    element.click();
+    await flushMicrotasks();
+
+    expect(received1.length).toBe(2);
+    expect(received2.length).toBe(2);
+    expect(received1[0]).toBeInstanceOf(Event);
+    expect(received2[0]).toBeInstanceOf(Event);
+
+    sub1.unsubscribe();
+    sub2.unsubscribe();
+  });
+
   it('does not attach listener when unsubscribed before pending target resolves', async () => {
     const element = document.createElement('button');
 
