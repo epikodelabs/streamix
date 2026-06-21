@@ -13,7 +13,7 @@ import {
     merge,
     range,
     scan,
-    Subscription,
+    scope,
     tap,
     throttle,
 } from '@epikodelabs/streamix';
@@ -480,14 +480,11 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
 
   // Buffer
   batches: string[][] = [];
-  private clickSubject = atom<string>();
 
   // Combined
   streamAValue = 30;
   streamBValue = 60;
   combinedValue = 18;
-  private streamA = atom<number>();
-  private streamB = atom<number>();
 
   // juliabrot
   juliaGenerating = false;
@@ -497,7 +494,11 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
   // Log
   logEntries: { time: string; message: string; type: string }[] = [];
 
-  private subscriptions: Subscription[] = [];
+  private readonly appScope = scope(() => ({
+    clickSubject: atom<string>(),
+    streamA: atom<number>(),
+    streamB: atom<number>(),
+  }));
 
   ngOnInit(): void {
     this.initMetricsStream();
@@ -506,8 +507,8 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     this.initLogStream();
 
     // Seed combined
-    this.streamA.next(this.streamAValue);
-    this.streamB.next(this.streamBValue);
+    this.appScope.streamA.next(this.streamAValue);
+    this.appScope.streamB.next(this.streamBValue);
   }
 
   ngAfterViewInit(): void {
@@ -515,10 +516,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
   }
 
   ngOnDestroy(): void {
-    this.subscriptions.forEach(s => s.unsubscribe());
-    this.clickSubject.dispose();
-    this.streamA.dispose();
-    this.streamB.dispose();
+    this.appScope.dispose();
   }
 
   drawJulia(): void {
@@ -599,7 +597,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
       })
     ).subscribe(() => {});
 
-    this.subscriptions.push(sub);
+    this.appScope.cleanups.add(() => sub.unsubscribe());
   }
 
   private initMetricsStream(): void {
@@ -629,7 +627,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         this.cdr.detectChanges();
       })
     ).subscribe(() => {});
-    this.subscriptions.push(s);
+    this.appScope.cleanups.add(() => s.unsubscribe());
   }
 
   private initSearchStream(): void {
@@ -644,7 +642,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     const rawSub = value$.pipe(
       tap(() => { this.rawSearchCount++; this.cdr.detectChanges(); })
     ).subscribe(() => {});
-    this.subscriptions.push(rawSub);
+    this.appScope.cleanups.add(() => rawSub.unsubscribe());
 
     // Debounced results
     const resultSub = value$.pipe(
@@ -657,11 +655,11 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         this.cdr.detectChanges();
       })
     ).subscribe(() => {});
-    this.subscriptions.push(resultSub);
+    this.appScope.cleanups.add(() => resultSub.unsubscribe());
   }
 
   private initBufferStream(): void {
-    const s = this.clickSubject.pipe(
+    const s = this.appScope.clickSubject.pipe(
       bufferCount(5),
       tap((batch: string[]) => {
         this.batches.unshift(batch);
@@ -669,15 +667,15 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         this.cdr.detectChanges();
       })
     ).subscribe(() => {});
-    this.subscriptions.push(s);
+    this.appScope.cleanups.add(() => s.unsubscribe());
   }
 
   private initCombinedStream(): void {
-    const s = combineLatest(this.streamA, this.streamB).pipe(
+    const s = combineLatest(this.appScope.streamA, this.appScope.streamB).pipe(
       map(([a, b]) => (a * b) / 100),
       tap(v => { this.combinedValue = v; this.cdr.detectChanges(); })
     ).subscribe(() => {});
-    this.subscriptions.push(s);
+    this.appScope.cleanups.add(() => s.unsubscribe());
   }
 
   private initLogStream(): void {
@@ -709,21 +707,21 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     );
 
     const s = merge(metricLog$, searchLog$, bufferLog$, combinedLog$).subscribe(() => {});
-    this.subscriptions.push(s);
+    this.appScope.cleanups.add(() => s.unsubscribe());
   }
 
   emitClick(label: string): void {
-    this.clickSubject.next(label);
+    this.appScope.clickSubject.next(label);
   }
 
   updateStreamA(value: number): void {
     this.streamAValue = value;
-    this.streamA.next(value);
+    this.appScope.streamA.next(value);
   }
 
   updateStreamB(value: number): void {
     this.streamBValue = value;
-    this.streamB.next(value);
+    this.appScope.streamB.next(value);
   }
 
   private pushLog(message: string, type: string): void {

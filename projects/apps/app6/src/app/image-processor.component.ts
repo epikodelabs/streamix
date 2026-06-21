@@ -1,5 +1,6 @@
 import { DecimalPipe } from '@angular/common';
 import { Component, OnDestroy, signal } from '@angular/core';
+import { scope } from '@epikodelabs/streamix';
 import { FileSizePipe } from './file-size.pipe';
 import { ImagePipelineService } from './image-pipeline.service';
 
@@ -299,6 +300,8 @@ export class ImageProcessorComponent implements OnDestroy {
   showSettings = signal(false);
   dragOver = signal(false);
 
+  private readonly appScope = scope(() => ({}));
+
   constructor(public pipeline: ImagePipelineService) {}
 
   onFiles(event: Event) {
@@ -332,5 +335,6 @@ export class ImageProcessorComponent implements OnDestroy {
 
   ngOnDestroy() {
     this.pipeline.ngOnDestroy();
+    this.appScope.dispose();
   }
 }

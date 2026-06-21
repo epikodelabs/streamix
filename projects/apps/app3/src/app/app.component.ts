@@ -1,7 +1,7 @@
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { atom, fromEvent, map, tap, throttle } from '@epikodelabs/streamix';
+import { atom, fromEvent, map, scope, tap, throttle } from '@epikodelabs/streamix';
 import { onAnimationFrame, onResize } from '@epikodelabs/streamix/dom';
 import type { Subscription } from '@epikodelabs/streamix';
 
@@ -106,7 +106,11 @@ type Weather = 'sunny' | 'rainy';
 export class AppComponent implements OnInit, OnDestroy {
   @ViewChild('canvas') canvasRef!: ElementRef<HTMLCanvasElement>;
 
-  weather = atom<Weather>('sunny');
+  private readonly appScope = scope(() => ({
+    weather: atom<Weather>('sunny'),
+  }));
+
+  get weather() { return this.appScope.weather; }
 
   private renderer!: THREE.WebGLRenderer;
   private scene!: THREE.Scene;
@@ -124,7 +128,6 @@ export class AppComponent implements OnInit, OnDestroy {
   private flowers: THREE.Mesh[] = [];
 
   private animSub!: Subscription;
-  private weatherSub!: Subscription;
   private resizeSub!: Subscription;
   private mouseSub!: Subscription;
 
@@ -134,9 +137,10 @@ export class AppComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     // Weather reaction — toggle scene elements
-    this.weatherSub = this.weather.pipe(
+    const weatherSub = this.appScope.weather.pipe(
       tap((w) => this.applyWeather(w)),
     ).subscribe(() => {});
+    this.appScope.cleanups.add(() => weatherSub.unsubscribe());
   }
 
   ngAfterViewInit(): void {
@@ -145,10 +149,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.animSub?.unsubscribe();
-    this.weatherSub?.unsubscribe();
-    this.resizeSub?.unsubscribe();
-    this.mouseSub?.unsubscribe();
+    this.appScope.dispose();
     this.controls?.dispose();
     this.renderer?.dispose();
     this.rainGeo?.dispose();
@@ -328,6 +329,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.renderer.setSize(width, height);
       })
     ).subscribe(() => {});
+    this.appScope.cleanups.add(() => this.resizeSub?.unsubscribe());
 
     // Mouse parallax
     this.mouseSub = fromEvent(canvas, 'mousemove').pipe(
@@ -344,6 +346,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.parallaxTarget.y = -y * 2;
       })
     ).subscribe(() => {});
+    this.appScope.cleanups.add(() => this.mouseSub?.unsubscribe());
 
     this.baseCamPos = this.camera.position.clone();
   }
@@ -520,5 +523,6 @@ export class AppComponent implements OnInit, OnDestroy {
         this.renderer.render(this.scene, this.camera);
       }),
     ).subscribe(() => {});
+    this.appScope.cleanups.add(() => this.animSub?.unsubscribe());
   }
 }

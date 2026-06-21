@@ -1,5 +1,6 @@
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { Subscription } from 'rxjs';
+import { scope } from '@epikodelabs/streamix';
 import {
   KitchenService,
   KitchenStats,
@@ -392,6 +393,7 @@ export class KitchenComponent implements OnInit, OnDestroy {
     { id: 'E5', item: 'Hawaiian', customer: 'Roberto' },
   ];
 
+  private readonly appScope = scope(() => ({}));
   private subs = new Subscription();
   private runningInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -436,16 +438,18 @@ export class KitchenComponent implements OnInit, OnDestroy {
       this.updateRunningState();
       this.cdr.detectChanges();
     }, 250);
+    this.appScope.cleanups.add(() => {
+      if (this.runningInterval) {
+        clearInterval(this.runningInterval);
+        this.runningInterval = null;
+      }
+    });
+
+    this.appScope.cleanups.add(() => this.subs.unsubscribe());
   }
 
   ngOnDestroy() {
-    this.subs.unsubscribe();
-
-    if (this.runningInterval) {
-      clearInterval(this.runningInterval);
-      this.runningInterval = null;
-    }
-
+    this.appScope.dispose();
     this.kitchen.destroy();
   }
 

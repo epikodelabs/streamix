@@ -1,6 +1,7 @@
 import { DecimalPipe } from '@angular/common';
 import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { scope } from '@epikodelabs/streamix';
 import { compute } from '@epikodelabs/streamix/coroutines';
 
 interface JuliaPreset {
@@ -342,16 +343,20 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   progress = 0;
   elapsed = 0;
 
+  private readonly appScope = scope(() => ({}));
   private runner = compute<BatchParams, Pixel[]>(juliaBatchWorker);
   private abortController: AbortController | null = null;
 
   ngAfterViewInit(): void {
+    this.appScope.cleanups.add(() => {
+      this.abortController?.abort();
+      this.runner.finalize();
+    });
     this.drawJulia();
   }
 
   ngOnDestroy(): void {
-    this.abortController?.abort();
-    this.runner.finalize();
+    this.appScope.dispose();
   }
 
   loadPreset(p: JuliaPreset): void {

@@ -1,5 +1,5 @@
 import { ChangeDetectorRef, Component, OnDestroy, inject } from '@angular/core';
-import { Subscription, tap } from '@epikodelabs/streamix';
+import { scope, Subscription, tap } from '@epikodelabs/streamix';
 import { onAnimationFrame, onViewportChange } from '@epikodelabs/streamix/dom';
 
 interface Particle {
@@ -135,6 +135,8 @@ export class AppComponent implements OnDestroy {
   private animation?: Subscription;
   private resize?: Subscription;
 
+  private readonly appScope = scope(() => ({}));
+
   private width = window.innerWidth;
   private height = window.innerHeight;
 
@@ -158,6 +160,7 @@ export class AppComponent implements OnDestroy {
         })
       )
       .subscribe();
+    this.appScope.cleanups.add(() => this.resize?.unsubscribe());
 
     this.animation = onAnimationFrame()
       .pipe(
@@ -194,11 +197,11 @@ export class AppComponent implements OnDestroy {
         })
       )
       .subscribe();
+    this.appScope.cleanups.add(() => this.animation?.unsubscribe());
   }
 
   ngOnDestroy(): void {
-    this.animation?.unsubscribe();
-    this.resize?.unsubscribe();
+    this.appScope.dispose();
     this.particles = [];
   }
 }
