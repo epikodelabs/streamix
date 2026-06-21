@@ -1,5 +1,5 @@
 import { ChangeDetectorRef, Component, OnDestroy, inject } from '@angular/core';
-import { Subscription, interval, tap } from '@epikodelabs/streamix';
+import { Subscription, fromEvent, interval, tap } from '@epikodelabs/streamix';
 
 interface Particle {
   x: number;
@@ -132,9 +132,10 @@ export class AppComponent implements OnDestroy {
 
   particles: Particle[] = [];
   private animation?: Subscription;
+  private resize?: Subscription;
 
-  private readonly width = window.innerWidth;
-  private readonly height = window.innerHeight;
+  private width = window.innerWidth;
+  private height = window.innerHeight;
 
   constructor() {
     this.start();
@@ -147,6 +148,15 @@ export class AppComponent implements OnDestroy {
     for (let i = 0; i < 300; i++) {
       this.particles.push(createParticle(cx + rand(-200, 200), cy + rand(-200, 200)));
     }
+
+    this.resize = fromEvent(window, 'resize')
+      .pipe(
+        tap(() => {
+          this.width = window.innerWidth;
+          this.height = window.innerHeight;
+        })
+      )
+      .subscribe();
 
     this.animation = interval(16)
       .pipe(
@@ -187,6 +197,7 @@ export class AppComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     this.animation?.unsubscribe();
+    this.resize?.unsubscribe();
     this.particles = [];
   }
 }
