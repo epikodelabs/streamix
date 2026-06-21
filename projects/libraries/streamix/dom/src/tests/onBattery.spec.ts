@@ -216,7 +216,7 @@ idescribe('onBattery', () => {
     const sub = onBattery().subscribe();
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // Errors in cleanup will propagate from stop() which is not wrapped in try-catch
+    // createSharedSource swallows cleanup errors
     let didThrow = false;
     try {
       sub.unsubscribe();
@@ -224,8 +224,7 @@ idescribe('onBattery', () => {
       didThrow = true;
     }
     
-    // In current implementation, stop() errors propagate
-    expect(didThrow).toBe(true);
+    expect(didThrow).toBe(false);
   });
 
   it('does not stop when already stopped', async () => {

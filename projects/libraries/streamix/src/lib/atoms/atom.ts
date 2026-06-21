@@ -17,6 +17,7 @@ import { createSubscription, type Subscription } from "./subscription";
 const NODE = Symbol("engine.node");
 const MARK_DIRTY = Symbol("engine.markDirty");
 const FLUSH = Symbol("engine.flush");
+export const ANALOG = Symbol("engine.analog");
 
 export interface AtomOptions {
   discrete?: boolean;
@@ -608,6 +609,7 @@ export function flow<T>(
   };
 
   Object.defineProperty(instance, "_onDispose", { get: () => disposeHandlers, enumerable: false });
+  (instance as any)[ANALOG] = analog;
   registerWithCurrentScope(instance as any);
   return instance;
 }
@@ -788,6 +790,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
   };
 
   Object.defineProperty(instance, "_onDispose", { get: () => disposeHandlers, enumerable: false });
+  (instance as any)[ANALOG] = analog;
   registerWithCurrentScope(instance as any);
   if (hasInitialValue) markAtomAsEmitted(instance as any);
   return instance;
@@ -1034,6 +1037,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     },
   };
 
+  (instance as any)[ANALOG] = analog;
   registerWithCurrentScope(instance as any);
 
   return instance;

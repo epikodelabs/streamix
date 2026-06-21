@@ -63,6 +63,7 @@ idescribe('fromEvent', () => {
     const subscription = atom.subscribe(() => count++);
 
     element.click();
+    await flushMicrotasks();
     subscription.unsubscribe();
     element.click();
 

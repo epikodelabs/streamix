@@ -1,4 +1,4 @@
-import { atom, createAsyncIterator, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the time delta (in milliseconds) between
@@ -17,21 +17,27 @@ import { atom, createAsyncIterator, type AtomBase } from "@epikodelabs/streamix"
  * @returns {Atom<number>} An atom emitting frame-to-frame time deltas.
  */
 export function onAnimationFrame(): AtomBase<number> {
-  const atom$ = atom<number>();
+  return createSharedSource<number>((push) => {
+    let cleaned = false;
 
-  let subscriberCount = 0;
-  let stopped = true;
-
-  let rafId: number | null = null;
-  let lastTime = 0;
-  let cancelFrame: ((id: any) => void) | null = null;
-
-  const startLoop = () => {
-    if (!stopped) return;
-    stopped = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (rafId !== null) {
+        cancelFrame?.(rafId);
+        rafId = null;
+      }
+      cancelFrame = null;
+    };
 
     // SSR / non-browser guard
-    if (typeof globalThis.performance === "undefined") return;
+    if (typeof globalThis.performance === "undefined") {
+      return cleanup;
+    }
+
+    let rafId: number | null = null;
+    let lastTime = 0;
+    let cancelFrame: ((id: any) => void) | null = null;
 
     const hasRaf = typeof (globalThis as any).requestAnimationFrame === "function";
     const raf: (cb: FrameRequestCallback) => number =
@@ -53,7 +59,7 @@ export function onAnimationFrame(): AtomBase<number> {
     }
 
     const tick = (now: number) => {
-      if (stopped) return;
+      if (cleaned) return;
 
       // Some RAF polyfills can provide non-monotonic timestamps; clamp to 0.
       // Also treat the first tick as a 0-delta frame.
@@ -65,75 +71,14 @@ export function onAnimationFrame(): AtomBase<number> {
         lastTime = now;
       }
 
-      atom$.next(delta);
+      push(delta);
+      if (cleaned) return;
       rafId = raf(tick);
     };
 
     lastTime = 0;
     rafId = raf(tick);
-  };
 
-  const stopLoop = () => {
-    if (stopped) return;
-    stopped = true;
-
-    if (rafId !== null) {
-      cancelFrame?.(rafId);
-      rafId = null;
-    }
-    cancelFrame = null;
-  };
-
-  /* ------------------------------------------------------------------------
-   * Ref-counted subscription handling
-   * ---------------------------------------------------------------------- */
-
-  const originalSubscribe = atom$.subscribe;
-  const scheduleStart = () => {
-    subscriberCount += 1;
-    if (subscriberCount === 1) {
-      startLoop();
-    }
-  };
-
-  (atom$ as any).subscribe = (
-    callback?: (value: number) => void
-  ) => {
-    const subscription = (originalSubscribe as any).call(atom$, callback);
-
-    scheduleStart();
-
-    const baseUnsubscribe = subscription.unsubscribe.bind(subscription);
-    let cleaned = false;
-
-    subscription.unsubscribe = () => {
-      if (!cleaned) {
-        cleaned = true;
-
-        subscriberCount = Math.max(0, subscriberCount - 1);
-        if (subscriberCount === 0) {
-          stopLoop();
-        }
-
-        // Some specs expect teardown to run synchronously.
-        const teardown = subscription.teardown;
-        subscription.teardown = undefined;
-        try {
-          teardown?.();
-        } catch {
-        }
-      }
-
-      return baseUnsubscribe();
-    };
-
-    return subscription;
-  };
-
-  (atom$ as any)[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (observer) => atom$.subscribe((value: any) => observer.next(value)) })();
-
-  (atom$ as any).name = "onAnimationFrame";
-  (atom$ as any).type = "stream";
-  return atom$ as AtomBase<number>;
+    return cleanup;
+  }, { name: "onAnimationFrame" });
 }

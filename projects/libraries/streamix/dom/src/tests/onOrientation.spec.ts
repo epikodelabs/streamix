@@ -259,7 +259,7 @@ idescribe('onOrientation', () => {
     
     await new Promise(resolve => setTimeout(resolve, 50));
     
-    // Errors in cleanup will propagate from stop() which is not wrapped in try-catch
+    // createSharedSource swallows cleanup errors
     let didThrow = false;
     try {
       sub.unsubscribe();
@@ -267,7 +267,7 @@ idescribe('onOrientation', () => {
       didThrow = true;
     }
     
-    expect(didThrow).toBe(true);
+    expect(didThrow).toBe(false);
   });
 });
 

@@ -1,4 +1,4 @@
-import { atom, createAsyncIterator, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `IdleDeadline` objects whenever
@@ -22,18 +22,27 @@ import { atom, createAsyncIterator, type AtomBase } from "@epikodelabs/streamix"
  * @returns {Atom<IdleDeadline>} An atom emitting idle deadlines.
  */
 export function onIdle(timeout?: number): AtomBase<IdleDeadline> {
-  const atom$ = atom<IdleDeadline>();
+  return createSharedSource<IdleDeadline>((push) => {
+    let cleaned = false;
+    let idleId: number | null = null;
 
-  let subscriberCount = 0;
-  let stopped = true;
-  let idleId: number | null = null;
-
-  const startLoop = () => {
-    if (!stopped) return;
-    stopped = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (idleId !== null) {
+        if (typeof cancelIdleCallback === "function") {
+          cancelIdleCallback(idleId);
+        } else {
+          clearTimeout(idleId);
+        }
+        idleId = null;
+      }
+    };
 
     // SSR / non-browser guard
-    if (typeof setTimeout !== "function") return;
+    if (typeof setTimeout !== "function") {
+      return cleanup;
+    }
 
     const ric: typeof requestIdleCallback =
       typeof requestIdleCallback === "function"
@@ -49,65 +58,14 @@ export function onIdle(timeout?: number): AtomBase<IdleDeadline> {
             )) as unknown as typeof requestIdleCallback;
 
     const tick = (deadline: IdleDeadline) => {
-      if (stopped) return;
-
-      atom$.next(deadline);
+      if (cleaned) return;
+      push(deadline);
+      if (cleaned) return;
       idleId = ric(tick, timeout != null ? { timeout } : undefined);
     };
 
     idleId = ric(tick, timeout != null ? { timeout } : undefined);
-  };
 
-  const stopLoop = () => {
-    if (stopped) return;
-    stopped = true;
-
-    if (idleId !== null) {
-      if (typeof cancelIdleCallback === "function") {
-        cancelIdleCallback(idleId);
-      } else {
-        clearTimeout(idleId);
-      }
-      idleId = null;
-    }
-  };
-
-  /* ------------------------------------------------------------------------
-   * Ref-counted subscription handling
-   * ---------------------------------------------------------------------- */
-
-  const originalSubscribe = atom$.subscribe;
-  const scheduleStart = () => {
-    subscriberCount += 1;
-    if (subscriberCount === 1) {
-      startLoop();
-    }
-  };
-
-  (atom$ as any).subscribe = (
-    callback?: (value: IdleDeadline) => void
-  ) => {
-    const sub = (originalSubscribe as any).call(atom$, callback);
-
-    scheduleStart();
-
-    const o = sub.teardown;
-    sub.teardown = () => {
-      if (--subscriberCount === 0) {
-        stopLoop();
-      }
-      o?.call(sub);
-    };
-
-    return sub;
-  };
-
-  (atom$ as any)[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (observer) => atom$.subscribe((value: any) => observer.next(value)) })();
-
-  (atom$ as any).name = "onIdle";
-  (atom$ as any).type = "stream";
-  return atom$ as AtomBase<IdleDeadline>;
+    return cleanup;
+  }, { name: "onIdle" });
 }
-
-

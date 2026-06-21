@@ -410,7 +410,7 @@ idescribe("onFullscreen", () => {
       throw new Error('removeEventListener error');
     });
 
-    // Errors in cleanup will propagate from stop() which is not wrapped in try-catch
+    // createSharedSource swallows cleanup errors
     let didThrow = false;
     try {
       sub.unsubscribe();
@@ -418,7 +418,7 @@ idescribe("onFullscreen", () => {
       didThrow = true;
     }
     
-    expect(didThrow).toBe(true);
+    expect(didThrow).toBe(false);
   });
 
   it('does not restart when start() called multiple times', async () => {

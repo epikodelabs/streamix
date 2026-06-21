@@ -1,4 +1,4 @@
-import { atom, createAsyncIterator, isPromiseLike, type AtomBase, type MaybePromise } from "@epikodelabs/streamix";
+import { createSharedSource, isPromiseLike, type AtomBase, type MaybePromise } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `true` or `false` whenever a CSS media
@@ -22,43 +22,50 @@ import { atom, createAsyncIterator, isPromiseLike, type AtomBase, type MaybeProm
 export function onMediaQuery(
   query: MaybePromise<string>
 ): AtomBase<boolean> {
-  const atom$ = atom<boolean>();
-
-  let subscriberCount = 0;
-  let active = false;
-
-  let mql: MediaQueryList | null = null;
-  let listener: ((e: MediaQueryListEvent) => void) | null = null;
-
   /* -------------------------------------------------- */
   /* Immediate environment check (required by tests)    */
   /* -------------------------------------------------- */
 
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     console.warn('matchMedia is not supported in this environment');
-    return atom$ as AtomBase<boolean>;
+    return createSharedSource<boolean>(() => () => {}, { name: 'onMediaQuery' });
   }
 
-  /* -------------------------------------------------- */
-  /* Lifecycle                                          */
-  /* -------------------------------------------------- */
+  return createSharedSource<boolean>((push) => {
+    let cleaned = false;
+    let mql: MediaQueryList | null = null;
+    let listener: ((e: MediaQueryListEvent) => void) | null = null;
 
-  const start = () => {
-    if (active) return;
-    active = true;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+
+      if (mql && listener) {
+        if (typeof mql.removeEventListener === 'function') {
+          mql.removeEventListener('change', listener);
+        } else if (typeof (mql as any).removeListener === 'function') {
+          (mql as any).removeListener(listener);
+        }
+      }
+
+      mql = null;
+      listener = null;
+    };
 
     if (isPromiseLike(query)) {
       // Async path for promise query
-      atom$.next(false); // Emit false immediately
+      push(false); // Emit false immediately
+
       void (async () => {
         const q = await query;
-        if (!active) return;
+        if (cleaned) return;
 
         mql = window.matchMedia(q);
-        atom$.next(mql.matches);
+        push(mql.matches);
 
         listener = (e: MediaQueryListEvent) => {
-          atom$.next(e.matches);
+          if (cleaned) return;
+          push(e.matches);
         };
 
         if (typeof mql.addEventListener === 'function') {
@@ -72,7 +79,8 @@ export function onMediaQuery(
       mql = window.matchMedia(query);
 
       listener = (e: MediaQueryListEvent) => {
-        atom$.next(e.matches);
+        if (cleaned) return;
+        push(e.matches);
       };
 
       if (typeof mql.addEventListener === 'function') {
@@ -80,63 +88,10 @@ export function onMediaQuery(
       } else if (typeof (mql as any).addListener === 'function') {
         (mql as any).addListener(listener);
       }
-      
-      if (active && mql) atom$.next(mql.matches);
-    }
-  };
 
-  const stop = () => {
-    if (!active) return;
-    active = false;
-
-    if (mql && listener) {
-      if (typeof mql.removeEventListener === 'function') {
-        mql.removeEventListener('change', listener);
-      } else if (typeof (mql as any).removeListener === 'function') {
-        (mql as any).removeListener(listener);
-      }
+      push(mql.matches);
     }
 
-    mql = null;
-    listener = null;
-  };
-
-  /* -------------------------------------------------- */
-  /* Ref-counted subscribe override                     */
-  /* -------------------------------------------------- */
-
-  const originalSubscribe = atom$.subscribe;
-  const scheduleStart = () => {
-    subscriberCount += 1;
-    if (subscriberCount === 1) {
-      start();
-    }
-  };
-
-  (atom$ as any).subscribe = (
-    callback?: (value: boolean) => void
-  ) => {
-    const sub = (originalSubscribe as any).call(atom$, callback);
-
-    scheduleStart();
-
-    const o = sub.teardown;
-    sub.teardown = () => {
-      if (--subscriberCount === 0) {
-        stop();
-      }
-      o?.call(sub);
-    };
-
-    return sub;
-  };
-
-  (atom$ as any)[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (observer) => atom$.subscribe((value) => observer.next(value)) })();
-
-  (atom$ as any).name = 'onMediaQuery';
-  (atom$ as any).type = "stream";
-  return atom$ as AtomBase<boolean>;
+    return cleanup;
+  }, { name: 'onMediaQuery' });
 }
-
-

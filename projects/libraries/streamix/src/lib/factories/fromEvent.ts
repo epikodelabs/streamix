@@ -1,7 +1,6 @@
 import { isPromiseLike, type MaybePromise } from "../atoms";
-import { createSubscription, type Subscription } from "../atoms/subscription";
-import { atom, type AtomBase } from "../atoms";
-import { createAsyncIterator } from "../utils";
+import type { AtomBase } from "../atoms/atom";
+import { createSharedSource } from "../utils/sharedSource";
 
 /**
  * Creates an atom that emits events of the specified type from the given EventTarget.
@@ -17,71 +16,53 @@ export function fromEvent<T extends Event = Event>(
   event: MaybePromise<string>,
   options?: AddEventListenerOptions | boolean
 ): AtomBase<T> {
-  const output = atom<T>(undefined, { discrete: true });
-  const originalSubscribe = output.subscribe.bind(output);
+  return createSharedSource<T>((push) => {
+    let cleaned = false;
+    let listener: ((ev: Event) => void) | null = null;
+    let resolvedTarget: EventTarget | null = null;
+    let resolvedEvent: string | null = null;
 
-  let activeCount = 0;
-  let listener: ((ev: Event) => void) | null = null;
-  let resolvedTarget: EventTarget | null = null;
-  let resolvedEvent: string | null = null;
-  let attachPromise: Promise<void> | null = null;
-  let aborted = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
 
-  const ensureAttached = async () => {
-    if (listener) return;
-    if (attachPromise) return attachPromise;
-
-    attachPromise = (async () => {
-      resolvedTarget = isPromiseLike(target) ? await target : target;
-      resolvedEvent = isPromiseLike(event) ? await event : event;
-      if (aborted) return;
-
-      listener = (ev: Event) => output.next(ev as T);
-      resolvedTarget!.addEventListener(resolvedEvent!, listener, options);
-    })();
-
-    return attachPromise;
-  };
-
-  const detach = () => {
-    if (listener && resolvedTarget && resolvedEvent) {
-      resolvedTarget.removeEventListener(resolvedEvent, listener, options);
-      listener = null;
-    }
-  };
-
-  (output as any).subscribe = (
-    callback?: (value: T) => void
-  ): Subscription => {
-    let active = false;
-    const baseSub = originalSubscribe((value: T) => {
-      if (!active) return;
-      callback?.(value);
-    });
-    active = true;
-
-    if (activeCount === 0) {
-      void ensureAttached();
-    }
-    activeCount++;
-
-    const sub = createSubscription(() => {
-      baseSub.unsubscribe();
-      activeCount--;
-      if (activeCount <= 0) {
-        aborted = true;
-        detach();
+      if (listener && resolvedTarget && resolvedEvent) {
+        resolvedTarget.removeEventListener(resolvedEvent, listener, options);
       }
-    });
 
-    return sub;
-  };
+      listener = null;
+      resolvedTarget = null;
+      resolvedEvent = null;
+    };
 
-  (output as any)[Symbol.asyncIterator] = () =>
-    createAsyncIterator({
-      register: (observer) =>
-        (output as any).subscribe((value: any) => observer.next(value)),
-    })();
+    if (isPromiseLike(target) || isPromiseLike(event)) {
+      void (async () => {
+        resolvedTarget = isPromiseLike(target) ? await target : target;
+        resolvedEvent = isPromiseLike(event) ? await event : event;
 
-  return output;
+        if (cleaned) {
+          return;
+        }
+
+        listener = (ev: Event) => {
+          if (cleaned) return;
+          push(ev as T);
+        };
+
+        resolvedTarget.addEventListener(resolvedEvent, listener, options);
+      })();
+    } else {
+      resolvedTarget = target;
+      resolvedEvent = event;
+
+      listener = (ev: Event) => {
+        if (cleaned) return;
+        push(ev as T);
+      };
+
+      resolvedTarget.addEventListener(resolvedEvent, listener, options);
+    }
+
+    return cleanup;
+  }, { name: "fromEvent" });
 }

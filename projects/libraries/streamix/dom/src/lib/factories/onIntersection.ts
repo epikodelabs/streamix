@@ -1,9 +1,8 @@
 import {
-    atom,
-    createAsyncIterator,
-    isPromiseLike,
-    type AtomBase,
-    type MaybePromise,
+  createSharedSource,
+  isPromiseLike,
+  type AtomBase,
+  type MaybePromise,
 } from "@epikodelabs/streamix";
 
 /**
@@ -29,146 +28,77 @@ export function onIntersection(
   element: MaybePromise<Element>,
   options?: MaybePromise<IntersectionObserverInit>
 ): AtomBase<boolean> {
-  const atom$ = atom<boolean>(false, { discrete: true });
+  return createSharedSource<boolean>((push) => {
+    let cleaned = false;
+    let io: IntersectionObserver | null = null;
+    let mo: MutationObserver | null = null;
+    let lastValue: boolean | undefined;
+    let hasEmitted = false;
 
-  let subscriberCount = 0;
-  let active = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
 
-  let io: IntersectionObserver | null = null;
-  let mo: MutationObserver | null = null;
-  let lastValue: boolean | undefined;
-  let hasEmitted = false;
+      try {
+        io?.disconnect();
+      } catch {}
+      try {
+        mo?.disconnect();
+      } catch {}
 
-  const emit = (value: boolean) => {
-    if (value === lastValue) return;
-    lastValue = value;
-    hasEmitted = true;
-    atom$.next(value);
-  };
-
-  const computeInitial = (el: Element): boolean => {
-    if (typeof window === "undefined") return false;
-    const rect = el.getBoundingClientRect();
-    return rect.top < window.innerHeight && rect.bottom > 0;
-  };
-
-  const stop = () => {
-    if (!active) return;
-    active = false;
-
-    try {
-      io?.disconnect();
-    } catch {}
-    try {
-      mo?.disconnect();
-    } catch {}
-
-    io = null;
-    mo = null;
-    lastValue = undefined;
-    hasEmitted = false;
-  };
-
-  const start = async () => {
-    if (active) return;
-    active = true;
+      io = null;
+      mo = null;
+      lastValue = undefined;
+      hasEmitted = false;
+    };
 
     if (
       typeof IntersectionObserver === "undefined" ||
       typeof document === "undefined"
     ) {
-      active = false;
-      return;
+      return cleanup;
     }
 
-    const el = (isPromiseLike(element) ? await element : element) ?? null;
-    const resolvedOptions = isPromiseLike(options) ? await options : options;
+    void (async () => {
+      const el = (isPromiseLike(element) ? await element : element) ?? null;
+      const resolvedOptions = isPromiseLike(options) ? await options : options;
 
-    if (!active || !el) {
-      stop();
-      return;
-    }
-
-    io = new IntersectionObserver((entries) => {
-      emit(entries[0]?.isIntersecting ?? false);
-    }, resolvedOptions);
-    io.observe(el);
-
-    if (!hasEmitted) {
-      emit(computeInitial(el));
-    }
-
-    if (typeof MutationObserver !== "undefined") {
-      mo = new MutationObserver(() => {
-        if (!document.body.contains(el)) {
-          stop();
-        }
-      });
-      mo.observe(document.body, { childList: true, subtree: true });
-    }
-  };
-
-  const originalSubscribe = atom$.subscribe;
-  const scheduleStart = () => {
-    subscriberCount += 1;
-    if (subscriberCount === 1) {
-      // Defer startup so callers can assign the returned subscription before
-      // any synchronous observer callbacks fire.
-      queueMicrotask(() => {
-        if (subscriberCount > 0) {
-          void start();
-        }
-      });
-    }
-  };
-
-  (atom$ as any).subscribe = (
-    callback?: (value: any) => void
-  ) => {
-    let active = false;
-    const callbackFn = (value: boolean) => {
-      if (!active) return;
-      callback?.(value);
-    };
-
-    const subscription = (originalSubscribe as any).call(atom$, callbackFn);
-    active = true;
-
-    scheduleStart();
-
-    const baseUnsubscribe = subscription.unsubscribe.bind(subscription);
-    let cleaned = false;
-
-    subscription.unsubscribe = () => {
-      if (!cleaned) {
-        cleaned = true;
-
-        subscriberCount = Math.max(0, subscriberCount - 1);
-        if (subscriberCount === 0) {
-          stop();
-        }
-
-        const teardown = subscription.teardown;
-        subscription.teardown = undefined;
-        try {
-          teardown?.();
-        } catch {}
-
-        ;
+      if (cleaned || !el) {
+        return;
       }
 
-      return baseUnsubscribe();
-    };
+      const emit = (value: boolean) => {
+        if (cleaned || value === lastValue) return;
+        lastValue = value;
+        hasEmitted = true;
+        push(value);
+      };
 
-    return subscription;
-  };
+      const computeInitial = (target: Element): boolean => {
+        if (typeof window === "undefined") return false;
+        const rect = target.getBoundingClientRect();
+        return rect.top < window.innerHeight && rect.bottom > 0;
+      };
 
-  (atom$ as any)[Symbol.asyncIterator] = () =>
-    createAsyncIterator({
-      register: (observer) => atom$.subscribe((value) => observer.next(value)),
+      io = new IntersectionObserver((entries) => {
+        emit(entries[0]?.isIntersecting ?? false);
+      }, resolvedOptions);
+      io.observe(el);
+
+      if (!hasEmitted) {
+        emit(computeInitial(el));
+      }
+
+      if (typeof MutationObserver !== "undefined") {
+        mo = new MutationObserver(() => {
+          if (!document.body.contains(el)) {
+            cleanup();
+          }
+        });
+        mo.observe(document.body, { childList: true, subtree: true });
+      }
     })();
 
-  (atom$ as any).name = "onIntersection";
-  (atom$ as any).type = "stream";
-  return atom$ as AtomBase<boolean>;
+    return cleanup;
+  }, { name: "onIntersection" });
 }

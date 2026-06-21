@@ -1,4 +1,4 @@
-import { atom, createAsyncIterator, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the current network state.
@@ -31,35 +31,41 @@ export type NetworkState = {
  * @returns {Atom<NetworkState>}
  */
 export function onNetwork(): AtomBase<NetworkState> {
-  const atom$ = atom<NetworkState>();
+  return createSharedSource<NetworkState>((push) => {
+    let cleaned = false;
+    let connection: any = null;
 
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
 
-  let subscriberCount = 0;
-  let stopped = true;
+      if (typeof window === "undefined") return;
 
-  let connection: any = null;
+      window.removeEventListener("online", emit);
+      window.removeEventListener("offline", emit);
+      connection?.removeEventListener?.("change", emit);
 
-  const snapshot = (): NetworkState => ({
-    online:
-      typeof navigator !== "undefined" ? navigator.onLine : false,
-    type: connection?.type,
-    effectiveType: connection?.effectiveType,
-    downlink: connection?.downlink,
-    rtt: connection?.rtt,
-    saveData: connection?.saveData
-  });
+      connection = null;
+    };
 
-  const emit = () => {
-    atom$.next(snapshot());
-  };
+    const snapshot = (): NetworkState => ({
+      online:
+        typeof navigator !== "undefined" ? navigator.onLine : false,
+      type: connection?.type,
+      effectiveType: connection?.effectiveType,
+      downlink: connection?.downlink,
+      rtt: connection?.rtt,
+      saveData: connection?.saveData
+    });
 
-  const start = () => {
-    if (!stopped) return;
-    stopped = false;
+    const emit = () => {
+      if (cleaned) return;
+      push(snapshot());
+    };
 
     // SSR / unsupported guard
     if (typeof window === "undefined" || typeof navigator === "undefined") {
-      return;
+      return cleanup;
     }
 
     connection = (navigator as any).connection ?? null;
@@ -69,57 +75,7 @@ export function onNetwork(): AtomBase<NetworkState> {
     connection?.addEventListener?.("change", emit);
 
     emit();
-  };
 
-  const stop = () => {
-    if (stopped) return;
-    stopped = true;
-
-    if (typeof window === "undefined") return;
-
-    window.removeEventListener("online", emit);
-    window.removeEventListener("offline", emit);
-    connection?.removeEventListener?.("change", emit);
-
-    connection = null;
-  };
-
-  /* ------------------------------------------------------------------------
-   * Ref-counted subscription handling
-   * ---------------------------------------------------------------------- */
-
-  const originalSubscribe = atom$.subscribe;
-  const scheduleStart = () => {
-    subscriberCount += 1;
-    if (subscriberCount === 1) {
-      start();
-    }
-  };
-
-  (atom$ as any).subscribe = (
-    callback?: (value: NetworkState) => void
-  ) => {
-    const sub = (originalSubscribe as any).call(atom$, callback);
-
-    scheduleStart();
-
-    const o = sub.teardown;
-    sub.teardown = () => {
-      if (--subscriberCount === 0) {
-        stop();
-      }
-      o?.call(sub);
-    };
-
-    return sub;
-  };
-
-  (atom$ as any)[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (observer) => atom$.subscribe((value: any) => observer.next(value)) })();
-
-  (atom$ as any).name = "onNetwork";
-  (atom$ as any).type = "stream";
-  return atom$ as AtomBase<NetworkState>;
+    return cleanup;
+  }, { name: "onNetwork" });
 }
-
-

@@ -1,4 +1,4 @@
-import { atom, createAsyncIterator, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
 
 /**
  * Represents the current battery status.
@@ -26,115 +26,58 @@ export type BatteryState = {
  * @returns {Atom<BatteryState>}
  */
 export function onBattery(): AtomBase<BatteryState> {
-  const atom$ = atom<BatteryState>();
+  return createSharedSource<BatteryState>((push) => {
+    let cleaned = false;
+    let battery: any = null;
 
-  let subscriberCount = 0;
-  let stopped = true;
-  let battery: any = null;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
 
-  const snapshot = (): BatteryState => ({
-    charging: battery.charging,
-    level: battery.level,
-    chargingTime: battery.chargingTime,
-    dischargingTime: battery.dischargingTime
-  });
+      if (!battery) return;
 
-  const emit = () => {
-    atom$.next(snapshot());
-  };
+      battery.removeEventListener("chargingchange", emit);
+      battery.removeEventListener("levelchange", emit);
+      battery.removeEventListener("chargingtimechange", emit);
+      battery.removeEventListener("dischargingtimechange", emit);
 
-  const start = async () => {
-    if (!stopped) return;
-    stopped = false;
+      battery = null;
+    };
+
+    const snapshot = (): BatteryState => ({
+      charging: battery.charging,
+      level: battery.level,
+      chargingTime: battery.chargingTime,
+      dischargingTime: battery.dischargingTime
+    });
+
+    const emit = () => {
+      if (cleaned) return;
+      push(snapshot());
+    };
 
     // SSR / unsupported API guard
     if (typeof navigator === "undefined" || !(navigator as any).getBattery) {
-      return;
+      return cleanup;
     }
 
-    try {
-      battery = await (navigator as any).getBattery();
-      if (stopped || subscriberCount === 0) return;
-      
-      // Defer initial emission to allow subscription variable assignment
-      if (!stopped) emit();
+    void (async () => {
+      try {
+        battery = await (navigator as any).getBattery();
+        if (cleaned) return;
 
-      battery.addEventListener("chargingchange", emit);
-      battery.addEventListener("levelchange", emit);
-      battery.addEventListener("chargingtimechange", emit);
-      battery.addEventListener("dischargingtimechange", emit);
-    } catch (err) {
-      // getBattery() rejected - silently fail (e.g., permission denied)
-      stopped = true;
-    }
-  };
+        // Defer initial emission to allow subscription variable assignment
+        emit();
 
-  const stop = () => {
-    if (stopped) return;
-    stopped = true;
-
-    if (!battery) return;
-
-    battery.removeEventListener("chargingchange", emit);
-    battery.removeEventListener("levelchange", emit);
-    battery.removeEventListener("chargingtimechange", emit);
-    battery.removeEventListener("dischargingtimechange", emit);
-
-    battery = null;
-  };
-
-  /* ------------------------------------------------------------------------
-   * Ref-counted subscription handling
-   * ---------------------------------------------------------------------- */
-
-  const originalSubscribe = atom$.subscribe;
-  const scheduleStart = () => {
-    subscriberCount += 1;
-    if (subscriberCount === 1) {
-      start();
-    }
-  };
-
-  (atom$ as any).subscribe = (
-    callback?: (value: BatteryState) => void
-  ) => {
-    const subscription = (originalSubscribe as any).call(atom$, callback);
-
-    scheduleStart();
-
-    const baseUnsubscribe = subscription.unsubscribe.bind(subscription);
-    let cleaned = false;
-
-    subscription.unsubscribe = () => {
-      if (!cleaned) {
-        cleaned = true;
-
-        subscriberCount = Math.max(0, subscriberCount - 1);
-        if (subscriberCount === 0) {
-          stop();
-        }
-
-        // Some specs expect teardown to run synchronously.
-        const teardown = subscription.teardown;
-        subscription.teardown = undefined;
-        try {
-          teardown?.();
-        } catch {
-        }
+        battery.addEventListener("chargingchange", emit);
+        battery.addEventListener("levelchange", emit);
+        battery.addEventListener("chargingtimechange", emit);
+        battery.addEventListener("dischargingtimechange", emit);
+      } catch {
+        // getBattery() rejected - silently fail (e.g., permission denied)
       }
+    })();
 
-      return baseUnsubscribe();
-    };
-
-    return subscription;
-  };
-
-  (atom$ as any)[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (observer) => atom$.subscribe((value: any) => observer.next(value)) })();
-
-  (atom$ as any).name = "onBattery";
-  (atom$ as any).type = "stream";
-  return atom$ as AtomBase<BatteryState>;
+    return cleanup;
+  }, { name: "onBattery" });
 }
-
-

@@ -25,8 +25,9 @@ export type AsyncPushable<R> = AsyncIterator<R> & AsyncIterable<R> & {
  * Creates an `AsyncPushable` - an async iterator that you can manually
  * push values into with backpressure.
  */
-export function createAsyncPushable<R>(): AsyncPushable<R> {
+export function createAsyncPushable<R>(options?: { conflate?: boolean }): AsyncPushable<R> {
   const state = new AsyncIteratorState<R>();
+  const conflate = options?.conflate ?? false;
 
   // Create the receiver that will handle pushes
   const receiver = {
@@ -96,6 +97,26 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
 
   // Augment with push API
   iterator.push = function(value: R): void | Promise<void> {
+    if (state.completed) return;
+
+    if (conflate) {
+      // A consumer is already waiting: deliver immediately.
+      if (state.pullResolve) {
+        const r = state.pullResolve;
+        state.pullResolve = state.pullReject = null;
+        r({ done: false, value });
+        iterator.__onPush?.();
+        return;
+      }
+
+      // Consumer is behind: keep only the latest buffered value.
+      if (state.queue.length > 0) {
+        state.queue[state.queue.length - 1] = { result: { done: false, value } };
+        iterator.__onPush?.();
+        return;
+      }
+    }
+
     return receiver.next(value);
   };
 

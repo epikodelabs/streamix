@@ -1,4 +1,4 @@
-import { atom, createAsyncIterator, isPromiseLike, type AtomBase, type MaybePromise } from "@epikodelabs/streamix";
+import { createSharedSource, isPromiseLike, type AtomBase, type MaybePromise } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the dimensions of a given DOM element
@@ -21,144 +21,64 @@ import { atom, createAsyncIterator, isPromiseLike, type AtomBase, type MaybeProm
 export function onResize(
   element: MaybePromise<HTMLElement>
 ): AtomBase<{ width: number; height: number }> {
-  const atom$ = atom<{ width: number; height: number }>();
-  
-  let subscriberCount = 0;
-  let active = false;
+  return createSharedSource<{ width: number; height: number }>((push) => {
+    let cleaned = false;
+    let resolvedElement: HTMLElement | null = null;
+    let observer: ResizeObserver | null = null;
 
-  let resolvedElement: HTMLElement | null = null;
-  let observer: ResizeObserver | null = null;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
 
-  /* -------------------------------------------------- */
-  /* Helpers                                            */
-  /* -------------------------------------------------- */
-
-  const emit = (entry?: ResizeObserverEntry) => {
-    if (!resolvedElement) return;
-
-    // Prefer contentBoxSize over deprecated contentRect for modern browsers.
-    // contentBoxSize is a FrozenArray<ResizeObserverSize>, use the first entry.
-    let width: number;
-    let height: number;
-
-    if (entry?.contentBoxSize?.length) {
-      const boxSize = entry.contentBoxSize[0];
-      width = Math.round(boxSize.inlineSize);
-      height = Math.round(boxSize.blockSize);
-    } else if (entry?.contentRect) {
-      // Fallback to contentRect for older browsers
-      width = Math.round(entry.contentRect.width);
-      height = Math.round(entry.contentRect.height);
-    } else {
-      const rect = resolvedElement.getBoundingClientRect();
-      width = Math.round(rect.width);
-      height = Math.round(rect.height);
-    }
-
-    atom$.next({ width, height });
-  };
-
-  /* -------------------------------------------------- */
-  /* Lifecycle                                          */
-  /* -------------------------------------------------- */
-
-  const start = () => {
-    if (active) return;
-    active = true;
+      observer?.disconnect();
+      observer = null;
+      resolvedElement = null;
+    };
 
     // SSR / unsupported
     if (typeof ResizeObserver === "undefined") {
-      active = false;
-      return;
+      return cleanup;
     }
 
-    if (isPromiseLike(element)) {
-      // Async: wait for element resolution
-      void (async () => {
-        const el = await element;
-        if (!active || !el) return;
-
-        resolvedElement = el;
-        observer = new ResizeObserver(entries => emit(entries[0]));
-        observer.observe(resolvedElement);
-        
-        if (active) emit();
-      })();
-    } else {
-      // Sync: setup immediately, defer emission
-      resolvedElement = element;
-      observer = new ResizeObserver(entries => emit(entries[0]));
-      observer.observe(resolvedElement);
-      
-      if (active) emit();
-    }
-  };
-
-  const stop = () => {
-    if (!active) return;
-    active = false;
-
-    observer?.disconnect();
-    observer = null;
-    resolvedElement = null;
-  };
-
-  /* -------------------------------------------------- */
-  /* Ref-counted subscription override                  */
-  /* -------------------------------------------------- */
-
-  const originalSubscribe = atom$.subscribe;
-  const scheduleStart = () => {
-    subscriberCount += 1;
-    if (subscriberCount === 1) {
-      start();
-    }
-  };
-
-  (atom$ as any).subscribe = (
-    callback?: (value: any) => void
-  ) => {
-    const callbackFn = (value: { width: number; height: number }) => callback?.(value);
-
-    const subscription = (originalSubscribe as any).call(atom$, callbackFn);
-
-    scheduleStart();
-
-    const baseUnsubscribe = subscription.unsubscribe.bind(subscription);
-    let cleaned = false;
-
-    subscription.unsubscribe = () => {
-      if (!cleaned) {
-        cleaned = true;
-
-        subscriberCount = Math.max(0, subscriberCount - 1);
-        if (subscriberCount === 0) {
-          stop();
-        }
-
-        // Some specs expect teardown to run synchronously.
-        const teardown = subscription.teardown;
-        subscription.teardown = undefined;
-        try {
-          teardown?.();
-        } catch {
-        }
-
-        ;
+    void (async () => {
+      const el = (isPromiseLike(element) ? await element : element) ?? null;
+      if (cleaned || !el) {
+        return;
       }
 
-      return baseUnsubscribe();
-    };
+      resolvedElement = el;
 
-    return subscription;
-  };
+      const emit = (entry?: ResizeObserverEntry) => {
+        if (cleaned || !resolvedElement) return;
 
-  (atom$ as any)[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (observer) => atom$.subscribe((value) => observer.next(value)) })();
+        // Prefer contentBoxSize over deprecated contentRect for modern browsers.
+        // contentBoxSize is a FrozenArray<ResizeObserverSize>, use the first entry.
+        let width: number;
+        let height: number;
 
-  (atom$ as any).name = "onResize";
-  (atom$ as any).type = "stream";
-  return atom$ as AtomBase<{ width: number; height: number }>;
+        if (entry?.contentBoxSize?.length) {
+          const boxSize = entry.contentBoxSize[0];
+          width = Math.round(boxSize.inlineSize);
+          height = Math.round(boxSize.blockSize);
+        } else if (entry?.contentRect) {
+          // Fallback to contentRect for older browsers
+          width = Math.round(entry.contentRect.width);
+          height = Math.round(entry.contentRect.height);
+        } else {
+          const rect = resolvedElement.getBoundingClientRect();
+          width = Math.round(rect.width);
+          height = Math.round(rect.height);
+        }
+
+        push({ width, height });
+      };
+
+      observer = new ResizeObserver(entries => emit(entries[0]));
+      observer.observe(resolvedElement);
+
+      emit();
+    })();
+
+    return cleanup;
+  }, { name: "onResize" });
 }
-
-

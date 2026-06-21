@@ -1,4 +1,4 @@
-import { atom, createAsyncIterator, isPromiseLike, type AtomBase, type MaybePromise } from "@epikodelabs/streamix";
+import { createSharedSource, isPromiseLike, type AtomBase, type MaybePromise } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits arrays of `MutationRecord` objects
@@ -23,94 +23,39 @@ export function onMutation(
   element: MaybePromise<Element>,
   options?: MaybePromise<MutationObserverInit>
 ): AtomBase<MutationRecord[]> {
-  const atom$ = atom<MutationRecord[]>();
+  return createSharedSource<MutationRecord[]>((push) => {
+    let cleaned = false;
+    let observer: MutationObserver | null = null;
 
-  let subscriberCount = 0;
-  let stopped = true;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
 
-  let resolvedElement: Element | null = null;
-  let resolvedOptions: MutationObserverInit | undefined;
-  let observer: MutationObserver | null = null;
-
-  const start = () => {
-    if (!stopped) return;
-    stopped = false;
+      observer?.disconnect();
+      observer = null;
+    };
 
     // SSR / unsupported guard
-    if (typeof MutationObserver === "undefined") return;
+    if (typeof MutationObserver === "undefined") {
+      return cleanup;
+    }
 
-    if (isPromiseLike(element) || isPromiseLike(options)) {
-      // Async path for promise element/options
-      void (async () => {
-        resolvedElement = isPromiseLike(element) ? await element : element;
-        resolvedOptions = isPromiseLike(options) ? await options : options;
+    void (async () => {
+      const resolvedElement = (isPromiseLike(element) ? await element : element) ?? null;
+      const resolvedOptions = isPromiseLike(options) ? await options : options;
 
-        if (stopped || !resolvedElement) return;
-
-        observer = new MutationObserver(mutations => {
-          atom$.next([...mutations]);
-        });
-
-        observer.observe(resolvedElement, resolvedOptions);
-      })();
-    } else {
-      // Synchronous path for immediate element/options
-      resolvedElement = element;
-      resolvedOptions = options;
+      if (cleaned || !resolvedElement) {
+        return;
+      }
 
       observer = new MutationObserver(mutations => {
-        atom$.next([...mutations]);
+        if (cleaned) return;
+        push([...mutations]);
       });
 
       observer.observe(resolvedElement, resolvedOptions);
-    }
-  };
+    })();
 
-  const stop = () => {
-    if (stopped) return;
-    stopped = true;
-
-    observer?.disconnect();
-    observer = null;
-    resolvedElement = null;
-  };
-
-  /* ------------------------------------------------------------------------
-   * Ref-counted subscription handling
-   * ---------------------------------------------------------------------- */
-
-  const originalSubscribe = atom$.subscribe;
-  const scheduleStart = () => {
-    subscriberCount += 1;
-    if (subscriberCount === 1) {
-      start();
-    }
-  };
-
-  (atom$ as any).subscribe = (
-    callback?: (value: MutationRecord[]) => void
-  ) => {
-    const sub = (originalSubscribe as any).call(atom$, callback);
-
-    scheduleStart();
-
-    const o = sub.teardown;
-    sub.teardown = () => {
-      if (--subscriberCount === 0) {
-        stop();
-      }
-      o?.call(sub);
-    };
-
-    return sub;
-  };
-
-  (atom$ as any)[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (observer) => atom$.subscribe((value) => observer.next(value)) })();
-
-  (atom$ as any).name = "onMutation";
-  (atom$ as any).type = "stream";
-  return atom$ as AtomBase<MutationRecord[]>;
+    return cleanup;
+  }, { name: "onMutation" });
 }
-
-

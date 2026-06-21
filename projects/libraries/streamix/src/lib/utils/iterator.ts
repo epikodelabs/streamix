@@ -48,8 +48,11 @@ export type AsyncIteratorResult<T> =
  */
 export function createAsyncIterator<T>(opts: {
   register: (observer: Observer<T>) => Subscription;
+  conflate?: boolean;
 }) {
   const { register } = opts;
+
+  const conflate = opts.conflate ?? false;
 
   return () => {
     const state = new AsyncIteratorState<T>();
@@ -164,6 +167,8 @@ export function createAsyncIterator<T>(opts: {
     iterator.__pushNext = (value: T) => {
       if (observer) {
         observer.next(value);
+      } else if (conflate && pendingPushes.length > 0) {
+        pendingPushes[pendingPushes.length - 1] = { type: 'next', value };
       } else {
         pendingPushes.push({ type: 'next', value });
       }

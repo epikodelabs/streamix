@@ -1,4 +1,4 @@
-import type { AtomBase } from "./atom";
+import { ANALOG, type AtomBase } from "./atom";
 import type { MaybePromise } from "./operator";
 
 /**
@@ -28,6 +28,7 @@ export function iterate<T>(source: AtomBase<T> | AsyncIterable<T>): AsyncIterabl
   }
 
   const atom = source as AtomBase<T>;
+  const conflate = (atom as any)[ANALOG] === true;
 
   let initialized = false;
   let buffer: T[] = [];
@@ -59,6 +60,8 @@ export function iterate<T>(source: AtomBase<T> | AsyncIterable<T>): AsyncIterabl
         resolveNext({ value, done: false });
         resolveNext = null;
         rejectNext = null;
+      } else if (conflate && buffer.length > 0) {
+        buffer[0] = value;
       } else {
         buffer.push(value);
       }

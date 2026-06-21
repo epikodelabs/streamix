@@ -1,3 +1,4 @@
+export * from '../utils/sharedSource';
 export * from './combineLatest';
 export * from './commit';
 export * from './concat';

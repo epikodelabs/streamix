@@ -1,4 +1,4 @@
-import { atom, createAsyncIterator, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the visual viewport.
@@ -27,54 +27,62 @@ export type ViewportState = {
  * @returns {Atom<ViewportState>}
  */
 export function onViewportChange(): AtomBase<ViewportState> {
-  const atom$ = atom<ViewportState>();
+  return createSharedSource<ViewportState>((push) => {
+    let cleaned = false;
+    let target: VisualViewport | Window | null = null;
 
-  let subscriberCount = 0;
-  let stopped = true;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
 
-  let target: VisualViewport | Window | null = null;
+      if (!target) return;
 
-  const snapshot = (): ViewportState => {
-    if (typeof window === "undefined") {
+      target.removeEventListener("resize", emit);
+      target.removeEventListener("scroll", emit);
+
+      target = null;
+    };
+
+    const snapshot = (): ViewportState => {
+      if (typeof window === "undefined") {
+        return {
+          width: 0,
+          height: 0,
+          scale: 1,
+          offsetLeft: 0,
+          offsetTop: 0
+        };
+      }
+
+      if (window.visualViewport) {
+        const vp = window.visualViewport;
+        return {
+          width: vp.width,
+          height: vp.height,
+          scale: vp.scale,
+          offsetLeft: vp.offsetLeft,
+          offsetTop: vp.offsetTop
+        };
+      }
+
       return {
-        width: 0,
-        height: 0,
+        width: window.innerWidth,
+        height: window.innerHeight,
         scale: 1,
         offsetLeft: 0,
         offsetTop: 0
       };
-    }
-
-    if (window.visualViewport) {
-      const vp = window.visualViewport;
-      return {
-        width: vp.width,
-        height: vp.height,
-        scale: vp.scale,
-        offsetLeft: vp.offsetLeft,
-        offsetTop: vp.offsetTop
-      };
-    }
-
-    return {
-      width: window.innerWidth,
-      height: window.innerHeight,
-      scale: 1,
-      offsetLeft: 0,
-      offsetTop: 0
     };
-  };
 
-  const emit = () => {
-    atom$.next(snapshot());
-  };
-
-  const start = () => {
-    if (!stopped) return;
-    stopped = false;
+    const emit = () => {
+      if (cleaned) return;
+      push(snapshot());
+    };
 
     // SSR guard
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") {
+      return cleanup;
+    }
 
     target = window.visualViewport ?? window;
 
@@ -82,56 +90,7 @@ export function onViewportChange(): AtomBase<ViewportState> {
     target.addEventListener("scroll", emit);
 
     emit();
-  };
 
-  const stop = () => {
-    if (stopped) return;
-    stopped = true;
-
-    if (!target) return;
-
-    target.removeEventListener("resize", emit);
-    target.removeEventListener("scroll", emit);
-
-    target = null;
-  };
-
-  /* ------------------------------------------------------------------------
-   * Ref-counted subscription handling
-   * ---------------------------------------------------------------------- */
-
-  const originalSubscribe = atom$.subscribe;
-  const scheduleStart = () => {
-    subscriberCount += 1;
-    if (subscriberCount === 1) {
-      start();
-    }
-  };
-
-  (atom$ as any).subscribe = (
-    callback?: (value: ViewportState) => void
-  ) => {
-    const sub = (originalSubscribe as any).call(atom$, callback);
-
-    scheduleStart();
-
-    const o = sub.teardown;
-    sub.teardown = () => {
-      if (--subscriberCount === 0) {
-        stop();
-      }
-      o?.call(sub);
-    };
-
-    return sub;
-  };
-
-  (atom$ as any)[Symbol.asyncIterator] = () =>
-    createAsyncIterator({ register: (observer) => atom$.subscribe((value: any) => observer.next(value)) })();
-  
-  (atom$ as any).name = "onViewportChange";
-  (atom$ as any).type = "stream";
-  return atom$ as AtomBase<ViewportState>;
+    return cleanup;
+  }, { name: "onViewportChange" });
 }
-
-
