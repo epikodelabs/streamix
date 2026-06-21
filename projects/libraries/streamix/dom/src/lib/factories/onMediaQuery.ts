@@ -31,7 +31,7 @@ export function onMediaQuery(
     return createSharedSource<boolean>(() => () => {}, { name: 'onMediaQuery' });
   }
 
-  return createSharedSource<boolean>(async (push) => {
+  return createSharedSource<boolean>((push) => {
     let cleaned = false;
     let mql: MediaQueryList | null = null;
     let listener: ((e: MediaQueryListEvent) => void) | null = null;
@@ -52,33 +52,40 @@ export function onMediaQuery(
       listener = null;
     };
 
+    const emit = async (value: boolean) => {
+      if (cleaned) return;
+      await push(value);
+    };
+
     if (isPromiseLike(query)) {
       // Async path for promise query
-      await push(false); // Emit false immediately
+      void emit(false);
 
-      const q = await query;
-      if (cleaned) return cleanup;
-
-      mql = window.matchMedia(q);
-      await push(mql.matches);
-
-      listener = async (e: MediaQueryListEvent) => {
+      void (async () => {
+        const q = await query;
         if (cleaned) return;
-        await push(e.matches);
-      };
 
-      if (typeof mql.addEventListener === 'function') {
-        mql.addEventListener('change', listener);
-      } else if (typeof (mql as any).addListener === 'function') {
-        (mql as any).addListener(listener);
-      }
+        mql = window.matchMedia(q);
+        await emit(mql.matches);
+
+        listener = async (e: MediaQueryListEvent) => {
+          if (cleaned) return;
+          await emit(e.matches);
+        };
+
+        if (typeof mql.addEventListener === 'function') {
+          mql.addEventListener('change', listener);
+        } else if (typeof (mql as any).addListener === 'function') {
+          (mql as any).addListener(listener);
+        }
+      })();
     } else {
       // Synchronous path for immediate query
       mql = window.matchMedia(query);
 
       listener = async (e: MediaQueryListEvent) => {
         if (cleaned) return;
-        await push(e.matches);
+        await emit(e.matches);
       };
 
       if (typeof mql.addEventListener === 'function') {
@@ -87,7 +94,7 @@ export function onMediaQuery(
         (mql as any).addListener(listener);
       }
 
-      await push(mql.matches);
+      void emit(mql.matches);
     }
 
     return cleanup;

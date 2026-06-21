@@ -55,7 +55,7 @@ export function onVisibilityChange(): AtomBase<DocumentVisibilityState> {
 
     document.addEventListener("visibilitychange", emit);
 
-    emit();
+    void emit();
 
     return cleanup;
   }, { name: "onVisibilityChange" });

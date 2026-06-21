@@ -74,7 +74,7 @@ export function onNetwork(): AtomBase<NetworkState> {
     window.addEventListener("offline", emit);
     connection?.addEventListener?.("change", emit);
 
-    emit();
+    void emit();
 
     return cleanup;
   }, { name: "onNetwork" });

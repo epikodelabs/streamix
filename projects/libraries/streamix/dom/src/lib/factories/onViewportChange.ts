@@ -89,7 +89,7 @@ export function onViewportChange(): AtomBase<ViewportState> {
     target.addEventListener("resize", emit);
     target.addEventListener("scroll", emit);
 
-    emit();
+    void emit();
 
     return cleanup;
   }, { name: "onViewportChange" });
