@@ -58,6 +58,11 @@ export function onAnimationFrame(): AtomBase<number> {
       cancelFrame = globalThis.clearTimeout.bind(globalThis);
     }
 
+    const emit = async (value: number) => {
+      if (cleaned) return;
+      await push(value);
+    };
+
     const tick = async (now: number) => {
       if (cleaned) return;
 
@@ -71,7 +76,7 @@ export function onAnimationFrame(): AtomBase<number> {
         lastTime = now;
       }
 
-      await push(delta);
+      await emit(delta);
       if (cleaned) return;
       rafId = raf(tick);
     };

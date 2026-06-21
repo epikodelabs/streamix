@@ -50,14 +50,14 @@ export function onOrientation(): AtomBase<"portrait" | "landscape"> {
 
     // If the Orientation API is unavailable, still emit a sane default once.
     if (!window.screen.orientation) {
-      emit();
+      void emit();
       return cleanup;
     }
 
     orientation = window.screen.orientation;
     orientation.addEventListener("change", emit);
 
-    emit();
+    void emit();
 
     return cleanup;
   }, { name: "onOrientation" });

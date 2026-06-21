@@ -35,6 +35,11 @@ export function onMutation(
       observer = null;
     };
 
+    const emit = async (value: MutationRecord[]) => {
+      if (cleaned) return;
+      await push(value);
+    };
+
     // SSR / unsupported guard
     if (typeof MutationObserver === "undefined") {
       return cleanup;
@@ -49,8 +54,7 @@ export function onMutation(
       }
 
       observer = new MutationObserver(async mutations => {
-        if (cleaned) return;
-        await push([...mutations]);
+        await emit([...mutations]);
       });
 
       observer.observe(resolvedElement, resolvedOptions);

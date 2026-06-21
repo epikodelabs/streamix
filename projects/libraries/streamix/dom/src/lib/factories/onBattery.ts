@@ -67,7 +67,7 @@ export function onBattery(): AtomBase<BatteryState> {
         if (cleaned) return;
 
         // Defer initial emission to allow subscription variable assignment
-        emit();
+        void emit();
 
         battery.addEventListener("chargingchange", emit);
         battery.addEventListener("levelchange", emit);

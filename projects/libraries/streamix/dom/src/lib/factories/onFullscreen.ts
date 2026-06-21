@@ -62,7 +62,7 @@ export function onFullscreen(): AtomBase<boolean> {
     document.addEventListener("MSFullscreenChange", emit as any);
 
     // Emit initial value immediately
-    emit();
+    void emit();
 
     return cleanup;
   }, { name: "onFullscreen" });

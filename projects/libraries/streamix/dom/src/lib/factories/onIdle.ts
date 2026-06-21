@@ -57,9 +57,14 @@ export function onIdle(timeout?: number): AtomBase<IdleDeadline> {
               0
             )) as unknown as typeof requestIdleCallback;
 
+    const emit = async (value: IdleDeadline) => {
+      if (cleaned) return;
+      await push(value);
+    };
+
     const tick = async (deadline: IdleDeadline) => {
       if (cleaned) return;
-      await push(deadline);
+      await emit(deadline);
       if (cleaned) return;
       idleId = ric(tick, timeout != null ? { timeout } : undefined);
     };

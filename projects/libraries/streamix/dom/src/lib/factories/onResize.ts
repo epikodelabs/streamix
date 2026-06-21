@@ -35,6 +35,31 @@ export function onResize(
       resolvedElement = null;
     };
 
+    const emit = async (entry?: ResizeObserverEntry) => {
+      if (cleaned || !resolvedElement) return;
+
+      // Prefer contentBoxSize over deprecated contentRect for modern browsers.
+      // contentBoxSize is a FrozenArray<ResizeObserverSize>, use the first entry.
+      let width: number;
+      let height: number;
+
+      if (entry?.contentBoxSize?.length) {
+        const boxSize = entry.contentBoxSize[0];
+        width = Math.round(boxSize.inlineSize);
+        height = Math.round(boxSize.blockSize);
+      } else if (entry?.contentRect) {
+        // Fallback to contentRect for older browsers
+        width = Math.round(entry.contentRect.width);
+        height = Math.round(entry.contentRect.height);
+      } else {
+        const rect = resolvedElement.getBoundingClientRect();
+        width = Math.round(rect.width);
+        height = Math.round(rect.height);
+      }
+
+      await push({ width, height });
+    };
+
     // SSR / unsupported
     if (typeof ResizeObserver === "undefined") {
       return cleanup;
@@ -48,35 +73,12 @@ export function onResize(
 
       resolvedElement = el;
 
-      const emit = async (entry?: ResizeObserverEntry) => {
-        if (cleaned || !resolvedElement) return;
-
-        // Prefer contentBoxSize over deprecated contentRect for modern browsers.
-        // contentBoxSize is a FrozenArray<ResizeObserverSize>, use the first entry.
-        let width: number;
-        let height: number;
-
-        if (entry?.contentBoxSize?.length) {
-          const boxSize = entry.contentBoxSize[0];
-          width = Math.round(boxSize.inlineSize);
-          height = Math.round(boxSize.blockSize);
-        } else if (entry?.contentRect) {
-          // Fallback to contentRect for older browsers
-          width = Math.round(entry.contentRect.width);
-          height = Math.round(entry.contentRect.height);
-        } else {
-          const rect = resolvedElement.getBoundingClientRect();
-          width = Math.round(rect.width);
-          height = Math.round(rect.height);
-        }
-
-        await push({ width, height });
-      };
-
-      observer = new ResizeObserver(entries => emit(entries[0]));
+      observer = new ResizeObserver(async entries => {
+        await emit(entries[0]);
+      });
       observer.observe(resolvedElement);
 
-      emit();
+      void emit();
     })();
 
     return cleanup;

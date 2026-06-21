@@ -35,6 +35,13 @@ export function onIntersection(
     let lastValue: boolean | undefined;
     let hasEmitted = false;
 
+    const emit = async (value: boolean) => {
+      if (cleaned || value === lastValue) return;
+      lastValue = value;
+      hasEmitted = true;
+      await push(value);
+    };
+
     const cleanup = () => {
       if (cleaned) return;
       cleaned = true;
@@ -67,26 +74,19 @@ export function onIntersection(
         return;
       }
 
-      const emit = async (value: boolean) => {
-        if (cleaned || value === lastValue) return;
-        lastValue = value;
-        hasEmitted = true;
-        await push(value);
-      };
-
       const computeInitial = (target: Element): boolean => {
         if (typeof window === "undefined") return false;
         const rect = target.getBoundingClientRect();
         return rect.top < window.innerHeight && rect.bottom > 0;
       };
 
-      io = new IntersectionObserver((entries) => {
-        emit(entries[0]?.isIntersecting ?? false);
+      io = new IntersectionObserver(async (entries) => {
+        await emit(entries[0]?.isIntersecting ?? false);
       }, resolvedOptions);
       io.observe(el);
 
       if (!hasEmitted) {
-        emit(computeInitial(el));
+        void emit(computeInitial(el));
       }
 
       if (typeof MutationObserver !== "undefined") {
