@@ -12,11 +12,11 @@ describe('every', () => {
 
   it('should emit true if all values satisfy the predicate', async () => {
     const predicate = (value: number) => value > 0;
-    const everyStream = source.pipe(every(predicate));
+    const everyResult = source.pipe(every(predicate));
     const results: boolean[] = [];
 
     void (async () => {
-      for await (const value of everyStream) {
+      for await (const value of everyResult) {
         results.push(value);
       }
     })();
@@ -32,11 +32,11 @@ describe('every', () => {
 
   it('should emit false if any value does not satisfy the predicate', async () => {
     const predicate = (value: number) => value > 0;
-    const everyStream = source.pipe(every(predicate));
+    const everyResult = source.pipe(every(predicate));
     const results: boolean[] = [];
 
     void (async () => {
-      for await (const value of everyStream) {
+      for await (const value of everyResult) {
         results.push(value);
       }
     })();
@@ -51,11 +51,11 @@ describe('every', () => {
 
   it('should emit true if the stream is empty', async () => {
     const predicate = (value: number) => value > 0;
-    const everyStream = source.pipe(every(predicate));
+    const everyResult = source.pipe(every(predicate));
     const results: boolean[] = [];
 
     void (async () => {
-      for await (const value of everyStream) {
+      for await (const value of everyResult) {
         results.push(value);
       }
     })();
@@ -68,12 +68,12 @@ describe('every', () => {
 
   it('should propagate errors from the source stream', async () => {
     const predicate = (value: number) => value > 0;
-    const everyStream = source.pipe(every(predicate));
+    const everyResult = source.pipe(every(predicate));
     let error: any = null;
 
     void (async () => {
       try {
-        for await (const _ of everyStream) {
+        for await (const _ of everyResult) {
           void _;
         }
       } catch (err) {
@@ -89,11 +89,11 @@ describe('every', () => {
 
   it('should complete after emitting true when all values satisfy the predicate', async () => {
     const predicate = (value: number) => value > 0;
-    const everyStream = source.pipe(every(predicate));
+    const everyResult = source.pipe(every(predicate));
     let completed = false;
 
     void (async () => {
-      for await (const _ of everyStream) {
+      for await (const _ of everyResult) {
         void _;
         completed = true;
       }
@@ -109,11 +109,11 @@ describe('every', () => {
 
   it('should complete after emitting false if any value does not satisfy the predicate', async () => {
     const predicate = (value: number) => value > 0;
-    const everyStream = source.pipe(every(predicate));
+    const everyResult = source.pipe(every(predicate));
     let completed = false;
 
     void (async () => {
-      for await (const _ of everyStream) {
+      for await (const _ of everyResult) {
         void _;
         completed = true;
       }

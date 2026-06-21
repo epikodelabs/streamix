@@ -345,29 +345,29 @@ const cashier = actor('cashier', async function cashier(
 
 @Injectable({ providedIn: 'root' })
 export class KitchenService {
-  private eventsSubject = atom<KitchenEvent>();
-  events$ = this.eventsSubject;
+  private events = atom<KitchenEvent>();
+  events$ = this.events;
 
-  private ovensSubject = atom<OvenState[]>([
+  private ovens = atom<OvenState[]>([
     { id: 'Oven #1', order: null, stage: null },
     { id: 'Oven #2', order: null, stage: null },
     { id: 'Oven #3', order: null, stage: null },
   ]);
-  ovens$ = this.ovensSubject;
+  ovens$ = this.ovens;
 
-  private cancellableOrdersSubject = atom<Order[]>([]);
-  cancellableOrders$ = this.cancellableOrdersSubject;
+  private cancellableOrders = atom<Order[]>([]);
+  cancellableOrders$ = this.cancellableOrders;
 
-  private statsSubject = atom<KitchenStats>({
+  private stats = atom<KitchenStats>({
     completed: 0,
     cancelled: 0,
     revenue: 0,
     active: 0,
   });
-  stats$ = this.statsSubject;
+  stats$ = this.stats;
 
-  private logSubject = atom<string>();
-  log$ = this.logSubject;
+  private log = atom<string>();
+  log$ = this.log;
 
   private running = false;
   private fullDayClosing = false;
@@ -382,14 +382,14 @@ export class KitchenService {
       }
 
       const event = message.payload as KitchenEvent;
-      this.eventsSubject.next(event);
+      this.events.next(event);
       this.handleEvent(event);
     });
   }
 
   private handleEvent(event: KitchenEvent) {
-    const ovens = [...this.ovensSubject.value];
-    const stats = this.statsSubject.value;
+    const ovens = [...this.ovens.value];
+    const stats = this.stats.value;
     const time = new Date().toLocaleTimeString();
 
     const oven = 'oven' in event
@@ -402,15 +402,15 @@ export class KitchenService {
           oven.order = event.order;
           oven.stage = 'Preparing...';
         }
-        this.logSubject.next(
+        this.log.next(
           `[${time}] 🍳 Started: ${event.order.item} for ${event.order.customer} (${event.oven})`
         );
-        this.statsSubject.next({ ...stats, active: stats.active + 1 });
+        this.stats.next({ ...stats, active: stats.active + 1 });
         break;
 
       case 'stage':
         if (oven) oven.stage = event.stage;
-        this.logSubject.next(
+        this.log.next(
           `[${time}] 📍 ${event.stage} - ${event.order.item} (${event.oven})`
         );
         break;
@@ -421,10 +421,10 @@ export class KitchenService {
           oven.stage = null;
         }
         this.removeCancellableOrder(event.order.id);
-        this.logSubject.next(
+        this.log.next(
           `[${time}] ✅ READY! ${event.order.item} for ${event.order.customer} (${event.oven})`
         );
-        this.statsSubject.next({
+        this.stats.next({
           ...stats,
           completed: stats.completed + 1,
           revenue: stats.revenue + event.price,
@@ -438,10 +438,10 @@ export class KitchenService {
           oven.stage = null;
         }
         this.removeCancellableOrder(event.order.id);
-        this.logSubject.next(
+        this.log.next(
           `[${time}] ❌ CANCELLED: ${event.order.item} for ${event.order.customer} - ${event.reason} (${event.oven})`
         );
-        this.statsSubject.next({
+        this.stats.next({
           ...stats,
           cancelled: stats.cancelled + 1,
           active: oven ? Math.max(0, stats.active - 1) : stats.active,
@@ -454,10 +454,10 @@ export class KitchenService {
           oven.stage = null;
         }
         this.removeCancellableOrder(event.order.id);
-        this.logSubject.next(
+        this.log.next(
           `[${time}] ⏰ TIMEOUT: ${event.order.item} got burnt! (${event.oven})`
         );
-        this.statsSubject.next({
+        this.stats.next({
           ...stats,
           cancelled: stats.cancelled + 1,
           active: Math.max(0, stats.active - 1),
@@ -465,18 +465,18 @@ export class KitchenService {
         break;
 
       case 'closed':
-        this.cancellableOrdersSubject.next([]);
-        this.logSubject.next(
+        this.cancellableOrders.next([]);
+        this.log.next(
           `[${time}] 🏁 Shift closed! Completed: ${event.completed}, Cancelled: ${event.cancelled}, Revenue: $${event.totalRevenue.toFixed(2)}`
         );
-        this.statsSubject.next({ ...this.statsSubject.value, active: 0 });
+        this.stats.next({ ...this.stats.value, active: 0 });
         if (!this.inFullDay) {
           this.running = false;
         }
         break;
     }
 
-    this.ovensSubject.next(ovens);
+    this.ovens.next(ovens);
   }
 
   async runShift(
@@ -495,9 +495,9 @@ export class KitchenService {
       this.resetState();
     }
 
-    this.cancellableOrdersSubject.next([...orders]);
+    this.cancellableOrders.next([...orders]);
 
-    this.logSubject.next(`--- Starting shift with ${orders.length} orders ---`);
+    this.log.next(`--- Starting shift with ${orders.length} orders ---`);
 
     return new Promise((resolve) => {
       let resolved = false;
@@ -571,12 +571,12 @@ export class KitchenService {
     this.running = true;
     this.resetState();
 
-    this.logSubject.next('\n=== Full Day Started ===');
+    this.log.next('\n=== Full Day Started ===');
 
     for (const shift of shifts) {
       if (this.fullDayClosing) break;
 
-      this.logSubject.next(`\n=== ${shift.name} ===`);
+      this.log.next(`\n=== ${shift.name} ===`);
 
       await this.runShift(shift.orders, { accumulate: true, internal: true });
 
@@ -585,16 +585,16 @@ export class KitchenService {
       await delay(1000);
     }
 
-    this.cancellableOrdersSubject.next([]);
+    this.cancellableOrders.next([]);
 
-    this.logSubject.next('\n=== Full Day Complete ===');
+    this.log.next('\n=== Full Day Complete ===');
 
     this.inFullDay = false;
     this.running = false;
 
-    const stats = this.statsSubject.value;
+    const stats = this.stats.value;
 
-    this.logSubject.next(
+    this.log.next(
       `📊 FULL DAY SUMMARY: ✅ ${stats.completed} completed, ❌ ${stats.cancelled} cancelled, 💰 $${stats.revenue.toFixed(2)}`
     );
   }
@@ -603,7 +603,7 @@ export class KitchenService {
     if (!this.running) return;
 
     main.outbox.send(cashier, 'cancel', orderId);
-    this.logSubject.next(`🚫 Cancellation requested for order ${orderId}`);
+    this.log.next(`🚫 Cancellation requested for order ${orderId}`);
   }
 
   closeKitchen() {
@@ -611,11 +611,11 @@ export class KitchenService {
 
     this.fullDayClosing = true;
     main.outbox.send(cashier, 'close', undefined);
-    this.logSubject.next('🚨 Kitchen closing requested — active ovens finish, queued orders are cancelled');
+    this.log.next('🚨 Kitchen closing requested — active ovens finish, queued orders are cancelled');
   }
 
   resetOvens() {
-    this.ovensSubject.next([
+    this.ovens.next([
       { id: 'Oven #1', order: null, stage: null },
       { id: 'Oven #2', order: null, stage: null },
       { id: 'Oven #3', order: null, stage: null },
@@ -624,8 +624,8 @@ export class KitchenService {
 
   resetState() {
     this.resetOvens();
-    this.cancellableOrdersSubject.next([]);
-    this.statsSubject.next({
+    this.cancellableOrders.next([]);
+    this.stats.next({
       completed: 0,
       cancelled: 0,
       revenue: 0,
@@ -634,8 +634,8 @@ export class KitchenService {
   }
 
   private removeCancellableOrder(orderId: string) {
-    this.cancellableOrdersSubject.next(
-      this.cancellableOrdersSubject.value.filter(order => order.id !== orderId)
+    this.cancellableOrders.next(
+      this.cancellableOrders.value.filter(order => order.id !== orderId)
     );
   }
 

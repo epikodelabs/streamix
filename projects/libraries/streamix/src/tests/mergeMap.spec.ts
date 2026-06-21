@@ -4,11 +4,11 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('mergeMap', () => {
   it('should merge emissions from inner streams correctly', async () => {
-    const testStream = from([1, 2, 3]);
+    const source = from([1, 2, 3]);
 
     const project = (value: number) => [value * 2, value * 4];
 
-    const mergedAtom = pipe(testStream, mergeMap(project));
+    const mergedAtom = pipe(source, mergeMap(project));
 
     const results: any[] = [];
     for await (const value of iterate(mergedAtom)) {
@@ -20,7 +20,7 @@ describe('mergeMap', () => {
   });
 
   it('should correctly handle a chain of from, filter, mergeMap, filter, and mergeMap', async () => {
-    const testStream = from([1, 2, 3, 4, 5, 6]);
+    const source = from([1, 2, 3, 4, 5, 6]);
 
     // Project functions for mergeMap
     const firstProject = (value: number) => [value, value * 10];
@@ -28,7 +28,7 @@ describe('mergeMap', () => {
 
     // Create the chained stream
     const chainedAtom = pipe(
-      testStream,
+      source,
       filter((value: number) => value % 2 === 0),
       mergeMap(firstProject),
       filter((value: number) => value > 10),
@@ -50,11 +50,11 @@ describe('mergeMap', () => {
   });
 
   it('should handle inner Observable that emits nothing', async () => {
-    const testStream = from([1, 2, 3]);
+    const source = from([1, 2, 3]);
 
     const project = () => [];
 
-    const mergedAtom = pipe(testStream, mergeMap(project));
+    const mergedAtom = pipe(source, mergeMap(project));
 
     const results: number[] = [];
     for await (const value of iterate(mergedAtom)) {
@@ -65,7 +65,7 @@ describe('mergeMap', () => {
   });
 
   it('should handle inner Observable that errors out', async () => {
-    const testStream = from([1, 2, 3]);
+    const source = from([1, 2, 3]);
 
     const project = (value: number) => {
       if (value === 2) {
@@ -74,7 +74,7 @@ describe('mergeMap', () => {
       return [value * 2];
     };
 
-    const mergedAtom = pipe(testStream, mergeMap(project));
+    const mergedAtom = pipe(source, mergeMap(project));
 
     const results: number[] = [];
     let caughtError: Error | undefined;
@@ -91,11 +91,11 @@ describe('mergeMap', () => {
   });
 
   it('should merge inner Observable that emits multiple values', async () => {
-    const testStream = from([1, 2]);
+    const source = from([1, 2]);
 
     const project = (value: number) => [value * 2, value * 3];
 
-    const mergedAtom = pipe(testStream, mergeMap(project));
+    const mergedAtom = pipe(source, mergeMap(project));
 
     const results: number[] = [];
     for await (const value of iterate(mergedAtom)) {
@@ -106,11 +106,11 @@ describe('mergeMap', () => {
   });
 
   it('should handle an empty source Observable', async () => {
-    const testStream = from([]);
+    const source = from([]);
 
     const project = (value: number) => [value * 2];
 
-    const mergedAtom = pipe(testStream, mergeMap(project));
+    const mergedAtom = pipe(source, mergeMap(project));
 
     const results: number[] = [];
     for await (const value of iterate(mergedAtom)) {
@@ -121,12 +121,12 @@ describe('mergeMap', () => {
   });
 
   it('should handle rapid emissions from the source', async () => {
-    const testStream = from([1, 2, 3, 4, 5]);
+    const source = from([1, 2, 3, 4, 5]);
 
     const project = (value: number) =>
       new Promise<number>((resolve) => setTimeout(() => resolve(value * 2), value * 10));
 
-    const mergedAtom = pipe(testStream, mergeMap(project));
+    const mergedAtom = pipe(source, mergeMap(project));
 
     const results: number[] = [];
     for await (const value of iterate(mergedAtom)) {
@@ -137,12 +137,12 @@ describe('mergeMap', () => {
   });
 
   it('should wait for all inner Observables to complete', async () => {
-    const testStream = from([1, 2, 3]);
+    const source = from([1, 2, 3]);
 
     const project = (value: number) =>
       new Promise<number>((resolve) => setTimeout(() => resolve(value * 2), value * 10));
 
-    const mergedAtom = pipe(testStream, mergeMap(project));
+    const mergedAtom = pipe(source, mergeMap(project));
 
     const results: number[] = [];
     for await (const value of iterate(mergedAtom)) {

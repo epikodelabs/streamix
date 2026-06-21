@@ -13,11 +13,11 @@ describe('max', () => {
   });
 
   it('should emit the largest value', async () => {
-    const maxStream = source.pipe(max());
+    const maxResult = source.pipe(max());
     const results: number[] = [];
 
     void (async () => {
-      for await (const value of maxStream) {
+      for await (const value of maxResult) {
         results.push(value);
       }
     })();
@@ -32,12 +32,12 @@ describe('max', () => {
   });
 
   it('should propagate errors from the source stream', async () => {
-    const maxStream = source.pipe(max());
+    const maxResult = source.pipe(max());
     let error: any = null;
 
     void (async () => {
       try {
-        for await (const _ of maxStream) {
+        for await (const _ of maxResult) {
           void _;
         }
       } catch (err) {

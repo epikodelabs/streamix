@@ -2,7 +2,7 @@ import { atom, defer, from, iterate, type Atom } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
-function mockStream(values: any[], completed = false, error?: Error): any {
+function mockSource(values: any[], completed = false, error?: Error): any {
   const subject: Atom<any> = atom<any>();
 
   setTimeout(() => {
@@ -24,7 +24,7 @@ function mockStream(values: any[], completed = false, error?: Error): any {
 describe('defer', () => {
   it('should create a new stream each time it is subscribed to', async () => {
     const emissions = [1, 2, 3];
-    const factory = jasmine.createSpy('factory').and.callFake(() => mockStream(emissions, true));
+    const factory = jasmine.createSpy('factory').and.callFake(() => mockSource(emissions, true));
 
     const deferAtom = defer(factory);
 
@@ -38,7 +38,7 @@ describe('defer', () => {
   });
 
   it('should handle stream completion', async () => {
-    const factory = jasmine.createSpy('factory').and.callFake(() => mockStream([], true));
+    const factory = jasmine.createSpy('factory').and.callFake(() => mockSource([], true));
 
     const deferAtom = defer(factory);
 
@@ -52,7 +52,7 @@ describe('defer', () => {
 
   it('should handle stream errors', async () => {
     const error = new Error('Test Error');
-    const factory = jasmine.createSpy('factory').and.callFake(() => mockStream([], false, error));
+    const factory = jasmine.createSpy('factory').and.callFake(() => mockSource([], false, error));
 
     const deferAtom = defer(factory);
 

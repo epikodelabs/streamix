@@ -10,9 +10,9 @@ async function collect<T>(input: any): Promise<T[]> {
 
 describe('fromAny', () => {
   it('should pass through a stream as-is', async () => {
-    const sourceStream = from([1, 2, 3]);
+    const source = from([1, 2, 3]);
 
-    const result = fromAny(sourceStream);
+    const result = fromAny(source);
 
     // Atoms are normalized into a stream-like iterable.
     const values = await collect<number>(result);

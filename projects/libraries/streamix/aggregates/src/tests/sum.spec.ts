@@ -13,11 +13,11 @@ describe('sum', () => {
   });
 
   it('should emit the sum of emitted values', async () => {
-    const sumStream = source.pipe(sum());
+    const sumResult = source.pipe(sum());
     const results: number[] = [];
 
     void (async () => {
-      for await (const value of sumStream) {
+      for await (const value of sumResult) {
         results.push(value);
       }
     })();
@@ -32,13 +32,13 @@ describe('sum', () => {
   });
 
   it('should respect asynchronous selectors', async () => {
-    const sumStream = source.pipe(
+    const sumResult = source.pipe(
       sum(async (value, index) => value + index)
     );
     const results: number[] = [];
 
     void (async () => {
-      for await (const value of sumStream) {
+      for await (const value of sumResult) {
         results.push(value);
       }
     })();
@@ -53,11 +53,11 @@ describe('sum', () => {
   });
 
   it('should emit 0 if no values were emitted', async () => {
-    const sumStream = source.pipe(sum());
+    const sumResult = source.pipe(sum());
     const results: number[] = [];
 
     void (async () => {
-      for await (const value of sumStream) {
+      for await (const value of sumResult) {
         results.push(value);
       }
     })();

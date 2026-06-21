@@ -13,11 +13,11 @@ describe('average', () => {
   });
 
   it('should emit the arithmetic mean of all values', async () => {
-    const averageStream = source.pipe(average());
+    const averageResult = source.pipe(average());
     const results: number[] = [];
 
     void (async () => {
-      for await (const value of averageStream) {
+      for await (const value of averageResult) {
         results.push(value);
       }
     })();
@@ -32,13 +32,13 @@ describe('average', () => {
   });
 
   it('should use the provided selector and await promises', async () => {
-    const averageStream = source.pipe(
+    const averageResult = source.pipe(
       average(async (value: { score: number }) => value.score * 2)
     );
     const results: number[] = [];
 
     void (async () => {
-      for await (const value of averageStream) {
+      for await (const value of averageResult) {
         results.push(value);
       }
     })();
@@ -52,11 +52,11 @@ describe('average', () => {
   });
 
   it('should emit 0 when the source stream is empty', async () => {
-    const averageStream = source.pipe(average());
+    const averageResult = source.pipe(average());
     const results: number[] = [];
 
     void (async () => {
-      for await (const value of averageStream) {
+      for await (const value of averageResult) {
         results.push(value);
       }
     })();

@@ -54,11 +54,11 @@ describe('merge', () => {
   });
 
   it('should propagate errors from rejected sources', async () => {
-    const badStream = flow(async function* () {
+    const badSource = flow(async function* () {
       throw new Error('boom');
     });
 
-    const atom = merge(badStream, from([1]));
+    const atom = merge(badSource, from([1]));
 
     let caught: any;
     try {
@@ -85,7 +85,7 @@ describe('merge', () => {
   it('cleans up underlying iterators when the consumer stops early', async () => {
     const cleanupCalls: number[] = [];
 
-    const makeStream = (id: number) =>
+    const makeSource = (id: number) =>
       flow(async function* () {
         try {
           while (true) {
@@ -96,7 +96,7 @@ describe('merge', () => {
         }
       });
 
-    const merged = merge(makeStream(1), makeStream(2));
+    const merged = merge(makeSource(1), makeSource(2));
     const iterator = iterate(merged)[Symbol.asyncIterator]();
 
     const first = await iterator.next();

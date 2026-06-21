@@ -139,12 +139,12 @@ idescribe('onResize', () => {
     divToTest.style.height = '100px';
     document.body.appendChild(divToTest);
 
-    const resizeStream = onResize(divToTest);
+    const resize = onResize(divToTest);
 
     // Spy on the cleanup mechanism
     const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect');
 
-    const subscription = resizeStream.subscribe(() => { });
+    const subscription = resize.subscribe(() => { });
 
     // Remove element and verify cleanup
     document.body.removeChild(divToTest);
@@ -157,10 +157,10 @@ idescribe('onResize', () => {
     const divToTest = document.createElement('div');
     document.body.appendChild(divToTest);
 
-    const resizeStream = onResize(divToTest);
+    const resize = onResize(divToTest);
     const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect');
 
-    const subscription = resizeStream.subscribe(() => { });
+    const subscription = resize.subscribe(() => { });
 
     subscription.unsubscribe();
 
@@ -172,10 +172,10 @@ idescribe('onResize', () => {
     const divToTest = document.createElement('div');
     document.body.appendChild(divToTest);
 
-    const resizeStream = onResize(divToTest);
+    const resize = onResize(divToTest);
     let errorOccurred = false;
 
-    const subscription = resizeStream.subscribe(() => { });
+    const subscription = resize.subscribe(() => { });
 
     setTimeout(() => {
       document.body.removeChild(divToTest);

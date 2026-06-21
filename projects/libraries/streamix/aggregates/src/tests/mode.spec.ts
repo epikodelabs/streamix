@@ -13,11 +13,11 @@ describe('mode', () => {
   });
 
   it('should emit the most frequently occurring value', async () => {
-    const modeStream = source.pipe(mode());
+    const modeResult = source.pipe(mode());
     const results: number[][] = [];
 
     void (async () => {
-      for await (const value of modeStream) {
+      for await (const value of modeResult) {
         results.push(value);
       }
     })();
@@ -33,11 +33,11 @@ describe('mode', () => {
   });
 
   it('should emit all values that share the top frequency', async () => {
-    const modeStream = source.pipe(mode());
+    const modeResult = source.pipe(mode());
     const results: number[][] = [];
 
     void (async () => {
-      for await (const value of modeStream) {
+      for await (const value of modeResult) {
         results.push(value);
       }
     })();
@@ -53,22 +53,21 @@ describe('mode', () => {
   });
 
   it('should be able to key values before counting', async () => {
-    const itemSubject = atom<{ group: string; value: string }>();
-    const itemSource = itemSubject;
-    const modeStream = itemSource.pipe(mode((item) => item.group));
+    const items = atom<{ group: string; value: string }>();
+    const modeResult = items.pipe(mode((item) => item.group));
     const results: { group: string; value: string }[][] = [];
 
     void (async () => {
-      for await (const value of modeStream) {
+      for await (const value of modeResult) {
         results.push(value);
       }
     })();
 
-    itemSubject.next({ group: 'alpha', value: 'a' });
-    itemSubject.next({ group: 'beta', value: 'b' });
-    itemSubject.next({ group: 'alpha', value: 'a2' });
-    itemSubject.next({ group: 'beta', value: 'b2' });
-    itemSubject.dispose();
+    items.next({ group: 'alpha', value: 'a' });
+    items.next({ group: 'beta', value: 'b' });
+    items.next({ group: 'alpha', value: 'a2' });
+    items.next({ group: 'beta', value: 'b2' });
+    items.dispose();
     await settle();
 
     expect(results).toEqual([
@@ -80,11 +79,11 @@ describe('mode', () => {
   });
 
   it('should not emit when the stream is empty', async () => {
-    const modeStream = source.pipe(mode());
+    const modeResult = source.pipe(mode());
     const results: number[][] = [];
 
     void (async () => {
-      for await (const value of modeStream) {
+      for await (const value of modeResult) {
         results.push(value);
       }
     })();

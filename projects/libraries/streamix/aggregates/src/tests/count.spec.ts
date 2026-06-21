@@ -13,11 +13,11 @@ describe('count', () => {
   });
 
   it('should emit the count of values', async () => {
-    const countStream = source.pipe(count());
+    const countResult = source.pipe(count());
     const results: number[] = [];
 
     void (async () => {
-      for await (const value of countStream) {
+      for await (const value of countResult) {
         results.push(value);
       }
     })();
@@ -32,11 +32,11 @@ describe('count', () => {
   });
 
   it('should emit 0 for an empty stream', async () => {
-    const countStream = source.pipe(count());
+    const countResult = source.pipe(count());
     const results: number[] = [];
 
     void (async () => {
-      for await (const value of countStream) {
+      for await (const value of countResult) {
         results.push(value);
       }
     })();
@@ -48,12 +48,12 @@ describe('count', () => {
   });
 
   it('should propagate errors from the source stream', async () => {
-    const countStream = source.pipe(count());
+    const countResult = source.pipe(count());
     let error: any = null;
 
     void (async () => {
       try {
-        for await (const _ of countStream) {
+        for await (const _ of countResult) {
           void _;
         }
       } catch (err) {

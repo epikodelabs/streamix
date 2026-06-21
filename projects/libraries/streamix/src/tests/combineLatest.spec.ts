@@ -54,9 +54,9 @@ describe('combineLatest', () => {
   });
 
   it('should combine from streams and emit values', async () => {
-    const firstStream = from([0, 1, 2]);
-    const secondStream = from([0, 1, 2]);
-    const combined = combineLatest(firstStream, secondStream);
+    const firstSource = from([0, 1, 2]);
+    const secondSource = from([0, 1, 2]);
+    const combined = combineLatest(firstSource, secondSource);
     let nextCalled = false;
 
     combined.subscribe(() => nextCalled = true);

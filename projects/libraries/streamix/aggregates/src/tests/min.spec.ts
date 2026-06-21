@@ -13,11 +13,11 @@ describe('min', () => {
   });
 
   it('should emit the smallest value', async () => {
-    const minStream = source.pipe(min());
+    const minResult = source.pipe(min());
     const results: number[] = [];
 
     void (async () => {
-      for await (const value of minStream) {
+      for await (const value of minResult) {
         results.push(value);
       }
     })();
@@ -32,12 +32,12 @@ describe('min', () => {
   });
 
   it('should propagate errors from the source stream', async () => {
-    const minStream = source.pipe(min());
+    const minResult = source.pipe(min());
     let error: any = null;
 
     void (async () => {
       try {
-        for await (const _ of minStream) {
+        for await (const _ of minResult) {
           void _;
         }
       } catch (err) {

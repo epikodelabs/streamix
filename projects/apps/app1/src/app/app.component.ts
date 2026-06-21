@@ -126,22 +126,22 @@ interface Metric {
           <p class="tooltip">Drag the sliders to change Stream A and B. combineLatest recalculates (A × B) / 100 in real time.</p>
           <div class="combined-controls">
             <label>
-              Stream A ({{ streamAValue }})
+              Stream A ({{ sliderAValue }})
               <input
                 type="range"
                 min="0"
                 max="100"
-                [value]="streamAValue"
+                [value]="sliderAValue"
                 (input)="updateStreamA(+($any($event.target)).value)"
               />
             </label>
             <label>
-              Stream B ({{ streamBValue }})
+              Stream B ({{ sliderBValue }})
               <input
                 type="range"
                 min="0"
                 max="100"
-                [value]="streamBValue"
+                [value]="sliderBValue"
                 (input)="updateStreamB(+($any($event.target)).value)"
               />
             </label>
@@ -149,10 +149,10 @@ interface Metric {
           <div class="combined-result">
             <div class="formula">(A × B) / 100 = {{ combinedValue | number:'1.0-1' }}</div>
             <div class="bar-chart">
-              <div class="bar" [style.height.%]="streamAValue">
+              <div class="bar" [style.height.%]="sliderAValue">
                 <span>A</span>
               </div>
-              <div class="bar" [style.height.%]="streamBValue">
+              <div class="bar" [style.height.%]="sliderBValue">
                 <span>B</span>
               </div>
               <div class="bar result" [style.height.%]="combinedValue">
@@ -482,8 +482,8 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
   batches: string[][] = [];
 
   // Combined
-  streamAValue = 30;
-  streamBValue = 60;
+  sliderAValue = 30;
+  sliderBValue = 60;
   combinedValue = 18;
 
   // juliabrot
@@ -495,9 +495,9 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
   logEntries: { time: string; message: string; type: string }[] = [];
 
   private readonly appScope = scope(() => ({
-    clickSubject: atom<string>(),
-    streamA: atom<number>(),
-    streamB: atom<number>(),
+    clicks: atom<string>(),
+    sliderA: atom<number>(),
+    sliderB: atom<number>(),
   }));
 
   ngOnInit(): void {
@@ -507,8 +507,8 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     this.initLogStream();
 
     // Seed combined
-    this.appScope.streamA.next(this.streamAValue);
-    this.appScope.streamB.next(this.streamBValue);
+    this.appScope.sliderA.next(this.sliderAValue);
+    this.appScope.sliderB.next(this.sliderBValue);
   }
 
   ngAfterViewInit(): void {
@@ -659,7 +659,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
   }
 
   private initBufferStream(): void {
-    const s = this.appScope.clickSubject.pipe(
+    const s = this.appScope.clicks.pipe(
       bufferCount(5),
       tap((batch: string[]) => {
         this.batches.unshift(batch);
@@ -671,7 +671,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
   }
 
   private initCombinedStream(): void {
-    const s = combineLatest(this.appScope.streamA, this.appScope.streamB).pipe(
+    const s = combineLatest(this.appScope.sliderA, this.appScope.sliderB).pipe(
       map(([a, b]) => (a * b) / 100),
       tap(v => { this.combinedValue = v; this.cdr.detectChanges(); })
     ).subscribe(() => {});
@@ -702,7 +702,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
 
     const combinedLog$ = interval(4200).pipe(
       throttle(4200),
-      map(() => `Combined recalculated: A=${this.streamAValue}, B=${this.streamBValue}`),
+      map(() => `Combined recalculated: A=${this.sliderAValue}, B=${this.sliderBValue}`),
       tap(msg => this.pushLog(msg, 'combined'))
     );
 
@@ -711,17 +711,17 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
   }
 
   emitClick(label: string): void {
-    this.appScope.clickSubject.next(label);
+    this.appScope.clicks.next(label);
   }
 
   updateStreamA(value: number): void {
-    this.streamAValue = value;
-    this.appScope.streamA.next(value);
+    this.sliderAValue = value;
+    this.appScope.sliderA.next(value);
   }
 
   updateStreamB(value: number): void {
-    this.streamBValue = value;
-    this.appScope.streamB.next(value);
+    this.sliderBValue = value;
+    this.appScope.sliderB.next(value);
   }
 
   private pushLog(message: string, type: string): void {

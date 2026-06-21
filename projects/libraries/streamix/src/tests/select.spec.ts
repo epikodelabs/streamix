@@ -11,11 +11,11 @@ describe('select', () => {
 
   it("should emit selected values based on indexIterator", async () => {
     const indexes = [0, 2, 4];
-    const selectStream = pipe(source, select(indexes[Symbol.iterator]()));
+    const selected = pipe(source, select(indexes[Symbol.iterator]()));
     const results: any[] = [];
 
     const done = (async () => {
-      for await (const value of iterate(selectStream)) {
+      for await (const value of iterate(selected)) {
         results.push(value);
       }
     })();
@@ -34,11 +34,11 @@ describe('select', () => {
 
   it("should complete immediately if indexIterator is empty", async () => {
     const indexes: number[] = []; // Empty iterator, no indexes to select
-    const selectStream = pipe(source, select(indexes[Symbol.iterator]()));
+    const selected = pipe(source, select(indexes[Symbol.iterator]()));
     const results: any[] = [];
 
     const done = (async () => {
-      for await (const value of iterate(selectStream)) {
+      for await (const value of iterate(selected)) {
         results.push(value);
       }
     })();
@@ -53,11 +53,11 @@ describe('select', () => {
 
   it("should not emit values if indexIterator has indexes beyond the stream length", async () => {
     const indexes = [10, 11, 12]; // Indexes beyond the length of the stream
-    const selectStream = pipe(source, select(indexes[Symbol.iterator]()));
+    const selected = pipe(source, select(indexes[Symbol.iterator]()));
     const results: any[] = [];
 
     const done = (async () => {
-      for await (const value of iterate(selectStream)) {
+      for await (const value of iterate(selected)) {
         results.push(value);
       }
     })();
@@ -72,11 +72,11 @@ describe('select', () => {
 
   it("should emit only the valid values when indexIterator has mixed valid and invalid indexes", async () => {
     const indexes = [0, 2, 10]; // 10 is beyond the stream length
-    const selectStream = pipe(source, select(indexes[Symbol.iterator]()));
+    const selected = pipe(source, select(indexes[Symbol.iterator]()));
     const results: any[] = [];
 
     const done = (async () => {
-      for await (const value of iterate(selectStream)) {
+      for await (const value of iterate(selected)) {
         results.push(value);
       }
     })();

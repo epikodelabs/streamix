@@ -12,7 +12,7 @@ describe('concatMap', () => {
     const values = ['1', '2'];
     const atom = pipe(
       from(values),
-      concatMap((value: any) => (value === '2' ? errorInnerStream() : project(value)))
+      concatMap((value: any) => (value === '2' ? errorInnerSource() : project(value)))
     );
 
     const emittedValues: any[] = [];
@@ -230,7 +230,7 @@ describe('concatMap', () => {
 });
 
 // Error Handling Stream using library's `flow`
-export function errorInnerStream(): AtomBase {
+export function errorInnerSource(): AtomBase {
   return flow(async function* () {
     throw new Error('Inner Stream Error');
   });

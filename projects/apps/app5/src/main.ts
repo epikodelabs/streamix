@@ -159,12 +159,12 @@ const test404 = async () => {
   const client = createHttpClient();
   client.withDefaults(useBase('https://jsonplaceholder.typicode.com'));
 
-  const stream = client
+  const response$ = client
     .get('/nonexistent-endpoint-12345', readText)
     .pipe(catchError((err: any) => { setOutput('404', `Caught 404: ${err.message || err}`); }));
 
   try {
-    for await (const value of stream) {
+    for await (const value of response$) {
       setOutput('404', String(value) || 'Empty 404 response');
     }
   } catch (err: any) {
@@ -199,12 +199,12 @@ const testTimeout = async () => {
     .withDefaults(useBase('https://jsonplaceholder.typicode.com'))
     .withDefaults(useTimeout(1));
 
-  const stream = client
+  const response$ = client
     .get('/posts', readArrayBuffer)
     .pipe(catchError((err: any) => { setOutput('timeout', `Caught timeout: ${err.message || err}`); }));
 
   try {
-    for await (const value of stream) {
+    for await (const value of response$) {
       setOutput('timeout', `Received ${(value as ArrayBuffer).byteLength} bytes`);
     }
   } catch (err: any) {

@@ -14,11 +14,11 @@ describe('none', () => {
 
   it('should emit true when no values satisfy the predicate', async () => {
     const predicate = (value: number) => value > 10;
-    const noneStream = source.pipe(none(predicate));
+    const noneResult = source.pipe(none(predicate));
     const results: boolean[] = [];
 
     void (async () => {
-      for await (const value of noneStream) {
+      for await (const value of noneResult) {
         results.push(value);
       }
     })();
@@ -33,11 +33,11 @@ describe('none', () => {
 
   it('should emit false immediately once a value satisfies the predicate', async () => {
     const predicate = (value: number) => value > 5;
-    const noneStream = source.pipe(none(predicate));
+    const noneResult = source.pipe(none(predicate));
     const results: boolean[] = [];
 
     void (async () => {
-      for await (const value of noneStream) {
+      for await (const value of noneResult) {
         results.push(value);
       }
     })();
@@ -53,11 +53,11 @@ describe('none', () => {
 
   it('should await asynchronous predicates before deciding', async () => {
     const predicate = async (value: number) => value === 3;
-    const noneStream = source.pipe(none(predicate));
+    const noneResult = source.pipe(none(predicate));
     const results: boolean[] = [];
 
     void (async () => {
-      for await (const value of noneStream) {
+      for await (const value of noneResult) {
         results.push(value);
       }
     })();

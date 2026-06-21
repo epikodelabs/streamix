@@ -179,8 +179,8 @@ describe("bufferCount", () => {
   });
 
   it("should work with different data types", async () => {
-    const objectSubject: Atom = atom<any>();
-    const buffered = pipe(objectSubject, bufferCount(2));
+    const objects: Atom = atom<any>();
+    const buffered = pipe(objects, bufferCount(2));
     const results: { id: number; name: string }[][] = [];
 
     const completed = (async () => {
@@ -189,10 +189,10 @@ describe("bufferCount", () => {
       }
     })();
 
-    objectSubject.next({ id: 1, name: "Alice" });
-    objectSubject.next({ id: 2, name: "Bob" });
-    objectSubject.next({ id: 3, name: "Charlie" });
-    objectSubject.dispose();
+    objects.next({ id: 1, name: "Alice" });
+    objects.next({ id: 2, name: "Bob" });
+    objects.next({ id: 3, name: "Charlie" });
+    objects.dispose();
     await waitTick();
 
     await completed;
@@ -203,8 +203,8 @@ describe("bufferCount", () => {
   });
 
   it("should handle null and undefined values in buffers", async () => {
-    const nullableSubject: Atom = atom<any>();
-    const buffered = pipe(nullableSubject, bufferCount(3));
+    const nullableValues: Atom = atom<any>();
+    const buffered = pipe(nullableValues, bufferCount(3));
     const results: (number | null | undefined)[][] = [];
 
     const completed = (async () => {
@@ -213,11 +213,11 @@ describe("bufferCount", () => {
       }
     })();
 
-    nullableSubject.next(1);
-    nullableSubject.next(null);
-    nullableSubject.next(undefined);
-    nullableSubject.next(2);
-    nullableSubject.dispose();
+    nullableValues.next(1);
+    nullableValues.next(null);
+    nullableValues.next(undefined);
+    nullableValues.next(2);
+    nullableValues.dispose();
     await waitTick();
 
     await completed;

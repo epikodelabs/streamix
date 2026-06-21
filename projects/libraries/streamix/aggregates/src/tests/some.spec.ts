@@ -12,11 +12,11 @@ describe('some', () => {
 
   it('should emit true if any value matches the predicate', async () => {
     const predicate = (value: number) => value > 2;
-    const someStream = source.pipe(some(predicate));
+    const someResult = source.pipe(some(predicate));
     const results: boolean[] = [];
 
     void (async () => {
-      for await (const value of someStream) {
+      for await (const value of someResult) {
         results.push(value);
       }
     })();
@@ -32,11 +32,11 @@ describe('some', () => {
 
   it('should emit false if no value matches the predicate', async () => {
     const predicate = (value: number) => value > 5;
-    const someStream = source.pipe(some(predicate));
+    const someResult = source.pipe(some(predicate));
     const results: boolean[] = [];
 
     void (async () => {
-      for await (const value of someStream) {
+      for await (const value of someResult) {
         results.push(value);
       }
     })();
@@ -51,11 +51,11 @@ describe('some', () => {
 
   it('should emit false if the stream is empty', async () => {
     const predicate = (value: number) => value > 2;
-    const someStream = source.pipe(some(predicate));
+    const someResult = source.pipe(some(predicate));
     const results: boolean[] = [];
 
     void (async () => {
-      for await (const value of someStream) {
+      for await (const value of someResult) {
         results.push(value);
       }
     })();
@@ -68,12 +68,12 @@ describe('some', () => {
 
   it('should propagate errors from the source stream', async () => {
     const predicate = (value: number) => value > 2;
-    const someStream = source.pipe(some(predicate));
+    const someResult = source.pipe(some(predicate));
     let error: any = null;
 
     void (async () => {
       try {
-        for await (const _ of someStream) {}
+        for await (const _ of someResult) {}
       } catch (err) {
         error = err;
       }
@@ -87,11 +87,11 @@ describe('some', () => {
 
   it('should complete after emitting true when predicate is matched', async () => {
     const predicate = (value: number) => value > 2;
-    const someStream = source.pipe(some(predicate));
+    const someResult = source.pipe(some(predicate));
     let completed = false;
 
     void (async () => {
-      for await (const _ of someStream) {
+      for await (const _ of someResult) {
         completed = true;
       }
     })();
@@ -106,11 +106,11 @@ describe('some', () => {
 
   it('should complete after emitting false if no value matches the predicate', async () => {
     const predicate = (value: number) => value > 5;
-    const someStream = source.pipe(some(predicate));
+    const someResult = source.pipe(some(predicate));
     let completed = false;
 
     void (async () => {
-      for await (const _ of someStream) {
+      for await (const _ of someResult) {
         completed = true;
       }
     })();

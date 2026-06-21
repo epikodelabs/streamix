@@ -77,9 +77,9 @@ describe('concat', () => {
   it('handles sources whose iterator lacks a return hook', async () => {
     const values: string[] = [];
 
-    const bareIteratorStream = createBareIteratorStream();
+    const bareIterator = createBareIterator();
 
-    for await (const value of iterate(concat(bareIteratorStream, from(['next'])))) {
+    for await (const value of iterate(concat(bareIterator, from(['next'])))) {
       if (value !== undefined) values.push(value);
     }
 
@@ -87,7 +87,7 @@ describe('concat', () => {
   });
 });
 
-function createBareIteratorStream(): AtomBase<string> {
+function createBareIterator(): AtomBase<string> {
   const stream = {} as AtomBase<string>;
 
   (stream as any).type = 'atom';

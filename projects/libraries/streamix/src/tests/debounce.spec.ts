@@ -30,14 +30,14 @@ describe('debounce', () => {
 
   it('should debounce values with rapid emissions', async () => {
     const values = [1, 2, 3, 4, 5];
-    const intervalStream = flow<number>(async function* () {
+    const intervalSource = flow<number>(async function* () {
       for (const value of values) {
         yield value;
         await wait(50);
       }
     });
 
-    const debouncedAtom = pipe(intervalStream, debounce(100));
+    const debouncedAtom = pipe(intervalSource, debounce(100));
     const emittedValues: number[] = [];
 
     for await (const value of iterate(debouncedAtom)) {

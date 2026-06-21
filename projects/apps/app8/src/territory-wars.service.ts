@@ -878,8 +878,8 @@ const gameActor = actor(
 );
 
 export class TerritoryWarsService {
-  private readonly stateSubject = atom<TerritoryWarsState>();
-  readonly state$ = this.stateSubject;
+  private readonly state = atom<TerritoryWarsState>();
+  readonly state$ = this.state;
 
   private readonly unsubscribeInbox: () => void;
   private destroyed = false;
@@ -889,7 +889,7 @@ export class TerritoryWarsService {
       if (message.from !== 'territory-game' || message.topic !== 'state') {
         return;
       }
-      this.stateSubject.next(message.payload as TerritoryWarsState);
+      this.state.next(message.payload as TerritoryWarsState);
     });
   }
 

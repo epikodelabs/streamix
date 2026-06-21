@@ -11,11 +11,11 @@ describe('unique', () => {
   });
 
   it('should emit only unique values', async () => {
-    const uniqueStream = source.pipe(unique());
+    const uniqueResult = source.pipe(unique());
     const results: any[] = [];
 
     void (async () => {
-      for await (const value of uniqueStream) {
+      for await (const value of uniqueResult) {
         results.push(value);
       }
     })();
@@ -32,11 +32,11 @@ describe('unique', () => {
   });
 
   it('should emit unique values based on the keySelector', async () => {
-    const uniqueStream = source.pipe(unique(value => value.key));
+    const uniqueResult = source.pipe(unique(value => value.key));
     const results: any[] = [];
 
     void (async () => {
-      for await (const value of uniqueStream) {
+      for await (const value of uniqueResult) {
         results.push(value);
       }
     })();
@@ -56,11 +56,11 @@ describe('unique', () => {
   });
 
   it('should emit all values when no key selector is provided', async () => {
-    const uniqueStream = source.pipe(unique());
+    const uniqueResult = source.pipe(unique());
     const results: any[] = [];
 
     void (async () => {
-      for await (const value of uniqueStream) {
+      for await (const value of uniqueResult) {
         results.push(value);
       }
     })();
@@ -81,11 +81,11 @@ describe('unique', () => {
   });
 
   it('should handle an empty stream gracefully', async () => {
-    const uniqueStream = source.pipe(unique());
+    const uniqueResult = source.pipe(unique());
     const results: any[] = [];
 
     void (async () => {
-      for await (const value of uniqueStream) {
+      for await (const value of uniqueResult) {
         results.push(value);
       }
     })();
@@ -97,12 +97,12 @@ describe('unique', () => {
   });
 
   it('should propagate errors from the source stream', async () => {
-    const uniqueStream = source.pipe(unique());
+    const uniqueResult = source.pipe(unique());
     let error: any = null;
 
     void (async () => {
       try {
-        for await (const _ of uniqueStream) {
+        for await (const _ of uniqueResult) {
           void _;
         }
       } catch (err) {
@@ -117,11 +117,11 @@ describe('unique', () => {
   });
 
   it('should handle complex objects correctly', async () => {
-    const uniqueStream = source.pipe(unique(value => value.id));
+    const uniqueResult = source.pipe(unique(value => value.id));
     const results: any[] = [];
 
     void (async () => {
-      for await (const value of uniqueStream) {
+      for await (const value of uniqueResult) {
         results.push(value);
       }
     })();

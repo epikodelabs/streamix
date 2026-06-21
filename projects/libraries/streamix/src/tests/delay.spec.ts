@@ -4,10 +4,10 @@ const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('delay', () => {
   it('should delay each value by the specified time', async () => {
-    const testStream = from([1, 2, 3]);
+    const source = from([1, 2, 3]);
     const delayTime = 100;
 
-    const delayedAtom = pipe(testStream, delay(delayTime));
+    const delayedAtom = pipe(source, delay(delayTime));
 
     const startTime = Date.now();
     const emittedTimes: number[] = [];
@@ -22,10 +22,10 @@ describe('delay', () => {
   });
 
   it('should stop emitting if the stream is cancelled', async () => {
-    const testStream = from([1, 2, 3]);
+    const source = from([1, 2, 3]);
     const delayTime = 1000;
 
-    const delayedAtom = pipe(testStream, delay(delayTime));
+    const delayedAtom = pipe(source, delay(delayTime));
 
     const results: number[] = [];
     for await (const value of iterate(delayedAtom)) {
@@ -40,10 +40,10 @@ describe('delay', () => {
   });
 
   it('should emit all values with delay before stopping', async () => {
-    const testStream = from([1, 2, 3, 4, 5]);
+    const source = from([1, 2, 3, 4, 5]);
     const delayTime = 100;
 
-    const delayedAtom = pipe(testStream, delay(delayTime));
+    const delayedAtom = pipe(source, delay(delayTime));
     const results: number[] = [];
     for await (const value of iterate(delayedAtom)) {
       results.push(value);
@@ -53,10 +53,10 @@ describe('delay', () => {
   });
 
   it('should respect promise-based delay inputs', async () => {
-    const testStream = from([1]);
+    const source = from([1]);
     const delayPromise = Promise.resolve(10);
 
-    const delayedAtom = pipe(testStream, delay(delayPromise));
+    const delayedAtom = pipe(source, delay(delayPromise));
     const startTime = Date.now();
 
     const results: number[] = [];
@@ -69,10 +69,10 @@ describe('delay', () => {
   });
 
   it('should treat undefined delay durations as immediate', async () => {
-    const testStream = from([42]);
+    const source = from([42]);
     const delayPromise = Promise.resolve<number | undefined>(undefined);
 
-    const delayedAtom = pipe(testStream, delay(delayPromise as any));
+    const delayedAtom = pipe(source, delay(delayPromise as any));
     const startTime = Date.now();
 
     const results: number[] = [];
