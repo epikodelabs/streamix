@@ -31,7 +31,7 @@ export type SharedSourceOptions = {
  * callback subscribers and/or the single active async iterator.
  */
 export function createSharedSource<T>(
-  connect: (push: (value: T) => void) => MaybePromise<() => MaybePromise<void>>,
+  connect: (push: (value: T) => MaybePromise<void>) => MaybePromise<() => MaybePromise<void>>,
   options: SharedSourceOptions = {}
 ): AtomBase<T> {
   const scope = getCurrentScope();
@@ -180,9 +180,9 @@ export function createSharedSource<T>(
     }
   };
 
-  const pushToAll = (value: T): void => {
+  const pushToAll = async (value: T): Promise<void> => {
     if (completed || buffer === null) return;
-    buffer.tryPush(value);
+    await buffer.push(value);
   };
 
   const instance: any = {

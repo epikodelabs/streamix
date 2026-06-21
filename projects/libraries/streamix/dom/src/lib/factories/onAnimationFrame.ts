@@ -58,7 +58,7 @@ export function onAnimationFrame(): AtomBase<number> {
       cancelFrame = globalThis.clearTimeout.bind(globalThis);
     }
 
-    const tick = (now: number) => {
+    const tick = async (now: number) => {
       if (cleaned) return;
 
       // Some RAF polyfills can provide non-monotonic timestamps; clamp to 0.
@@ -71,7 +71,7 @@ export function onAnimationFrame(): AtomBase<number> {
         lastTime = now;
       }
 
-      push(delta);
+      await push(delta);
       if (cleaned) return;
       rafId = raf(tick);
     };

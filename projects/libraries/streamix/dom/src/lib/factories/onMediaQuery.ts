@@ -31,7 +31,7 @@ export function onMediaQuery(
     return createSharedSource<boolean>(() => () => {}, { name: 'onMediaQuery' });
   }
 
-  return createSharedSource<boolean>((push) => {
+  return createSharedSource<boolean>(async (push) => {
     let cleaned = false;
     let mql: MediaQueryList | null = null;
     let listener: ((e: MediaQueryListEvent) => void) | null = null;
@@ -54,33 +54,31 @@ export function onMediaQuery(
 
     if (isPromiseLike(query)) {
       // Async path for promise query
-      push(false); // Emit false immediately
+      await push(false); // Emit false immediately
 
-      void (async () => {
-        const q = await query;
+      const q = await query;
+      if (cleaned) return cleanup;
+
+      mql = window.matchMedia(q);
+      await push(mql.matches);
+
+      listener = async (e: MediaQueryListEvent) => {
         if (cleaned) return;
+        await push(e.matches);
+      };
 
-        mql = window.matchMedia(q);
-        push(mql.matches);
-
-        listener = (e: MediaQueryListEvent) => {
-          if (cleaned) return;
-          push(e.matches);
-        };
-
-        if (typeof mql.addEventListener === 'function') {
-          mql.addEventListener('change', listener);
-        } else if (typeof (mql as any).addListener === 'function') {
-          (mql as any).addListener(listener);
-        }
-      })();
+      if (typeof mql.addEventListener === 'function') {
+        mql.addEventListener('change', listener);
+      } else if (typeof (mql as any).addListener === 'function') {
+        (mql as any).addListener(listener);
+      }
     } else {
       // Synchronous path for immediate query
       mql = window.matchMedia(query);
 
-      listener = (e: MediaQueryListEvent) => {
+      listener = async (e: MediaQueryListEvent) => {
         if (cleaned) return;
-        push(e.matches);
+        await push(e.matches);
       };
 
       if (typeof mql.addEventListener === 'function') {
@@ -89,7 +87,7 @@ export function onMediaQuery(
         (mql as any).addListener(listener);
       }
 
-      push(mql.matches);
+      await push(mql.matches);
     }
 
     return cleanup;

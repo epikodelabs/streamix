@@ -58,9 +58,9 @@ export function onNetwork(): AtomBase<NetworkState> {
       saveData: connection?.saveData
     });
 
-    const emit = () => {
+    const emit = async () => {
       if (cleaned) return;
-      push(snapshot());
+      await push(snapshot());
     };
 
     // SSR / unsupported guard

@@ -55,12 +55,12 @@ export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromi
         }
 
         if (cancelled) return;
-        push(count++);
+        await push(count++);
 
         while (!cancelled) {
           await sleep(resolvedInterval);
           if (cancelled) return;
-          push(count++);
+          await push(count++);
         }
       };
 

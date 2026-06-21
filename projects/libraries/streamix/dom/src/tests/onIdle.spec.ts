@@ -181,6 +181,7 @@ idescribe('onIdle', () => {
     await flush();
 
     env.fireIdle();
+    await flush();
     env.fireIdle();
     await flush();
 

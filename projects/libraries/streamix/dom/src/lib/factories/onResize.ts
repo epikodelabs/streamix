@@ -48,7 +48,7 @@ export function onResize(
 
       resolvedElement = el;
 
-      const emit = (entry?: ResizeObserverEntry) => {
+      const emit = async (entry?: ResizeObserverEntry) => {
         if (cleaned || !resolvedElement) return;
 
         // Prefer contentBoxSize over deprecated contentRect for modern browsers.
@@ -70,7 +70,7 @@ export function onResize(
           height = Math.round(rect.height);
         }
 
-        push({ width, height });
+        await push({ width, height });
       };
 
       observer = new ResizeObserver(entries => emit(entries[0]));

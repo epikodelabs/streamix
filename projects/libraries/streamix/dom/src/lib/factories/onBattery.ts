@@ -51,9 +51,9 @@ export function onBattery(): AtomBase<BatteryState> {
       dischargingTime: battery.dischargingTime
     });
 
-    const emit = () => {
+    const emit = async () => {
       if (cleaned) return;
-      push(snapshot());
+      await push(snapshot());
     };
 
     // SSR / unsupported API guard

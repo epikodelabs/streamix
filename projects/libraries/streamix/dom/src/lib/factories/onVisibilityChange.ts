@@ -43,9 +43,9 @@ export function onVisibilityChange(): AtomBase<DocumentVisibilityState> {
       return "visible";
     };
 
-    const emit = () => {
+    const emit = async () => {
       if (cleaned) return;
-      push(getState());
+      await push(getState());
     };
 
     // SSR / unsupported guard

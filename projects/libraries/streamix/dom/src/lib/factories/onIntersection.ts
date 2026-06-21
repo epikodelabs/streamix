@@ -67,11 +67,11 @@ export function onIntersection(
         return;
       }
 
-      const emit = (value: boolean) => {
+      const emit = async (value: boolean) => {
         if (cleaned || value === lastValue) return;
         lastValue = value;
         hasEmitted = true;
-        push(value);
+        await push(value);
       };
 
       const computeInitial = (target: Element): boolean => {

@@ -3,7 +3,7 @@ import { createSemaphore, type Semaphore } from "./semaphore";
 export type CyclicBufferMode = "discrete" | "analog";
 
 export interface CyclicBuffer<T> extends AsyncIterable<T> {
-  push(value: T): void;
+  push(value: T): Promise<void>;
   tryPush(value: T): boolean;
   close(): void;
   get length(): number;
@@ -60,8 +60,29 @@ export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "disc
   }
 
   return {
-    push(value: T): void {
-      tryPush(value);
+    async push(value: T): Promise<void> {
+      if (closed) return;
+
+      let release = semaphore.tryAcquire();
+      if (release) {
+        write(value);
+        notify();
+        return;
+      }
+
+      if (mode === "analog") {
+        buffer[readIdx] = value;
+        return;
+      }
+
+      release = await semaphore.acquire();
+      if (closed) {
+        release();
+        return;
+      }
+
+      write(value);
+      notify();
     },
 
     tryPush,

@@ -39,9 +39,9 @@ export function onOrientation(): AtomBase<"portrait" | "landscape"> {
       return angle === 0 || angle === 180 ? "portrait" : "landscape";
     };
 
-    const emit = () => {
+    const emit = async () => {
       if (cleaned) return;
-      push(getOrientation());
+      await push(getOrientation());
     };
 
     if (typeof window === "undefined" || !window.screen) {

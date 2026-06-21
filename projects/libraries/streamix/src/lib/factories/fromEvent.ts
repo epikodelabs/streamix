@@ -44,9 +44,9 @@ export function fromEvent<T extends Event = Event>(
           return;
         }
 
-        listener = (ev: Event) => {
+        listener = async (ev: Event) => {
           if (cleaned) return;
-          push(ev as T);
+          await push(ev as T);
         };
 
         resolvedTarget.addEventListener(resolvedEvent, listener, options);
@@ -55,9 +55,9 @@ export function fromEvent<T extends Event = Event>(
       resolvedTarget = target;
       resolvedEvent = event;
 
-      listener = (ev: Event) => {
+      listener = async (ev: Event) => {
         if (cleaned) return;
-        push(ev as T);
+        await push(ev as T);
       };
 
       resolvedTarget.addEventListener(resolvedEvent, listener, options);

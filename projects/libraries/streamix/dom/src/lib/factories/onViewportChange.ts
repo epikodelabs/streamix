@@ -74,9 +74,9 @@ export function onViewportChange(): AtomBase<ViewportState> {
       };
     };
 
-    const emit = () => {
+    const emit = async () => {
       if (cleaned) return;
-      push(snapshot());
+      await push(snapshot());
     };
 
     // SSR guard

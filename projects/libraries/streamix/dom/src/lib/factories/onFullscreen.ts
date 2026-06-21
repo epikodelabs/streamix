@@ -46,9 +46,9 @@ export function onFullscreen(): AtomBase<boolean> {
       );
     };
 
-    const emit = () => {
+    const emit = async () => {
       if (cleaned) return;
-      push(isFullscreen());
+      await push(isFullscreen());
     };
 
     // SSR guard

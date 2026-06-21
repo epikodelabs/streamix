@@ -110,6 +110,51 @@ idescribe('fromEvent', () => {
     sub2.unsubscribe();
   });
 
+  it('should support async subscribers', async () => {
+    const element = document.createElement('button');
+    const atom = fromEvent(element, 'click');
+
+    const received: Event[] = [];
+    const subscription = atom.subscribe(async (ev) => {
+      await Promise.resolve();
+      received.push(ev);
+    });
+
+    element.click();
+    await flushMicrotasks();
+
+    expect(received.length).toBe(1);
+    expect(received[0]).toBeInstanceOf(Event);
+
+    subscription.unsubscribe();
+  });
+
+  it('should await async subscribers before reading next value', async () => {
+    const element = document.createElement('button');
+    const atom = fromEvent(element, 'click');
+
+    let active = 0;
+    let maxActive = 0;
+    const received: Event[] = [];
+
+    const subscription = atom.subscribe(async (ev) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await delay(5);
+      received.push(ev);
+      active--;
+    });
+
+    element.click();
+    element.click();
+    await delay(20);
+
+    expect(received.length).toBe(2);
+    expect(maxActive).toBe(1);
+
+    subscription.unsubscribe();
+  });
+
   it('does not attach listener when unsubscribed before pending target resolves', async () => {
     const element = document.createElement('button');
 

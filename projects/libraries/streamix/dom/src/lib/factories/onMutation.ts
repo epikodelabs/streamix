@@ -48,9 +48,9 @@ export function onMutation(
         return;
       }
 
-      observer = new MutationObserver(mutations => {
+      observer = new MutationObserver(async mutations => {
         if (cleaned) return;
-        push([...mutations]);
+        await push([...mutations]);
       });
 
       observer.observe(resolvedElement, resolvedOptions);
