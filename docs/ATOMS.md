@@ -9,7 +9,7 @@ Lightweight reactive state for Streamix.
 
 ## Design
 
-* **Atoms are reactive state nodes** — `atom` for writable values, `flow` for stream-backed values, `derived` for derived values.
+* **Atoms are reactive state nodes** — `atom` for writable values, `flow` for async-backed values, `derived` for derived values.
 * **Scopes form a tree** — each scope owns atoms and nested scopes created within its factory.
 * **Loading state** — `scope.loading` is `true` until every tracked atom (recursively) has emitted at least once. It is computed in O(1) from an internal pending-atom counter.
 * **Implicit registration** — items are tracked automatically via execution context; no manual wiring required.
@@ -22,11 +22,11 @@ Lightweight reactive state for Streamix.
 ```
 app (loading)
 ├── header (loading)
-│   └── title = flow(titleStream, '')
+│   └── title = flow(titleSource)
 ├── main (loading)
 │   ├── count = atom(0)
-│   └── label = flow(labelStream, 'hello')
-└── footer = flow(footerStream, '')
+│   └── label = flow(labelSource)
+└── footer = flow(footerSource)
 ```
 
 Only returned values define the public shape:
@@ -43,11 +43,11 @@ Internal tracking remains separate from public structure.
 
 ### `atom(initialValue?)`
 
-Creates a writable reactive state node. With an initial value it behaves like a behavior-aware primitive; without one it starts empty like a Subject.
+Creates a writable reactive state node. With an initial value it behaves like a behavior-aware primitive; without one it starts empty.
 
 ```ts
 const count = atom(0);
-const source = atom<number>(); // starts empty (like a Subject)
+const source = atom<number>(); // starts empty until the first next()
 ```
 
 ```ts
@@ -72,9 +72,9 @@ count.dispose();
 
 ---
 
-### `flow(stream)`
+### `flow(source)`
 
-Creates a reactive state node connected to a stream.
+Creates a reactive state node connected to an async iterable, iterable, promise, or another atom.
 
 ```ts
 const source = atom<number>();
@@ -152,7 +152,7 @@ Creates a scoped reactive tree. All atoms and nested scopes created inside are a
 ```ts
 const app = scope(() => {
   const count = atom(0);
-  const label = flow(labelStream.pipe(startWith('hello')));
+  const label = flow(labelSource.pipe(startWith('hello')));
 
   return { count, label };
 });
@@ -190,8 +190,8 @@ root.dispose(); // disposes full tree
 
 ```ts
 const app = scope(() => {
-  const a = flow(streamA.pipe(startWith(0)));
-  const b = flow(streamB.pipe(startWith('')));
+  const a = flow(sourceA.pipe(startWith(0)));
+  const b = flow(sourceB.pipe(startWith('')));
 
   return { a, b };
 });
@@ -208,7 +208,7 @@ app.loading; // true until both emit
 ```ts
 const dashboard = scope(() => {
   const kpis = Array.from({ length: 1000 }, (_, i) =>
-    flow(loadKpi(i), 0)
+    flow(loadKpi(i))
   );
   return { kpis };
 });
@@ -265,7 +265,7 @@ Atoms form a push-based reactive graph. Understanding the synchronization rules 
 |---|---|---|---|
 | Writable | `atom(initialValue?)` | `next(value)` | every `next()` |
 | Derived | `derived(factory)` | re-runs factory when dependencies change | value actually changes |
-| Stream | `flow(source, initialValue?)` | async iterable / promise / atom | every emitted value |
+| Flow | `flow(source)` | async iterable / promise / atom | every emitted value |
 
 ### Discrete mode (default)
 
@@ -291,7 +291,7 @@ const analogScope = scope(() => { ... }, { mode: 'analog' });
 
 Atoms created inside an analog scope become **analog**: `next()` updates the value but defers the public broadcast to the scheduler's next microtask flush. Multiple synchronous `next()` calls collapse into a single subscriber notification with the latest value. This batches rapid updates so subscribers see only the final value per task.
 
-Use `discrete(initialValue?)` or `atom(..., { discrete: true })` to force a single atom to stay discrete even inside an analog scope.
+Use `atom(..., { discrete: true })` to force a single atom to stay discrete even inside an analog scope.
 
 Derived atoms inside an analog scope also defer subscriber notifications to the scheduler, but their `.value` getter still recomputes on read so values remain live.
 
@@ -360,6 +360,21 @@ A derived atom only notifies subscribers when its computed value actually change
 - a factory returning any of the above
 
 `pipe(source, ...operators)` builds a flow pipeline by normalizing input into an async iterable, applying operators, and wrapping the result in `flow()`.
+
+### TypeScript types
+
+Streamix exposes two public atom interfaces:
+
+* `Atom<T>` — the read-only base contract (`value`, `subscribe`, `pipe`, async iterator, `dispose`). Returned by `flow()`, `derived()`, and operator pipelines.
+* `Writable<T>` — extends `Atom<T>` with mutation methods (`next`, `fail`, `recover`, `clearError`). Returned by `atom()`.
+
+```ts
+import { atom, flow, derived, type Atom, type Writable } from '@epikodelabs/streamix';
+
+const count: Writable<number> = atom(0);
+const doubled: Atom<number> = derived(() => count.value * 2);
+const ticks: Atom<number> = flow(interval(1000));
+```
 
 ### Scope disposal
 
