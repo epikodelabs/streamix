@@ -6,7 +6,6 @@ export interface CyclicBuffer<T> extends AsyncIterable<T> {
   push(value: T): void;
   close(): void;
   get length(): number;
-  [Symbol.iterator](): Iterator<Promise<T>>;
 }
 
 export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "discrete"): CyclicBuffer<T> {
@@ -66,24 +65,6 @@ export function cyclicBuffer<T>(capacity: number, mode: CyclicBufferMode = "disc
 
     get length(): number {
       return size;
-    },
-
-    [Symbol.iterator](): Iterator<Promise<T>> {
-      return {
-        next(): IteratorResult<Promise<T>> {
-          if (size > 0) {
-            return { value: Promise.resolve(dequeue()), done: false };
-          }
-          if (closed) return { value: undefined!, done: true };
-          const p = new Promise<T>((resolve, reject) => {
-            waiters.push({ resolve, reject });
-          });
-          return { value: p, done: false };
-        },
-        return() {
-          return { value: undefined!, done: true };
-        },
-      };
     },
 
     [Symbol.asyncIterator](): AsyncIterator<T> {
