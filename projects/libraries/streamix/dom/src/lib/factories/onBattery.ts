@@ -1,4 +1,4 @@
-import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Represents the current battery status.
@@ -25,7 +25,7 @@ export type BatteryState = {
  *
  * @returns {Atom<BatteryState>}
  */
-export function onBattery(): AtomBase<BatteryState> {
+export function onBattery(): Atom<BatteryState> {
   return createSharedSource<BatteryState>((push) => {
     let cleaned = false;
     let battery: any = null;

@@ -1,7 +1,7 @@
-import { flow, type AtomBase } from "../atoms/atom";
+import { flow, type Atom } from "../atoms/atom";
+import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 import { createAsyncCoordinator } from "../utils";
 import { normalizeError } from "../utils/helpers";
-import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
  * Waits for all sources to complete and emits an array of their last values.
@@ -25,7 +25,7 @@ import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
  */
 export function forkJoin<R extends readonly unknown[] = any[]>(
   ...sources: { [K in keyof R]: PipeInput<R[K]> }
-): AtomBase<R >;
+): Atom<R >;
 
 /**
  * Overload that accepts an array/tuple of sources.
@@ -36,7 +36,7 @@ export function forkJoin<R extends readonly unknown[] = any[]>(
  */
 export function forkJoin<R extends readonly unknown[] = any[]>(
   sources: { [K in keyof R]: PipeInput<R[K]> }
-): AtomBase<R >;
+): Atom<R >;
 
 /**
  * Implementation signature.
@@ -45,7 +45,7 @@ export function forkJoin<R extends readonly unknown[] = any[]>(
  */
 export function forkJoin<R extends readonly unknown[] = any[]>(
   ...sources: any[]
-): AtomBase<R > {
+): Atom<R > {
   return flow<R >(async function* () {
     const normalizedSources = sources.length === 1 && Array.isArray(sources[0]) ? sources[0] : sources;
 

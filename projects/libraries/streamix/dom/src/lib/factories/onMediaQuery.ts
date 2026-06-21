@@ -1,4 +1,4 @@
-import { createSharedSource, isPromiseLike, type AtomBase, type MaybePromise } from "@epikodelabs/streamix";
+import { createSharedSource, isPromiseLike, type Atom, type MaybePromise } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `true` or `false` whenever a CSS media
@@ -21,7 +21,7 @@ import { createSharedSource, isPromiseLike, type AtomBase, type MaybePromise } f
  */
 export function onMediaQuery(
   query: MaybePromise<string>
-): AtomBase<boolean> {
+): Atom<boolean> {
   /* -------------------------------------------------- */
   /* Immediate environment check (required by tests)    */
   /* -------------------------------------------------- */

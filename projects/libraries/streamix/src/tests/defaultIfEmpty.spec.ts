@@ -1,8 +1,8 @@
-import {concatMap, defaultIfEmpty, iterate, atom as makeAtom, pipe, type Atom} from '@epikodelabs/streamix';
+import { concatMap, defaultIfEmpty, iterate, atom as makeAtom, pipe, type Writable } from '@epikodelabs/streamix';
 
 describe('defaultIfEmpty', () => {
   it('should emit the default value if no values are emitted', async () => {
-    const subject: Atom<string> = makeAtom<string>();
+    const subject: Writable<string> = makeAtom<string>();
     const defaultValue = 'Default Value';
     const atom = pipe(subject, defaultIfEmpty(defaultValue));
     const results: string[] = [];
@@ -21,7 +21,7 @@ describe('defaultIfEmpty', () => {
   });
 
   it('should not emit the default value if values are emitted', async () => {
-    const subject: Atom<string> = makeAtom<string>();
+    const subject: Writable<string> = makeAtom<string>();
     const defaultValue = 'Default Value';
     const atom = pipe(subject, defaultIfEmpty(defaultValue));
     const results: string[] = [];
@@ -42,7 +42,7 @@ describe('defaultIfEmpty', () => {
   });
 
   it('should emit default value when an upstream operator yields no values', async () => {
-    const subject: Atom<string> = makeAtom<string>();
+    const subject: Writable<string> = makeAtom<string>();
     const defaultValue = 'Default Value';
     const atom = pipe(
       subject,
@@ -66,7 +66,7 @@ describe('defaultIfEmpty', () => {
   });
 
   it('should not emit default value if values are emitted before', async () => {
-    const subject: Atom<string> = makeAtom<string>();
+    const subject: Writable<string> = makeAtom<string>();
     const defaultValue = 'Default Value';
     const atom = pipe(
       subject,

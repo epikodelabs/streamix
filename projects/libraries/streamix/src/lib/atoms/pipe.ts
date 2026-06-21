@@ -1,11 +1,11 @@
+import { flow, type Atom } from "./atom";
 import { isPromiseLike, type MaybePromise, type Operator } from "./operator";
-import { flow, type AtomBase } from "./atom";
 
 /**
  * Anything that can be used as the source of an atom pipeline.
  */
 export type PipeInput<T = any> =
-  | AtomBase<T>
+  | Atom<T>
   | AsyncIterable<T>
   | Iterable<T>
   | MaybePromise<T>
@@ -13,7 +13,7 @@ export type PipeInput<T = any> =
 
 
 
-function isAtomLike(value: unknown): value is AtomBase<any> {
+function isAtomLike(value: unknown): value is Atom<any> {
   return value != null && (value as any).type === "atom";
 }
 
@@ -69,7 +69,7 @@ export function toAsyncIterable<T>(source: PipeInput<T>): AsyncIterable<T> {
   })();
 }
 
-function combineAtoms<T extends unknown[]>(sources: AtomBase<any>[]): AsyncIterable<T> {
+function combineAtoms<T extends unknown[]>(sources: Atom<any>[]): AsyncIterable<T> {
   return {
     [Symbol.asyncIterator]() {
       const values = sources.map((s) => s.value);
@@ -111,21 +111,21 @@ function combineAtoms<T extends unknown[]>(sources: AtomBase<any>[]): AsyncItera
  *
  * @param source The source for the pipeline, or an array of atoms to combine.
  * @param ops Operators to apply.
- * @returns A new {@link AtomBase}.
+ * @returns A new {@link Atom}.
  */
-export function pipe<T>(source: PipeInput<T>): AtomBase<T>;
-export function pipe<T, A>(source: PipeInput<T>, op1: Operator<T, A>): AtomBase<A>;
-export function pipe<T, A, B>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>): AtomBase<B>;
-export function pipe<T, A, B, C>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>): AtomBase<C>;
-export function pipe<T, A, B, C, D>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>): AtomBase<D>;
-export function pipe<T, A, B, C, D, E>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>, op5: Operator<D, E>): AtomBase<E>;
-export function pipe<T, A, B, C, D, E, F>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>, op5: Operator<D, E>, op6: Operator<E, F>): AtomBase<F>;
-export function pipe<T extends readonly unknown[]>(sources: [...{ [K in keyof T]: AtomBase<T[K]> }]): AtomBase<T>;
-export function pipe<T>(source: PipeInput<T>, ...ops: Operator[]): AtomBase<any>;
+export function pipe<T>(source: PipeInput<T>): Atom<T>;
+export function pipe<T, A>(source: PipeInput<T>, op1: Operator<T, A>): Atom<A>;
+export function pipe<T, A, B>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>): Atom<B>;
+export function pipe<T, A, B, C>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>): Atom<C>;
+export function pipe<T, A, B, C, D>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>): Atom<D>;
+export function pipe<T, A, B, C, D, E>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>, op5: Operator<D, E>): Atom<E>;
+export function pipe<T, A, B, C, D, E, F>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>, op5: Operator<D, E>, op6: Operator<E, F>): Atom<F>;
+export function pipe<T extends readonly unknown[]>(sources: [...{ [K in keyof T]: Atom<T[K]> }]): Atom<T>;
+export function pipe<T>(source: PipeInput<T>, ...ops: Operator[]): Atom<any>;
 export function pipe(
-  source: PipeInput<any> | AtomBase<any>[],
+  source: PipeInput<any> | Atom<any>[],
   ...ops: Operator[]
-): AtomBase<any> {
+): Atom<any> {
   let iterable: AsyncIterable<any>;
 
   if (Array.isArray(source) && source.every(isAtomLike)) {

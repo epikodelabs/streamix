@@ -1,6 +1,6 @@
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
+import type { Atom } from "../atoms/atom";
 import { fromAny } from '../factories';
-import type { AtomBase } from "../atoms/atom";
 import { normalizeError } from "../utils/helpers";
 
 /**
@@ -9,7 +9,7 @@ import { normalizeError } from "../utils/helpers";
  * TypeScript infers the emitted element type rather than the wrapper type.
  */
 type ForkHandlerResult<R> =
-  | AtomBase<R>
+  | Atom<R>
   | AsyncIterable<R>
   | Iterable<R>
   | MaybePromise<R>;
@@ -38,7 +38,7 @@ export interface ForkOption<T = any, R = any> {
    * Handler function called for values that match the predicate.
    *
    * Can return:
-   * - an {@link AtomBase<R>}
+   * - an {@link Atom<R>}
    * - an {@link AsyncIterable<R>}
    * - an {@link Iterable<R>} (including arrays)
    * - a {@link MaybePromise<R>}

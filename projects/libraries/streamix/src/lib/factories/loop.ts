@@ -1,5 +1,5 @@
 import { isPromiseLike, type MaybePromise } from '../atoms';
-import { flow, type AtomBase } from '../atoms/atom';
+import { flow, type Atom } from '../atoms/atom';
 
 /**
  * Creates an atom that emits values in a loop based on a condition and an
@@ -14,13 +14,13 @@ import { flow, type AtomBase } from '../atoms/atom';
  * @param initialValue The starting value for the loop.
  * @param condition A function that returns `true` to continue the loop and `false` to stop.
  * @param iterateFn A function that returns the next value in the sequence.
- * @returns {AtomBase<T>} An atom that emits the generated sequence of values.
+ * @returns {Atom<T>} An atom that emits the generated sequence of values.
  */
 export function loop<T = any>(
   initialValue: MaybePromise<T>,
   condition: (value: T) => MaybePromise<boolean>,
   iterateFn: (value: T) => MaybePromise<T>
-): AtomBase<T> {
+): Atom<T> {
   return flow<T>(
     async function* () {
       let currentValue = isPromiseLike(initialValue) ? await initialValue : initialValue;

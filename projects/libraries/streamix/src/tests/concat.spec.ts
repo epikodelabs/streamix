@@ -1,5 +1,5 @@
-import type { AtomBase } from '@epikodelabs/streamix';
-import { concat, flow, DONE, from, iterate, NEXT } from '@epikodelabs/streamix';
+import type { Atom } from '@epikodelabs/streamix';
+import { concat, DONE, flow, from, iterate, NEXT } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -87,8 +87,8 @@ describe('concat', () => {
   });
 });
 
-function createBareIterator(): AtomBase<string> {
-  const stream = {} as AtomBase<string>;
+function createBareIterator(): Atom<string> {
+  const stream = {} as Atom<string>;
 
   (stream as any).type = 'atom';
   (stream as any).name = 'bare-iterator';

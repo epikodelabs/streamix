@@ -1,8 +1,8 @@
 import { flow, isPromiseLike, type MaybePromise } from "../atoms";
-import type { AtomBase } from "../atoms/atom";
+import type { Atom } from "../atoms/atom";
 import { normalizeError } from "../utils/helpers";
 
-function isAtomLike(value: unknown): value is AtomBase<any> {
+function isAtomLike(value: unknown): value is Atom<any> {
   return value != null && (value as any).type === "atom";
 }
 
@@ -18,8 +18,8 @@ function isIterable(value: unknown): value is Iterable<any> {
  * Normalizes any value type into an AtomBase using your system's native atom/flow primitives.
  */
 export function fromAny<R = any>(
-  value: AtomBase<R> | MaybePromise<R> | Array<R> | Iterable<R> | AsyncIterable<R>
-): AtomBase<R> {
+  value: Atom<R> | MaybePromise<R> | Array<R> | Iterable<R> | AsyncIterable<R>
+): Atom<R> {
   if (isAtomLike(value)) {
     return value;
   }

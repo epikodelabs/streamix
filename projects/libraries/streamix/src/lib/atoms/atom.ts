@@ -28,7 +28,7 @@ export interface AtomOptions {
 }
 
 /** Public API Contract */
-export interface AtomBase<T = any> {
+export interface Atom<T = any> {
   readonly type: "atom";
   readonly name?: string;
   readonly value: T;
@@ -40,11 +40,11 @@ export interface AtomBase<T = any> {
   subscribe(callback?: (value: T) => MaybePromise): Subscription;
   onError(handler: (error: any) => void): Subscription;
   dispose(): void;
-  pipe<R = any>(...ops: Operator<any, any>[]): AtomBase<R>;
+  pipe<R = any>(...ops: Operator<any, any>[]): Atom<R>;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
-export interface Atom<T = any> extends AtomBase<T> {
+export interface Writable<T = any> extends Atom<T> {
   next(value: T): void;
   fail(err: any, options?: { terminate?: boolean }): void;
   recover?(): void;
@@ -274,9 +274,9 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
 // Dependency invalidation channel: separate from public subscriber broadcast.
 // Dependent atoms register here so they are marked dirty immediately when a
 // dependency changes, even in analog mode where public broadcasts are batched.
-const atomChangeHandlers = new WeakMap<AtomBase<any>, Set<() => void>>();
+const atomChangeHandlers = new WeakMap<Atom<any>, Set<() => void>>();
 
-function addAtomChangeHandler(atom: AtomBase<any>, handler: () => void): void {
+function addAtomChangeHandler(atom: Atom<any>, handler: () => void): void {
   let handlers = atomChangeHandlers.get(atom);
   if (!handlers) {
     handlers = new Set();
@@ -285,11 +285,11 @@ function addAtomChangeHandler(atom: AtomBase<any>, handler: () => void): void {
   handlers.add(handler);
 }
 
-function removeAtomChangeHandler(atom: AtomBase<any>, handler: () => void): void {
+function removeAtomChangeHandler(atom: Atom<any>, handler: () => void): void {
   atomChangeHandlers.get(atom)?.delete(handler);
 }
 
-function notifyChangeHandlers(atom: AtomBase<any>): void {
+function notifyChangeHandlers(atom: Atom<any>): void {
   const handlers = atomChangeHandlers.get(atom);
   if (!handlers) return;
   for (const h of Array.from(handlers)) {
@@ -301,14 +301,14 @@ function notifyChangeHandlers(atom: AtomBase<any>): void {
  * flow() - Async Resource Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
-interface InternalFlowAtom<T> extends AtomBase<T>, InternalAtomContainer {
+interface InternalFlowAtom<T> extends Atom<T>, InternalAtomContainer {
   fail(err: any, options?: { terminate?: boolean }): void;
 }
 
 export function flow<T>(
   source: AsyncIterable<T> | Iterable<T> | ((signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>),
   options?: AtomOptions
-): AtomBase<T> {
+): Atom<T> {
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   
   const scope = getCurrentScope();
@@ -618,7 +618,7 @@ export function flow<T>(
  * atom() - Mutable State Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
-export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> {
+export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable<T> {
   const scope = getCurrentScope();
   const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
   
@@ -666,7 +666,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
     },
   };
 
-  const instance: Atom<T> & InternalAtomContainer = {
+  const instance: Writable<T> & InternalAtomContainer = {
     type: "atom",
 
     get disposed() { return disposed || isDisposed(this); },
@@ -800,7 +800,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Atom<T> 
  * derived() - Computed Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
-export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
+export function derived<T>(fn: () => T, options?: AtomOptions): Atom<T> {
   const scope = getCurrentScope();
   const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
   
@@ -938,7 +938,7 @@ export function derived<T>(fn: () => T, options?: AtomOptions): AtomBase<T> {
     },
   };
 
-  const instance: AtomBase<T> & InternalAtomContainer = {
+  const instance: Atom<T> & InternalAtomContainer = {
     type: "atom",
 
     get disposed() { return disposed || isDisposed(this); },

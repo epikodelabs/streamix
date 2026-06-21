@@ -1,4 +1,4 @@
-import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the visual viewport.
@@ -26,7 +26,7 @@ export type ViewportState = {
  *
  * @returns {Atom<ViewportState>}
  */
-export function onViewportChange(): AtomBase<ViewportState> {
+export function onViewportChange(): Atom<ViewportState> {
   return createSharedSource<ViewportState>((push) => {
     let cleaned = false;
     let target: VisualViewport | Window | null = null;

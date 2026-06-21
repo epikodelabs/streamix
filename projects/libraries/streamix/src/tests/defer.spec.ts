@@ -1,9 +1,9 @@
-import { atom, defer, from, iterate, type Atom } from '@epikodelabs/streamix';
+import { atom, defer, from, iterate, type Writable } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
 function mockSource(values: any[], completed = false, error?: Error): any {
-  const subject: Atom<any> = atom<any>();
+  const subject: Writable<any> = atom<any>();
 
   setTimeout(() => {
     if (error) {

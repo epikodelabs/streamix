@@ -1,4 +1,4 @@
-import { ANALOG, type AtomBase } from "./atom";
+import { ANALOG, type Atom } from "./atom";
 import type { MaybePromise } from "./operator";
 
 /**
@@ -22,12 +22,12 @@ import type { MaybePromise } from "./operator";
  * }
  * ```
  */
-export function iterate<T>(source: AtomBase<T> | AsyncIterable<T>): AsyncIterableIterator<T> {
+export function iterate<T>(source: Atom<T> | AsyncIterable<T>): AsyncIterableIterator<T> {
   if (!("type" in source) || (source as any).type !== "atom") {
     return source as AsyncIterableIterator<T>;
   }
 
-  const atom = source as AtomBase<T>;
+  const atom = source as Atom<T>;
   const conflate = (atom as any)[ANALOG] === true;
 
   let initialized = false;

@@ -1,10 +1,10 @@
 import {
-  atom,
-  createAsyncIterator,
-  createSubscription,
-  flow,
-  normalizeError,
-  type AtomBase,
+    atom,
+    createAsyncIterator,
+    createSubscription,
+    flow,
+    normalizeError,
+    type Atom,
 } from '@epikodelabs/streamix';
 
 const LOG_PREFIX = '[httpClient]';
@@ -19,7 +19,7 @@ const logWarning = (message: string, ...details: any[]) => {
  * This is used for HTTP response bodies so that consumers can iterate the
  * data after the parser has already finished.
  */
-function createReplayAtom<T>(): AtomBase<T> & {
+function createReplayAtom<T>(): Atom<T> & {
   set(value: T): void;
   fail(err: any): void;
   dispose(): void;
@@ -134,7 +134,7 @@ function createReplayAtom<T>(): AtomBase<T> & {
  * underlying HTTP request, providing control over long-running or cancellable
  * operations.
  */
-export type HttpStream<T = any> = AtomBase<T> & { abort: () => void };
+export type HttpStream<T = any> = Atom<T> & { abort: () => void };
 
 /**
  * HTTP request options.
@@ -167,7 +167,7 @@ export type Context = {
   status?: number;
   statusText?: string;
   redirectTo?: string;
-  data?: AtomBase;
+  data?: Atom;
   [key: string]: any;
 };
 
@@ -749,7 +749,7 @@ export const createHttpClient = (): HttpClient => {
         }
       })();
 
-      context.data = data as unknown as AtomBase;
+      context.data = data as unknown as Atom;
       return context;
     });
   }

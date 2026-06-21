@@ -1,4 +1,4 @@
-import { flow, isPromiseLike, type MaybePromise, type AtomBase } from '@epikodelabs/streamix';
+import { flow, isPromiseLike, type Atom, type MaybePromise } from '@epikodelabs/streamix';
 
 /**
  * Creates a stream that performs a JSONP request and emits the resulting data once.
@@ -12,9 +12,9 @@ import { flow, isPromiseLike, type MaybePromise, type AtomBase } from '@epikodel
  * @template T The type of the JSONP data to be emitted.
  * @param {MaybePromise<string>} url The URL to make the JSONP request to.
  * @param {MaybePromise<string>} [callbackParam='callback'] The name of the query parameter for the callback function.
- * @returns {AtomBase<T>} A new atom that emits the JSONP data and then completes.
+ * @returns {Atom<T>} A new atom that emits the JSONP data and then completes.
  */
-export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePromise<string> = 'callback'): AtomBase<T> {
+export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePromise<string> = 'callback'): Atom<T> {
   return flow<T>(async function* (signal) {
     if (
       typeof document === "undefined" ||

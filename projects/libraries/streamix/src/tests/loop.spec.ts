@@ -1,8 +1,8 @@
-import {iterate, loop, type AtomBase} from '@epikodelabs/streamix';
+import { iterate, loop, type Atom } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
-async function collect<T>(atom: AtomBase<T | undefined>): Promise<T[]> {
+async function collect<T>(atom: Atom<T | undefined>): Promise<T[]> {
   const result: T[] = [];
   for await (const v of iterate(atom)) {
     if (v !== undefined) result.push(v);

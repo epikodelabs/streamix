@@ -1,5 +1,5 @@
 import type { MaybePromise } from '../atoms';
-import type { AtomBase } from '../atoms/atom';
+import type { Atom } from '../atoms/atom';
 import { timer } from './timer';
 
 /**
@@ -12,8 +12,8 @@ import { timer } from './timer';
  * as an asynchronous atom.
  *
  * @param intervalMs The time in milliseconds between each emission.
- * @returns {AtomBase<number >} An atom that emits incrementing numbers (0, 1, 2, ...).
+ * @returns {Atom<number >} An atom that emits incrementing numbers (0, 1, 2, ...).
  */
-export function interval(intervalMs: MaybePromise<number>): AtomBase<number > {
+export function interval(intervalMs: MaybePromise<number>): Atom<number > {
   return timer(0, intervalMs);
 }

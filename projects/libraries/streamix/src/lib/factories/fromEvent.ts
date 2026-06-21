@@ -1,5 +1,5 @@
 import { isPromiseLike, type MaybePromise } from "../atoms";
-import type { AtomBase } from "../atoms/atom";
+import type { Atom } from "../atoms/atom";
 import { createSharedSource } from "../utils/sharedSource";
 
 /**
@@ -15,7 +15,7 @@ export function fromEvent<T extends Event = Event>(
   target: MaybePromise<EventTarget>,
   event: MaybePromise<string>,
   options?: AddEventListenerOptions | boolean
-): AtomBase<T> {
+): Atom<T> {
   return createSharedSource<T>((push) => {
     let cleaned = false;
     let listener: ((ev: Event) => void) | null = null;

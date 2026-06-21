@@ -1,4 +1,4 @@
-import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Represents a snapshot of the current network state.
@@ -30,7 +30,7 @@ export type NetworkState = {
  *
  * @returns {Atom<NetworkState>}
  */
-export function onNetwork(): AtomBase<NetworkState> {
+export function onNetwork(): Atom<NetworkState> {
   return createSharedSource<NetworkState>((push) => {
     let cleaned = false;
     let connection: any = null;

@@ -1,4 +1,4 @@
-import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the time delta (in milliseconds) between
@@ -16,7 +16,7 @@ import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
  *
  * @returns {Atom<number>} An atom emitting frame-to-frame time deltas.
  */
-export function onAnimationFrame(): AtomBase<number> {
+export function onAnimationFrame(): Atom<number> {
   return createSharedSource<number>((push) => {
     let cleaned = false;
 

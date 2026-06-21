@@ -1,5 +1,5 @@
 import { isPromiseLike, type MaybePromise } from "../atoms";
-import { flow, type AtomBase } from "../atoms/atom";
+import { flow, type Atom } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
@@ -18,7 +18,7 @@ export function retry<T = any>(
   factory: () => PipeInput<T>,
   maxRetries: MaybePromise<number> = 3,
   delay: MaybePromise<number> = 1000
-): AtomBase<T> {
+): Atom<T> {
   return flow<T>(async function* (signal?: AbortSignal) {
     const resolvedMaxRetries = isPromiseLike(maxRetries) ? await maxRetries : maxRetries;
     let resolvedDelayValue: number | undefined;

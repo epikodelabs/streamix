@@ -1,9 +1,9 @@
 import {
-  flow,
-  isPromiseLike,
-  normalizeError,
-  type MaybePromise,
-  type AtomBase,
+    flow,
+    isPromiseLike,
+    normalizeError,
+    type Atom,
+    type MaybePromise,
 } from "@epikodelabs/streamix";
 
 /**
@@ -14,7 +14,7 @@ import {
  *
  * @template T Message payload type.
  */
-export type WebSocketStream<T = any> = AtomBase<T> & {
+export type WebSocketStream<T = any> = Atom<T> & {
   /**
    * Sends a JSON-serializable message to the server.
    *

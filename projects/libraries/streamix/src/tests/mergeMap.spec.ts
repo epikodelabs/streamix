@@ -1,4 +1,4 @@
-import {atom, filter, from, iterate, mergeMap, pipe, type Atom} from '@epikodelabs/streamix';
+import { atom, filter, from, iterate, mergeMap, pipe, type Writable } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -153,7 +153,7 @@ describe('mergeMap', () => {
   });
 
   it('edge: should run all rapid emissions concurrently', async () => {
-    const source: Atom<any> = atom<number>();
+    const source: Writable<any> = atom<number>();
     const results: number[] = [];
     const startTimes: number[] = [];
 
@@ -186,7 +186,7 @@ describe('mergeMap', () => {
   });
 
   it('edge: should handle mix of sync and async inners concurrently', async () => {
-    const source: Atom<any> = atom<number>();
+    const source: Writable<any> = atom<number>();
     const results: number[] = [];
 
     const merged = pipe(
@@ -219,7 +219,7 @@ describe('mergeMap', () => {
   });
 
   it('edge: should continue other inners when one errors', async () => {
-    const source: Atom<any> = atom<number>();
+    const source: Writable<any> = atom<number>();
     const results: number[] = [];
     let caughtError: Error | undefined;
 
@@ -260,7 +260,7 @@ describe('mergeMap', () => {
   });
 
   it('edge: should handle rapid emissions with varying inner durations', async () => {
-    const source: Atom<any> = atom<number>();
+    const source: Writable<any> = atom<number>();
     const results: number[] = [];
 
     const merged = pipe(
@@ -290,7 +290,7 @@ describe('mergeMap', () => {
   });
 
   it('edge: should handle unsubscribe with multiple active inners', async () => {
-    const source: Atom<any> = atom<number>();
+    const source: Writable<any> = atom<number>();
     const results: number[] = [];
     const completions: number[] = [];
 

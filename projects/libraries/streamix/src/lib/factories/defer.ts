@@ -1,4 +1,4 @@
-import { flow, type AtomBase } from '../atoms/atom';
+import { flow, type Atom } from '../atoms/atom';
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
@@ -12,9 +12,9 @@ import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
  *
  * @template T The type of the values in the inner stream.
  * @param factory A function that returns the source to be subscribed to.
- * @returns {AtomBase<T>} A new atom that defers subscription to the inner stream.
+ * @returns {Atom<T>} A new atom that defers subscription to the inner stream.
  */
-export function defer<T = any>(factory: () => PipeInput<T>): AtomBase<T> {
+export function defer<T = any>(factory: () => PipeInput<T>): Atom<T> {
   return flow<T>(async function* () {
     const source = toAsyncIterable(factory());
     const iterator = source[Symbol.asyncIterator]() as AsyncIterator<T>;

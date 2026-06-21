@@ -1,4 +1,4 @@
-import { flow, type AtomBase } from "../atoms/atom";
+import { flow, type Atom } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
@@ -11,9 +11,9 @@ import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
  *
  * @template T The type of the values in the iterable.
  * @param source The iterable source to convert into an atom.
- * @returns {AtomBase<T>} A new atom that emits each value from the source.
+ * @returns {Atom<T>} A new atom that emits each value from the source.
  */
-export function from<T = any>(source: PipeInput<T>): AtomBase<T> {
+export function from<T = any>(source: PipeInput<T>): Atom<T> {
   return flow<T>(async function* () {
     yield* toAsyncIterable(source);
   });

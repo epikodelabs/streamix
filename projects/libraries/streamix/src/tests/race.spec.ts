@@ -1,4 +1,4 @@
-import { atom, flow, from, race, type Atom } from '@epikodelabs/streamix';
+import { atom, flow, from, race, type Writable } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -13,11 +13,11 @@ describe('race', () => {
   });
 
   it('should only emit values from the winning stream', async () => {
-    const stream1: Atom = atom<number>();
-    const stream2: Atom = atom<number>();
+    const stream1: Writable = atom<number>();
+    const stream2: Writable = atom<number>();
     const results: number[] = [];
 
-    (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
     stream1.next(2);
@@ -29,11 +29,11 @@ describe('race', () => {
   });
 
   it('should emit the first value from the winning stream', async () => {
-    const stream1: Atom = atom<number>();
-    const stream2: Atom = atom<number>();
+    const stream1: Writable = atom<number>();
+    const stream2: Writable = atom<number>();
     const results: number[] = [];
 
-    (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
     stream2.next(2);
@@ -44,11 +44,11 @@ describe('race', () => {
   });
 
   it('should complete when the winning stream completes', async () => {
-    const stream1: Atom = atom<number>();
-    const stream2: Atom = atom<number>();
+    const stream1: Writable = atom<number>();
+    const stream2: Writable = atom<number>();
     const results: number[] = [];
 
-    const subscription = (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    const subscription = (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
     stream1.dispose();
@@ -61,11 +61,11 @@ describe('race', () => {
   });
 
   it('should not crash when the winning stream errors', async () => {
-    const stream1: Atom = atom<number>();
-    const stream2: Atom = atom<number>();
+    const stream1: Writable = atom<number>();
+    const stream2: Writable = atom<number>();
     const results: number[] = [];
 
-    (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
     stream1.fail(new Error('test error'));
@@ -77,12 +77,12 @@ describe('race', () => {
   });
 
   it('should handle multiple streams correctly', async () => {
-    const stream1: Atom = atom<number>();
-    const stream2: Atom = atom<number>();
-    const stream3: Atom = atom<number>();
+    const stream1: Writable = atom<number>();
+    const stream2: Writable = atom<number>();
+    const stream3: Writable = atom<number>();
     const results: number[] = [];
 
-    const subscription = (race(stream1, stream2, stream3) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    const subscription = (race(stream1, stream2, stream3) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
     stream2.next(2);
@@ -111,7 +111,7 @@ describe('race', () => {
     });
 
     const results: number[] = [];
-    const subscription = (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    const subscription = (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     await delay(100);
     subscription.unsubscribe();
@@ -131,7 +131,7 @@ describe('race', () => {
     });
 
     const results: number[] = [];
-    const subscription = (race(stream1, stream2) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    const subscription = (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     await delay(150);
 
@@ -164,7 +164,7 @@ describe('race', () => {
 
     const results: number[] = [];
 
-    (race(from([] as number[]), losing) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    (race(from([] as number[]), losing) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     await delay(50);
 
@@ -178,7 +178,7 @@ describe('race', () => {
   it('supports promise inputs', async () => {
     const results: number[] = [];
 
-    (race(Promise.resolve(1), Promise.resolve(2)) as Atom<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    (race(Promise.resolve(1), Promise.resolve(2)) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     await delay();
 

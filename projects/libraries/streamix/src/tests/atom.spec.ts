@@ -1,10 +1,10 @@
 import {
-  atom,
-  createTestEnvironment,
-  derived,
-  flow,
-  getScheduler,
-  type AtomBase
+    atom,
+    createTestEnvironment,
+    derived,
+    flow,
+    getScheduler,
+    type Atom
 } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -173,7 +173,7 @@ describe('Atom System', () => {
     });
 
     it('should throw on circular dependency', () => {
-      let derivedAtom: AtomBase<any>;
+      let derivedAtom: Atom<any>;
       const source = atom(0);
       // This creates a circular dependency
       expect(() => {

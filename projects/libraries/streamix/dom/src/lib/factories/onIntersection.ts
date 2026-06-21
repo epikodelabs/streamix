@@ -1,7 +1,7 @@
 import {
   createSharedSource,
   isPromiseLike,
-  type AtomBase,
+  type Atom,
   type MaybePromise,
 } from "@epikodelabs/streamix";
 
@@ -27,7 +27,7 @@ import {
 export function onIntersection(
   element: MaybePromise<Element>,
   options?: MaybePromise<IntersectionObserverInit>
-): AtomBase<boolean> {
+): Atom<boolean> {
   return createSharedSource<boolean>((push) => {
     let cleaned = false;
     let io: IntersectionObserver | null = null;

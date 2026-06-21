@@ -1,9 +1,9 @@
-import { atom, bufferCount, iterate, pipe, type Atom } from '@epikodelabs/streamix';
+import { atom, bufferCount, iterate, pipe, type Writable } from '@epikodelabs/streamix';
 
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("bufferCount", () => {
-  let source: Atom<any>;
+  let source: Writable<any>;
 
   beforeEach(() => {
     source = atom<number>();
@@ -179,7 +179,7 @@ describe("bufferCount", () => {
   });
 
   it("should work with different data types", async () => {
-    const objects: Atom = atom<any>();
+    const objects: Writable = atom<any>();
     const buffered = pipe(objects, bufferCount(2));
     const results: { id: number; name: string }[][] = [];
 
@@ -203,7 +203,7 @@ describe("bufferCount", () => {
   });
 
   it("should handle null and undefined values in buffers", async () => {
-    const nullableValues: Atom = atom<any>();
+    const nullableValues: Writable = atom<any>();
     const buffered = pipe(nullableValues, bufferCount(3));
     const results: (number | null | undefined)[][] = [];
 

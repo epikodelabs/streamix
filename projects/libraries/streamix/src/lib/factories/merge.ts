@@ -1,7 +1,7 @@
-import { flow, type AtomBase } from "../atoms/atom";
+import { flow, type Atom } from "../atoms/atom";
+import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 import { createAsyncCoordinator } from "../utils";
 import { normalizeError } from "../utils/helpers";
-import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
  * Merges multiple source streams into a single atom, emitting values as they arrive from any source.
@@ -19,7 +19,7 @@ import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
  *
  * @template T The type of the values in the streams.
  * @param sources Atoms, streams, or values (including promises) to merge.
- * @returns {AtomBase<T>} A new atom that emits values from all input streams.
+ * @returns {Atom<T>} A new atom that emits values from all input streams.
  *
  * @example
  * ```typescript
@@ -31,7 +31,7 @@ import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
  * merge(fast, slow, instant).forEach(console.log);
  * ```
  */
-export function merge<T = any>(...sources: PipeInput<T>[]): AtomBase<T> {
+export function merge<T = any>(...sources: PipeInput<T>[]): Atom<T> {
   return flow<T>(async function* () {
     if (sources.length === 0) return;
 

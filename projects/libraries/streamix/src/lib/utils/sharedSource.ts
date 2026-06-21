@@ -3,7 +3,7 @@ import {
   type MaybePromise,
   type Subscription,
 } from "../atoms";
-import { ANALOG, type AtomBase } from "../atoms/atom";
+import { ANALOG, type Atom } from "../atoms/atom";
 import { DONE } from "../atoms/operator";
 import { pipe as pipeSource } from "../atoms/pipe";
 import { getCurrentScope, getScopeMode, registerWithCurrentScope } from "../atoms/scope";
@@ -33,7 +33,7 @@ export type SharedSourceOptions = {
 export function createSharedSource<T>(
   connect: (push: (value: T) => MaybePromise<void>) => MaybePromise<() => MaybePromise<void>>,
   options: SharedSourceOptions = {}
-): AtomBase<T> {
+): Atom<T> {
   const scope = getCurrentScope();
   const mode: CyclicBufferMode =
     options.mode ?? (scope !== null ? getScopeMode(scope) : "discrete");
@@ -255,7 +255,7 @@ export function createSharedSource<T>(
       };
     },
     pipe(...ops: any[]) {
-      return pipeSource(instance as AtomBase<T>, ...ops);
+      return pipeSource(instance as Atom<T>, ...ops);
     },
     dispose() {
       completed = true;
@@ -276,7 +276,7 @@ export function createSharedSource<T>(
   };
 
   (instance as any)[ANALOG] = analog;
-  registerWithCurrentScope(instance as AtomBase<T>);
+  registerWithCurrentScope(instance as Atom<T>);
 
-  return instance as AtomBase<T>;
+  return instance as Atom<T>;
 }

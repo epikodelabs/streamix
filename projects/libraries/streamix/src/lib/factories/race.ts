@@ -1,7 +1,7 @@
-import { flow, type AtomBase } from "../atoms/atom";
+import { flow, type Atom } from "../atoms/atom";
+import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 import { createAsyncCoordinator } from "../utils";
 import { normalizeError } from "../utils/helpers";
-import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
 /**
  * Returns an atom that races multiple input sources.
@@ -17,11 +17,11 @@ import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
  *
  * @template {readonly unknown[]} T - A tuple type representing the combined values from the sources.
  * @param streams Atoms, streams, or values (including promises) to race against each other.
- * @returns {AtomBase<T[number] >} A new atom that emits values from the first source to produce a value.
+ * @returns {Atom<T[number] >} A new atom that emits values from the first source to produce a value.
  */
 export function race<T extends readonly unknown[] = any[]>(
   ...streams: { [K in keyof T]: PipeInput<T[K]> }
-): AtomBase<T[number] > {
+): Atom<T[number] > {
   return flow<T[number] >(async function* () {
     if (streams.length === 0) return;
 

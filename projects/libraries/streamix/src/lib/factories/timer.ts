@@ -1,5 +1,5 @@
 import { isPromiseLike, type MaybePromise } from '../atoms';
-import type { AtomBase } from '../atoms/atom';
+import type { Atom } from '../atoms/atom';
 import { createSharedSource } from '../utils/sharedSource';
 
 /**
@@ -16,9 +16,9 @@ import { createSharedSource } from '../utils/sharedSource';
  * If 0, the first value is emitted immediately (in the next microtask).
  * @param intervalMs - The time in milliseconds between subsequent emissions.
  * If not provided, it defaults to `delayMs`.
- * @returns {AtomBase<number>} An atom that emits incrementing numbers (0, 1, 2, ...).
+ * @returns {Atom<number>} An atom that emits incrementing numbers (0, 1, 2, ...).
  */
-export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromise<number>): AtomBase<number> {
+export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromise<number>): Atom<number> {
   return createSharedSource<number>(
     (push) => {
       let cancelled = false;

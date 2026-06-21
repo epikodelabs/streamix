@@ -1,6 +1,6 @@
-import { iterate, type AtomBase } from "../atoms";
+import { iterate, type Atom } from "../atoms";
 
-function isAtomLike(value: unknown): value is AtomBase<any> {
+function isAtomLike(value: unknown): value is Atom<any> {
   return value != null && (value as any).type === "atom";
 }
 
@@ -17,7 +17,7 @@ function isAtomLike(value: unknown): value is AtomBase<any> {
  * @param source The source stream or atom to listen to for the final value.
  * @returns A promise that resolves with the last value from the source or rejects on completion without a value or on error.
  */
-export function lastValueFrom<T = any>(source: AtomBase<T> | AsyncIterable<T>): Promise<T> {
+export function lastValueFrom<T = any>(source: Atom<T> | AsyncIterable<T>): Promise<T> {
   const iterator = isAtomLike(source)
     ? iterate(source)[Symbol.asyncIterator]()
     : (source as AsyncIterable<T>)[Symbol.asyncIterator]();

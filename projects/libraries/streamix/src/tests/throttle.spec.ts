@@ -1,11 +1,11 @@
-import { atom, iterate, pipe, throttle, type Atom } from '@epikodelabs/streamix';
+import { atom, iterate, pipe, throttle, type Writable } from '@epikodelabs/streamix';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('throttle', () => {
   it('should emit first value immediately and throttle subsequent values', async () => {
     const output: number[] = [];
-    const subject: Atom<any> = atom<number>();
+    const subject: Writable<any> = atom<number>();
     const reader = (async () => {
       for await (const v of iterate(pipe(subject, throttle<number>(100)))) {
         output.push(v);
@@ -27,7 +27,7 @@ describe('throttle', () => {
   });
 
   it('should complete after source completes', async () => {
-    const subject: Atom<any> = atom<number>();
+    const subject: Writable<any> = atom<number>();
 
     const reader = (async () => {
       for await (const _ of iterate(pipe(subject, throttle<number>(50)))) {
@@ -43,7 +43,7 @@ describe('throttle', () => {
   });
 
   it('should forward errors from the source', async () => {
-    const subject: Atom<any> = atom<number>();
+    const subject: Writable<any> = atom<number>();
     let caught: any = null;
 
     const reader = (async () => {
@@ -67,7 +67,7 @@ describe('throttle', () => {
 
   it('should flush the trailing value when the source completes during cooldown', async () => {
     const output: number[] = [];
-    const subject: Atom<any> = atom<number>();
+    const subject: Writable<any> = atom<number>();
     const reader = (async () => {
       for await (const v of iterate(pipe(subject, throttle<number>(50)))) {
         output.push(v);
@@ -85,7 +85,7 @@ describe('throttle', () => {
 
   it('should emit every value when values are spaced beyond duration', async () => {
     const output: number[] = [];
-    const subject: Atom<any> = atom<number>();
+    const subject: Writable<any> = atom<number>();
     const reader = (async () => {
       for await (const v of iterate(pipe(subject, throttle<number>(20)))) {
         output.push(v);
@@ -105,7 +105,7 @@ describe('throttle', () => {
 
   it('should not throttle when duration is 0', async () => {
     const output: number[] = [];
-    const subject: Atom<any> = atom<number>();
+    const subject: Writable<any> = atom<number>();
 
     const reader = (async () => {
       for await (const v of iterate(pipe(subject, throttle<number>(0)))) {

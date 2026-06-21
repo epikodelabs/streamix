@@ -1,4 +1,4 @@
-import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits fullscreen state changes.
@@ -16,7 +16,7 @@ import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
  *
  * @returns {Atom<boolean>}
  */
-export function onFullscreen(): AtomBase<boolean> {
+export function onFullscreen(): Atom<boolean> {
   return createSharedSource<boolean>((push) => {
     let cleaned = false;
 

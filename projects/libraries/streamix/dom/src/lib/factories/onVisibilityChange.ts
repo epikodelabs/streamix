@@ -1,4 +1,4 @@
-import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the document's visibility state
@@ -19,7 +19,7 @@ import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
  *
  * @returns {Atom<DocumentVisibilityState>}
  */
-export function onVisibilityChange(): AtomBase<DocumentVisibilityState> {
+export function onVisibilityChange(): Atom<DocumentVisibilityState> {
   return createSharedSource<DocumentVisibilityState>((push) => {
     let cleaned = false;
 

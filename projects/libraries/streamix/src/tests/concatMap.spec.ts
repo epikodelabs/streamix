@@ -1,4 +1,4 @@
-import { concatMap, flow, from, iterate, atom as makeAtom, pipe, type Atom, type AtomBase } from '@epikodelabs/streamix';
+import { concatMap, flow, from, iterate, atom as makeAtom, pipe, type Atom, type Writable } from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
 
@@ -84,7 +84,7 @@ describe('concatMap', () => {
   });
 
   it('edge: should queue rapid successive emissions and process sequentially', async () => {
-    const source: Atom<number> = makeAtom<number>();
+    const source: Writable<number> = makeAtom<number>();
     const results: number[] = [];
     const order: string[] = [];
 
@@ -92,7 +92,7 @@ describe('concatMap', () => {
       source,
       concatMap((val) => {
         order.push(`start-${val}`);
-        const inner: Atom = makeAtom<number>();
+        const inner: Writable = makeAtom<number>();
         setTimeout(() => {
           inner.next(val * 10);
           inner.dispose();
@@ -124,7 +124,7 @@ describe('concatMap', () => {
   });
 
   it('edge: should handle mix of sync and async inners in order', async () => {
-    const source: Atom<number> = makeAtom<number>();
+    const source: Writable<number> = makeAtom<number>();
     const results: number[] = [];
 
     const atom = pipe(
@@ -157,7 +157,7 @@ describe('concatMap', () => {
   });
 
   it('edge: should handle rapid emissions with empty inners', async () => {
-    const source: Atom<number> = makeAtom<number>();
+    const source: Writable<number> = makeAtom<number>();
     const results: number[] = [];
 
     const atom = pipe(
@@ -187,14 +187,14 @@ describe('concatMap', () => {
   });
 
   it('edge: should stop on first inner error in rapid emissions', async () => {
-    const source: Atom<number> = makeAtom<number>();
+    const source: Writable<number> = makeAtom<number>();
     const results: number[] = [];
     let caughtError: Error | undefined;
 
     const atom = pipe(
       source,
       concatMap((val) => {
-        const inner: Atom = makeAtom<number>();
+        const inner: Writable = makeAtom<number>();
         setTimeout(() => {
           if (val === 2) {
             inner.fail(new Error('Error at 2'));
@@ -230,7 +230,7 @@ describe('concatMap', () => {
 });
 
 // Error Handling Stream using library's `flow`
-export function errorInnerSource(): AtomBase {
+export function errorInnerSource(): Atom {
   return flow(async function* () {
     throw new Error('Inner Stream Error');
   });

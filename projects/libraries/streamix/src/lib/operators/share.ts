@@ -1,4 +1,4 @@
-import { atom, createOperator, DONE, iterate, type Atom, type Operator } from "../atoms";
+import { atom, createOperator, DONE, iterate, type Operator, type Writable } from "../atoms";
 import { normalizeError } from "../utils/helpers";
 
 /**
@@ -13,7 +13,7 @@ import { normalizeError } from "../utils/helpers";
  * @returns An operator that can be inserted into a pipeline to share the source.
  */
 export function share<T = any>() {
-  let shared: Atom<T> | undefined;
+  let shared: Writable<T> | undefined;
   let isConnected = false;
   let sourceIterator: AsyncIterator<T> | null = null;
   let subscriberCount = 0;

@@ -1,7 +1,7 @@
-import { atom, audit, iterate, pipe, type Atom } from '@epikodelabs/streamix';
+import { atom, audit, iterate, pipe, type Writable } from '@epikodelabs/streamix';
 
 describe('audit', () => {
-  let input: Atom;
+  let input: Writable;
 
   beforeEach(() => { 
     input = atom<number>();

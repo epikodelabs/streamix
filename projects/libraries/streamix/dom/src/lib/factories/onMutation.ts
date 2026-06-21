@@ -1,4 +1,4 @@
-import { createSharedSource, isPromiseLike, type AtomBase, type MaybePromise } from "@epikodelabs/streamix";
+import { createSharedSource, isPromiseLike, type Atom, type MaybePromise } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits arrays of `MutationRecord` objects
@@ -22,7 +22,7 @@ import { createSharedSource, isPromiseLike, type AtomBase, type MaybePromise } f
 export function onMutation(
   element: MaybePromise<Element>,
   options?: MaybePromise<MutationObserverInit>
-): AtomBase<MutationRecord[]> {
+): Atom<MutationRecord[]> {
   return createSharedSource<MutationRecord[]>((push) => {
     let cleaned = false;
     let observer: MutationObserver | null = null;

@@ -1,6 +1,6 @@
-import type { AtomBase } from "./atom";
-import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
 import { normalizeError } from "../utils/helpers";
+import type { Atom } from "./atom";
+import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
 
 // Define a recursive type to unwrap atom values and handle nested scopes
 type UnwrapSnapshotValues<T> = {
@@ -20,7 +20,7 @@ export interface Scope {
   /** Unique discriminator for the runtime context. */
   type: "scope";
   /** State container for active elements captured by this window. */
-  atoms: Set<AtomBase<any> | Scope>;
+  atoms: Set<Atom<any> | Scope>;
   /** Registered callbacks triggered when this context collapses. */
   cleanups: Set<() => void>;
   /** Scope mode: 'discrete' or 'analog' */
@@ -49,10 +49,10 @@ export interface Scope {
 let currentScope: Scope | null = null;
 
 // Tracks which scope each registered atom belongs to.
-const atomScopeRegistry = new WeakMap<AtomBase<any>, Scope>();
+const atomScopeRegistry = new WeakMap<Atom<any>, Scope>();
 
 // Tracks atoms that have produced at least one value.
-const emittedAtomsRegistry = new WeakSet<AtomBase<any>>();
+const emittedAtomsRegistry = new WeakSet<Atom<any>>();
 
 /* ── Active Window Accessors ──────────────────────────────────────────────── */
 
@@ -196,7 +196,7 @@ export function disposeScope(sc: Scope): void {
 /**
  * Links a newly created atom to the active scope so it is disposed with the scope.
  */
-export function registerWithCurrentScope(atom: AtomBase<any>): void {
+export function registerWithCurrentScope(atom: Atom<any>): void {
   if (!currentScope) return;
 
   const scopeRef = currentScope;
@@ -247,7 +247,7 @@ export function registerWithCurrentScope(atom: AtomBase<any>): void {
  * step is needed — the next read of `scope.loading` will automatically reflect
  * this change.
  */
-export function markAtomAsEmitted(atom: AtomBase<any>): void {
+export function markAtomAsEmitted(atom: Atom<any>): void {
   if (emittedAtomsRegistry.has(atom)) return;
   emittedAtomsRegistry.add(atom);
 

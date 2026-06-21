@@ -1,5 +1,5 @@
 import { isPromiseLike, type MaybePromise } from "../atoms";
-import { flow, type AtomBase } from "../atoms/atom";
+import { flow, type Atom } from "../atoms/atom";
 
 /**
  * Creates an atom from a value, promise, or a cancelable asynchronous factory.
@@ -20,7 +20,7 @@ import { flow, type AtomBase } from "../atoms/atom";
  */
 export function fromPromise<T>(
   input: MaybePromise<T> | ((signal?: AbortSignal) => MaybePromise<T>)
-): AtomBase<T> {
+): Atom<T> {
   return flow<T>(async function* () {
     const controller = new AbortController();
 

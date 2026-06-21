@@ -1,4 +1,4 @@
-import { createSharedSource, isPromiseLike, type AtomBase, type MaybePromise } from "@epikodelabs/streamix";
+import { createSharedSource, isPromiseLike, type Atom, type MaybePromise } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits the dimensions of a given DOM element
@@ -20,7 +20,7 @@ import { createSharedSource, isPromiseLike, type AtomBase, type MaybePromise } f
  */
 export function onResize(
   element: MaybePromise<HTMLElement>
-): AtomBase<{ width: number; height: number }> {
+): Atom<{ width: number; height: number }> {
   return createSharedSource<{ width: number; height: number }>((push) => {
     let cleaned = false;
     let resolvedElement: HTMLElement | null = null;

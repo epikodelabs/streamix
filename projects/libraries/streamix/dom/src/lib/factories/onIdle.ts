@@ -1,4 +1,4 @@
-import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
+import { createSharedSource, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `IdleDeadline` objects whenever
@@ -21,7 +21,7 @@ import { createSharedSource, type AtomBase } from "@epikodelabs/streamix";
  * @param timeout Optional timeout (ms) after which idle callback must fire.
  * @returns {Atom<IdleDeadline>} An atom emitting idle deadlines.
  */
-export function onIdle(timeout?: number): AtomBase<IdleDeadline> {
+export function onIdle(timeout?: number): Atom<IdleDeadline> {
   return createSharedSource<IdleDeadline>((push) => {
     let cleaned = false;
     let idleId: number | null = null;
