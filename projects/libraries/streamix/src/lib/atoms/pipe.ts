@@ -69,6 +69,48 @@ export function toAsyncIterable<T>(source: PipeInput<T>): AsyncIterable<T> {
   })();
 }
 
+function combineAtoms<T extends unknown[]>(sources: Atom<any>[]): AsyncIterable<T> {
+  return {
+    [Symbol.asyncIterator]() {
+      const values = sources.map((s) => s.value);
+      const queue: T[] = [];
+      let resolveNext: ((value: IteratorResult<T>) => void) | null = null;
+      let done = false;
+
+      const subs = sources.map((s, i) =>
+        s.subscribe((v) => {
+          values[i] = v;
+          const emitted = values.slice() as T;
+          if (resolveNext) {
+            resolveNext({ value: emitted, done: false });
+            resolveNext = null;
+          } else {
+            queue.push(emitted);
+          }
+        })
+      );
+
+      return {
+        async next() {
+          if (done) return { value: undefined, done: true } as IteratorResult<T>;
+          if (queue.length > 0) {
+            return { value: queue.shift()!, done: false };
+          }
+          return new Promise<IteratorResult<T>>((resolve) => {
+            resolveNext = resolve;
+          });
+        },
+        return() {
+          done = true;
+          subs.forEach((s) => s.unsubscribe());
+          queue.length = 0;
+          return Promise.resolve({ value: undefined, done: true } as IteratorResult<T>);
+        },
+      };
+    },
+  };
+}
+
 /**
  * Builds an atom pipeline from a supported source.
  *
@@ -83,13 +125,21 @@ export function toAsyncIterable<T>(source: PipeInput<T>): AsyncIterable<T> {
  * );
  * ```
  *
+ * You can also pass a tuple of atoms to combine them into a single atom whose
+ * values are tuples:
+ *
+ * ```ts
+ * const combined = pipe([atom(1), atom('hello')]); // Atom<[number, string]>
+ * ```
+ *
  * Up to 16 operators are fully typed via overloads. Beyond 16 operators, TypeScript
  * falls back to the generic signature and the result type becomes `Atom<any>`.
  *
- * @param source - The source for the pipeline.
+ * @param source - The source for the pipeline, or a tuple of atoms to combine.
  * @param operators - Operators to apply to the source.
  * @returns A new {@link Atom} that emits the transformed values.
  */
+export function pipe<T extends readonly unknown[]>(sources: [...{ [K in keyof T]: Atom<T[K]> }]): Atom<T>;
 export function pipe<T>(source: PipeInput<T>): Atom<T>;
 export function pipe<T, A>(source: PipeInput<T>, op1: Operator<T, A>): Atom<A>;
 export function pipe<T, A, B>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>): Atom<B>;
@@ -109,10 +159,18 @@ export function pipe<T, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O>(source: Pip
 export function pipe<T, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>, op5: Operator<D, E>, op6: Operator<E, F>, op7: Operator<F, G>, op8: Operator<G, H>, op9: Operator<H, I>, op10: Operator<I, J>, op11: Operator<J, K>, op12: Operator<K, L>, op13: Operator<L, M>, op14: Operator<M, N>, op15: Operator<N, O>, op16: Operator<O, P>): Atom<P>;
 export function pipe<T>(source: PipeInput<T>, ...ops: Operator[]): Atom<any>;
 export function pipe(
-  source: PipeInput<any>,
+  source: PipeInput<any> | Atom<any>[],
   ...ops: Operator[]
 ): Atom<any> {
-  let iterator: AsyncIterator<any> = toAsyncIterable(source)[Symbol.asyncIterator]();
+  let iterable: AsyncIterable<any>;
+
+  if (Array.isArray(source) && source.every(isAtomLike)) {
+    iterable = combineAtoms(source);
+  } else {
+    iterable = toAsyncIterable(source as PipeInput<any>);
+  }
+
+  let iterator: AsyncIterator<any> = iterable[Symbol.asyncIterator]();
 
   for (const op of ops) {
     iterator = op.apply(iterator);

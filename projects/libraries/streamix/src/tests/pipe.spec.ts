@@ -1,4 +1,4 @@
-import { filter, from, iterate, map, pipe } from '@epikodelabs/streamix';
+import { atom, filter, from, iterate, map, pipe } from '@epikodelabs/streamix';
 describe('pipe', () => {
     it('can pass the result of one pipe as the input of another', async () => {
         const source = from([1, 2, 3, 4, 5]);
@@ -19,5 +19,29 @@ describe('pipe', () => {
             results.push(value);
         }
         expect(results).toEqual([3, 4, 5]);
+    });
+    it('can combine atoms of different types into a tuple', async () => {
+        const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+        const name = atom('Alice');
+        const age = atom(30);
+        const active = atom(true);
+        const combined = pipe([name, age, active]);
+        const results: [string, number, boolean][] = [];
+        void (async () => {
+            for await (const value of combined) {
+                results.push(value);
+            }
+        })();
+
+        name.next('Bob');
+        age.next(31);
+        active.next(false);
+
+        await settle();
+        expect(results).toEqual([
+            ['Bob', 30, true],
+            ['Bob', 31, true],
+            ['Bob', 31, false],
+        ]);
     });
 });
