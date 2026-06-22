@@ -1,4 +1,4 @@
-import { onResize } from "@epikodelabs/streamix/dom";
+import { on } from "@epikodelabs/streamix/dom";
 import { idescribe } from "./env.spec";
 
 idescribe('onResize', () => {
@@ -30,7 +30,7 @@ idescribe('onResize', () => {
     (div as any).getBoundingClientRect = () => ({ width: 10.4, height: 20.6 } as any);
 
     const values: any[] = [];
-    const sub = onResize(div).subscribe(v => values.push(v));
+    const sub = on('resize', div).subscribe(v => values.push(v));
 
     setTimeout(() => {
       try {
@@ -89,7 +89,7 @@ idescribe('onResize', () => {
     });
 
     const values: any[] = [];
-    const sub = onResize(elementPromise).subscribe(v => values.push(v));
+    const sub = on('resize', elementPromise).subscribe(v => values.push(v));
 
     sub.unsubscribe();
 
@@ -114,7 +114,7 @@ idescribe('onResize', () => {
     document.body.appendChild(div);
 
     const values: any[] = [];
-    const sub = onResize(div).subscribe(v => values.push(v));
+    const sub = on('resize', div).subscribe(v => values.push(v));
 
     // initial
     await new Promise(requestAnimationFrame);
@@ -139,7 +139,7 @@ idescribe('onResize', () => {
     divToTest.style.height = '100px';
     document.body.appendChild(divToTest);
 
-    const resize = onResize(divToTest);
+    const resize = on('resize', divToTest);
 
     // Spy on the cleanup mechanism
     const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect');
@@ -157,7 +157,7 @@ idescribe('onResize', () => {
     const divToTest = document.createElement('div');
     document.body.appendChild(divToTest);
 
-    const resize = onResize(divToTest);
+    const resize = on('resize', divToTest);
     const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect');
 
     const subscription = resize.subscribe(() => { });
@@ -172,7 +172,7 @@ idescribe('onResize', () => {
     const divToTest = document.createElement('div');
     document.body.appendChild(divToTest);
 
-    const resize = onResize(divToTest);
+    const resize = on('resize', divToTest);
     let errorOccurred = false;
 
     const subscription = resize.subscribe(() => { });
@@ -192,7 +192,7 @@ idescribe('onResize', () => {
     document.body.appendChild(div);
 
     const values: any[] = [];
-    const subscription = onResize(div).subscribe(v => values.push(v));
+    const subscription = on('resize', div).subscribe(v => values.push(v));
 
     // Wait for initial deferred emission
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -209,7 +209,7 @@ idescribe('onResize', () => {
     const div = document.createElement('div');
     document.body.appendChild(div);
 
-    const sub = onResize(div).subscribe(() => {});
+    const sub = on('resize', div).subscribe(() => {});
     sub.unsubscribe();
 
     setTimeout(() => done(), 0);
@@ -227,7 +227,7 @@ idescribe('onResize', () => {
     });
 
     const values: any[] = [];
-    const subscription = onResize(elementPromise!).subscribe(v => values.push(v));
+    const subscription = on('resize', elementPromise!).subscribe(v => values.push(v));
 
     resolveElement!(div);
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -250,7 +250,7 @@ idescribe('onResize', () => {
       delete (globalThis as any).ResizeObserver;
 
       const callback = jasmine.createSpy('callback');
-      const subscription = onResize(div).subscribe(callback);
+      const subscription = on('resize', div).subscribe(callback);
 
       expect(callback).not.toHaveBeenCalled();
       subscription.unsubscribe();
@@ -273,7 +273,7 @@ idescribe('onResize', () => {
       delete (globalThis as any).ResizeObserver;
 
       const callback = jasmine.createSpy('callback');
-      const subscription = onResize(div).subscribe(callback);
+      const subscription = on('resize', div).subscribe(callback);
 
       // Should not emit without ResizeObserver
       expect(callback).not.toHaveBeenCalled();
@@ -294,8 +294,8 @@ idescribe('onResize', () => {
 
     const observeSpy = spyOn(ResizeObserver.prototype, 'observe').and.callThrough();
 
-    const sub1 = onResize(div).subscribe();
-    const sub2 = onResize(div).subscribe();
+    const sub1 = on('resize', div).subscribe();
+    const sub2 = on('resize', div).subscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     // Should observe for each subscription
@@ -322,7 +322,7 @@ idescribe('onResize', () => {
     (globalThis as any).ResizeObserver = FakeResizeObserver;
 
     const values: any[] = [];
-    const sub = onResize(Promise.resolve(null as any)).subscribe(v => values.push(v));
+    const sub = on('resize', Promise.resolve(null as any)).subscribe(v => values.push(v));
 
     await new Promise(resolve => setTimeout(resolve, 50));
 
@@ -343,7 +343,7 @@ idescribe('onResize', () => {
       throw new Error('disconnect error');
     });
 
-    const sub = onResize(div).subscribe();
+    const sub = on('resize', div).subscribe();
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // createSharedSource swallows cleanup errors
@@ -366,7 +366,7 @@ idescribe('onResize', () => {
 
     const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect').and.callThrough();
 
-    const sub = onResize(div).subscribe();
+    const sub = on('resize', div).subscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     sub.unsubscribe();

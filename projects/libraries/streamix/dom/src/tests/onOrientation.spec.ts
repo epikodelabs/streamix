@@ -1,4 +1,4 @@
-import { onOrientation } from "@epikodelabs/streamix/dom";
+import { on } from "@epikodelabs/streamix/dom";
 import { idescribe } from "./env.spec";
 
 idescribe('onOrientation', () => {
@@ -35,7 +35,7 @@ idescribe('onOrientation', () => {
   });
 
   it('should emit initial orientation immediately', (done) => {
-    const stream = onOrientation();
+    const stream = on('orientation');
     const subscription = stream.subscribe((value) => {
         try {
           expect(value).toBe('portrait');
@@ -48,7 +48,7 @@ idescribe('onOrientation', () => {
   });
 
   it('should emit a new value on orientation change', (done) => {
-    const stream = onOrientation();
+    const stream = on('orientation');
     const addListenerSpy = (window.screen.orientation.addEventListener as jasmine.Spy);
 
     // Get the callback that was registered
@@ -90,7 +90,7 @@ idescribe('onOrientation', () => {
     mockOrientation.angle = 90;
     mockOrientation.type = 'landscape-primary';
 
-    const stream = onOrientation();
+    const stream = on('orientation');
     const subscription = stream.subscribe((value) => {
         try {
           expect(value).toBe('landscape');
@@ -106,7 +106,7 @@ idescribe('onOrientation', () => {
     mockOrientation.angle = 180;
     mockOrientation.type = 'portrait-secondary';
 
-    const stream = onOrientation();
+    const stream = on('orientation');
     const subscription = stream.subscribe((value) => {
         try {
           expect(value).toBe('portrait');
@@ -123,7 +123,7 @@ idescribe('onOrientation', () => {
     mockOrientation.angle = 270;
     mockOrientation.type = 'landscape-secondary';
 
-    const stream = onOrientation();
+    const stream = on('orientation');
     const subscription = stream.subscribe((value) => {
         try {
           expect(value).toBe('landscape');
@@ -140,7 +140,7 @@ idescribe('onOrientation', () => {
     // @ts-ignore
     delete (window.screen as any).orientation;
 
-    const stream = onOrientation();
+    const stream = on('orientation');
     const values: any[] = [];
 
     const subscription = stream.subscribe((value) => {
@@ -161,7 +161,7 @@ idescribe('onOrientation', () => {
   });
 
   it('should clean up event listeners on unsubscribe', () => {
-    const stream = onOrientation();
+    const stream = on('orientation');
     const subscription = stream.subscribe(() => { });
 
     const removeListenerSpy = (window.screen.orientation.removeEventListener as jasmine.Spy);
@@ -172,7 +172,7 @@ idescribe('onOrientation', () => {
   });
 
   it('should share the same listener across multiple subscribers', () => {
-    const stream = onOrientation();
+    const stream = on('orientation');
     const addListenerSpy = window.screen.orientation.addEventListener as jasmine.Spy;
 
     const sub1 = stream.subscribe(() => { });
@@ -193,7 +193,7 @@ idescribe('onOrientation', () => {
   });
 
   it('does not restart when start() is called multiple times', (done) => {
-    const stream = onOrientation();
+    const stream = on('orientation');
     const addListenerSpy = window.screen.orientation.addEventListener as jasmine.Spy;
     addListenerSpy.calls.reset();
 
@@ -216,7 +216,7 @@ idescribe('onOrientation', () => {
   });
 
   it('does not stop when already stopped', (done) => {
-    const stream = onOrientation();
+    const stream = on('orientation');
     const removeListenerSpy = window.screen.orientation.removeEventListener as jasmine.Spy;
     
     const sub = stream.subscribe(() => { });
@@ -249,7 +249,7 @@ idescribe('onOrientation', () => {
   });
 
   it('handles teardown errors gracefully', async () => {
-    const stream = onOrientation();
+    const stream = on('orientation');
     const removeListenerSpy = window.screen.orientation.removeEventListener as jasmine.Spy;
     
     // Make removeEventListener throw an error

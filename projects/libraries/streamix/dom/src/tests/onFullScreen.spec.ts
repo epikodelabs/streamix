@@ -1,4 +1,4 @@
-import { onFullscreen } from "@epikodelabs/streamix/dom";
+import { on } from "@epikodelabs/streamix/dom";
 import { idescribe } from "./env.spec";
 
 function delay(ms = 0): Promise<void> {
@@ -101,14 +101,14 @@ idescribe("onFullscreen", () => {
   });
 
   it("creates a stream with correct name and does not listen immediately", () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     
     expect(stream.name).toBe("onFullscreen");
     expect(document.addEventListener).not.toHaveBeenCalled();
   });
 
   it("emits initial state when subscribing", async () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     const values: boolean[] = [];
 
     stream.subscribe((value) => {
@@ -121,7 +121,7 @@ idescribe("onFullscreen", () => {
 
   it("detects fullscreen state across all browser variants", async () => {
     fullscreenElement = document.createElement("div");
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     
     const values1: boolean[] = [];
     stream.subscribe((value) => values1.push(value));
@@ -130,7 +130,7 @@ idescribe("onFullscreen", () => {
     
     fullscreenElement = null;
     webkitFullscreenElement = document.createElement("div");
-    const stream2 = onFullscreen();
+    const stream2 = on('fullscreen');
     
     const values2: boolean[] = [];
     stream2.subscribe((value) => values2.push(value));
@@ -139,7 +139,7 @@ idescribe("onFullscreen", () => {
   });
 
   it("responds to fullscreen change events", async () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     const values: boolean[] = [];
 
     stream.subscribe((value) => values.push(value));
@@ -159,7 +159,7 @@ idescribe("onFullscreen", () => {
   });
 
   it("emits to multiple subscribers and cleans up properly", async () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     const values1: boolean[] = [];
     const values2: boolean[] = [];
 
@@ -187,7 +187,7 @@ idescribe("onFullscreen", () => {
   });
 
   it("supports async iteration", async () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     
     expect(stream[Symbol.asyncIterator]).toBeDefined();
     expect(typeof stream[Symbol.asyncIterator]).toBe("function");
@@ -202,7 +202,7 @@ idescribe("onFullscreen", () => {
   });
 
   it("responds to all browser-specific fullscreen events", async () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     const values: boolean[] = [];
 
     stream.subscribe((value) => values.push(value));
@@ -229,7 +229,7 @@ idescribe("onFullscreen", () => {
   });
 
   it("starts listening on first subscription", () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
 
     stream.subscribe(() => {});
 
@@ -252,7 +252,7 @@ idescribe("onFullscreen", () => {
   });
 
   it("does not restart listening for additional subscribers", () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     
     stream.subscribe(() => {});
     (document.addEventListener as jasmine.Spy).calls.reset();
@@ -263,7 +263,7 @@ idescribe("onFullscreen", () => {
   });
 
   it("stops listening when last subscriber unsubscribes", () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     
     const sub1 = stream.subscribe(() => {});
     const sub2 = stream.subscribe(() => {});
@@ -291,7 +291,7 @@ idescribe("onFullscreen", () => {
   });
 
   it("calls original teardown callback", () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     let onUnsubscribeCalled = false;
     
     const sub = stream.subscribe(() => {});
@@ -307,7 +307,7 @@ idescribe("onFullscreen", () => {
   });
 
   it("handles rapid subscribe/unsubscribe cycles", () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
 
     for (let i = 0; i < 5; i++) {
       const sub = stream.subscribe(() => {});
@@ -318,7 +318,7 @@ idescribe("onFullscreen", () => {
   });
 
   it("does not emit after all subscribers unsubscribe", async () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     const values: boolean[] = [];
 
     const sub = stream.subscribe((value) => values.push(value));
@@ -336,7 +336,7 @@ idescribe("onFullscreen", () => {
   });
 
   it("handles resubscription after all unsubscribe", async () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     
     const sub1 = stream.subscribe(() => {});
     sub1.unsubscribe();
@@ -378,7 +378,7 @@ idescribe("onFullscreen", () => {
     msFullscreenElement = null;
 
     const values: boolean[] = [];
-    const sub = onFullscreen().subscribe(v => values.push(v));
+    const sub = on('fullscreen').subscribe(v => values.push(v));
     await delay(50);
 
     expect(values[0]).toBe(true);
@@ -392,7 +392,7 @@ idescribe("onFullscreen", () => {
     mozFullScreenElement = null;
 
     const values: boolean[] = [];
-    const sub = onFullscreen().subscribe(v => values.push(v));
+    const sub = on('fullscreen').subscribe(v => values.push(v));
     await delay(50);
 
     expect(values[0]).toBe(true);
@@ -400,7 +400,7 @@ idescribe("onFullscreen", () => {
   });
 
   it('handles teardown errors gracefully', async () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     const sub = stream.subscribe();
 
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -424,8 +424,8 @@ idescribe("onFullscreen", () => {
   it('does not restart when start() called multiple times', async () => {
     (document.addEventListener as jasmine.Spy).calls.reset();
 
-    const sub1 = onFullscreen().subscribe();
-    const sub2 = onFullscreen().subscribe();
+    const sub1 = on('fullscreen').subscribe();
+    const sub2 = on('fullscreen').subscribe();
     await delay(50);
 
     // Should only add listeners once
@@ -437,7 +437,7 @@ idescribe("onFullscreen", () => {
   });
 
   it('does not stop when already stopped', async () => {
-    const stream = onFullscreen();
+    const stream = on('fullscreen');
     const sub = stream.subscribe();
     await delay(50);
 

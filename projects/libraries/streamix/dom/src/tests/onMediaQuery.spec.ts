@@ -1,5 +1,5 @@
 import type { Atom } from '@epikodelabs/streamix';
-import { onMediaQuery } from '@epikodelabs/streamix/dom';
+import { on } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 idescribe('onMediaQuery', () => {
@@ -33,7 +33,7 @@ idescribe('onMediaQuery', () => {
   });
 
   it('should emit initial value immediately', async () => {
-    const stream: Atom<boolean> = onMediaQuery('(min-width: 600px)');
+    const stream: Atom<boolean> = on('mediaQuery', '(min-width: 600px)');
     const callback = jasmine.createSpy('callback');
 
     stream.subscribe(callback);
@@ -46,7 +46,7 @@ idescribe('onMediaQuery', () => {
 
   it('should call callback on media query change', async () => {
     const query = '(min-width: 600px)';
-    const stream: Atom<boolean> = onMediaQuery(query);
+    const stream: Atom<boolean> = on('mediaQuery', query);
     const callback = jasmine.createSpy('callback');
     stream.subscribe(callback);
 
@@ -70,7 +70,7 @@ idescribe('onMediaQuery', () => {
 
   it('should clean up listener on unsubscribe', async () => {
     const query = '(min-width: 600px)';
-    const stream: Atom<boolean> = onMediaQuery(query);
+    const stream: Atom<boolean> = on('mediaQuery', query);
     const callback = jasmine.createSpy('callback');
 
     const subscription = stream.subscribe(callback);
@@ -93,7 +93,7 @@ idescribe('onMediaQuery', () => {
     (window as any).matchMedia = undefined;
     spyOn(console, 'warn');
 
-    const stream: Atom<boolean> = onMediaQuery('(min-width: 600px)');
+    const stream: Atom<boolean> = on('mediaQuery', '(min-width: 600px)');
     expect(console.warn).toHaveBeenCalledWith('matchMedia is not supported in this environment');
 
     const callback = jasmine.createSpy('callback');
@@ -113,7 +113,7 @@ idescribe('onMediaQuery', () => {
       };
     });
 
-    const stream: Atom<boolean> = onMediaQuery(Promise.resolve(query));
+    const stream: Atom<boolean> = on('mediaQuery', Promise.resolve(query));
     const callback = jasmine.createSpy('callback');
     stream.subscribe(callback);
 
@@ -140,7 +140,7 @@ idescribe('onMediaQuery', () => {
 
     const iterPromise = (async () => {
       const values: boolean[] = [];
-      for await (const v of onMediaQuery(query)) {
+      for await (const v of on('mediaQuery', query)) {
         values.push(v);
         if (values.length === 2) break;
       }
@@ -176,7 +176,7 @@ idescribe('onMediaQuery', () => {
     });
 
     const callback = jasmine.createSpy('callback');
-    const stream: Atom<boolean> = onMediaQuery(queryPromise);
+    const stream: Atom<boolean> = on('mediaQuery', queryPromise);
     const sub = stream.subscribe(callback);
 
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -217,7 +217,7 @@ idescribe('onMediaQuery', () => {
     });
 
     const callback = jasmine.createSpy('callback');
-    const stream: Atom<boolean> = onMediaQuery(queryPromise);
+    const stream: Atom<boolean> = on('mediaQuery', queryPromise);
     const subscription = stream.subscribe(callback);
 
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -248,7 +248,7 @@ idescribe('onMediaQuery', () => {
       };
     });
 
-    const stream: Atom<boolean> = onMediaQuery(query);
+    const stream: Atom<boolean> = on('mediaQuery', query);
     const callback = jasmine.createSpy('callback');
     const sub = stream.subscribe(callback);
 
@@ -279,7 +279,7 @@ idescribe('onMediaQuery', () => {
       };
     });
 
-    const stream: Atom<boolean> = onMediaQuery(query);
+    const stream: Atom<boolean> = on('mediaQuery', query);
     const cb1 = jasmine.createSpy('cb1');
     const cb2 = jasmine.createSpy('cb2');
 
@@ -300,7 +300,7 @@ idescribe('onMediaQuery', () => {
 
   it('does not start when already active', async () => {
     const query = '(min-width: 800px)';
-    const stream = onMediaQuery(query);
+    const stream = on('mediaQuery', query);
 
     const sub1 = stream.subscribe();
     const sub2 = stream.subscribe();
@@ -315,7 +315,7 @@ idescribe('onMediaQuery', () => {
 
   it('does not stop when not active', async () => {
     const query = '(min-width: 600px)';
-    const stream = onMediaQuery(query);
+    const stream = on('mediaQuery', query);
     
     // Try to unsubscribe without subscribing
     const sub = stream.subscribe();
@@ -335,7 +335,7 @@ idescribe('onMediaQuery', () => {
     });
 
     const callback = jasmine.createSpy('callback');
-    const stream = onMediaQuery(queryPromise);
+    const stream = on('mediaQuery', queryPromise);
     const sub = stream.subscribe(callback);
 
     await new Promise(resolve => setTimeout(resolve, 0));

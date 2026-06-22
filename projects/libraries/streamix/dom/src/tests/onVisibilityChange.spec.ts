@@ -1,4 +1,4 @@
-import { onVisibilityChange } from '@epikodelabs/streamix/dom';
+import { on } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
@@ -106,7 +106,7 @@ idescribe('onVisibilityChange', () => {
     );
 
     const values: DocumentVisibilityState[] = [];
-    const sub = onVisibilityChange().subscribe(v => values.push(v));
+    const sub = on('visibilityChange').subscribe(v => values.push(v));
     await flush();
 
     expect(values).toEqual(['hidden']);
@@ -125,7 +125,7 @@ idescribe('onVisibilityChange', () => {
     );
 
     const values: DocumentVisibilityState[] = [];
-    const sub = onVisibilityChange().subscribe(v => values.push(v));
+    const sub = on('visibilityChange').subscribe(v => values.push(v));
     await flush();
 
     env.setVisibility('hidden');
@@ -151,7 +151,7 @@ idescribe('onVisibilityChange', () => {
       })
     );
 
-    const stream = onVisibilityChange();
+    const stream = on('visibilityChange');
 
     const s1 = stream.subscribe();
     const s2 = stream.subscribe();
@@ -179,7 +179,7 @@ idescribe('onVisibilityChange', () => {
 
     const iter = (async () => {
       const out: DocumentVisibilityState[] = [];
-      for await (const v of onVisibilityChange()) {
+      for await (const v of on('visibilityChange')) {
         out.push(v);
         if (out.length === 3) break;
       }
@@ -213,7 +213,7 @@ idescribe('onVisibilityChange', () => {
     );
 
     const values: DocumentVisibilityState[] = [];
-    const sub = onVisibilityChange().subscribe(v => values.push(v));
+    const sub = on('visibilityChange').subscribe(v => values.push(v));
     await flush();
 
     expect(values).toEqual(['visible']);
@@ -243,7 +243,7 @@ idescribe('onVisibilityChange', () => {
     );
 
     const values: DocumentVisibilityState[] = [];
-    const sub = onVisibilityChange().subscribe(v => values.push(v));
+    const sub = on('visibilityChange').subscribe(v => values.push(v));
     await flush();
 
     expect(values).toEqual(['visible']);
@@ -263,8 +263,8 @@ idescribe('onVisibilityChange', () => {
 
     env.addEventListener.calls.reset();
 
-    const sub1 = onVisibilityChange().subscribe();
-    const sub2 = onVisibilityChange().subscribe();
+    const sub1 = on('visibilityChange').subscribe();
+    const sub2 = on('visibilityChange').subscribe();
     await flush();
 
     // Should add listener at least once (may be called per subscription)
@@ -285,7 +285,7 @@ idescribe('onVisibilityChange', () => {
       })
     );
 
-    const sub = onVisibilityChange().subscribe();
+    const sub = on('visibilityChange').subscribe();
     await flush();
 
     sub.unsubscribe();

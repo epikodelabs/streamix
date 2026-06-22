@@ -1,11 +1,11 @@
 import { takeWhile } from '@epikodelabs/streamix';
-import { onAnimationFrame } from '@epikodelabs/streamix/dom';
+import { on } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 idescribe('onAnimationFrame', () => {
 
   it('should emit delta values with reasonable time intervals', async () => {
-    const stream = onAnimationFrame();
+    const stream = on('animationFrame');
     const emittedDeltas: number[] = [];
     let count = 0;
 
@@ -32,7 +32,7 @@ idescribe('onAnimationFrame', () => {
   });
 
   it('should stop emitting when condition is met', async () => {
-    const stream = onAnimationFrame().pipe(takeWhile((_, index) => index < 5));
+    const stream = on('animationFrame').pipe(takeWhile((_, index) => index < 5));
     const emittedCount: number[] = [];
 
     const subscription = stream.subscribe((delta: number) => {
@@ -47,7 +47,7 @@ idescribe('onAnimationFrame', () => {
   });
 
   it('should emit multiple times when condition allows', async () => {
-    const stream = onAnimationFrame().pipe(takeWhile((_, index) => index < 10));
+    const stream = on('animationFrame').pipe(takeWhile((_, index) => index < 10));
     const emittedDeltas: number[] = [];
 
     const subscription = stream.subscribe((delta: number) => {
@@ -95,7 +95,7 @@ idescribe('onAnimationFrame', () => {
       cancelledIds.push(id);
     };
 
-    const stream = onAnimationFrame();
+    const stream = on('animationFrame');
     const subscription = stream.subscribe(() => {});
 
     // Give it a moment for the RAF to be called
@@ -115,7 +115,7 @@ idescribe('onAnimationFrame', () => {
     const valuesA: number[] = [];
     const valuesB: number[] = [];
 
-    const stream = onAnimationFrame();
+    const stream = on('animationFrame');
 
     const subA = stream.subscribe(v => valuesA.push(v));
     const subB = stream.subscribe(v => valuesB.push(v));
@@ -171,7 +171,7 @@ idescribe('onAnimationFrame', () => {
     };
 
     try {
-      const stream = onAnimationFrame();
+      const stream = on('animationFrame');
       const subscription = stream.subscribe((delta: number) => {
         emittedDeltas.push(delta);
       });
@@ -213,7 +213,7 @@ idescribe('onAnimationFrame', () => {
       return globalThis.setTimeout(() => cb(performance.now()), 0) as any;
     };
 
-    const subscription = onAnimationFrame().subscribe();
+    const subscription = on('animationFrame').subscribe();
 
     setTimeout(() => {
       subscription.unsubscribe();
@@ -245,7 +245,7 @@ idescribe('onAnimationFrame', () => {
     (globalThis as any).cancelAnimationFrame = jasmine.createSpy('cancelAnimationFrame');
 
     const deltas: number[] = [];
-    const subscription = onAnimationFrame().subscribe((delta: number) => {
+    const subscription = on('animationFrame').subscribe((delta: number) => {
         deltas.push(delta);
         if (deltas.length === 3) {
           try {
@@ -270,7 +270,7 @@ idescribe('onAnimationFrame', () => {
 
     try {
       const values: number[] = [];
-      const sub = onAnimationFrame().subscribe(v => values.push(v));
+      const sub = on('animationFrame').subscribe(v => values.push(v));
 
       setTimeout(() => {
         // Should not emit without performance
@@ -288,8 +288,8 @@ idescribe('onAnimationFrame', () => {
   it('does not restart loop when startLoop() called multiple times', async () => {
     const rafSpy = spyOn(globalThis as any, 'requestAnimationFrame').and.callThrough();
 
-    const sub1 = onAnimationFrame().subscribe();
-    const sub2 = onAnimationFrame().subscribe();
+    const sub1 = on('animationFrame').subscribe();
+    const sub2 = on('animationFrame').subscribe();
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // Should only start one RAF loop
@@ -319,7 +319,7 @@ idescribe('onAnimationFrame', () => {
     (globalThis as any).cancelAnimationFrame = jasmine.createSpy('cancelAnimationFrame');
 
     const deltas: number[] = [];
-    const subscription = onAnimationFrame().subscribe((delta: number) => {
+    const subscription = on('animationFrame').subscribe((delta: number) => {
         deltas.push(delta);
         if (deltas.length === 3) {
           try {

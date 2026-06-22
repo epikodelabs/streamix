@@ -1,4 +1,4 @@
-import { onMutation } from '@epikodelabs/streamix/dom';
+import { on } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 // Mock DOM element for testing purposes
@@ -22,7 +22,7 @@ idescribe('onMutation', () => {
   });
 
   it('should emit mutations when child is added', (done) => {
-    const mutation = onMutation(observedElement, {
+    const mutation = on('mutation', observedElement, {
       childList: true,
     });
 
@@ -47,7 +47,7 @@ idescribe('onMutation', () => {
     child.innerText = 'Child div to remove';
     observedElement.appendChild(child);
 
-    const mutation = onMutation(observedElement, {
+    const mutation = on('mutation', observedElement, {
       childList: true,
     });
 
@@ -73,7 +73,7 @@ idescribe('onMutation', () => {
     nestedChild.innerText = 'Nested change';
     nestedParent.appendChild(nestedChild);
 
-    const mutation = onMutation(observedElement, {
+    const mutation = on('mutation', observedElement, {
       subtree: true,
       childList: true,
     });
@@ -103,7 +103,7 @@ idescribe('onMutation', () => {
     const elementPromise = Promise.resolve(observedElement);
     const optionsPromise = Promise.resolve({ attributes: true });
 
-    const mutation = onMutation(elementPromise, optionsPromise);
+    const mutation = on('mutation', elementPromise, optionsPromise);
     const subscription = mutation.subscribe((mutations: MutationRecord[]) => {
         try {
           expect(mutations.some(m => m.type === 'attributes')).toBeTrue();
@@ -124,7 +124,7 @@ idescribe('onMutation', () => {
     const savedObserver = (globalThis as any).MutationObserver;
     (globalThis as any).MutationObserver = undefined;
 
-    const mutation = onMutation(observedElement, { childList: true });
+    const mutation = on('mutation', observedElement, { childList: true });
     const subscription = mutation.subscribe(() => fail('Should not emit without MutationObserver'));
 
     setTimeout(() => {
@@ -160,7 +160,7 @@ idescribe('onMutation', () => {
       const mutations = [{ type: 'attributes', attributeName: 'x' } as any] as MutationRecord[];
 
       const values: MutationRecord[][] = [];
-      const sub = onMutation(observedElement).subscribe(v => values.push(v));
+      const sub = on('mutation', observedElement).subscribe(v => values.push(v));
 
       // Allow observer.observe to happen
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -212,7 +212,7 @@ idescribe('onMutation', () => {
       });
 
       const values: MutationRecord[][] = [];
-      const sub = onMutation(elementPromise, optionsPromise).subscribe(v => values.push(v));
+      const sub = on('mutation', elementPromise, optionsPromise).subscribe(v => values.push(v));
 
       sub.unsubscribe();
 
@@ -234,7 +234,7 @@ idescribe('onMutation', () => {
 
   it('handles null element from promise resolution', async () => {
     const values: MutationRecord[][] = [];
-    const sub = onMutation(Promise.resolve(null as any)).subscribe(v => values.push(v));
+    const sub = on('mutation', Promise.resolve(null as any)).subscribe(v => values.push(v));
 
     await new Promise(resolve => setTimeout(resolve, 50));
 
@@ -251,8 +251,8 @@ idescribe('onMutation', () => {
   it('does not restart when start() called multiple times', async () => {
     const observeSpy = spyOn(MutationObserver.prototype, 'observe').and.callThrough();
 
-    const sub1 = onMutation(observedElement, { childList: true }).subscribe();
-    const sub2 = onMutation(observedElement, { childList: true }).subscribe();
+    const sub1 = on('mutation', observedElement, { childList: true }).subscribe();
+    const sub2 = on('mutation', observedElement, { childList: true }).subscribe();
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // Each subscription should call observe (they share the same stream instance)
@@ -267,7 +267,7 @@ idescribe('onMutation', () => {
     const optionsPromise = Promise.resolve({ attributes: true });
 
     const values: MutationRecord[][] = [];
-    const sub = onMutation(observedElement, optionsPromise).subscribe(v => values.push(v));
+    const sub = on('mutation', observedElement, optionsPromise).subscribe(v => values.push(v));
 
     await new Promise(resolve => setTimeout(resolve, 50));
 

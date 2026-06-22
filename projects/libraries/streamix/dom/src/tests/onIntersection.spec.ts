@@ -1,4 +1,4 @@
-import { onIntersection } from '@epikodelabs/streamix/dom';
+import { on } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 function withGlobal<T>(key: string, value: T, fn: () => void | Promise<void>) {
@@ -54,7 +54,7 @@ idescribe('onIntersection', () => {
     }
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
-      await expectAsync(firstValue<boolean>(onIntersection(element))).toBeResolvedTo(true);
+      await expectAsync(firstValue<boolean>(on('intersection', element))).toBeResolvedTo(true);
     });
   });
 
@@ -69,7 +69,7 @@ idescribe('onIntersection', () => {
     }
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
-      await expectAsync(firstValue<boolean>(onIntersection(element))).toBeResolvedTo(false);
+      await expectAsync(firstValue<boolean>(on('intersection', element))).toBeResolvedTo(false);
     });
   });
 
@@ -86,7 +86,7 @@ idescribe('onIntersection', () => {
 
     try {
       await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
-        await expectAsync(firstValue<boolean>(onIntersection(element))).toBeResolvedTo(true);
+        await expectAsync(firstValue<boolean>(on('intersection', element))).toBeResolvedTo(true);
       });
     } finally {
       (element as any).getBoundingClientRect = originalGetRect;
@@ -104,7 +104,7 @@ idescribe('onIntersection', () => {
     }
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
-      await expectAsync(firstValue<boolean>(onIntersection(element))).toBeResolvedTo(false);
+      await expectAsync(firstValue<boolean>(on('intersection', element))).toBeResolvedTo(false);
     });
   });
 
@@ -128,7 +128,7 @@ idescribe('onIntersection', () => {
       await withGlobal('MutationObserver', FakeMutationObserver as any, async () => {
         const elementPromise = Promise.resolve(element);
         const optionsPromise = Promise.resolve({ rootMargin: '0px' });
-        await expectAsync(firstValue<boolean>(onIntersection(elementPromise, optionsPromise))).toBeResolvedTo(
+        await expectAsync(firstValue<boolean>(on('intersection', elementPromise, optionsPromise))).toBeResolvedTo(
           true
         );
       });
@@ -157,7 +157,7 @@ idescribe('onIntersection', () => {
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
       await withGlobal('MutationObserver', FakeMutationObserver as any, async () => {
-        const subscription = onIntersection(element).subscribe(() => {});
+        const subscription = on('intersection', element).subscribe(() => {});
 
         document.body.removeChild(element);
         triggerMutation?.();
@@ -182,7 +182,7 @@ idescribe('onIntersection', () => {
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
       const values: boolean[] = [];
-      for await (const v of onIntersection(element)) {
+      for await (const v of on('intersection', element)) {
         values.push(v);
         break;
       }
@@ -193,7 +193,7 @@ idescribe('onIntersection', () => {
   it('handles SSR (IntersectionObserver undefined)', async () => {
     await withGlobal('IntersectionObserver', undefined, async () => {
       const values: boolean[] = [];
-      const sub = onIntersection(element).subscribe(v => values.push(v));
+      const sub = on('intersection', element).subscribe(v => values.push(v));
 
       await new Promise(r => setTimeout(r, 50));
 
@@ -213,7 +213,7 @@ idescribe('onIntersection', () => {
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
       const values: boolean[] = [];
-      const sub = onIntersection(Promise.resolve(null as any)).subscribe(v => values.push(v));
+      const sub = on('intersection', Promise.resolve(null as any)).subscribe(v => values.push(v));
 
       await new Promise(r => setTimeout(r, 50));
 
@@ -233,7 +233,7 @@ idescribe('onIntersection', () => {
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
       const values: boolean[] = [];
-      const sub = onIntersection(Promise.resolve(element)).subscribe(
+      const sub = on('intersection', Promise.resolve(element)).subscribe(
         v => values.push(v)
       );
 
@@ -258,7 +258,7 @@ idescribe('onIntersection', () => {
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
       await withGlobal('MutationObserver', undefined, async () => {
-        await expectAsync(firstValue<boolean>(onIntersection(element))).toBeResolvedTo(true);
+        await expectAsync(firstValue<boolean>(on('intersection', element))).toBeResolvedTo(true);
       });
     });
   });
@@ -276,7 +276,7 @@ idescribe('onIntersection', () => {
     }
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
-      const sub = onIntersection(element).subscribe();
+      const sub = on('intersection', element).subscribe();
       await new Promise(r => setTimeout(r, 50));
 
       // Should not throw when unsubscribing

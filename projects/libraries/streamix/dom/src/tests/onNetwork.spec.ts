@@ -1,4 +1,4 @@
-import { type NetworkState, onNetwork } from '@epikodelabs/streamix/dom';
+import { type NetworkState, on } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
@@ -139,7 +139,7 @@ idescribe('onNetwork', () => {
     );
 
     const values: NetworkState[] = [];
-    const sub = onNetwork().subscribe(v => values.push(v));
+    const sub = on('network').subscribe(v => values.push(v));
     await flush();
 
     expect(values[0]).toEqual(
@@ -171,7 +171,7 @@ idescribe('onNetwork', () => {
     );
 
     const values: NetworkState[] = [];
-    const sub = onNetwork().subscribe(v => values.push(v));
+    const sub = on('network').subscribe(v => values.push(v));
     await flush();
 
     env.setOnline(false);
@@ -199,7 +199,7 @@ idescribe('onNetwork', () => {
     );
 
     const values: NetworkState[] = [];
-    const sub = onNetwork().subscribe(v => values.push(v));
+    const sub = on('network').subscribe(v => values.push(v));
     await flush();
 
     env.connection.downlink = 42;
@@ -227,7 +227,7 @@ idescribe('onNetwork', () => {
 
     const iter = (async () => {
       const out: NetworkState[] = [];
-      for await (const v of onNetwork()) {
+      for await (const v of on('network')) {
         out.push(v);
         if (out.length === 2) break;
       }
@@ -254,7 +254,7 @@ idescribe('onNetwork', () => {
     );
 
     const values: NetworkState[] = [];
-    const sub = onNetwork().subscribe(v => values.push(v));
+    const sub = on('network').subscribe(v => values.push(v));
     await flush();
 
     expect(values.length).toBe(1); // snapshot still emitted
@@ -271,7 +271,7 @@ idescribe('onNetwork', () => {
     delete (globalThis as any).navigator;
 
     try {
-      const subscription = onNetwork().subscribe(() => {});
+      const subscription = on('network').subscribe(() => {});
 
       expect(addSpy).not.toHaveBeenCalled();
 
@@ -313,7 +313,7 @@ idescribe('onNetwork', () => {
     );
 
     const values: NetworkState[] = [];
-    const sub = onNetwork().subscribe(v => values.push(v));
+    const sub = on('network').subscribe(v => values.push(v));
     await flush();
 
     // Should still emit snapshot
@@ -347,7 +347,7 @@ idescribe('onNetwork', () => {
       })
     );
 
-    const sub = onNetwork().subscribe();
+    const sub = on('network').subscribe();
     await flush();
 
     // Should not crash when unsubscribing
@@ -371,8 +371,8 @@ idescribe('onNetwork', () => {
     (env.addEventListener as jasmine.Spy).calls.reset();
     (env.connection.addEventListener as jasmine.Spy).calls.reset();
 
-    const sub1 = onNetwork().subscribe();
-    const sub2 = onNetwork().subscribe();
+    const sub1 = on('network').subscribe();
+    const sub2 = on('network').subscribe();
     await flush();
 
     // Should only add listeners once
@@ -400,7 +400,7 @@ idescribe('onNetwork', () => {
       })
     );
 
-    const sub = onNetwork().subscribe();
+    const sub = on('network').subscribe();
     await flush();
 
     sub.unsubscribe();
@@ -431,7 +431,7 @@ idescribe('onNetwork', () => {
       })
     );
 
-    const sub = onNetwork().subscribe();
+    const sub = on('network').subscribe();
     await flush();
 
     // Should not crash on unsubscribe even if cleanup has issues

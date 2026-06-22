@@ -1,4 +1,4 @@
-import { onBattery } from '@epikodelabs/streamix/dom';
+import { on } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 function patchNavigator(patch: Record<string, any>) {
@@ -31,7 +31,7 @@ idescribe('onBattery', () => {
 
     try {
       const values: any[] = [];
-      const sub = onBattery().subscribe(v => values.push(v));
+      const sub = on('battery').subscribe(v => values.push(v));
 
       await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -54,7 +54,7 @@ idescribe('onBattery', () => {
       .and.returnValue(batteryPromise);
 
     const updates: any[] = [];
-    const sub = onBattery().subscribe(update => updates.push(update));
+    const sub = on('battery').subscribe(update => updates.push(update));
 
     // Unsubscribe before getBattery resolves.
     sub.unsubscribe();
@@ -101,7 +101,7 @@ idescribe('onBattery', () => {
       .and.resolveTo(battery);
 
     const updates: any[] = [];
-    const sub = onBattery().subscribe(update => updates.push(update));
+    const sub = on('battery').subscribe(update => updates.push(update));
 
     await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -130,8 +130,8 @@ idescribe('onBattery', () => {
 
     (navigator as any).getBattery = getBatterySpy;
 
-    const sub1 = onBattery().subscribe();
-    const sub2 = onBattery().subscribe();
+    const sub1 = on('battery').subscribe();
+    const sub2 = on('battery').subscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     // Should share battery instance
@@ -154,7 +154,7 @@ idescribe('onBattery', () => {
 
     const values: any[] = [];
     const errors: any[] = [];
-    const sub = onBattery().subscribe(v => values.push(v));
+    const sub = on('battery').subscribe(v => values.push(v));
 
     // Wait for rejection to be handled
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -176,7 +176,7 @@ idescribe('onBattery', () => {
       .createSpy('getBattery')
       .and.returnValue(batteryPromise);
 
-    const sub = onBattery().subscribe();
+    const sub = on('battery').subscribe();
     
     // Unsubscribe before battery resolves
     sub.unsubscribe();
@@ -213,7 +213,7 @@ idescribe('onBattery', () => {
       .createSpy('getBattery')
       .and.resolveTo(battery);
 
-    const sub = onBattery().subscribe();
+    const sub = on('battery').subscribe();
     await new Promise(resolve => setTimeout(resolve, 100));
 
     // createSharedSource swallows cleanup errors
@@ -242,7 +242,7 @@ idescribe('onBattery', () => {
       .createSpy('getBattery')
       .and.resolveTo(battery);
 
-    const sub = onBattery().subscribe();
+    const sub = on('battery').subscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     sub.unsubscribe();

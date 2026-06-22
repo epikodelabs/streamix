@@ -1,4 +1,4 @@
-import { onIdle } from '@epikodelabs/streamix/dom';
+import { on } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 const nativeSetTimeout = setTimeout;
@@ -136,7 +136,7 @@ idescribe('onIdle', () => {
     );
 
     const values: IdleDeadline[] = [];
-    const sub = onIdle().subscribe(v => values.push(v));
+    const sub = on('idle').subscribe(v => values.push(v));
     await flush();
 
     env.fireIdle();
@@ -157,7 +157,7 @@ idescribe('onIdle', () => {
       patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
     );
 
-    const sub = onIdle(123).subscribe();
+    const sub = on('idle', 123).subscribe();
     await flush();
 
     expect(env.requestIdleCallback).toHaveBeenCalledWith(
@@ -177,7 +177,7 @@ idescribe('onIdle', () => {
     );
 
     const values: IdleDeadline[] = [];
-    const sub = onIdle().subscribe(v => values.push(v));
+    const sub = on('idle').subscribe(v => values.push(v));
     await flush();
 
     env.fireIdle();
@@ -197,7 +197,7 @@ idescribe('onIdle', () => {
       patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
     );
 
-    const sub = onIdle().subscribe();
+    const sub = on('idle').subscribe();
     await flush();
 
     sub.unsubscribe();
@@ -221,7 +221,7 @@ idescribe('onIdle', () => {
     );
 
     const values: IdleDeadline[] = [];
-    const sub = onIdle().subscribe(v => values.push(v));
+    const sub = on('idle').subscribe(v => values.push(v));
     await flush();
 
     env.fireAll();
@@ -243,7 +243,7 @@ idescribe('onIdle', () => {
       patchGlobal('clearTimeout', env.clearTimeoutMock)
     );
 
-    const sub = onIdle().subscribe();
+    const sub = on('idle').subscribe();
     await flush();
 
     sub.unsubscribe();
@@ -266,7 +266,7 @@ idescribe('onIdle', () => {
 
     const iter = (async () => {
       const out: IdleDeadline[] = [];
-      for await (const v of onIdle()) {
+      for await (const v of on('idle')) {
         out.push(v);
         if (out.length === 1) break;
       }
@@ -293,7 +293,7 @@ idescribe('onIdle', () => {
     );
 
     const values: IdleDeadline[] = [];
-    const sub = onIdle().subscribe(v => values.push(v));
+    const sub = on('idle').subscribe(v => values.push(v));
     await flush();
 
     expect(values).toEqual([]);
@@ -310,8 +310,8 @@ idescribe('onIdle', () => {
 
     env.requestIdleCallback.calls.reset();
 
-    const sub1 = onIdle().subscribe();
-    const sub2 = onIdle().subscribe();
+    const sub1 = on('idle').subscribe();
+    const sub2 = on('idle').subscribe();
     await flush();
 
     // Should only call requestIdleCallback for each subscription
@@ -329,7 +329,7 @@ idescribe('onIdle', () => {
       patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
     );
 
-    const sub = onIdle().subscribe();
+    const sub = on('idle').subscribe();
     await flush();
 
     sub.unsubscribe();
@@ -353,7 +353,7 @@ idescribe('onIdle', () => {
       patchGlobal('clearTimeout', clearTimeoutSpy)
     );
 
-    const sub = onIdle().subscribe();
+    const sub = on('idle').subscribe();
     await flush();
 
     sub.unsubscribe();
@@ -371,7 +371,7 @@ idescribe('onIdle', () => {
       patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
     );
 
-    const sub = onIdle().subscribe();
+    const sub = on('idle').subscribe();
     await flush();
 
     // Should be called with callback and undefined/empty options
@@ -391,7 +391,7 @@ idescribe('onIdle', () => {
     );
 
     const values: IdleDeadline[] = [];
-    const sub = onIdle().subscribe(v => values.push(v));
+    const sub = on('idle').subscribe(v => values.push(v));
 
     // Should not crash, but also not emit
     expect(values.length).toBe(0);

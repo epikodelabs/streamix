@@ -1,4 +1,4 @@
-import { onViewportChange } from '@epikodelabs/streamix/dom';
+import { on } from '@epikodelabs/streamix/dom';
 import { idescribe } from './env.spec';
 
 /* -------------------------------------------------- */
@@ -121,7 +121,7 @@ idescribe('onViewportChange', () => {
     );
 
     const values: any[] = [];
-    const sub = onViewportChange().subscribe(v => values.push(v));
+    const sub = on('viewportChange').subscribe(v => values.push(v));
     await flush();
 
     expect(values[0]).toEqual(
@@ -149,7 +149,7 @@ idescribe('onViewportChange', () => {
     );
 
     const values: any[] = [];
-    const sub = onViewportChange().subscribe(v => values.push(v));
+    const sub = on('viewportChange').subscribe(v => values.push(v));
     await flush();
 
     env.resize(1280, 720);
@@ -174,7 +174,7 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    const sub = onViewportChange().subscribe();
+    const sub = on('viewportChange').subscribe();
     await flush();
 
     expect(env.visualViewport.addEventListener).toHaveBeenCalled();
@@ -190,7 +190,7 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    const sub = onViewportChange().subscribe();
+    const sub = on('viewportChange').subscribe();
     await flush();
 
     sub.unsubscribe();
@@ -212,7 +212,7 @@ idescribe('onViewportChange', () => {
 
     const iter = (async () => {
       const out: any[] = [];
-      for await (const v of onViewportChange()) {
+      for await (const v of on('viewportChange')) {
         out.push(v);
         if (out.length === 2) break;
       }
@@ -241,7 +241,7 @@ idescribe('onViewportChange', () => {
     );
 
     const values: any[] = [];
-    const sub = onViewportChange().subscribe(v => values.push(v));
+    const sub = on('viewportChange').subscribe(v => values.push(v));
     await flush();
 
     // Snapshot still emitted using innerWidth / innerHeight
@@ -259,7 +259,7 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    const sub = onViewportChange().subscribe();
+    const sub = on('viewportChange').subscribe();
     await flush();
 
     expect(addSpy).toHaveBeenCalledWith('resize', jasmine.any(Function));
@@ -284,8 +284,8 @@ idescribe('onViewportChange', () => {
     const addSpy = env.visualViewport.addEventListener as jasmine.Spy;
     addSpy.calls.reset();
 
-    const sub1 = onViewportChange().subscribe();
-    const sub2 = onViewportChange().subscribe();
+    const sub1 = on('viewportChange').subscribe();
+    const sub2 = on('viewportChange').subscribe();
     await flush();
 
     // Should add listeners (resize + scroll, may be shared or per-subscription)
@@ -306,7 +306,7 @@ idescribe('onViewportChange', () => {
 
     const removeSpy = env.visualViewport.removeEventListener as jasmine.Spy;
 
-    const sub = onViewportChange().subscribe();
+    const sub = on('viewportChange').subscribe();
     await flush();
 
     sub.unsubscribe();
@@ -346,7 +346,7 @@ idescribe('onViewportChange', () => {
     );
 
     const values: any[] = [];
-    const sub = onViewportChange().subscribe(v => values.push(v));
+    const sub = on('viewportChange').subscribe(v => values.push(v));
     await flush();
 
     // Verify scroll listener was added
@@ -377,9 +377,9 @@ idescribe('onViewportChange', () => {
 
     const removeSpy = env.visualViewport.removeEventListener as jasmine.Spy;
 
-    const sub1 = onViewportChange().subscribe();
-    const sub2 = onViewportChange().subscribe();
-    const sub3 = onViewportChange().subscribe();
+    const sub1 = on('viewportChange').subscribe();
+    const sub2 = on('viewportChange').subscribe();
+    const sub3 = on('viewportChange').subscribe();
     await flush();
 
     removeSpy.calls.reset();
@@ -415,7 +415,7 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    const sub = onViewportChange().subscribe();
+    const sub = on('viewportChange').subscribe();
     await flush();
 
     // Simulate target becoming null
