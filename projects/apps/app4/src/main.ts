@@ -1,16 +1,16 @@
 import {
   filter,
-  fromEvent,
+  listen,
   map,
   merge,
   tap,
 } from '@epikodelabs/streamix';
-import { onAnimationFrame, onIntersection } from '@epikodelabs/streamix/dom';
+import { on } from '@epikodelabs/streamix/dom';
 
 /* ─── 1. Header scroll shadow ─── */
 const header = document.querySelector('.site-header') as HTMLElement;
 if (header) {
-  fromEvent(window, 'scroll')
+  listen(window, 'scroll')
     .pipe(
       map(() => window.scrollY > 20),
       filter((scrolled) => scrolled !== header.classList.contains('scrolled')),
@@ -23,7 +23,7 @@ if (header) {
 const heroMedia = document.querySelector('.hero-media img') as HTMLImageElement;
 // Parallax on scroll
 if (heroMedia) {
-  onAnimationFrame()
+  on('animationFrame')
     .pipe(
       map(() => {
         const scrollY = window.scrollY;
@@ -48,7 +48,7 @@ animateTextElements.forEach((el) => {
     el.appendChild(span);
   });
 
-  onIntersection(el, { threshold: 0.3 })
+  on('intersection', el, { threshold: 0.3 })
     .pipe(
       filter((visible) => visible),
       tap(() => el.classList.add('visible'))
@@ -61,7 +61,7 @@ const revealElements = document.querySelectorAll('.reveal');
 revealElements.forEach((el, index) => {
   (el as HTMLElement).style.transitionDelay = `${index * 0.06}s`;
 
-  onIntersection(el, { threshold: 0.15 })
+  on('intersection', el, { threshold: 0.15 })
     .pipe(
       filter((visible) => visible),
       tap(() => el.classList.add('visible'))
@@ -92,7 +92,7 @@ const startAutoAdvance = () => {
 const stopAutoAdvance = () => clearInterval(autoAdvance);
 
 dots.forEach((dot, i) => {
-  fromEvent(dot, 'click')
+  listen(dot, 'click')
     .pipe(
       tap(() => {
         stopAutoAdvance();
@@ -110,7 +110,7 @@ const postCards = document.querySelectorAll('.post-card');
 postCards.forEach((card) => {
   const el = card as HTMLElement;
 
-  fromEvent(el, 'mousemove')
+  listen(el, 'mousemove')
     .pipe(
       map((e: Event) => {
         const ev = e as MouseEvent;
@@ -125,7 +125,7 @@ postCards.forEach((card) => {
     )
     .subscribe(() => {});
 
-  fromEvent(el, 'mouseleave')
+  listen(el, 'mouseleave')
     .pipe(
       tap(() => {
         el.style.transform = '';
@@ -140,28 +140,28 @@ const newsletterBtn = document.querySelector('.newsletter-form button') as HTMLB
 
 if (newsletterInput) {
   merge(
-    fromEvent(newsletterInput, 'focus').pipe(tap(() => {
+    listen(newsletterInput, 'focus').pipe(tap(() => {
       newsletterInput.style.borderColor = 'var(--accent)';
     })),
-    fromEvent(newsletterInput, 'blur').pipe(tap(() => {
+    listen(newsletterInput, 'blur').pipe(tap(() => {
       newsletterInput.style.borderColor = '';
     }))
   ).subscribe(() => {});
 }
 
 if (newsletterBtn) {
-  fromEvent(newsletterBtn, 'mouseenter')
+  listen(newsletterBtn, 'mouseenter')
     .pipe(tap(() => newsletterBtn.style.transform = 'translateY(-2px)'))
     .subscribe(() => {});
 
-  fromEvent(newsletterBtn, 'mouseleave')
+  listen(newsletterBtn, 'mouseleave')
     .pipe(tap(() => newsletterBtn.style.transform = ''))
     .subscribe(() => {});
 }
 
 /* ─── 7. Smooth anchor scroll offset for fixed header ─── */
 document.querySelectorAll('a[href^="#"]').forEach((link) => {
-  fromEvent(link, 'click')
+  listen(link, 'click')
     .pipe(
       tap((e) => {
         e.preventDefault();

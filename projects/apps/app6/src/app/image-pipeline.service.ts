@@ -4,7 +4,7 @@ import {
     atom,
     catchError,
     filter,
-    fromPromise,
+    from,
     map,
     mergeMap,
     tap,
@@ -87,7 +87,7 @@ export class ImagePipelineService {
     this.fileStream.pipe(
       filter((task) => task.file.type.startsWith('image/')),
       mergeMap((task) =>
-        fromPromise(this.readFile(task.file)).pipe(
+        from(this.readFile(task.file)).pipe(
           map(({ arrayBuffer }) => {
             const s = this.settings();
             const input: ProcessInput = {
@@ -116,7 +116,7 @@ export class ImagePipelineService {
         )
       ),
       mergeMap((input) =>
-        fromPromise(this.runPipeline(input)).pipe(
+        from(this.runPipeline(input)).pipe(
           map((output) => ({ input, output })),
           tap(({ input, output }) => {
             const finalBlob = new Blob([output.finalBlob], { type: input.format });

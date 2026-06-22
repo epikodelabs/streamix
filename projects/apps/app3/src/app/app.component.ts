@@ -1,8 +1,8 @@
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { atom, fromEvent, map, scope, tap, throttle } from '@epikodelabs/streamix';
-import { onAnimationFrame, onResize } from '@epikodelabs/streamix/dom';
+import { atom, listen, map, scope, tap, throttle } from '@epikodelabs/streamix';
+import { on } from '@epikodelabs/streamix/dom';
 import type { Subscription } from '@epikodelabs/streamix';
 
 type Weather = 'sunny' | 'rainy';
@@ -322,7 +322,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.buildRain();
 
     // Resize handler via reactive stream
-    this.resizeSub = onResize(wrap).pipe(
+    this.resizeSub = on('resize', wrap).pipe(
       tap(({ width, height }) => {
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
@@ -332,7 +332,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.appScope.cleanups.add(() => this.resizeSub?.unsubscribe());
 
     // Mouse parallax
-    this.mouseSub = fromEvent(canvas, 'mousemove').pipe(
+    this.mouseSub = listen(canvas, 'mousemove').pipe(
       throttle(50),
       map((e: Event) => {
         const me = e as MouseEvent;
@@ -467,7 +467,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private startLoop(): void {
-    this.animSub = onAnimationFrame().pipe(
+    this.animSub = on('animationFrame').pipe(
       tap(() => {
         const time = this.clock.getElapsedTime();
 

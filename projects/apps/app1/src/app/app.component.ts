@@ -7,7 +7,7 @@ import {
     debounce,
     filter,
     finalize,
-    fromEvent,
+    listen,
     interval,
     map,
     merge,
@@ -634,7 +634,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     const input = this.searchInput?.nativeElement;
     if (!input) return;
 
-    const value$ = fromEvent(input, 'input').pipe(
+    const value$ = listen(input, 'input').pipe(
       map(() => input.value as string)
     );
 

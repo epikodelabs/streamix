@@ -1,4 +1,4 @@
-import { flow, isPromiseLike, PipeInput, type MaybePromise } from "../atoms";
+import { flow, isPromiseLike, PipeInput, toAsyncIterable, type MaybePromise } from "../atoms";
 import type { Atom } from "../atoms/atom";
 import { normalizeError } from "../utils/helpers";
 
@@ -18,10 +18,21 @@ function isIterable(value: unknown): value is Iterable<any> {
  * Normalizes any value type into an AtomBase using your system's native atom/flow primitives.
  */
 export function from<R = any>(
-  value: PipeInput<R>
+  value: PipeInput<R> | ((signal?: AbortSignal) => MaybePromise<R>)
 ): Atom<R> {
   if (isAtomLike(value)) {
     return value;
+  }
+
+  if (typeof value === 'function') {
+    return flow<R>(async function* (signal?: AbortSignal) {
+      try {
+        const result = await (value as (signal?: AbortSignal) => MaybePromise<R>)(signal);
+        yield* toAsyncIterable(result as PipeInput<R>);
+      } catch (err) {
+        throw normalizeError(err);
+      }
+    });
   }
 
   // We mirror the original's internal state array to handle the replay behavior
