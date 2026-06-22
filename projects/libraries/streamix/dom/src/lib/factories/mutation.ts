@@ -19,7 +19,7 @@ import { createSharedSource, isPromiseLike, type Atom, type MaybePromise } from 
  * @param options Optional MutationObserver options (or promise).
  * @returns {Atom<MutationRecord[]>} An atom of mutation records.
  */
-export function onMutation(
+export function mutation(
   element: MaybePromise<Element>,
   options?: MaybePromise<MutationObserverInit>
 ): Atom<MutationRecord[]> {
@@ -61,5 +61,5 @@ export function onMutation(
     })();
 
     return cleanup;
-  }, { name: "onMutation" });
+  }, { name: "mutation" });
 }

@@ -24,7 +24,7 @@ import {
  * @param options Optional IntersectionObserver options (or promise).
  * @returns {Atom<boolean>} An atom emitting intersection state.
  */
-export function onIntersection(
+export function intersection(
   element: MaybePromise<Element>,
   options?: MaybePromise<IntersectionObserverInit>
 ): Atom<boolean> {
@@ -100,5 +100,5 @@ export function onIntersection(
     })();
 
     return cleanup;
-  }, { name: "onIntersection" });
+  }, { name: "intersection" });
 }

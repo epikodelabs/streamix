@@ -1,16 +1,16 @@
 import type { Atom, MaybePromise } from "@epikodelabs/streamix";
-import { onAnimationFrame } from "./onAnimationFrame";
-import { onBattery, type BatteryState } from "./onBattery";
-import { onFullscreen } from "./onFullscreen";
-import { onIdle } from "./onIdle";
-import { onIntersection } from "./onIntersection";
-import { onMediaQuery } from "./onMediaQuery";
-import { onMutation } from "./onMutation";
-import { onNetwork, type NetworkState } from "./onNetwork";
-import { onOrientation } from "./onOrientation";
-import { onResize } from "./onResize";
-import { onViewportChange, type ViewportState } from "./onViewportChange";
-import { onVisibilityChange } from "./onVisibilityChange";
+import { animationFrame } from "./animationFrame";
+import { battery, type BatteryState } from "./battery";
+import { fullscreen } from "./fullscreen";
+import { idle } from "./idle";
+import { intersection } from "./intersection";
+import { mediaQuery } from "./mediaQuery";
+import { mutation } from "./mutation";
+import { network, type NetworkState } from "./network";
+import { orientation } from "./orientation";
+import { resize } from "./resize";
+import { viewportChange, type ViewportState } from "./viewportChange";
+import { visibilityChange } from "./visibilityChange";
 
 export type { BatteryState, NetworkState, ViewportState };
 
@@ -61,35 +61,35 @@ export function on(type: 'visibilityChange'): Atom<DocumentVisibilityState>;
 export function on(type: string, ...args: any[]): Atom<any> {
   switch (type) {
     case 'animationFrame':
-      return onAnimationFrame();
+      return animationFrame();
     case 'battery':
-      return onBattery();
+      return battery();
     case 'fullscreen':
-      return onFullscreen();
+      return fullscreen();
     case 'idle':
-      return onIdle(args[0] as number | undefined);
+      return idle(args[0] as number | undefined);
     case 'intersection':
-      return onIntersection(
+      return intersection(
         args[0] as MaybePromise<Element>,
         args[1] as MaybePromise<IntersectionObserverInit> | undefined
       );
     case 'mediaQuery':
-      return onMediaQuery(args[0] as MaybePromise<string>);
+      return mediaQuery(args[0] as MaybePromise<string>);
     case 'mutation':
-      return onMutation(
+      return mutation(
         args[0] as MaybePromise<Element>,
         args[1] as MaybePromise<MutationObserverInit> | undefined
       );
     case 'network':
-      return onNetwork();
+      return network();
     case 'orientation':
-      return onOrientation();
+      return orientation();
     case 'resize':
-      return onResize(args[0] as MaybePromise<HTMLElement>);
+      return resize(args[0] as MaybePromise<HTMLElement>);
     case 'viewportChange':
-      return onViewportChange();
+      return viewportChange();
     case 'visibilityChange':
-      return onVisibilityChange();
+      return visibilityChange();
     default:
       throw new Error(`[on] Unsupported DOM source type: ${type}`);
   }

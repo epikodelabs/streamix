@@ -25,7 +25,7 @@ export type BatteryState = {
  *
  * @returns {Atom<BatteryState>}
  */
-export function onBattery(): Atom<BatteryState> {
+export function battery(): Atom<BatteryState> {
   return createSharedSource<BatteryState>((push) => {
     let cleaned = false;
     let battery: any = null;
@@ -79,5 +79,5 @@ export function onBattery(): Atom<BatteryState> {
     })();
 
     return cleanup;
-  }, { name: "onBattery" });
+  }, { name: "battery" });
 }

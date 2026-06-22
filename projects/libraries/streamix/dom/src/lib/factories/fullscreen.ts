@@ -16,7 +16,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  *
  * @returns {Atom<boolean>}
  */
-export function onFullscreen(): Atom<boolean> {
+export function fullscreen(): Atom<boolean> {
   return createSharedSource<boolean>((push) => {
     let cleaned = false;
 
@@ -65,5 +65,5 @@ export function onFullscreen(): Atom<boolean> {
     void emit();
 
     return cleanup;
-  }, { name: "onFullscreen" });
+  }, { name: "fullscreen" });
 }

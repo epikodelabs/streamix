@@ -18,7 +18,7 @@ import { createSharedSource, isPromiseLike, type Atom, type MaybePromise } from 
  * @param element The DOM element (or promise) to observe.
  * @returns {Atom<{ width: number; height: number }>}
  */
-export function onResize(
+export function resize(
   element: MaybePromise<HTMLElement>
 ): Atom<{ width: number; height: number }> {
   return createSharedSource<{ width: number; height: number }>((push) => {
@@ -82,5 +82,5 @@ export function onResize(
     })();
 
     return cleanup;
-  }, { name: "onResize" });
+  }, { name: "resize" });
 }

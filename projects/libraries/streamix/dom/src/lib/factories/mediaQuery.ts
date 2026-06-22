@@ -19,7 +19,7 @@ import { createSharedSource, isPromiseLike, type Atom, type MaybePromise } from 
  * @param mediaQueryString A CSS media query string (or promise).
  * @returns {Atom<boolean>} An atom emitting match state.
  */
-export function onMediaQuery(
+export function mediaQuery(
   query: MaybePromise<string>
 ): Atom<boolean> {
   /* -------------------------------------------------- */
@@ -28,7 +28,7 @@ export function onMediaQuery(
 
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     console.warn('matchMedia is not supported in this environment');
-    return createSharedSource<boolean>(() => () => {}, { name: 'onMediaQuery' });
+    return createSharedSource<boolean>(() => () => {}, { name: 'mediaQuery' });
   }
 
   return createSharedSource<boolean>((push) => {
@@ -98,5 +98,5 @@ export function onMediaQuery(
     }
 
     return cleanup;
-  }, { name: 'onMediaQuery' });
+  }, { name: 'mediaQuery' });
 }

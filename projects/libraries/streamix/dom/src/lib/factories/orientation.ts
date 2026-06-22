@@ -14,7 +14,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  *
  * @returns {Atom<"portrait" | "landscape">}
  */
-export function onOrientation(): Atom<"portrait" | "landscape"> {
+export function orientation(): Atom<"portrait" | "landscape"> {
   return createSharedSource<"portrait" | "landscape">((push) => {
     let cleaned = false;
     let orientation: ScreenOrientation | null = null;
@@ -60,5 +60,5 @@ export function onOrientation(): Atom<"portrait" | "landscape"> {
     void emit();
 
     return cleanup;
-  }, { name: "onOrientation" });
+  }, { name: "orientation" });
 }

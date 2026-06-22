@@ -19,7 +19,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  *
  * @returns {Atom<DocumentVisibilityState>}
  */
-export function onVisibilityChange(): Atom<DocumentVisibilityState> {
+export function visibilityChange(): Atom<DocumentVisibilityState> {
   return createSharedSource<DocumentVisibilityState>((push) => {
     let cleaned = false;
 
@@ -58,5 +58,5 @@ export function onVisibilityChange(): Atom<DocumentVisibilityState> {
     void emit();
 
     return cleanup;
-  }, { name: "onVisibilityChange" });
+  }, { name: "visibilityChange" });
 }

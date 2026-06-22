@@ -16,7 +16,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  *
  * @returns {Atom<number>} An atom emitting frame-to-frame time deltas.
  */
-export function onAnimationFrame(): Atom<number> {
+export function animationFrame(): Atom<number> {
   return createSharedSource<number>((push) => {
     let cleaned = false;
 
@@ -85,5 +85,5 @@ export function onAnimationFrame(): Atom<number> {
     rafId = raf(tick);
 
     return cleanup;
-  }, { name: "onAnimationFrame" });
+  }, { name: "animationFrame" });
 }

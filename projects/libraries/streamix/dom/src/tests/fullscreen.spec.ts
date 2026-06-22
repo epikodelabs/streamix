@@ -5,7 +5,7 @@ function delay(ms = 0): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-idescribe("onFullscreen", () => {
+idescribe("fullscreen", () => {
   let eventListeners: Map<string, Set<EventListener>>;
   let fullscreenElement: any;
   let webkitFullscreenElement: any;
@@ -103,7 +103,7 @@ idescribe("onFullscreen", () => {
   it("creates a stream with correct name and does not listen immediately", () => {
     const stream = on('fullscreen');
     
-    expect(stream.name).toBe("onFullscreen");
+    expect(stream.name).toBe("fullscreen");
     expect(document.addEventListener).not.toHaveBeenCalled();
   });
 

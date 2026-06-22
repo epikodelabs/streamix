@@ -30,7 +30,7 @@ export type NetworkState = {
  *
  * @returns {Atom<NetworkState>}
  */
-export function onNetwork(): Atom<NetworkState> {
+export function network(): Atom<NetworkState> {
   return createSharedSource<NetworkState>((push) => {
     let cleaned = false;
     let connection: any = null;
@@ -77,5 +77,5 @@ export function onNetwork(): Atom<NetworkState> {
     void emit();
 
     return cleanup;
-  }, { name: "onNetwork" });
+  }, { name: "network" });
 }

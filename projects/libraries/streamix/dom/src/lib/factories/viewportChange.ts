@@ -26,7 +26,7 @@ export type ViewportState = {
  *
  * @returns {Atom<ViewportState>}
  */
-export function onViewportChange(): Atom<ViewportState> {
+export function viewportChange(): Atom<ViewportState> {
   return createSharedSource<ViewportState>((push) => {
     let cleaned = false;
     let target: VisualViewport | Window | null = null;
@@ -92,5 +92,5 @@ export function onViewportChange(): Atom<ViewportState> {
     void emit();
 
     return cleanup;
-  }, { name: "onViewportChange" });
+  }, { name: "viewportChange" });
 }

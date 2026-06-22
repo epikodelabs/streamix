@@ -21,7 +21,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  * @param timeout Optional timeout (ms) after which idle callback must fire.
  * @returns {Atom<IdleDeadline>} An atom emitting idle deadlines.
  */
-export function onIdle(timeout?: number): Atom<IdleDeadline> {
+export function idle(timeout?: number): Atom<IdleDeadline> {
   return createSharedSource<IdleDeadline>((push) => {
     let cleaned = false;
     let idleId: number | null = null;
@@ -72,5 +72,5 @@ export function onIdle(timeout?: number): Atom<IdleDeadline> {
     idleId = ric(tick, timeout != null ? { timeout } : undefined);
 
     return cleanup;
-  }, { name: "onIdle" });
+  }, { name: "idle" });
 }
