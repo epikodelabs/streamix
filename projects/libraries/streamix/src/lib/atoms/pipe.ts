@@ -159,13 +159,13 @@ export function pipe<T, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O>(source: Pip
 export function pipe<T, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P>(source: PipeInput<T>, op1: Operator<T, A>, op2: Operator<A, B>, op3: Operator<B, C>, op4: Operator<C, D>, op5: Operator<D, E>, op6: Operator<E, F>, op7: Operator<F, G>, op8: Operator<G, H>, op9: Operator<H, I>, op10: Operator<I, J>, op11: Operator<J, K>, op12: Operator<K, L>, op13: Operator<L, M>, op14: Operator<M, N>, op15: Operator<N, O>, op16: Operator<O, P>): Atom<P>;
 export function pipe<T>(source: PipeInput<T>, ...ops: Operator[]): Atom<any>;
 export function pipe(
-  source: PipeInput<any> | Atom<any>[],
+  source: PipeInput<any>,
   ...ops: Operator[]
 ): Atom<any> {
   let iterable: AsyncIterable<any>;
 
   if (Array.isArray(source) && source.every(isAtomLike)) {
-    iterable = combineAtoms(source);
+    iterable = combineAtoms(source as Atom<any>[]);
   } else {
     iterable = toAsyncIterable(source as PipeInput<any>);
   }
