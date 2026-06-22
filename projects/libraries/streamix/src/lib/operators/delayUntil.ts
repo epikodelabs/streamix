@@ -5,7 +5,7 @@ import {
     NEXT,
     type Operator
 } from "../atoms";
-import { fromAny } from "../factories";
+import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
 import { normalizeError } from "../utils/helpers";
 
@@ -40,7 +40,7 @@ export function delayUntil<T = any, N = any>(
   notifier: Atom<N> | Promise<N>
 ): Operator<T, T> {
   return createOperator<T, T>("delayUntil", function (source: AsyncIterator<T>) {
-    const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
+    const notifierIt = from(notifier)[Symbol.asyncIterator]();
     const runner = createAsyncCoordinator([notifierIt, source]);
 
     const buffer: T[] = [];

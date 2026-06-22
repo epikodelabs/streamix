@@ -1,6 +1,6 @@
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
-import { fromAny } from '../factories';
 import type { PipeInput } from "../atoms/pipe";
+import { from } from '../factories';
 import { normalizeError } from "../utils/helpers";
 
 /**
@@ -53,7 +53,7 @@ export const expand = <T = any>(
       const projected = project(value);
       const normalized = isPromiseLike(projected) ? await projected : projected;
 
-      const stream = fromAny(normalized);
+      const stream = from(normalized);
       const iterator = stream[Symbol.asyncIterator]() as AsyncIterator<T>;
 
       while (true) {

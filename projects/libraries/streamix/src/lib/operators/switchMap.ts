@@ -1,7 +1,7 @@
 import type { MaybePromise, Operator } from "../atoms";
 import { createOperator, DONE, isPromiseLike } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
-import { fromAny } from "../factories";
+import { from } from "../factories";
 import { createAsyncPushable } from "../utils";
 import { normalizeError } from "../utils/helpers";
 
@@ -62,7 +62,7 @@ export function switchMap<T = any, R = any>(
         Promise.resolve(prev.it.return?.()).catch(() => {});
       }
 
-      const it = fromAny(innerStream as any)[Symbol.asyncIterator]() as AsyncIterator<R>;
+      const it = from(innerStream as any)[Symbol.asyncIterator]() as AsyncIterator<R>;
       currentInner = { token, it };
 
       void (async () => {
@@ -104,7 +104,7 @@ export function switchMap<T = any, R = any>(
         Promise.resolve(projected).then(
           (normalized) => {
             if (stopped || capturedToken !== currentInnerToken) return;
-            subscribeToInner(fromAny<R>(normalized as any), capturedToken);
+            subscribeToInner(from<R>(normalized as any), capturedToken);
           },
           (err) => {
             if (stopped || capturedToken !== currentInnerToken) return;
@@ -112,7 +112,7 @@ export function switchMap<T = any, R = any>(
           }
         );
       } else {
-        subscribeToInner(fromAny<R>(projected as any), token);
+        subscribeToInner(from<R>(projected as any), token);
       }
     };
 

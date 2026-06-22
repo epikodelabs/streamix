@@ -1,6 +1,6 @@
 import { createPushOperator, MaybePromise, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
-import { fromAny } from '../factories';
+import { from } from '../factories';
 import { createAsyncCoordinator, normalizeError, type RunnerEvent } from '../utils';
 
 /**
@@ -9,7 +9,7 @@ import { createAsyncCoordinator, normalizeError, type RunnerEvent } from '../uti
  *
  * For each value from the source stream:
  * 1. The `project` function is called with the value and its index.
- * 2. The returned value is normalized into a stream using {@link fromAny}.
+ * 2. The returned value is normalized into a stream using {@link from}.
  * 3. The inner stream is consumed concurrently with all other active inner streams.
  * 4. Emitted values from all inner streams are interleaved into the output stream.
  *
@@ -52,7 +52,7 @@ export function mergeMap<T = any, R = any>(
 
       const startInner = (value: T) => {
         const projected = project(value, projectIndex++);
-        const inner = fromAny(projected as any);
+        const inner = from(projected as any);
         coordinator.addSource(inner[Symbol.asyncIterator]() as AsyncIterator<R>);
         pendingInners++;
       };

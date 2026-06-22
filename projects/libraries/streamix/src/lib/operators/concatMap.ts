@@ -1,6 +1,6 @@
 import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator } from "../atoms";
-import { fromAny } from "../factories";
 import type { PipeInput } from "../atoms/pipe";
+import { from } from "../factories";
 import { normalizeError } from "../utils/helpers";
 
 /**
@@ -9,7 +9,7 @@ import { normalizeError } from "../utils/helpers";
  *
  * For each value from the source:
  * 1. The `project` function is called with the value and its index.
- * 2. The returned value is normalized into a stream using {@link fromAny}.
+ * 2. The returned value is normalized into a stream using {@link from}.
  * 3. The inner stream is consumed fully before processing the next outer value.
  *
  * This ensures that all emitted values maintain their original sequential order.
@@ -42,7 +42,7 @@ export const concatMap = <T = any, R = any>(
 
             const projected = project(result.value, outerIndex++);
             const normalized = isPromiseLike(projected) ? await projected : projected;
-            const innerStream = fromAny<R>(normalized);
+            const innerStream = from<R>(normalized);
             innerIterator = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
           }
 

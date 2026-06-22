@@ -1,6 +1,6 @@
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
 import type { Atom } from "../atoms/atom";
-import { fromAny } from '../factories';
+import { from } from '../factories';
 import { normalizeError } from "../utils/helpers";
 
 /**
@@ -103,7 +103,7 @@ export const fork = <T = any, R = any>(...options: Array<ForkOption<T, R>>) =>
               throw new Error(`No handler found for value: ${outerValue}`);
             }
 
-            const innerStream = fromAny(matched.handler(outerValue));
+            const innerStream = from(matched.handler(outerValue));
             innerIterator = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
           }
 

@@ -1,6 +1,6 @@
 import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator } from "../atoms";
-import { fromAny } from "../factories";
 import type { PipeInput } from "../atoms/pipe";
+import { from } from "../factories";
 import { normalizeError } from "../utils/helpers";
 
 /**
@@ -82,7 +82,7 @@ export const exhaustMap = <T = any, R = any>(
             }
           }
 
-          const innerStream = fromAny<R>(projected as any);
+          const innerStream = from<R>(projected as any);
           innerIterator = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
         }
       },

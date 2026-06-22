@@ -1,6 +1,6 @@
 import { createAsyncPushable, EMPTY, firstValueFrom, flow, from, iterate, lastValueFrom } from '@epikodelabs/streamix';
 
-describe('eachValueFrom', () => {
+describe('iterate', () => {
   it('should get first value from the stream', async () => {
     const first = await firstValueFrom(from([1, 2, 3]));
     expect(first).toBe(1);

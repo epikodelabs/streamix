@@ -7,8 +7,6 @@ export * from './EMPTY';
 export * from './firstValueFrom';
 export * from './forkJoin';
 export * from './from';
-export * from './fromAny';
-export * from './fromPromise';
 export * from './iif';
 export * from './interval';
 export * from './lastValueFrom';

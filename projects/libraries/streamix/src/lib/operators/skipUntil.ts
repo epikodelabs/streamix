@@ -1,6 +1,6 @@
 import { createOperator, DONE, NEXT, type Operator } from "../atoms";
-import { fromAny } from "../factories";
 import type { PipeInput } from "../atoms/pipe";
+import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
 
 /**
@@ -29,7 +29,7 @@ export function skipUntil<T = any, N = any>(
   notifier: PipeInput<N> | Promise<N>
 ): Operator<T, T> {
   return createOperator<T, T>("skipUntil", function (source: AsyncIterator<T>) {
-    const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
+    const notifierIt = from(notifier)[Symbol.asyncIterator]();
     const runner = createAsyncCoordinator([source, notifierIt]);
 
     let gateOpened = false;

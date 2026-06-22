@@ -102,7 +102,7 @@ Retained .map files to improve developer experience.
 
 ## 2.0.21
 
-Small fixes, added `forAny` converter, eachValueFrom correctly propagates void values. Updated documentation
+Small fixes, added `forAny` converter, iterate correctly propagates void values. Updated documentation
 
 ## 2.0.20
 
@@ -238,7 +238,7 @@ Streamix 0.1.8 introduces several key improvements and bug fixes, including enha
 
 ## 0.1.7
 
-Various improvements and bug fixes in Streamix v0.1.7, including updated stream components, added test cases for `mergeMap` and `switchMap`, corrections to code structure, implementation of event bus as a generator, cleanup of unused variables, removal of flags with setters, introduction of `eachValueFrom` method with tests, and updates to the pipeline and operator components.
+Various improvements and bug fixes in Streamix v0.1.7, including updated stream components, added test cases for `mergeMap` and `switchMap`, corrections to code structure, implementation of event bus as a generator, cleanup of unused variables, removal of flags with setters, introduction of `iterate` method with tests, and updates to the pipeline and operator components.
 
 ## 0.1.6
 

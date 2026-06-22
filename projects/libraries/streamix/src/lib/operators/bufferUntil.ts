@@ -1,6 +1,6 @@
 import { createOperator, DONE, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
-import { fromAny } from "../factories";
+import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
 import { normalizeError } from "../utils/helpers";
 
@@ -16,7 +16,7 @@ import { normalizeError } from "../utils/helpers";
  */
 export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
   createOperator<T, T[]>("bufferUntil", function (this: Operator, source: AsyncIterator<T>) {
-    const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
+    const notifierIt = from(notifier)[Symbol.asyncIterator]();
     const runner = createAsyncCoordinator([source, notifierIt]);
 
     // Buffered source values
