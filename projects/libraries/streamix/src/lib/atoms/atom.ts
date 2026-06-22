@@ -42,6 +42,19 @@ export interface Atom<T = any> {
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
+/**
+ * Extracts the value type of an {@link Atom}.
+ *
+ * Useful when you want to name the type produced by a piped atom without
+ * repeating it manually:
+ *
+ * ```ts
+ * const combined = pipe([atom(1), atom('hello')]);
+ * type CombinedValue = AtomValue<typeof combined>; // [number, string]
+ * ```
+ */
+export type AtomValue<A> = A extends Atom<infer T> ? T : never;
+
 export interface Writable<T = any> extends Atom<T> {
   next(value: T): void;
   fail(err: any, options?: { terminate?: boolean }): void;

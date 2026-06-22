@@ -1,4 +1,4 @@
-import { atom, filter, from, iterate, map, pipe, type Atom } from '@epikodelabs/streamix';
+import { atom, filter, from, iterate, map, pipe, type AtomValue } from '@epikodelabs/streamix';
 
 async function collect<T>(source: AsyncIterable<T>, count: number): Promise<T[]> {
     const results: T[] = [];
@@ -36,7 +36,7 @@ describe('pipe', () => {
         const age = atom(30);
         const active = atom(true);
         const combined = pipe([name, age, active]);
-        type CombinedValue = typeof combined extends Atom<infer T> ? T : never;
+        type CombinedValue = AtomValue<typeof combined>;
         type _Inferred = AssertEqual<CombinedValue, [string, number, boolean]>;
 
         const pending = collect(combined, 3);
