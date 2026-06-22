@@ -1,73 +1,58 @@
-import { atom } from '@epikodelabs/streamix';
+import { atom, pipe } from '@epikodelabs/streamix';
 import { none } from '@epikodelabs/streamix/aggregates';
-
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
-
 describe('none', () => {
-  let subject: ReturnType<typeof atom>;
-  let source: ReturnType<typeof atom>;
-
-  beforeEach(() => {
-    subject = atom<number>();
-    source = subject;
-  });
-
-  it('should emit true when no values satisfy the predicate', async () => {
-    const predicate = (value: number) => value > 10;
-    const noneResult = source.pipe(none(predicate));
-    const results: boolean[] = [];
-
-    void (async () => {
-      for await (const value of noneResult) {
-        results.push(value);
-      }
-    })();
-
-    subject.next(1);
-    subject.next(9);
-    subject.dispose();
-    await settle();
-
-    expect(results).toEqual([true]);
-  });
-
-  it('should emit false immediately once a value satisfies the predicate', async () => {
-    const predicate = (value: number) => value > 5;
-    const noneResult = source.pipe(none(predicate));
-    const results: boolean[] = [];
-
-    void (async () => {
-      for await (const value of noneResult) {
-        results.push(value);
-      }
-    })();
-
-    subject.next(1);
-    subject.next(6);
-    subject.next(2);
-    subject.dispose();
-    await settle();
-
-    expect(results).toEqual([false]);
-  });
-
-  it('should await asynchronous predicates before deciding', async () => {
-    const predicate = async (value: number) => value === 3;
-    const noneResult = source.pipe(none(predicate));
-    const results: boolean[] = [];
-
-    void (async () => {
-      for await (const value of noneResult) {
-        results.push(value);
-      }
-    })();
-
-    subject.next(1);
-    subject.next(2);
-    subject.next(3);
-    subject.dispose();
-    await settle();
-
-    expect(results).toEqual([false]);
-  });
+    let subject: ReturnType<typeof atom>;
+    let source: ReturnType<typeof atom>;
+    beforeEach(() => {
+        subject = atom<number>();
+        source = subject;
+    });
+    it('should emit true when no values satisfy the predicate', async () => {
+        const predicate = (value: number) => value > 10;
+        const noneResult = pipe(source, none(predicate));
+        const results: boolean[] = [];
+        void (async () => {
+            for await (const value of noneResult) {
+                results.push(value);
+            }
+        })();
+        subject.next(1);
+        subject.next(9);
+        subject.dispose();
+        await settle();
+        expect(results).toEqual([true]);
+    });
+    it('should emit false immediately once a value satisfies the predicate', async () => {
+        const predicate = (value: number) => value > 5;
+        const noneResult = pipe(source, none(predicate));
+        const results: boolean[] = [];
+        void (async () => {
+            for await (const value of noneResult) {
+                results.push(value);
+            }
+        })();
+        subject.next(1);
+        subject.next(6);
+        subject.next(2);
+        subject.dispose();
+        await settle();
+        expect(results).toEqual([false]);
+    });
+    it('should await asynchronous predicates before deciding', async () => {
+        const predicate = async (value: number) => value === 3;
+        const noneResult = pipe(source, none(predicate));
+        const results: boolean[] = [];
+        void (async () => {
+            for await (const value of noneResult) {
+                results.push(value);
+            }
+        })();
+        subject.next(1);
+        subject.next(2);
+        subject.next(3);
+        subject.dispose();
+        await settle();
+        expect(results).toEqual([false]);
+    });
 });

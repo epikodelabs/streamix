@@ -1,69 +1,54 @@
-import { atom } from '@epikodelabs/streamix';
+import { atom, pipe } from '@epikodelabs/streamix';
 import { average } from '@epikodelabs/streamix/aggregates';
-
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
-
 describe('average', () => {
-  let subject: ReturnType<typeof atom>;
-  let source: ReturnType<typeof atom>;
-
-  beforeEach(() => {
-    subject = atom<number>();
-    source = subject;
-  });
-
-  it('should emit the arithmetic mean of all values', async () => {
-    const averageResult = source.pipe(average());
-    const results: number[] = [];
-
-    void (async () => {
-      for await (const value of averageResult) {
-        results.push(value);
-      }
-    })();
-
-    subject.next(1);
-    subject.next(5);
-    subject.next(4);
-    subject.dispose();
-    await settle();
-
-    expect(results).toEqual([10 / 3]);
-  });
-
-  it('should use the provided selector and await promises', async () => {
-    const averageResult = source.pipe(
-      average(async (value: { score: number }) => value.score * 2)
-    );
-    const results: number[] = [];
-
-    void (async () => {
-      for await (const value of averageResult) {
-        results.push(value);
-      }
-    })();
-
-    subject.next({ score: 1 });
-    subject.next({ score: 3 });
-    subject.dispose();
-    await settle();
-
-    expect(results).toEqual([4]);
-  });
-
-  it('should emit 0 when the source stream is empty', async () => {
-    const averageResult = source.pipe(average());
-    const results: number[] = [];
-
-    void (async () => {
-      for await (const value of averageResult) {
-        results.push(value);
-      }
-    })();
-
-    subject.dispose();
-    await settle();
-
-    expect(results).toEqual([0]);
-  });
+    let subject: ReturnType<typeof atom>;
+    let source: ReturnType<typeof atom>;
+    beforeEach(() => {
+        subject = atom<number>();
+        source = subject;
+    });
+    it('should emit the arithmetic mean of all values', async () => {
+        const averageResult = pipe(source, average());
+        const results: number[] = [];
+        void (async () => {
+            for await (const value of averageResult) {
+                results.push(value);
+            }
+        })();
+        subject.next(1);
+        subject.next(5);
+        subject.next(4);
+        subject.dispose();
+        await settle();
+        expect(results).toEqual([10 / 3]);
+    });
+    it('should use the provided selector and await promises', async () => {
+        const averageResult = pipe(source, average(async (value: {
+            score: number;
+        }) => value.score * 2));
+        const results: number[] = [];
+        void (async () => {
+            for await (const value of averageResult) {
+                results.push(value);
+            }
+        })();
+        subject.next({ score: 1 });
+        subject.next({ score: 3 });
+        subject.dispose();
+        await settle();
+        expect(results).toEqual([4]);
+    });
+    it('should emit 0 when the source stream is empty', async () => {
+        const averageResult = pipe(source, average());
+        const results: number[] = [];
+        void (async () => {
+            for await (const value of averageResult) {
+                results.push(value);
+            }
+        })();
+        subject.dispose();
+        await settle();
+        expect(results).toEqual([0]);
+    });
 });

@@ -75,7 +75,7 @@ function SearchComponent() {
 Here's the same functionality with Streamix:
 
 ```typescript
-import { fromEvent, debounce, map, filter, switchMap } from '@epikodelabs/streamix';
+import { debounce, filter, fromEvent, map, pipe, switchMap } from '@epikodelabs/streamix';
 import { useState, useEffect } from 'react';
 
 function SearchComponent() {
@@ -85,8 +85,8 @@ function SearchComponent() {
   useEffect(() => {
     const input = document.getElementById('search-input');
     
-    const stream = fromEvent(input, 'input')
-      .pipe(
+    const stream = pipe(
+        fromEvent(input, 'input'),
         map(e => e.target.value),
         filter(query => query.length >= 3),
         debounce(300),
@@ -95,7 +95,7 @@ function SearchComponent() {
           fetch(`/api/search?q=${query}`).then(r => r.json())
         ),
         tap(() => setLoading(false))
-      );
+    );
 
     const subscription = stream.subscribe(data => {
       setResults(data);
@@ -143,14 +143,14 @@ function MetricsDashboard() {
   const [metrics, setMetrics] = useState({});
 
   useEffect(() => {
-    const stream = interval(5000)
-      .pipe(
+    const stream = pipe(
+        interval(5000),
         switchMap(() => fetch('/api/metrics').then(r => r.json())),
         catchError(err => {
           console.error('Metrics failed:', err);
           return of(metrics); // Keep showing last good data
         })
-      );
+    );
 
     const subscription = stream.subscribe(data => {
       setMetrics(data);
@@ -179,8 +179,8 @@ function UsernameInput() {
   const [checking, setChecking] = useState(false);
 
   useEffect(() => {
-    const stream = fromEvent(document.getElementById('username'), 'input')
-      .pipe(
+    const stream = pipe(
+        fromEvent(document.getElementById('username'), 'input'),
         map(e => e.target.value),
         tap(setUsername),
         filter(name => name.length >= 3),
@@ -190,7 +190,7 @@ function UsernameInput() {
           fetch(`/api/check-username?name=${name}`).then(r => r.json())
         ),
         tap(() => setChecking(false))
-      );
+    );
 
     const subscription = stream.subscribe(result => {
       setAvailable(result.available);
@@ -223,8 +223,8 @@ function InfiniteList() {
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    const stream = fromEvent(window, 'scroll')
-      .pipe(
+    const stream = pipe(
+        fromEvent(window, 'scroll'),
         filter(() => {
           const bottom = window.innerHeight + window.scrollY >= 
                         document.body.offsetHeight - 500;
@@ -236,7 +236,7 @@ function InfiniteList() {
         switchMap(currentPage => 
           fetch(`/api/items?page=${currentPage}`).then(r => r.json())
         )
-      );
+    );
 
     const subscription = stream.subscribe(newItems => {
       setItems(prev => [...prev, ...newItems]);
@@ -263,10 +263,10 @@ function LiveChat() {
   useEffect(() => {
     const ws = new WebSocket('wss://chat.example.com');
     
-    const stream = fromEvent(ws, 'message')
-      .pipe(
+    const stream = pipe(
+        fromEvent(ws, 'message'),
         map(event => JSON.parse(event.data))
-      );
+    );
 
     const subscription = stream.subscribe(message => {
       setMessages(prev => [...prev, message]);
@@ -401,11 +401,11 @@ Don't rewrite everything. Start with your most annoying `useEffect`:
 // Before: 50 lines of defensive useEffect code
 
 // After: One readable stream
-const stream = fromEvent(input, 'input')
-  .pipe(
+const stream = pipe(
+    fromEvent(input, 'input'),
     debounce(300),
     switchMap(fetchResults)
-  );
+);
 ```
 
 ### ✨ 4. Watch Your Code Quality Improve

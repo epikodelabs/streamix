@@ -118,9 +118,10 @@ const primes = compute(async function* () {
 ### Stream Processing
 
 ```typescript
-import { range, map, filter, take } from '@epikodelabs/streamix';
+import { range, map, filter, take, pipe } from '@epikodelabs/streamix';
 
-const potionRecipe = range(1, 20).pipe(
+const potionRecipe = pipe(
+  range(1, 20),
   map(i => ({
     name: ['Dragon Scale', 'Phoenix Tear', 'Unicorn Hair', 'Mermaid Kelp'][i % 4],
     power: i * 10,

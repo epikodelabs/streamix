@@ -36,10 +36,10 @@ type WithLatestInput<T> =
  *
  * @example
  * ```ts
- * const clicks = fromEvent(document, 'click');
- * const mouseMoves = fromEvent(document, 'mousemove');
+ * const clicks = listen(document, 'click');
+ * const mouseMoves = listen(document, 'mousemove');
  *
- * clicks.pipe(withLatestFrom(mouseMoves)).subscribe({
+ * pipe(clicks, withLatestFrom(mouseMoves)).subscribe({
  * next: ([clickEvent, lastMouseMove]) => {
  * console.log('Clicked at:', lastMouseMove.clientX, lastMouseMove.clientY);
  * }

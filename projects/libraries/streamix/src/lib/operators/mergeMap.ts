@@ -29,7 +29,8 @@ import { createAsyncCoordinator, normalizeError, type RunnerEvent } from '../uti
  * @example
  * ```typescript
  * // Process HTTP requests with max 3 concurrent
- * stream(urls).pipe(
+ * pipe(
+ *   stream(urls),
  *   mergeMap(url => fetch(url), 3)
  * )
  * ```

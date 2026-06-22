@@ -29,9 +29,9 @@ describe('mergeMap', () => {
     // Create the chained stream
     const chainedAtom = pipe(
       source,
-      filter((value: number) => value % 2 === 0),
+      filter((value) => value % 2 === 0),
       mergeMap(firstProject),
-      filter((value: number) => value > 10),
+      filter((value) => value > 10),
       mergeMap(secondProject)
     );
 

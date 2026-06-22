@@ -44,9 +44,10 @@ npm install @epikodelabs/streamix
 A stream is an async iterable sequence. You can iterate it directly or pipe it through operators.
 
 ```ts
-import { range, map, filter, take } from '@epikodelabs/streamix';
+import { filter, map, pipe, range, take } from '@epikodelabs/streamix';
 
-const evens = range(1, 20).pipe(
+const evens = pipe(
+  range(1, 20),
   filter(n => n % 2 === 0),
   map(n => n * 10),
   take(5)
@@ -62,7 +63,7 @@ for await (const value of evens) {
 Atoms are reactive values — readable, writable, and composable with `derived`. They are also streams, so they pipe and iterate like any other source.
 
 ```ts
-import { atom, derived } from '@epikodelabs/streamix';
+import { atom, derived, pipe } from '@epikodelabs/streamix';
 
 const count = atom(0);         // always has a value
 const label = atom<string>();  // value arrives later
@@ -73,7 +74,7 @@ count.next(5);
 console.log(summary.value); // "count is 5"
 
 // As a stream
-count.pipe(map(n => n * 2)).subscribe(console.log);
+pipe(count, map(n => n * 2)).subscribe(console.log);
 ```
 
 **Migration from Subjects:**
@@ -88,7 +89,8 @@ count.pipe(map(n => n * 2)).subscribe(console.log);
 Operators transform streams. Sync and async callbacks are both supported.
 
 ```ts
-stream.pipe(
+pipe(
+  stream,
   map(async x => await enrich(x)),
   filter(x => x.valid),
   debounce(200),
@@ -139,7 +141,7 @@ const onlyPrime = () =>
 ### `query()` — promise from a stream
 
 ```ts
-const first = await interval(1000).pipe(take(1)).query();
+const first = await pipe(interval(1000), take(1)).query();
 ```
 
 Resolves to the first emitted value and unsubscribes automatically.
@@ -151,13 +153,13 @@ Resolves to the first emitted value and unsubscribes automatically.
 Offload heavy work to Web Workers without losing stream composability.
 
 ```ts
-import { compute, compose, actor } from '@epikodelabs/streamix';
+import { actor, compose, compute, pipe } from '@epikodelabs/streamix';
 
 // Run a function in a worker pool
 const result = await compute(() => heavyCalculation());
 
 // Run a whole pipeline in the background
-const background = compose(source.pipe(map(expensiveTransform)));
+const background = compose(pipe(source, map(expensiveTransform)));
 
 // Long-lived stateful worker
 const counter = actor({ count: 0 }, (state, msg) => {
@@ -199,7 +201,7 @@ async function* primes() {
 }
 
 // Only 5 primes are ever computed
-for await (const p of createStream('primes', primes).pipe(take(5))) {
+for await (const p of pipe(createStream('primes', primes), take(5))) {
   console.log(p);
 }
 ```

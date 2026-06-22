@@ -161,7 +161,7 @@ The difference sounds minor. It's the difference between "building a data pipeli
 ### ✨ 1. Just Consume The Dang Values
 
 ```typescript
-for await (const q of searchInput.pipe(debounce(300))) {
+for await (const q of pipe(searchInput, debounce(300))) {
   const result = await api.search(q);
   render(result);
 }

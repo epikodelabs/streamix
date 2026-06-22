@@ -1,130 +1,103 @@
-import { atom } from '@epikodelabs/streamix';
+import { atom, pipe } from '@epikodelabs/streamix';
 import { every } from '@epikodelabs/streamix/aggregates';
-
 describe('every', () => {
-  let subject: ReturnType<typeof atom>;
-  let source: ReturnType<typeof atom>;
-
-  beforeEach(() => {
-    subject = atom<number>();
-    source = subject;
-  });
-
-  it('should emit true if all values satisfy the predicate', async () => {
-    const predicate = (value: number) => value > 0;
-    const everyResult = source.pipe(every(predicate));
-    const results: boolean[] = [];
-
-    void (async () => {
-      for await (const value of everyResult) {
-        results.push(value);
-      }
-    })();
-
-    subject.next(1);
-    subject.next(2);
-    subject.next(3); // All values > 0
-    subject.dispose();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    expect(results).toEqual([true]);
-  });
-
-  it('should emit false if any value does not satisfy the predicate', async () => {
-    const predicate = (value: number) => value > 0;
-    const everyResult = source.pipe(every(predicate));
-    const results: boolean[] = [];
-
-    void (async () => {
-      for await (const value of everyResult) {
-        results.push(value);
-      }
-    })();
-
-    subject.next(1);
-    subject.next(-1); // Does not satisfy predicate (value > 0)
-    subject.dispose();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    expect(results).toEqual([false]);
-  });
-
-  it('should emit true if the stream is empty', async () => {
-    const predicate = (value: number) => value > 0;
-    const everyResult = source.pipe(every(predicate));
-    const results: boolean[] = [];
-
-    void (async () => {
-      for await (const value of everyResult) {
-        results.push(value);
-      }
-    })();
-
-    subject.dispose(); // Empty stream, so it should emit true
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    expect(results).toEqual([true]);
-  });
-
-  it('should propagate errors from the source stream', async () => {
-    const predicate = (value: number) => value > 0;
-    const everyResult = source.pipe(every(predicate));
-    let error: any = null;
-
-    void (async () => {
-      try {
-        for await (const _ of everyResult) {
-          void _;
-        }
-      } catch (err) {
-        error = err;
-      }
-    })();
-
-    subject.fail(new Error('Test Error'));
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    expect(error).toEqual(new Error('Test Error')); // Propagate error
-  });
-
-  it('should complete after emitting true when all values satisfy the predicate', async () => {
-    const predicate = (value: number) => value > 0;
-    const everyResult = source.pipe(every(predicate));
-    let completed = false;
-
-    void (async () => {
-      for await (const _ of everyResult) {
-        void _;
-        completed = true;
-      }
-    })();
-
-    subject.next(1);
-    subject.next(2);
-    subject.dispose(); // All values > 0, should emit true and complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    expect(completed).toBe(true);
-  });
-
-  it('should complete after emitting false if any value does not satisfy the predicate', async () => {
-    const predicate = (value: number) => value > 0;
-    const everyResult = source.pipe(every(predicate));
-    let completed = false;
-
-    void (async () => {
-      for await (const _ of everyResult) {
-        void _;
-        completed = true;
-      }
-    })();
-
-    subject.next(1);
-    subject.next(-1); // Does not satisfy predicate, should emit false and complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    expect(completed).toBe(true);
-  });
+    let subject: ReturnType<typeof atom>;
+    let source: ReturnType<typeof atom>;
+    beforeEach(() => {
+        subject = atom<number>();
+        source = subject;
+    });
+    it('should emit true if all values satisfy the predicate', async () => {
+        const predicate = (value: number) => value > 0;
+        const everyResult = pipe(source, every(predicate));
+        const results: boolean[] = [];
+        void (async () => {
+            for await (const value of everyResult) {
+                results.push(value);
+            }
+        })();
+        subject.next(1);
+        subject.next(2);
+        subject.next(3); // All values > 0
+        subject.dispose();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(results).toEqual([true]);
+    });
+    it('should emit false if any value does not satisfy the predicate', async () => {
+        const predicate = (value: number) => value > 0;
+        const everyResult = pipe(source, every(predicate));
+        const results: boolean[] = [];
+        void (async () => {
+            for await (const value of everyResult) {
+                results.push(value);
+            }
+        })();
+        subject.next(1);
+        subject.next(-1); // Does not satisfy predicate (value > 0)
+        subject.dispose();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(results).toEqual([false]);
+    });
+    it('should emit true if the stream is empty', async () => {
+        const predicate = (value: number) => value > 0;
+        const everyResult = pipe(source, every(predicate));
+        const results: boolean[] = [];
+        void (async () => {
+            for await (const value of everyResult) {
+                results.push(value);
+            }
+        })();
+        subject.dispose(); // Empty stream, so it should emit true
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(results).toEqual([true]);
+    });
+    it('should propagate errors from the source stream', async () => {
+        const predicate = (value: number) => value > 0;
+        const everyResult = pipe(source, every(predicate));
+        let error: any = null;
+        void (async () => {
+            try {
+                for await (const _ of everyResult) {
+                    void _;
+                }
+            }
+            catch (err) {
+                error = err;
+            }
+        })();
+        subject.fail(new Error('Test Error'));
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(error).toEqual(new Error('Test Error')); // Propagate error
+    });
+    it('should complete after emitting true when all values satisfy the predicate', async () => {
+        const predicate = (value: number) => value > 0;
+        const everyResult = pipe(source, every(predicate));
+        let completed = false;
+        void (async () => {
+            for await (const _ of everyResult) {
+                void _;
+                completed = true;
+            }
+        })();
+        subject.next(1);
+        subject.next(2);
+        subject.dispose(); // All values > 0, should emit true and complete
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(completed).toBe(true);
+    });
+    it('should complete after emitting false if any value does not satisfy the predicate', async () => {
+        const predicate = (value: number) => value > 0;
+        const everyResult = pipe(source, every(predicate));
+        let completed = false;
+        void (async () => {
+            for await (const _ of everyResult) {
+                void _;
+                completed = true;
+            }
+        })();
+        subject.next(1);
+        subject.next(-1); // Does not satisfy predicate, should emit false and complete
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(completed).toBe(true);
+    });
 });
-
-

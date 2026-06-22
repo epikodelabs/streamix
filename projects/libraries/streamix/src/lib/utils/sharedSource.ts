@@ -5,7 +5,6 @@ import {
 } from "../atoms";
 import { ANALOG, type Atom } from "../atoms/atom";
 import { DONE } from "../atoms/operator";
-import { pipe as pipeSource } from "../atoms/pipe";
 import { getCurrentScope, getScopeMode, registerWithCurrentScope } from "../atoms/scope";
 import { createSubscription } from "../atoms/subscription";
 import { cyclicBuffer, type CyclicBuffer, type CyclicBufferMode } from "../primitives/cyclicBuffer";
@@ -253,9 +252,6 @@ export function createSharedSource<T>(
         },
         throw: async (err?: any) => Promise.reject(normalizeError(err)),
       };
-    },
-    pipe(...ops: any[]) {
-      return pipeSource(instance as Atom<T>, ...ops);
     },
     dispose() {
       completed = true;

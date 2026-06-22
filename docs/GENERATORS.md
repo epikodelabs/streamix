@@ -62,13 +62,13 @@ for await (const n of mapped(filtered(numbers()))) {
 **The solution:** Add operator pipelines.
 
 ```typescript
-import { from, map, filter } from '@epikodelabs/streamix';
+import { filter, from, map, pipe } from '@epikodelabs/streamix';
 
-const theaterShow = from(bedtimeStory())
-  .pipe(
+const theaterShow = pipe(
+    from(bedtimeStory()),
     map(page => page.toUpperCase()),
     filter(page => page.includes("DRAGON"))
-  );
+);
 
 for await (const scene of theaterShow) {
   console.log(scene);
@@ -82,7 +82,7 @@ Same behavior, cleaner syntax. The generator stays pull-based—Streamix just ad
 ## ⚡ Quick Start
 
 ```typescript
-import { from, map, filter, take } from '@epikodelabs/streamix';
+import { filter, from, map, pipe, take } from '@epikodelabs/streamix';
 
 // Simple async generator - counting sheep
 async function* countSheep(total) {
@@ -93,12 +93,12 @@ async function* countSheep(total) {
 }
 
 // Add operator pipeline
-const sleepyTime = from(countSheep(100))
-  .pipe(
+const sleepyTime = pipe(
+    from(countSheep(100)),
     filter(sheep => !sheep.includes("13")), // No unlucky sheep
     map(sheep => sheep + " zzz"),
-    take(10) // Only count 10
-  );
+    take(10)
+);
 
 // Pull values with for-await-of
 for await (const sheep of sleepyTime) {
@@ -145,7 +145,8 @@ const powerUps = createStream('game', signal => {
 });
 
 // Now you can pipe operators
-const player = powerUps.pipe(
+const player = pipe(
+  powerUps,
   filter(power => power !== "Mushroom"),
   map(power => `Collected: ${power}`)
 );
@@ -247,10 +248,10 @@ const kid2 = toyBox.subscribe(toy => console.log("Kid 2:", toy));
 // They have to SHARE the toys
 ```
 
-**Unicast** (from `.pipe()`): Independent execution
+**Unicast** (from `pipe()`): Independent execution
 
 ```typescript
-const piped = toyBox.pipe(map(toy => toy.toUpperCase()));
+const piped = pipe(toyBox, map(toy => toy.toUpperCase()));
 
 for await (const toy of piped) { /* chain 1 */ }
 for await (const toy of piped) { /* chain 2 */ }
@@ -287,13 +288,13 @@ When producer outpaces consumer, values accumulate in an internal queue. The que
 // Solution: Make the machine slower or eat faster
 
 // Limit items
-candyMachine.pipe(take(100))
+pipe(candyMachine, take(100))
 
 // Throttle
-candyMachine.pipe(throttle(100))
+pipe(candyMachine, throttle(100))
 
 // Sample
-candyMachine.pipe(filter((_, i) => i % 10 === 0))
+pipe(candyMachine, filter((_, i) => i % 10 === 0))
 
 // Or slow down producer
 async function*() {
@@ -367,11 +368,11 @@ async function* raindrops() {
 }
 
 // Race them
-const race = from(raindrops())
-  .pipe(
+const race = pipe(
+    from(raindrops()),
     map(drop => ({ drop, time: Date.now() })),
-    take(5) // First 5 to finish
-  );
+    take(5)
+);
 
 console.log("Ready... Set... Go!");
 for await (const finisher of race) {
@@ -389,7 +390,8 @@ const metrics = createStream('system', async function* (signal: AbortSignal) {
   }
 });
 
-const highLoad = metrics.pipe(
+const highLoad = pipe(
+  metrics,
   filter(m => m.cpu > 80 || m.memory > 90)
 );
 
@@ -411,7 +413,8 @@ async function* readChunks(path) {
   }
 }
 
-const errors = createStream('logs', signal => readChunks('app.log')).pipe(
+const errors = pipe(
+  createStream('logs', signal => readChunks('app.log')),
   map(chunk => chunk.toString()),
   mergeMap(text => text.split('\n')),
   filter(line => line.includes('ERROR'))
@@ -434,11 +437,11 @@ async function* questions() {
   yield "Let's make a story!";
 }
 
-const quiz = from(questions())
-  .pipe(
+const quiz = pipe(
+    from(questions()),
     map(question => `Question: ${question}`),
     filter(question => question.includes("favorite"))
-  );
+);
 
 for await (const q of quiz) {
   const answer = await ask(q);
@@ -453,7 +456,8 @@ async function* userIds() {
   yield* [1, 2, 3, 4, 5];
 }
 
-const users = createStream('users', userIds).pipe(
+const users = pipe(
+  createStream('users', userIds),
   map(id => fetch(`/api/users/${id}`).then(r => r.json())),
   filter(user => user.active)
 );
@@ -499,11 +503,11 @@ Streamix keeps the pull-based semantics you get with native async iteration—co
 for await (const n of mapped(filtered(numbers()))) { }
 
 // After: operator pipeline
-from(numbers())
-  .pipe(
+pipe(
+    from(numbers()),
     filter(n => n % 2 === 0),
     map(n => n * 2)
-  )
+)
 ```
 
 Same behavior, cleaner syntax, same pull semantics.

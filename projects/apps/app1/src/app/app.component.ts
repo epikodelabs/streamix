@@ -1,35 +1,17 @@
 import { DecimalPipe } from '@angular/common';
 import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import {
-    atom,
-    bufferCount,
-    combineLatest,
-    debounce,
-    filter,
-    finalize,
-    listen,
-    interval,
-    map,
-    merge,
-    range,
-    scan,
-    scope,
-    tap,
-    throttle,
-} from '@epikodelabs/streamix';
-
+import { atom, bufferCount, combineLatest, debounce, filter, finalize, interval, listen, map, merge, pipe, range, scan, scope, tap, throttle } from '@epikodelabs/streamix';
 interface Metric {
-  name: string;
-  value: number;
-  unit: string;
-  trend: 'up' | 'down' | 'flat';
+    name: string;
+    value: number;
+    unit: string;
+    trend: 'up' | 'down' | 'flat';
 }
-
 @Component({
-  selector: 'app-root',
-  standalone: true,
-  imports: [DecimalPipe],
-  template: `
+    selector: 'app-root',
+    standalone: true,
+    imports: [DecimalPipe],
+    template: `
     <div class="app">
       <header class="header">
         <h1>📊 Stream Monitor</h1>
@@ -214,7 +196,7 @@ interface Metric {
       </footer>
     </div>
   `,
-  styles: [`
+    styles: [`
     :host {
       --bg: #0f1117;
       --surface: #181b24;
@@ -458,276 +440,222 @@ interface Metric {
   `],
 })
 export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
-  constructor(private cdr: ChangeDetectorRef) {}
-
-  @ViewChild('searchInput') searchInput!: ElementRef<HTMLInputElement>;
-  @ViewChild('juliaCanvas') juliaCanvas!: ElementRef<HTMLCanvasElement>;
-
-  // Live metrics
-  metrics: Metric[] = [
-    { name: 'Throughput', value: 0, unit: 'req/s', trend: 'flat' },
-    { name: 'Latency', value: 0, unit: 'ms', trend: 'flat' },
-    { name: 'Errors', value: 0, unit: '%', trend: 'flat' },
-    { name: 'Active', value: 0, unit: 'conn', trend: 'flat' },
-  ];
-  sparklinePoints = '';
-  private sparklineHistory: number[] = [];
-
-  // Search
-  rawSearchCount = 0;
-  debouncedSearchCount = 0;
-  searchResults: string[] = [];
-
-  // Buffer
-  batches: string[][] = [];
-
-  // Combined
-  sliderAValue = 30;
-  sliderBValue = 60;
-  combinedValue = 18;
-
-  // juliabrot
-  juliaGenerating = false;
-  juliaProgress = 0;
-  juliaElapsed = 0;
-
-  // Log
-  logEntries: { time: string; message: string; type: string }[] = [];
-
-  private readonly appScope = scope(() => ({
-    clicks: atom<string>(),
-    sliderA: atom<number>(),
-    sliderB: atom<number>(),
-  }));
-
-  ngOnInit(): void {
-    this.initMetricsStream();
-    this.initBufferStream();
-    this.initCombinedStream();
-    this.initLogStream();
-
-    // Seed combined
-    this.appScope.sliderA.next(this.sliderAValue);
-    this.appScope.sliderB.next(this.sliderBValue);
-  }
-
-  ngAfterViewInit(): void {
-    this.initSearchStream();
-  }
-
-  ngOnDestroy(): void {
-    this.appScope.dispose();
-  }
-
-  drawJulia(): void {
-    const canvas = this.juliaCanvas?.nativeElement;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d')!;
-    const width = canvas.width;
-    const height = canvas.height;
-    const imageData = ctx.createImageData(width, height);
-    const data = imageData.data;
-
-    this.juliaGenerating = true;
-    this.juliaProgress = 0;
-    this.juliaElapsed = 0;
-    this.cdr.detectChanges();
-    const startTime = performance.now();
-
-    const maxIterations = 60;
-    const zoom = 55;
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const juliaC = { x: -0.7, y: 0.27015 };
-
-    const julia = (zx: number, zy: number): number => {
-      for (let i = 0; i < maxIterations; i++) {
-        const x2 = zx * zx, y2 = zy * zy;
-        if (x2 + y2 > 4) return i;
-        const tmp = x2 - y2 + juliaC.x;
-        zy = 2 * zx * zy + juliaC.y;
-        zx = tmp;
-      }
-      return maxIterations;
-    };
-
-    const getColor = (iteration: number): [number, number, number] => {
-      if (iteration === maxIterations) return [0, 0, 0];
-      const t = iteration / maxIterations;
-      const r = Math.floor(9 * (1 - t) * t * t * t * 255);
-      const g = Math.floor(15 * (1 - t) * (1 - t) * t * t * 255);
-      const b = Math.floor(8.5 * (1 - t) * (1 - t) * (1 - t) * t * 255);
-      return [r, g, b];
-    };
-
-    const batchSize = 200;
-    let pixelsDone = 0;
-
-    const sub = range(0, width * height).pipe(
-      map((i: number) => {
-        const px = i % width;
-        const py = Math.floor(i / width);
-        const x0 = (px - centerX) / zoom;
-        const y0 = (py - centerY) / zoom;
-        const iter = julia(x0, y0);
-        const [r, g, b] = getColor(iter);
-        return { i, r, g, b };
-      }),
-      bufferCount(batchSize),
-      tap(async (batch: Array<{ i: number; r: number; g: number; b: number }>) => {
-        for (const p of batch) {
-          const idx = p.i * 4;
-          data[idx] = p.r;
-          data[idx + 1] = p.g;
-          data[idx + 2] = p.b;
-          data[idx + 3] = 255;
-        }
-        pixelsDone += batch.length;
-        this.juliaProgress = (pixelsDone / (width * height)) * 100;
-        ctx.putImageData(imageData, 0, 0);
+    constructor(private cdr: ChangeDetectorRef) { }
+    @ViewChild('searchInput')
+    searchInput!: ElementRef<HTMLInputElement>;
+    @ViewChild('juliaCanvas')
+    juliaCanvas!: ElementRef<HTMLCanvasElement>;
+    // Live metrics
+    metrics: Metric[] = [
+        { name: 'Throughput', value: 0, unit: 'req/s', trend: 'flat' },
+        { name: 'Latency', value: 0, unit: 'ms', trend: 'flat' },
+        { name: 'Errors', value: 0, unit: '%', trend: 'flat' },
+        { name: 'Active', value: 0, unit: 'conn', trend: 'flat' },
+    ];
+    sparklinePoints = '';
+    private sparklineHistory: number[] = [];
+    // Search
+    rawSearchCount = 0;
+    debouncedSearchCount = 0;
+    searchResults: string[] = [];
+    // Buffer
+    batches: string[][] = [];
+    // Combined
+    sliderAValue = 30;
+    sliderBValue = 60;
+    combinedValue = 18;
+    // juliabrot
+    juliaGenerating = false;
+    juliaProgress = 0;
+    juliaElapsed = 0;
+    // Log
+    logEntries: {
+        time: string;
+        message: string;
+        type: string;
+    }[] = [];
+    private readonly appScope = scope(() => ({
+        clicks: atom<string>(),
+        sliderA: atom<number>(),
+        sliderB: atom<number>(),
+    }));
+    ngOnInit(): void {
+        this.initMetricsStream();
+        this.initBufferStream();
+        this.initCombinedStream();
+        this.initLogStream();
+        // Seed combined
+        this.appScope.sliderA.next(this.sliderAValue);
+        this.appScope.sliderB.next(this.sliderBValue);
+    }
+    ngAfterViewInit(): void {
+        this.initSearchStream();
+    }
+    ngOnDestroy(): void {
+        this.appScope.dispose();
+    }
+    drawJulia(): void {
+        const canvas = this.juliaCanvas?.nativeElement;
+        if (!canvas)
+            return;
+        const ctx = canvas.getContext('2d')!;
+        const width = canvas.width;
+        const height = canvas.height;
+        const imageData = ctx.createImageData(width, height);
+        const data = imageData.data;
+        this.juliaGenerating = true;
+        this.juliaProgress = 0;
+        this.juliaElapsed = 0;
         this.cdr.detectChanges();
-
-        await new Promise<void>((r) => requestAnimationFrame(() => r()));
-      }),
-      finalize(() => {
-        this.juliaElapsed = performance.now() - startTime;
-        this.juliaGenerating = false;
+        const startTime = performance.now();
+        const maxIterations = 60;
+        const zoom = 55;
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const juliaC = { x: -0.7, y: 0.27015 };
+        const julia = (zx: number, zy: number): number => {
+            for (let i = 0; i < maxIterations; i++) {
+                const x2 = zx * zx, y2 = zy * zy;
+                if (x2 + y2 > 4)
+                    return i;
+                const tmp = x2 - y2 + juliaC.x;
+                zy = 2 * zx * zy + juliaC.y;
+                zx = tmp;
+            }
+            return maxIterations;
+        };
+        const getColor = (iteration: number): [
+            number,
+            number,
+            number
+        ] => {
+            if (iteration === maxIterations)
+                return [0, 0, 0];
+            const t = iteration / maxIterations;
+            const r = Math.floor(9 * (1 - t) * t * t * t * 255);
+            const g = Math.floor(15 * (1 - t) * (1 - t) * t * t * 255);
+            const b = Math.floor(8.5 * (1 - t) * (1 - t) * (1 - t) * t * 255);
+            return [r, g, b];
+        };
+        const batchSize = 200;
+        let pixelsDone = 0;
+        const sub = pipe(range(0, width * height), map((i: number) => {
+            const px = i % width;
+            const py = Math.floor(i / width);
+            const x0 = (px - centerX) / zoom;
+            const y0 = (py - centerY) / zoom;
+            const iter = julia(x0, y0);
+            const [r, g, b] = getColor(iter);
+            return { i, r, g, b };
+        }), bufferCount(batchSize), tap(async (batch: Array<{
+            i: number;
+            r: number;
+            g: number;
+            b: number;
+        }>) => {
+            for (const p of batch) {
+                const idx = p.i * 4;
+                data[idx] = p.r;
+                data[idx + 1] = p.g;
+                data[idx + 2] = p.b;
+                data[idx + 3] = 255;
+            }
+            pixelsDone += batch.length;
+            this.juliaProgress = (pixelsDone / (width * height)) * 100;
+            ctx.putImageData(imageData, 0, 0);
+            this.cdr.detectChanges();
+            await new Promise<void>((r) => requestAnimationFrame(() => r()));
+        }), finalize(() => {
+            this.juliaElapsed = performance.now() - startTime;
+            this.juliaGenerating = false;
+            this.cdr.detectChanges();
+        })).subscribe(() => { });
+        this.appScope.cleanups.add(() => sub.unsubscribe());
+    }
+    private initMetricsStream(): void {
+        const s = pipe(interval(800), scan(acc => {
+            const throughput = Math.max(0, acc.throughput + (Math.random() - 0.5) * 40);
+            const latency = Math.max(5, acc.latency + (Math.random() - 0.5) * 10);
+            const errors = Math.max(0, Math.min(5, acc.errors + (Math.random() - 0.5) * 0.5));
+            const active = Math.max(0, acc.active + Math.floor((Math.random() - 0.5) * 6));
+            return { throughput, latency, errors, active };
+        }, { throughput: 120, latency: 45, errors: 0.5, active: 24 }), tap(({ throughput, latency, errors, active }) => {
+            this.metrics = [
+                { name: 'Throughput', value: throughput, unit: 'req/s', trend: throughput > 120 ? 'up' : 'down' },
+                { name: 'Latency', value: latency, unit: 'ms', trend: latency < 45 ? 'up' : 'down' },
+                { name: 'Errors', value: errors, unit: '%', trend: errors < 0.5 ? 'up' : 'down' },
+                { name: 'Active', value: active, unit: 'conn', trend: active > 24 ? 'up' : 'down' },
+            ];
+            this.sparklineHistory.push(throughput);
+            if (this.sparklineHistory.length > 50)
+                this.sparklineHistory.shift();
+            const min = Math.min(...this.sparklineHistory);
+            const max = Math.max(...this.sparklineHistory);
+            const range = max - min || 1;
+            this.sparklinePoints = this.sparklineHistory
+                .map((v, i) => `${i * (100 / (this.sparklineHistory.length - 1 || 1))},${30 - ((v - min) / range) * 28}`)
+                .join(' ');
+            this.cdr.detectChanges();
+        })).subscribe(() => { });
+        this.appScope.cleanups.add(() => s.unsubscribe());
+    }
+    private initSearchStream(): void {
+        const input = this.searchInput?.nativeElement;
+        if (!input)
+            return;
+        const value$ = pipe(listen(input, 'input'), map(() => input.value as string));
+        // Raw counter
+        const rawSub = pipe(value$, tap(() => { this.rawSearchCount++; this.cdr.detectChanges(); })).subscribe(() => { });
+        this.appScope.cleanups.add(() => rawSub.unsubscribe());
+        // Debounced results
+        const resultSub = pipe(value$, debounce(400), filter(q => q.length > 1), tap(() => { this.debouncedSearchCount++; this.cdr.detectChanges(); }), tap((query: string) => {
+            this.searchResults.unshift(`Matched "${query}" (${Math.floor(Math.random() * 50)} results)`);
+            if (this.searchResults.length > 5)
+                this.searchResults.pop();
+            this.cdr.detectChanges();
+        })).subscribe(() => { });
+        this.appScope.cleanups.add(() => resultSub.unsubscribe());
+    }
+    private initBufferStream(): void {
+        const s = pipe(this.appScope.clicks, bufferCount(5), tap((batch: string[]) => {
+            this.batches.unshift(batch);
+            if (this.batches.length > 8)
+                this.batches.pop();
+            this.cdr.detectChanges();
+        })).subscribe(() => { });
+        this.appScope.cleanups.add(() => s.unsubscribe());
+    }
+    private initCombinedStream(): void {
+        const s = pipe(combineLatest(this.appScope.sliderA, this.appScope.sliderB), map(([a, b]) => (a * b) / 100), tap(v => { this.combinedValue = v; this.cdr.detectChanges(); })).subscribe(() => { });
+        this.appScope.cleanups.add(() => s.unsubscribe());
+    }
+    private initLogStream(): void {
+        const metricLog$ = pipe(interval(2000), throttle(2000), map(() => {
+            const names = ['Throughput spike detected', 'Latency normalized', 'Connection pool resized', 'Cache invalidated'];
+            return names[Math.floor(Math.random() * names.length)];
+        }), tap(msg => this.pushLog(msg, 'metric')));
+        const searchLog$ = pipe(interval(3500), throttle(3500), map(() => 'Search index refreshed'), tap(msg => this.pushLog(msg, 'search')));
+        const bufferLog$ = pipe(interval(5000), throttle(5000), map(() => `Buffer flushed — ${this.batches.length} active batches`), tap(msg => this.pushLog(msg, 'buffer')));
+        const combinedLog$ = pipe(interval(4200), throttle(4200), map(() => `Combined recalculated: A=${this.sliderAValue}, B=${this.sliderBValue}`), tap(msg => this.pushLog(msg, 'combined')));
+        const s = merge(metricLog$, searchLog$, bufferLog$, combinedLog$).subscribe(() => { });
+        this.appScope.cleanups.add(() => s.unsubscribe());
+    }
+    emitClick(label: string): void {
+        this.appScope.clicks.next(label);
+    }
+    updateStreamA(value: number): void {
+        this.sliderAValue = value;
+        this.appScope.sliderA.next(value);
+    }
+    updateStreamB(value: number): void {
+        this.sliderBValue = value;
+        this.appScope.sliderB.next(value);
+    }
+    private pushLog(message: string, type: string): void {
+        const time = new Date().toLocaleTimeString();
+        this.logEntries.unshift({ time, message, type });
+        if (this.logEntries.length > 40)
+            this.logEntries.pop();
         this.cdr.detectChanges();
-      })
-    ).subscribe(() => {});
-
-    this.appScope.cleanups.add(() => sub.unsubscribe());
-  }
-
-  private initMetricsStream(): void {
-    const s = interval(800).pipe(
-      scan(acc => {
-        const throughput = Math.max(0, acc.throughput + (Math.random() - 0.5) * 40);
-        const latency = Math.max(5, acc.latency + (Math.random() - 0.5) * 10);
-        const errors = Math.max(0, Math.min(5, acc.errors + (Math.random() - 0.5) * 0.5));
-        const active = Math.max(0, acc.active + Math.floor((Math.random() - 0.5) * 6));
-        return { throughput, latency, errors, active };
-      }, { throughput: 120, latency: 45, errors: 0.5, active: 24 }),
-      tap(({ throughput, latency, errors, active }) => {
-        this.metrics = [
-          { name: 'Throughput', value: throughput, unit: 'req/s', trend: throughput > 120 ? 'up' : 'down' },
-          { name: 'Latency', value: latency, unit: 'ms', trend: latency < 45 ? 'up' : 'down' },
-          { name: 'Errors', value: errors, unit: '%', trend: errors < 0.5 ? 'up' : 'down' },
-          { name: 'Active', value: active, unit: 'conn', trend: active > 24 ? 'up' : 'down' },
-        ];
-        this.sparklineHistory.push(throughput);
-        if (this.sparklineHistory.length > 50) this.sparklineHistory.shift();
-        const min = Math.min(...this.sparklineHistory);
-        const max = Math.max(...this.sparklineHistory);
-        const range = max - min || 1;
-        this.sparklinePoints = this.sparklineHistory
-          .map((v, i) => `${i * (100 / (this.sparklineHistory.length - 1 || 1))},${30 - ((v - min) / range) * 28}`)
-          .join(' ');
-        this.cdr.detectChanges();
-      })
-    ).subscribe(() => {});
-    this.appScope.cleanups.add(() => s.unsubscribe());
-  }
-
-  private initSearchStream(): void {
-    const input = this.searchInput?.nativeElement;
-    if (!input) return;
-
-    const value$ = listen(input, 'input').pipe(
-      map(() => input.value as string)
-    );
-
-    // Raw counter
-    const rawSub = value$.pipe(
-      tap(() => { this.rawSearchCount++; this.cdr.detectChanges(); })
-    ).subscribe(() => {});
-    this.appScope.cleanups.add(() => rawSub.unsubscribe());
-
-    // Debounced results
-    const resultSub = value$.pipe(
-      debounce(400),
-      filter(q => q.length > 1),
-      tap(() => { this.debouncedSearchCount++; this.cdr.detectChanges(); }),
-      tap((query: string) => {
-        this.searchResults.unshift(`Matched "${query}" (${Math.floor(Math.random() * 50)} results)`);
-        if (this.searchResults.length > 5) this.searchResults.pop();
-        this.cdr.detectChanges();
-      })
-    ).subscribe(() => {});
-    this.appScope.cleanups.add(() => resultSub.unsubscribe());
-  }
-
-  private initBufferStream(): void {
-    const s = this.appScope.clicks.pipe(
-      bufferCount(5),
-      tap((batch: string[]) => {
-        this.batches.unshift(batch);
-        if (this.batches.length > 8) this.batches.pop();
-        this.cdr.detectChanges();
-      })
-    ).subscribe(() => {});
-    this.appScope.cleanups.add(() => s.unsubscribe());
-  }
-
-  private initCombinedStream(): void {
-    const s = combineLatest(this.appScope.sliderA, this.appScope.sliderB).pipe(
-      map(([a, b]) => (a * b) / 100),
-      tap(v => { this.combinedValue = v; this.cdr.detectChanges(); })
-    ).subscribe(() => {});
-    this.appScope.cleanups.add(() => s.unsubscribe());
-  }
-
-  private initLogStream(): void {
-    const metricLog$ = interval(2000).pipe(
-      throttle(2000),
-      map(() => {
-        const names = ['Throughput spike detected', 'Latency normalized', 'Connection pool resized', 'Cache invalidated'];
-        return names[Math.floor(Math.random() * names.length)];
-      }),
-      tap(msg => this.pushLog(msg, 'metric'))
-    );
-
-    const searchLog$ = interval(3500).pipe(
-      throttle(3500),
-      map(() => 'Search index refreshed'),
-      tap(msg => this.pushLog(msg, 'search'))
-    );
-
-    const bufferLog$ = interval(5000).pipe(
-      throttle(5000),
-      map(() => `Buffer flushed — ${this.batches.length} active batches`),
-      tap(msg => this.pushLog(msg, 'buffer'))
-    );
-
-    const combinedLog$ = interval(4200).pipe(
-      throttle(4200),
-      map(() => `Combined recalculated: A=${this.sliderAValue}, B=${this.sliderBValue}`),
-      tap(msg => this.pushLog(msg, 'combined'))
-    );
-
-    const s = merge(metricLog$, searchLog$, bufferLog$, combinedLog$).subscribe(() => {});
-    this.appScope.cleanups.add(() => s.unsubscribe());
-  }
-
-  emitClick(label: string): void {
-    this.appScope.clicks.next(label);
-  }
-
-  updateStreamA(value: number): void {
-    this.sliderAValue = value;
-    this.appScope.sliderA.next(value);
-  }
-
-  updateStreamB(value: number): void {
-    this.sliderBValue = value;
-    this.appScope.sliderB.next(value);
-  }
-
-  private pushLog(message: string, type: string): void {
-    const time = new Date().toLocaleTimeString();
-    this.logEntries.unshift({ time, message, type });
-    if (this.logEntries.length > 40) this.logEntries.pop();
-    this.cdr.detectChanges();
-  }
+    }
 }

@@ -1,53 +1,43 @@
-import { atom } from '@epikodelabs/streamix';
+import { atom, pipe } from '@epikodelabs/streamix';
 import { min } from '@epikodelabs/streamix/aggregates';
-
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
-
 describe('min', () => {
-  let subject: ReturnType<typeof atom>;
-  let source: ReturnType<typeof atom>;
-
-  beforeEach(() => {
-    subject = atom<number>();
-    source = subject;
-  });
-
-  it('should emit the smallest value', async () => {
-    const minResult = source.pipe(min());
-    const results: number[] = [];
-
-    void (async () => {
-      for await (const value of minResult) {
-        results.push(value);
-      }
-    })();
-
-    subject.next(3);
-    subject.next(1); // Smallest value
-    subject.next(2);
-    subject.dispose();
-    await settle();
-
-    expect(results).toEqual([1]);
-  });
-
-  it('should propagate errors from the source stream', async () => {
-    const minResult = source.pipe(min());
-    let error: any = null;
-
-    void (async () => {
-      try {
-        for await (const _ of minResult) {
-          void _;
-        }
-      } catch (err) {
-        error = err;
-      }
-    })();
-
-    subject.fail(new Error('Test Error'));
-    await settle();
-
-    expect(error).toEqual(new Error('Test Error'));
-  });
+    let subject: ReturnType<typeof atom>;
+    let source: ReturnType<typeof atom>;
+    beforeEach(() => {
+        subject = atom<number>();
+        source = subject;
+    });
+    it('should emit the smallest value', async () => {
+        const minResult = pipe(source, min());
+        const results: number[] = [];
+        void (async () => {
+            for await (const value of minResult) {
+                results.push(value);
+            }
+        })();
+        subject.next(3);
+        subject.next(1); // Smallest value
+        subject.next(2);
+        subject.dispose();
+        await settle();
+        expect(results).toEqual([1]);
+    });
+    it('should propagate errors from the source stream', async () => {
+        const minResult = pipe(source, min());
+        let error: any = null;
+        void (async () => {
+            try {
+                for await (const _ of minResult) {
+                    void _;
+                }
+            }
+            catch (err) {
+                error = err;
+            }
+        })();
+        subject.fail(new Error('Test Error'));
+        await settle();
+        expect(error).toEqual(new Error('Test Error'));
+    });
 });

@@ -25,7 +25,7 @@ import { normalizeError } from "../utils/helpers";
  * @example
  * ```ts
  * // For each number, start a new timer stream and emit its ticks, cancelling the previous timer.
- * source.pipe(switchMap(n => timerStream(n)))
+ * pipe(source, switchMap(n => timerStream(n)))
  * ```
  */
 export function switchMap<T = any, R = any>(

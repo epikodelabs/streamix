@@ -1,14 +1,12 @@
 import { DecimalPipe, JsonPipe } from '@angular/common';
 import { ChangeDetectorRef, Component, OnDestroy, inject } from '@angular/core';
-import { atom, derived, flow, from, scope, startWith } from '@epikodelabs/streamix';
-
+import { atom, derived, flow, from, pipe, scope, startWith } from '@epikodelabs/streamix';
 type Tab = 'tree' | 'state';
-
 @Component({
-  selector: 'app-root',
-  standalone: true,
-  imports: [DecimalPipe, JsonPipe],
-  template: `
+    selector: 'app-root',
+    standalone: true,
+    imports: [DecimalPipe, JsonPipe],
+    template: `
     <div class="universe">
       <!-- Animated background mesh -->
       <div class="mesh">
@@ -250,7 +248,7 @@ type Tab = 'tree' | 'state';
 
     </div>
   `,
-  styles: [`
+    styles: [`
     :host {
       display: block;
       min-height: 100vh;
@@ -359,63 +357,56 @@ type Tab = 'tree' | 'state';
   `]
 })
 export class AppComponent implements OnDestroy {
-  readonly cdr = inject(ChangeDetectorRef);
-
-  readonly personal = scope(() => ({
-    name: atom(''),
-    email: atom(''),
-  }));
-
-  readonly address = scope(() => ({
-    street: atom(''),
-    country: atom(''),
-  }));
-
-  readonly preferences = scope(() => ({
-    notifications: atom(true),
-    theme: atom('dark'),
-  }));
-
-  readonly wizard = scope(() => ({
-    step: atom(0),
-    personal: this.personal,
-    address: this.address,
-    preferences: this.preferences,
-    async: scope(() => ({
-      countries: flow(
-        from(() => new Promise<string[]>(r => setTimeout(() => r(['US','CA','UK','DE','FR']), 1500))).pipe(startWith([] as string[]))
-      ),
-    })),
-  }));
-
-  // Derived state
-  readonly completeness = derived(() => {
-    let score = 0;
-    if (this.personal.name.value) score++;
-    if (this.personal.email.value) score++;
-    if (this.address.street.value) score++;
-    if (this.address.country.value) score++;
-    return (score / 4) * 100;
-  });
-
-  // Single derived snapshot — auto-tracks every atom in the wizard tree
-  readonly state = derived(() => ({
-    ...this.wizard.snapshot(),
-    completeness: this.completeness.value,
-  }));
-
-  sidebarCollapsed = false;
-  activeTab: Tab = 'tree';
-  readonly tabs: Tab[] = ['tree', 'state'];
-
-  constructor() {
-    // Async atoms update outside Angular's zone — trigger CD manually
-    this.state.subscribe(() => this.cdr.detectChanges());
-  }
-
-  ngOnDestroy() {
-    this.state.dispose();
-    this.completeness.dispose();
-    this.wizard.dispose();
-  }
+    readonly cdr = inject(ChangeDetectorRef);
+    readonly personal = scope(() => ({
+        name: atom(''),
+        email: atom(''),
+    }));
+    readonly address = scope(() => ({
+        street: atom(''),
+        country: atom(''),
+    }));
+    readonly preferences = scope(() => ({
+        notifications: atom(true),
+        theme: atom('dark'),
+    }));
+    readonly wizard = scope(() => ({
+        step: atom(0),
+        personal: this.personal,
+        address: this.address,
+        preferences: this.preferences,
+        async: scope(() => ({
+            countries: flow(pipe(from(() => new Promise<string[]>(r => setTimeout(() => r(['US', 'CA', 'UK', 'DE', 'FR']), 1500))), startWith([] as string[]))),
+        })),
+    }));
+    // Derived state
+    readonly completeness = derived(() => {
+        let score = 0;
+        if (this.personal.name.value)
+            score++;
+        if (this.personal.email.value)
+            score++;
+        if (this.address.street.value)
+            score++;
+        if (this.address.country.value)
+            score++;
+        return (score / 4) * 100;
+    });
+    // Single derived snapshot — auto-tracks every atom in the wizard tree
+    readonly state = derived(() => ({
+        ...this.wizard.snapshot(),
+        completeness: this.completeness.value,
+    }));
+    sidebarCollapsed = false;
+    activeTab: Tab = 'tree';
+    readonly tabs: Tab[] = ['tree', 'state'];
+    constructor() {
+        // Async atoms update outside Angular's zone — trigger CD manually
+        this.state.subscribe(() => this.cdr.detectChanges());
+    }
+    ngOnDestroy() {
+        this.state.dispose();
+        this.completeness.dispose();
+        this.wizard.dispose();
+    }
 }

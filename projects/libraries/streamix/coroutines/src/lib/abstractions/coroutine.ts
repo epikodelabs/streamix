@@ -51,7 +51,7 @@ function createCoroutineImpl<T, R>(
  *
  * A coroutine owns one dedicated worker, reuses it across calls, and queues
  * `processTask()` submissions on that worker. The returned `Coroutine` can be
- * used with `.pipe()` in stream pipelines or called directly. Call
+ * used with `pipe()` in stream pipelines or called directly. Call
  * `.finalize()` when done to terminate the underlying worker. Raw helper
  * snippets can be provided through an optional trailing options object.
  */

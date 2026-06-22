@@ -1,6 +1,5 @@
 import { iterate } from "./iterate";
-import { type MaybePromise, type Operator } from "./operator";
-import { pipe as pipeSource } from "./pipe";
+import { type MaybePromise } from "./operator";
 
 import {
   getCurrentScope,
@@ -40,7 +39,6 @@ export interface Atom<T = any> {
   subscribe(callback?: (value: T) => MaybePromise): Subscription;
   onError(handler: (error: any) => void): Subscription;
   dispose(): void;
-  pipe<R = any>(...ops: Operator<any, any>[]): Atom<R>;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
@@ -603,7 +601,6 @@ export function flow<T>(
       }
     },
 
-    pipe(...ops: Operator<any, any>[]) { return pipeSource(this, ...ops); },
     [Symbol.asyncIterator]() { return iterate(this); },
     dispose() { void disposeInstance(); },
   };
@@ -712,7 +709,6 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
       return createSubscription(() => { errorHandlers.delete(handler); });
     },
 
-    pipe(...ops: Operator<any, any>[]) { return pipeSource(this, ...ops); },
     [Symbol.asyncIterator]() { return iterate(this); },
 
     next(value: T) {
@@ -1020,7 +1016,6 @@ export function derived<T>(fn: () => T, options?: AtomOptions): Atom<T> {
       return createSubscription(() => { errorHandlers.delete(handler); });
     },
 
-    pipe(...ops: Operator<any, any>[]) { return pipeSource(this, ...ops); },
     [Symbol.asyncIterator]() { return iterate(this); },
 
     dispose() {
