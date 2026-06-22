@@ -1,4 +1,14 @@
 import { atom, filter, from, iterate, map, pipe, type Atom } from '@epikodelabs/streamix';
+
+async function collect<T>(source: AsyncIterable<T>, count: number): Promise<T[]> {
+    const results: T[] = [];
+    for await (const value of source) {
+        results.push(value);
+        if (results.length >= count) break;
+    }
+    return results;
+}
+
 describe('pipe', () => {
     it('can pass the result of one pipe as the input of another', async () => {
         const source = from([1, 2, 3, 4, 5]);
@@ -21,25 +31,21 @@ describe('pipe', () => {
         expect(results).toEqual([3, 4, 5]);
     });
     it('can combine atoms of different types into a tuple', async () => {
-        type AssertTrue<T extends true> = T;
-        const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+        type AssertEqual<T, U> = [T] extends [U] ? ([U] extends [T] ? true : false) : false;
         const name = atom('Alice');
         const age = atom(30);
         const active = atom(true);
         const combined = pipe([name, age, active]);
-        type _CombinedType = AssertTrue<typeof combined extends Atom<[string, number, boolean]> ? true : false>;
-        const results = [];
-        void (async () => {
-            for await (const value of combined) {
-                results.push(value);
-            }
-        })();
+        type CombinedValue = typeof combined extends Atom<infer T> ? T : never;
+        type _Inferred = AssertEqual<CombinedValue, [string, number, boolean]>;
+
+        const pending = collect(combined, 3);
 
         name.next('Bob');
         age.next(31);
         active.next(false);
 
-        await settle();
+        const results = await pending;
         expect(results).toEqual([
             ['Bob', 30, true],
             ['Bob', 31, true],
