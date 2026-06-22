@@ -1,5 +1,7 @@
 import { atom, filter, from, iterate, map, pipe, type AtomValue } from '@epikodelabs/streamix';
 
+function assertType<_T extends true>(): void {}
+
 async function collect<T>(source: AsyncIterable<T>, count: number): Promise<T[]> {
     const results: T[] = [];
     for await (const value of source) {
@@ -38,6 +40,7 @@ describe('pipe', () => {
         const combined = pipe([name, age, active]);
         type CombinedValue = AtomValue<typeof combined>;
         type _Inferred = AssertEqual<CombinedValue, [string, number, boolean]>;
+        assertType<_Inferred>();
 
         const pending = collect(combined, 3);
 

@@ -1,14 +1,17 @@
 import { compose, filter, from, iterate, map, pipe, take } from '@epikodelabs/streamix';
 
+type AssertEqual<T, U> = [T] extends [U] ? ([U] extends [T] ? true : false) : false;
+function assertType<_T extends true>(): void {}
+
 describe('compose', () => {
     it('composes multiple operators into one operator', async () => {
         const source = from([1, 2, 3, 4, 5]);
         const doubleThenFilter = compose(
             map((value: number) => value * 2),
-            filter((value: number) => value > 4)
+            filter(value => value > 4)
         );
         const result = pipe(source, doubleThenFilter);
-        const results: number[] = [];
+        const results = [];
         for await (const value of iterate(result)) {
             results.push(value);
         }
@@ -40,7 +43,7 @@ describe('compose', () => {
 
     it('returns an identity operator when called with no operators', async () => {
         const source = from([1, 2, 3]);
-        const identity = compose();
+        const identity = compose<number>();
         const result = pipe(source, identity);
         const results: number[] = [];
         for await (const value of iterate(result)) {
@@ -62,5 +65,21 @@ describe('compose', () => {
             results.push(value);
         }
         expect(results).toEqual([8, 10, 12]);
+    });
+
+    it('infers the composed operator type across type changes', async () => {
+        const source = from([1, 2, 3]);
+        const toStringThenFilter = compose(
+            map((value: number) => String(value)),
+            filter((value: string) => value !== '2')
+        );
+        type _Inferred = AssertEqual<typeof toStringThenFilter, import('@epikodelabs/streamix').Operator<number, string>>;
+        assertType<_Inferred>();
+        const result = pipe(source, toStringThenFilter);
+        const results: string[] = [];
+        for await (const value of iterate(result)) {
+            results.push(value);
+        }
+        expect(results).toEqual(['1', '3']);
     });
 });
