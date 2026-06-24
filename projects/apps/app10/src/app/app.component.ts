@@ -11,6 +11,7 @@ interface Particle {
     rotation: number;
     rotationSpeed: number;
     shape: 'rect' | 'circle';
+    restitution: number;
 }
 const PALETTE = [
     '#ff4d6d',
@@ -40,6 +41,7 @@ function createParticle(x: number, y: number): Particle {
         rotation: rand(0, 360),
         rotationSpeed: rand(-8, 8),
         shape: Math.random() > 0.5 ? 'rect' : 'circle',
+        restitution: rand(0.6, 0.95),
     };
 }
 @Component({
@@ -134,6 +136,48 @@ export class AppComponent implements OnDestroy {
     constructor() {
         this.start();
     }
+    private resolveCollisions(): void {
+        const particles = this.particles;
+        for (let i = 0; i < particles.length; i++) {
+            const p1 = particles[i];
+            for (let j = i + 1; j < particles.length; j++) {
+                const p2 = particles[j];
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const distSq = dx * dx + dy * dy;
+                const minDist = (p1.size + p2.size) / 2;
+                if (distSq <= 0 || distSq >= minDist * minDist) continue;
+
+                const dist = Math.sqrt(distSq);
+                const nx = dx / dist;
+                const ny = dy / dist;
+                const overlap = minDist - dist;
+
+                // Separate overlapping positions using size as mass.
+                const m1 = p1.size;
+                const m2 = p2.size;
+                const totalMass = m1 + m2;
+                p1.x -= nx * overlap * (m2 / totalMass);
+                p1.y -= ny * overlap * (m2 / totalMass);
+                p2.x += nx * overlap * (m1 / totalMass);
+                p2.y += ny * overlap * (m1 / totalMass);
+
+                // Elastic impulse along collision normal.
+                const dvx = p2.vx - p1.vx;
+                const dvy = p2.vy - p1.vy;
+                const velocityAlongNormal = dvx * nx + dvy * ny;
+                if (velocityAlongNormal > 0) continue;
+
+                const restitution = Math.min(p1.restitution, p2.restitution);
+                const impulse = -(1 + restitution) * velocityAlongNormal / (1 / m1 + 1 / m2);
+                p1.vx -= (impulse / m1) * nx;
+                p1.vy -= (impulse / m1) * ny;
+                p2.vx += (impulse / m2) * nx;
+                p2.vy += (impulse / m2) * ny;
+            }
+        }
+    }
+
     private start(): void {
         // Seed an initial swarm.
         const cx = this.width / 2;
@@ -165,24 +209,25 @@ export class AppComponent implements OnDestroy {
                 p.x += p.vx;
                 p.y += p.vy;
                 p.rotation += p.rotationSpeed;
-                // Bounce off edges.
+                // Bounce off edges with elastic restitution.
                 if (p.x < 0) {
                     p.x = 0;
-                    p.vx *= -1;
+                    p.vx *= -p.restitution;
                 }
                 if (p.x > this.width) {
                     p.x = this.width;
-                    p.vx *= -1;
+                    p.vx *= -p.restitution;
                 }
                 if (p.y < 0) {
                     p.y = 0;
-                    p.vy *= -1;
+                    p.vy *= -p.restitution;
                 }
                 if (p.y > this.height) {
                     p.y = this.height;
-                    p.vy *= -1;
+                    p.vy *= -p.restitution;
                 }
             }
+            this.resolveCollisions();
             this.cdr.detectChanges();
         }))
             .subscribe();

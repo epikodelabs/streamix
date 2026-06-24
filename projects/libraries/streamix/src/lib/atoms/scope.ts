@@ -1,3 +1,11 @@
+import {
+  createContainer,
+  globalContainer,
+  type Container,
+  type Factory,
+  type RegistrationOptions,
+  type Token,
+} from "../ioc/container";
 import { normalizeError } from "../utils/helpers";
 import type { Atom } from "./atom";
 import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
@@ -27,6 +35,8 @@ export interface Scope {
   mode: "discrete" | "analog";
   /** Parent scope reference */
   parent: Scope | RootScope | null;
+  /** IoC container for this scope. Inherits from the parent scope's container. */
+  container: Container;
   /**
    * Whether the scope is still loading.
    * True until every owned atom (and nested scope) has emitted at least one value.
@@ -70,6 +80,45 @@ export function setCurrentScope(scope: Scope | null): Scope | null {
   return previous;
 }
 
+/* ── IoC Helpers ──────────────────────────────────────────────────────────── */
+
+/**
+ * Registers a service on the current scope's container.
+ *
+ * Falls back to the global container when called outside of a scope.
+ */
+export function provide<T>(
+  token: Token<T>,
+  factory: Factory<T>,
+  options?: RegistrationOptions<T>
+): void {
+  const scope = getCurrentScope();
+  const container = scope?.container ?? globalContainer;
+  container.register(token, factory, options);
+}
+
+/**
+ * Resolves a required service from the current scope's container.
+ *
+ * Falls back to the global container when called outside of a scope.
+ */
+export function inject<T>(token: Token<T>): T {
+  const scope = getCurrentScope();
+  const container = scope?.container ?? globalContainer;
+  return container.resolve(token, scope);
+}
+
+/**
+ * Resolves an optional service from the current scope's container.
+ *
+ * Falls back to the global container when called outside of a scope.
+ */
+export function injectOptional<T>(token: Token<T>): T | undefined {
+  const scope = getCurrentScope();
+  const container = scope?.container ?? globalContainer;
+  return container.resolveOptional(token, scope);
+}
+
 /* ── Context Lifecycle Management ─────────────────────────────────────────── */
 
 /**
@@ -85,12 +134,14 @@ export function scope<T extends Record<string, any>>(
   const mode = resolveMode(options, parent);
 
   // Create the base scope structure
+  const parentContainer = isScope(parent) ? parent.container : globalContainer;
   const newScope: Scope = {
     type: "scope",
     atoms: new Set(),
     cleanups: new Set(),
     mode,
     parent,
+    container: createContainer(parentContainer),
     loading: false,
     snapshot() {
       const result: Record<string, any> = {};
@@ -189,6 +240,9 @@ export function disposeScope(sc: Scope): void {
     }
   }
   sc.atoms.clear();
+
+  // Dispose the scope's IoC container and run cleanup for scoped services.
+  sc.container.dispose().catch(() => {});
 }
 
 /* ── Registry Linkage Handlers ───────────────────────────────────────────── */
