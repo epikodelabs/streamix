@@ -166,13 +166,11 @@ By default, updates are immediate (“discrete”). Switch to **analog** mode fo
 **Real-world example:**
 
 ```ts
-const app = scope(() => {
-  const query   = atom("");
-  const results = pipe(query, debounce(300), switchMap(search));
-  const count   = derived(() => results.value?.length ?? 0);
-  const status  = flow(connectionStatus());
-
-  return { query, results, count, status };
+const app = scope({
+  query: '',
+  results: pipeExpr((self) => pipe(self.query, debounce(300), switchMap(search))),
+  count: derivedExpr((self) => self.results?.length ?? 0),
+  status: flowExpr(() => connectionStatus()),
 });
 ```
 
