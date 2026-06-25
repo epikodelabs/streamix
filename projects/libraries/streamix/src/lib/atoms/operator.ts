@@ -115,10 +115,13 @@ export function createOperator<T = any, R = T>(
       const iterator = transformFn.call(op, source);
 
       if (typeof iterator.return !== 'function') {
+        // Capture the source's return method before we add our own, so an
+        // identity operator (e.g. empty compose) doesn't recurse into itself.
+        const sourceReturn = source.return?.bind(source);
         iterator.return = async (value?: any) => {
           try {
-            if (typeof source.return === 'function') {
-              const result = await source.return(value);
+            if (typeof sourceReturn === 'function') {
+              const result = await sourceReturn(value);
               // If the source produced a meaningful return value, forward it
               if (result != null && result.done) return result;
             }

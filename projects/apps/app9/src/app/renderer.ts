@@ -43,11 +43,11 @@ function deepProxy<T>(value: T, touched: Set<Atom<any>>): T {
     if (value && typeof value === 'object') {
         return new Proxy(value, {
             get(target, prop) {
-                // Scope loading is a boolean getter backed by _loadingAtom;
-                // track the atom and return the boolean value so templates can
-                // use `scope.loading` without `.value`.
-                if (prop === 'loading' && (target as any)._loadingAtom) {
-                    const loadingAtom = (target as any)._loadingAtom as Atom<any>;
+                // Scope loading is now the loading atom itself; track it and
+                // return the boolean value so templates can use `scope.loading`
+                // without `.value`.
+                if (prop === 'loading' && isAtom((target as any).loading)) {
+                    const loadingAtom = (target as any).loading as Atom<any>;
                     touched.add(loadingAtom);
                     return deepProxy(loadingAtom.value, touched);
                 }
@@ -224,7 +224,12 @@ export class ReactiveRenderer {
 
     private bindModel(el: HTMLElement, path: string, ctx: Ctx): void {
         const { parent, key } = resolvePath(ctx, path);
-        const atom = parent?.[key] as Writable<any>;
+        let atom = parent?.[key] as Writable<any>;
+        // Scope proxies return atom values, not atoms. Use scope.at(key) to reach
+        // the underlying writable atom for two-way binding.
+        if (!isAtom(atom) && typeof parent?.at === 'function') {
+            atom = parent.at(key);
+        }
         if (!atom || typeof atom.next !== 'function') return;
 
         const input = el as HTMLInputElement | HTMLSelectElement;

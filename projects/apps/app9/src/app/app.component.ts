@@ -12,7 +12,7 @@ const template = `
   </div>
 
   <div class="toast-container">
-    <div if="toast.value" class="toast">{{ toast.value }}</div>
+    <div if="toast" class="toast">{{ toast }}</div>
   </div>
 
   <header>
@@ -20,38 +20,38 @@ const template = `
     <h1>Atoms &amp; Scopes</h1>
     <p class="subtitle">Watch state flow through the tree in real time</p>
     <div class="completeness-bar">
-      <div class="fill" [style.width.%]="Math.round(completeness.value)"></div>
-      <span>{{ Math.round(completeness.value) }}% complete</span>
+      <div class="fill" [style.width.%]="Math.round(completeness)"></div>
+      <span>{{ Math.round(completeness) }}% complete</span>
     </div>
   </header>
 
   <main class="stage">
-    <section class="specimen" [style.transform]="'translateX(calc(-' + wizard.step.value + ' * 100% / 3))'">
+    <section class="specimen" [style.transform]="'translateX(calc(-' + wizard.step + ' * 100% / 3))'">
 
       <div class="slide">
         <h2>Identity</h2>
         <div class="field">
-          <label [class.lit]="personal.name.value">Codename</label>
+          <label [class.lit]="personal.name">Codename</label>
           <input model="personal.name" placeholder="Enter codename" />
-          <div class="pulse-bar" [style.width.%]="personal.name.value.length * 5"></div>
+          <div class="pulse-bar" [style.width.%]="personal.name.length * 5"></div>
         </div>
         <div class="field">
-          <label [class.lit]="personal.email.value">Channel</label>
+          <label [class.lit]="personal.email">Channel</label>
           <input model="personal.email" placeholder="secure@node.net" />
-          <div class="pulse-bar" [style.width.%]="personal.email.value.length * 3"></div>
+          <div class="pulse-bar" [style.width.%]="personal.email.length * 3"></div>
         </div>
       </div>
 
       <div class="slide">
         <h2>Location</h2>
         <div class="field">
-          <label [class.lit]="address.street.value">Sector</label>
+          <label [class.lit]="address.street">Sector</label>
           <input model="address.street" placeholder="Sector 7-G" />
         </div>
         <div class="field">
-          <label [class.lit]="address.country.value">Zone</label>
-          <div if="countriesList.value.length === 0" class="loading-pulse">Scanning zones…</div>
-          <select if="countriesList.value.length > 0" bind-innerhtml="countryOptions.value" model="address.country"></select>
+          <label [class.lit]="address.country">Zone</label>
+          <div if="countriesList.length === 0" class="loading-pulse">Scanning zones…</div>
+          <select if="countriesList.length > 0" bind-innerhtml="countryOptions" model="address.country"></select>
         </div>
       </div>
 
@@ -60,7 +60,7 @@ const template = `
         <div class="field row">
           <label class="toggle">
             <input type="checkbox" model="preferences.notifications" />
-            <span class="toggle-glow" [class.on]="preferences.notifications.value"></span>
+            <span class="toggle-glow" [class.on]="preferences.notifications"></span>
             <span>Signal beacon</span>
           </label>
         </div>
@@ -69,17 +69,17 @@ const template = `
           <div class="radio-group">
             <label class="radio">
               <input type="radio" name="theme" value="dark" model="preferences.theme" />
-              <span class="radio-glow" [class.on]="preferences.theme.value === 'dark'"></span>
+              <span class="radio-glow" [class.on]="preferences.theme === 'dark'"></span>
               <span>dark</span>
             </label>
             <label class="radio">
               <input type="radio" name="theme" value="light" model="preferences.theme" />
-              <span class="radio-glow" [class.on]="preferences.theme.value === 'light'"></span>
+              <span class="radio-glow" [class.on]="preferences.theme === 'light'"></span>
               <span>light</span>
             </label>
             <label class="radio">
               <input type="radio" name="theme" value="auto" model="preferences.theme" />
-              <span class="radio-glow" [class.on]="preferences.theme.value === 'auto'"></span>
+              <span class="radio-glow" [class.on]="preferences.theme === 'auto'"></span>
               <span>auto</span>
             </label>
           </div>
@@ -89,18 +89,18 @@ const template = `
     </section>
   </main>
 
-  <aside class="sidebar" [class.collapsed]="sidebarCollapsed.value">
+  <aside class="sidebar" [class.collapsed]="sidebarCollapsed">
     <div class="sidebar-header">
       <span class="sidebar-title">🔬 Reactive Lab</span>
-      <button class="sidebar-toggle" (click)="toggleSidebar">{{ sidebarCollapsed.value ? '◀' : '▶' }}</button>
+      <button class="sidebar-toggle" (click)="toggleSidebar">{{ sidebarCollapsed ? '◀' : '▶' }}</button>
     </div>
     <div class="tabs">
-      <button [class.active]="activeTab.value === 'tree'" (click)="setTabTree">tree</button>
-      <button [class.active]="activeTab.value === 'state'" (click)="setTabState">state</button>
+      <button [class.active]="activeTab === 'tree'" (click)="setTabTree">tree</button>
+      <button [class.active]="activeTab === 'state'" (click)="setTabState">state</button>
     </div>
     <div class="tab-panel">
 
-      <div if="activeTab.value === 'tree'">
+      <div if="activeTab === 'tree'">
         <div class="tree">
           <div class="node scope-root" [class.loading]="wizard.loading">
             <span class="dot"></span>
@@ -111,22 +111,22 @@ const template = `
             <div class="node atom">
               <span class="dot"></span>
               <span class="label">step</span>
-              <span class="value">{{ wizard.step.value }}</span>
+              <span class="value">{{ wizard.step }}</span>
             </div>
             <div class="node scope" [class.loading]="personal.loading">
               <span class="dot"></span>
               <span class="label">personal</span>
             </div>
             <div class="branch">
-              <div class="node atom" [class.pulse]="personal.name.value">
+              <div class="node atom" [class.pulse]="personal.name">
                 <span class="dot"></span>
                 <span class="label">name</span>
-                <span class="value truncate">{{ personal.name.value || '—' }}</span>
+                <span class="value truncate">{{ personal.name || '—' }}</span>
               </div>
-              <div class="node atom" [class.pulse]="personal.email.value">
+              <div class="node atom" [class.pulse]="personal.email">
                 <span class="dot"></span>
                 <span class="label">email</span>
-                <span class="value truncate">{{ personal.email.value || '—' }}</span>
+                <span class="value truncate">{{ personal.email || '—' }}</span>
               </div>
             </div>
             <div class="node scope" [class.loading]="address.loading">
@@ -134,15 +134,15 @@ const template = `
               <span class="label">address</span>
             </div>
             <div class="branch">
-              <div class="node atom" [class.pulse]="address.street.value">
+              <div class="node atom" [class.pulse]="address.street">
                 <span class="dot"></span>
                 <span class="label">street</span>
-                <span class="value truncate">{{ address.street.value || '—' }}</span>
+                <span class="value truncate">{{ address.street || '—' }}</span>
               </div>
-              <div class="node atom" [class.pulse]="address.country.value">
+              <div class="node atom" [class.pulse]="address.country">
                 <span class="dot"></span>
                 <span class="label">country</span>
-                <span class="value truncate">{{ address.country.value || '—' }}</span>
+                <span class="value truncate">{{ address.country || '—' }}</span>
               </div>
             </div>
             <div class="node scope" [class.loading]="preferences.loading">
@@ -150,15 +150,15 @@ const template = `
               <span class="label">preferences</span>
             </div>
             <div class="branch">
-              <div class="node atom" [class.pulse]="preferences.notifications.value">
+              <div class="node atom" [class.pulse]="preferences.notifications">
                 <span class="dot"></span>
                 <span class="label">notifications</span>
-                <span class="value">{{ preferences.notifications.value }}</span>
+                <span class="value">{{ preferences.notifications }}</span>
               </div>
               <div class="node atom pulse">
                 <span class="dot"></span>
                 <span class="label">theme</span>
-                <span class="value">{{ preferences.theme.value }}</span>
+                <span class="value">{{ preferences.theme }}</span>
               </div>
             </div>
             <div class="node scope" [class.loading]="wizard.async.loading">
@@ -169,29 +169,29 @@ const template = `
               <div class="node atom" [class.pulse]="!wizard.async.loading">
                 <span class="dot"></span>
                 <span class="label">countries</span>
-                <span class="value">{{ countriesList.value.length }} zones</span>
+                <span class="value">{{ countriesList.length }} zones</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div if="activeTab.value === 'state'">
-        <pre class="snapshot">{{ JSON.stringify(state.value, null, 2) }}</pre>
+      <div if="activeTab === 'state'">
+        <pre class="snapshot">{{ JSON.stringify(state, null, 2) }}</pre>
       </div>
 
     </div>
   </aside>
 
   <footer class="nav">
-    <button (click)="goBack" [disabled]="wizard.step.value === 0">← Back</button>
+    <button (click)="goBack" [disabled]="wizard.step === 0">← Back</button>
     <div class="step-dots">
-      <span [class.on]="wizard.step.value === 0"></span>
-      <span [class.on]="wizard.step.value === 1"></span>
-      <span [class.on]="wizard.step.value === 2"></span>
+      <span [class.on]="wizard.step === 0"></span>
+      <span [class.on]="wizard.step === 1"></span>
+      <span [class.on]="wizard.step === 2"></span>
     </div>
-    <button if="wizard.step.value === 2" (click)="submit">Submit</button>
-    <button if="wizard.step.value !== 2" (click)="goNext" [disabled]="wizard.step.value === 2">Next →</button>
+    <button if="wizard.step === 2" (click)="submit">Submit</button>
+    <button if="wizard.step !== 2" (click)="goNext" [disabled]="wizard.step === 2">Next →</button>
   </footer>
 </div>
 `;
@@ -229,10 +229,10 @@ export function mountApp(root: HTMLElement): () => void {
 
         const completeness = derived(() => {
             let score = 0;
-            if (personal.name.value) score++;
-            if (personal.email.value) score++;
-            if (address.street.value) score++;
-            if (address.country.value) score++;
+            if (personal.name) score++;
+            if (personal.email) score++;
+            if (address.street) score++;
+            if (address.country) score++;
             return (score / 4) * 100;
         });
 
@@ -246,7 +246,7 @@ export function mountApp(root: HTMLElement): () => void {
         const toast = atom<string | null>(null);
 
 
-        const countriesList = derived(() => wizard.async.countries.value ?? []);
+        const countriesList = derived(() => wizard.async.countries ?? []);
         const countryOptions = derived(() =>
             '<option value="">Select zone</option>' +
             countriesList.value.map((c: string) => `<option value="${c}">${c}</option>`).join('')
@@ -266,8 +266,8 @@ export function mountApp(root: HTMLElement): () => void {
             completeness, state, activeTab, sidebarCollapsed, toast,
             countriesList, countryOptions,
             Math, JSON,
-            goBack: () => wizard.step.next(Math.max(0, wizard.step.value - 1)),
-            goNext: () => wizard.step.next(Math.min(2, wizard.step.value + 1)),
+            goBack: () => wizard.step = Math.max(0, wizard.step - 1),
+            goNext: () => wizard.step = Math.min(2, wizard.step + 1),
             submit,
             toggleSidebar: () => sidebarCollapsed.next(!sidebarCollapsed.value),
             setTabTree: () => activeTab.next('tree'),

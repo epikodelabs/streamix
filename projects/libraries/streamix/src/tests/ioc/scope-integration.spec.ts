@@ -166,8 +166,8 @@ describe('IoC Scope Integration', () => {
       return { message, computed };
     });
 
-    s.message.set('hello');
-    expect(s.computed.value).toBe('scoped:hello');
+    s.message = 'hello';
+    expect(s.computed).toBe('scoped:hello');
     s.dispose();
   });
 });

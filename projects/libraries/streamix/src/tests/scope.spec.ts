@@ -20,7 +20,7 @@ describe('Scope System', () => {
       const s = scope(() => ({}));
       expect(s.type).toBe('scope');
       expect(s.parent).toBe(globalScope);
-      expect(s.loading).toBe(false);
+      expect(s.loading.value).toBe(false);
       s.dispose();
     });
 
@@ -42,10 +42,68 @@ describe('Scope System', () => {
         return { count, doubled };
       });
       
-      s.count.next(5);
+      s.at('count').next(5);
       await delay();
-      expect(s.doubled.value).toBe(10);
-      expect(s.loading).toBe(false); // This should be false as all atoms had initial values
+      expect(s.doubled).toBe(10);
+      expect(s.loading.value).toBe(false); // This should be false as all atoms had initial values
+      s.dispose();
+    });
+
+    it('should support assignment through the proxy', async () => {
+      const s = scope(() => {
+        const count = atom(0);
+        const doubled = derived(() => count.value * 2);
+        return { count, doubled };
+      });
+
+      expect(s.count).toBe(0);
+      s.count = 5;
+      await delay();
+      expect(s.count).toBe(5);
+      expect(s.doubled).toBe(10);
+      s.dispose();
+    });
+
+    it('should subscribe to atom values via subscribeTo', async () => {
+      const s = scope(() => {
+        const count = atom(0);
+        return { count };
+      });
+
+      const values: number[] = [];
+      const sub = s.subscribeTo('count', v => values.push(v));
+
+      s.count = 1;
+      s.count = 2;
+      await delay();
+      expect(values).toEqual([0, 1, 2]);
+
+      sub.unsubscribe();
+      s.dispose();
+    });
+
+    it('should not allow assignment to derived atoms', () => {
+      const s = scope(() => {
+        const count = atom(0);
+        const doubled = derived(() => count.value * 2);
+        return { count, doubled };
+      });
+
+      expect(() => {
+        (s as any).doubled = 99;
+      }).toThrowError();
+      s.dispose();
+    });
+
+    it('should not allow assignment to flow atoms', async () => {
+      const s = scope(() => {
+        const a = flow((async function* () { yield 1; })());
+        return { a };
+      });
+
+      expect(() => {
+        (s as any).a = 99;
+      }).toThrowError();
       s.dispose();
     });
 
@@ -58,7 +116,7 @@ describe('Scope System', () => {
         return { child };
       });
       
-      expect(parent.child.x.value).toBe(42);
+      expect(parent.child.x).toBe(42);
       expect(parent.child.parent).toBe(parent);
       parent.dispose();
     });
@@ -75,15 +133,15 @@ describe('Scope System', () => {
         return { a, b };
       });
       
-      expect(s.loading).toBe(true);
+      expect(s.loading.value).toBe(true);
       
       s1.next(1);
       await delay();
-      expect(s.loading).toBe(true);
+      expect(s.loading.value).toBe(true);
       
       s2.next('x');
       await delay();
-      expect(s.loading).toBe(false);
+      expect(s.loading.value).toBe(false);
       
       s.dispose();
       s1.dispose();
@@ -96,7 +154,7 @@ describe('Scope System', () => {
         const b = atom('hello');
         return { a, b };
       });
-      expect(s.loading).toBe(false);
+      expect(s.loading.value).toBe(false);
       s.dispose();
     });
 
@@ -111,11 +169,11 @@ describe('Scope System', () => {
         return { child };
       });
       
-      expect(parent.loading).toBe(true);
+      expect(parent.loading.value).toBe(true);
       
       source.next(42);
       await delay();
-      expect(parent.loading).toBe(false);
+      expect(parent.loading.value).toBe(false);
       
       parent.dispose();
       source.dispose();
@@ -181,12 +239,12 @@ describe('Scope System', () => {
         return { a, b };
       });
       
-      expect(s.a.disposed).toBe(false);
-      expect(s.b.disposed).toBe(false);
+      expect(s.at('a').disposed).toBe(false);
+      expect(s.at('b').disposed).toBe(false);
       
       s.dispose();
-      expect(s.a.disposed).toBe(true);
-      expect(s.b.disposed).toBe(true);
+      expect(s.at('a').disposed).toBe(true);
+      expect(s.at('b').disposed).toBe(true);
     });
 
     it('should dispose nested scopes recursively', () => {
@@ -202,9 +260,9 @@ describe('Scope System', () => {
         return { child };
       });
       
-      expect(parent.child.grandchild.x.disposed).toBe(false);
+      expect(parent.child.grandchild.at('x').disposed).toBe(false);
       parent.dispose();
-      expect(parent.child.grandchild.x.disposed).toBe(true);
+      expect(parent.child.grandchild.at('x').disposed).toBe(true);
       source.dispose();
     });
 
@@ -230,11 +288,11 @@ describe('Scope System', () => {
       }, { mode: 'analog' });
       
       const values: number[] = [];
-      s.a.subscribe(v => values.push(v));
+      s.at('a').subscribe(v => values.push(v));
       
-      s.a.next(1);
-      s.a.next(2);
-      s.a.next(3);
+      s.at('a').next(1);
+      s.at('a').next(2);
+      s.at('a').next(3);
       
       expect(values).toEqual([]);
       await delay();
@@ -250,14 +308,14 @@ describe('Scope System', () => {
       }, { mode: 'analog' });
       
       const values: number[] = [];
-      s.doubled.subscribe(v => values.push(v));
+      s.at('doubled').subscribe(v => values.push(v));
       
-      s.a.next(1);
-      s.a.next(2);
-      s.a.next(3);
+      s.at('a').next(1);
+      s.at('a').next(2);
+      s.at('a').next(3);
       
       expect(values).toEqual([]);
-      expect(s.doubled.value).toBe(6);
+      expect(s.doubled).toBe(6);
       
       await delay();
       expect(values).toEqual([6]);
@@ -271,10 +329,10 @@ describe('Scope System', () => {
       }, { mode: 'analog' });
       
       const values: number[] = [];
-      s.a.subscribe(v => values.push(v));
+      s.at('a').subscribe(v => values.push(v));
       
-      s.a.next(1);
-      s.a.next(2);
+      s.at('a').next(1);
+      s.at('a').next(2);
       await delay();
       expect(values).toEqual([1, 2]);
       s.dispose();
@@ -290,14 +348,14 @@ describe('Scope System', () => {
       }, { mode: 'analog' });
       
       const childValues: number[] = [];
-      parent.child.a.subscribe(v => childValues.push(v));
+      parent.child.at('a').subscribe(v => childValues.push(v));
       
-      parent.child.a.next(1);
-      parent.child.a.next(2);
-      parent.child.a.next(3);
+      parent.child.at('a').next(1);
+      parent.child.at('a').next(2);
+      parent.child.at('a').next(3);
       
       await delay();
-      expect(parent.child.a.value).toBe(3);
+      expect(parent.child.a).toBe(3);
       expect(childValues).toEqual([3]);
       
       parent.dispose();
@@ -313,10 +371,10 @@ describe('Scope System', () => {
       }, { mode: 'analog' });
       
       const values: number[] = [];
-      parent.child.a.subscribe(v => values.push(v));
+      parent.child.at('a').subscribe(v => values.push(v));
       
-      parent.child.a.next(1);
-      parent.child.a.next(2);
+      parent.child.at('a').next(1);
+      parent.child.at('a').next(2);
       
       await delay();
       expect(values).toEqual([1, 2]);
@@ -332,12 +390,12 @@ describe('Scope System', () => {
       }, { mode: 'analog' });
       
       const values: number[] = [];
-      s.doubled.subscribe(v => values.push(v));
+      s.at('doubled').subscribe(v => values.push(v));
       
-      s.a.next(5);
+      s.at('a').next(5);
       
       // Value is recomputed on read even before the scheduler flushes
-      expect(s.doubled.value).toBe(10);
+      expect(s.doubled).toBe(10);
       expect(values).toEqual([]);
       
       await delay();
@@ -354,17 +412,17 @@ describe('Scope System', () => {
       }, { mode: 'analog' });
       
       const values: number[] = [];
-      s.a.subscribe(v => values.push(v));
+      s.at('a').subscribe(v => values.push(v));
       
-      s.source.next(1);
-      s.source.next(2);
-      s.source.next(3);
+      s.at('source').next(1);
+      s.at('source').next(2);
+      s.at('source').next(3);
       
       // In analog mode, rapid source emissions are batched to a single scheduler
       // flush; the flow broadcasts only the latest value.
       expect(values).toEqual([]);
       await delay();
-      expect(s.a.value).toBe(3);
+      expect(s.a).toBe(3);
       expect(values).toEqual([3]);
       
       s.dispose();
@@ -385,11 +443,11 @@ describe('Scope System', () => {
       });
       
       const values: number[] = [];
-      s.a.subscribe(v => values.push(v));
+      s.at('a').subscribe(v => values.push(v));
       
-      s.a.next(1);
-      s.a.next(2);
-      s.a.next(3);
+      s.at('a').next(1);
+      s.at('a').next(2);
+      s.at('a').next(3);
       
       expect(values).toEqual([]);
       await delay();
@@ -407,10 +465,10 @@ describe('Scope System', () => {
       }, { mode: 'discrete' });
       
       const values: number[] = [];
-      s.a.subscribe(v => values.push(v));
+      s.at('a').subscribe(v => values.push(v));
       
-      s.a.next(1);
-      s.a.next(2);
+      s.at('a').next(1);
+      s.at('a').next(2);
       
       await delay();
       expect(values).toEqual([1, 2]);
@@ -433,8 +491,8 @@ describe('Scope System', () => {
       
       // Source updates should not affect disposed atom
       source.next(42);
-      expect(s.a.safeValue).toBe(0);
-      expect(() => s.a.value).toThrow();
+      expect(s.at('a').safeValue).toBe(0);
+      expect(() => s.a).toThrow();
       
       source.dispose();
     });
@@ -449,21 +507,21 @@ describe('Scope System', () => {
         return { a, b, sum, product, result };
       });
       
-      expect(s.sum.value).toBe(3);
-      expect(s.product.value).toBe(2);
-      expect(s.result.value).toBe(5);
+      expect(s.sum).toBe(3);
+      expect(s.product).toBe(2);
+      expect(s.result).toBe(5);
       
-      s.a.next(3);
+      s.at('a').next(3);
       await delay();
-      expect(s.sum.value).toBe(5);
-      expect(s.product.value).toBe(6);
-      expect(s.result.value).toBe(11);
+      expect(s.sum).toBe(5);
+      expect(s.product).toBe(6);
+      expect(s.result).toBe(11);
       
-      s.b.next(4);
+      s.at('b').next(4);
       await delay();
-      expect(s.sum.value).toBe(7);
-      expect(s.product.value).toBe(12);
-      expect(s.result.value).toBe(19);
+      expect(s.sum).toBe(7);
+      expect(s.product).toBe(12);
+      expect(s.result).toBe(19);
       
       s.dispose();
     });

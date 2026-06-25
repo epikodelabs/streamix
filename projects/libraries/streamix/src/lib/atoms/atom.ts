@@ -56,8 +56,8 @@ export interface Atom<T = any> {
 export type AtomValue<A> = A extends Atom<infer T> ? T : never;
 
 export interface Writable<T = any> extends Atom<T> {
-  set(value: T): void;
   next(value: T): void;
+  set(value: T): void;
   fail(err: any, options?: { terminate?: boolean }): void;
   recover?(): void;
   clearError?(): void;
@@ -190,6 +190,20 @@ function popFormulaContext(): void {
 
 export function getCurrentFormulaContext(): FormulaContext | null {
   return activeFormulaStack.length > 0 ? activeFormulaStack[activeFormulaStack.length - 1] : null;
+}
+
+/**
+ * Runs the provided function inside a fresh formula context and returns both its
+ * result and the set of atoms that were read. Useful for reactive renderers that
+ * need to discover dependencies without manually walking every proxy layer.
+ */
+export function trackDependencies<T>(fn: () => T): { result: T; dependencies: Set<InternalAtomContainer> } {
+  const context = pushFormulaContext();
+  try {
+    return { result: fn(), dependencies: context.dependencies };
+  } finally {
+    popFormulaContext();
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -752,9 +766,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
       }
     },
 
-    set(value: T) {
-      this.next(value);
-    },
+    set(value: T) { this.next(value); },
 
     fail(err: any, errorOptions?: { terminate?: boolean }) {
       if (disposed) return;
