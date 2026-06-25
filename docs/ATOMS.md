@@ -77,20 +77,21 @@ app.user.name = 'Ada'; // same
 
 #### Expression markers
 
-When a derived value needs to read `self`, use an expression marker:
+When a value needs to be an atom or needs to read `self`, use an expression marker:
 
 ```ts
-import { derivedExpr, flowExpr, pipeExpr, scope } from '@epikodelabs/streamix';
+import { atomExpr, derivedExpr, flowExpr, pipeExpr, scope } from '@epikodelabs/streamix';
 
 const app = scope({
   query: '',
+  user: atomExpr<string>(),                                       // atom without initial value
   results: pipeExpr((self) => pipe(self.query, debounce(300), switchMap(search))),
   count: derivedExpr((self) => self.results?.length ?? 0),
   ticks: flowExpr(() => interval(1000)),
 });
 ```
 
-`derivedExpr`, `pipeExpr`, and `flowExpr` are evaluated lazily and turned into regular atoms inside the scope.
+`atomExpr`, `derivedExpr`, `pipeExpr`, and `flowExpr` are evaluated lazily and turned into regular atoms inside the scope.
 
 #### Factory form
 

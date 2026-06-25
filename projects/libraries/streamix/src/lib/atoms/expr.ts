@@ -1,8 +1,14 @@
-import { derived, flow, type Atom } from "./atom";
+import { atom, derived, flow, type Atom } from "./atom";
 
+export const ATOM_EXPR = Symbol("streamix.atomExpr");
 export const DERIVED_EXPR = Symbol("streamix.derivedExpr");
 export const PIPE_EXPR = Symbol("streamix.pipeExpr");
 export const FLOW_EXPR = Symbol("streamix.flowExpr");
+
+export interface AtomExpr<T = any> {
+  [ATOM_EXPR]: true;
+  initialValue?: T;
+}
 
 export interface DerivedExpr<T = any> {
   [DERIVED_EXPR]: true;
@@ -19,6 +25,10 @@ export interface FlowExpr<T = any> {
   fn: (self: any) => AsyncIterable<T> | Iterable<T>;
 }
 
+export function isAtomExpr(value: any): value is AtomExpr {
+  return value != null && typeof value === "object" && value[ATOM_EXPR] === true;
+}
+
 export function isDerivedExpr(value: any): value is DerivedExpr {
   return value != null && typeof value === "object" && value[DERIVED_EXPR] === true;
 }
@@ -29,6 +39,10 @@ export function isPipeExpr(value: any): value is PipeExpr {
 
 export function isFlowExpr(value: any): value is FlowExpr {
   return value != null && typeof value === "object" && value[FLOW_EXPR] === true;
+}
+
+export function atomExpr<T>(initialValue?: T): AtomExpr<T> {
+  return { [ATOM_EXPR]: true, initialValue };
 }
 
 export function derivedExpr<T>(fn: (self: any) => T): DerivedExpr<T> {
@@ -43,11 +57,14 @@ export function flowExpr<T>(fn: (self: any) => AsyncIterable<T> | Iterable<T>): 
   return { [FLOW_EXPR]: true, fn };
 }
 
-export function isExprMarker(value: any): value is DerivedExpr | PipeExpr | FlowExpr {
-  return isDerivedExpr(value) || isPipeExpr(value) || isFlowExpr(value);
+export function isExprMarker(value: any): value is AtomExpr | DerivedExpr | PipeExpr | FlowExpr {
+  return isAtomExpr(value) || isDerivedExpr(value) || isPipeExpr(value) || isFlowExpr(value);
 }
 
-export function evaluateExprMarker(marker: DerivedExpr | PipeExpr | FlowExpr, self: any): Atom<any> {
+export function evaluateExprMarker(marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr, self: any): Atom<any> {
+  if (isAtomExpr(marker)) {
+    return atom(marker.initialValue);
+  }
   if (isDerivedExpr(marker)) {
     return derived(() => marker.fn(self));
   }

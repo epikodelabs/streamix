@@ -11,6 +11,7 @@ import { atom, getCurrentFormulaContext, Writable, type Atom } from "./atom";
 import {
   evaluateExprMarker,
   isExprMarker,
+  type AtomExpr,
   type DerivedExpr,
   type FlowExpr,
   type PipeExpr,
@@ -74,9 +75,11 @@ type ScopeValue<T> =
               ? Atom<U>
               : T extends FlowExpr<infer U>
                 ? Atom<U>
-                : T extends Record<string, any>
-                  ? ScopeReturn<ScopeOf<T>>
-                  : Writable<T>;
+                : T extends AtomExpr<infer U>
+                  ? Atom<U>
+                  : T extends Record<string, any>
+                    ? ScopeReturn<ScopeOf<T>>
+                    : Writable<T>;
 
 type ScopeOf<T extends Record<string, any>> = {
   [K in keyof T]: ScopeValue<T[K]>;

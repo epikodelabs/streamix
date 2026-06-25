@@ -1,5 +1,6 @@
 import {
   atom,
+  atomExpr,
   derived,
   derivedExpr,
   flow,
@@ -762,6 +763,32 @@ describe('Scope System', () => {
       source.next(5);
       await delay();
       expect(s.flowValue).toBe(5);
+      s.dispose();
+    });
+
+    it('should support atomExpr for atoms without an initial value', async () => {
+      const s = scope({
+        user: atomExpr<string>()
+      });
+
+      expect(s.user).toBeUndefined();
+
+      s.user = 'Ada';
+      await delay();
+      expect(s.user).toBe('Ada');
+      s.dispose();
+    });
+
+    it('should support atomExpr with an initial value', async () => {
+      const s = scope({
+        count: atomExpr(0)
+      });
+
+      expect(s.count).toBe(0);
+
+      s.count = 5;
+      await delay();
+      expect(s.count).toBe(5);
       s.dispose();
     });
 
