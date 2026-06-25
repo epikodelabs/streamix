@@ -56,6 +56,7 @@ export interface Atom<T = any> {
 export type AtomValue<A> = A extends Atom<infer T> ? T : never;
 
 export interface Writable<T = any> extends Atom<T> {
+  set(value: T): void;
   next(value: T): void;
   fail(err: any, options?: { terminate?: boolean }): void;
   recover?(): void;
@@ -187,7 +188,7 @@ function popFormulaContext(): void {
   activeFormulaStack.pop();
 }
 
-function getCurrentFormulaContext(): FormulaContext | null {
+export function getCurrentFormulaContext(): FormulaContext | null {
   return activeFormulaStack.length > 0 ? activeFormulaStack[activeFormulaStack.length - 1] : null;
 }
 
@@ -749,6 +750,10 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
         // Mark dirty for scheduler/test harness awareness (state changed)
         instance[MARK_DIRTY](); 
       }
+    },
+
+    set(value: T) {
+      this.next(value);
     },
 
     fail(err: any, errorOptions?: { terminate?: boolean }) {

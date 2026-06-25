@@ -43,6 +43,14 @@ function deepProxy<T>(value: T, touched: Set<Atom<any>>): T {
     if (value && typeof value === 'object') {
         return new Proxy(value, {
             get(target, prop) {
+                // Scope loading is a boolean getter backed by _loadingAtom;
+                // track the atom and return the boolean value so templates can
+                // use `scope.loading` without `.value`.
+                if (prop === 'loading' && (target as any)._loadingAtom) {
+                    const loadingAtom = (target as any)._loadingAtom as Atom<any>;
+                    touched.add(loadingAtom);
+                    return deepProxy(loadingAtom.value, touched);
+                }
                 return deepProxy((target as any)[prop], touched);
             }
         }) as T;
@@ -197,6 +205,8 @@ export class ReactiveRenderer {
             }));
         } else if (target === 'text') {
             this.cleanups.push(watch(expr, ctx, v => el.textContent = v == null ? '' : String(v)));
+        } else if (target === 'innerhtml' || target === 'innerHTML') {
+            this.cleanups.push(watch(expr, ctx, v => el.innerHTML = v == null ? '' : String(v)));
         } else {
             this.cleanups.push(watch(expr, ctx, v => {
                 if (v == null || v === false) el.removeAttribute(target);
@@ -255,6 +265,7 @@ export class ReactiveRenderer {
                 if (!current) {
                     current = el.cloneNode(true) as HTMLElement;
                     current.removeAttribute('if');
+                    this.bindElement(current, childCtx);
                     this.walk(current, childCtx);
                     parent.insertBefore(current, anchor);
                 }
@@ -297,6 +308,7 @@ export class ReactiveRenderer {
                 // Temporarily replace this.cleanups
                 const prev = this.cleanups;
                 this.cleanups = cleanups;
+                this.bindElement(el, childCtx);
                 this.walk(el, childCtx);
                 this.cleanups = prev;
 

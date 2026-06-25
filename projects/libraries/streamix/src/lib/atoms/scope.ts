@@ -7,7 +7,7 @@ import {
   type Token,
 } from "../ioc/container";
 import { normalizeError } from "../utils/helpers";
-import type { Atom } from "./atom";
+import { atom, getCurrentFormulaContext, Writable, type Atom } from "./atom";
 import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
 
 // Define a recursive type to unwrap atom values and handle nested scopes
@@ -40,7 +40,7 @@ export interface Scope {
   /**
    * Whether the scope is still loading.
    * True until every owned atom (and nested scope) has emitted at least one value.
-   * Implemented as a computed getter — always current, no subscriptions needed.
+   * Returns a plain boolean; the underlying reactive atom is `_loadingAtom`.
    */
   loading: boolean;
   /** Returns a plain object snapshot of all current atom values. */
@@ -53,6 +53,8 @@ export interface Scope {
   _exports: Set<string | symbol>;
   /** @internal True once the scope has begun disposal. */
   _disposed: boolean;
+  /** @internal Reactive atom that tracks this scope's loading state. */
+  _loadingAtom: Writable<boolean>;
 }
 
 // Active execution context tracking frames
@@ -143,6 +145,7 @@ export function scope<T extends Record<string, any>>(
     parent,
     container: createContainer(parentContainer),
     loading: false,
+    _loadingAtom: null as any,
     snapshot() {
       const result: Record<string, any> = {};
       collectScopeValues(this as Scope & T, result);
@@ -156,19 +159,6 @@ export function scope<T extends Record<string, any>>(
     _disposed: false,
   };
 
-  // `loading` is a computed getter so it is always up-to-date without any
-  // subscription wiring. The setter is a no-op to absorb any legacy writes.
-  Object.defineProperty(newScope, "loading", {
-    get() {
-      return this._pendingCount > 0;
-    },
-    set(_v: boolean) {
-      /* computed; writes are intentionally ignored */
-    },
-    enumerable: true,
-    configurable: true,
-  });
-
   // Register this nested scope with its real (non-root) parent so disposal
   // recurses through the scope tree.
   if (isScope(parent)) {
@@ -181,6 +171,24 @@ export function scope<T extends Record<string, any>>(
   currentScope = newScope;
 
   try {
+    // Create a reactive atom that mirrors this scope's loading state.
+    // `loading` is exposed as a boolean getter so callers don't need `.value`,
+    // while `_loadingAtom` provides the reactive subscription point.
+    const loadingAtom = atom(false);
+    (newScope as any)._loadingAtom = loadingAtom;
+    Object.defineProperty(newScope, "loading", {
+      get() {
+        const ctx = getCurrentFormulaContext();
+        if (ctx) ctx.dependencies.add(loadingAtom as any);
+        return loadingAtom.value;
+      },
+      set(_v: boolean) {
+        /* computed; writes are intentionally ignored */
+      },
+      enumerable: true,
+      configurable: true,
+    });
+
     const result = factory();
 
     if (result && typeof result === "object") {
@@ -296,10 +304,6 @@ export function registerWithCurrentScope(atom: Atom<any>): void {
  *   - atom()   immediately after construction when an initialValue is provided
  *   - derived() after its first successful synchronous computation
  *   - flow()   on the first value received from its async source
- *
- * Because `scope.loading` is derived from `_pendingCount`, no explicit refresh
- * step is needed — the next read of `scope.loading` will automatically reflect
- * this change.
  */
 export function markAtomAsEmitted(atom: Atom<any>): void {
   if (emittedAtomsRegistry.has(atom)) return;
@@ -315,6 +319,11 @@ function incrementPending(scope: Scope): void {
   let sc: Scope | RootScope | null = scope;
   while (isScope(sc)) {
     sc._pendingCount++;
+    const loadingAtom = sc._loadingAtom;
+    if (loadingAtom) {
+      const loading = sc._pendingCount > 0;
+      if (loadingAtom.value !== loading) loadingAtom.next(loading);
+    }
     sc = sc.parent;
   }
 }
@@ -323,6 +332,11 @@ function decrementPending(scope: Scope): void {
   let sc: Scope | RootScope | null = scope;
   while (isScope(sc) && !sc._disposed) {
     sc._pendingCount = Math.max(0, sc._pendingCount - 1);
+    const loadingAtom = sc._loadingAtom;
+    if (loadingAtom) {
+      const loading = sc._pendingCount > 0;
+      if (loadingAtom.value !== loading) loadingAtom.next(loading);
+    }
     sc = sc.parent;
   }
 }
@@ -332,6 +346,11 @@ function decrementPendingBy(scope: Scope | RootScope | null, amount: number): vo
   let sc: Scope | RootScope | null = scope;
   while (isScope(sc) && !sc._disposed) {
     sc._pendingCount = Math.max(0, sc._pendingCount - amount);
+    const loadingAtom = sc._loadingAtom;
+    if (loadingAtom) {
+      const loading = sc._pendingCount > 0;
+      if (loadingAtom.value !== loading) loadingAtom.next(loading);
+    }
     sc = sc.parent;
   }
 }

@@ -1,4 +1,4 @@
-import { atom, derived, flow, from, pipe, scope, startWith } from '@epikodelabs/streamix';
+import { atom, derived, flow, scope } from '@epikodelabs/streamix';
 import { ReactiveRenderer } from './renderer';
 
 type Tab = 'tree' | 'state';
@@ -9,6 +9,10 @@ const template = `
     <div class="orb orb-1"></div>
     <div class="orb orb-2"></div>
     <div class="orb orb-3"></div>
+  </div>
+
+  <div class="toast-container">
+    <div if="toast.value" class="toast">{{ toast.value }}</div>
   </div>
 
   <header>
@@ -46,13 +50,8 @@ const template = `
         </div>
         <div class="field">
           <label [class.lit]="address.country.value">Zone</label>
-          <div if="asyncLoading.value" class="loading-pulse">Scanning zones…</div>
-          <select if="!asyncLoading.value" model="address.country">
-            <option value="">Select zone</option>
-            <template for="c of countriesList">
-              <option value="{{ c }}">{{ c }}</option>
-            </template>
-          </select>
+          <div if="countriesList.value.length === 0" class="loading-pulse">Scanning zones…</div>
+          <select if="countriesList.value.length > 0" bind-innerhtml="countryOptions.value" model="address.country"></select>
         </div>
       </div>
 
@@ -114,7 +113,7 @@ const template = `
               <span class="label">step</span>
               <span class="value">{{ wizard.step.value }}</span>
             </div>
-            <div class="node scope" [class.loading]="personalLoading.value">
+            <div class="node scope" [class.loading]="personal.loading">
               <span class="dot"></span>
               <span class="label">personal</span>
             </div>
@@ -130,7 +129,7 @@ const template = `
                 <span class="value truncate">{{ personal.email.value || '—' }}</span>
               </div>
             </div>
-            <div class="node scope" [class.loading]="addressLoading.value">
+            <div class="node scope" [class.loading]="address.loading">
               <span class="dot"></span>
               <span class="label">address</span>
             </div>
@@ -146,7 +145,7 @@ const template = `
                 <span class="value truncate">{{ address.country.value || '—' }}</span>
               </div>
             </div>
-            <div class="node scope" [class.loading]="preferencesLoading.value">
+            <div class="node scope" [class.loading]="preferences.loading">
               <span class="dot"></span>
               <span class="label">preferences</span>
             </div>
@@ -162,12 +161,12 @@ const template = `
                 <span class="value">{{ preferences.theme.value }}</span>
               </div>
             </div>
-            <div class="node scope" [class.loading]="asyncLoading.value">
+            <div class="node scope" [class.loading]="wizard.async.loading">
               <span class="dot"></span>
               <span class="label">async</span>
             </div>
             <div class="branch">
-              <div class="node atom" [class.pulse]="!asyncLoading.value">
+              <div class="node atom" [class.pulse]="!wizard.async.loading">
                 <span class="dot"></span>
                 <span class="label">countries</span>
                 <span class="value">{{ countriesList.value.length }} zones</span>
@@ -191,7 +190,8 @@ const template = `
       <span [class.on]="wizard.step.value === 1"></span>
       <span [class.on]="wizard.step.value === 2"></span>
     </div>
-    <button (click)="goNext" [disabled]="wizard.step.value === 2">Next →</button>
+    <button if="wizard.step.value === 2" (click)="submit">Submit</button>
+    <button if="wizard.step.value !== 2" (click)="goNext" [disabled]="wizard.step.value === 2">Next →</button>
   </footer>
 </div>
 `;
@@ -219,10 +219,11 @@ export function mountApp(root: HTMLElement): () => void {
             address,
             preferences,
             async: scope(() => ({
-                countries: flow<string[]>(pipe(
-                    from(() => new Promise<string[]>(r => setTimeout(() => r(['US', 'CA', 'UK', 'DE', 'FR']), 1500))),
-                    startWith([] as string[])
-                )),
+                countries: flow((async function* () {
+                    yield [] as string[];
+                    await new Promise(r => setTimeout(r, 1500));
+                    yield ['US', 'CA', 'UK', 'DE', 'FR'];
+                })()),
             })),
         }));
 
@@ -242,21 +243,32 @@ export function mountApp(root: HTMLElement): () => void {
 
         const activeTab = atom<Tab>('tree');
         const sidebarCollapsed = atom(false);
+        const toast = atom<string | null>(null);
 
-        const wizardLoading = derived(() => { wizard.snapshot(); return wizard.loading; });
-        const personalLoading = derived(() => { personal.snapshot(); return personal.loading; });
-        const addressLoading = derived(() => { address.snapshot(); return address.loading; });
-        const preferencesLoading = derived(() => { preferences.snapshot(); return preferences.loading; });
-        const asyncLoading = derived(() => { wizard.async.snapshot(); return wizard.async.loading; });
+
         const countriesList = derived(() => wizard.async.countries.value ?? []);
+        const countryOptions = derived(() =>
+            '<option value="">Select zone</option>' +
+            countriesList.value.map((c: string) => `<option value="${c}">${c}</option>`).join('')
+        );
+
+        const submit = () => {
+            if (completeness.value === 100) {
+                toast.next('Profile synchronized successfully');
+            } else {
+                toast.next(`Complete all fields first (${Math.round(completeness.value)}%)`);
+            }
+            setTimeout(() => toast.next(null), 3000);
+        };
 
         return {
             personal, address, preferences, wizard,
-            completeness, state, activeTab, sidebarCollapsed,
-            wizardLoading, personalLoading, addressLoading, preferencesLoading, asyncLoading, countriesList,
+            completeness, state, activeTab, sidebarCollapsed, toast,
+            countriesList, countryOptions,
             Math, JSON,
             goBack: () => wizard.step.next(Math.max(0, wizard.step.value - 1)),
             goNext: () => wizard.step.next(Math.min(2, wizard.step.value + 1)),
+            submit,
             toggleSidebar: () => sidebarCollapsed.next(!sidebarCollapsed.value),
             setTabTree: () => activeTab.next('tree'),
             setTabState: () => activeTab.next('state'),

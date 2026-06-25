@@ -49,6 +49,7 @@ h1 { font-size: 1.6rem; font-weight: 600; margin: 0; letter-spacing: -1px; }
 .field label.lit { color: #5b8cff; }
 .field input, .field select { width: 100%; background: rgba(0,0,0,.2); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 12px 14px; color: #e8eaf0; font-family: inherit; font-size: .9rem; outline: none; transition: border-color .2s, box-shadow .2s; box-sizing: border-box; }
 .field input:focus, .field select:focus { border-color: rgba(91,140,255,.4); box-shadow: 0 0 0 3px rgba(91,140,255,.08); }
+.field option, .field optgroup { background: #0a0a10; color: #e8eaf0; }
 .pulse-bar { height: 2px; background: linear-gradient(90deg, #5b8cff, #c084fc); border-radius: 2px; margin-top: 4px; transition: width .3s ease; opacity: .6; }
 .loading-pulse { padding: 12px; color: #8b92a8; font-size: .85rem; animation: textPulse 1.5s ease-in-out infinite; }
 @keyframes textPulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
@@ -116,3 +117,8 @@ h1 { font-size: 1.6rem; font-weight: 600; margin: 0; letter-spacing: -1px; }
 .step-dots { display: flex; gap: 6px; }
 .step-dots span { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.15); transition: all .3s; }
 .step-dots span.on { background: #5b8cff; box-shadow: 0 0 6px rgba(91,140,255,.5); transform: scale(1.3); }
+
+/* ── Toast ── */
+.toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 100; pointer-events: none; }
+.toast { padding: 12px 24px; border-radius: 10px; background: rgba(91, 140, 255, .15); border: 1px solid rgba(91, 140, 255, .35); color: #5b8cff; font-size: .9rem; backdrop-filter: blur(8px); box-shadow: 0 8px 32px rgba(0,0,0,.3); animation: toastIn .3s ease; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }

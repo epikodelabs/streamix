@@ -1,3 +1,4 @@
+import { globalContainer, type Container } from "../ioc/container";
 import type { Scope } from "./scope";
 
 /**
@@ -8,6 +9,8 @@ import type { Scope } from "./scope";
 export interface RootScope {
   readonly type: "root";
   mode: "discrete" | "analog";
+  /** IoC container shared by all top-level scopes. */
+  container: Container;
 }
 
 let _globalScope: RootScope | null = null;
@@ -17,6 +20,9 @@ export function getGlobalScope(): RootScope {
     _globalScope = {
       type: "root",
       mode: "discrete",
+      get container() {
+        return globalContainer;
+      },
     };
   }
   return _globalScope;
