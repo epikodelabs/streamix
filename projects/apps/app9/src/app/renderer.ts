@@ -1,4 +1,4 @@
-import type { Atom, Writable } from '@epikodelabs/streamix';
+import { trackDependencies, type Atom, type Writable } from '@epikodelabs/streamix';
 
 type Cleanup = () => void;
 type Ctx = Record<string, any>;
@@ -28,53 +28,14 @@ function isAtom(x: any): x is Atom<any> {
     return x && typeof x === 'object' && typeof x.subscribe === 'function';
 }
 
-function deepProxy<T>(value: T, touched: Set<Atom<any>>): T {
-    if (isAtom(value)) {
-        return new Proxy(value, {
-            get(target, prop) {
-                if (prop === 'value') touched.add(target);
-                return deepProxy((target as any)[prop], touched);
-            }
-        }) as T;
-    }
-    if (Array.isArray(value)) {
-        return value.map(item => deepProxy(item, touched)) as T;
-    }
-    if (value && typeof value === 'object') {
-        return new Proxy(value, {
-            get(target, prop) {
-                // Scope loading is now the loading atom itself; track it and
-                // return the boolean value so templates can use `scope.loading`
-                // without `.value`.
-                if (prop === 'loading' && isAtom((target as any).loading)) {
-                    const loadingAtom = (target as any).loading as Atom<any>;
-                    touched.add(loadingAtom);
-                    return deepProxy(loadingAtom.value, touched);
-                }
-                return deepProxy((target as any)[prop], touched);
-            }
-        }) as T;
-    }
-    return value;
-}
-
 function watch(expr: string, ctx: Ctx, cb: (value: any) => void): Cleanup {
     const value = () => getValue(evaluate(expr, ctx));
-    const readAtoms = () => {
-        const touched = new Set<Atom<any>>();
-        const proxyCtx: Ctx = {};
-        for (const key of Object.keys(ctx)) {
-            proxyCtx[key] = deepProxy(ctx[key], touched);
-        }
-        getValue(evaluate(expr, proxyCtx));
-        return touched;
-    };
+    const { dependencies } = trackDependencies(() => value());
 
-    const touched = readAtoms();
     cb(value());
 
     const subs: Cleanup[] = [];
-    touched.forEach(atom => {
+    dependencies.forEach(atom => {
         const sub = atom.subscribe(() => cb(value()));
         subs.push(() => sub.unsubscribe());
     });

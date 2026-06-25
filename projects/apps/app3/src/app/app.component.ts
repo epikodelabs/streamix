@@ -17,18 +17,18 @@ type Weather = 'sunny' | 'rainy';
 
       <div class="controls">
         <button
-          [class.active]="weather.value === 'sunny'"
+          [class.active]="weather === 'sunny'"
           (click)="setWeather('sunny')"
         >☀️ Sunshine</button>
         <button
-          [class.active]="weather.value === 'rainy'"
+          [class.active]="weather === 'rainy'"
           (click)="setWeather('rainy')"
         >🌧️ Rain</button>
       </div>
 
       <div class="canvas-wrap">
         <canvas #canvas></canvas>
-        <div class="overlay-badge">{{ weather.value === 'sunny' ? 'Sunny · 24°C' : 'Rainy · 16°C' }}</div>
+        <div class="overlay-badge">{{ weather === 'sunny' ? 'Sunny · 24°C' : 'Rainy · 16°C' }}</div>
       </div>
 
       <footer class="footer">
@@ -104,9 +104,15 @@ type Weather = 'sunny' | 'rainy';
 export class AppComponent implements OnInit, OnDestroy {
     @ViewChild('canvas')
     canvasRef!: ElementRef<HTMLCanvasElement>;
-    private readonly appScope = scope(() => ({
-        weather: atom<Weather>('sunny'),
-    }));
+    private readonly appScope = scope((self) => {
+        const weather = atom<Weather>('sunny');
+        const weatherSub = weather.subscribe((w) => this.applyWeather(w));
+        self.cleanups.add(() => weatherSub.unsubscribe());
+        return {
+            weather,
+            setWeather: (w: Weather) => { self.weather = w; },
+        };
+    });
     get weather() { return this.appScope.weather; }
     private renderer!: THREE.WebGLRenderer;
     private scene!: THREE.Scene;
@@ -127,9 +133,7 @@ export class AppComponent implements OnInit, OnDestroy {
     private baseCamPos!: THREE.Vector3;
     private parallaxTarget = { x: 0, y: 0 };
     ngOnInit(): void {
-        // Weather reaction — toggle scene elements
-        const weatherSub = pipe(this.appScope.weather, tap((w) => this.applyWeather(w))).subscribe(() => { });
-        this.appScope.cleanups.add(() => weatherSub.unsubscribe());
+        // Weather reaction is wired inside the scope factory.
     }
     ngAfterViewInit(): void {
         this.initScene();
@@ -142,7 +146,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.rainGeo?.dispose();
     }
     setWeather(w: Weather): void {
-        this.weather.next(w);
+        this.appScope.setWeather(w);
     }
     private initScene(): void {
         const canvas = this.canvasRef.nativeElement;
@@ -435,7 +439,7 @@ export class AppComponent implements OnInit, OnDestroy {
                 f.position.x += Math.sin(time * 2 + i) * 0.002;
             }
             // Tree gentle sway in rain
-            if (this.weather.value === 'rainy') {
+            if (this.weather === 'rainy') {
                 for (let i = 0; i < this.trees.length; i++) {
                     this.trees[i].rotation.z = Math.sin(time * 3 + i) * 0.015;
                 }

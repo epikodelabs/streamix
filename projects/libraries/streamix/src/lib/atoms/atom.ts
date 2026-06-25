@@ -197,10 +197,10 @@ export function getCurrentFormulaContext(): FormulaContext | null {
  * result and the set of atoms that were read. Useful for reactive renderers that
  * need to discover dependencies without manually walking every proxy layer.
  */
-export function trackDependencies<T>(fn: () => T): { result: T; dependencies: Set<InternalAtomContainer> } {
+export function trackDependencies<T>(fn: () => T): { result: T; dependencies: Set<Atom<any>> } {
   const context = pushFormulaContext();
   try {
-    return { result: fn(), dependencies: context.dependencies };
+    return { result: fn(), dependencies: context.dependencies as unknown as Set<Atom<any>> };
   } finally {
     popFormulaContext();
   }
@@ -430,37 +430,36 @@ export function flow<T>(
     abortController = new AbortController();
     const signal = abortController.signal;
     
-    // 1. Resolve Source & Track Dependencies
+    // 1. Resolve Source & Track Dependencies.
+    // Use try/finally so the formula context is always popped — even if
+    // asyncIter.call() or syncIter.call() throws an exception.
     let iterable: AsyncIterable<T> | Iterable<T>;
     const context = pushFormulaContext();
     try {
       if (typeof source === "function") iterable = source(signal);
       else iterable = source;
+
+      if (disposed || targetVersion !== node.version) return; // finally pops context
+
+      // 2. Acquire Iterator
+      const asyncIter = (iterable as any)[Symbol.asyncIterator];
+      const syncIter = (iterable as any)[Symbol.iterator];
+      iterator = asyncIter ? asyncIter.call(iterable) : (syncIter ? syncIter.call(iterable) : undefined);
+
+      if (!iterator) {
+        instance.fail(new Error("Source is not iterable"));
+        void disposeInstance();
+        return; // finally pops context
+      }
     } catch (err) {
-      popFormulaContext();
       instance.fail(normalizeError(err));
       void disposeInstance();
-      return;
-    }
-    
-    if (disposed || targetVersion !== node.version) {
+      return; // finally pops context
+    } finally {
       popFormulaContext();
-      return;
     }
 
-    // 2. Acquire Iterator
-    const asyncIter = (iterable as any)[Symbol.asyncIterator];
-    const syncIter = (iterable as any)[Symbol.iterator];
-    iterator = asyncIter ? asyncIter.call(iterable) : (syncIter ? syncIter.call(iterable) : undefined);
-
-    if (!iterator) {
-      popFormulaContext();
-      instance.fail(new Error("Source is not iterable"));
-      void disposeInstance();
-      return;
-    }
-
-    // 3. Update Dependencies
+    // 3. Update Dependencies (context is already popped; we still hold the reference)
     let maxDepth = -1;
     for (const dep of context.dependencies) {
       if (dep[NODE]?.depth > maxDepth) maxDepth = dep[NODE].depth;
@@ -481,7 +480,6 @@ export function flow<T>(
       }
     }
     node.depth = maxDepth + 1;
-    popFormulaContext();
 
     // 4. Run Loop
     try {
@@ -756,13 +754,15 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
           instance[MARK_DIRTY]();
         }
       } else {
-        // Discrete: Immediate broadcast
+        // Discrete: Immediate broadcast.
+        // Dependents are already queued by notifyChangeHandlers() above; there is
+        // no need to re-queue this node — flushInternal() would short-circuit on
+        // the Object.is(lastNotified, current) guard anyway, but getting here at
+        // all wastes a microtask per discrete emit.
         node.dirty = false;
         lastNotified = current;
         node.version++;
         broadcast();
-        // Mark dirty for scheduler/test harness awareness (state changed)
-        instance[MARK_DIRTY](); 
       }
     },
 
@@ -826,10 +826,29 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
  * derived() - Computed Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
-export function derived<T>(fn: () => T, options?: AtomOptions): Atom<T> {
+export function derived<T>(fn: () => T, options?: AtomOptions): Atom<T>;
+export function derived<T, A>(source: Atom<A>, fn: (a: A) => T, options?: AtomOptions): Atom<T>;
+export function derived<T, A, B>(sources: [Atom<A>, Atom<B>], fn: (a: A, b: B) => T, options?: AtomOptions): Atom<T>;
+export function derived<T, A, B, C>(sources: [Atom<A>, Atom<B>, Atom<C>], fn: (a: A, b: B, c: C) => T, options?: AtomOptions): Atom<T>;
+export function derived<T, A, B, C, D>(sources: [Atom<A>, Atom<B>, Atom<C>, Atom<D>], fn: (a: A, b: B, c: C, d: D) => T, options?: AtomOptions): Atom<T>;
+export function derived<T, A, B, C, D, E>(sources: [Atom<A>, Atom<B>, Atom<C>, Atom<D>, Atom<E>], fn: (a: A, b: B, c: C, d: D, e: E) => T, options?: AtomOptions): Atom<T>;
+export function derived<T>(...args: any[]): Atom<T> {
+  let fn: () => any;
+  let options: AtomOptions | undefined;
+
+  if (typeof args[0] === "function") {
+    fn = args[0];
+    options = args[1];
+  } else {
+    const sources = Array.isArray(args[0]) ? args[0] : [args[0]];
+    const valueFn = args[1] as (...values: any[]) => any;
+    options = args[2];
+    fn = () => valueFn(...sources.map((s: Atom<any>) => s.value));
+  }
+
   const scope = getCurrentScope();
   const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
-  
+
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   const terminateOnError = options?.terminateOnError ?? false;
   const propagateErrors = options?.propagateErrors ?? true;
@@ -978,13 +997,14 @@ export function derived<T>(fn: () => T, options?: AtomOptions): Atom<T> {
       const ctx = getCurrentFormulaContext();
       if (ctx) ctx.dependencies.add(instance);
 
-      // Lazy pull-to-refresh
-      if (node.dirty) {
+      // Eager initialization must precede the dirty pull: if fn() throws during
+      // recompute on an uninitialized node, initialized stays false, and the old
+      // ordering would invoke fn() a second time in the !initialized block.
+      if (!initialized) {
         try {
-          recompute();
-          // In analog mode, value reads make the result live but still defer
-          // subscriber notification to the scheduler.
-          if (notifyPending && subs.size > 0) instance[MARK_DIRTY]();
+          current = compute();
+          previous = current;
+          markAtomAsEmitted(instance as any);
         } catch (err) {
           errorValue = normalizeError(err);
           isErrorState = true;
@@ -993,14 +1013,13 @@ export function derived<T>(fn: () => T, options?: AtomOptions): Atom<T> {
             throw errorValue;
           }
         }
-      }
-
-      // Eager initialization
-      if (!initialized) {
+      } else if (node.dirty) {
+        // Lazy pull-to-refresh
         try {
-          current = compute();
-          previous = current;
-          markAtomAsEmitted(instance as any);
+          recompute();
+          // In analog mode, value reads make the result live but still defer
+          // subscriber notification to the scheduler.
+          if (notifyPending && subs.size > 0) instance[MARK_DIRTY]();
         } catch (err) {
           errorValue = normalizeError(err);
           isErrorState = true;

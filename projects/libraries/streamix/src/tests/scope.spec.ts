@@ -1,9 +1,16 @@
 import {
   atom,
   derived,
+  derivedExpr,
   flow,
+  flowExpr,
   getCurrentScope,
-  globalScope, scope
+  globalScope,
+  map,
+  pipe,
+  pipeExpr,
+  scope,
+  startWith
 } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -20,7 +27,7 @@ describe('Scope System', () => {
       const s = scope(() => ({}));
       expect(s.type).toBe('scope');
       expect(s.parent).toBe(globalScope);
-      expect(s.loading.value).toBe(false);
+      expect(s.loading).toBe(false);
       s.dispose();
     });
 
@@ -45,7 +52,7 @@ describe('Scope System', () => {
       s.at('count').next(5);
       await delay();
       expect(s.doubled).toBe(10);
-      expect(s.loading.value).toBe(false); // This should be false as all atoms had initial values
+      expect(s.loading).toBe(false); // This should be false as all atoms had initial values
       s.dispose();
     });
 
@@ -122,6 +129,82 @@ describe('Scope System', () => {
     });
   });
 
+  describe('self proxy in factory', () => {
+    it('should pass the scope proxy to the factory', () => {
+      let receivedSelf: any;
+      const s = scope((self) => {
+        receivedSelf = self;
+        const count = atom(0);
+        return { count };
+      });
+
+      expect(receivedSelf).toBe(s);
+      s.dispose();
+    });
+
+    it('should expose loading through self during setup', () => {
+      let loadingDuringSetup: boolean | undefined;
+      const s = scope((self) => {
+        loadingDuringSetup = self.loading;
+        const count = atom(0);
+        return { count };
+      });
+
+      // Loading is true during setup because atoms have not yet emitted.
+      expect(loadingDuringSetup).toBe(true);
+      // After setup completes with initial values, loading flips to false.
+      expect(s.loading).toBe(false);
+      s.dispose();
+    });
+
+    it('should allow self-referential methods', () => {
+      const s = scope((self) => {
+        const count = atom(0);
+        const increment = () => { self.count = self.count + 1; };
+        return { count, increment };
+      });
+
+      expect(s.count).toBe(0);
+      s.increment();
+      expect(s.count).toBe(1);
+      s.increment();
+      expect(s.count).toBe(2);
+      s.dispose();
+    });
+
+    it('should allow atoms to be assigned to self before use', async () => {
+      const s = scope((self) => {
+        self.count = atom(0);
+        const doubled = derived(() => self.count * 2);
+        return { count: self.at.count, doubled };
+      });
+
+      expect(s.count).toBe(0);
+      expect(s.doubled).toBe(0);
+
+      s.count = 5;
+      await delay();
+      expect(s.doubled).toBe(10);
+      s.dispose();
+    });
+
+    it('should allow subscribing through self during setup', async () => {
+      const values: number[] = [];
+      const s = scope((self) => {
+        self.count = atom(0);
+        self.subscribeTo('count', (v: number) => values.push(v));
+        return { count: self.at.count };
+      });
+
+      s.count = 1;
+      s.count = 2;
+      await delay();
+
+      expect(values).toEqual([0, 1, 2]);
+      s.dispose();
+    });
+  });
+
   describe('loading state', () => {
     it('should be true until all atoms emit', async () => {
       const s1 = atom<number>();
@@ -133,15 +216,15 @@ describe('Scope System', () => {
         return { a, b };
       });
       
-      expect(s.loading.value).toBe(true);
+      expect(s.loading).toBe(true);
       
       s1.next(1);
       await delay();
-      expect(s.loading.value).toBe(true);
+      expect(s.loading).toBe(true);
       
       s2.next('x');
       await delay();
-      expect(s.loading.value).toBe(false);
+      expect(s.loading).toBe(false);
       
       s.dispose();
       s1.dispose();
@@ -154,7 +237,7 @@ describe('Scope System', () => {
         const b = atom('hello');
         return { a, b };
       });
-      expect(s.loading.value).toBe(false);
+      expect(s.loading).toBe(false);
       s.dispose();
     });
 
@@ -169,11 +252,11 @@ describe('Scope System', () => {
         return { child };
       });
       
-      expect(parent.loading.value).toBe(true);
+      expect(parent.loading).toBe(true);
       
       source.next(42);
       await delay();
-      expect(parent.loading.value).toBe(false);
+      expect(parent.loading).toBe(false);
       
       parent.dispose();
       source.dispose();
@@ -472,6 +555,262 @@ describe('Scope System', () => {
       
       await delay();
       expect(values).toEqual([1, 2]);
+      s.dispose();
+    });
+  });
+
+  describe('scope object shorthand', () => {
+    it('should create a scope from a plain object', () => {
+      const s = scope({ name: 'test', count: 0 });
+
+      expect(s.type).toBe('scope');
+      expect(s.name).toBe('test');
+      expect(s.count).toBe(0);
+      expect(s.at('name').value).toBe('test');
+      expect(s.at('count').value).toBe(0);
+      s.dispose();
+    });
+
+    it('should support assignment through the proxy for shorthand atoms', async () => {
+      const s = scope({ name: 'test', count: 0 });
+
+      s.name = 'updated';
+      s.count = 5;
+
+      await delay();
+      expect(s.name).toBe('updated');
+      expect(s.count).toBe(5);
+      expect(s.at('name').value).toBe('updated');
+      expect(s.at('count').value).toBe(5);
+      s.dispose();
+    });
+
+    it('should turn nested plain objects into nested scopes', () => {
+      const s = scope({
+        user: { name: 'Alex', email: 'alex@example.com' },
+        settings: { theme: 'dark' }
+      });
+
+      expect(s.user.name).toBe('Alex');
+      expect(s.user.email).toBe('alex@example.com');
+      expect(s.settings.theme).toBe('dark');
+      expect(s.user.type).toBe('scope');
+      expect(s.user.parent).toBe(s);
+      s.dispose();
+    });
+
+    it('should write to nested shorthand scopes', async () => {
+      const s = scope({
+        user: { name: 'Alex', email: '' }
+      });
+
+      s.user.name = 'Jordan';
+      s.user.email = 'jordan@example.com';
+
+      await delay();
+      expect(s.user.name).toBe('Jordan');
+      expect(s.user.email).toBe('jordan@example.com');
+      s.dispose();
+    });
+
+    it('should pass existing atoms through unchanged', async () => {
+      const count = atom(0);
+      const s = scope({ count, name: 'test' });
+
+      expect(s.count).toBe(0);
+      s.count = 10;
+      await delay();
+      expect(count.value).toBe(10);
+      expect(s.name).toBe('test');
+      s.dispose();
+    });
+
+    it('should pass nested scopes through unchanged', () => {
+      const inner = scope({ x: 1 });
+      const s = scope({ inner, name: 'test' });
+
+      expect(s.inner.x).toBe(1);
+      expect(s.inner.parent).toBe(s);
+      s.dispose();
+    });
+
+    it('should pass functions through unchanged', () => {
+      const s = scope({
+        value: 0,
+        increment() { (s as any).value = (s as any).value + 1; }
+      } as any);
+
+      expect(typeof (s as any).increment).toBe('function');
+      (s as any).increment();
+      expect((s as any).value).toBe(1);
+      s.dispose();
+    });
+
+    it('should wrap arrays in atoms', async () => {
+      const s = scope({ items: [1, 2, 3] });
+
+      expect(s.items).toEqual([1, 2, 3]);
+      s.items = [4, 5];
+      await delay();
+      expect(s.items).toEqual([4, 5]);
+      s.dispose();
+    });
+
+    it('should support snapshot for shorthand scopes', () => {
+      const s = scope({
+        user: { name: 'Alex', email: 'alex@example.com' },
+        count: 5
+      });
+
+      const snap = s.snapshot();
+      expect(snap).toEqual({
+        user: { name: 'Alex', email: 'alex@example.com' },
+        count: 5
+      });
+      s.dispose();
+    });
+
+    it('should dispose shorthand atoms and nested scopes recursively', () => {
+      const s = scope({
+        user: { name: 'Alex' },
+        count: 0
+      });
+
+      expect(s.at('count').disposed).toBe(false);
+      expect(s.user.at('name').disposed).toBe(false);
+      s.dispose();
+      expect(s.at('count').disposed).toBe(true);
+      expect(s.user.at('name').disposed).toBe(true);
+    });
+
+    it('should subscribe to shorthand atoms via subscribeTo', async () => {
+      const s = scope({ count: 0 });
+      const values: number[] = [];
+
+      const sub = s.subscribeTo('count', v => values.push(v));
+      s.count = 1;
+      s.count = 2;
+      await delay();
+
+      expect(values).toEqual([0, 1, 2]);
+      sub.unsubscribe();
+      s.dispose();
+    });
+
+    it('should throw on circular references in shorthand state', () => {
+      const state: any = { name: 'test' };
+      state.self = state;
+
+      expect(() => scope(state)).toThrowError(/Circular reference/);
+    });
+
+    it('should work alongside factory form in the same app', () => {
+      const s = scope(() => {
+        const personal = scope({ name: '', email: '' });
+        const count = atom(0);
+        return { personal, count };
+      });
+
+      s.personal.name = 'Alex';
+      s.count = 5;
+      expect(s.personal.name).toBe('Alex');
+      expect(s.count).toBe(5);
+      s.dispose();
+    });
+  });
+
+  describe('expression markers in object shorthand', () => {
+    it('should support derivedExpr with self reference', async () => {
+      const s = scope({
+        count: 0,
+        doubled: derivedExpr((self) => self.count * 2)
+      });
+
+      expect(s.count).toBe(0);
+      expect(s.doubled).toBe(0);
+
+      s.count = 5;
+      await delay();
+      expect(s.doubled).toBe(10);
+      s.dispose();
+    });
+
+    it('should support pipeExpr with self reference', async () => {
+      const source = atom(0);
+      const s = scope({
+        multiplier: 2,
+        ticks: pipeExpr((self) => pipe(source, startWith(1), map(x => x * self.multiplier)))
+      });
+
+      await delay();
+      expect(s.ticks).toBe(2);
+
+      source.next(5);
+      await delay();
+      expect(s.ticks).toBe(10);
+      s.dispose();
+    });
+
+    it('should support flowExpr', async () => {
+      const source = atom(0);
+      const s = scope({
+        flowValue: flowExpr(() => flow(source))
+      });
+
+      expect(s.flowValue).toBe(0);
+
+      source.next(5);
+      await delay();
+      expect(s.flowValue).toBe(5);
+      s.dispose();
+    });
+
+    it('should support methods with this bound to scope', () => {
+      const s = scope({
+        count: 0,
+        increment() { this.count++; }
+      });
+
+      expect(s.count).toBe(0);
+      s.increment();
+      expect(s.count).toBe(1);
+      s.increment();
+      expect(s.count).toBe(2);
+      s.dispose();
+    });
+
+    it('should support derivedExpr depending on another derivedExpr', async () => {
+      const s = scope({
+        count: 1,
+        doubled: derivedExpr((self) => self.count * 2),
+        quadrupled: derivedExpr((self) => self.doubled * 2)
+      });
+
+      expect(s.quadrupled).toBe(4);
+
+      s.count = 5;
+      await delay();
+      expect(s.doubled).toBe(10);
+      expect(s.quadrupled).toBe(20);
+      s.dispose();
+    });
+
+    it('should throw on circular expression markers', () => {
+      expect(() => scope({
+        a: derivedExpr((self) => self.b as number),
+        b: derivedExpr((self) => self.a as number)
+      })).toThrowError(/Circular dependency/);
+    });
+
+    it('should pass atoms through unchanged', () => {
+      const count = atom(0);
+      const s = scope({
+        count,
+        doubled: derivedExpr((self) => self.count * 2)
+      });
+
+      expect(s.count).toBe(0);
+      expect(s.doubled).toBe(0);
       s.dispose();
     });
   });

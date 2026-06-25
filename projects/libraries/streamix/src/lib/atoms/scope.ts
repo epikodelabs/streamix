@@ -8,18 +8,27 @@ import {
 } from "../ioc/container";
 import { normalizeError } from "../utils/helpers";
 import { atom, getCurrentFormulaContext, Writable, type Atom } from "./atom";
-import type { Subscription } from "./subscription";
+import {
+  evaluateExprMarker,
+  isExprMarker,
+  type DerivedExpr,
+  type FlowExpr,
+  type PipeExpr,
+} from "./expr";
 import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
+import type { Subscription } from "./subscription";
 
 // Define a recursive type to unwrap atom values and handle nested scopes
 type UnwrapSnapshotValues<T> = {
-  [K in keyof T]: T[K] extends Scope & Record<string, any>
-    ? UnwrapSnapshotValues<T[K]>
-    : T[K] extends { value: infer U }
-      ? U
-      : T[K] extends Record<string, any>
-        ? UnwrapSnapshotValues<T[K]>
-        : T[K];
+  [K in keyof T]: T[K] extends Scope<infer U>
+    ? UnwrapSnapshotValues<U>
+    : T[K] extends Scope & Record<string, any>
+      ? UnwrapSnapshotValues<T[K]>
+      : T[K] extends { value: infer U }
+        ? U
+        : T[K] extends Record<string, any>
+          ? UnwrapSnapshotValues<T[K]>
+          : T[K];
 };
 
 type UnwrapScopeValues<T> = {
@@ -38,10 +47,58 @@ type AtomOf<T> = T extends Writable<infer U>
 
 type AtomValueOf<T> = T extends Atom<infer U> ? U : never;
 
+type AtomAccessor<T> = {
+  [K in keyof T]: AtomOf<T[K]>;
+} & (<K extends keyof T>(key: K) => AtomOf<T[K]>);
+
+/**
+ * Transforms a plain-object scope state shape into the shape stored inside a scope.
+ *
+ * - Atoms and scopes are passed through unchanged.
+ * - Functions are passed through unchanged (useful for methods).
+ * - Nested plain objects become nested scopes.
+ * - Everything else is wrapped in a writable atom.
+ */
+type ScopeValue<T> =
+  T extends Atom<any>
+    ? T
+    : T extends Scope
+      ? T
+      : T extends (...args: any[]) => any
+        ? T
+        : T extends readonly any[]
+          ? Writable<T>
+          : T extends DerivedExpr<infer U>
+            ? Atom<U>
+            : T extends PipeExpr<infer U>
+              ? Atom<U>
+              : T extends FlowExpr<infer U>
+                ? Atom<U>
+                : T extends Record<string, any>
+                  ? ScopeReturn<ScopeOf<T>>
+                  : Writable<T>;
+
+type ScopeOf<T extends Record<string, any>> = {
+  [K in keyof T]: ScopeValue<T[K]>;
+};
+
+/** Full return type produced by the {@link scope} factory for a raw shape T. */
+type ScopeReturn<T extends Record<string, any>> = Scope<T> &
+  UnwrapScopeValues<T> & {
+    at: AtomAccessor<T>;
+    subscribeTo<K extends keyof T>(
+      key: K,
+      callback: (value: AtomValueOf<T[K]>) => void,
+    ): Subscription;
+  };
+
 /**
  * Interface definition for a lifecycle scope execution context.
+ *
+ * @template T The raw factory return type. The proxy exposes unwrapped atom
+ *   values and uses T to infer the shape of `snapshot()`.
  */
-export interface Scope {
+export interface Scope<T extends Record<string, any> = Record<string, any>> {
   /** Unique discriminator for the runtime context. */
   type: "scope";
   /** State container for active elements captured by this window. */
@@ -55,12 +112,13 @@ export interface Scope {
   /** IoC container for this scope. Inherits from the parent scope's container. */
   container: Container;
   /**
-   * Reactive atom that tracks whether the scope is still loading.
+   * Whether the scope is still loading.
    * True until every owned atom (and nested scope) has emitted at least one value.
+   * Exposed as a plain boolean via the proxy; the underlying atom lives in `_rawState`.
    */
-  loading: Writable<boolean>;
+  loading: boolean;
   /** Returns a plain object snapshot of all current atom values. */
-  snapshot(): this extends (infer T extends Record<string, any>) ? UnwrapSnapshotValues<T> : Record<string, any>;
+  snapshot(): UnwrapSnapshotValues<T>;
   /** Disposes the scope and all of its atoms. */
   dispose(): void;
   /** @internal Number of atoms in this scope's subtree that have not yet emitted. */
@@ -146,20 +204,191 @@ export function injectOptional<T>(token: Token<T>): T | undefined {
  *
  * The returned object is a Proxy: reading an exported atom returns its current
  * value, and writing to an exported atom forwards the value to atom.next().
- * Use `scope.at('key')` to reach the underlying atom when you need to subscribe,
- * dispose, or call other atom methods directly.
+ * Use `scope.at('key')` or `scope.at.key` to reach the underlying atom when you
+ * need to subscribe, dispose, or call other atom methods directly.
+ *
+ * As a convenience, `scope` also accepts a plain object. Primitive values are
+ * automatically wrapped in atoms and nested plain objects become nested scopes.
+ *
+ * ```ts
+ * const app = scope({
+ *   user: { name: '', email: '' },
+ *   theme: 'dark'
+ * });
+ *
+ * app.user.name = 'Alex'; // writes through the underlying atom
+ * app.theme = 'light';    // same
+ * ```
+ */
+// Keys that belong to the scope's own interface and must bypass the atom-routing
+// proxy. Hoisted to module level so the Set is allocated once, not on every
+// scope() call.
+const INTERNAL_SCOPE_KEYS = new Set([
+  "type",
+  "atoms",
+  "cleanups",
+  "mode",
+  "parent",
+  "container",
+  "snapshot",
+  "dispose",
+  "_pendingCount",
+  "_exports",
+  "_disposed",
+  "_rawState",
+  "at",
+]);
+
+function isAtomLike(value: any): value is Atom<any> | Scope {
+  return value && typeof value === "object" && (value.type === "atom" || value.type === "scope");
+}
+
+function isAtom(value: any): value is Atom<any> {
+  return value && typeof value === "object" && value.type === "atom";
+}
+
+function isPlainObject(value: any): boolean {
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
+  if (value instanceof Date || value instanceof RegExp || value instanceof Map || value instanceof Set) {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function isWritableAtom(value: any): value is Writable {
+  return isAtomLike(value) && typeof (value as Writable).next === "function";
+}
+
+function transformScopeState<T extends Record<string, any>>(
+  state: T,
+  visited: WeakMap<object, boolean>,
+  scopeProxy: any,
+): any {
+  const rawState: any = {};
+  const evaluating = new Set<string | symbol>();
+
+  // First pass: store raw values, wrap primitives in atoms, bind methods to the
+  // scope proxy, and recursively convert nested plain objects into scopes.
+  for (const key of Reflect.ownKeys(state)) {
+    const value = (state as any)[key];
+    if (isExprMarker(value)) {
+      rawState[key] = value;
+    } else if (typeof value === "function") {
+      rawState[key] = value.bind(scopeProxy);
+    } else if (isAtomLike(value)) {
+      rawState[key] = value;
+    } else if (isPlainObject(value)) {
+      if (visited.has(value)) {
+        throw new Error(`Circular reference detected in scope state at key: ${String(key)}`);
+      }
+      visited.set(value, true);
+      try {
+        rawState[key] = scope(() => transformScopeState(value, visited, scopeProxy));
+      } finally {
+        visited.delete(value);
+      }
+    } else {
+      rawState[key] = atom(value);
+    }
+  }
+
+  // Build a plain `self` object with getters/setters backed by rawState.
+  // No Proxy is used for `self`.
+  const self: any = {};
+  for (const key of Reflect.ownKeys(rawState)) {
+    Object.defineProperty(self, key, {
+      get() {
+        const value = rawState[key];
+        if (isExprMarker(value)) {
+          if (evaluating.has(key)) {
+            throw new Error(`Circular dependency detected in scope state at key: ${String(key)}`);
+          }
+          evaluating.add(key);
+          try {
+            const atom = evaluateExprMarker(value, self);
+            rawState[key] = atom;
+            return atom.value;
+          } finally {
+            evaluating.delete(key);
+          }
+        }
+        if (isAtom(value)) {
+          const ctx = getCurrentFormulaContext();
+          if (ctx) ctx.dependencies.add(value as any);
+          return value.value;
+        }
+        return value;
+      },
+      set(newValue: any) {
+        const value = rawState[key];
+        if (isWritableAtom(value)) {
+          value.next(newValue);
+        } else {
+          rawState[key] = newValue;
+        }
+      },
+      enumerable: true,
+      configurable: true,
+    });
+  }
+
+  // Eagerly evaluate expression markers so the returned rawState contains atoms.
+  // The self getters handle lazy dependencies and circularity detection.
+  for (const key of Reflect.ownKeys(rawState)) {
+    if (isExprMarker(rawState[key])) {
+      void (self as any)[key];
+    }
+  }
+
+  return rawState;
+}
+
+/**
+ * Creates an execution boundary to encapsulate, track, and bulk-dispose reactive
+ * units. Atoms created inside an analog scope defer public broadcasts to the
+ * scheduler instead of notifying subscribers synchronously.
+ *
+ * The returned object is a Proxy: reading an exported atom returns its current
+ * value, and writing to an exported atom forwards the value to atom.next().
+ * Use `scope.at('key')` or `scope.at.key` to reach the underlying atom when you
+ * need to subscribe, dispose, or call other atom methods directly.
+ *
+ * The factory receives the scope proxy as `self`, so derived values and setup
+ * logic can read values through the same ergonomic API while still returning the
+ * raw reactive units.
+ *
+ * As a convenience, `scope` also accepts a plain object. Primitive values are
+ * automatically wrapped in atoms and nested plain objects become nested scopes.
+ *
+ * ```ts
+ * const app = scope((self) => {
+ *   const count = atom(0);
+ *   const doubled = derived(() => self.count * 2);
+ *   return { count, doubled };
+ * });
+ * ```
  */
 export function scope<T extends Record<string, any>>(
-  factory: () => T,
+  factory: (self: any) => T,
   options?: { mode?: "discrete" | "analog" },
-): Scope &
-  UnwrapScopeValues<T> & {
-    at<K extends keyof T>(key: K): AtomOf<T[K]>;
-    subscribeTo<K extends keyof T>(
-      key: K,
-      callback: (value: AtomValueOf<T[K]>) => void,
-    ): Subscription;
-  } {
+): ScopeReturn<T>;
+
+export function scope<T extends Record<string, any>>(
+  state: T,
+  options?: { mode?: "discrete" | "analog" },
+): ScopeReturn<ScopeOf<T>>;
+
+export function scope<T extends Record<string, any>>(
+  arg: ((self: any) => T) | T,
+  options?: { mode?: "discrete" | "analog" },
+): any {
+  const factory: (self: any) => T =
+    typeof arg === "function"
+      ? (arg as (self: any) => T)
+      : ((self: any) => transformScopeState(arg, new WeakMap(), self) as T);
+
   const parent = currentScope ?? getGlobalScope();
   const mode = resolveMode(options, parent);
 
@@ -172,7 +401,7 @@ export function scope<T extends Record<string, any>>(
     mode,
     parent,
     container: createContainer(parentContainer),
-    loading: null as any,
+    loading: null as any, // placeholder; replaced by proxy below
     snapshot() {
       const result: Record<string, any> = {};
       collectScopeValues(this as Scope & T, result);
@@ -202,43 +431,36 @@ export function scope<T extends Record<string, any>>(
     // Create a reactive atom that mirrors this scope's loading state.
     // Loading starts true and becomes false once every registered atom has
     // emitted at least one value.
-    const loadingAtom = atom(true);
-    (newScope as any).loading = loadingAtom;
-
-    const result = factory();
-
-    if (result && typeof result === "object") {
-      // Store the original factory result so the proxy can route reads/writes
-      // to the underlying atoms while exposing values to callers.
-      const exportKeys = Reflect.ownKeys(result);
-      Object.assign(newScope, result);
-      (newScope as any)._rawState = result;
-      for (const key of exportKeys) {
-        newScope._exports.add(key);
+    // Create it outside the current scope so it does not count as a pending
+    // atom itself; then store it in _rawState so the proxy treats it like any
+    // other atom.
+    const loadingAtom = (() => {
+      const scopeBefore = currentScope;
+      currentScope = null;
+      try {
+        return atom(true);
+      } finally {
+        currentScope = scopeBefore;
       }
-    }
+    })();
+    (newScope as any)._rawState['loading'] = loadingAtom;
 
-    const internalKeys = new Set([
-      "type",
-      "atoms",
-      "cleanups",
-      "mode",
-      "parent",
-      "container",
-      "loading",
-      "snapshot",
-      "dispose",
-      "_pendingCount",
-      "_exports",
-      "_disposed",
-      "_rawState",
-      "at",
-    ]);
+    // Pre-create the proxy so the factory can use `self` for reads, writes,
+    // subscriptions, and dependency tracking during setup.
+    const atAccessor = (key: string | symbol) => newScope._rawState[key];
+    const atProxy = new Proxy(atAccessor, {
+      get(_, key) {
+        if (typeof key === "string" && key in atAccessor) {
+          return Reflect.get(atAccessor, key);
+        }
+        return newScope._rawState[key];
+      },
+    });
 
     const scopeProxy = new Proxy(newScope, {
       get(target, prop, receiver) {
         if (prop === "at") {
-          return (key: string | symbol) => target._rawState[key];
+          return atProxy;
         }
         if (prop === "subscribeTo") {
           return (key: string | symbol, callback: (value: any) => void) => {
@@ -250,7 +472,7 @@ export function scope<T extends Record<string, any>>(
             return atom.subscribe(callback);
           };
         }
-        if (internalKeys.has(prop as string)) {
+        if (INTERNAL_SCOPE_KEYS.has(prop as string)) {
           return Reflect.get(target, prop, receiver);
         }
         const factoryItem = target._rawState[prop];
@@ -266,7 +488,7 @@ export function scope<T extends Record<string, any>>(
         return Reflect.get(target, prop, receiver);
       },
       set(target, prop, value, receiver): boolean {
-        if (internalKeys.has(prop as string)) {
+        if (INTERNAL_SCOPE_KEYS.has(prop as string)) {
           return Reflect.set(target, prop, value, receiver);
         }
         const factoryItem = target._rawState[prop];
@@ -275,18 +497,50 @@ export function scope<T extends Record<string, any>>(
           typeof factoryItem === "object" &&
           (factoryItem as any).type === "atom"
         ) {
-          const atom = factoryItem as Writable<any>;
-          if (typeof atom.next !== "function" || typeof atom.set !== "function") {
+          const writable = factoryItem as Writable<any>;
+          // Only `next` presence determines writability — checking `set` too with
+          // || would incorrectly block custom Writable implementations that expose
+          // next but not the alias `set`.
+          if (typeof writable.next !== "function") {
             // Derived and flow atoms are read-only; assignment is not allowed.
             return false;
           }
-          atom.next(value);
+          writable.next(value);
           return true;
         }
         target._rawState[prop] = value;
         return Reflect.set(target, prop, value, receiver);
       },
     });
+
+    const result = factory(scopeProxy);
+
+    if (result && typeof result === "object") {
+      // Store the original factory result so the proxy can route reads/writes
+      // to the underlying atoms while exposing values to callers.
+      const exportKeys = Reflect.ownKeys(result);
+
+      // 'loading' is a reserved key managed by the scope itself. Silently
+      // overwriting a factory-exported 'loading' would discard user data; warn
+      // so the conflict is visible during development.
+      if ("loading" in (result as object)) {
+        console.warn(
+          "[streamix] scope(): factory returned a 'loading' key, " +
+          "which is reserved and will be overwritten by the scope's own loading atom. " +
+          "Rename your property to avoid the conflict."
+        );
+      }
+
+      Object.assign(newScope, result);
+      (newScope as any)._rawState = result;
+      for (const key of exportKeys) {
+        newScope._exports.add(key);
+      }
+    }
+
+    // Treat loading like any other atom: keep it in _rawState so the proxy
+    // can expose its value and route at()/subscribeTo() to it.
+    (newScope as any)._rawState['loading'] = loadingAtom;
 
     // Ensure nested scopes point to this proxied parent so identity checks like
     // `parent.child.parent === parent` hold.
@@ -301,6 +555,11 @@ export function scope<T extends Record<string, any>>(
     if (newScope._pendingCount === 0 && loadingAtom.value !== false) {
       loadingAtom.next(false);
     }
+
+    // Dispose the loading atom with the scope.
+    newScope.cleanups.add(() => {
+      if (!loadingAtom.disposed) loadingAtom.dispose();
+    });
 
     return scopeProxy as any;
   } catch (error) {
@@ -412,11 +671,15 @@ export function markAtomAsEmitted(atom: Atom<any>): void {
 
 /* ── Loading State ────────────────────────────────────────────────────────── */
 
+function getLoadingAtom(sc: Scope): Writable<boolean> | undefined {
+  return sc._rawState['loading'] as Writable<boolean> | undefined;
+}
+
 function incrementPending(scope: Scope): void {
   let sc: Scope | RootScope | null = scope;
-  while (isScope(sc)) {
+  while (isScope(sc) && !sc._disposed) {
     sc._pendingCount++;
-    const loadingAtom = sc.loading;
+    const loadingAtom = getLoadingAtom(sc);
     if (loadingAtom) {
       const loading = sc._pendingCount > 0;
       if (loadingAtom.value !== loading) loadingAtom.next(loading);
@@ -429,7 +692,7 @@ function decrementPending(scope: Scope): void {
   let sc: Scope | RootScope | null = scope;
   while (isScope(sc) && !sc._disposed) {
     sc._pendingCount = Math.max(0, sc._pendingCount - 1);
-    const loadingAtom = sc.loading;
+    const loadingAtom = getLoadingAtom(sc);
     if (loadingAtom) {
       const loading = sc._pendingCount > 0;
       if (loadingAtom.value !== loading) loadingAtom.next(loading);
@@ -443,7 +706,7 @@ function decrementPendingBy(scope: Scope | RootScope | null, amount: number): vo
   let sc: Scope | RootScope | null = scope;
   while (isScope(sc) && !sc._disposed) {
     sc._pendingCount = Math.max(0, sc._pendingCount - amount);
-    const loadingAtom = sc.loading;
+    const loadingAtom = getLoadingAtom(sc);
     if (loadingAtom) {
       const loading = sc._pendingCount > 0;
       if (loadingAtom.value !== loading) loadingAtom.next(loading);

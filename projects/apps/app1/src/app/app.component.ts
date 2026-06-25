@@ -1,6 +1,6 @@
 import { DecimalPipe } from '@angular/common';
 import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import { atom, bufferCount, combineLatest, debounce, filter, finalize, interval, listen, map, merge, pipe, range, scan, scope, tap, throttle } from '@epikodelabs/streamix';
+import { atom, bufferCount, debounce, derived, filter, finalize, interval, listen, map, merge, pipe, range, scan, scope, tap, throttle } from '@epikodelabs/streamix';
 interface Metric {
     name: string;
     value: number;
@@ -474,19 +474,47 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         message: string;
         type: string;
     }[] = [];
-    private readonly appScope = scope(() => ({
-        clicks: atom<string>(),
-        sliderA: atom<number>(),
-        sliderB: atom<number>(),
-    }));
+    private readonly appScope = scope((self) => {
+        const clicks = atom<string>();
+        const sliderA = atom<number>();
+        const sliderB = atom<number>();
+        const combined = derived(() => (self.sliderA * self.sliderB) / 100);
+
+        const bufferSub = pipe(clicks, bufferCount(5)).subscribe((batch: string[]) => {
+            this.batches.unshift(batch);
+            if (this.batches.length > 8)
+                this.batches.pop();
+            this.cdr.detectChanges();
+        });
+        self.cleanups.add(() => bufferSub.unsubscribe());
+
+        const combinedSub = combined.subscribe(v => {
+            this.combinedValue = v;
+            this.cdr.detectChanges();
+        });
+        self.cleanups.add(() => combinedSub.unsubscribe());
+
+        sliderA.next(this.sliderAValue);
+        sliderB.next(this.sliderBValue);
+
+        return {
+            clicks,
+            sliderA,
+            sliderB,
+            emitClick: (label: string) => { self.clicks = label; },
+            updateStreamA: (value: number) => {
+                this.sliderAValue = value;
+                self.sliderA = value;
+            },
+            updateStreamB: (value: number) => {
+                this.sliderBValue = value;
+                self.sliderB = value;
+            },
+        };
+    });
     ngOnInit(): void {
         this.initMetricsStream();
-        this.initBufferStream();
-        this.initCombinedStream();
         this.initLogStream();
-        // Seed combined
-        this.appScope.sliderA.next(this.sliderAValue);
-        this.appScope.sliderB.next(this.sliderBValue);
     }
     ngAfterViewInit(): void {
         this.initSearchStream();
@@ -616,19 +644,6 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         })).subscribe(() => { });
         this.appScope.cleanups.add(() => resultSub.unsubscribe());
     }
-    private initBufferStream(): void {
-        const s = pipe(this.appScope.clicks, bufferCount(5), tap((batch: string[]) => {
-            this.batches.unshift(batch);
-            if (this.batches.length > 8)
-                this.batches.pop();
-            this.cdr.detectChanges();
-        })).subscribe(() => { });
-        this.appScope.cleanups.add(() => s.unsubscribe());
-    }
-    private initCombinedStream(): void {
-        const s = pipe(combineLatest(this.appScope.sliderA, this.appScope.sliderB), map(([a, b]) => (a * b) / 100), tap(v => { this.combinedValue = v; this.cdr.detectChanges(); })).subscribe(() => { });
-        this.appScope.cleanups.add(() => s.unsubscribe());
-    }
     private initLogStream(): void {
         const metricLog$ = pipe(interval(2000), throttle(2000), map(() => {
             const names = ['Throughput spike detected', 'Latency normalized', 'Connection pool resized', 'Cache invalidated'];
@@ -641,15 +656,13 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         this.appScope.cleanups.add(() => s.unsubscribe());
     }
     emitClick(label: string): void {
-        this.appScope.clicks.next(label);
+        this.appScope.emitClick(label);
     }
     updateStreamA(value: number): void {
-        this.sliderAValue = value;
-        this.appScope.sliderA.next(value);
+        this.appScope.updateStreamA(value);
     }
     updateStreamB(value: number): void {
-        this.sliderBValue = value;
-        this.appScope.sliderB.next(value);
+        this.appScope.updateStreamB(value);
     }
     private pushLog(message: string, type: string): void {
         const time = new Date().toLocaleTimeString();

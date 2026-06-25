@@ -1,7 +1,5 @@
-import { atom, derived, flow, scope } from '@epikodelabs/streamix';
+import { derivedExpr, flowExpr, scope } from '@epikodelabs/streamix';
 import { ReactiveRenderer } from './renderer';
-
-type Tab = 'tree' | 'state';
 
 const template = `
 <div class="universe">
@@ -12,7 +10,7 @@ const template = `
   </div>
 
   <div class="toast-container">
-    <div if="toast" class="toast">{{ toast }}</div>
+    <div if="ui.toast" class="toast">{{ ui.toast }}</div>
   </div>
 
   <header>
@@ -20,8 +18,8 @@ const template = `
     <h1>Atoms &amp; Scopes</h1>
     <p class="subtitle">Watch state flow through the tree in real time</p>
     <div class="completeness-bar">
-      <div class="fill" [style.width.%]="Math.round(completeness)"></div>
-      <span>{{ Math.round(completeness) }}% complete</span>
+      <div class="fill" [style.width.%]="Math.round(ui.completeness)"></div>
+      <span>{{ Math.round(ui.completeness) }}% complete</span>
     </div>
   </header>
 
@@ -50,8 +48,8 @@ const template = `
         </div>
         <div class="field">
           <label [class.lit]="address.country">Zone</label>
-          <div if="countriesList.length === 0" class="loading-pulse">Scanning zones…</div>
-          <select if="countriesList.length > 0" bind-innerhtml="countryOptions" model="address.country"></select>
+          <div if="ui.countriesList.length === 0" class="loading-pulse">Scanning zones…</div>
+          <select if="ui.countriesList.length > 0" bind-innerhtml="ui.countryOptions" model="address.country"></select>
         </div>
       </div>
 
@@ -89,18 +87,18 @@ const template = `
     </section>
   </main>
 
-  <aside class="sidebar" [class.collapsed]="sidebarCollapsed">
+  <aside class="sidebar" [class.collapsed]="ui.sidebarCollapsed">
     <div class="sidebar-header">
       <span class="sidebar-title">🔬 Reactive Lab</span>
-      <button class="sidebar-toggle" (click)="toggleSidebar">{{ sidebarCollapsed ? '◀' : '▶' }}</button>
+      <button class="sidebar-toggle" (click)="toggleSidebar">{{ ui.sidebarCollapsed ? '◀' : '▶' }}</button>
     </div>
     <div class="tabs">
-      <button [class.active]="activeTab === 'tree'" (click)="setTabTree">tree</button>
-      <button [class.active]="activeTab === 'state'" (click)="setTabState">state</button>
+      <button [class.active]="ui.activeTab === 'tree'" (click)="setTabTree">tree</button>
+      <button [class.active]="ui.activeTab === 'state'" (click)="setTabState">state</button>
     </div>
     <div class="tab-panel">
 
-      <div if="activeTab === 'tree'">
+      <div if="ui.activeTab === 'tree'">
         <div class="tree">
           <div class="node scope-root" [class.loading]="wizard.loading">
             <span class="dot"></span>
@@ -169,15 +167,15 @@ const template = `
               <div class="node atom" [class.pulse]="!wizard.async.loading">
                 <span class="dot"></span>
                 <span class="label">countries</span>
-                <span class="value">{{ countriesList.length }} zones</span>
+                <span class="value">{{ ui.countriesList.length }} zones</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div if="activeTab === 'state'">
-        <pre class="snapshot">{{ JSON.stringify(state, null, 2) }}</pre>
+      <div if="ui.activeTab === 'state'">
+        <pre class="snapshot">{{ JSON.stringify(ui.state, null, 2) }}</pre>
       </div>
 
     </div>
@@ -197,81 +195,77 @@ const template = `
 `;
 
 export function mountApp(root: HTMLElement): () => void {
-    const app = scope(() => {
-        const personal = scope(() => ({
-            name: atom(''),
-            email: atom(''),
-        }));
+    const app = scope((self) => {
+        const personal = scope({
+            name: '',
+            email: '',
+        });
 
-        const address = scope(() => ({
-            street: atom(''),
-            country: atom(''),
-        }));
+        const address = scope({
+            street: '',
+            country: '',
+        });
 
-        const preferences = scope(() => ({
-            notifications: atom(true),
-            theme: atom('dark'),
-        }));
+        const preferences = scope({
+            notifications: true,
+            theme: 'dark',
+        });
 
-        const wizard = scope(() => ({
-            step: atom(0),
+        const wizard = scope({
+            step: 0,
             personal,
             address,
             preferences,
-            async: scope(() => ({
-                countries: flow((async function* () {
-                    yield [] as string[];
+            async: {
+                countries: flowExpr(() => (async function* () {
                     await new Promise(r => setTimeout(r, 1500));
                     yield ['US', 'CA', 'UK', 'DE', 'FR'];
                 })()),
-            })),
-        }));
-
-        const completeness = derived(() => {
-            let score = 0;
-            if (personal.name) score++;
-            if (personal.email) score++;
-            if (address.street) score++;
-            if (address.country) score++;
-            return (score / 4) * 100;
+            },
         });
 
-        const state = derived(() => ({
-            ...wizard.snapshot(),
-            completeness: completeness.value,
-        }));
-
-        const activeTab = atom<Tab>('tree');
-        const sidebarCollapsed = atom(false);
-        const toast = atom<string | null>(null);
-
-
-        const countriesList = derived(() => wizard.async.countries ?? []);
-        const countryOptions = derived(() =>
-            '<option value="">Select zone</option>' +
-            countriesList.value.map((c: string) => `<option value="${c}">${c}</option>`).join('')
-        );
+        const ui = scope({
+            activeTab: 'tree',
+            sidebarCollapsed: false,
+            toast: null as string | null,
+            completeness: derivedExpr(() => {
+                let score = 0;
+                if (personal.name) score++;
+                if (personal.email) score++;
+                if (address.street) score++;
+                if (address.country) score++;
+                return (score / 4) * 100;
+            }),
+            state: derivedExpr((self) => ({
+                ...wizard.snapshot(),
+                completeness: self.completeness,
+            })),
+            countriesList: derivedExpr(() => wizard.async.countries ?? []),
+            countryOptions: derivedExpr((self) =>
+                '<option value="">Select zone</option>' +
+                self.countriesList.map((c: string) => `<option value="${c}">${c}</option>`).join('')
+            ),
+        });
 
         const submit = () => {
-            if (completeness.value === 100) {
-                toast.next('Profile synchronized successfully');
+            if (self.ui.completeness === 100) {
+                self.ui.toast = 'Profile synchronized successfully';
             } else {
-                toast.next(`Complete all fields first (${Math.round(completeness.value)}%)`);
+                self.ui.toast = `Complete all fields first (${Math.round(self.ui.completeness)}%)`;
             }
-            setTimeout(() => toast.next(null), 3000);
+            // Guard against the app being unmounted before the timer fires.
+            setTimeout(() => { if (!self.ui.at.toast.disposed) self.ui.toast = null; }, 3000);
         };
 
         return {
-            personal, address, preferences, wizard,
-            completeness, state, activeTab, sidebarCollapsed, toast,
-            countriesList, countryOptions,
+            personal, address, preferences, wizard, ui,
             Math, JSON,
-            goBack: () => wizard.step = Math.max(0, wizard.step - 1),
-            goNext: () => wizard.step = Math.min(2, wizard.step + 1),
+            goBack: () => self.wizard.step = Math.max(0, self.wizard.step - 1),
+            goNext: () => self.wizard.step = Math.min(2, self.wizard.step + 1),
             submit,
-            toggleSidebar: () => sidebarCollapsed.next(!sidebarCollapsed.value),
-            setTabTree: () => activeTab.next('tree'),
-            setTabState: () => activeTab.next('state'),
+            toggleSidebar: () => self.ui.sidebarCollapsed = !self.ui.sidebarCollapsed,
+            setTabTree: () => self.ui.activeTab = 'tree',
+            setTabState: () => self.ui.activeTab = 'state',
         };
     });
 

@@ -4,6 +4,7 @@ import {
     derived,
     flow,
     getScheduler,
+    scope,
     type Atom
 } from '@epikodelabs/streamix';
 
@@ -138,6 +139,30 @@ describe('Atom System', () => {
       expect(doubled.value).toBe(20);
       source.dispose();
       doubled.dispose();
+    });
+
+    it('should compute derived value from atom source', async () => {
+      const source = atom(5);
+      const doubled = derived(source, s => s * 2);
+      expect(doubled.value).toBe(10);
+      source.next(10);
+      expect(doubled.value).toBe(20);
+      source.dispose();
+      doubled.dispose();
+    });
+
+    it('should compute derived value from multiple atom sources', async () => {
+      const a = atom(1);
+      const b = atom(2);
+      const sum = derived([a, b], (x, y) => x + y);
+      expect(sum.value).toBe(3);
+      a.next(5);
+      expect(sum.value).toBe(7);
+      b.next(10);
+      expect(sum.value).toBe(15);
+      a.dispose();
+      b.dispose();
+      sum.dispose();
     });
 
     it('should update when dependencies change', async () => {
@@ -337,20 +362,24 @@ describe('Atom System', () => {
 
 
   describe('scheduler', () => {
-    it('should use custom scheduler', async () => { // Make it async
+    it('should use custom scheduler', async () => {
       const env = createTestEnvironment();
-      
+
       env.run(() => {
-        const a = atom(0);
-        a.subscribe(() => {});
-        a.next(1);
-        // In test environment, we control when flush happens
-        expect(getScheduler().isDirty).toBe(true);
+        const s = scope(() => {
+          const a = atom(0);
+          a.subscribe(() => {});
+          a.next(1);
+          // In analog mode the public broadcast is deferred to the scheduler.
+          expect(getScheduler().isDirty).toBe(true);
+          return { a };
+        }, { mode: 'analog' });
+
         env.flush();
         expect(getScheduler().isDirty).toBe(false);
-        a.dispose();
+        s.dispose();
       });
-      
+
       env.reset();
     });
   });
