@@ -60,80 +60,71 @@ It only starts pulling data when someone subscribes, and automatically stops whe
 
 A scope automatically tracks all atoms and nested scopes created inside it, and disposes everything together when you call `.dispose()`.
 
-```ts
-const app = scope(() => {
-  const count = atom(0);
-  const label = flow(someLiveSource);
-
-  return { count, label };
-});
-
-// Later
-app.dispose(); // everything gets cleaned up nicely 🧼
-```
-
-Scopes can nest, giving you a clean tree of state.
-
-#### Factory form with `self`
-
-When you use a factory function, the scope pre-creates a `self` proxy and passes it in. This lets derived values reference other scope members during setup without surprises:
-
-```ts
-const app = scope((self) => {
-  const count = atom(0);
-  const doubled = derived(() => self.count * 2);
-
-  return { count, doubled };
-});
-```
-
-#### Object shorthand
-
-For simpler state, pass a plain object. Primitives are automatically wrapped in atoms, nested plain objects become nested scopes, and atoms or scopes pass through unchanged:
+For most UI state, use the **object shorthand**. Primitives are automatically wrapped in atoms, nested plain objects become nested scopes, and atoms or scopes pass through unchanged:
 
 ```ts
 const app = scope({
+  count: 0,
   user: {
     name: '',
     email: '',
   },
-  theme: 'dark',
 });
 
-app.user.name = 'Ada'; // writes through the underlying atom
-app.theme = 'light';
+app.count = 5;         // writes through the underlying atom
+app.user.name = 'Ada'; // same
 ```
 
 #### Expression markers
 
-Object shorthand is convenient, but because the shape is known up front it uses a plain `self` object rather than a Proxy. If a derived value needs to read `self`, use an expression marker:
+When a derived value needs to read `self`, use an expression marker:
 
 ```ts
 import { derivedExpr, flowExpr, pipeExpr, scope } from '@epikodelabs/streamix';
 
 const app = scope({
   query: '',
-  results: flowExpr((self) => fetchUsers(self.query)),
-  count: derivedExpr((self) => self.results.length),
+  results: pipeExpr((self) => pipe(self.query, debounce(300), switchMap(search))),
+  count: derivedExpr((self) => self.results?.length ?? 0),
+  ticks: flowExpr(() => interval(1000)),
 });
 ```
 
 `derivedExpr`, `pipeExpr`, and `flowExpr` are evaluated lazily and turned into regular atoms inside the scope.
 
-#### Accessing raw atoms
+#### Factory form
 
-The scope proxy exposes atom *values*. If you ever need the atom itself — for example to pass it to `pipe` or `combineLatest` — use `scope.at.key` or `scope.at('key')`:
+If you need direct atom references — for example to wire up streams with `pipe` or `combineLatest` inside the scope — you can use a factory function. It receives a `self` proxy for reading and writing values:
 
 ```ts
-const app = scope(() => {
-  const count = atom(0);
-  return { count };
+const app = scope((self) => {
+  const clicks = atom<string>();
+  const sliderA = atom<number>();
+  const sliderB = atom<number>();
+
+  pipe(combineLatest(sliderA, sliderB), map(([a, b]) => a * b))
+    .subscribe(v => { ... });
+
+  return {
+    clicks,
+    sliderA,
+    sliderB,
+    emitClick: (label: string) => { self.clicks = label; },
+  };
+});
+```
+
+#### Accessing raw atoms
+
+The scope proxy exposes atom *values*. If you ever need the atom itself — for example to pass it to `pipe` or `combineLatest` from outside the scope — use `scope.at.key` or `scope.at('key')`:
+
+```ts
+const app = scope({
+  count: 0,
 });
 
 pipe(app.at.count, map(n => n * 2)).subscribe(console.log);
 ```
-
-Even better, keep atoms inside the scope factory, set up your streams there, and use `self` to read and write values. Then the outside world only sees values and methods, and the scope owns the lifecycle.
 
 ### ✨ Handy extras
 
