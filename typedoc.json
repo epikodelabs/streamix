@@ -15,9 +15,23 @@
   "readme": "none",
   "externalSymbolLinkMappings": {
     "typescript": {
-      "AbortSignal": "#"
+      "AbortSignal": "#",
+      "AsyncIterable": "#",
+      "Iterable": "#"
     }
   },
+  "intentionallyNotExported": [
+    "DefinedValue",
+    "FormulaContext",
+    "Method",
+    "ScopeReturn",
+    "ScopeOf",
+    "UnwrapSnapshotValues",
+    "WithLatestInput",
+    "AtomNode",
+    "ForkHandlerResult",
+    "Observer"
+  ],
   "sort": ["source-order"],
   "kindSortOrder": [
     "Document",

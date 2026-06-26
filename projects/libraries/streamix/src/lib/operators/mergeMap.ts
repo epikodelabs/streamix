@@ -19,7 +19,7 @@ import { createAsyncCoordinator, normalizeError, type RunnerEvent } from '../uti
  * @template T The type of values in the source stream.
  * @template R The type of values emitted by the inner and output streams.
  * @param project A function that maps a source value and its index to either:
- *   - a {@link AtomBase<R>},
+ *   - an {@link Atom | Atom<R>},
  *   - a {@link MaybePromise<R>},
  *   - or an array of `R`.
  * @param concurrent Maximum number of concurrent inner streams (default: Infinity).

@@ -50,7 +50,6 @@ export type ComposeResult<
  * pipe(query, searchPipeline);
  * ```
  *
- * @param operators - Operators to compose into one.
  * @returns A single {@link Operator} that runs the composed chain.
  */
 export function compose<T = any>(): Operator<T, T>;

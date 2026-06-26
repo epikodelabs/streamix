@@ -135,8 +135,6 @@ function combineAtoms<T extends unknown[]>(sources: Atom<any>[]): AsyncIterable<
  * Up to 16 operators are fully typed via overloads. Beyond 16 operators, TypeScript
  * falls back to the generic signature and the result type becomes `Atom<any>`.
  *
- * @param source - The source for the pipeline, or a tuple of atoms to combine.
- * @param operators - Operators to apply to the source.
  * @returns A new {@link Atom} that emits the transformed values.
  */
 export function pipe<T extends readonly unknown[]>(sources: [...{ [K in keyof T]: Atom<T[K]> }]): Atom<T>;
