@@ -23,7 +23,7 @@ idescribe('onAnimationFrame', () => {
             expect(avgDelta).toBeGreaterThan(5);
         }
         finally {
-            subscription.unsubscribe();
+            subscription();
         }
     });
     it('should stop emitting when condition is met', async () => {
@@ -34,7 +34,7 @@ idescribe('onAnimationFrame', () => {
             emittedCount.push(delta);
         });
         await new Promise(resolve => setTimeout(resolve, 200));
-        subscription.unsubscribe();
+        subscription();
         expect(emittedCount.length).toBe(5);
     });
     it('should emit multiple times when condition allows', async () => {
@@ -56,7 +56,7 @@ idescribe('onAnimationFrame', () => {
             });
         }
         finally {
-            subscription.unsubscribe();
+            subscription();
         }
     });
     it('should cancel animation frame on unsubscribe', (done) => {
@@ -84,7 +84,7 @@ idescribe('onAnimationFrame', () => {
         const subscription = stream.subscribe(() => { });
         // Give it a moment for the RAF to be called
         setTimeout(() => {
-            subscription.unsubscribe();
+            subscription();
             expect(cancelledIds.length).toBeGreaterThan(0);
             expect(requestedIds.length).toBeGreaterThan(0);
             // Restore originals
@@ -100,8 +100,8 @@ idescribe('onAnimationFrame', () => {
         const subA = stream.subscribe(v => valuesA.push(v));
         const subB = stream.subscribe(v => valuesB.push(v));
         await new Promise(res => setTimeout(res, 100));
-        subA.unsubscribe();
-        subB.unsubscribe();
+        subA();
+        subB();
         // Both subscribers should have received real delta values
         expect(valuesA.length).toBeGreaterThan(0);
         expect(valuesB.length).toBeGreaterThan(0);
@@ -141,7 +141,7 @@ idescribe('onAnimationFrame', () => {
                 emittedDeltas.push(delta);
             });
             await new Promise(resolve => originalSetTimeout(resolve, 100));
-            subscription.unsubscribe();
+            subscription();
             await new Promise(resolve => originalSetTimeout(resolve, 10));
             // Should have emitted deltas using setTimeout fallback
             expect(emittedDeltas.length).toBeGreaterThan(0);
@@ -173,7 +173,7 @@ idescribe('onAnimationFrame', () => {
         };
         const subscription = on('animationFrame').subscribe();
         setTimeout(() => {
-            subscription.unsubscribe();
+            subscription();
             expect(clearSpy).toHaveBeenCalled();
             (globalThis as any).requestAnimationFrame = originalRAF;
             (globalThis as any).cancelAnimationFrame = originalCancel;
@@ -202,13 +202,13 @@ idescribe('onAnimationFrame', () => {
                 try {
                     // First tick is always 0, second is non-monotonic => 0, third is 110-100 => 10
                     expect(deltas).toEqual([0, 0, 10]);
-                    subscription.unsubscribe();
+                    subscription();
                     (globalThis as any).requestAnimationFrame = originalRAF;
                     (globalThis as any).cancelAnimationFrame = originalCancel;
                     done();
                 }
                 catch (err: any) {
-                    subscription.unsubscribe();
+                    subscription();
                     (globalThis as any).requestAnimationFrame = originalRAF;
                     (globalThis as any).cancelAnimationFrame = originalCancel;
                     done.fail(err);
@@ -225,7 +225,7 @@ idescribe('onAnimationFrame', () => {
             setTimeout(() => {
                 // Should not emit without performance
                 expect(values.length).toBe(0);
-                sub.unsubscribe();
+                sub();
                 (globalThis as any).performance = originalPerformance;
                 done();
             }, 50);
@@ -243,8 +243,8 @@ idescribe('onAnimationFrame', () => {
         // Should only start one RAF loop
         const callCount = rafSpy.calls.count();
         expect(callCount).toBeGreaterThan(0);
-        sub1.unsubscribe();
-        sub2.unsubscribe();
+        sub1();
+        sub2();
     });
     it('handles strictly decreasing timestamps', (done) => {
         const originalRAF = (globalThis as any).requestAnimationFrame;
@@ -267,13 +267,13 @@ idescribe('onAnimationFrame', () => {
                 try {
                     // All deltas should be 0 since timestamps are strictly decreasing
                     expect(deltas).toEqual([0, 0, 0]);
-                    subscription.unsubscribe();
+                    subscription();
                     (globalThis as any).requestAnimationFrame = originalRAF;
                     (globalThis as any).cancelAnimationFrame = originalCancel;
                     done();
                 }
                 catch (err: any) {
-                    subscription.unsubscribe();
+                    subscription();
                     (globalThis as any).requestAnimationFrame = originalRAF;
                     (globalThis as any).cancelAnimationFrame = originalCancel;
                     done.fail(err);

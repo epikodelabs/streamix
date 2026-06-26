@@ -376,7 +376,7 @@ export function flow<T>(
   let disposePromise: Promise<void> | null = null;
 
   const clearDepSubscriptions = () => {
-    for (const sub of depSubscriptions.values()) sub.unsubscribe();
+    for (const sub of depSubscriptions.values()) sub();
     depSubscriptions.clear();
   };
 
@@ -415,7 +415,7 @@ export function flow<T>(
       for (const handler of disposeHandlers) await Promise.resolve(handler()).catch(() => {});
       disposeHandlers.clear();
       
-      for (const sub of subscriptions) await sub.unsubscribe().catch(() => {});
+      for (const sub of subscriptions) await sub().catch(() => {});
       subscriptions.clear();
       
       getScheduler().remove(node);
@@ -619,7 +619,7 @@ export function flow<T>(
         
         for (const h of disposeHandlers) Promise.resolve(h()).catch(() => {});
         disposeHandlers.clear();
-        for (const s of subscriptions) s.unsubscribe();
+        for (const s of subscriptions) s();
         subscriptions.clear();
         subs.clear();
         errorHandlers.clear();
@@ -784,7 +784,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
         
         for (const h of disposeHandlers) Promise.resolve(h()).catch(() => {});
         disposeHandlers.clear();
-        for (const s of subscriptions) s.unsubscribe();
+        for (const s of subscriptions) s();
         subscriptions.clear();
         subs.clear();
         errorHandlers.clear();
@@ -808,7 +808,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
       getScheduler().remove(node);
       for (const h of disposeHandlers) Promise.resolve(h()).catch(() => {});
       disposeHandlers.clear();
-      for (const s of subscriptions) s.unsubscribe();
+      for (const s of subscriptions) s();
       subscriptions.clear();
       subs.clear();
       errorHandlers.clear();
@@ -892,7 +892,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       // Cleanup stale deps
       for (const dep of oldDeps) {
         if (!context.dependencies.has(dep)) {
-          depSubscriptions.get(dep)?.unsubscribe();
+          depSubscriptions.get(dep)?.();
           depSubscriptions.delete(dep);
         }
       }
@@ -1073,7 +1073,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       markDisposed(instance);
       getScheduler().remove(node);
       
-      for (const sub of depSubscriptions.values()) sub.unsubscribe();
+      for (const sub of depSubscriptions.values()) sub();
       depSubscriptions.clear();
       dependencies.clear();
       subs.clear();

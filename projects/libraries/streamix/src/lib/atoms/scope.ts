@@ -834,7 +834,7 @@ export function registerWithCurrentScope(atom: Atom<any>): void {
     const sub = atom.subscribe(() => markAtomAsEmitted(atom));
     scopeRef.cleanups.add(() => {
       if ((atom as any).disposed) return;
-      sub.unsubscribe();
+      sub();
     });
   } catch {
     // ignore initialization errors (e.g. derived that throws on first run)

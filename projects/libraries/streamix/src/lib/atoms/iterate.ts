@@ -70,9 +70,9 @@ export function iterate<T>(source: Atom<T> | AsyncIterable<T>): AsyncIterableIte
 
     finish = () => {
       if (done) return;
-      const cleanup = sub.unsubscribe();
+      const cleanup = sub();
       if (errorSub) {
-        errorSub.unsubscribe();
+        errorSub();
         errorSub = undefined;
       }
       const err = atom.error;

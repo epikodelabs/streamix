@@ -30,7 +30,7 @@ idescribe('onMutation', () => {
         expect(mutations.length).toBeGreaterThan(0);
         expect(mutations[0].type).toBe('childList');
         expect(mutations[0].addedNodes.length).toBe(1);
-        subscription.unsubscribe();
+        subscription();
         done();
       });
 
@@ -55,7 +55,7 @@ idescribe('onMutation', () => {
         expect(mutations.length).toBeGreaterThan(0);
         expect(mutations[0].type).toBe('childList');
         expect(mutations[0].removedNodes.length).toBe(1);
-        subscription.unsubscribe();
+        subscription();
         done();
       });
 
@@ -84,7 +84,7 @@ idescribe('onMutation', () => {
           expect(mutations.length).toBe(1);
           expect(mutations[0].type).toBe('childList');
           expect(mutations[0].addedNodes.length).toBe(1);
-          subscription.unsubscribe();
+          subscription();
           done();
         } catch (error: any) {
           done.fail(error);
@@ -108,7 +108,7 @@ idescribe('onMutation', () => {
         try {
           expect(mutations.some(m => m.type === 'attributes')).toBeTrue();
           expect(mutations.some(m => m.attributeName === 'data-test')).toBeTrue();
-          subscription.unsubscribe();
+          subscription();
           done();
         } catch (error: any) {
           done.fail(error);
@@ -129,7 +129,7 @@ idescribe('onMutation', () => {
 
     setTimeout(() => {
       observedElement.appendChild(document.createElement('span'));
-      subscription.unsubscribe();
+      subscription();
       (globalThis as any).MutationObserver = savedObserver;
       done();
     }, 150);
@@ -173,7 +173,7 @@ idescribe('onMutation', () => {
       expect(values[0]).not.toBe(mutations);
       expect(values[0][0]).toBe(mutations[0]);
 
-      await sub.unsubscribe();
+      await sub();
       await new Promise(resolve => setTimeout(resolve, 0));
       expect(disconnectSpy).toHaveBeenCalled();
     } finally {
@@ -214,7 +214,7 @@ idescribe('onMutation', () => {
       const values: MutationRecord[][] = [];
       const sub = on('mutation', elementPromise, optionsPromise).subscribe(v => values.push(v));
 
-      sub.unsubscribe();
+      sub();
 
       resolveElement(observedElement);
       resolveOptions({ attributes: true });
@@ -239,7 +239,7 @@ idescribe('onMutation', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     expect(values).toEqual([]);
-    sub.unsubscribe();
+    sub();
   });
 
   it('handles synchronous null element gracefully', async () => {
@@ -259,8 +259,8 @@ idescribe('onMutation', () => {
     const callCount = observeSpy.calls.count();
     expect(callCount).toBeGreaterThanOrEqual(1);
 
-    sub1.unsubscribe();
-    sub2.unsubscribe();
+    sub1();
+    sub2();
   });
 
   it('resolves options promise independently', async () => {
@@ -277,7 +277,7 @@ idescribe('onMutation', () => {
 
     expect(values.some(arr => arr.some(m => m.type === 'attributes'))).toBeTrue();
 
-    sub.unsubscribe();
+    sub();
   });
 });
 

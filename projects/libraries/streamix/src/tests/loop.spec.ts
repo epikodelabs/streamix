@@ -28,7 +28,7 @@ describe('loop', () => {
     const sub = atom.subscribe(v => {
       if (v !== undefined) emitted.push(v);
       if (v === 3) {
-        sub.unsubscribe();
+        sub();
       }
     });
 

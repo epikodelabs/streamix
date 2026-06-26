@@ -102,7 +102,7 @@ function combineAtoms<T extends unknown[]>(sources: Atom<any>[]): AsyncIterable<
         },
         return() {
           done = true;
-          subs.forEach((s) => s.unsubscribe());
+          subs.forEach((s) => s());
           queue.length = 0;
           return Promise.resolve({ value: undefined, done: true } as IteratorResult<T>);
         },

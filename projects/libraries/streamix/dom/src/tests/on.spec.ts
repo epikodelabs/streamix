@@ -9,7 +9,7 @@ idescribe('on', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(values.length).toBeGreaterThan(0);
-    sub.unsubscribe();
+    sub();
   });
 
   it('passes parameters through to parameterized factories', async () => {
@@ -20,7 +20,7 @@ idescribe('on', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(values.length).toBeGreaterThan(0);
-    sub.unsubscribe();
+    sub();
   });
 
   it('throws for unsupported source types', () => {

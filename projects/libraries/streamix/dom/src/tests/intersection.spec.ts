@@ -23,7 +23,7 @@ function firstValue<T>(stream: any, timeoutMs = 250): Promise<T> {
     let sub: any;
     sub = stream.subscribe((v: T) => {
         clearTimeout(timeoutId);
-        sub?.unsubscribe();
+        sub?.();
         resolve(v);
       });
   });
@@ -163,7 +163,7 @@ idescribe('onIntersection', () => {
         triggerMutation?.();
 
         await new Promise((r) => setTimeout(r, 0));
-        subscription.unsubscribe();
+        subscription();
 
         expect(subscription.unsubscribed).toBe(true);
       });
@@ -199,7 +199,7 @@ idescribe('onIntersection', () => {
 
       // Should not emit without IntersectionObserver
       expect(values).toEqual([]);
-      sub.unsubscribe();
+      sub();
     });
   });
 
@@ -219,7 +219,7 @@ idescribe('onIntersection', () => {
 
       // Should not emit with null element
       expect(values).toEqual([]);
-      sub.unsubscribe();
+      sub();
     });
   });
 
@@ -237,12 +237,12 @@ idescribe('onIntersection', () => {
         v => values.push(v)
       );
 
-      sub.unsubscribe();
+      sub();
       await new Promise(r => setTimeout(r, 50));
 
       // Should not emit when signal is aborted
       expect(values).toEqual([]);
-      sub.unsubscribe();
+      sub();
     });
   });
 
@@ -280,7 +280,7 @@ idescribe('onIntersection', () => {
       await new Promise(r => setTimeout(r, 50));
 
       // Should not throw when unsubscribing
-      expect(() => sub.unsubscribe()).not.toThrow();
+      expect(() => sub()).not.toThrow();
     });
   });
 

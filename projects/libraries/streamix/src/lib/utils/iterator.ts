@@ -101,7 +101,7 @@ export function createAsyncIterator<T>(opts: {
     };
 
     const handleDone = () => {
-      const unsubscribePromise = sub?.unsubscribe();
+      const unsubscribePromise = sub?.();
       sub = null;
       if (unsubscribePromise && isPromiseLike(unsubscribePromise)) {
         (unsubscribePromise as Promise<unknown>).catch((err: any) => {
@@ -126,7 +126,7 @@ export function createAsyncIterator<T>(opts: {
 
       async return() {
         state.markCompleted();
-        const unsubscribePromise = sub?.unsubscribe();
+        const unsubscribePromise = sub?.();
         sub = null;
         try {
           await unsubscribePromise;
@@ -139,7 +139,7 @@ export function createAsyncIterator<T>(opts: {
       async throw(err) {
         const error = normalizeError(err);
         state.completed = true;
-        const unsubscribePromise = sub?.unsubscribe();
+        const unsubscribePromise = sub?.();
         sub = null;
         if (state.pullReject) {
           const r = state.pullReject;

@@ -17,7 +17,7 @@ idescribe('fromEvent', () => {
     await flushMicrotasks();
 
     expect(received).toBeInstanceOf(Event);
-    subscription.unsubscribe();
+    subscription();
   });
 
   it('should emit multiple events correctly', async () => {
@@ -32,7 +32,7 @@ idescribe('fromEvent', () => {
     await flushMicrotasks();
 
     expect(emitted.length).toBe(2);
-    subscription.unsubscribe();
+    subscription();
   });
 
   it('should remove event listener and unsubscribe on unsubscribe', async () => {
@@ -49,7 +49,7 @@ idescribe('fromEvent', () => {
 
     const subscription = atom.subscribe(() => {});
 
-    subscription.unsubscribe();
+    subscription();
 
     await delay(10);
     expect(listenerRemoved).toBe(true);
@@ -64,7 +64,7 @@ idescribe('fromEvent', () => {
 
     element.click();
     await flushMicrotasks();
-    subscription.unsubscribe();
+    subscription();
     element.click();
 
     await delay(10);
@@ -85,7 +85,7 @@ idescribe('fromEvent', () => {
     await flushMicrotasks();
 
     expect(received).toBeInstanceOf(Event);
-    subscription.unsubscribe();
+    subscription();
   });
 
   it('should emit to multiple subscribers', async () => {
@@ -106,8 +106,8 @@ idescribe('fromEvent', () => {
     expect(received1[0]).toBeInstanceOf(Event);
     expect(received2[0]).toBeInstanceOf(Event);
 
-    sub1.unsubscribe();
-    sub2.unsubscribe();
+    sub1();
+    sub2();
   });
 
   it('should support async subscribers', async () => {
@@ -126,7 +126,7 @@ idescribe('fromEvent', () => {
     expect(received.length).toBe(1);
     expect(received[0]).toBeInstanceOf(Event);
 
-    subscription.unsubscribe();
+    subscription();
   });
 
   it('should await async subscribers before reading next value', async () => {
@@ -152,7 +152,7 @@ idescribe('fromEvent', () => {
     expect(received.length).toBe(2);
     expect(maxActive).toBe(1);
 
-    subscription.unsubscribe();
+    subscription();
   });
 
   it('does not attach listener when unsubscribed before pending target resolves', async () => {
@@ -172,7 +172,7 @@ idescribe('fromEvent', () => {
     const atom = listen(targetPromise, Promise.resolve('click'));
     const subscription = atom.subscribe(() => listenerAdded = true);
 
-    subscription.unsubscribe();
+    subscription();
 
     await delay(40);
     expect(listenerAdded).toBe(false);

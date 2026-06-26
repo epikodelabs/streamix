@@ -35,7 +35,7 @@ describe('of', () => {
     const emittedValues: string[] = [];
     const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
-    subscription.unsubscribe();
+    subscription();
 
     await delay();
     expect(emittedValues).toEqual([]);

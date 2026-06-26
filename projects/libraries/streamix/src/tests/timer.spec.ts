@@ -11,7 +11,7 @@ describe('timer', () => {
     const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     await delay(250);
-    subscription.unsubscribe();
+    subscription();
 
     expect(emittedValues.length).toBeGreaterThan(1);
     for (let i = 1; i < emittedValues.length; i++) {
@@ -26,7 +26,7 @@ describe('timer', () => {
     const emittedValues: number[] = [];
     const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
-    subscription.unsubscribe();
+    subscription();
 
     const previousLength = emittedValues.length;
     await delay(intervalMs * 2);
@@ -40,7 +40,7 @@ describe('timer', () => {
     const subscription = atom.subscribe(v => {
       if (v !== undefined) emitted.push(v);
       if (emitted.length === 2) {
-        subscription.unsubscribe();
+        subscription();
       }
     });
 
@@ -54,7 +54,7 @@ describe('timer', () => {
     const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     await delay(80);
-    subscription.unsubscribe();
+    subscription();
 
     expect(emittedValues[0]).toBe(0);
     expect(emittedValues[1]).toBe(1);

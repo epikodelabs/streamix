@@ -81,7 +81,7 @@ idescribe('onMediaQuery', () => {
     const mql = mqlMap[query];
     expect(mql.listeners.length).toBe(1);
 
-    subscription.unsubscribe();
+    subscription();
     
     // Wait for cleanup
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -191,7 +191,7 @@ idescribe('onMediaQuery', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(callback).toHaveBeenCalledWith(true);
 
-    sub.unsubscribe();
+    sub();
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(listeners.length).toBe(0);
   });
@@ -224,7 +224,7 @@ idescribe('onMediaQuery', () => {
 
     expect(callback).toHaveBeenCalledWith(false);
 
-    subscription.unsubscribe();
+    subscription();
     resolveQuery!(query);
 
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -259,7 +259,7 @@ idescribe('onMediaQuery', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(callback).toHaveBeenCalledWith(true);
 
-    sub.unsubscribe();
+    sub();
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(listeners.length).toBe(0);
   });
@@ -289,11 +289,11 @@ idescribe('onMediaQuery', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(listeners.length).toBe(1);
 
-    s1.unsubscribe();
+    s1();
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(listeners.length).toBe(1);
 
-    s2.unsubscribe();
+    s2();
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(listeners.length).toBe(0);
   });
@@ -309,8 +309,8 @@ idescribe('onMediaQuery', () => {
     // Should only add listener once
     expect(mqlMap[query].listeners.length).toBe(1);
 
-    sub1.unsubscribe();
-    sub2.unsubscribe();
+    sub1();
+    sub2();
   });
 
   it('does not stop when not active', async () => {
@@ -321,11 +321,11 @@ idescribe('onMediaQuery', () => {
     const sub = stream.subscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
     
-    sub.unsubscribe();
+    sub();
     await new Promise(resolve => setTimeout(resolve, 0));
     
     // Calling unsubscribe again should be safe
-    expect(() => sub.unsubscribe()).not.toThrow();
+    expect(() => sub()).not.toThrow();
   });
 
   it('handles stop before promise query resolves', async () => {
@@ -341,7 +341,7 @@ idescribe('onMediaQuery', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
 
     // Unsubscribe before promise resolves
-    sub.unsubscribe();
+    sub();
 
     // Now resolve
     resolveQuery!('(min-width: 1000px)');

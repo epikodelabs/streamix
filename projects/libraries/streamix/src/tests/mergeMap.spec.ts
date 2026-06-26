@@ -309,7 +309,7 @@ describe('mergeMap', () => {
     const sub = merged.subscribe((val: number) => {
       results.push(val);
       if (val === 10) {
-        sub.unsubscribe();
+        sub();
       }
     });
 

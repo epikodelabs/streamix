@@ -114,7 +114,7 @@ describe('race', () => {
     const subscription = (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     await delay(100);
-    subscription.unsubscribe();
+    subscription();
 
     expect(results).toEqual([3, 4]);
   });

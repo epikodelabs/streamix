@@ -247,7 +247,7 @@ describe('retry', () => {
     const sub = atom.subscribe(v => { if (v !== undefined) values.push(v); });
 
     await sleep(0);
-    sub.unsubscribe();
+    sub();
 
     await sleep(60);
 
@@ -302,7 +302,7 @@ describe('retry', () => {
     const atom = retry(factory, 1, 0);
     const sub = atom.subscribe(() => fail('Should not emit'));
 
-    sub.unsubscribe();
+    sub();
 
     await sleep(10);
 
@@ -331,7 +331,7 @@ describe('retry', () => {
     const sub = atom.subscribe(v => { if (v !== undefined) values.push(v); });
 
     await sleep(35);
-    sub.unsubscribe();
+    sub();
     await sleep(20);
 
     expect(iterationCount).toBeGreaterThan(0);
@@ -360,7 +360,7 @@ describe('retry', () => {
     const sub = atom.subscribe(() => {});
 
     await sleep(10);
-    sub.unsubscribe();
+    sub();
     await sleep(50);
 
     expect(factory).toHaveBeenCalledTimes(1);

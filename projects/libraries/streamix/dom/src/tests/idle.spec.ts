@@ -146,7 +146,7 @@ idescribe('onIdle', () => {
     expect(values[0].didTimeout).toBeFalse();
     expect(values[0].timeRemaining()).toBeGreaterThan(0);
 
-    sub.unsubscribe();
+    sub();
   });
 
   it('passes timeout option to requestIdleCallback when provided', async () => {
@@ -165,7 +165,7 @@ idescribe('onIdle', () => {
       { timeout: 123 }
     );
 
-    sub.unsubscribe();
+    sub();
   });
 
   it('continues scheduling until unsubscribed', async () => {
@@ -186,7 +186,7 @@ idescribe('onIdle', () => {
     await flush();
 
     expect(values.length).toBe(2);
-    sub.unsubscribe();
+    sub();
   });
 
   it('cancels idle callback on unsubscribe', async () => {
@@ -200,7 +200,7 @@ idescribe('onIdle', () => {
     const sub = on('idle').subscribe();
     await flush();
 
-    sub.unsubscribe();
+    sub();
     await flush();
 
     expect(env.cancelIdleCallback).toHaveBeenCalled();
@@ -230,7 +230,7 @@ idescribe('onIdle', () => {
     expect(values.length).toBe(1);
     expect(values[0].didTimeout).toBeFalse();
 
-    sub.unsubscribe();
+    sub();
   });
 
   it('clears timeout on unsubscribe in fallback mode', async () => {
@@ -246,7 +246,7 @@ idescribe('onIdle', () => {
     const sub = on('idle').subscribe();
     await flush();
 
-    sub.unsubscribe();
+    sub();
     await flush();
 
     expect(env.clearTimeoutMock).toHaveBeenCalled();
@@ -297,7 +297,7 @@ idescribe('onIdle', () => {
     await flush();
 
     expect(values).toEqual([]);
-    sub.unsubscribe();
+    sub();
   });
 
   it('does not restart when startLoop() called multiple times', async () => {
@@ -317,8 +317,8 @@ idescribe('onIdle', () => {
     // Should only call requestIdleCallback for each subscription
     expect(env.requestIdleCallback.calls.count()).toBeGreaterThan(0);
 
-    sub1.unsubscribe();
-    sub2.unsubscribe();
+    sub1();
+    sub2();
   });
 
   it('does not stop when already stopped', async () => {
@@ -332,13 +332,13 @@ idescribe('onIdle', () => {
     const sub = on('idle').subscribe();
     await flush();
 
-    sub.unsubscribe();
+    sub();
     await flush();
 
     env.cancelIdleCallback.calls.reset();
 
     // Calling unsubscribe again should not call cancelIdleCallback
-    sub.unsubscribe();
+    sub();
     await flush();
 
     expect(env.cancelIdleCallback).not.toHaveBeenCalled();
@@ -356,7 +356,7 @@ idescribe('onIdle', () => {
     const sub = on('idle').subscribe();
     await flush();
 
-    sub.unsubscribe();
+    sub();
     await flush();
 
     // Should use clearTimeout as fallback
@@ -380,7 +380,7 @@ idescribe('onIdle', () => {
     expect(calls[0].args.length).toBeLessThanOrEqual(2);
     expect(typeof calls[0].args[0]).toBe('function');
 
-    sub.unsubscribe();
+    sub();
   });
 
   it('handles SSR environment (setTimeout unavailable)', () => {
@@ -395,7 +395,7 @@ idescribe('onIdle', () => {
 
     // Should not crash, but also not emit
     expect(values.length).toBe(0);
-    expect(() => sub.unsubscribe()).not.toThrow();
+    expect(() => sub()).not.toThrow();
   });
 });
 

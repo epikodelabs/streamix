@@ -12,7 +12,7 @@ describe('combineLatest', () => {
 
     const subscription = combined.subscribe(v => { if (v !== undefined) emitted.push(v); });
     await delay(250);
-    subscription.unsubscribe();
+    subscription();
 
     expect(emitted.length).toBeGreaterThan(4);
     expect(emitted[0]).toEqual([0, 0]);
@@ -28,7 +28,7 @@ describe('combineLatest', () => {
     const subscription = combined.subscribe(v => {
       if (v !== undefined) {
         emissionCount++;
-        subscription.unsubscribe();
+        subscription();
       }
     });
 
@@ -47,7 +47,7 @@ describe('combineLatest', () => {
 
     const subscription = combined.subscribe(v => { if (v !== undefined) emitted.push(v); });
     await delay(1200);
-    subscription.unsubscribe();
+    subscription();
 
     expect(emitted.length).toBeGreaterThan(0);
     expect(emitted[0]).toEqual([0, 0, 0]);

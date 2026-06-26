@@ -110,7 +110,7 @@ idescribe('onVisibilityChange', () => {
     await flush();
 
     expect(values).toEqual(['hidden']);
-    sub.unsubscribe();
+    sub();
   });
 
   it('emits on visibilitychange events', async () => {
@@ -137,7 +137,7 @@ idescribe('onVisibilityChange', () => {
     await flush();
 
     expect(values).toEqual(['visible', 'hidden', 'visible']);
-    sub.unsubscribe();
+    sub();
   });
 
   it('adds listener once and removes on last unsubscribe', async () => {
@@ -159,8 +159,8 @@ idescribe('onVisibilityChange', () => {
 
     expect(env.addEventListener).toHaveBeenCalledTimes(1);
 
-    s1.unsubscribe();
-    s2.unsubscribe();
+    s1();
+    s2();
     await flush();
 
     expect(env.removeEventListener).toHaveBeenCalledTimes(1);
@@ -217,7 +217,7 @@ idescribe('onVisibilityChange', () => {
     await flush();
 
     expect(values).toEqual(['visible']);
-    sub.unsubscribe();
+    sub();
   });
 
   it('returns "visible" when document is undefined (SSR)', async () => {
@@ -247,7 +247,7 @@ idescribe('onVisibilityChange', () => {
     await flush();
 
     expect(values).toEqual(['visible']);
-    sub.unsubscribe();
+    sub();
   });
 
   it('does not restart when start() called multiple times', async () => {
@@ -270,8 +270,8 @@ idescribe('onVisibilityChange', () => {
     // Should add listener at least once (may be called per subscription)
     expect(env.addEventListener.calls.count()).toBeGreaterThanOrEqual(1);
 
-    sub1.unsubscribe();
-    sub2.unsubscribe();
+    sub1();
+    sub2();
   });
 
   it('does not stop when already stopped', async () => {
@@ -288,13 +288,13 @@ idescribe('onVisibilityChange', () => {
     const sub = on('visibilityChange').subscribe();
     await flush();
 
-    sub.unsubscribe();
+    sub();
     await flush();
 
     env.removeEventListener.calls.reset();
 
     // Calling unsubscribe again should not call removeEventListener
-    sub.unsubscribe();
+    sub();
     await flush();
 
     expect(env.removeEventListener).not.toHaveBeenCalled();

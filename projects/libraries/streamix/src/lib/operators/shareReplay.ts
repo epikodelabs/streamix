@@ -106,7 +106,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
         disconnect();
       }
       if (liveSub) {
-        liveSub.unsubscribe();
+        liveSub();
         liveSub = null;
       }
       if (liveCompletionHandler) {

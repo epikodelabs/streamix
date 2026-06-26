@@ -89,7 +89,7 @@ describe('Atom System', () => {
       a.next(1);
       await delay(); // Allow microtask queue to drain
       expect(calls).toBe(1);
-      sub.unsubscribe();
+      sub();
       a.next(2);
       await delay(); // Allow microtask queue to drain
       expect(calls).toBe(1);
@@ -315,7 +315,7 @@ describe('Atom System', () => {
       const sub = f.subscribe(v => values.push(v));
       
       await delay(30);
-      sub.unsubscribe();
+      sub();
       
       expect(values.length).toBeLessThan(5);
       f.dispose();

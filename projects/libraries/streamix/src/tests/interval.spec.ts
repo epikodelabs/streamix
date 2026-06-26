@@ -37,7 +37,7 @@ describe('interval', () => {
     const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     await delay(intervalMs * 3);
-    subscription.unsubscribe();
+    subscription();
 
     const previousLength = emittedValues.length;
     await delay(intervalMs * 2);
@@ -52,7 +52,7 @@ describe('interval', () => {
     const emittedValues: number[] = [];
     const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
-    subscription.unsubscribe();
+    subscription();
 
     const previousLength = emittedValues.length;
     await delay(intervalMs * 2);
@@ -68,7 +68,7 @@ describe('interval', () => {
 
     await delay(10);
     expect(emittedValues.length).toBeGreaterThan(0);
-    subscription.unsubscribe();
+    subscription();
   });
 
   it('should allow multiple subscriptions', async () => {
@@ -83,8 +83,8 @@ describe('interval', () => {
 
     await delay(intervalMs * 3);
 
-    subscription1.unsubscribe();
-    subscription2.unsubscribe();
+    subscription1();
+    subscription2();
 
     expect(emittedValues1).toEqual(emittedValues2);
 
@@ -105,7 +105,7 @@ describe('interval', () => {
     const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     await delay(intervalMs * 1.5);
-    subscription.unsubscribe();
+    subscription();
 
     const firstLength = emittedValues.length;
 

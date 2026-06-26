@@ -36,7 +36,7 @@ idescribe('onBattery', () => {
       await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(values.length).toBe(0);
-      sub.unsubscribe();
+      sub();
     } finally {
       restore();
     }
@@ -57,7 +57,7 @@ idescribe('onBattery', () => {
     const sub = on('battery').subscribe(update => updates.push(update));
 
     // Unsubscribe before getBattery resolves.
-    sub.unsubscribe();
+    sub();
 
     resolveBattery({
       charging: true,
@@ -113,7 +113,7 @@ idescribe('onBattery', () => {
 
     expect(updates.at(-1)?.level).toBe(0.75);
 
-    sub.unsubscribe();
+    sub();
     expect(listeners['levelchange'].length).toBe(0);
     expect(listeners['chargingchange'].length).toBe(0);
   });
@@ -137,8 +137,8 @@ idescribe('onBattery', () => {
     // Should share battery instance
     expect(getBatterySpy.calls.count()).toBeLessThan(3);
 
-    sub1.unsubscribe();
-    sub2.unsubscribe();
+    sub1();
+    sub2();
   });
 
   it('handles getBattery rejection', async () => {
@@ -162,7 +162,7 @@ idescribe('onBattery', () => {
     // Should not crash or emit values
     expect(values.length).toBe(0);
     expect(errors.length).toBe(0);
-    sub.unsubscribe();
+    sub();
   });
 
   it('stops before battery resolves when all subscribers unsubscribe', async () => {
@@ -179,7 +179,7 @@ idescribe('onBattery', () => {
     const sub = on('battery').subscribe();
     
     // Unsubscribe before battery resolves
-    sub.unsubscribe();
+    sub();
 
     // Now resolve battery
     resolveBattery({
@@ -219,7 +219,7 @@ idescribe('onBattery', () => {
     // createSharedSource swallows cleanup errors
     let didThrow = false;
     try {
-      sub.unsubscribe();
+      sub();
     } catch (e) {
       didThrow = true;
     }
@@ -245,13 +245,13 @@ idescribe('onBattery', () => {
     const sub = on('battery').subscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
-    sub.unsubscribe();
+    sub();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     removeEventListenerSpy.calls.reset();
 
     // Calling unsubscribe again should not call removeEventListener
-    sub.unsubscribe();
+    sub();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(removeEventListenerSpy).not.toHaveBeenCalled();

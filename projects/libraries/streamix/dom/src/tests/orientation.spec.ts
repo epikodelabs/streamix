@@ -43,7 +43,7 @@ idescribe('onOrientation', () => {
           done.fail(err);
         }
       });
-    subscription.unsubscribe();
+    subscription();
     done();
   });
 
@@ -76,7 +76,7 @@ idescribe('onOrientation', () => {
             }, 0);
           } else if (callCount === 2) {
             expect(value).toBe('landscape');
-            subscription.unsubscribe();
+            subscription();
             done();
           }
         } catch (err: any) {
@@ -98,7 +98,7 @@ idescribe('onOrientation', () => {
           done.fail(err);
         }
       });
-    subscription.unsubscribe();
+    subscription();
     done();
   });
 
@@ -115,7 +115,7 @@ idescribe('onOrientation', () => {
         }
       });
 
-    subscription.unsubscribe();
+    subscription();
     done();
   });
 
@@ -132,7 +132,7 @@ idescribe('onOrientation', () => {
         }
       });
 
-    subscription.unsubscribe();
+    subscription();
     done();
   });
 
@@ -151,10 +151,10 @@ idescribe('onOrientation', () => {
       try {
         expect(values).toEqual(['portrait']);
         expect(mockOrientation.addEventListener).not.toHaveBeenCalled();
-        subscription.unsubscribe();
+        subscription();
         done();
       } catch (err: any) {
-        subscription.unsubscribe();
+        subscription();
         done.fail(err);
       }
     }, 0);
@@ -166,7 +166,7 @@ idescribe('onOrientation', () => {
 
     const removeListenerSpy = (window.screen.orientation.removeEventListener as jasmine.Spy);
 
-    subscription.unsubscribe();
+    subscription();
 
     expect(removeListenerSpy).toHaveBeenCalledWith('change', jasmine.any(Function));
   });
@@ -181,12 +181,12 @@ idescribe('onOrientation', () => {
     // Should only add listener once
     expect(addListenerSpy).toHaveBeenCalledTimes(1);
 
-    sub1.unsubscribe();
+    sub1();
     // Should not remove yet
     expect((window.screen.orientation.removeEventListener as jasmine.Spy))
       .not.toHaveBeenCalled();
 
-    sub2.unsubscribe();
+    sub2();
     // Now should remove
     expect((window.screen.orientation.removeEventListener as jasmine.Spy))
       .toHaveBeenCalledTimes(1);
@@ -204,12 +204,12 @@ idescribe('onOrientation', () => {
       try {
         // Should only be called once despite two subscriptions
         expect(addListenerSpy).toHaveBeenCalledTimes(1);
-        sub1.unsubscribe();
-        sub2.unsubscribe();
+        sub1();
+        sub2();
         done();
       } catch (err: any) {
-        sub1.unsubscribe();
-        sub2.unsubscribe();
+        sub1();
+        sub2();
         done.fail(err);
       }
     }, 0);
@@ -220,12 +220,12 @@ idescribe('onOrientation', () => {
     const removeListenerSpy = window.screen.orientation.removeEventListener as jasmine.Spy;
     
     const sub = stream.subscribe(() => { });
-    sub.unsubscribe();
+    sub();
     
     removeListenerSpy.calls.reset();
     
     // Try to trigger another stop - should be a no-op
-    sub.unsubscribe();
+    sub();
 
     setTimeout(() => {
       try {
@@ -262,7 +262,7 @@ idescribe('onOrientation', () => {
     // createSharedSource swallows cleanup errors
     let didThrow = false;
     try {
-      sub.unsubscribe();
+      sub();
     } catch (e) {
       didThrow = true;
     }

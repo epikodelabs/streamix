@@ -153,7 +153,7 @@ idescribe('onNetwork', () => {
       })
     );
 
-    sub.unsubscribe();
+    sub();
   });
 
   it('emits on online / offline events', async () => {
@@ -181,7 +181,7 @@ idescribe('onNetwork', () => {
     await flush();
 
     expect(values.map(v => v.online)).toEqual([true, false, true]);
-    sub.unsubscribe();
+    sub();
   });
 
   it('emits on connection change events (Network Information API)', async () => {
@@ -208,7 +208,7 @@ idescribe('onNetwork', () => {
 
     expect(values.length).toBe(2);
     expect(values[1].downlink).toBe(42);
-    sub.unsubscribe();
+    sub();
   });
 
   it('supports async iteration', async () => {
@@ -258,7 +258,7 @@ idescribe('onNetwork', () => {
     await flush();
 
     expect(values.length).toBe(1); // snapshot still emitted
-    sub.unsubscribe();
+    sub();
   });
 
   it('does nothing when navigator is unavailable', () => {
@@ -275,7 +275,7 @@ idescribe('onNetwork', () => {
 
       expect(addSpy).not.toHaveBeenCalled();
 
-      subscription.unsubscribe();
+      subscription();
     } finally {
       (globalThis as any).addEventListener = originalAdd;
       (globalThis as any).removeEventListener = originalRemove;
@@ -320,7 +320,7 @@ idescribe('onNetwork', () => {
     expect(values.length).toBe(1);
     
     // Should not crash when unsubscribing
-    expect(() => sub.unsubscribe()).not.toThrow();
+    expect(() => sub()).not.toThrow();
   });
 
   it('handles connection without removeEventListener method', async () => {
@@ -351,7 +351,7 @@ idescribe('onNetwork', () => {
     await flush();
 
     // Should not crash when unsubscribing
-    expect(() => sub.unsubscribe()).not.toThrow();
+    expect(() => sub()).not.toThrow();
   });
 
   it('does not restart when start() called multiple times', async () => {
@@ -382,8 +382,8 @@ idescribe('onNetwork', () => {
     expect(windowCalls).toBeGreaterThan(0);
     expect(connectionCalls).toBeGreaterThan(0);
 
-    sub1.unsubscribe();
-    sub2.unsubscribe();
+    sub1();
+    sub2();
   });
 
   it('does not stop when already stopped', async () => {
@@ -403,14 +403,14 @@ idescribe('onNetwork', () => {
     const sub = on('network').subscribe();
     await flush();
 
-    sub.unsubscribe();
+    sub();
     await flush();
 
     (env.removeEventListener as jasmine.Spy).calls.reset();
     (env.connection.removeEventListener as jasmine.Spy).calls.reset();
 
     // Calling unsubscribe again should not call removeEventListener
-    sub.unsubscribe();
+    sub();
     await flush();
 
     expect(env.removeEventListener).not.toHaveBeenCalled();
@@ -436,7 +436,7 @@ idescribe('onNetwork', () => {
 
     // Should not crash on unsubscribe even if cleanup has issues
     try {
-      sub.unsubscribe();
+      sub();
       expect(true).toBe(true); // Passed
     } catch (e) {
       // Cleanup errors should be caught

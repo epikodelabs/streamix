@@ -180,8 +180,8 @@ idescribe("fullscreen", () => {
     expect(values1).toEqual([false, true]);
     expect(values2).toEqual([true]);
 
-    sub1.unsubscribe();
-    sub2.unsubscribe();
+    sub1();
+    sub2();
 
     expect(document.removeEventListener).toHaveBeenCalled();
   });
@@ -268,10 +268,10 @@ idescribe("fullscreen", () => {
     const sub1 = stream.subscribe(() => {});
     const sub2 = stream.subscribe(() => {});
 
-    sub1.unsubscribe();
+    sub1();
     expect(document.removeEventListener).not.toHaveBeenCalled();
 
-    sub2.unsubscribe();
+    sub2();
     expect(document.removeEventListener).toHaveBeenCalledWith(
       "fullscreenchange",
       jasmine.any(Function)
@@ -290,20 +290,11 @@ idescribe("fullscreen", () => {
     );
   });
 
-  it("calls original teardown callback", () => {
+  it("unsubscribes when called as a function", () => {
     const stream = on('fullscreen');
-    let onUnsubscribeCalled = false;
-    
     const sub = stream.subscribe(() => {});
-    const originalOnUnsubscribe = sub.teardown;
-    sub.teardown = () => {
-      originalOnUnsubscribe?.call(sub);
-      onUnsubscribeCalled = true;
-    };
-
-    sub.unsubscribe();
-
-    expect(onUnsubscribeCalled).toBe(true);
+    sub();
+    expect(sub.unsubscribed).toBe(true);
   });
 
   it("handles rapid subscribe/unsubscribe cycles", () => {
@@ -311,7 +302,7 @@ idescribe("fullscreen", () => {
 
     for (let i = 0; i < 5; i++) {
       const sub = stream.subscribe(() => {});
-      sub.unsubscribe();
+      sub();
     }
 
     expect(document.removeEventListener).toHaveBeenCalled();
@@ -326,7 +317,7 @@ idescribe("fullscreen", () => {
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(values).toEqual([false]);
     
-    sub.unsubscribe();
+    sub();
 
     fullscreenElement = document.createElement("div");
     triggerEvent("fullscreenchange");
@@ -339,7 +330,7 @@ idescribe("fullscreen", () => {
     const stream = on('fullscreen');
     
     const sub1 = stream.subscribe(() => {});
-    sub1.unsubscribe();
+    sub1();
 
     (document.addEventListener as jasmine.Spy).calls.reset();
     
@@ -382,7 +373,7 @@ idescribe("fullscreen", () => {
     await delay(50);
 
     expect(values[0]).toBe(true);
-    sub.unsubscribe();
+    sub();
   });
 
   it('detects msFullscreenElement', async () => {
@@ -396,7 +387,7 @@ idescribe("fullscreen", () => {
     await delay(50);
 
     expect(values[0]).toBe(true);
-    sub.unsubscribe();
+    sub();
   });
 
   it('handles teardown errors gracefully', async () => {
@@ -413,7 +404,7 @@ idescribe("fullscreen", () => {
     // createSharedSource swallows cleanup errors
     let didThrow = false;
     try {
-      sub.unsubscribe();
+      sub();
     } catch (e) {
       didThrow = true;
     }
@@ -432,8 +423,8 @@ idescribe("fullscreen", () => {
     const callCount = (document.addEventListener as jasmine.Spy).calls.count();
     expect(callCount).toBeGreaterThan(0);
 
-    sub1.unsubscribe();
-    sub2.unsubscribe();
+    sub1();
+    sub2();
   });
 
   it('does not stop when already stopped', async () => {
@@ -441,13 +432,13 @@ idescribe("fullscreen", () => {
     const sub = stream.subscribe();
     await delay(50);
 
-    sub.unsubscribe();
+    sub();
     await delay(50);
 
     (document.removeEventListener as jasmine.Spy).calls.reset();
 
     // Calling unsubscribe again should not call removeEventListener
-    sub.unsubscribe();
+    sub();
     await delay(50);
 
     expect(document.removeEventListener).not.toHaveBeenCalled();

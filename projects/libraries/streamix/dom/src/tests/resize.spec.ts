@@ -43,12 +43,12 @@ idescribe('onResize', () => {
         setTimeout(() => {
           try {
             expect(values.at(-1)).toEqual({ width: 100, height: 0 });
-            sub.unsubscribe();
+            sub();
             expect(disconnectSpy).toHaveBeenCalled();
             expect(observeSpy).toHaveBeenCalled();
             done();
           } catch (err: any) {
-            sub.unsubscribe();
+            sub();
             done.fail(err);
           } finally {
             (div as any).getBoundingClientRect = originalRect;
@@ -58,7 +58,7 @@ idescribe('onResize', () => {
           }
         }, 0);
       } catch (err: any) {
-        sub.unsubscribe();
+        sub();
         (div as any).getBoundingClientRect = originalRect;
         document.body.removeChild(div);
         if (originalObserver) (globalThis as any).ResizeObserver = originalObserver;
@@ -91,7 +91,7 @@ idescribe('onResize', () => {
     const values: any[] = [];
     const sub = on('resize', elementPromise).subscribe(v => values.push(v));
 
-    sub.unsubscribe();
+    sub();
 
     const div = document.createElement('div');
     document.body.appendChild(div);
@@ -129,7 +129,7 @@ idescribe('onResize', () => {
     expect(values[0].width).toBe(100);
     expect(values.at(-1).width).toBe(200);
 
-    sub.unsubscribe();
+    sub();
     document.body.removeChild(div);
   });
 
@@ -148,7 +148,7 @@ idescribe('onResize', () => {
 
     // Remove element and verify cleanup
     document.body.removeChild(divToTest);
-    subscription.unsubscribe();
+    subscription();
 
     expect(disconnectSpy).toHaveBeenCalled();
   });
@@ -162,7 +162,7 @@ idescribe('onResize', () => {
 
     const subscription = resize.subscribe(() => { });
 
-    subscription.unsubscribe();
+    subscription();
 
     expect(disconnectSpy).toHaveBeenCalled();
     document.body.removeChild(divToTest);
@@ -179,7 +179,7 @@ idescribe('onResize', () => {
 
     setTimeout(() => {
       document.body.removeChild(divToTest);
-      subscription.unsubscribe();
+      subscription();
       expect(errorOccurred).toBe(false);
       done();
     }, 50);
@@ -200,7 +200,7 @@ idescribe('onResize', () => {
     expect(values[0].width).toBe(100);
     expect(values[0].height).toBe(50);
     
-    subscription.unsubscribe();
+    subscription();
     document.body.removeChild(div);
   });
 
@@ -210,7 +210,7 @@ idescribe('onResize', () => {
     document.body.appendChild(div);
 
     const sub = on('resize', div).subscribe(() => {});
-    sub.unsubscribe();
+    sub();
 
     setTimeout(() => done(), 0);
   });
@@ -237,7 +237,7 @@ idescribe('onResize', () => {
     expect(values.length).toBeGreaterThan(0);
     expect(values[0].width).toBeGreaterThan(0);
 
-    subscription.unsubscribe();
+    subscription();
     document.body.removeChild(div);
   });
 
@@ -253,7 +253,7 @@ idescribe('onResize', () => {
       const subscription = on('resize', div).subscribe(callback);
 
       expect(callback).not.toHaveBeenCalled();
-      subscription.unsubscribe();
+      subscription();
     } finally {
       if (originalObserver) {
         (globalThis as any).ResizeObserver = originalObserver;
@@ -279,7 +279,7 @@ idescribe('onResize', () => {
       expect(callback).not.toHaveBeenCalled();
       
       // Should not crash on unsubscribe
-      expect(() => subscription.unsubscribe()).not.toThrow();
+      expect(() => subscription()).not.toThrow();
     } finally {
       if (originalObserver) {
         (globalThis as any).ResizeObserver = originalObserver;
@@ -301,8 +301,8 @@ idescribe('onResize', () => {
     // Should observe for each subscription
     expect(observeSpy.calls.count()).toBeGreaterThan(0);
 
-    sub1.unsubscribe();
-    sub2.unsubscribe();
+    sub1();
+    sub2();
     document.body.removeChild(div);
   });
 
@@ -329,7 +329,7 @@ idescribe('onResize', () => {
     expect(observeSpy).not.toHaveBeenCalled();
     expect(values).toEqual([]);
 
-    sub.unsubscribe();
+    sub();
 
     if (originalObserver) (globalThis as any).ResizeObserver = originalObserver;
     else delete (globalThis as any).ResizeObserver;
@@ -349,7 +349,7 @@ idescribe('onResize', () => {
     // createSharedSource swallows cleanup errors
     let didThrow = false;
     try {
-      sub.unsubscribe();
+      sub();
     } catch (e) {
       didThrow = true;
     }
@@ -369,13 +369,13 @@ idescribe('onResize', () => {
     const sub = on('resize', div).subscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
-    sub.unsubscribe();
+    sub();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     disconnectSpy.calls.reset();
 
     // Calling unsubscribe again should not call disconnect
-    sub.unsubscribe();
+    sub();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(disconnectSpy).not.toHaveBeenCalled();

@@ -98,7 +98,7 @@ describe('Scope System', () => {
       await delay();
       expect(values).toEqual([0, 1, 2]);
 
-      sub.unsubscribe();
+      sub();
       s.dispose();
     });
 
@@ -213,7 +213,7 @@ describe('Scope System', () => {
       await delay();
 
       expect(values).toEqual([0, 1, 2]);
-      sub.unsubscribe();
+      sub();
       s.dispose();
     });
 
@@ -773,7 +773,7 @@ describe('Scope System', () => {
       await delay();
 
       expect(values).toEqual([0, 1, 2]);
-      sub.unsubscribe();
+      sub();
       s.dispose();
     });
 

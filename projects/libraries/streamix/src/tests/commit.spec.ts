@@ -100,7 +100,7 @@ describe("commit", () => {
     const sub = atom.subscribe(v => { if (v !== undefined) values.push(v); });
 
     await sleep(35);
-    sub.unsubscribe();
+    sub();
     await sleep(20);
 
     expect(iterationCount).toBeGreaterThan(0);

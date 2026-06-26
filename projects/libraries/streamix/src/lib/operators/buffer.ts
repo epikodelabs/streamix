@@ -30,7 +30,7 @@ export function buffer<T>(period: MaybePromise<number>) {
       if (intervalSubscription) {
         const sub = intervalSubscription;
         intervalSubscription = undefined;
-        sub.unsubscribe();
+        sub();
         return;
       }
       pendingIntervalUnsubscribe = true;

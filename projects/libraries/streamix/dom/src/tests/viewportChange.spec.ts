@@ -134,7 +134,7 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    sub.unsubscribe();
+    sub();
   });
 
   it('emits on viewport resize', async () => {
@@ -162,7 +162,7 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    sub.unsubscribe();
+    sub();
   });
 
   it('adds visualViewport listeners on start', async () => {
@@ -178,7 +178,7 @@ idescribe('onViewportChange', () => {
     await flush();
 
     expect(env.visualViewport.addEventListener).toHaveBeenCalled();
-    sub.unsubscribe();
+    sub();
   });
 
   it('removes visualViewport listeners on stop', async () => {
@@ -193,7 +193,7 @@ idescribe('onViewportChange', () => {
     const sub = on('viewportChange').subscribe();
     await flush();
 
-    sub.unsubscribe();
+    sub();
     await flush();
 
     expect(env.visualViewport.removeEventListener).toHaveBeenCalled();
@@ -246,7 +246,7 @@ idescribe('onViewportChange', () => {
 
     // Snapshot still emitted using innerWidth / innerHeight
     expect(values.length).toBe(1);
-    sub.unsubscribe();
+    sub();
   });
 
   it('falls back to window event listeners when visualViewport is unavailable', async () => {
@@ -265,7 +265,7 @@ idescribe('onViewportChange', () => {
     expect(addSpy).toHaveBeenCalledWith('resize', jasmine.any(Function));
     expect(addSpy).toHaveBeenCalledWith('scroll', jasmine.any(Function));
 
-    sub.unsubscribe();
+    sub();
     await flush();
 
     expect(removeSpy).toHaveBeenCalledWith('resize', jasmine.any(Function));
@@ -291,8 +291,8 @@ idescribe('onViewportChange', () => {
     // Should add listeners (resize + scroll, may be shared or per-subscription)
     expect(addSpy.calls.count()).toBeGreaterThanOrEqual(2);
 
-    sub1.unsubscribe();
-    sub2.unsubscribe();
+    sub1();
+    sub2();
   });
 
   it('does not stop when already stopped', async () => {
@@ -309,13 +309,13 @@ idescribe('onViewportChange', () => {
     const sub = on('viewportChange').subscribe();
     await flush();
 
-    sub.unsubscribe();
+    sub();
     await flush();
 
     removeSpy.calls.reset();
 
     // Calling unsubscribe again should not call removeEventListener
-    sub.unsubscribe();
+    sub();
     await flush();
 
     expect(removeSpy).not.toHaveBeenCalled();
@@ -358,7 +358,7 @@ idescribe('onViewportChange', () => {
 
     expect(values.length).toBeGreaterThan(1);
 
-    sub.unsubscribe();
+    sub();
   });
 
   it('handles SSR environment (window undefined)', async () => {
@@ -385,21 +385,21 @@ idescribe('onViewportChange', () => {
     removeSpy.calls.reset();
 
     // Unsubscribe one
-    sub1.unsubscribe();
+    sub1();
     await flush();
 
     // May or may not remove depending on implementation
     removeSpy.calls.count();
 
     // Unsubscribe another
-    sub2.unsubscribe();
+    sub2();
     await flush();
 
     // Track calls
     removeSpy.calls.count();
 
     // Unsubscribe last
-    sub3.unsubscribe();
+    sub3();
     await flush();
 
     // Now should remove
@@ -426,7 +426,7 @@ idescribe('onViewportChange', () => {
     );
 
     // Should not throw
-    expect(() => sub.unsubscribe()).not.toThrow();
+    expect(() => sub()).not.toThrow();
   });
 });
 
