@@ -38,6 +38,16 @@ unsubscribe();
 await unsubscribe();
 ```
 
+You can chain extra cleanup with `compose`:
+
+```ts
+const unsubscribe = count.subscribe(...).compose(() => {
+  console.log("extra cleanup");
+});
+
+unsubscribe(); // runs built-in teardown, then the composed cleanup
+```
+
 Atoms can even hold an error while keeping their last good value.
 
 ---
