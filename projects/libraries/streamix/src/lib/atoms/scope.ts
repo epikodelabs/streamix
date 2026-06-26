@@ -590,12 +590,12 @@ function createScopeInternal<T extends Record<string, any>>(
           return atProxy;
         }
         if (prop === "subscribeTo") {
-          return (key: string | symbol, callback: (value: any) => void) => {
+          return (key: string | symbol, callback: (current: any, previous?: any) => void) => {
             const atom = target._rawState[key] as Atom<any>;
             if (!atom || typeof atom.subscribe !== "function") {
               throw new Error(`Cannot subscribe to non-atom property: ${String(key)}`);
             }
-            callback(atom.value);
+            callback(atom.value, atom.previous);
             return atom.subscribe(callback);
           };
         }

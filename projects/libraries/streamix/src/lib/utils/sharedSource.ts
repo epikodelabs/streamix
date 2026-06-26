@@ -46,7 +46,7 @@ export function createSharedSource<T>(
   let terminalError: any;
   let readerRunning = false;
 
-  const callbacks = new Set<(value: T) => MaybePromise>();
+  const callbacks = new Set<(current: T, previous: T) => MaybePromise>();
   const callbackPromises: Promise<any>[] = [];
   type IteratorWaiter = {
     resolve: (result: IteratorResult<T>) => void;
@@ -125,7 +125,7 @@ export function createSharedSource<T>(
     }
     callbackPromises.length = 0;
     for (const cb of callbacks) {
-      callbackPromises.push(Promise.resolve(cb(value)).catch(() => {}));
+      callbackPromises.push(Promise.resolve(cb(value, value)).catch(() => {}));
     }
     if (callbackPromises.length > 0) {
       await Promise.all(callbackPromises);
@@ -196,7 +196,7 @@ export function createSharedSource<T>(
     get error() {
       return terminalError;
     },
-    subscribe(callback?: (value: T) => MaybePromise): Subscription {
+    subscribe(callback?: (current: T, previous: T) => MaybePromise): Subscription {
       if (completed) return createSubscription(() => {});
 
       const cb = callback ?? (() => {});
