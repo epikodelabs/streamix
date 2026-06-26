@@ -41,7 +41,7 @@ idescribe('onMediaQuery', () => {
     // Wait for async emission
     await new Promise(resolve => setTimeout(resolve, 0));
 
-    expect(callback).toHaveBeenCalledWith(false);
+    expect(callback).toHaveBeenCalledWith(false, false);
   });
 
   it('should call callback on media query change', async () => {
@@ -52,18 +52,18 @@ idescribe('onMediaQuery', () => {
 
     // Wait for initial emission
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(callback).toHaveBeenCalledWith(false);
+    expect(callback).toHaveBeenCalledWith(false, false);
 
     const mql = mqlMap[query];
 
     // Dispatch change event
     mql.dispatchEvent(true);
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(callback).toHaveBeenCalledWith(true);
+    expect(callback).toHaveBeenCalledWith(true, true);
 
     mql.dispatchEvent(false);
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(callback).toHaveBeenCalledWith(false);
+    expect(callback).toHaveBeenCalledWith(false, false);
 
     expect(callback).toHaveBeenCalledTimes(3); // initial + 2 changes
   });
@@ -119,8 +119,8 @@ idescribe('onMediaQuery', () => {
 
     await new Promise(resolve => setTimeout(resolve, 0));
 
-    expect(callback).toHaveBeenCalledWith(false); // initial (thenable => false)
-    expect(callback).toHaveBeenCalledWith(true);  // after promise resolves
+    expect(callback).toHaveBeenCalledWith(false, false); // initial (thenable => false)
+    expect(callback).toHaveBeenCalledWith(true, true);  // after promise resolves
   });
 
   it('supports async iteration', async () => {
@@ -180,7 +180,7 @@ idescribe('onMediaQuery', () => {
     const sub = stream.subscribe(callback);
 
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(callback).toHaveBeenCalledWith(false); // immediate false for thenable path
+    expect(callback).toHaveBeenCalledWith(false, false); // immediate false for thenable path
 
     resolveQuery('(min-width: 9000px)');
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -189,7 +189,7 @@ idescribe('onMediaQuery', () => {
 
     listeners.forEach(cb => cb({ matches: true } as MediaQueryListEvent));
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(callback).toHaveBeenCalledWith(true);
+    expect(callback).toHaveBeenCalledWith(true, true);
 
     sub();
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -222,7 +222,7 @@ idescribe('onMediaQuery', () => {
 
     await new Promise(resolve => setTimeout(resolve, 0));
 
-    expect(callback).toHaveBeenCalledWith(false);
+    expect(callback).toHaveBeenCalledWith(false, false);
 
     subscription();
     resolveQuery!(query);
@@ -257,7 +257,7 @@ idescribe('onMediaQuery', () => {
 
     listeners.forEach(cb => cb({ matches: true } as MediaQueryListEvent));
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(callback).toHaveBeenCalledWith(true);
+    expect(callback).toHaveBeenCalledWith(true, true);
 
     sub();
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -350,7 +350,7 @@ idescribe('onMediaQuery', () => {
 
     // Should only have initial false, no further emissions
     expect(callback).toHaveBeenCalledTimes(1);
-    expect(callback).toHaveBeenCalledWith(false);
+    expect(callback).toHaveBeenCalledWith(false, false);
   });
 });
 
