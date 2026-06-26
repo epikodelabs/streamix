@@ -31,7 +31,7 @@ describe('slidingPair', () => {
   it('should handle an empty stream', async () => {
     const atom = pipe(from([]), slidingPair());
 
-    const results: [number | undefined, number][] = [];
+    const results: [number, number | undefined][] = [];
     for await (const value of iterate(atom)) {
       results.push(value);
     }

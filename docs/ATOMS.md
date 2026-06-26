@@ -34,8 +34,8 @@ count.next(10);
 // → "0 → 10"
 
 unsubscribe();
-
-sub.unsubscribe(); // clean up when you're done 🧹
+// or, if teardown is async:
+await unsubscribe();
 ```
 
 Atoms can even hold an error while keeping their last good value.

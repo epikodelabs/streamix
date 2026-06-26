@@ -6,20 +6,32 @@ import type { MaybePromise } from "./operator";
  * A `Subscription` is returned from a stream's `subscribe()` method and
  * represents an active connection between a producer and a consumer.
  *
- * Responsibilities:
- * - Tracks whether the subscription is active
- * - Provides an idempotent mechanism to unsubscribe
- * - Optionally executes cleanup logic on unsubscribe
+ * The subscription itself is callable: calling it is shorthand for calling
+ * `unsubscribe()`. This supports the idiomatic pattern:
+ *
+ * ```ts
+ * const unsubscribe = count.subscribe((current, previous) => { ... });
+ * unsubscribe();
+ * // or, if teardown is async:
+ * await unsubscribe();
+ * ```
+ *
+ * The classic object form still works as well:
+ *
+ * ```ts
+ * const subscription = count.subscribe(...);
+ * subscription.unsubscribe();
+ * ```
  */
-export type Subscription = {
+export type Subscription = (() => MaybePromise) & {
   /**
    * Indicates whether the subscription has been terminated.
    *
    * - `false` - subscription is active
    * - `true`  - subscription has been unsubscribed and is inactive
    *
-   * This flag becomes `true` immediately when `unsubscribe()` is invoked
-   * for the first time.
+   * This flag becomes `true` immediately when the subscription is invoked
+   * or when `unsubscribe()` is called for the first time.
    */
   readonly unsubscribed: boolean;
 
@@ -65,7 +77,7 @@ export type Subscription = {
  * - Consistent error handling during teardown
  *
  * @param teardown Optional cleanup callback executed on first unsubscribe
- * @returns {Subscription} A new Subscription object
+ * @returns {Subscription} A callable subscription handle
  */
 export function createSubscription(
   teardown?: () => MaybePromise
@@ -73,36 +85,25 @@ export function createSubscription(
   /** Internal mutable subscription state */
   let _unsubscribed = false;
 
-  return {
-    /**
-   * - `true`  - subscription has been unsubscribed and is inactive
-     */
-    get unsubscribed() {
-      return _unsubscribed;
-    },
-
-    /**
-     * Unsubscribes from the subscription.
-     *
-     * This method:
-     * 1. Marks the subscription as unsubscribed
-     * 2. Executes the `teardown` callback (if present)
-     * 3. Suppresses and logs any errors thrown during cleanup
-     */
-    unsubscribe: function (): MaybePromise {
-      if (!_unsubscribed) {
-        _unsubscribed = true;
-        try {
-          return this.teardown?.();
-        } catch (err) {
-          console.error("Error during unsubscribe callback:", err);
-        }
+  const unsubscribe = (): MaybePromise => {
+    if (!_unsubscribed) {
+      _unsubscribed = true;
+      try {
+        return teardown?.();
+      } catch (err) {
+        console.error("Error during unsubscribe callback:", err);
       }
-    },
-
-    /**
-     * Cleanup callback executed when unsubscribing.
-     */
-    teardown: teardown
+    }
   };
+
+  const subscription = unsubscribe as Subscription;
+
+  Object.defineProperty(subscription, "unsubscribed", {
+    get: () => _unsubscribed,
+  });
+
+  subscription.unsubscribe = unsubscribe;
+  subscription.teardown = teardown;
+
+  return subscription;
 }
