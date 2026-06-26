@@ -58,6 +58,18 @@ describe('Atom System', () => {
       a.dispose();
     });
 
+    it('should pass prior value to subscribers', async () => {
+      const a = atom(0);
+      const values: number[] = [];
+      const priors: number[] = [];
+      a.subscribe((v, prior) => { values.push(v); priors.push(prior!); });
+      a.next(5);
+      a.next(10);
+      expect(values).toEqual([5, 10]);
+      expect(priors).toEqual([0, 5]);
+      a.dispose();
+    });
+
     it('should handle multiple subscribers', async () => {
       const a = atom(0);
       let val1 = 0, val2 = 0;

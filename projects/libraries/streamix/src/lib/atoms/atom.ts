@@ -36,7 +36,7 @@ export interface Atom<T = any> {
   readonly disposed: boolean;
   readonly error?: any;
   readonly subscriberCount?: number;
-  subscribe(callback?: (value: T) => MaybePromise): Subscription;
+  subscribe(callback?: (value: T, prior?: T) => MaybePromise): Subscription;
   onError(handler: (error: any) => void): Subscription;
   dispose(): void;
   [Symbol.asyncIterator](): AsyncIterator<T>;
@@ -224,13 +224,13 @@ function normalizeError(err: any): Error {
  * ───────────────────────────────────────────────────────────────────────────*/
 
 function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, conflate: boolean) {
-  type Callback = (value: T) => MaybePromise;
+  type Callback = (value: T, prior: T) => MaybePromise;
 
   type Subscriber = {
     callback: Callback;
     busy: boolean;
     hasPending: boolean;
-    pending: T | undefined;
+    pending: { value: T; prior: T } | undefined;
   };
 
   const subs = new Map<Callback, Subscriber>();
@@ -239,20 +239,20 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
     if (!subs.has(sub.callback)) return;
     sub.busy = false;
     while (sub.hasPending) {
-      const value = sub.pending as T;
+      const { value, prior } = sub.pending!;
       sub.hasPending = false;
       sub.pending = undefined;
-      invoke(sub, value);
+      invoke(sub, value, prior);
     }
   };
 
-  const invoke = (sub: Subscriber, value: T): void => {
+  const invoke = (sub: Subscriber, value: T, prior: T): void => {
     sub.busy = true;
     sub.hasPending = false;
     sub.pending = undefined;
 
     try {
-      const result = sub.callback(value);
+      const result = sub.callback(value, prior);
       const thenable = result && typeof (result as any).then === "function"
         ? (result as PromiseLike<void>)
         : null;
@@ -284,13 +284,13 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
     delete(callback: Callback) { subs.delete(callback); },
     clear() { subs.clear(); },
     has(callback: Callback) { return subs.has(callback); },
-    broadcast(value: T) {
+    broadcast(value: T, prior: T) {
       for (const sub of Array.from(subs.values())) {
         if (conflate && sub.busy) {
           sub.hasPending = true;
-          sub.pending = value;
+          sub.pending = { value, prior };
         } else {
-          invoke(sub, value);
+          invoke(sub, value, prior);
         }
       }
     }
@@ -380,7 +380,7 @@ export function flow<T>(
     depSubscriptions.clear();
   };
 
-  const broadcast = (val: T) => subs.broadcast(val);
+  const broadcast = (val: T) => subs.broadcast(val, previous);
 
   const broadcastLatest = () => {
     if (!hasNewValue) return;
@@ -662,7 +662,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
   const subs = createSubscriberSet<T>(errorHandlers, analog);
   const subscriptions = new Set<Subscription>();
 
-  const broadcast = () => subs.broadcast(current);
+  const broadcast = () => subs.broadcast(current, previous);
 
   const flushInternal = () => {
     if (!node.dirty || disposed) return;
@@ -867,7 +867,7 @@ export function derived<T>(...args: any[]): Atom<T> {
   const dependencies = new Set<InternalAtomContainer>();
   const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
 
-  const broadcast = () => subs.broadcast(current);
+  const broadcast = () => subs.broadcast(current, previous);
 
   /** Core computation: tracks deps, runs fn, returns value */
   const compute = (): T => {
