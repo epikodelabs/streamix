@@ -1,4 +1,4 @@
-import { type Atom } from "./atom";
+import { type Atom, type AtomOptions } from "./atom";
 
 export const ATOM_EXPR = Symbol("streamix.atomExpr");
 export const DERIVED_EXPR = Symbol("streamix.derivedExpr");
@@ -8,6 +8,7 @@ export const FLOW_EXPR = Symbol("streamix.flowExpr");
 export interface AtomExpr<T = any> {
   [ATOM_EXPR]: true;
   initialValue?: T;
+  options?: AtomOptions;
 }
 
 export interface DerivedExpr<T = any, Self = any> {
@@ -41,8 +42,8 @@ export function isFlowExpr(value: any): value is FlowExpr {
   return value != null && typeof value === "object" && value[FLOW_EXPR] === true;
 }
 
-export function atomExpr<T>(initialValue?: T): AtomExpr<T> {
-  return { [ATOM_EXPR]: true, initialValue };
+export function atomExpr<T>(initialValue?: T, options?: AtomOptions): AtomExpr<T> {
+  return { [ATOM_EXPR]: true, initialValue, options };
 }
 
 export function derivedExpr<T, Self = any>(fn: (self: Self) => T): DerivedExpr<T, Self> {

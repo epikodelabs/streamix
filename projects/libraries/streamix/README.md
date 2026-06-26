@@ -87,15 +87,13 @@ console.log(doubled.value); // 10
 ### Scope-Based Lifecycle
 
 ```typescript
-import { atom, scope } from '@epikodelabs/streamix';
+import { scope } from '@epikodelabs/streamix';
 
-const app = scope(() => {
-  const count = atom(0);
-
-  return { count };
+const app = scope<{ count: number }>({
+  count: 0,
 });
 
-app.count.set(10);
+app.count = 10;
 
 app.dispose();
 ```
@@ -152,23 +150,22 @@ Atoms are the primary reactive primitive in streamix.
 Scopes provide lifecycle management and automatic disposal.
 
 ```typescript
-import { atom, derived, scope } from '@epikodelabs/streamix';
+import { scope } from '@epikodelabs/streamix';
 
-const count = atom(0);
-const events = atom<string>();
+const app = scope<{
+  count: number;
+  events: string;
+  doubled: number;
+}>({
+  count: 0,
+  events: '',
+  doubled: (self) => self.count * 2,
+});
 
-const doubled = derived(() => count.value * 2);
+app.count = 5;
+app.events = 'hello';
 
-const app = scope(() => ({
-  count,
-  events,
-  doubled
-}));
-
-count.next(5);
-events.next('hello')
-
-console.log(app.doubled.value);
+console.log(app.doubled);
 
 app.dispose();
 ```

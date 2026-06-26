@@ -1,8 +1,7 @@
 import {
-  atom,
-  createContainer,
+  atomExpr,
   createToken,
-  derived,
+  derivedExpr,
   globalContainer,
   globalScope,
   inject,
@@ -10,9 +9,6 @@ import {
   provide,
   resetGlobalContainer,
   scope,
-  type Container,
-  type Scope,
-  type Token,
 } from '@epikodelabs/streamix';
 
 describe('IoC Scope Integration', () => {
@@ -29,17 +25,17 @@ describe('IoC Scope Integration', () => {
   });
 
   it('scope has a child container', () => {
-    const s = scope(() => ({}));
+    const s = scope({});
     expect(s.container).toBeDefined();
     expect(s.container.parent).toBe(globalContainer);
     s.dispose();
   });
 
   it('nested scopes form a container hierarchy', () => {
-    const parent = scope(() => {
-      const child = scope(() => ({}));
-      return { child };
-    });
+    interface ParentShape { child: any; }
+    const parent = scope<ParentShape>(() => ({
+      child: scope({}),
+    }));
 
     expect(parent.container.parent).toBe(globalContainer);
     expect(parent.child.container.parent).toBe(parent.container);
@@ -60,10 +56,11 @@ describe('IoC Scope Integration', () => {
   });
 
   it('inject() uses the current scope container', () => {
+    interface Shape { value: string; }
     const Token = createToken<string>('service');
     provide(Token, () => 'global-value');
 
-    const s = scope(() => {
+    const s = scope<Shape>(() => {
       provide(Token, () => 'scoped-value');
       return { value: inject(Token) };
     });
@@ -79,8 +76,9 @@ describe('IoC Scope Integration', () => {
   });
 
   it('injectOptional() returns undefined for unregistered token in scope', () => {
+    interface Shape { value: string | undefined; }
     const Token = createToken<string>('optional-scope');
-    const s = scope(() => ({
+    const s = scope<Shape>(() => ({
       value: injectOptional(Token),
     }));
 
@@ -89,10 +87,12 @@ describe('IoC Scope Integration', () => {
   });
 
   it('child scope inherits parent scope registrations', () => {
+    interface ChildShape { value: string; }
+    interface ParentShape { child: any; }
     const Token = createToken<string>('inherited');
-    const parent = scope(() => {
+    const parent = scope<ParentShape>(() => {
       provide(Token, () => 'from-parent');
-      const child = scope(() => ({
+      const child = scope<ChildShape>(() => ({
         value: inject(Token),
       }));
       return { child };
@@ -103,10 +103,12 @@ describe('IoC Scope Integration', () => {
   });
 
   it('child scope can override parent scope registrations', () => {
+    interface ChildShape { value: string; }
+    interface ParentShape { child: any; }
     const Token = createToken<string>('overridden');
-    const parent = scope(() => {
+    const parent = scope<ParentShape>(() => {
       provide(Token, () => 'parent');
-      const child = scope(() => {
+      const child = scope<ChildShape>(() => {
         provide(Token, () => 'child');
         return { value: inject(Token) };
       });
@@ -156,14 +158,19 @@ describe('IoC Scope Integration', () => {
   });
 
   it('atoms can use services resolved from their containing scope', () => {
+    interface Shape {
+      message: string;
+      computed: string;
+    }
     const Config = createToken<{ prefix: string }>('config');
 
-    const s = scope(() => {
+    const s = scope<Shape>(() => {
       provide(Config, () => ({ prefix: 'scoped' }));
       const config = inject(Config); // resolved eagerly while scope is active
-      const message = atom('');
-      const computed = derived(() => `${config.prefix}:${message.value}`);
-      return { message, computed };
+      return {
+        message: atomExpr(''),
+        computed: derivedExpr((self) => `${config.prefix}:${self.message}`),
+      };
     });
 
     s.message = 'hello';

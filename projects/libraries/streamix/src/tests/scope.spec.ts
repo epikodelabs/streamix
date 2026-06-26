@@ -8,6 +8,7 @@ import {
   getCurrentScope,
   globalScope,
   map,
+  method,
   pipe,
   pipeExpr,
   scope,
@@ -26,7 +27,7 @@ describe('Scope System', () => {
 
   describe('scope creation', () => {
     it('should create a scope', () => {
-      const s = scope(() => ({}));
+      const s = scope({});
       expect(s.type).toBe('scope');
       expect(s.parent).toBe(globalScope);
       expect(s.loading).toBe(false);
@@ -34,10 +35,11 @@ describe('Scope System', () => {
     });
 
     it('should merge factory return values', () => {
-      const s = scope(() => {
-        const count = atom(0);
-        return { count };
-      });
+      interface Shape {
+        count: number;
+      }
+
+      const s = scope<Shape>(() => ({ count: 0 }));
       const snapshot = s.snapshot();
       expect(snapshot.count).toBe(0);
       expect(s.count).toBeDefined();
@@ -45,13 +47,17 @@ describe('Scope System', () => {
     });
 
     it('should support dot notation on properties', async () => {
-      const s = scope(() => {
-        const count = atom(0);
-        const doubled = derived(() => count.value * 2);
-        return { count, doubled };
+      interface Shape {
+        count: number;
+        doubled: number;
+      }
+
+      const s = scope<Shape>({
+        count: 0,
+        doubled: (self) => self.count * 2,
       });
-      
-      s.at('count').next(5);
+
+      s.count = 5;
       await delay();
       expect(s.doubled).toBe(10);
       expect(s.loading).toBe(false); // This should be false as all atoms had initial values
@@ -59,10 +65,14 @@ describe('Scope System', () => {
     });
 
     it('should support assignment through the proxy', async () => {
-      const s = scope(() => {
-        const count = atom(0);
-        const doubled = derived(() => count.value * 2);
-        return { count, doubled };
+      interface Shape {
+        count: number;
+        doubled: number;
+      }
+
+      const s = scope<Shape>({
+        count: 0,
+        doubled: (self) => self.count * 2,
       });
 
       expect(s.count).toBe(0);
@@ -74,10 +84,11 @@ describe('Scope System', () => {
     });
 
     it('should subscribe to atom values via subscribeTo', async () => {
-      const s = scope(() => {
-        const count = atom(0);
-        return { count };
-      });
+      interface Shape {
+        count: number;
+      }
+
+      const s = scope<Shape>({ count: 0 });
 
       const values: number[] = [];
       const sub = s.subscribeTo('count', v => values.push(v));
@@ -92,10 +103,14 @@ describe('Scope System', () => {
     });
 
     it('should not allow assignment to derived atoms', () => {
-      const s = scope(() => {
-        const count = atom(0);
-        const doubled = derived(() => count.value * 2);
-        return { count, doubled };
+      interface Shape {
+        count: number;
+        doubled: number;
+      }
+
+      const s = scope<Shape>({
+        count: 0,
+        doubled: (self) => self.count * 2,
       });
 
       expect(() => {
@@ -105,9 +120,12 @@ describe('Scope System', () => {
     });
 
     it('should not allow assignment to flow atoms', async () => {
-      const s = scope(() => {
-        const a = flow((async function* () { yield 1; })());
-        return { a };
+      interface Shape {
+        a: number;
+      }
+
+      const s = scope<Shape>({
+        a: flowExpr(() => (async function* () { yield 1; })()),
       });
 
       expect(() => {
@@ -117,14 +135,10 @@ describe('Scope System', () => {
     });
 
     it('should support nested scopes', () => {
-      const parent = scope(() => {
-        const child = scope(() => {
-          const x = atom(42);
-          return { x };
-        });
-        return { child };
+      const parent = scope({
+        child: { x: 42 },
       });
-      
+
       expect(parent.child.x).toBe(42);
       expect(parent.child.parent).toBe(parent);
       parent.dispose();
@@ -132,24 +146,11 @@ describe('Scope System', () => {
   });
 
   describe('self proxy in factory', () => {
-    it('should pass the scope proxy to the factory', () => {
-      let receivedSelf: any;
-      const s = scope((self) => {
-        receivedSelf = self;
-        const count = atom(0);
-        return { count };
-      });
-
-      expect(receivedSelf).toBe(s);
-      s.dispose();
-    });
-
     it('should expose loading through self during setup', () => {
       let loadingDuringSetup: boolean | undefined;
-      const s = scope((self) => {
-        loadingDuringSetup = self.loading;
-        const count = atom(0);
-        return { count };
+      const s = scope(function (this: any) {
+        loadingDuringSetup = this.loading;
+        return { count: atom(0) };
       });
 
       // Loading is true during setup because atoms have not yet emitted.
@@ -160,10 +161,14 @@ describe('Scope System', () => {
     });
 
     it('should allow self-referential methods', () => {
-      const s = scope((self) => {
-        const count = atom(0);
-        const increment = () => { self.count = self.count + 1; };
-        return { count, increment };
+      interface Shape {
+        count: number;
+        increment: () => void;
+      }
+
+      const s = scope<Shape>({
+        count: 0,
+        increment: (self) => () => { self.count = self.count + 1; },
       });
 
       expect(s.count).toBe(0);
@@ -175,10 +180,14 @@ describe('Scope System', () => {
     });
 
     it('should allow atoms to be assigned to self before use', async () => {
-      const s = scope((self) => {
-        self.count = atom(0);
-        const doubled = derived(() => self.count * 2);
-        return { count: self.at.count, doubled };
+      interface Shape {
+        count: number;
+        doubled: number;
+      }
+
+      const s = scope<Shape>({
+        count: 0,
+        doubled: (self) => self.count * 2,
       });
 
       expect(s.count).toBe(0);
@@ -191,27 +200,28 @@ describe('Scope System', () => {
     });
 
     it('should allow subscribing through self during setup', async () => {
+      interface Shape {
+        count: number;
+      }
+
       const values: number[] = [];
-      const s = scope((self) => {
-        self.count = atom(0);
-        self.subscribeTo('count', (v: number) => values.push(v));
-        return { count: self.at.count };
-      });
+      const s = scope<Shape>({ count: 0 });
+      const sub = s.subscribeTo('count', (v: number) => values.push(v));
 
       s.count = 1;
       s.count = 2;
       await delay();
 
       expect(values).toEqual([0, 1, 2]);
+      sub.unsubscribe();
       s.dispose();
     });
 
     it('should bind `this` to the scope proxy when a regular function is used', () => {
       let receivedThis: any;
-      const s = scope(function (this) {
+      const s = scope(function (this: any) {
         receivedThis = this;
-        const count = atom(0);
-        return { count };
+        return { count: atom(0) };
       });
 
       expect(receivedThis).toBe(s);
@@ -219,10 +229,14 @@ describe('Scope System', () => {
     });
 
     it('should allow reading and writing scope values through `this`', async () => {
-      const s = scope(function (this) {
-        this.count = atom(0);
-        const doubled = derived(() => this.count * 2);
-        return { count: this.at.count, doubled };
+      interface Shape {
+        count: number;
+        doubled: number;
+      }
+
+      const s = scope<Shape>({
+        count: 0,
+        doubled: (self) => self.count * 2,
       });
 
       expect(s.count).toBe(0);
@@ -238,57 +252,58 @@ describe('Scope System', () => {
 
   describe('loading state', () => {
     it('should be true until all atoms emit', async () => {
+      interface Shape {
+        a: number;
+        b: string;
+      }
+
       const s1 = atom<number>();
       const s2 = atom<string>();
-      
-      const s = scope(() => {
-        const a = flow(s1);
-        const b = flow(s2);
-        return { a, b };
-      });
-      
+
+      const s = scope<Shape>(() => ({
+        a: () => flow(s1),
+        b: () => flow(s2),
+      }));
+
       expect(s.loading).toBe(true);
-      
+
       s1.next(1);
       await delay();
       expect(s.loading).toBe(true);
-      
+
       s2.next('x');
       await delay();
       expect(s.loading).toBe(false);
-      
+
       s.dispose();
       s1.dispose();
       s2.dispose();
     });
 
     it('should be false for atoms with initial values', () => {
-      const s = scope(() => {
-        const a = atom(0);
-        const b = atom('hello');
-        return { a, b };
-      });
+      interface Shape {
+        a: number;
+        b: string;
+      }
+
+      const s = scope<Shape>({ a: 0, b: 'hello' });
       expect(s.loading).toBe(false);
       s.dispose();
     });
 
     it('should track nested scope loading', async () => {
       const source = atom<number>();
-      
-      const parent = scope(() => {
-        const child = scope(() => {
-          const a = flow(source);
-          return { a };
-        });
-        return { child };
+
+      const parent = scope({
+        child: { a: () => flow(source) },
       });
-      
+
       expect(parent.loading).toBe(true);
-      
+
       source.next(42);
       await delay();
       expect(parent.loading).toBe(false);
-      
+
       parent.dispose();
       source.dispose();
     });
@@ -296,13 +311,18 @@ describe('Scope System', () => {
 
   describe('snapshot', () => {
     it('should capture all atom values', () => {
-      const s = scope(() => {
-        const count = atom(10);
-        const name = atom('test');
-        const doubled = derived(() => count.value * 2);
-        return { count, name, doubled };
+      interface Shape {
+        count: number;
+        name: string;
+        doubled: number;
+      }
+
+      const s = scope<Shape>({
+        count: 10,
+        name: 'test',
+        doubled: (self) => self.count * 2,
       });
-      
+
       const snap = s.snapshot();
       expect(snap.count).toBe(10);
       expect(snap.name).toBe('test');
@@ -311,15 +331,19 @@ describe('Scope System', () => {
     });
 
     it('should capture nested scope values', () => {
-      const s = scope(() => {
-        const child = scope(() => {
-          const x = atom(42);
-          const y = atom('hello');
-          return { x, y };
-        });
-        return { child };
+      interface ChildShape {
+        x: number;
+        y: string;
+      }
+
+      interface ParentShape {
+        child: Scope<ChildShape>;
+      }
+
+      const s = scope<ParentShape>({
+        child: scope<ChildShape>({ x: 42, y: 'hello' }),
       });
-      
+
       const snap = s.snapshot();
       expect(snap.child.x).toBe(42);
       expect(snap.child.y).toBe('hello');
@@ -327,15 +351,18 @@ describe('Scope System', () => {
     });
 
     it('should handle errors in snapshot', async () => {
+      interface Shape {
+        d: number;
+      }
+
       const source = atom(0);
-      const s = scope(() => {
-        const d = derived(() => {
+      const s = scope<Shape>(() => ({
+        d: () => derived(() => {
           if (source.value > 10) throw new Error('Too high');
           return source.value;
-        }, { terminateOnError: false });
-        return { d };
-      });
-      
+        }, { terminateOnError: false }),
+      }));
+
       source.next(15);
       const snap = await s.snapshot();
       // Should still return something even with error
@@ -347,33 +374,37 @@ describe('Scope System', () => {
 
   describe('disposal', () => {
     it('should dispose all atoms in scope', () => {
-      const s = scope(() => {
-        const a = atom(0);
-        const b = atom(0);
-        return { a, b };
-      });
-      
+      interface Shape {
+        a: number;
+        b: number;
+      }
+
+      const s = scope<Shape>({ a: 0, b: 0 });
+
       expect(s.at('a').disposed).toBe(false);
       expect(s.at('b').disposed).toBe(false);
-      
+
       s.dispose();
       expect(s.at('a').disposed).toBe(true);
       expect(s.at('b').disposed).toBe(true);
     });
 
     it('should dispose nested scopes recursively', () => {
+      interface Shape {
+        child: {
+          grandchild: {
+            x: number;
+          };
+        };
+      }
+
       const source = atom(0);
-      const parent = scope(() => {
-        const child = scope(() => {
-          const grandchild = scope(() => {
-            const x = flow(source);
-            return { x };
-          });
-          return { grandchild };
-        });
-        return { child };
+      const parent = scope<Shape>({
+        child: {
+          grandchild: { x: () => flow(source) },
+        },
       });
-      
+
       expect(parent.child.grandchild.at('x').disposed).toBe(false);
       parent.dispose();
       expect(parent.child.grandchild.at('x').disposed).toBe(true);
@@ -388,7 +419,7 @@ describe('Scope System', () => {
         (_s as any).cleanups.add(() => { cleaned = true; });
         return {};
       });
-      
+
       s.dispose();
       expect(cleaned).toBe(true);
     });
@@ -396,18 +427,19 @@ describe('Scope System', () => {
 
   describe('analog mode', () => {
     it('should batch atom emissions to the scheduler', async () => {
-      const s = scope(() => {
-        const a = atom(0);
-        return { a };
-      }, { mode: 'analog' });
-      
+      interface Shape {
+        a: number;
+      }
+
+      const s = scope<Shape>({ a: 0 }, { mode: 'analog' });
+
       const values: number[] = [];
       s.at('a').subscribe(v => values.push(v));
-      
+
       s.at('a').next(1);
       s.at('a').next(2);
       s.at('a').next(3);
-      
+
       expect(values).toEqual([]);
       await delay();
       expect(values).toEqual([3]);
@@ -415,36 +447,43 @@ describe('Scope System', () => {
     });
 
     it('should batch derived recomputations', async () => {
-      const s = scope(() => {
-        const a = atom(0);
-        const doubled = derived(() => a.value * 2);
-        return { a, doubled };
+      interface Shape {
+        a: number;
+        doubled: number;
+      }
+
+      const s = scope<Shape>({
+        a: 0,
+        doubled: (self) => self.a * 2,
       }, { mode: 'analog' });
-      
+
       const values: number[] = [];
       s.at('doubled').subscribe(v => values.push(v));
-      
+
       s.at('a').next(1);
       s.at('a').next(2);
       s.at('a').next(3);
-      
+
       expect(values).toEqual([]);
       expect(s.doubled).toBe(6);
-      
+
       await delay();
       expect(values).toEqual([6]);
       s.dispose();
     });
 
     it('should respect discrete opt-out', async () => {
-      const s = scope(() => {
-        const a = atom(0, { discrete: true });
-        return { a };
-      }, { mode: 'analog' });
-      
+      interface Shape {
+        a: number;
+      }
+
+      const s = scope<Shape>(() => ({
+        a: atomExpr<number>(0, { discrete: true }),
+      }), { mode: 'analog' });
+
       const values: number[] = [];
       s.at('a').subscribe(v => values.push(v));
-      
+
       s.at('a').next(1);
       s.at('a').next(2);
       await delay();
@@ -453,92 +492,100 @@ describe('Scope System', () => {
     });
 
     it('should inherit analog mode from parent', async () => {
-      const parent = scope(() => {
-        const child = scope(() => {
-          const a = atom(0);
-          return { a };
-        });
-        return { child };
+      const parent = scope({
+        child: { a: 0 },
       }, { mode: 'analog' });
-      
+
       const childValues: number[] = [];
       parent.child.at('a').subscribe(v => childValues.push(v));
-      
+
       parent.child.at('a').next(1);
       parent.child.at('a').next(2);
       parent.child.at('a').next(3);
-      
+
       await delay();
       expect(parent.child.a).toBe(3);
       expect(childValues).toEqual([3]);
-      
+
       parent.dispose();
     });
 
     it('should allow child to override parent analog mode', async () => {
-      const parent = scope(() => {
-        const child = scope(() => {
-          const a = atom(0);
-          return { a };
-        }, { mode: 'discrete' });
-        return { child };
-      }, { mode: 'analog' });
-      
+      interface ChildShape {
+        a: number;
+      }
+
+      interface ParentShape {
+        child: Scope<ChildShape>;
+      }
+
+      const parent = scope<ParentShape>(() => ({
+        child: scope<ChildShape>({ a: 0 }, { mode: 'discrete' }),
+      }), { mode: 'analog' });
+
       const values: number[] = [];
       parent.child.at('a').subscribe(v => values.push(v));
-      
+
       parent.child.at('a').next(1);
       parent.child.at('a').next(2);
-      
+
       await delay();
       expect(values).toEqual([1, 2]);
-      
+
       parent.dispose();
     });
 
     it('should keep derived values live in analog mode', async () => {
-      const s = scope(() => {
-        const a = atom(0);
-        const doubled = derived(() => a.value * 2);
-        return { a, doubled };
+      interface Shape {
+        a: number;
+        doubled: number;
+      }
+
+      const s = scope<Shape>({
+        a: 0,
+        doubled: (self) => self.a * 2,
       }, { mode: 'analog' });
-      
+
       const values: number[] = [];
       s.at('doubled').subscribe(v => values.push(v));
-      
+
       s.at('a').next(5);
-      
+
       // Value is recomputed on read even before the scheduler flushes
       expect(s.doubled).toBe(10);
       expect(values).toEqual([]);
-      
+
       await delay();
       expect(values).toEqual([10]);
-      
+
       s.dispose();
     });
 
     it('should batch flow emissions in analog mode', async () => {
-      const s = scope(() => {
-        const source = atom<number>();
-        const a = flow(source);
-        return { a, source };
-      }, { mode: 'analog' });
-      
+      interface Shape {
+        a: number;
+        source: number;
+      }
+
+      const s = scope<Shape>(() => ({
+        source: atomExpr<number>(),
+        a: (_, atoms) => flow(atoms.source),
+      }), { mode: 'analog' });
+
       const values: number[] = [];
       s.at('a').subscribe(v => values.push(v));
-      
+
       s.at('source').next(1);
       s.at('source').next(2);
       s.at('source').next(3);
-      
+
       // In analog mode, rapid source emissions are batched to a single scheduler
       // flush; the flow broadcasts only the latest value.
       expect(values).toEqual([]);
       await delay();
       expect(s.a).toBe(3);
       expect(values).toEqual([3]);
-      
+
       s.dispose();
     });
   });
@@ -550,40 +597,42 @@ describe('Scope System', () => {
 
     it('should make top-level scopes analog via global config', async () => {
       globalScope.mode = 'analog';
-      
-      const s = scope(() => {
-        const a = atom(0);
-        return { a };
-      });
-      
+
+      interface Shape {
+        a: number;
+      }
+
+      const s = scope<Shape>({ a: 0 });
+
       const values: number[] = [];
       s.at('a').subscribe(v => values.push(v));
-      
+
       s.at('a').next(1);
       s.at('a').next(2);
       s.at('a').next(3);
-      
+
       expect(values).toEqual([]);
       await delay();
       expect(values).toEqual([3]);
-      
+
       s.dispose();
     });
 
     it('should let child scopes override global analog mode', async () => {
       globalScope.mode = 'analog';
-      
-      const s = scope(() => {
-        const a = atom(0);
-        return { a };
-      }, { mode: 'discrete' });
-      
+
+      interface Shape {
+        a: number;
+      }
+
+      const s = scope<Shape>({ a: 0 }, { mode: 'discrete' });
+
       const values: number[] = [];
       s.at('a').subscribe(v => values.push(v));
-      
+
       s.at('a').next(1);
       s.at('a').next(2);
-      
+
       await delay();
       expect(values).toEqual([1, 2]);
       s.dispose();
@@ -668,8 +717,8 @@ describe('Scope System', () => {
     it('should pass functions through unchanged', () => {
       const s = scope({
         value: 0,
-        increment() { (s as any).value = (s as any).value + 1; }
-      } as any);
+        increment: (self: any) => () => { self.value = self.value + 1; }
+      });
 
       expect(typeof (s as any).increment).toBe('function');
       (s as any).increment();
@@ -736,11 +785,15 @@ describe('Scope System', () => {
     });
 
     it('should work alongside factory form in the same app', () => {
-      const s = scope(() => {
-        const personal = scope({ name: '', email: '' });
-        const count = atom(0);
-        return { personal, count };
-      });
+      interface Shape {
+        personal: Scope<{ name: string; email: string }>;
+        count: number;
+      }
+
+      const s = scope<Shape>(() => ({
+        personal: scope({ name: '', email: '' }),
+        count: 0,
+      }));
 
       s.personal.name = 'Alex';
       s.count = 5;
@@ -823,9 +876,33 @@ describe('Scope System', () => {
     });
 
     it('should support methods with this bound to scope', () => {
-      const s = scope({
+      interface Shape {
+        count: number;
+        increment: () => void;
+      }
+
+      const s = scope<Shape>({
         count: 0,
-        increment() { this.count++; }
+        increment: (self) => () => { self.count++; },
+      });
+
+      expect(s.count).toBe(0);
+      s.increment();
+      expect(s.count).toBe(1);
+      s.increment();
+      expect(s.count).toBe(2);
+      s.dispose();
+    });
+
+    it('should support method marker for side-effect actions', () => {
+      interface Shape {
+        count: number;
+        increment: () => void;
+      }
+
+      const s = scope<Shape>({
+        count: 0,
+        increment: method(() => { s.count++; }),
       });
 
       expect(s.count).toBe(0);
@@ -872,7 +949,7 @@ describe('Scope System', () => {
     });
   });
 
-  describe('scope.define', () => {
+  describe('scope', () => {
     it('should pass nested scopes through unchanged', () => {
       interface ChildShape {
         name: string;
@@ -882,8 +959,8 @@ describe('Scope System', () => {
         child: Scope<ChildShape>;
       }
 
-      const child = scope.define<ChildShape>({ name: 'Ada' });
-      const parent = scope.define<ParentShape>({ child });
+      const child = scope<ChildShape>({ name: 'Ada' });
+      const parent = scope<ParentShape>({ child });
 
       expect(parent.child.name).toBe('Ada');
       expect(parent.snapshot()).toEqual({ child: { name: 'Ada' } });
@@ -897,7 +974,7 @@ describe('Scope System', () => {
       }
 
       const source = atom(0);
-      const s = scope.define<Shape>({
+      const s = scope<Shape>({
         async: {
           value: () => flow(source),
         },
@@ -920,7 +997,7 @@ describe('Scope System', () => {
         doubled: number;
       }
 
-      const s = scope.define<Shape>({
+      const s = scope<Shape>({
         count: 0,
         doubled: (self) => self.count * 2,
       });
@@ -942,7 +1019,7 @@ describe('Scope System', () => {
         quadrupled: number;
       }
 
-      const s = scope.define<Shape>({
+      const s = scope<Shape>({
         count: 1,
         doubled: (self) => self.count * 2,
         quadrupled: (self) => self.doubled * 2,
@@ -964,19 +1041,19 @@ describe('Scope System', () => {
         b: number;
       }
 
-      expect(() => scope.define<Shape>({
+      expect(() => scope<Shape>({
         a: (self) => self.b,
         b: (self) => self.a,
       })).toThrowError(/Circular dependency/);
     });
 
-    it('should throw on circular derived functions via scope.define factory', () => {
+    it('should throw on circular derived functions via factory', () => {
       interface Shape {
         a: number;
         b: number;
       }
 
-      expect(() => scope.define<Shape>(() => ({
+      expect(() => scope<Shape>(() => ({
         a: (self) => self.b,
         b: (self) => self.a,
       }))).toThrowError(/Circular dependency/);
@@ -988,7 +1065,7 @@ describe('Scope System', () => {
         doubled: number;
       }
 
-      const s = scope.define<Shape>({
+      const s = scope<Shape>({
         count: 2,
         doubled: (self) => self.count * 2,
       });
@@ -1008,7 +1085,7 @@ describe('Scope System', () => {
         squared: number;
       }
 
-      const s = scope.define<Shape>({
+      const s = scope<Shape>({
         count: 3,
         squared: (self) => self.count ** 2,
       });
@@ -1025,7 +1102,7 @@ describe('Scope System', () => {
       }
 
       const source = atom(0);
-      const s = scope.define<Shape>({
+      const s = scope<Shape>({
         query: '',
         results: () => pipe(source, startWith(1), map(x => x * 2)),
         ticks: () => flow(source),
@@ -1052,7 +1129,7 @@ describe('Scope System', () => {
       }
 
       const source = atom(0);
-      const s = scope.define<Shape>({
+      const s = scope<Shape>({
         a: () => flow(source),
       });
 
@@ -1078,7 +1155,7 @@ describe('Scope System', () => {
         result: number;
       }
 
-      const s = scope.define<Shape>({
+      const s = scope<Shape>({
         a: 1,
         b: 2,
         sum: (self) => self.a + self.b,

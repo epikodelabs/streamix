@@ -130,7 +130,7 @@ export class AppComponent implements OnDestroy {
     particles: Particle[] = [];
     private animation?: Subscription;
     private resize?: Subscription;
-    private readonly appScope = scope(() => ({}));
+    private readonly appScope = scope({});
     private width = window.innerWidth;
     private height = window.innerHeight;
     constructor() {

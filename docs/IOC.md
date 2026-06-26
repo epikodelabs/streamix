@@ -151,7 +151,7 @@ infraModule(app);
 
 ## Integration with scopes
 
-Every Streamix `scope.define()` gets its own container that inherits from the parent scope's container. This lets you register services naturally inside a scope and have them cleaned up when the scope disposes.
+Every Streamix `scope()` gets its own container that inherits from the parent scope's container. This lets you register services naturally inside a scope and have them cleaned up when the scope disposes.
 
 Object form works for state that only reads services:
 
@@ -160,7 +160,7 @@ import { scope, inject, createToken } from '@epikodelabs/streamix';
 
 const Config = createToken<{ apiUrl: string }>('config');
 
-const feature = scope.define({
+const feature = scope({
   apiUrl: () => inject(Config).apiUrl,
 });
 
@@ -174,7 +174,7 @@ import { scope, provide, inject, createToken } from '@epikodelabs/streamix';
 
 const Config = createToken<{ apiUrl: string }>('config');
 
-const feature = scope.define(() => {
+const feature = scope(() => {
   provide(Config, () => ({ apiUrl: '/api/v1' }), { lifetime: 'singleton' });
 
   return {

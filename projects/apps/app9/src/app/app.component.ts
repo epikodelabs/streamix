@@ -1,4 +1,4 @@
-import { flow, scope, type Scope } from '@epikodelabs/streamix';
+import { flow, method, scope, type Scope } from '@epikodelabs/streamix';
 import { ReactiveRenderer } from './renderer';
 
 interface PersonalShape {
@@ -32,6 +32,22 @@ interface UIShape {
     state: Record<string, any>;
     countriesList: string[];
     countryOptions: string;
+}
+
+interface AppShape {
+    personal: Scope<PersonalShape>;
+    address: Scope<AddressShape>;
+    preferences: Scope<PreferencesShape>;
+    wizard: Scope<WizardShape>;
+    ui: Scope<UIShape>;
+    Math: any;
+    JSON: any;
+    goBack: () => void;
+    goNext: () => void;
+    submit: () => void;
+    toggleSidebar: () => void;
+    setTabTree: () => void;
+    setTabState: () => void;
 }
 
 const template = `
@@ -228,23 +244,23 @@ const template = `
 `;
 
 export function mountApp(root: HTMLElement): () => void {
-    const app = scope(() => {
-        const personal = scope.define<PersonalShape>({
+    const app = scope<AppShape>(() => {
+        const personal = scope<PersonalShape>({
             name: '',
             email: '',
         });
 
-        const address = scope.define<AddressShape>({
+        const address = scope<AddressShape>({
             street: '',
             country: '',
         });
 
-        const preferences = scope.define<PreferencesShape>({
+        const preferences = scope<PreferencesShape>({
             notifications: true,
             theme: 'dark',
         });
 
-        const wizard = scope.define<WizardShape>({
+        const wizard = scope<WizardShape>({
             step: 0,
             personal,
             address,
@@ -257,7 +273,7 @@ export function mountApp(root: HTMLElement): () => void {
             },
         });
 
-        const ui = scope.define<UIShape>({
+        const ui = scope<UIShape>({
             activeTab: 'tree',
             sidebarCollapsed: false,
             toast: null as string | null,
@@ -292,13 +308,14 @@ export function mountApp(root: HTMLElement): () => void {
 
         return {
             personal, address, preferences, wizard, ui,
-            Math, JSON,
-            goBack: () => wizard.step = Math.max(0, wizard.step - 1),
-            goNext: () => wizard.step = Math.min(2, wizard.step + 1),
-            submit,
-            toggleSidebar: () => ui.sidebarCollapsed = !ui.sidebarCollapsed,
-            setTabTree: () => ui.activeTab = 'tree',
-            setTabState: () => ui.activeTab = 'state',
+            Math: () => Math,
+            JSON: () => JSON,
+            goBack: method(() => wizard.step = Math.max(0, wizard.step - 1)),
+            goNext: method(() => wizard.step = Math.min(2, wizard.step + 1)),
+            submit: method(submit),
+            toggleSidebar: method(() => ui.sidebarCollapsed = !ui.sidebarCollapsed),
+            setTabTree: method(() => ui.activeTab = 'tree'),
+            setTabState: method(() => ui.activeTab = 'state'),
         };
     });
 

@@ -1,12 +1,23 @@
 import { DecimalPipe } from '@angular/common';
 import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import { atom, bufferCount, debounce, derived, filter, finalize, interval, listen, map, merge, pipe, range, scan, scope, tap, throttle } from '@epikodelabs/streamix';
+import { atomExpr, bufferCount, debounce, filter, finalize, interval, listen, map, merge, pipe, range, scan, scope, tap, throttle } from '@epikodelabs/streamix';
 interface Metric {
     name: string;
     value: number;
     unit: string;
     trend: 'up' | 'down' | 'flat';
 }
+
+interface AppScopeShape {
+    clicks: string;
+    sliderA: number;
+    sliderB: number;
+    combined: number;
+    emitClick: (label: string) => void;
+    updateStreamA: (value: number) => void;
+    updateStreamB: (value: number) => void;
+}
+
 @Component({
     selector: 'app-root',
     standalone: true,
@@ -474,45 +485,37 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         message: string;
         type: string;
     }[] = [];
-    private readonly appScope = scope((self) => {
-        const clicks = atom<string>();
-        const sliderA = atom<number>();
-        const sliderB = atom<number>();
-        const combined = derived(() => (self.sliderA * self.sliderB) / 100);
-
-        const bufferSub = pipe(clicks, bufferCount(5)).subscribe((batch: string[]) => {
+    private readonly appScope = scope<AppScopeShape>(() => ({
+        clicks: atomExpr<string>(),
+        sliderA: this.sliderAValue,
+        sliderB: this.sliderBValue,
+        combined: (self: AppScopeShape) => (self.sliderA * self.sliderB) / 100,
+        emitClick: (self: AppScopeShape) => (label: string) => { self.clicks = label; },
+        updateStreamA: (self: AppScopeShape) => (value: number) => {
+            this.sliderAValue = value;
+            self.sliderA = value;
+        },
+        updateStreamB: (self: AppScopeShape) => (value: number) => {
+            this.sliderBValue = value;
+            self.sliderB = value;
+        },
+    }));
+    ngOnInit(): void {
+        const clicksAtom = this.appScope.at('clicks');
+        const bufferSub = pipe(clicksAtom, bufferCount(5)).subscribe((batch: string[]) => {
             this.batches.unshift(batch);
             if (this.batches.length > 8)
                 this.batches.pop();
             this.cdr.detectChanges();
         });
-        self.cleanups.add(() => bufferSub.unsubscribe());
+        this.appScope.cleanups.add(() => bufferSub.unsubscribe());
 
-        const combinedSub = combined.subscribe(v => {
+        const combinedSub = this.appScope.at('combined').subscribe(v => {
             this.combinedValue = v;
             this.cdr.detectChanges();
         });
-        self.cleanups.add(() => combinedSub.unsubscribe());
+        this.appScope.cleanups.add(() => combinedSub.unsubscribe());
 
-        sliderA.next(this.sliderAValue);
-        sliderB.next(this.sliderBValue);
-
-        return {
-            clicks,
-            sliderA,
-            sliderB,
-            emitClick: (label: string) => { self.clicks = label; },
-            updateStreamA: (value: number) => {
-                this.sliderAValue = value;
-                self.sliderA = value;
-            },
-            updateStreamB: (value: number) => {
-                this.sliderBValue = value;
-                self.sliderB = value;
-            },
-        };
-    });
-    ngOnInit(): void {
         this.initMetricsStream();
         this.initLogStream();
     }

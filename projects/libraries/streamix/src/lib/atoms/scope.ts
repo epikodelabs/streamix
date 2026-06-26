@@ -21,7 +21,7 @@ import {
 import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
 import type { Subscription } from "./subscription";
 
-/* ── Internal expression markers for scope.define ─────────────────────────── */
+/* ── Internal expression markers for scope() ──────────────────────────────── */
 
 const DYNAMIC_EXPR = Symbol("streamix.dynamicExpr");
 
@@ -38,6 +38,21 @@ function dynamicExpr<T, Self = any>(fn: (self: Self, atoms?: any) => Atom<T> | T
   return { [DYNAMIC_EXPR]: true, fn };
 }
 
+const METHOD = Symbol("streamix.method");
+
+interface Method<T extends (...args: any[]) => any = (...args: any[]) => any> {
+  [METHOD]: true;
+  fn: T;
+}
+
+function isMethod(value: any): value is Method {
+  return value != null && typeof value === "object" && value[METHOD] === true;
+}
+
+export function method<T extends (...args: any[]) => any>(fn: T): Method<T> {
+  return { [METHOD]: true, fn };
+}
+
 function isExprMarker(value: any): value is AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr {
   return isAtomExpr(value) || isDerivedExpr(value) || isPipeExpr(value) || isFlowExpr(value) || isDynamicExpr(value);
 }
@@ -48,7 +63,7 @@ function evaluateExprMarker(
   atoms?: any,
 ): Atom<any> {
   if (isAtomExpr(marker)) {
-    return atom(marker.initialValue);
+    return atom(marker.initialValue, marker.options);
   }
   if (isDerivedExpr(marker)) {
     return derived(() => marker.fn(self));
@@ -108,6 +123,11 @@ type DefinedAtomAccessor<Shape extends Record<string, any>> = {
 
 type DefinedValue<Top extends Record<string, any>, T> =
   | T
+  | Method<T extends (...args: any[]) => any ? T : never>
+  | AtomExpr<T>
+  | DerivedExpr<T, Top>
+  | PipeExpr<T, Top>
+  | FlowExpr<T, Top>
   | ((self: Top, atoms: DefinedAtomAccessor<Top>) => T | Atom<T>);
 
 /**
@@ -321,38 +341,46 @@ function isPlainObject(value: any): boolean {
 }
 
 /**
- * Input-shape type for {@link scope.define}. Each property may be either its
- * final value or a function that receives the typed scope `self` and returns
- * that value. Functions are automatically wrapped in derived atoms.
+ * Input-shape type for {@link scope}. Each property may be either its final
+ * value or a function that receives the typed scope `self` and returns that
+ * value. Functions are automatically wrapped in derived atoms.
  */
 export type DefinedInput<
   Top extends Record<string, any>,
   Shape extends Record<string, any> = Top,
 > = {
-  [K in keyof Shape]: Shape[K] extends readonly any[]
-    ? DefinedValue<Top, Shape[K]>
-    : Shape[K] extends Record<string, any>
-      ? DefinedInput<Top, Shape[K]> | DefinedValue<Top, Shape[K]>
-      : DefinedValue<Top, Shape[K]>;
+  [K in keyof Shape]: Shape[K] extends Scope<any>
+    ? Shape[K]
+    : Shape[K] extends readonly any[]
+      ? DefinedValue<Top, Shape[K]>
+      : Shape[K] extends Record<string, any>
+        ? DefinedInput<Top, Shape[K]> | DefinedValue<Top, Shape[K]>
+        : DefinedValue<Top, Shape[K]>;
 };
 
 /**
- * Recursively transforms a {@link scope.define} input object into a regular
- * scope state object by wrapping every function value in a derived-expression
- * marker.
+ * Recursively transforms a `scope()` input object into a regular scope state
+ * object by wrapping every function value in a derived-expression marker.
  */
-function toDefinedState(state: DefinedInput<any>): any {
+function toDefinedState(state: DefinedInput<any>, visited: WeakSet<object> = new WeakSet()): any {
   const result: any = {};
   for (const key of Reflect.ownKeys(state)) {
     const value = (state as any)[key];
     if (isExprMarker(value)) {
+      result[key] = value;
+    } else if (isMethod(value)) {
       result[key] = value;
     } else if (typeof value === "function") {
       result[key] = dynamicExpr(value);
     } else if (isAtomLike(value)) {
       result[key] = value;
     } else if (isPlainObject(value)) {
-      result[key] = toDefinedState(value);
+      if (visited.has(value)) {
+        throw new Error(`Circular reference detected in scope state at key: ${String(key)}`);
+      }
+      visited.add(value);
+      result[key] = toDefinedState(value, visited);
+      visited.delete(value);
     } else {
       result[key] = value;
     }
@@ -378,6 +406,8 @@ function transformScopeState<T extends Record<string, any>>(
     const value = (state as any)[key];
     if (isExprMarker(value)) {
       rawState[key] = value;
+    } else if (isMethod(value)) {
+      rawState[key] = value.fn.bind(scopeProxy);
     } else if (typeof value === "function") {
       rawState[key] = value.bind(scopeProxy);
     } else if (isAtomLike(value)) {
@@ -388,7 +418,7 @@ function transformScopeState<T extends Record<string, any>>(
       }
       visited.set(value, true);
       try {
-        rawState[key] = scope(() => transformScopeState(value, visited, scopeProxy));
+        rawState[key] = createScopeInternal(() => transformScopeState(value, visited, scopeProxy));
       } finally {
         visited.delete(value);
       }
@@ -478,49 +508,14 @@ function transformScopeState<T extends Record<string, any>>(
 }
 
 /**
- * Creates an execution boundary to encapsulate, track, and bulk-dispose reactive
- * units. Atoms created inside an analog scope defer public broadcasts to the
- * scheduler instead of notifying subscribers synchronously.
- *
- * The returned object is a Proxy: reading an exported atom returns its current
- * value, and writing to an exported atom forwards the value to atom.next().
- * Use `scope.at('key')` or `scope.at.key` to reach the underlying atom when you
- * need to subscribe, dispose, or call other atom methods directly.
- *
- * The factory receives the scope proxy as `self`, so derived values and setup
- * logic can read values through the same ergonomic API while still returning the
- * raw reactive units.
- *
- * As a convenience, `scope` also accepts a plain object. Primitive values are
- * automatically wrapped in atoms and nested plain objects become nested scopes.
- *
- * ```ts
- * const app = scope((self) => {
- *   const count = atom(0);
- *   const doubled = derived(() => self.count * 2);
- *   return { count, doubled };
- * });
- * ```
+ * Internal scope constructor. The factory must return the final `_rawState`
+ * shape (atoms, scopes, etc.). Used by the public `scope()` API and by nested
+ * scope creation inside `transformScopeState`.
  */
-export function scope<T extends Record<string, any>>(
+function createScopeInternal<T extends Record<string, any>>(
   factory: (this: any, self: any) => T,
   options?: { mode?: "discrete" | "analog" },
-): ScopeReturn<T>;
-
-export function scope<T extends Record<string, any>>(
-  state: T,
-  options?: { mode?: "discrete" | "analog" },
-): ScopeReturn<ScopeOf<T>>;
-
-export function scope<T extends Record<string, any>>(
-  arg: ((this: any, self: any) => T) | T,
-  options?: { mode?: "discrete" | "analog" },
-): any {
-  const factory: (this: any, self: any) => T =
-    typeof arg === "function"
-      ? (arg as (this: any, self: any) => T)
-      : ((self: any) => transformScopeState(arg, new WeakMap(), self) as T);
-
+): ScopeReturn<T> {
   const parent = currentScope ?? getGlobalScope();
   const mode = resolveMode(options, parent);
 
@@ -704,6 +699,60 @@ export function scope<T extends Record<string, any>>(
   }
 }
 
+/**
+ * Creates an execution boundary to encapsulate, track, and bulk-dispose reactive
+ * units. Atoms created inside an analog scope defer public broadcasts to the
+ * scheduler instead of notifying subscribers synchronously.
+ *
+ * The returned object is a Proxy: reading an exported atom returns its current
+ * value, and writing to an exported atom forwards the value to atom.next().
+ * Use `scope.at('key')` or `scope.at.key` to reach the underlying atom when you
+ * need to subscribe, dispose, or call other atom methods directly.
+ *
+ * Object form — primitives are wrapped in atoms, nested plain objects become
+ * nested scopes, and functions become derived expressions:
+ *
+ * ```ts
+ * const app = scope<AppShape>({
+ *   query: '',
+ *   count: (self) => self.query.length,
+ * });
+ * ```
+ *
+ * Factory form — useful for setup-time side effects like `provide()`:
+ *
+ * ```ts
+ * const app = scope<AppShape>(() => {
+ *   provide(Config, () => ({ apiUrl: '/api' }));
+ *   return { apiUrl: () => inject(Config).apiUrl };
+ * });
+ * ```
+ */
+export function scope<T extends Record<string, any>>(
+  state: DefinedInput<T>,
+  options?: { mode?: "discrete" | "analog" },
+): ScopeReturn<ScopeOf<T>>;
+
+export function scope<T extends Record<string, any>>(
+  factory: () => DefinedInput<T>,
+  options?: { mode?: "discrete" | "analog" },
+): ScopeReturn<ScopeOf<T>>;
+
+export function scope(arg: any, options?: any): any {
+  if (typeof arg === "function") {
+    return createScopeInternal(
+      function (this: any, self: any) {
+        return transformScopeState(toDefinedState(arg.call(this)), new WeakMap(), self);
+      },
+      options,
+    );
+  }
+  return createScopeInternal(
+    (self: any) => transformScopeState(toDefinedState(arg), new WeakMap(), self),
+    options,
+  );
+}
+
 /* ── Scope Disposal ───────────────────────────────────────────────────────── */
 
 /**
@@ -871,38 +920,4 @@ function collectScopeValues(sc: Scope, result: Record<string, any>): void {
     }
   }
 }
-/* ── Namespaced scope helpers ─────────────────────────────────────────────── */
 
-export namespace scope {
-  /**
-   * Defines a typed scope from an object state. Plain function values become
-   * derived expressions, and functions that return atoms are used as-is.
-   *
-   * ```ts
-   * interface AppShape { query: string; count: number; }
-   *
-   * const app = scope.define<AppShape>({
-   *   query: '',
-   *   count: (self, atoms) => self.query.length,
-   * });
-   * ```
-   */
-  export function define<Shape extends Record<string, any>>(
-    state: DefinedInput<Shape>,
-    options?: { mode?: "discrete" | "analog" },
-  ): ScopeReturn<ScopeOf<Shape>>;
-  export function define<Shape extends Record<string, any>>(
-    factory: () => DefinedInput<Shape>,
-    options?: { mode?: "discrete" | "analog" },
-  ): ScopeReturn<ScopeOf<Shape>>;
-  export function define(arg: any, options?: any): any {
-    const createScope = scope as any;
-    if (typeof arg === "function") {
-      return createScope(
-        (self: any) => transformScopeState(toDefinedState(arg()), new WeakMap(), self),
-        options,
-      );
-    }
-    return createScope(toDefinedState(arg), options);
-  }
-}

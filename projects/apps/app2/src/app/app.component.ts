@@ -343,7 +343,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   progress = 0;
   elapsed = 0;
 
-  private readonly appScope = scope(() => ({}));
+  private readonly appScope = scope({});
   private runner = compute<BatchParams, Pixel[]>(juliaBatchWorker);
   private abortController: AbortController | null = null;
 

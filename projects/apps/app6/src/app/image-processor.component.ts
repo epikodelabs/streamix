@@ -300,7 +300,7 @@ export class ImageProcessorComponent implements OnDestroy {
   showSettings = signal(false);
   dragOver = signal(false);
 
-  private readonly appScope = scope(() => ({}));
+  private readonly appScope = scope({});
 
   constructor(public pipeline: ImagePipelineService) {}
 

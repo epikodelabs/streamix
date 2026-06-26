@@ -1,10 +1,16 @@
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { atom, listen, map, pipe, scope, tap, throttle } from '@epikodelabs/streamix';
+import { listen, map, pipe, scope, tap, throttle } from '@epikodelabs/streamix';
 import { on } from '@epikodelabs/streamix/dom';
 import type { Subscription } from '@epikodelabs/streamix';
 type Weather = 'sunny' | 'rainy';
+
+interface AppScopeShape {
+    weather: Weather;
+    setWeather: (w: Weather) => void;
+}
+
 @Component({
     selector: 'app-root',
     standalone: true,
@@ -104,15 +110,10 @@ type Weather = 'sunny' | 'rainy';
 export class AppComponent implements OnInit, OnDestroy {
     @ViewChild('canvas')
     canvasRef!: ElementRef<HTMLCanvasElement>;
-    private readonly appScope = scope((self) => {
-        const weather = atom<Weather>('sunny');
-        const weatherSub = weather.subscribe((w) => this.applyWeather(w));
-        self.cleanups.add(() => weatherSub.unsubscribe());
-        return {
-            weather,
-            setWeather: (w: Weather) => { self.weather = w; },
-        };
-    });
+    private readonly appScope = scope<AppScopeShape>(() => ({
+        weather: 'sunny' as Weather,
+        setWeather: (self: AppScopeShape) => (w: Weather) => { self.weather = w; },
+    }));
     get weather() { return this.appScope.weather; }
     private renderer!: THREE.WebGLRenderer;
     private scene!: THREE.Scene;
@@ -133,7 +134,8 @@ export class AppComponent implements OnInit, OnDestroy {
     private baseCamPos!: THREE.Vector3;
     private parallaxTarget = { x: 0, y: 0 };
     ngOnInit(): void {
-        // Weather reaction is wired inside the scope factory.
+        const weatherSub = this.appScope.at('weather').subscribe((w) => this.applyWeather(w));
+        this.appScope.cleanups.add(() => weatherSub.unsubscribe());
     }
     ngAfterViewInit(): void {
         this.initScene();

@@ -393,7 +393,7 @@ export class KitchenComponent implements OnInit, OnDestroy {
     { id: 'E5', item: 'Hawaiian', customer: 'Roberto' },
   ];
 
-  private readonly appScope = scope(() => ({}));
+  private readonly appScope = scope({});
   private subs = new Subscription();
   private runningInterval: ReturnType<typeof setInterval> | null = null;
 
