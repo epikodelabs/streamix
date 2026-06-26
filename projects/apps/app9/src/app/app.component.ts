@@ -1,4 +1,4 @@
-import { derivedExpr, flowExpr, scope } from '@epikodelabs/streamix';
+import { flowExpr, scope } from '@epikodelabs/streamix';
 import { ReactiveRenderer } from './renderer';
 
 const template = `
@@ -195,7 +195,7 @@ const template = `
 `;
 
 export function mountApp(root: HTMLElement): () => void {
-    const app = scope((self) => {
+    const app = scope(() => {
         const personal = scope({
             name: '',
             email: '',
@@ -224,11 +224,21 @@ export function mountApp(root: HTMLElement): () => void {
             },
         });
 
+        interface UIShape {
+            activeTab: string;
+            sidebarCollapsed: boolean;
+            toast: string | null;
+            completeness: number;
+            state: any;
+            countriesList: string[];
+            countryOptions: string;
+        }
+
         const ui = scope({
             activeTab: 'tree',
             sidebarCollapsed: false,
             toast: null as string | null,
-            completeness: derivedExpr(() => {
+            completeness: scope.derived<UIShape>(() => {
                 let score = 0;
                 if (personal.name) score++;
                 if (personal.email) score++;
@@ -236,36 +246,36 @@ export function mountApp(root: HTMLElement): () => void {
                 if (address.country) score++;
                 return (score / 4) * 100;
             }),
-            state: derivedExpr((self) => ({
+            state: scope.derived<UIShape>((self) => ({
                 ...wizard.snapshot(),
                 completeness: self.completeness,
             })),
-            countriesList: derivedExpr(() => wizard.async.countries ?? []),
-            countryOptions: derivedExpr((self) =>
+            countriesList: scope.derived<UIShape>(() => wizard.async.countries ?? []),
+            countryOptions: scope.derived<UIShape>((self) =>
                 '<option value="">Select zone</option>' +
                 self.countriesList.map((c: string) => `<option value="${c}">${c}</option>`).join('')
             ),
         });
 
         const submit = () => {
-            if (self.ui.completeness === 100) {
-                self.ui.toast = 'Profile synchronized successfully';
+            if (ui.completeness === 100) {
+                ui.toast = 'Profile synchronized successfully';
             } else {
-                self.ui.toast = `Complete all fields first (${Math.round(self.ui.completeness)}%)`;
+                ui.toast = `Complete all fields first (${Math.round(ui.completeness)}%)`;
             }
             // Guard against the app being unmounted before the timer fires.
-            setTimeout(() => { if (!self.ui.at.toast.disposed) self.ui.toast = null; }, 3000);
+            setTimeout(() => { if (!ui.at.toast.disposed) ui.toast = null; }, 3000);
         };
 
         return {
             personal, address, preferences, wizard, ui,
             Math, JSON,
-            goBack: () => self.wizard.step = Math.max(0, self.wizard.step - 1),
-            goNext: () => self.wizard.step = Math.min(2, self.wizard.step + 1),
+            goBack: () => wizard.step = Math.max(0, wizard.step - 1),
+            goNext: () => wizard.step = Math.min(2, wizard.step + 1),
             submit,
-            toggleSidebar: () => self.ui.sidebarCollapsed = !self.ui.sidebarCollapsed,
-            setTabTree: () => self.ui.activeTab = 'tree',
-            setTabState: () => self.ui.activeTab = 'state',
+            toggleSidebar: () => ui.sidebarCollapsed = !ui.sidebarCollapsed,
+            setTabTree: () => ui.activeTab = 'tree',
+            setTabState: () => ui.activeTab = 'state',
         };
     });
 

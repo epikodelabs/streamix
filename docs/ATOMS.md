@@ -151,6 +151,50 @@ const app = scope({
 
 `atomExpr`, `derivedExpr`, `pipeExpr`, and `flowExpr` are evaluated lazily and turned into regular atoms inside the scope.
 
+You can type `self` by passing a shape interface as the second generic:
+
+```ts
+interface AppShape {
+  query: string;
+  results: string[];
+  count: number;
+}
+
+const app = scope({
+  query: '',
+  results: pipeExpr<string[], AppShape>((self) =>
+    pipe(self.query, debounce(300), switchMap(search))
+  ),
+  count: derivedExpr<number, AppShape>((self) => self.results.length),
+});
+```
+
+Or use `exprMarkers<Shape>()` to avoid repeating the shape on every marker:
+
+```ts
+const { derivedExpr, pipeExpr, flowExpr } = exprMarkers<AppShape>();
+
+const app = scope({
+  query: '',
+  results: pipeExpr((self) =>
+    pipe(self.query, debounce(300), switchMap(search))
+  ),
+  count: derivedExpr((self) => self.results.length),
+});
+```
+
+You can also use the namespaced helpers on `scope` itself:
+
+```ts
+const app = scope({
+  query: '',
+  results: scope.pipe<AppShape>((self) =>
+    pipe(self.query, debounce(300), switchMap(search))
+  ),
+  count: scope.derived<AppShape>((self) => self.results.length),
+});
+```
+
 ---
 
 ### 🏭 Factory scopes

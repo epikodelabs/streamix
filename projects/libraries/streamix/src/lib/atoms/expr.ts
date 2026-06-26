@@ -10,19 +10,19 @@ export interface AtomExpr<T = any> {
   initialValue?: T;
 }
 
-export interface DerivedExpr<T = any> {
+export interface DerivedExpr<T = any, Self = any> {
   [DERIVED_EXPR]: true;
-  fn: (self: any) => T;
+  fn: (self: Self) => T;
 }
 
-export interface PipeExpr<T = any> {
+export interface PipeExpr<T = any, Self = any> {
   [PIPE_EXPR]: true;
-  fn: (self: any) => Atom<T>;
+  fn: (self: Self) => Atom<T>;
 }
 
-export interface FlowExpr<T = any> {
+export interface FlowExpr<T = any, Self = any> {
   [FLOW_EXPR]: true;
-  fn: (self: any) => AsyncIterable<T> | Iterable<T>;
+  fn: (self: Self) => AsyncIterable<T> | Iterable<T>;
 }
 
 export function isAtomExpr(value: any): value is AtomExpr {
@@ -45,20 +45,51 @@ export function atomExpr<T>(initialValue?: T): AtomExpr<T> {
   return { [ATOM_EXPR]: true, initialValue };
 }
 
-export function derivedExpr<T>(fn: (self: any) => T): DerivedExpr<T> {
+export function derivedExpr<T, Self = any>(fn: (self: Self) => T): DerivedExpr<T, Self> {
   return { [DERIVED_EXPR]: true, fn };
 }
 
-export function pipeExpr<T>(fn: (self: any) => Atom<T>): PipeExpr<T> {
+export function pipeExpr<T, Self = any>(fn: (self: Self) => Atom<T>): PipeExpr<T, Self> {
   return { [PIPE_EXPR]: true, fn };
 }
 
-export function flowExpr<T>(fn: (self: any) => AsyncIterable<T> | Iterable<T>): FlowExpr<T> {
+export function flowExpr<T, Self = any>(fn: (self: Self) => AsyncIterable<T> | Iterable<T>): FlowExpr<T, Self> {
   return { [FLOW_EXPR]: true, fn };
 }
 
 export function isExprMarker(value: any): value is AtomExpr | DerivedExpr | PipeExpr | FlowExpr {
   return isAtomExpr(value) || isDerivedExpr(value) || isPipeExpr(value) || isFlowExpr(value);
+}
+
+/**
+ * Creates expression-marker helpers bound to a specific `Self` shape.
+ *
+ * Useful in object-shorthand scopes where you want the marker callbacks to
+ * receive a typed `self` without annotating each marker individually:
+ *
+ * ```ts
+ * interface AppShape { query: string; count: number; }
+ * const { derivedExpr, pipeExpr } = exprMarkers<AppShape>();
+ *
+ * const app = scope({
+ *   query: '',
+ *   count: derivedExpr((self) => self.query.length),
+ *   results: pipeExpr((self) => pipe(self.query, search)),
+ * });
+ * ```
+ */
+export function exprMarkers<Self>(): {
+  atomExpr: <T>(initialValue?: T) => AtomExpr<T>;
+  derivedExpr: <T>(fn: (self: Self) => T) => DerivedExpr<T, Self>;
+  pipeExpr: <T>(fn: (self: Self) => Atom<T>) => PipeExpr<T, Self>;
+  flowExpr: <T>(fn: (self: Self) => AsyncIterable<T> | Iterable<T>) => FlowExpr<T, Self>;
+} {
+  return {
+    atomExpr: <T,>(initialValue?: T) => atomExpr(initialValue),
+    derivedExpr: <T,>(fn: (self: Self) => T) => derivedExpr<T, Self>(fn),
+    pipeExpr: <T,>(fn: (self: Self) => Atom<T>) => pipeExpr<T, Self>(fn),
+    flowExpr: <T,>(fn: (self: Self) => AsyncIterable<T> | Iterable<T>) => flowExpr<T, Self>(fn),
+  };
 }
 
 export function evaluateExprMarker(marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr, self: any): Atom<any> {

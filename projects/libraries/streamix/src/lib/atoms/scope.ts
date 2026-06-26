@@ -9,8 +9,12 @@ import {
 import { normalizeError } from "../utils/helpers";
 import { atom, getCurrentFormulaContext, Writable, type Atom } from "./atom";
 import {
+  atomExpr,
+  derivedExpr,
   evaluateExprMarker,
+  flowExpr,
   isExprMarker,
+  pipeExpr,
   type AtomExpr,
   type DerivedExpr,
   type FlowExpr,
@@ -69,11 +73,11 @@ type ScopeValue<T> =
         ? T
         : T extends readonly any[]
           ? Writable<T>
-          : T extends DerivedExpr<infer U>
+          : T extends DerivedExpr<infer U, any>
             ? Atom<U>
-            : T extends PipeExpr<infer U>
+            : T extends PipeExpr<infer U, any>
               ? Atom<U>
-              : T extends FlowExpr<infer U>
+              : T extends FlowExpr<infer U, any>
                 ? Atom<U>
                 : T extends AtomExpr<infer U>
                   ? Atom<U>
@@ -739,4 +743,83 @@ function collectScopeValues(sc: Scope, result: Record<string, any>): void {
       result[key as string] = value;
     }
   }
+}
+/* ── Namespaced marker helpers ────────────────────────────────────────────── */
+
+/**
+ * Expression-marker factories attached to {@link scope} as a convenience.
+ *
+ * They behave exactly like {@link derivedExpr}, {@link pipeExpr},
+ * {@link flowExpr}, and {@link atomExpr}, but are namespaced under `scope`.
+ * You still need to supply the scope shape as a type argument for `self` to be
+ * typed:
+ *
+ * ```ts
+ * interface AppShape { query: string; count: number; }
+ *
+ * const app = scope({
+ *   query: '',
+ *   count: scope.derived<AppShape>((self) => self.query.length),
+ * });
+ * ```
+ */
+export namespace scope {
+  export function derived<Self, T = any>(fn: (self: Self) => T): DerivedExpr<T, Self> {
+    return derivedExpr<T, Self>(fn);
+  }
+
+  export function pipe<Self, T = any>(fn: (self: Self) => Atom<T>): PipeExpr<T, Self> {
+    return pipeExpr<T, Self>(fn);
+  }
+
+  export function flow<Self, T = any>(
+    fn: (self: Self) => AsyncIterable<T> | Iterable<T>,
+  ): FlowExpr<T, Self> {
+    return flowExpr<T, Self>(fn);
+  }
+
+  export function atom<T>(initialValue?: T): AtomExpr<T> {
+    return atomExpr(initialValue);
+  }
+}
+
+/**
+ * Creates a typed scope family: a `scope()` function with marker helpers bound
+ * to a specific shape. This lets you write `myScope.derived((self) => ...)`
+ * without repeating the shape generic on every marker.
+ *
+ * ```ts
+ * interface AppShape { query: string; count: number; }
+ * const appScope = scopeFactory<AppShape>();
+ *
+ * const app = appScope({
+ *   query: '',
+ *   count: appScope.derived((self) => self.query.length),
+ * });
+ * ```
+ */
+export function scopeFactory<Shape extends Record<string, any>>(): (<
+  T extends Record<string, any>,
+>(
+  arg: ((self: any) => T) | T,
+  options?: { mode?: "discrete" | "analog" },
+) => ScopeReturn<ScopeOf<T>>) & {
+  derived: <T>(fn: (self: Shape) => T) => DerivedExpr<T, Shape>;
+  pipe: <T>(fn: (self: Shape) => Atom<T>) => PipeExpr<T, Shape>;
+  flow: <T>(fn: (self: Shape) => AsyncIterable<T> | Iterable<T>) => FlowExpr<T, Shape>;
+  atom: <T>(initialValue?: T) => AtomExpr<T>;
+} {
+  const createScope = scope as any;
+  return Object.assign(
+    <T extends Record<string, any>>(
+      arg: ((self: any) => T) | T,
+      options?: { mode?: "discrete" | "analog" },
+    ): ScopeReturn<ScopeOf<T>> => createScope(arg, options),
+    {
+      derived: <T>(fn: (self: Shape) => T) => derivedExpr<T, Shape>(fn),
+      pipe: <T>(fn: (self: Shape) => Atom<T>) => pipeExpr<T, Shape>(fn),
+      flow: <T>(fn: (self: Shape) => AsyncIterable<T> | Iterable<T>) => flowExpr<T, Shape>(fn),
+      atom: <T>(initialValue?: T) => atomExpr(initialValue),
+    },
+  );
 }
