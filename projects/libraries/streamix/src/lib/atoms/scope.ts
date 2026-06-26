@@ -11,6 +11,7 @@ import { atom, getCurrentFormulaContext, Writable, type Atom } from "./atom";
 import {
   atomExpr,
   derivedExpr,
+  dynamicExpr,
   evaluateExprMarker,
   flowExpr,
   isExprMarker,
@@ -264,6 +265,46 @@ function isPlainObject(value: any): boolean {
   return proto === Object.prototype || proto === null;
 }
 
+/**
+ * Input-shape type for {@link scope.define}. Each property may be either its
+ * final value or a function that receives the typed scope `self` and returns
+ * that value. Functions are automatically wrapped in derived atoms.
+ */
+export type DefinedInput<
+  Top extends Record<string, any>,
+  Shape extends Record<string, any> = Top,
+> = {
+  [K in keyof Shape]: Shape[K] extends readonly any[]
+    ? Shape[K] | ((self: Top) => Shape[K]) | ((self: Top) => Atom<Shape[K]>)
+    : Shape[K] extends Record<string, any>
+      ? DefinedInput<Top, Shape[K]> | ((self: Top) => Shape[K]) | ((self: Top) => Atom<Shape[K]>)
+      : Shape[K] | ((self: Top) => Shape[K]) | ((self: Top) => Atom<Shape[K]>);
+};
+
+/**
+ * Recursively transforms a {@link scope.define} input object into a regular
+ * scope state object by wrapping every function value in a derived-expression
+ * marker.
+ */
+function toDefinedState(state: DefinedInput<any>): any {
+  const result: any = {};
+  for (const key of Reflect.ownKeys(state)) {
+    const value = (state as any)[key];
+    if (isExprMarker(value)) {
+      result[key] = value;
+    } else if (typeof value === "function") {
+      result[key] = dynamicExpr(value);
+    } else if (isAtomLike(value)) {
+      result[key] = value;
+    } else if (isPlainObject(value)) {
+      result[key] = toDefinedState(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 function isWritableAtom(value: any): value is Writable {
   return isAtomLike(value) && typeof (value as Writable).next === "function";
 }
@@ -378,7 +419,7 @@ function transformScopeState<T extends Record<string, any>>(
  * ```
  */
 export function scope<T extends Record<string, any>>(
-  factory: (self: any) => T,
+  factory: (this: any, self: any) => T,
   options?: { mode?: "discrete" | "analog" },
 ): ScopeReturn<T>;
 
@@ -388,12 +429,12 @@ export function scope<T extends Record<string, any>>(
 ): ScopeReturn<ScopeOf<T>>;
 
 export function scope<T extends Record<string, any>>(
-  arg: ((self: any) => T) | T,
+  arg: ((this: any, self: any) => T) | T,
   options?: { mode?: "discrete" | "analog" },
 ): any {
-  const factory: (self: any) => T =
+  const factory: (this: any, self: any) => T =
     typeof arg === "function"
-      ? (arg as (self: any) => T)
+      ? (arg as (this: any, self: any) => T)
       : ((self: any) => transformScopeState(arg, new WeakMap(), self) as T);
 
   const parent = currentScope ?? getGlobalScope();
@@ -520,7 +561,7 @@ export function scope<T extends Record<string, any>>(
       },
     });
 
-    const result = factory(scopeProxy);
+    const result = factory.call(scopeProxy, scopeProxy);
 
     if (result && typeof result === "object") {
       // Store the original factory result so the proxy can route reads/writes
@@ -781,45 +822,44 @@ export namespace scope {
   export function atom<T>(initialValue?: T): AtomExpr<T> {
     return atomExpr(initialValue);
   }
-}
 
-/**
- * Creates a typed scope family: a `scope()` function with marker helpers bound
- * to a specific shape. This lets you write `myScope.derived((self) => ...)`
- * without repeating the shape generic on every marker.
- *
- * ```ts
- * interface AppShape { query: string; count: number; }
- * const appScope = scopeFactory<AppShape>();
- *
- * const app = appScope({
- *   query: '',
- *   count: appScope.derived((self) => self.query.length),
- * });
- * ```
- */
-export function scopeFactory<Shape extends Record<string, any>>(): (<
-  T extends Record<string, any>,
->(
-  arg: ((self: any) => T) | T,
-  options?: { mode?: "discrete" | "analog" },
-) => ScopeReturn<ScopeOf<T>>) & {
-  derived: <T>(fn: (self: Shape) => T) => DerivedExpr<T, Shape>;
-  pipe: <T>(fn: (self: Shape) => Atom<T>) => PipeExpr<T, Shape>;
-  flow: <T>(fn: (self: Shape) => AsyncIterable<T> | Iterable<T>) => FlowExpr<T, Shape>;
-  atom: <T>(initialValue?: T) => AtomExpr<T>;
-} {
-  const createScope = scope as any;
-  return Object.assign(
-    <T extends Record<string, any>>(
-      arg: ((self: any) => T) | T,
-      options?: { mode?: "discrete" | "analog" },
-    ): ScopeReturn<ScopeOf<T>> => createScope(arg, options),
-    {
-      derived: <T>(fn: (self: Shape) => T) => derivedExpr<T, Shape>(fn),
-      pipe: <T>(fn: (self: Shape) => Atom<T>) => pipeExpr<T, Shape>(fn),
-      flow: <T>(fn: (self: Shape) => AsyncIterable<T> | Iterable<T>) => flowExpr<T, Shape>(fn),
-      atom: <T>(initialValue?: T) => atomExpr(initialValue),
-    },
-  );
+  /**
+   * Defines a typed scope. It accepts either an object state or a factory
+   * function.
+   *
+   * In object form, plain function values become derived expressions, and
+   * functions that return atoms are used as-is. In factory form, you create
+   * atoms directly and return them.
+   *
+   * ```ts
+   * interface AppShape { query: string; count: number; }
+   *
+   * // Object form
+   * const app = scope.define<AppShape>({
+   *   query: '',
+   *   count: (self) => self.query.length,
+   * });
+   *
+   * // Factory form
+   * const app = scope.define<AppShape>((self) => {
+   *   const query = atom('');
+   *   return { query };
+   * });
+   * ```
+   */
+  export function define<Shape extends Record<string, any>>(
+    state: DefinedInput<Shape>,
+    options?: { mode?: "discrete" | "analog" },
+  ): ScopeReturn<ScopeOf<Shape>>;
+  export function define<Shape extends Record<string, any>>(
+    factory: (self: Shape) => Record<string, any>,
+    options?: { mode?: "discrete" | "analog" },
+  ): ScopeReturn<ScopeOf<Shape>>;
+  export function define(arg: any, options?: any): any {
+    const createScope = scope as any;
+    if (typeof arg === "function") {
+      return createScope(arg, options);
+    }
+    return createScope(toDefinedState(arg), options);
+  }
 }

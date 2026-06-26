@@ -195,6 +195,36 @@ const app = scope({
 });
 ```
 
+For new code, `scope.define<Shape>()` is the cleaner alternative (see below).
+
+#### 📝 Unified typed scopes with `scope.define`
+
+`scope.define<Shape>()` is the recommended way to define a typed scope. It accepts either an object state or a factory function, and `self` is typed to the shape in every callback.
+
+Object form — functions become derived expressions, and functions that return atoms are used as-is:
+
+```ts
+const app = scope.define<AppShape>({
+  query: '',
+  count: (self) => self.query.length,
+  results: (self) => pipe(self.at.query, debounce(300), switchMap(search)),
+  online: () => flow(connectionStatus()),
+});
+```
+
+Factory form — create atoms directly when you need full control:
+
+```ts
+const app = scope.define<AppShape>((self) => {
+  const query = atom('');
+  const results = pipe(query, debounce(300), switchMap(search));
+
+  return { query, results };
+});
+```
+
+If you need `atom()` without an initial value or other marker-only features, use the explicit markers above or a plain `scope` factory.
+
 ---
 
 ### 🏭 Factory scopes

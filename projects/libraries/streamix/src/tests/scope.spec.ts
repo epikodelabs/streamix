@@ -11,7 +11,8 @@ import {
   pipe,
   pipeExpr,
   scope,
-  startWith
+  startWith,
+  type Scope,
 } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -202,6 +203,35 @@ describe('Scope System', () => {
       await delay();
 
       expect(values).toEqual([0, 1, 2]);
+      s.dispose();
+    });
+
+    it('should bind `this` to the scope proxy when a regular function is used', () => {
+      let receivedThis: any;
+      const s = scope(function (this) {
+        receivedThis = this;
+        const count = atom(0);
+        return { count };
+      });
+
+      expect(receivedThis).toBe(s);
+      s.dispose();
+    });
+
+    it('should allow reading and writing scope values through `this`', async () => {
+      const s = scope(function (this) {
+        this.count = atom(0);
+        const doubled = derived(() => this.count * 2);
+        return { count: this.at.count, doubled };
+      });
+
+      expect(s.count).toBe(0);
+      expect(s.doubled).toBe(0);
+
+      s.count = 5;
+      await delay();
+      expect(s.doubled).toBe(10);
+
       s.dispose();
     });
   });
@@ -838,6 +868,149 @@ describe('Scope System', () => {
 
       expect(s.count).toBe(0);
       expect(s.doubled).toBe(0);
+      s.dispose();
+    });
+  });
+
+  describe('scope.define', () => {
+    it('should support a factory form with typed self', () => {
+      interface Shape {
+        count: number;
+      }
+
+      const s = scope.define<Shape>((self) => {
+        const count = atom(0);
+        return { count };
+      });
+
+      expect(s.count).toBe(0);
+      s.count = 5;
+      expect(s.count).toBe(5);
+
+      s.dispose();
+    });
+
+    it('should pass nested scopes through unchanged', () => {
+      interface ChildShape {
+        name: string;
+      }
+
+      interface ParentShape {
+        child: Scope<ChildShape>;
+      }
+
+      const child = scope.define<ChildShape>({ name: 'Ada' });
+      const parent = scope.define<ParentShape>({ child });
+
+      expect(parent.child.name).toBe('Ada');
+      expect(parent.snapshot()).toEqual({ child: { name: 'Ada' } });
+
+      parent.dispose();
+    });
+
+    it('should support nested objects with expression functions', async () => {
+      interface Shape {
+        async: { value: number };
+      }
+
+      const source = atom(0);
+      const s = scope.define<Shape>({
+        async: {
+          value: () => flow(source),
+        },
+      });
+
+      await delay();
+      expect(s.async.value).toBe(0);
+
+      source.next(5);
+      await delay();
+      expect(s.async.value).toBe(5);
+
+      source.dispose();
+      s.dispose();
+    });
+
+    it('should treat function values as derived atoms', async () => {
+      interface Shape {
+        count: number;
+        doubled: number;
+      }
+
+      const s = scope.define<Shape>({
+        count: 0,
+        doubled: (self) => self.count * 2,
+      });
+
+      expect(s.count).toBe(0);
+      expect(s.doubled).toBe(0);
+
+      s.count = 5;
+      await delay();
+      expect(s.doubled).toBe(10);
+
+      s.dispose();
+    });
+
+    it('should support derived functions depending on other derived functions', async () => {
+      interface Shape {
+        count: number;
+        doubled: number;
+        quadrupled: number;
+      }
+
+      const s = scope.define<Shape>({
+        count: 1,
+        doubled: (self) => self.count * 2,
+        quadrupled: (self) => self.doubled * 2,
+      });
+
+      expect(s.quadrupled).toBe(4);
+
+      s.count = 5;
+      await delay();
+      expect(s.doubled).toBe(10);
+      expect(s.quadrupled).toBe(20);
+
+      s.dispose();
+    });
+
+    it('should throw on circular derived functions', () => {
+      interface Shape {
+        a: number;
+        b: number;
+      }
+
+      expect(() => scope.define<Shape>({
+        a: (self) => self.b,
+        b: (self) => self.a,
+      })).toThrowError(/Circular dependency/);
+    });
+
+    it('should use returned pipe and flow atoms directly', async () => {
+      interface Shape {
+        query: string;
+        results: number;
+        ticks: number;
+      }
+
+      const source = atom(0);
+      const s = scope.define<Shape>({
+        query: '',
+        results: (self) => pipe(source, startWith(1), map(x => x * 2)),
+        ticks: () => flow(source),
+      });
+
+      await delay();
+      expect(s.results).toBe(2);
+      expect(s.ticks).toBe(0);
+
+      source.next(5);
+      await delay();
+      expect(s.results).toBe(10);
+      expect(s.ticks).toBe(5);
+
+      source.dispose();
       s.dispose();
     });
   });

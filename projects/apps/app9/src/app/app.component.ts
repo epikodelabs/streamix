@@ -1,5 +1,38 @@
-import { flowExpr, scope } from '@epikodelabs/streamix';
+import { flow, scope, type Scope } from '@epikodelabs/streamix';
 import { ReactiveRenderer } from './renderer';
+
+interface PersonalShape {
+    name: string;
+    email: string;
+}
+
+interface AddressShape {
+    street: string;
+    country: string;
+}
+
+interface PreferencesShape {
+    notifications: boolean;
+    theme: string;
+}
+
+interface WizardShape {
+    step: number;
+    personal: Scope<PersonalShape>;
+    address: Scope<AddressShape>;
+    preferences: Scope<PreferencesShape>;
+    async: { countries: string[] };
+}
+
+interface UIShape {
+    activeTab: string;
+    sidebarCollapsed: boolean;
+    toast: string | null;
+    completeness: number;
+    state: Record<string, any>;
+    countriesList: string[];
+    countryOptions: string;
+}
 
 const template = `
 <div class="universe">
@@ -196,65 +229,55 @@ const template = `
 
 export function mountApp(root: HTMLElement): () => void {
     const app = scope(() => {
-        const personal = scope({
+        const personal = scope.define<PersonalShape>({
             name: '',
             email: '',
         });
 
-        const address = scope({
+        const address = scope.define<AddressShape>({
             street: '',
             country: '',
         });
 
-        const preferences = scope({
+        const preferences = scope.define<PreferencesShape>({
             notifications: true,
             theme: 'dark',
         });
 
-        const wizard = scope({
+        const wizard = scope.define<WizardShape>({
             step: 0,
             personal,
             address,
             preferences,
             async: {
-                countries: flowExpr(() => (async function* () {
+                countries: () => flow((async function* () {
                     await new Promise(r => setTimeout(r, 1500));
                     yield ['US', 'CA', 'UK', 'DE', 'FR'];
                 })()),
             },
         });
 
-        interface UIShape {
-            activeTab: string;
-            sidebarCollapsed: boolean;
-            toast: string | null;
-            completeness: number;
-            state: any;
-            countriesList: string[];
-            countryOptions: string;
-        }
-
-        const ui = scope({
+        const ui = scope.define<UIShape>({
             activeTab: 'tree',
             sidebarCollapsed: false,
             toast: null as string | null,
-            completeness: scope.derived<UIShape>(() => {
+            completeness: () => {
                 let score = 0;
                 if (personal.name) score++;
                 if (personal.email) score++;
                 if (address.street) score++;
                 if (address.country) score++;
                 return (score / 4) * 100;
-            }),
-            state: scope.derived<UIShape>((self) => ({
+            },
+            state: (self) => ({
                 ...wizard.snapshot(),
                 completeness: self.completeness,
-            })),
-            countriesList: scope.derived<UIShape>(() => wizard.async.countries ?? []),
-            countryOptions: scope.derived<UIShape>((self) =>
+            }),
+            countriesList: () => wizard.async.countries ?? [],
+            countryOptions: (self) =>
                 '<option value="">Select zone</option>' +
                 self.countriesList.map((c: string) => `<option value="${c}">${c}</option>`).join('')
-            ),
+            ,
         });
 
         const submit = () => {
