@@ -325,7 +325,7 @@ class TerritoryWarsApp {
 
   async destroy(): Promise<void> {
     for (const subscription of this.subscriptions) {
-      subscription.unsubscribe();
+      subscription();
     }
     this.subscriptions.length = 0;
     await this.service.destroy();

@@ -16,7 +16,7 @@ Every producer call records a monotonic stamp. `createTryCommit` clears entries 
 
 ## 🔗 Subscription lifecycle
 
-- 📥 **Subscribe** with a callback or full `Receiver` to get a `Subscription` that can `unsubscribe()`.
+- 📥 **Subscribe** with a callback or full `Receiver` to get a callable `Subscription` (invoke it, or `await` it, to unsubscribe).
 - 🧵 **Per-receiver queuing** – `createReceiver` serializes `next` calls, buffers values when the handler is running, defers completion until the queue drains, and defers each handler call via `queueMicrotask`.
 - 🧹 **Unsubscribe cleanup** – removing a receiver triggers `complete()` inside a stamped emission so cleanup sees a deterministic stop.
 - 🕒 **Late subscribers** – new receivers connect either to the pending queue or immediately replay the terminal stamp (complete/error) if the subject already finished.

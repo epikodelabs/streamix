@@ -508,13 +508,13 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
                 this.batches.pop();
             this.cdr.detectChanges();
         });
-        this.appScope.cleanups.add(() => bufferSub.unsubscribe());
+        this.appScope.cleanups.add(() => bufferSub());
 
         const combinedSub = this.appScope.at('combined').subscribe(v => {
             this.combinedValue = v;
             this.cdr.detectChanges();
         });
-        this.appScope.cleanups.add(() => combinedSub.unsubscribe());
+        this.appScope.cleanups.add(() => combinedSub());
 
         this.initMetricsStream();
         this.initLogStream();
@@ -601,7 +601,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
             this.juliaGenerating = false;
             this.cdr.detectChanges();
         })).subscribe(() => { });
-        this.appScope.cleanups.add(() => sub.unsubscribe());
+        this.appScope.cleanups.add(() => sub());
     }
     private initMetricsStream(): void {
         const s = pipe(interval(800), scan(acc => {
@@ -628,7 +628,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
                 .join(' ');
             this.cdr.detectChanges();
         })).subscribe(() => { });
-        this.appScope.cleanups.add(() => s.unsubscribe());
+        this.appScope.cleanups.add(() => s());
     }
     private initSearchStream(): void {
         const input = this.searchInput?.nativeElement;
@@ -637,7 +637,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         const value$ = pipe(listen(input, 'input'), map(() => input.value as string));
         // Raw counter
         const rawSub = pipe(value$, tap(() => { this.rawSearchCount++; this.cdr.detectChanges(); })).subscribe(() => { });
-        this.appScope.cleanups.add(() => rawSub.unsubscribe());
+        this.appScope.cleanups.add(() => rawSub());
         // Debounced results
         const resultSub = pipe(value$, debounce(400), filter(q => q.length > 1), tap(() => { this.debouncedSearchCount++; this.cdr.detectChanges(); }), tap((query: string) => {
             this.searchResults.unshift(`Matched "${query}" (${Math.floor(Math.random() * 50)} results)`);
@@ -645,7 +645,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
                 this.searchResults.pop();
             this.cdr.detectChanges();
         })).subscribe(() => { });
-        this.appScope.cleanups.add(() => resultSub.unsubscribe());
+        this.appScope.cleanups.add(() => resultSub());
     }
     private initLogStream(): void {
         const metricLog$ = pipe(interval(2000), throttle(2000), map(() => {
@@ -656,7 +656,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         const bufferLog$ = pipe(interval(5000), throttle(5000), map(() => `Buffer flushed — ${this.batches.length} active batches`), tap(msg => this.pushLog(msg, 'buffer')));
         const combinedLog$ = pipe(interval(4200), throttle(4200), map(() => `Combined recalculated: A=${this.sliderAValue}, B=${this.sliderBValue}`), tap(msg => this.pushLog(msg, 'combined')));
         const s = merge(metricLog$, searchLog$, bufferLog$, combinedLog$).subscribe(() => { });
-        this.appScope.cleanups.add(() => s.unsubscribe());
+        this.appScope.cleanups.add(() => s());
     }
     emitClick(label: string): void {
         this.appScope.emitClick(label);

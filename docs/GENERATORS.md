@@ -226,7 +226,7 @@ const ticket = theaterShow.subscribe({
 });
 
 // Leave early if you want
-ticket.unsubscribe();
+ticket();
 ```
 
 ---

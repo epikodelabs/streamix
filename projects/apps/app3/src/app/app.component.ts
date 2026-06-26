@@ -135,7 +135,7 @@ export class AppComponent implements OnInit, OnDestroy {
     private parallaxTarget = { x: 0, y: 0 };
     ngOnInit(): void {
         const weatherSub = this.appScope.at('weather').subscribe((w) => this.applyWeather(w));
-        this.appScope.cleanups.add(() => weatherSub.unsubscribe());
+        this.appScope.cleanups.add(() => weatherSub());
     }
     ngAfterViewInit(): void {
         this.initScene();
@@ -297,7 +297,7 @@ export class AppComponent implements OnInit, OnDestroy {
             this.camera.updateProjectionMatrix();
             this.renderer.setSize(width, height);
         })).subscribe(() => { });
-        this.appScope.cleanups.add(() => this.resizeSub?.unsubscribe());
+        this.appScope.cleanups.add(() => this.resizeSub?.());
         // Mouse parallax
         this.mouseSub = pipe(listen(canvas, 'mousemove'), throttle(50), map((e: Event) => {
             const me = e as MouseEvent;
@@ -309,7 +309,7 @@ export class AppComponent implements OnInit, OnDestroy {
             this.parallaxTarget.x = x * 4;
             this.parallaxTarget.y = -y * 2;
         })).subscribe(() => { });
-        this.appScope.cleanups.add(() => this.mouseSub?.unsubscribe());
+        this.appScope.cleanups.add(() => this.mouseSub?.());
         this.baseCamPos = this.camera.position.clone();
     }
     private makeTree(): THREE.Group {
@@ -454,6 +454,6 @@ export class AppComponent implements OnInit, OnDestroy {
             this.controls.update();
             this.renderer.render(this.scene, this.camera);
         })).subscribe(() => { });
-        this.appScope.cleanups.add(() => this.animSub?.unsubscribe());
+        this.appScope.cleanups.add(() => this.animSub?.());
     }
 }

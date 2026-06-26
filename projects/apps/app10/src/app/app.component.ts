@@ -190,7 +190,7 @@ export class AppComponent implements OnDestroy {
             this.height = viewport.height;
         }))
             .subscribe();
-        this.appScope.cleanups.add(() => this.resize?.unsubscribe());
+        this.appScope.cleanups.add(() => this.resize?.());
         this.animation = pipe(on('animationFrame'), tap(() => {
             for (const p of this.particles) {
                 // Brownian kick: small random acceleration.
@@ -231,7 +231,7 @@ export class AppComponent implements OnDestroy {
             this.cdr.detectChanges();
         }))
             .subscribe();
-        this.appScope.cleanups.add(() => this.animation?.unsubscribe());
+        this.appScope.cleanups.add(() => this.animation?.());
     }
     ngOnDestroy(): void {
         this.appScope.dispose();

@@ -102,7 +102,7 @@ function SearchComponent() {
     });
 
     return () => {
-      subscription.unsubscribe();
+      subscription();
     };
   }, []); // One dependency. Done.
 
@@ -157,7 +157,7 @@ function MetricsDashboard() {
     });
 
     return () => {
-      subscription.unsubscribe();
+      subscription();
     };
   }, []);
 
@@ -197,7 +197,7 @@ function UsernameInput() {
     });
 
     return () => {
-      subscription.unsubscribe();
+      subscription();
     };
   }, []);
 
@@ -244,7 +244,7 @@ function InfiniteList() {
     });
 
     return () => {
-      subscription.unsubscribe();
+      subscription();
     };
   }, [page]);
 
@@ -273,7 +273,7 @@ function LiveChat() {
     });
 
     return () => {
-      subscription.unsubscribe();
+      subscription();
       ws.close();
     };
   }, []);

@@ -37,7 +37,7 @@ function watch(expr: string, ctx: Ctx, cb: (value: any) => void): Cleanup {
     const subs: Cleanup[] = [];
     dependencies.forEach(atom => {
         const sub = atom.subscribe(() => cb(value()));
-        subs.push(() => sub.unsubscribe());
+        subs.push(() => sub());
     });
 
     return () => subs.forEach(fn => fn());
@@ -285,7 +285,7 @@ export class ReactiveRenderer {
 
         if (isAtom(itemsAtom)) {
             const sub = itemsAtom.subscribe((items: any) => renderItems(items));
-            this.cleanups.push(() => sub.unsubscribe());
+            this.cleanups.push(() => sub());
             renderItems(getValue(itemsAtom));
         } else {
             renderItems(itemsAtom);
