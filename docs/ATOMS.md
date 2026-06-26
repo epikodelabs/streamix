@@ -5,7 +5,7 @@ At its heart, Streamix gives you **one primitive**: the atom.
 - `atom()` creates writable state.
 - `derived()` creates computed state.
 - `flow()` creates async state.
-- `scope()` organizes atoms into trees.
+- `scope.define()` organizes atoms into trees.
 
 Everything else is a specialized way to produce, transform, or group atoms. Once you understand that, the whole API feels small.
 
@@ -79,11 +79,9 @@ It only starts pulling data when someone subscribes, and automatically stops whe
 A scope groups atoms into a single state tree. It automatically tracks every atom, derived value, flow, and nested scope created inside it, and disposes everything together when you call `.dispose()`.
 
 ```ts
-const app = scope(() => {
-  const count = atom(0);
-  const label = flow(someLiveSource);
-
-  return { count, label };
+const app = scope.define({
+  count: 0,
+  label: () => flow(someLiveSource),
 });
 
 // Later
@@ -101,8 +99,8 @@ Scopes can nest, giving you a clean tree of state.
 Every scope knows whether its subtree is still loading. A scope stays loading until every atom inside it has emitted at least once. Perfect for spinners:
 
 ```ts
-const app = scope({
-  user: flow(fetchUser()),
+const app = scope.define({
+  user: () => flow(fetchUser()),
 });
 
 if (app.loading) {
@@ -119,7 +117,7 @@ If you want a flow to keep a scope loading during an async delay, don't emit a p
 For most UI state, pass a plain object. Primitives are automatically wrapped in atoms, nested plain objects become nested scopes, and atoms or scopes pass through unchanged:
 
 ```ts
-const app = scope({
+const app = scope.define({
   user: {
     name: '',
     email: '',
@@ -135,12 +133,20 @@ app.theme = 'light';   // same
 
 ### 🧬 Expression markers
 
-Object scopes are evaluated before the scope exists, so values that need access to `self` or require deferred creation use expression markers. Each marker receives a `self` proxy that exposes the scope's current values:
+Inside `scope.define`, values that need access to `self` or require deferred creation can use expression markers. Each marker receives a typed `self` proxy:
 
 ```ts
 import { atomExpr, derivedExpr, flowExpr, pipeExpr, scope } from '@epikodelabs/streamix';
 
-const app = scope({
+interface AppShape {
+  query: string;
+  user?: string;
+  results: string[];
+  count: number;
+  ticks: number;
+}
+
+const app = scope.define<AppShape>({
   query: '',
   user: atomExpr<string>(),                                       // atom without initial value
   results: pipeExpr((self) => pipe(self.query, debounce(300), switchMap(search))),
@@ -151,55 +157,9 @@ const app = scope({
 
 `atomExpr`, `derivedExpr`, `pipeExpr`, and `flowExpr` are evaluated lazily and turned into regular atoms inside the scope.
 
-You can type `self` by passing a shape interface as the second generic:
-
-```ts
-interface AppShape {
-  query: string;
-  results: string[];
-  count: number;
-}
-
-const app = scope({
-  query: '',
-  results: pipeExpr<string[], AppShape>((self) =>
-    pipe(self.query, debounce(300), switchMap(search))
-  ),
-  count: derivedExpr<number, AppShape>((self) => self.results.length),
-});
-```
-
-Or use `exprMarkers<Shape>()` to avoid repeating the shape on every marker:
-
-```ts
-const { derivedExpr, pipeExpr, flowExpr } = exprMarkers<AppShape>();
-
-const app = scope({
-  query: '',
-  results: pipeExpr((self) =>
-    pipe(self.query, debounce(300), switchMap(search))
-  ),
-  count: derivedExpr((self) => self.results.length),
-});
-```
-
-You can also use the namespaced helpers on `scope` itself:
-
-```ts
-const app = scope({
-  query: '',
-  results: scope.pipe<AppShape>((self) =>
-    pipe(self.query, debounce(300), switchMap(search))
-  ),
-  count: scope.derived<AppShape>((self) => self.results.length),
-});
-```
-
-For new code, `scope.define<Shape>()` is the cleaner alternative (see below).
-
 #### 📝 Unified typed scopes with `scope.define`
 
-`scope.define<Shape>()` is the recommended way to define a typed scope. It accepts either an object state or a factory function, and `self` is typed to the shape in every callback.
+`scope.define<Shape>()` is the recommended way to define a typed scope. Every callback receives a typed `self` plus an `atoms` accessor for the underlying raw atoms.
 
 Object form — functions become derived expressions, and functions that return atoms are used as-is:
 
@@ -207,39 +167,27 @@ Object form — functions become derived expressions, and functions that return 
 const app = scope.define<AppShape>({
   query: '',
   count: (self) => self.query.length,
-  results: (self) => pipe(self.at.query, debounce(300), switchMap(search)),
+  // Use `atoms.<key>` or `atoms('<key>')` when you need the raw atom reference.
+  results: (self, atoms) => pipe(atoms.query, debounce(300), switchMap(search)),
   online: () => flow(connectionStatus()),
 });
 ```
 
-Factory form — create atoms directly when you need full control:
+Nested scopes can be typed with `Scope<Shape>`. The full scope proxy is preserved, so child properties remain accessible:
 
 ```ts
-const app = scope.define<AppShape>((self) => {
-  const query = atom('');
-  const results = pipe(query, debounce(300), switchMap(search));
+import { scope, type Scope } from '@epikodelabs/streamix';
 
-  return { query, results };
-});
+interface ChildShape { name: string; }
+interface ParentShape { child: Scope<ChildShape>; }
+
+const child = scope.define<ChildShape>({ name: 'Ada' });
+const parent = scope.define<ParentShape>({ child });
+
+parent.child.name; // string
 ```
 
-If you need `atom()` without an initial value or other marker-only features, use the explicit markers above or a plain `scope` factory.
-
----
-
-### 🏭 Factory scopes
-
-If you need direct atom references — for example to wire up streams with `pipe` or `combineLatest` inside the scope — use the factory form. It receives a `self` proxy for reading and writing values:
-
-```ts
-const app = scope((self) => {
-  const query = atom('');
-  const results = pipe(query, debounce(300), switchMap(searchUsers));
-  const count = derived(() => results.value?.length ?? 0);
-
-  return { query, results, count };
-});
-```
+If you need `atom()` without an initial value or other marker-only features, use the explicit markers above.
 
 ---
 
@@ -248,7 +196,7 @@ const app = scope((self) => {
 The scope proxy exposes atom *values*. If you ever need the atom itself — for example to pass it to `pipe` or `combineLatest` from outside the scope — use `scope.at.key` or `scope.at('key')`:
 
 ```ts
-const app = scope({
+const app = scope.define<{ count: number }>({
   count: 0,
 });
 
@@ -289,17 +237,16 @@ By default, updates are immediate (“discrete”). Switch to **analog** mode fo
 **Real-world example:**
 
 ```ts
-const app = scope({
+const app = scope.define<AppShape>({
   query: '',
 
-  results: pipeExpr((self) =>
-    pipe(self.query, debounce(300), switchMap(search))
-  ),
+  results: (self, atoms) =>
+    pipe(atoms.query, debounce(300), switchMap(search)),
 
-  count: derivedExpr((self) => self.results?.length ?? 0),
+  count: (self) => self.results?.length ?? 0,
 
-  online: flowExpr(() => connectionStatus()),
+  online: () => connectionStatus(),
 });
 ```
 
-One `scope()` call gives you atoms, derived values, async flows, loading states, snapshots, and automatic cleanup. ✨
+One `scope.define()` call gives you atoms, derived values, async flows, loading states, snapshots, and automatic cleanup. ✨

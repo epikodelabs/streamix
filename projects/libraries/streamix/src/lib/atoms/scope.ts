@@ -7,15 +7,12 @@ import {
   type Token,
 } from "../ioc/container";
 import { normalizeError } from "../utils/helpers";
-import { atom, getCurrentFormulaContext, Writable, type Atom } from "./atom";
+import { atom, derived, flow, getCurrentFormulaContext, Writable, type Atom } from "./atom";
 import {
-  atomExpr,
-  derivedExpr,
-  dynamicExpr,
-  evaluateExprMarker,
-  flowExpr,
-  isExprMarker,
-  pipeExpr,
+  isAtomExpr,
+  isDerivedExpr,
+  isFlowExpr,
+  isPipeExpr,
   type AtomExpr,
   type DerivedExpr,
   type FlowExpr,
@@ -23,6 +20,54 @@ import {
 } from "./expr";
 import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
 import type { Subscription } from "./subscription";
+
+/* ── Internal expression markers for scope.define ─────────────────────────── */
+
+const DYNAMIC_EXPR = Symbol("streamix.dynamicExpr");
+
+interface DynamicExpr<T = any, Self = any> {
+  [DYNAMIC_EXPR]: true;
+  fn: (self: Self, atoms?: any) => Atom<T> | T;
+}
+
+function isDynamicExpr(value: any): value is DynamicExpr {
+  return value != null && typeof value === "object" && value[DYNAMIC_EXPR] === true;
+}
+
+function dynamicExpr<T, Self = any>(fn: (self: Self, atoms?: any) => Atom<T> | T): DynamicExpr<T, Self> {
+  return { [DYNAMIC_EXPR]: true, fn };
+}
+
+function isExprMarker(value: any): value is AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr {
+  return isAtomExpr(value) || isDerivedExpr(value) || isPipeExpr(value) || isFlowExpr(value) || isDynamicExpr(value);
+}
+
+function evaluateExprMarker(
+  marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr,
+  self: any,
+  atoms?: any,
+): Atom<any> {
+  if (isAtomExpr(marker)) {
+    return atom(marker.initialValue);
+  }
+  if (isDerivedExpr(marker)) {
+    return derived(() => marker.fn(self));
+  }
+  if (isPipeExpr(marker)) {
+    return marker.fn(self);
+  }
+  if (isFlowExpr(marker)) {
+    return flow(marker.fn(self));
+  }
+  if (isDynamicExpr(marker)) {
+    const value = marker.fn(self, atoms);
+    if (value && typeof value === "object" && (value as Atom<any>).type === "atom") {
+      return value as Atom<any>;
+    }
+    return derived(() => marker.fn(self, atoms));
+  }
+  throw new Error("Unknown expression marker");
+}
 
 // Define a recursive type to unwrap atom values and handle nested scopes
 type UnwrapSnapshotValues<T> = {
@@ -57,6 +102,14 @@ type AtomAccessor<T> = {
   [K in keyof T]: AtomOf<T[K]>;
 } & (<K extends keyof T>(key: K) => AtomOf<T[K]>);
 
+type DefinedAtomAccessor<Shape extends Record<string, any>> = {
+  [K in keyof Shape]: Atom<Shape[K]>;
+} & (<K extends keyof Shape>(key: K) => Atom<Shape[K]>);
+
+type DefinedValue<Top extends Record<string, any>, T> =
+  | T
+  | ((self: Top, atoms: DefinedAtomAccessor<Top>) => T | Atom<T>);
+
 /**
  * Transforms a plain-object scope state shape into the shape stored inside a scope.
  *
@@ -66,25 +119,27 @@ type AtomAccessor<T> = {
  * - Everything else is wrapped in a writable atom.
  */
 type ScopeValue<T> =
-  T extends Atom<any>
+  T extends ScopeReturn<any>
     ? T
-    : T extends Scope
+    : T extends Atom<any>
       ? T
-      : T extends (...args: any[]) => any
-        ? T
-        : T extends readonly any[]
-          ? Writable<T>
-          : T extends DerivedExpr<infer U, any>
-            ? Atom<U>
-            : T extends PipeExpr<infer U, any>
+      : T extends Scope<infer U>
+        ? ScopeReturn<ScopeOf<U>>
+        : T extends (...args: any[]) => any
+          ? T
+          : T extends readonly any[]
+            ? Writable<T>
+            : T extends DerivedExpr<infer U, any>
               ? Atom<U>
-              : T extends FlowExpr<infer U, any>
+              : T extends PipeExpr<infer U, any>
                 ? Atom<U>
-                : T extends AtomExpr<infer U>
+                : T extends FlowExpr<infer U, any>
                   ? Atom<U>
-                  : T extends Record<string, any>
-                    ? ScopeReturn<ScopeOf<T>>
-                    : Writable<T>;
+                  : T extends AtomExpr<infer U>
+                    ? Atom<U>
+                    : T extends Record<string, any>
+                      ? ScopeReturn<ScopeOf<T>>
+                      : Writable<T>;
 
 type ScopeOf<T extends Record<string, any>> = {
   [K in keyof T]: ScopeValue<T[K]>;
@@ -275,10 +330,10 @@ export type DefinedInput<
   Shape extends Record<string, any> = Top,
 > = {
   [K in keyof Shape]: Shape[K] extends readonly any[]
-    ? Shape[K] | ((self: Top) => Shape[K]) | ((self: Top) => Atom<Shape[K]>)
+    ? DefinedValue<Top, Shape[K]>
     : Shape[K] extends Record<string, any>
-      ? DefinedInput<Top, Shape[K]> | ((self: Top) => Shape[K]) | ((self: Top) => Atom<Shape[K]>)
-      : Shape[K] | ((self: Top) => Shape[K]) | ((self: Top) => Atom<Shape[K]>);
+      ? DefinedInput<Top, Shape[K]> | DefinedValue<Top, Shape[K]>
+      : DefinedValue<Top, Shape[K]>;
 };
 
 /**
@@ -355,7 +410,7 @@ function transformScopeState<T extends Record<string, any>>(
           }
           evaluating.add(key);
           try {
-            const atom = evaluateExprMarker(value, self);
+            const atom = evaluateExprMarker(value, self, atoms);
             rawState[key] = atom;
             return atom.value;
           } finally {
@@ -381,6 +436,35 @@ function transformScopeState<T extends Record<string, any>>(
       configurable: true,
     });
   }
+
+  // Provide callbacks with a typed accessor to the raw atoms. Accessing a key
+  // that is still an expression marker forces its evaluation first, so callers
+  // always receive the underlying reactive unit.
+  function getRawAtom(key: string | symbol): any {
+    let value = rawState[key];
+    if (isExprMarker(value)) {
+      void (self as any)[key];
+      value = rawState[key];
+    }
+    return value;
+  }
+  const atoms: any = new Proxy(getRawAtom, {
+    get(_, key) {
+      if (typeof key === "symbol" && key in getRawAtom) {
+        return (getRawAtom as any)[key];
+      }
+      return getRawAtom(key);
+    },
+    has(_, key) {
+      return key in rawState;
+    },
+    ownKeys() {
+      return Reflect.ownKeys(rawState);
+    },
+    getOwnPropertyDescriptor(_, key) {
+      return Object.getOwnPropertyDescriptor(rawState, key);
+    },
+  });
 
   // Eagerly evaluate expression markers so the returned rawState contains atoms.
   // The self getters handle lazy dependencies and circularity detection.
@@ -524,14 +608,16 @@ export function scope<T extends Record<string, any>>(
           return Reflect.get(target, prop, receiver);
         }
         const factoryItem = target._rawState[prop];
-        if (
-          factoryItem &&
-          typeof factoryItem === "object" &&
-          (factoryItem as any).type === "atom"
-        ) {
-          const ctx = getCurrentFormulaContext();
-          if (ctx) ctx.dependencies.add(factoryItem as any);
-          return (factoryItem as Atom<any>).value;
+        if (factoryItem && typeof factoryItem === "object") {
+          if ((factoryItem as any).type === "atom") {
+            const ctx = getCurrentFormulaContext();
+            if (ctx) ctx.dependencies.add(factoryItem as any);
+            return (factoryItem as Atom<any>).value;
+          }
+          // Return child scope proxies directly — they already wrap their own atoms.
+          if ((factoryItem as any).type === "scope") {
+            return factoryItem;
+          }
         }
         return Reflect.get(target, prop, receiver);
       },
@@ -785,65 +871,19 @@ function collectScopeValues(sc: Scope, result: Record<string, any>): void {
     }
   }
 }
-/* ── Namespaced marker helpers ────────────────────────────────────────────── */
+/* ── Namespaced scope helpers ─────────────────────────────────────────────── */
 
-/**
- * Expression-marker factories attached to {@link scope} as a convenience.
- *
- * They behave exactly like {@link derivedExpr}, {@link pipeExpr},
- * {@link flowExpr}, and {@link atomExpr}, but are namespaced under `scope`.
- * You still need to supply the scope shape as a type argument for `self` to be
- * typed:
- *
- * ```ts
- * interface AppShape { query: string; count: number; }
- *
- * const app = scope({
- *   query: '',
- *   count: scope.derived<AppShape>((self) => self.query.length),
- * });
- * ```
- */
 export namespace scope {
-  export function derived<Self, T = any>(fn: (self: Self) => T): DerivedExpr<T, Self> {
-    return derivedExpr<T, Self>(fn);
-  }
-
-  export function pipe<Self, T = any>(fn: (self: Self) => Atom<T>): PipeExpr<T, Self> {
-    return pipeExpr<T, Self>(fn);
-  }
-
-  export function flow<Self, T = any>(
-    fn: (self: Self) => AsyncIterable<T> | Iterable<T>,
-  ): FlowExpr<T, Self> {
-    return flowExpr<T, Self>(fn);
-  }
-
-  export function atom<T>(initialValue?: T): AtomExpr<T> {
-    return atomExpr(initialValue);
-  }
-
   /**
-   * Defines a typed scope. It accepts either an object state or a factory
-   * function.
-   *
-   * In object form, plain function values become derived expressions, and
-   * functions that return atoms are used as-is. In factory form, you create
-   * atoms directly and return them.
+   * Defines a typed scope from an object state. Plain function values become
+   * derived expressions, and functions that return atoms are used as-is.
    *
    * ```ts
    * interface AppShape { query: string; count: number; }
    *
-   * // Object form
    * const app = scope.define<AppShape>({
    *   query: '',
-   *   count: (self) => self.query.length,
-   * });
-   *
-   * // Factory form
-   * const app = scope.define<AppShape>((self) => {
-   *   const query = atom('');
-   *   return { query };
+   *   count: (self, atoms) => self.query.length,
    * });
    * ```
    */
@@ -852,13 +892,16 @@ export namespace scope {
     options?: { mode?: "discrete" | "analog" },
   ): ScopeReturn<ScopeOf<Shape>>;
   export function define<Shape extends Record<string, any>>(
-    factory: (self: Shape) => Record<string, any>,
+    factory: () => DefinedInput<Shape>,
     options?: { mode?: "discrete" | "analog" },
   ): ScopeReturn<ScopeOf<Shape>>;
   export function define(arg: any, options?: any): any {
     const createScope = scope as any;
     if (typeof arg === "function") {
-      return createScope(arg, options);
+      return createScope(
+        (self: any) => transformScopeState(toDefinedState(arg()), new WeakMap(), self),
+        options,
+      );
     }
     return createScope(toDefinedState(arg), options);
   }

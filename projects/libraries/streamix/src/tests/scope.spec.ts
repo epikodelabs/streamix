@@ -873,23 +873,6 @@ describe('Scope System', () => {
   });
 
   describe('scope.define', () => {
-    it('should support a factory form with typed self', () => {
-      interface Shape {
-        count: number;
-      }
-
-      const s = scope.define<Shape>((self) => {
-        const count = atom(0);
-        return { count };
-      });
-
-      expect(s.count).toBe(0);
-      s.count = 5;
-      expect(s.count).toBe(5);
-
-      s.dispose();
-    });
-
     it('should pass nested scopes through unchanged', () => {
       interface ChildShape {
         name: string;
@@ -987,6 +970,53 @@ describe('Scope System', () => {
       })).toThrowError(/Circular dependency/);
     });
 
+    it('should throw on circular derived functions via scope.define factory', () => {
+      interface Shape {
+        a: number;
+        b: number;
+      }
+
+      expect(() => scope.define<Shape>(() => ({
+        a: (self) => self.b,
+        b: (self) => self.a,
+      }))).toThrowError(/Circular dependency/);
+    });
+
+    it('should pass raw atom references as the second callback argument', async () => {
+      interface Shape {
+        count: number;
+        doubled: number;
+      }
+
+      const s = scope.define<Shape>({
+        count: 2,
+        doubled: (self) => self.count * 2,
+      });
+
+      expect(s.doubled).toBe(4);
+
+      s.count = 5;
+      await delay();
+      expect(s.doubled).toBe(10);
+
+      s.dispose();
+    });
+
+    it('should support atoms callable accessor signature', () => {
+      interface Shape {
+        count: number;
+        squared: number;
+      }
+
+      const s = scope.define<Shape>({
+        count: 3,
+        squared: (self) => self.count ** 2,
+      });
+
+      expect(s.squared).toBe(9);
+      s.dispose();
+    });
+
     it('should use returned pipe and flow atoms directly', async () => {
       interface Shape {
         query: string;
@@ -997,7 +1027,7 @@ describe('Scope System', () => {
       const source = atom(0);
       const s = scope.define<Shape>({
         query: '',
-        results: (self) => pipe(source, startWith(1), map(x => x * 2)),
+        results: () => pipe(source, startWith(1), map(x => x * 2)),
         ticks: () => flow(source),
       });
 
@@ -1017,51 +1047,61 @@ describe('Scope System', () => {
 
   describe('integration', () => {
     it('should maintain reactivity after scope disposal', async () => {
+      interface Shape {
+        a: number;
+      }
+
       const source = atom(0);
-      const s = scope(() => {
-        const a = flow(source);
-        return { a };
+      const s = scope.define<Shape>({
+        a: () => flow(source),
       });
-      
+
       await delay();
 
       // Dispose scope
       s.dispose();
-      
+
       // Source updates should not affect disposed atom
       source.next(42);
       expect(s.at('a').safeValue).toBe(0);
       expect(() => s.a).toThrow();
-      
+
       source.dispose();
     });
 
     it('should handle complex reactive graph', async () => {
-      const s = scope(() => {
-        const a = atom(1);
-        const b = atom(2);
-        const sum = derived(() => a.value + b.value);
-        const product = derived(() => a.value * b.value);
-        const result = derived(() => sum.value + product.value);
-        return { a, b, sum, product, result };
+      interface Shape {
+        a: number;
+        b: number;
+        sum: number;
+        product: number;
+        result: number;
+      }
+
+      const s = scope.define<Shape>({
+        a: 1,
+        b: 2,
+        sum: (self) => self.a + self.b,
+        product: (self) => self.a * self.b,
+        result: (self) => self.sum + self.product,
       });
-      
+
       expect(s.sum).toBe(3);
       expect(s.product).toBe(2);
       expect(s.result).toBe(5);
-      
-      s.at('a').next(3);
+
+      s.a = 3;
       await delay();
       expect(s.sum).toBe(5);
       expect(s.product).toBe(6);
       expect(s.result).toBe(11);
-      
-      s.at('b').next(4);
+
+      s.b = 4;
       await delay();
       expect(s.sum).toBe(7);
       expect(s.product).toBe(12);
       expect(s.result).toBe(19);
-      
+
       s.dispose();
     });
   });
