@@ -21,17 +21,19 @@ count.next(5);
 console.log(count.value);     // 5
 ```
 
-You can also peek at the previous value with `.prior`.
+You can also peek at the previous value with `.previous`.
 
 Subscribing is super easy:
 
 ```ts
-const sub = count.subscribe(v => {
-  console.log("count is now", v);
+const unsubscribe = count.subscribe((current, previous) => {
+  console.log(`${previous} → ${current}`);
 });
 
 count.next(10);
-// → "count is now 10"
+// → "0 → 10"
+
+unsubscribe();
 
 sub.unsubscribe(); // clean up when you're done 🧹
 ```

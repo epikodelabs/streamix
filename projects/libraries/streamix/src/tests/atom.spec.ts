@@ -32,7 +32,7 @@ describe('Atom System', () => {
       const a = atom(0);
       a.next(5);
       expect(a.value).toBe(5);
-      expect(a.prior).toBe(0);
+      expect(a.previous).toBe(0);
       a.dispose();
     });
 
@@ -58,15 +58,15 @@ describe('Atom System', () => {
       a.dispose();
     });
 
-    it('should pass prior value to subscribers', async () => {
+    it('should pass previous value to subscribers', async () => {
       const a = atom(0);
-      const values: number[] = [];
-      const priors: number[] = [];
-      a.subscribe((v, prior) => { values.push(v); priors.push(prior!); });
+      const currents: number[] = [];
+      const previouses: number[] = [];
+      a.subscribe((current, previous) => { currents.push(current); previouses.push(previous); });
       a.next(5);
       a.next(10);
-      expect(values).toEqual([5, 10]);
-      expect(priors).toEqual([0, 5]);
+      expect(currents).toEqual([5, 10]);
+      expect(previouses).toEqual([0, 5]);
       a.dispose();
     });
 
