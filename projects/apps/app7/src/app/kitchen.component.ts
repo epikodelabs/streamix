@@ -1,5 +1,5 @@
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
-import { createSubscription, scope } from '@epikodelabs/streamix';
+import { scope } from '@epikodelabs/streamix';
 import {
   KitchenService,
   KitchenStats,
@@ -393,27 +393,33 @@ export class KitchenComponent implements OnInit, OnDestroy {
   ];
 
   private readonly appScope = scope({});
-  private subs = createSubscription();
   private runningInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(private kitchen: KitchenService, private cdr: ChangeDetectorRef) {}
 
   ngOnInit() {
-    this.subs.compose(
+    this.appScope.cleanups.add(
       this.kitchen.ovens$.subscribe((ovens: OvenState[]) => {
         this.ovens = ovens;
         this.cdr.detectChanges();
-      }),
+      })
+    );
 
+    this.appScope.cleanups.add(
       this.kitchen.cancellableOrders$.subscribe((orders: Order[]) => {
         this.cancellableOrders = orders;
         this.cdr.detectChanges();
-      }),
+      })
+    );
+
+    this.appScope.cleanups.add(
       this.kitchen.stats$.subscribe((stats: KitchenStats) => {
         this.stats = stats;
         this.cdr.detectChanges();
-      }),
+      })
+    );
 
+    this.appScope.cleanups.add(
       this.kitchen.log$.subscribe((entry: string) => {
         this.logEntries.push(entry);
 
@@ -437,7 +443,7 @@ export class KitchenComponent implements OnInit, OnDestroy {
       }
     });
 
-    this.appScope.cleanups.add(() => this.subs());
+
   }
 
   ngOnDestroy() {

@@ -15,14 +15,6 @@ import type { MaybePromise } from "./operator";
  * // or, if teardown is async:
  * await unsubscribe();
  * ```
- *
- * You can chain extra teardown logic with `compose`:
- *
- * ```ts
- * const unsubscribe = count.subscribe(...).compose(() => {
- *   console.log("extra cleanup");
- * });
- * ```
  */
 export type Subscription = (() => MaybePromise) & {
   /**
@@ -35,18 +27,6 @@ export type Subscription = (() => MaybePromise) & {
    * for the first time.
    */
   readonly unsubscribed: boolean;
-
-  /**
-   * Registers additional teardown callbacks to run when the subscription is
-   * terminated. Callbacks are executed after the original teardown.
-   *
-   * If the subscription has already been unsubscribed, the new teardowns are
-   * run immediately.
-   *
-   * @param teardowns One or more cleanup callbacks to chain.
-   * @returns The same subscription handle, for chaining.
-   */
-  compose(...teardowns: Array<() => MaybePromise>): Subscription;
 };
 
 /**
@@ -66,34 +46,14 @@ export function createSubscription(
   /** Internal mutable subscription state */
   let _unsubscribed = false;
 
-  const extras: Array<() => MaybePromise> = [];
-
-  const runTeardowns = (): MaybePromise => {
-    const results: MaybePromise[] = [];
-
-    const run = (fn?: () => MaybePromise) => {
-      try {
-        const result = fn?.();
-        if (result && typeof (result as PromiseLike<void>).then === "function") {
-          results.push(result);
-        }
-      } catch (err) {
-        console.error("Error during unsubscribe callback:", err);
-      }
-    };
-
-    run(teardown);
-    for (const extra of extras) run(extra);
-
-    if (results.length > 0) {
-      return Promise.all(results).then(() => undefined);
-    }
-  };
-
   const unsubscribe = (): MaybePromise => {
     if (!_unsubscribed) {
       _unsubscribed = true;
-      return runTeardowns();
+      try {
+        return teardown?.();
+      } catch (err) {
+        console.error("Error during unsubscribe callback:", err);
+      }
     }
   };
 
@@ -102,28 +62,6 @@ export function createSubscription(
   Object.defineProperty(subscription, "unsubscribed", {
     get: () => _unsubscribed,
   });
-
-  subscription.compose = (
-    ...additional: Array<() => MaybePromise>
-  ): Subscription => {
-    if (_unsubscribed) {
-      for (const fn of additional) {
-        try {
-          const result = fn();
-          if (result && typeof (result as PromiseLike<void>).then === "function") {
-            result.catch((err: any) =>
-              console.error("Error during compose teardown callback:", err)
-            );
-          }
-        } catch (err) {
-          console.error("Error during compose teardown callback:", err);
-        }
-      }
-    } else {
-      extras.push(...additional);
-    }
-    return subscription;
-  };
 
   return subscription;
 }
