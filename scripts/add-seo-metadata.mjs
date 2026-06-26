@@ -54,6 +54,12 @@ const PAGE_METADATA = {
     keywords: ['subjects', 'event emitters', 'multicast', 'subscriptions', 'reactivity', 'event handling']
   },
 
+  'ATOMS.md': {
+    title: 'Atoms - Reactive State Primitives | streamix',
+    description: 'Meet atom, the tiny reactive state primitive behind streamix. Learn how to create, update, and subscribe to reactive values.',
+    keywords: ['atom', 'reactive state', 'state management', 'observable', 'subscription', 'reactivity', 'typescript']
+  },
+
   // =================================================================
   // FRAMEWORK INTEGRATIONS
   // =================================================================
