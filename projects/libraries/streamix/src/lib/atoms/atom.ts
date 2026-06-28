@@ -897,12 +897,28 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
 
 export function derived<T>(fn: (track: <A>(atom: Atom<A>) => A) => T | Promise<T>, options?: AtomOptions): Atom<T>;
 export function derived<T>(fn: () => T | Promise<T>, options?: AtomOptions): Atom<T>;
+export function derived<T, A>(source: Atom<A>, fn: (a: A) => T, options?: AtomOptions): Atom<T>;
+export function derived<T, A, B>(sources: [Atom<A>, Atom<B>], fn: (a: A, b: B) => T, options?: AtomOptions): Atom<T>;
+export function derived<T, A, B, C>(sources: [Atom<A>, Atom<B>, Atom<C>], fn: (a: A, b: B, c: C) => T, options?: AtomOptions): Atom<T>;
+export function derived<T, A, B, C, D>(sources: [Atom<A>, Atom<B>, Atom<C>, Atom<D>], fn: (a: A, b: B, c: C, d: D) => T, options?: AtomOptions): Atom<T>;
+export function derived<T, A, B, C, D, E>(sources: [Atom<A>, Atom<B>, Atom<C>, Atom<D>, Atom<E>], fn: (a: A, b: B, c: C, d: D, e: E) => T, options?: AtomOptions): Atom<T>;
 export function derived<T>(...args: any[]): Atom<T> {
   let fn: () => any;
   let options: AtomOptions | undefined;
 
-  fn = args[0];
-  options = args[1];
+  if (typeof args[0] === "function") {
+    fn = args[0];
+    options = args[1];
+  } else {
+    const sources = Array.isArray(args[0]) ? args[0] : [args[0]];
+    const valueFn = args[1] as (...values: any[]) => any;
+    options = args[2];
+    fn = () => {
+      const values = sources.map((s: Atom<any>) => s.value);
+      if (values.some((v: any) => v === undefined)) return undefined;
+      return valueFn(...values);
+    };
+  }
 
   const scope = getCurrentScope();
   const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;

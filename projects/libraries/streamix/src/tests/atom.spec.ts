@@ -316,6 +316,70 @@ describe('Atom System', () => {
       b.dispose();
       d.dispose();
     });
+
+    it('should compute sync derived from a single source', async () => {
+      const source = atom(5);
+      const doubled = derived(source, s => s * 2);
+
+      expect(doubled.value).toBe(10);
+
+      source.next(7);
+      expect(doubled.value).toBe(14);
+
+      source.dispose();
+      doubled.dispose();
+    });
+
+    it('should compute sync derived from multiple sources', async () => {
+      const a = atom(1);
+      const b = atom(2);
+      const sum = derived([a, b], (x, y) => x + y);
+
+      expect(sum.value).toBe(3);
+
+      a.next(5);
+      expect(sum.value).toBe(7);
+
+      b.next(10);
+      expect(sum.value).toBe(15);
+
+      a.dispose();
+      b.dispose();
+      sum.dispose();
+    });
+
+    it('should stay undefined until all sync sources are defined', async () => {
+      const a = atom<number>();
+      const b = atom(2);
+      const sum = derived([a, b], (x, y) => x + y);
+
+      expect(sum.value).toBeUndefined();
+
+      a.next(1);
+      expect(sum.value).toBe(3);
+
+      a.dispose();
+      b.dispose();
+      sum.dispose();
+    });
+
+    it('should become undefined when a sync source becomes undefined', async () => {
+      const a = atom<number | undefined>(1);
+      const b = atom(2);
+      const sum = derived([a, b], (x, y) => (x ?? 0) + y);
+
+      expect(sum.value).toBe(3);
+
+      a.next(undefined);
+      expect(sum.value).toBeUndefined();
+
+      a.next(5);
+      expect(sum.value).toBe(7);
+
+      a.dispose();
+      b.dispose();
+      sum.dispose();
+    });
   });
 
   describe('flow()', () => {
