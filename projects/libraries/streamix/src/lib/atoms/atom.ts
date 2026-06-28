@@ -99,18 +99,73 @@ class DefaultScheduler implements Scheduler {
   private dirtyNodes = new Set<AtomNode>();
   private flushingNodes = new Set<AtomNode>();
 
+  // Min-heap of dirty nodes ordered by depth (shallow first).
+  // A node may appear multiple times if it was re-dirtied; stale entries are
+  // skipped via dirtyNodes membership and node.dirty checks.
+  private heap: AtomNode[] = [];
+  private heapSeq = 0;
+  private heapSeqMap = new WeakMap<AtomNode, number>();
+
+  private heapCompare(a: AtomNode, b: AtomNode): number {
+    if (a.depth !== b.depth) return a.depth - b.depth;
+    return (this.heapSeqMap.get(a) ?? 0) - (this.heapSeqMap.get(b) ?? 0);
+  }
+
+  private siftUp(i: number): void {
+    const node = this.heap[i];
+    while (i > 0) {
+      const parentIdx = (i - 1) >>> 1;
+      const parent = this.heap[parentIdx];
+      if (this.heapCompare(node, parent) >= 0) break;
+      this.heap[i] = parent;
+      i = parentIdx;
+    }
+    this.heap[i] = node;
+  }
+
+  private siftDown(i: number): void {
+    const node = this.heap[i];
+    const len = this.heap.length;
+    while (true) {
+      const left = (i << 1) + 1;
+      if (left >= len) break;
+      const right = left + 1;
+      let smallest = i;
+      if (this.heapCompare(this.heap[left], node) < 0) smallest = left;
+      if (right < len && this.heapCompare(this.heap[right], this.heap[smallest]) < 0) smallest = right;
+      if (smallest === i) break;
+      this.heap[i] = this.heap[smallest];
+      i = smallest;
+    }
+    this.heap[i] = node;
+  }
+
+  private heapPush(node: AtomNode): void {
+    this.heapSeqMap.set(node, this.heapSeq++);
+    this.heap.push(node);
+    this.siftUp(this.heap.length - 1);
+  }
+
+  private heapPop(): AtomNode | undefined {
+    const last = this.heap.pop();
+    if (last === undefined) return undefined;
+    if (this.heap.length === 0) return last;
+    const result = this.heap[0];
+    this.heap[0] = last;
+    this.siftDown(0);
+    return result;
+  }
+
   flush(): void {
     if (this.isFlushing) return;
     this.isFlushing = true;
 
     try {
       while (this.dirtyNodes.size > 0) {
-        // Topological sort: shallow nodes first
-        const sorted = Array.from(this.dirtyNodes).sort((a, b) => a.depth - b.depth);
-        this.dirtyNodes.clear();
-
-        for (const node of sorted) {
-          if (node.dirty && !this.flushingNodes.has(node)) {
+        let node = this.heapPop();
+        while (node !== undefined) {
+          if (this.dirtyNodes.has(node) && node.dirty && !this.flushingNodes.has(node)) {
+            this.dirtyNodes.delete(node);
             this.flushingNodes.add(node);
             try {
               node.flush();
@@ -119,11 +174,13 @@ class DefaultScheduler implements Scheduler {
               this.flushingNodes.delete(node);
             }
           }
+          node = this.heapPop();
         }
       }
     } finally {
       this.isFlushing = false;
       this.isBatchScheduled = false;
+      this.heap.length = 0;
     }
   }
 
@@ -145,7 +202,9 @@ class DefaultScheduler implements Scheduler {
   }
 
   queueFlush(node: AtomNode): void {
+    const added = !this.dirtyNodes.has(node);
     this.dirtyNodes.add(node);
+    if (added) this.heapPush(node);
     if (this.isBatchScheduled) return;
 
     this.isBatchScheduled = true;
