@@ -155,7 +155,7 @@ describe('Atom System', () => {
 
     it('should compute derived value from atom source', async () => {
       const source = atom(5);
-      const doubled = derived(source, s => s * 2);
+      const doubled = derived(() => source.value * 2);
       expect(doubled.value).toBe(10);
       source.next(10);
       expect(doubled.value).toBe(20);
@@ -166,7 +166,7 @@ describe('Atom System', () => {
     it('should compute derived value from multiple atom sources', async () => {
       const a = atom(1);
       const b = atom(2);
-      const sum = derived([a, b], (x, y) => x + y);
+      const sum = derived(() => a.value + b.value);
       expect(sum.value).toBe(3);
       a.next(5);
       expect(sum.value).toBe(7);
@@ -250,6 +250,70 @@ describe('Atom System', () => {
       expect(d.disposed).toBe(true);
       
       source.dispose();
+      d.dispose();
+    });
+
+    it('should resolve async derived value from Promise factory', async () => {
+      const source = atom(5);
+      const doubled = derived(() => Promise.resolve(source.value * 2));
+
+      expect(doubled.value).toBeUndefined();
+
+      await delay();
+      expect(doubled.value).toBe(10);
+
+      source.next(7);
+      await delay();
+      expect(doubled.value).toBe(14);
+
+      source.dispose();
+      doubled.dispose();
+    });
+
+    it('should ignore stale promise when dependency changes', async () => {
+      const source = atom(1);
+      const asyncDerived = derived(() => {
+        const value = source.value;
+        return new Promise<number>(resolve => {
+          setTimeout(() => resolve(value * 10), 20);
+        });
+      });
+
+      expect(asyncDerived.value).toBeUndefined();
+
+      source.next(2);
+      await delay(30);
+      expect(asyncDerived.value).toBe(20);
+
+      source.dispose();
+      asyncDerived.dispose();
+    });
+
+    it('should track dependencies across await with explicit track function', async () => {
+      const a = atom(1);
+      const b = atom(2);
+
+      const d = derived(async (track) => {
+        await delay(5);
+        return track(a) + track(b);
+      });
+
+      expect(d.value).toBeUndefined();
+      await delay(10);
+      expect(d.value).toBe(3);
+
+      a.next(5);
+      expect(d.value).toBe(3); // old value until async recompute resolves
+      await delay(10);
+      expect(d.value).toBe(7);
+
+      b.next(10);
+      expect(d.value).toBe(7); // old value until async recompute resolves
+      await delay(10);
+      expect(d.value).toBe(15);
+
+      a.dispose();
+      b.dispose();
       d.dispose();
     });
   });

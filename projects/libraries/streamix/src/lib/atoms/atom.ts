@@ -1,5 +1,5 @@
 import { iterate } from "./iterate";
-import { type MaybePromise } from "./operator";
+import { isPromiseLike, type MaybePromise } from "./operator";
 
 import {
   getCurrentScope,
@@ -164,14 +164,16 @@ class DefaultScheduler implements Scheduler {
       while (this.dirtyNodes.size > 0) {
         let node = this.heapPop();
         while (node !== undefined) {
-          if (this.dirtyNodes.has(node) && node.dirty && !this.flushingNodes.has(node)) {
+          if (this.dirtyNodes.has(node) && !this.flushingNodes.has(node)) {
             this.dirtyNodes.delete(node);
-            this.flushingNodes.add(node);
-            try {
-              node.flush();
-              node.dirty = false;
-            } finally {
-              this.flushingNodes.delete(node);
+            if (node.dirty) {
+              this.flushingNodes.add(node);
+              try {
+                node.flush();
+                node.dirty = false;
+              } finally {
+                this.flushingNodes.delete(node);
+              }
             }
           }
           node = this.heapPop();
@@ -202,9 +204,8 @@ class DefaultScheduler implements Scheduler {
   }
 
   queueFlush(node: AtomNode): void {
-    const added = !this.dirtyNodes.has(node);
     this.dirtyNodes.add(node);
-    if (added) this.heapPush(node);
+    this.heapPush(node);
     if (this.isBatchScheduled) return;
 
     this.isBatchScheduled = true;
@@ -894,25 +895,14 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
  * derived() - Computed Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
-export function derived<T>(fn: () => T, options?: AtomOptions): Atom<T>;
-export function derived<T, A>(source: Atom<A>, fn: (a: A) => T, options?: AtomOptions): Atom<T>;
-export function derived<T, A, B>(sources: [Atom<A>, Atom<B>], fn: (a: A, b: B) => T, options?: AtomOptions): Atom<T>;
-export function derived<T, A, B, C>(sources: [Atom<A>, Atom<B>, Atom<C>], fn: (a: A, b: B, c: C) => T, options?: AtomOptions): Atom<T>;
-export function derived<T, A, B, C, D>(sources: [Atom<A>, Atom<B>, Atom<C>, Atom<D>], fn: (a: A, b: B, c: C, d: D) => T, options?: AtomOptions): Atom<T>;
-export function derived<T, A, B, C, D, E>(sources: [Atom<A>, Atom<B>, Atom<C>, Atom<D>, Atom<E>], fn: (a: A, b: B, c: C, d: D, e: E) => T, options?: AtomOptions): Atom<T>;
+export function derived<T>(fn: (track: <A>(atom: Atom<A>) => A) => T | Promise<T>, options?: AtomOptions): Atom<T>;
+export function derived<T>(fn: () => T | Promise<T>, options?: AtomOptions): Atom<T>;
 export function derived<T>(...args: any[]): Atom<T> {
   let fn: () => any;
   let options: AtomOptions | undefined;
 
-  if (typeof args[0] === "function") {
-    fn = args[0];
-    options = args[1];
-  } else {
-    const sources = Array.isArray(args[0]) ? args[0] : [args[0]];
-    const valueFn = args[1] as (...values: any[]) => any;
-    options = args[2];
-    fn = () => valueFn(...sources.map((s: Atom<any>) => s.value));
-  }
+  fn = args[0];
+  options = args[1];
 
   const scope = getCurrentScope();
   const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
@@ -929,6 +919,7 @@ export function derived<T>(...args: any[]): Atom<T> {
   let errorValue: any = undefined;
   let isErrorState = false;
   let notifyPending = false;
+  let promiseGeneration = 0;
 
   const errorHandlers = new Set<(error: any) => void>();
   const subs = createSubscriberSet<T>(errorHandlers, analog);
@@ -937,72 +928,7 @@ export function derived<T>(...args: any[]): Atom<T> {
 
   const broadcast = () => subs.broadcast(current, previous);
 
-  /** Core computation: tracks deps, runs fn, returns value */
-  const compute = (): T => {
-    if (running) throw new Error("Circular dependency detected in derived()");
-
-    const oldDeps = new Set(depSubscriptions.keys());
-    dependencies.clear();
-    running = true;
-
-    try {
-      const { result, context } = (function withTracking() {
-        const ctx = pushFormulaContext();
-        try {
-          return { result: fn(), context: ctx };
-        } finally {
-          popFormulaContext();
-        }
-      })();
-
-      initialized = true;
-
-      // Cleanup stale deps
-      for (const dep of oldDeps) {
-        if (!context.dependencies.has(dep)) {
-          depSubscriptions.get(dep)?.();
-          depSubscriptions.delete(dep);
-        }
-      }
-
-      // Setup new deps
-      let maxDepth = -1;
-      for (const dep of context.dependencies) {
-        dependencies.add(dep);
-        if (dep[NODE]?.depth > maxDepth) maxDepth = dep[NODE].depth;
-
-        if (!depSubscriptions.has(dep)) {
-          const handler = () => {
-            if (disposed) return;
-
-            if (node.isAnalog && subs.size === 0) {
-              node.dirty = true;
-              return;
-            }
-
-            instance[MARK_DIRTY]();
-          };
-          addAtomChangeHandler(dep as any, handler);
-          depSubscriptions.set(dep, createSubscription(() => {
-            removeAtomChangeHandler(dep as any, handler);
-          }));
-        }
-      }
-      node.depth = maxDepth + 1;
-      return result;
-    } finally {
-      running = false;
-    }
-  };
-
-  /** Performs state transition if computation changes value */
-  const recompute = () => {
-    const next = compute();
-    node.dirty = false;
-
-    isErrorState = false;
-    errorValue = undefined;
-
+  const commitValue = (next: T) => {
     if (Object.is(current, next)) return;
 
     previous = current;
@@ -1016,6 +942,106 @@ export function derived<T>(...args: any[]): Atom<T> {
     } else if (subs.size > 0) {
       broadcast();
     }
+  };
+
+  const processDependencies = (context: FormulaContext) => {
+    const oldDeps = new Set(depSubscriptions.keys());
+    dependencies.clear();
+
+    for (const dep of oldDeps) {
+      if (!context.dependencies.has(dep)) {
+        depSubscriptions.get(dep)?.();
+        depSubscriptions.delete(dep);
+      }
+    }
+
+    let maxDepth = -1;
+    for (const dep of context.dependencies) {
+      dependencies.add(dep);
+      if (dep[NODE]?.depth > maxDepth) maxDepth = dep[NODE].depth;
+
+      if (!depSubscriptions.has(dep)) {
+        const handler = () => {
+          if (disposed) return;
+
+          if (node.isAnalog && subs.size === 0) {
+            node.dirty = true;
+            return;
+          }
+
+          instance[MARK_DIRTY]();
+        };
+        addAtomChangeHandler(dep as any, handler);
+        depSubscriptions.set(dep, createSubscription(() => {
+          removeAtomChangeHandler(dep as any, handler);
+        }));
+      }
+    }
+    node.depth = maxDepth + 1;
+  };
+
+  const handleAsyncResult = (promise: Promise<T>, generation: number, context: FormulaContext) => {
+    promise.then(
+      (value) => {
+        if (disposed || promiseGeneration !== generation) return;
+        processDependencies(context);
+        isErrorState = false;
+        errorValue = undefined;
+        markAtomAsEmitted(instance as any);
+        commitValue(value);
+      },
+      (err) => {
+        if (disposed || promiseGeneration !== generation) return;
+        processDependencies(context);
+        errorValue = normalizeError(err);
+        isErrorState = true;
+        if (terminateOnError) {
+          instance.dispose();
+        } else if (propagateErrors) {
+          broadcast();
+        }
+      }
+    );
+  };
+
+  /** Core computation: tracks deps, runs fn, returns value */
+  const compute = (): { result: T | Promise<T>; context: FormulaContext } => {
+    if (running) throw new Error("Circular dependency detected in derived()");
+
+    running = true;
+    const ctx = pushFormulaContext();
+
+    const track = <A>(atom: Atom<A>): A => {
+      ctx.dependencies.add(atom as unknown as InternalAtomContainer);
+      return atom.value;
+    };
+
+    try {
+      const result = fn.length > 0 ? (fn as any)(track) : fn();
+      initialized = true;
+      processDependencies(ctx);
+      return { result, context: ctx };
+    } finally {
+      popFormulaContext();
+      running = false;
+    }
+  };
+
+  /** Performs state transition if computation changes value */
+  const recompute = () => {
+    const { result: next, context } = compute();
+    node.dirty = false;
+
+    isErrorState = false;
+    errorValue = undefined;
+
+    if (isPromiseLike(next)) {
+      promiseGeneration++;
+      handleAsyncResult(Promise.resolve(next), promiseGeneration, context);
+      return;
+    }
+
+    commitValue(next);
   };
 
   const flushInternal = () => {
@@ -1070,9 +1096,15 @@ export function derived<T>(...args: any[]): Atom<T> {
       // until a dependency change triggers a recompute.
       if (!initialized) {
         try {
-          current = compute();
-          previous = current;
-          markAtomAsEmitted(instance as any);
+          const { result, context } = compute();
+          if (isPromiseLike(result)) {
+            promiseGeneration++;
+            handleAsyncResult(Promise.resolve(result), promiseGeneration, context);
+          } else {
+            current = result;
+            previous = current;
+            markAtomAsEmitted(instance as any);
+          }
         } catch (err) {
           initialized = true;
           errorValue = normalizeError(err);

@@ -145,7 +145,6 @@ export function createAsyncCoordinator(
   let iteratorReturned = false;
   let activeCount = sources.length;
   let batchDepth = 0;
-  let notifyPending = false;
 
   // Optional key -> source iterator mapping for reference-based removal.
   const keyToSource = new Map<any, AsyncIterator<any>>();
@@ -161,11 +160,8 @@ export function createAsyncCoordinator(
 
   function notify() {
     if (batchDepth > 0) {
-      notifyPending = true;
       return;
     }
-
-    notifyPending = false;
 
     if (!waitingResolve) return;
 
@@ -178,12 +174,6 @@ export function createAsyncCoordinator(
       const res = waitingResolve;
       waitingResolve = null;
       res(DONE);
-    }
-  }
-
-  function flushNotify() {
-    if (notifyPending) {
-      notify();
     }
   }
 
