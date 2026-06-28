@@ -498,8 +498,9 @@ export function createAsyncCoordinator(
       } finally {
         batchDepth--;
         if (batchDepth === 0) {
+          // drainSources flushes buffered events and triggers notify() now that
+          // the batch has ended.
           drainSources();
-          flushNotify();
         }
       }
     },

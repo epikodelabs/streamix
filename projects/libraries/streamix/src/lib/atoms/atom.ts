@@ -223,6 +223,15 @@ function normalizeError(err: any): Error {
  * Subscriber Set
  * ───────────────────────────────────────────────────────────────────────────*/
 
+/**
+ * Creates a subscriber set for an atom.
+ *
+ * @param conflate - If true, values emitted while a subscriber callback is still
+ *   running are coalesced: only the latest pending value is delivered once the
+ *   callback finishes. This is used in analog mode. If false, every emitted value
+ *   is still delivered sequentially (callbacks are never re-entered), but no
+ *   intermediate values are dropped.
+ */
 function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, conflate: boolean) {
   type Callback = (current: T, previous: T) => MaybePromise;
 
@@ -997,15 +1006,16 @@ export function derived<T>(...args: any[]): Atom<T> {
       const ctx = getCurrentFormulaContext();
       if (ctx) ctx.dependencies.add(instance);
 
-      // Eager initialization must precede the dirty pull: if fn() throws during
-      // recompute on an uninitialized node, initialized stays false, and the old
-      // ordering would invoke fn() a second time in the !initialized block.
+      // Eager initialization must precede the dirty pull. If the initial
+      // computation throws, mark the node initialized so the error is stable
+      // until a dependency change triggers a recompute.
       if (!initialized) {
         try {
           current = compute();
           previous = current;
           markAtomAsEmitted(instance as any);
         } catch (err) {
+          initialized = true;
           errorValue = normalizeError(err);
           isErrorState = true;
           if (terminateOnError) {
@@ -1072,6 +1082,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       disposed = true;
       markDisposed(instance);
       getScheduler().remove(node);
+      notifyPending = false;
       
       for (const sub of depSubscriptions.values()) sub();
       depSubscriptions.clear();
