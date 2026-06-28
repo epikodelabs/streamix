@@ -24,6 +24,16 @@ export type RunnerEvent<T> =
   | { type: "complete"; sourceIndex: number }
   | { type: "error"; error: any; sourceIndex: number };
 
+/**
+ * Options for {@link createAsyncCoordinator}.
+ */
+export interface AsyncCoordinatorOptions {
+  /**
+   * If true, drain initial sources synchronously instead of deferring to a microtask.
+   */
+  syncDrain?: boolean;
+}
+
 
 /**
  * An async iterator that coordinates multiple sources.
@@ -47,15 +57,29 @@ export interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
   /**
    * Dynamically add a new source to the coordinator.
    * @param source - The async iterator to add.
+   * @param key - Optional key used to remove the source by reference later.
    * @returns The index assigned to the new source.
    */
-  addSource(source: AsyncIterator<T>): number;
+  addSource(source: AsyncIterator<T>, key?: any): number;
 
   /**
    * Remove a source from the coordinator and clean it up.
    * @param index - The index of the source to remove.
    */
   removeSource(index: number): Promise<void>;
+
+  /**
+   * Remove a source by the key passed to {@link addSource}.
+   * @param key - The key of the source to remove.
+   */
+  removeSourceByKey(key: any): Promise<void>;
+
+  /**
+   * Batch multiple source additions/removals and emit a single notification
+   * after the batch completes.
+   * @param callback - Function that performs source changes.
+   */
+  batch(callback: () => void): void;
 
   /**
    * Get the number of currently active (non-completed, non-removed) sources.
@@ -100,7 +124,8 @@ export interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
  * ```
  */
 export function createAsyncCoordinator(
-  sources: AsyncIterator<any>[] = []
+  sources: AsyncIterator<any>[] = [],
+  options?: AsyncCoordinatorOptions
 ): AsyncCoordinator<any> {
   type CoordinatorQueueItem = {
     result: IteratorResult<RunnerEvent<any>>;
@@ -118,7 +143,12 @@ export function createAsyncCoordinator(
   let waitingResolve: ((v: any) => void) | null = null;
   let isDraining = false;
   let iteratorReturned = false;
-    let activeCount = sources.length;
+  let activeCount = sources.length;
+  let batchDepth = 0;
+  let notifyPending = false;
+
+  // Optional key -> source iterator mapping for reference-based removal.
+  const keyToSource = new Map<any, AsyncIterator<any>>();
 
   const allDone = () => activeCount === 0;
 
@@ -130,6 +160,13 @@ export function createAsyncCoordinator(
   }
 
   function notify() {
+    if (batchDepth > 0) {
+      notifyPending = true;
+      return;
+    }
+
+    notifyPending = false;
+
     if (!waitingResolve) return;
 
     if (queue.length > 0) {
@@ -141,6 +178,12 @@ export function createAsyncCoordinator(
       const res = waitingResolve;
       waitingResolve = null;
       res(DONE);
+    }
+  }
+
+  function flushNotify() {
+    if (notifyPending) {
+      notify();
     }
   }
 
@@ -346,9 +389,10 @@ export function createAsyncCoordinator(
      * The source will be immediately wired for push notifications and drained.
      * 
      * @param source AsyncIterator to add
+     * @param key Optional key for reference-based removal
      * @returns The index assigned to this source (for tracking)
      */
-    addSource(source: AsyncIterator<any>): number {
+    addSource(source: AsyncIterator<any>, key?: any): number {
       if (iteratorReturned) {
         throw new Error('Cannot add source to returned coordinator');
       }
@@ -368,6 +412,10 @@ export function createAsyncCoordinator(
         pendingPulls.push(false);
       }
       activeCount++;
+
+      if (key !== undefined) {
+        keyToSource.set(key, source);
+      }
 
       // Wire up push notification
       wireSource(source, index);
@@ -389,6 +437,14 @@ export function createAsyncCoordinator(
 
       const source = sourceList[index];
       if (!source) return;
+
+      // Clean up key mapping
+      for (const [key, mappedSource] of keyToSource.entries()) {
+        if (mappedSource === source) {
+          keyToSource.delete(key);
+          break;
+        }
+      }
 
       // Mark as completed and clear the slot
       if (!completed[index]) {
@@ -413,6 +469,42 @@ export function createAsyncCoordinator(
     },
 
     /**
+     * Remove a source by the key passed to {@link addSource}.
+     * 
+     * @param key Key of the source to remove
+     */
+    async removeSourceByKey(key: any): Promise<void> {
+      const source = keyToSource.get(key);
+      if (!source) return;
+
+      const index = sourceList.indexOf(source);
+      if (index >= 0) {
+        await iterator.removeSource(index);
+      } else {
+        keyToSource.delete(key);
+      }
+    },
+
+    /**
+     * Batch multiple source additions/removals and emit a single notification
+     * after the batch completes.
+     * 
+     * @param callback Function that performs source changes
+     */
+    batch(callback: () => void): void {
+      batchDepth++;
+      try {
+        callback();
+      } finally {
+        batchDepth--;
+        if (batchDepth === 0) {
+          drainSources();
+          flushNotify();
+        }
+      }
+    },
+
+    /**
      * Get the count of currently active (non-completed, non-removed) sources.
      * 
      * @returns Number of active sources
@@ -433,9 +525,13 @@ export function createAsyncCoordinator(
     }
   };
 
-  // Initial drain - schedule to prevent blocking
+  // Initial drain - sync or microtask based on options
   if (sources.length > 0) {
-    Promise.resolve().then(() => drainSources());
+    if (options?.syncDrain) {
+      drainSources();
+    } else {
+      Promise.resolve().then(() => drainSources());
+    }
   }
 
   return iterator as AsyncCoordinator<any>;

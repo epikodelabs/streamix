@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://epikodelabs.github.io/streamix/LOGO.png" alt="Streamix" width="380">
+  <img src="https://epikodelabs.github.io/streamix/LOGO.png" alt="streamix" width="380">
 </p>
 
 <p align="center">
@@ -21,15 +21,7 @@
   </a>
 </p>
 
-<br>
-
-<p align="center">
-  <img src="https://epikodelabs.github.io/streamix/presentation.gif" width="100%">
-</p>
-
----
-
-Streamix is a reactive streams library built on async generators. Values are computed on demand — consumers pull, producers don't push blindly. The result is natural backpressure, predictable memory use, and a `for await...of`-first API that composes well with modern TypeScript.
+streamix is a reactive streams library built on async generators. Values are computed on demand — consumers pull, producers don't push blindly. The result is natural backpressure, predictable memory use, and a `for await...of`-first API that composes well with modern TypeScript.
 
 ```bash
 npm install @epikodelabs/streamix
@@ -39,7 +31,9 @@ npm install @epikodelabs/streamix
 
 ## Core concepts
 
-### Streams
+### Streams (Legacy)
+
+> **Deprecated:** The imperative `createStream` API shown in this section is deprecated and no longer exported from `@epikodelabs/streamix`. New code should build async sequences with [`atom`](/ATOMS), [`flow`](/ATOMS), [`loop`](/api/#function-loop), or plain async generators combined with [`pipe`](/api/#function-pipe).
 
 A stream is an async iterable sequence. You can iterate it directly or pipe it through operators.
 
@@ -150,23 +144,30 @@ Resolves to the first emitted value and unsubscribes automatically.
 
 ## Coroutines
 
-Offload heavy work to Web Workers without losing stream composability.
+Offload heavy work to Web Workers without losing composability.
 
 ```ts
-import { actor, compose, compute, pipe } from '@epikodelabs/streamix';
+import { actor, compose, compute, coroutine, main } from '@epikodelabs/streamix/coroutines';
 
 // Run a function in a worker pool
-const result = await compute(() => heavyCalculation());
-
-// Run a whole pipeline in the background
-const background = compose(pipe(source, map(expensiveTransform)));
+const square = coroutine(function square(value: number) {
+  return value * value;
+});
+const result = await square.processTask(7); // 49
+await square.finalize();
 
 // Long-lived stateful worker
-const counter = actor({ count: 0 }, (state, msg) => {
-  if (msg === 'increment') return { count: state.count + 1 };
+const counter = actor('counter', (msg: { action: 'inc' | 'get' }, state: number) => {
+  if (msg.action === 'inc') return state + 1;
   return state;
-});
+}, 0);
+
+const one = await main.outbox.request(counter, 'update', { action: 'inc' }); // 1
+const two = await main.outbox.request(counter, 'update', { action: 'inc' }); // 2
+await main.outbox.stop(counter);
 ```
+
+Worker functions are serialized and run in isolation, so they must be self-contained. streamix APIs are not available inside Web Workers.
 
 ---
 
@@ -189,7 +190,7 @@ for await (const data of api.get('/items', readJson)) {
 
 ## Why pull-based?
 
-Most reactive libraries push values eagerly. Streamix pulls — the consumer asks for the next value, and only then is it computed.
+Most reactive libraries push values eagerly. streamix pulls — the consumer asks for the next value, and only then is it computed.
 
 ```ts
 async function* primes() {
@@ -201,7 +202,7 @@ async function* primes() {
 }
 
 // Only 5 primes are ever computed
-for await (const p of pipe(createStream('primes', primes), take(5))) {
+for await (const p of pipe(primes, take(5))) {
   console.log(p);
 }
 ```
@@ -210,9 +211,9 @@ This gives you on-demand computation, bounded memory, and consumer-driven backpr
 
 ---
 
-## Streamix vs RxJS
+## streamix vs RxJS
 
-| | Streamix | RxJS |
+| | streamix | RxJS |
 |--|----------|------|
 | Execution model | Pull-based (lazy) | Push-based (eager) |
 | Backpressure | Consumer-driven | Manual patterns required |
@@ -228,8 +229,6 @@ This gives you on-demand computation, bounded memory, and consumer-driven backpr
 - [npm](https://www.npmjs.com/package/@epikodelabs/streamix)
 - [GitHub](https://github.com/epikodelabs/streamix)
 - [Give feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
-
-**Live demos:** [Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk) · [Heavy computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz) · [Travel blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w)
 
 ---
 

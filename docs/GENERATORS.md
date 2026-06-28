@@ -1,8 +1,10 @@
-# 🚀 Understanding Async Generators and Streamix
+# 🚀 Understanding Async Generators
 
 Async generators are great. What if we just add operator pipelines to them?
 
 That's Streamix—a library that wraps async generators with composable operators while keeping the pull-based semantics intact.
+
+> **Legacy API:** The imperative `createStream` API is deprecated and no longer exported from `@epikodelabs/streamix`. The examples below use the current atom-based API: [`pipe`](/api/#function-pipe) / [`from`](/api/#function-from) for operator pipelines, and [`flow`](/ATOMS) / [`loop`](/api/#function-loop) / [`listen`](/api/#function-listen) for shared hot sources.
 
 ```bash
 npm install @epikodelabs/streamix
@@ -16,7 +18,7 @@ npm install @epikodelabs/streamix
 - Multicast when you need shared execution
 - ~9-11 KB gzipped, zero dependencies
 
---- 
+---
 
 ## 💡 The Idea
 
@@ -31,43 +33,20 @@ async function* bedtimeStory() {
   yield "The end!";
 }
 
-// You control when to turn pages
 for await (const page of bedtimeStory()) {
   console.log(page);
-  await ask("Ready for next page?");
 }
 ```
 
-But chaining transformations requires nested functions:
-
-```typescript
-async function* filtered(source) {
-  for await (const value of source) {
-    if (value % 2 === 0) yield value;
-  }
-}
-
-async function* mapped(source) {
-  for await (const value of source) {
-    yield value * 2;
-  }
-}
-
-// Gets messy quickly
-for await (const n of mapped(filtered(numbers()))) {
-  console.log(n);
-}
-```
-
-**The solution:** Add operator pipelines.
+But chaining transformations requires nested functions. streamix adds operator pipelines:
 
 ```typescript
 import { filter, from, map, pipe } from '@epikodelabs/streamix';
 
 const theaterShow = pipe(
-    from(bedtimeStory()),
-    map(page => page.toUpperCase()),
-    filter(page => page.includes("DRAGON"))
+  from(bedtimeStory()),
+  map(page => page.toUpperCase()),
+  filter(page => page.includes("DRAGON"))
 );
 
 for await (const scene of theaterShow) {
@@ -75,7 +54,7 @@ for await (const scene of theaterShow) {
 }
 ```
 
-Same behavior, cleaner syntax. The generator stays pull-based—Streamix just adds the pipeline.
+Same behavior, cleaner syntax. The generator stays pull-based.
 
 ---
 
@@ -84,26 +63,22 @@ Same behavior, cleaner syntax. The generator stays pull-based—Streamix just ad
 ```typescript
 import { filter, from, map, pipe, take } from '@epikodelabs/streamix';
 
-// Simple async generator - counting sheep
-async function* countSheep(total) {
+async function* countSheep(total: number) {
   for (let i = 1; i <= total; i++) {
     yield `Sheep #${i}`;
     await new Promise(r => setTimeout(r, 500));
   }
 }
 
-// Add operator pipeline
 const sleepyTime = pipe(
-    from(countSheep(100)),
-    filter(sheep => !sheep.includes("13")), // No unlucky sheep
-    map(sheep => sheep + " zzz"),
-    take(10)
+  from(countSheep(100)),
+  filter(sheep => !sheep.includes("13")),
+  map(sheep => sheep + " zzz"),
+  take(10)
 );
 
-// Pull values with for-await-of
 for await (const sheep of sleepyTime) {
   console.log(sheep);
-  // Output: Sheep #1 zzz, Sheep #2 zzz, ...
 }
 
 // Or use subscribe
@@ -114,148 +89,42 @@ sleepyTime.subscribe(sheep => console.log(sheep));
 
 ## 🎣 Pull Semantics Preserved
 
-**Pull:** Consumer requests values. Producer waits.
+**Pull:** consumer requests values, producer waits.
 
 ```typescript
-// You're fishing
 for await (const fish of fishingTrip()) {
-  await cookFish(fish); // Cook each before getting next
+  await cookFish(fish);
   console.log("Yum!");
 }
 ```
 
-This is different from push-based observables where the producer decides when to emit.
-
-Streamix keeps this pull behavior even when you use `subscribe()`. The callback style is implemented using internal buffering over pull-based iteration—the consumer's pace still controls the producer.
-
----
-
-## 🔧 Creating Streams
-
-Use `createStream` to wrap generators with operator support:
-
-```typescript
-const powerUps = createStream('game', signal => {
-  return async function*() {
-    while (!signal.aborted) {
-      await sleep(1000);
-      yield ["Star", "Mushroom", "Fire Flower"][Math.random() * 3 | 0];
-    }
-  }();
-});
-
-// Now you can pipe operators
-const player = pipe(
-  powerUps,
-  filter(power => power !== "Mushroom"),
-  map(power => `Collected: ${power}`)
-);
-
-player.subscribe(power => {
-  console.log(power);
-  increaseScore();
-});
-```
-
-Multiple subscribers share execution (multicast):
-
-```typescript
-const movie = createStream('blockbuster', signal => {
-  return async function*() {
-    yield "Scene 1: Explosion!";
-    yield "Scene 2: Chase scene!";
-    yield "Scene 3: Happy ending!";
-  }();
-});
-
-// Two friends watching
-movie.subscribe(scene => console.log("Friend A:", scene));
-movie.subscribe(scene => console.log("Friend B:", scene));
-// Both see the same movie at similar times
-```
-
-The `signal` parameter lets you detect when all subscribers leave:
-
-```typescript
-createStream('websocket', signal => {
-  const ws = new WebSocket(url);
-  
-  signal.addEventListener('abort', () => ws.close());
-  
-  return async function*() {
-    try {
-      for await (const msg of websocketMessages(ws)) {
-        if (signal.aborted) break;
-        yield msg;
-      }
-    } finally {
-      ws.close();
-    }
-  }();
-});
-```
-
----
-
-## 🎬 Consuming Streams
-
-### for-await-of
-
-Direct iteration when you need control:
-
-```typescript
-// Like watching a play where you say "Next scene please!"
-for await (const scene of theaterShow) {
-  console.log("Scene:", scene);
-  await eatPopcorn(); // Take your time
-  
-  if (shouldStop()) break;
-}
-```
-
-### subscribe()
-
-Callback-based when you don't need loop control:
-
-```typescript
-// Like a regular movie theater
-const ticket = theaterShow.subscribe({
-  next: scene => console.log("Watching:", scene),
-  error: err => console.error("Error:", err),
-  complete: () => console.log("The end!")
-});
-
-// Leave early if you want
-ticket();
-```
+streamix keeps this pull behavior even with `subscribe()`. The callback style is implemented using internal buffering over pull-based iteration—the consumer's pace still controls the producer.
 
 ---
 
 ## 🔁 / 🔂 Multicast vs Unicast
- 
-**Multicast** (from `createStream`): Shared execution
+
+**Unicast** (`pipe` from an async generator): each consumer gets its own iterator.
 
 ```typescript
-const toyBox = createStream('toys', async function* () {
-  yield "Car";
-  yield "Teddy";
-  yield "Dice";
-});
-
-// Two kids want the same toy box
-const kid1 = toyBox.subscribe(toy => console.log("Kid 1:", toy));
-const kid2 = toyBox.subscribe(toy => console.log("Kid 2:", toy));
-// They have to SHARE the toys
-```
-
-**Unicast** (from `pipe()`): Independent execution
-
-```typescript
-const piped = pipe(toyBox, map(toy => toy.toUpperCase()));
+const piped = pipe(
+  from(toyBox()),
+  map(toy => toy.toUpperCase())
+);
 
 for await (const toy of piped) { /* chain 1 */ }
 for await (const toy of piped) { /* chain 2 */ }
-// Each creates new iterator chain
+```
+
+**Multicast** ([`flow`](/ATOMS) / [`listen`](/api/#function-listen)): shared execution across subscribers.
+
+```typescript
+import { flow } from '@epikodelabs/streamix';
+
+const shared = flow(toyBox());
+
+shared.subscribe(toy => console.log("Kid 1:", toy));
+shared.subscribe(toy => console.log("Kid 2:", toy));
 ```
 
 ---
@@ -265,44 +134,28 @@ for await (const toy of piped) { /* chain 2 */ }
 Natural backpressure is preserved—slow consumers pause producers:
 
 ```typescript
-// The "Too Much Candy" Problem
-const candyMachine = createStream('candy', async function* (signal: AbortSignal) {
+async function* candyMachine(signal: AbortSignal) {
   while (!signal.aborted) {
     yield "Candy!";
-    // Makes candy REALLY fast
+    await delay(100);
   }
-});
+}
 
-// If you eat slowly...
-for await (const candy of candyMachine) {
-  await chewSlowly(2000); // Takes 2 seconds to eat
-  // Candy piles up in the machine while you're chewing
+const candies = flow(candyMachine); // flow owns the AbortSignal
+
+for await (const candy of candies) {
+  await chewSlowly(2000);
 }
 ```
 
-When producer outpaces consumer, values accumulate in an internal queue. The queue is unbounded—monitor memory if producer is consistently faster.
+When a producer outpaces a consumer, values accumulate in an internal queue. The queue is unbounded—monitor memory if the producer is consistently faster.
 
 **Managing queue growth:**
 
 ```typescript
-// Solution: Make the machine slower or eat faster
-
-// Limit items
-pipe(candyMachine, take(100))
-
-// Throttle
-pipe(candyMachine, throttle(100))
-
-// Sample
-pipe(candyMachine, filter((_, i) => i % 10 === 0))
-
-// Or slow down producer
-async function*() {
-  while (!signal.aborted) {
-    yield "Candy!";
-    await delay(100); // Pace production
-  }
-}
+pipe(candies, take(100));
+pipe(candies, throttle(100));
+pipe(candies, filter((_, i) => i % 10 === 0));
 ```
 
 ---
@@ -312,44 +165,42 @@ async function*() {
 `finally` blocks always run:
 
 ```typescript
-const messyStream = createStream('paint', async function* (signal: AbortSignal) {
+async function* paintJob(signal: AbortSignal) {
   try {
     yield "Red paint";
     yield "Blue paint";
     yield "Green paint";
   } finally {
-    console.log("Cleaning brushes!"); // Always happens
-  }
-});
-
-// Even if you spill paint and stop...
-for await (const paint of messyStream) {
-  if (paint === "Blue") {
-    console.log("Blue everywhere!");
-    break; // Oops
+    console.log("Cleaning brushes!");
   }
 }
-// Output: Cleaning brushes! (Still cleans up)
+
+const paints = flow(paintJob);
+
+for await (const paint of paints) {
+  if (paint === "Blue") break;
+}
+// Output: Cleaning brushes!
 ```
 
-Use `signal` for resource cleanup:
+Use an `AbortSignal` for resource cleanup. Pass a generator factory to `flow` so it owns the signal:
 
 ```typescript
-createStream('db', async (signal: AbortSignal) => {
+async function* dbLogs(signal: AbortSignal) {
   const db = await connect();
   signal.addEventListener('abort', () => db.close());
-  
-  return async function* () {
-    try {
-      while (!signal.aborted) {
-        yield await db.query('SELECT * FROM logs');
-        await delay(1000);
-      }
-    } finally {
-      db.close();
+
+  try {
+    while (!signal.aborted) {
+      yield await db.query('SELECT * FROM logs');
+      await delay(1000);
     }
-  }();
-});
+  } finally {
+    db.close();
+  }
+}
+
+const logs = flow(dbLogs); // flow creates and aborts the signal on disposal
 ```
 
 ---
@@ -359,22 +210,19 @@ createStream('db', async (signal: AbortSignal) => {
 ### Raindrop Race
 
 ```typescript
-// Each raindrop goes at its own pace
 async function* raindrops() {
   for (let i = 0; i < 20; i++) {
     yield `Drop ${i}`;
-    await sleep(Math.random() * 1000); // Random speed
+    await sleep(Math.random() * 1000);
   }
 }
 
-// Race them
 const race = pipe(
-    from(raindrops()),
-    map(drop => ({ drop, time: Date.now() })),
-    take(5)
+  from(raindrops()),
+  map(drop => ({ drop, time: Date.now() })),
+  take(5)
 );
 
-console.log("Ready... Set... Go!");
 for await (const finisher of race) {
   console.log(`${finisher.drop} finished!`);
 }
@@ -383,26 +231,30 @@ for await (const finisher of race) {
 ### Real-Time Metrics
 
 ```typescript
-const metrics = createStream('system', async function* (signal: AbortSignal) {
+import { flow } from '@epikodelabs/streamix';
+
+async function* metrics(signal: AbortSignal) {
   while (!signal.aborted) {
     yield await collectMetrics();
     await delay(1000);
   }
-});
+}
+
+const allMetrics = flow(metrics); // flow owns the AbortSignal
 
 const highLoad = pipe(
-  metrics,
+  allMetrics,
   filter(m => m.cpu > 80 || m.memory > 90)
 );
 
 highLoad.subscribe(sendAlert);
-metrics.subscribe(updateDashboard);
+allMetrics.subscribe(updateDashboard);
 ```
 
 ### File Processing
 
 ```typescript
-async function* readChunks(path) {
+async function* readChunks(path: string) {
   const file = await open(path);
   try {
     while (!file.eof) {
@@ -414,7 +266,7 @@ async function* readChunks(path) {
 }
 
 const errors = pipe(
-  createStream('logs', signal => readChunks('app.log')),
+  from(readChunks('app.log')),
   map(chunk => chunk.toString()),
   mergeMap(text => text.split('\n')),
   filter(line => line.includes('ERROR'))
@@ -426,47 +278,6 @@ for await (const line of errors) {
 }
 ```
 
-### Interactive Quiz
-
-```typescript
-async function* questions() {
-  yield "What's your favorite animal?";
-  await think(1000);
-  yield "What's your favorite color?";
-  await think(1000);
-  yield "Let's make a story!";
-}
-
-const quiz = pipe(
-    from(questions()),
-    map(question => `Question: ${question}`),
-    filter(question => question.includes("favorite"))
-);
-
-for await (const q of quiz) {
-  const answer = await ask(q);
-  console.log("You said:", answer);
-}
-```
-
-### API Rate Limiting
-
-```typescript
-async function* userIds() {
-  yield* [1, 2, 3, 4, 5];
-}
-
-const users = pipe(
-  createStream('users', userIds),
-  map(id => fetch(`/api/users/${id}`).then(r => r.json())),
-  filter(user => user.active)
-);
-
-for await (const user of users) {
-  await saveToDatabase(user); // Sequential, rate-limited
-}
-```
-
 ---
 
 ## When to Use
@@ -474,29 +285,19 @@ for await (const user of users) {
 | Scenario | Use |
 |----------|-----|
 | Simple iteration | Plain async generators |
-| Need operator pipelines | Streamix |
-| Hot sources (events, WebSockets) | `createStream` (multicast) |
-| Resource-intensive work | Streamix (automatic backpressure) |
-| Multiple consumers | `createStream` (multicast) |
-| Small bundle size matters | Streamix (~9KB) |
-
-**Use Streamix when:**
-- You want operator pipelines for async generators
-- Backpressure is important
-- You want reactive-style composition
-- Bundle size matters
-
-**Skip it when:**
-- Simple iteration suffices (plain async generators work fine)
-- Your team is heavily invested in another reactive library
+| Operator pipelines | [`pipe`](/api/#function-pipe) |
+| Hot sources (events, WebSockets) | [`listen`](/api/#function-listen) / [`flow`](/ATOMS) |
+| Resource-intensive work | streamix (automatic backpressure) |
+| Multiple consumers | [`flow`](/ATOMS) with shared async generators |
+| Small bundle size matters | streamix (~9KB) |
 
 ---
 
 ## Summary
 
-The core idea: **Add operator pipelines to async generators.**
+The core idea: **add operator pipelines to async generators.**
 
-Streamix keeps the pull-based semantics you get with native async iteration—consumer controls pace, natural backpressure, lazy evaluation—while adding the composability of reactive operators.
+streamix keeps the pull-based semantics you get with native async iteration—consumer controls pace, natural backpressure, lazy evaluation—while adding the composability of reactive operators.
 
 ```typescript
 // Before: nested functions
@@ -504,13 +305,11 @@ for await (const n of mapped(filtered(numbers()))) { }
 
 // After: operator pipeline
 pipe(
-    from(numbers()),
-    filter(n => n % 2 === 0),
-    map(n => n * 2)
+  from(numbers()),
+  filter(n => n % 2 === 0),
+  map(n => n * 2)
 )
 ```
-
-Same behavior, cleaner syntax, same pull semantics.
 
 ---
 

@@ -1,4 +1,11 @@
-# ⚡ Subjects
+# ⚡ Subjects (Deprecated)
+
+> **Deprecated:** Subjects are deprecated and remain available only for backward compatibility. New code should use [`atom`](/ATOMS) for reactive state and event broadcasting.
+>
+> | Before | After |
+> |--------|-------|
+> | `createSubject<T>()` | `atom<T>()` |
+> | `createBehaviorSubject(initial)` | `atom(initial)` |
 
 Subjects are hot, push-based streams that behave like every other `Stream` while letting you imperatively `next`, `complete`, or `error`. A single commit loop stamps each emission, keeps ordering deterministic, and makes sure late joins learn the terminal state instantly.
 
@@ -84,7 +91,7 @@ logger.subscribe(async v => {
 ```
 
 <p align="center">
-  <strong>Ready to stream? Get started with Streamix today! ⚙️</strong><br>
+  <strong>Ready to stream? Get started with streamix today! ⚙️</strong><br>
   <a href="https://www.npmjs.com/package/@epikodelabs/streamix">Install from NPM</a> ⚡ 
   <a href="https://github.com/actioncrew/streamix">View on GitHub</a> 📦 
   <a href="https://forms.gle/CDLvoXZqMMyp4VKu9">Give Feedback</a> 💬
