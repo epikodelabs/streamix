@@ -11,7 +11,7 @@ import { normalizeError } from "../utils/helpers";
  * @template T Type of values emitted by the source iterator.
  * @template N Type of values emitted by the notifier stream (ignored).
  * @param {Stream<N>} notifier - Stream whose emissions trigger buffer flush.
- * @returns {Operator<T, T[]>} A Streamix operator that collects values into arrays
+ * @returns {Operator<T, T[]>} A streamix operator that collects values into arrays
  *   and emits them whenever the notifier emits or the source completes.
  */
 export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
@@ -59,7 +59,7 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
      * - `return()`
      * - `throw()`
      *
-     * And two internal helpers for Streamix internals:
+     * And two internal helpers for streamix internals:
      * - `__tryNext()` — synchronous try-pull for testing and internal operators.
      * - `__hasBufferedValues()` — checks if buffer or runner has pending values.
      */
@@ -157,7 +157,7 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
       },
 
       /**
-       * Internal synchronous try-pull (used by Streamix for tests/operators).
+       * Internal synchronous try-pull (used by streamix for tests/operators).
        *
        * @returns {IteratorResult<T[]> | null} Next buffered array or null if no sync value
        */

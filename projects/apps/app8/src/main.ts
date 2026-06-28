@@ -1,7 +1,7 @@
 import { Subscription } from '@epikodelabs/streamix';
+import type { AbstractBlock } from 'million';
 import { block, mount, patch } from 'million';
 import { h } from 'million/jsx-runtime';
-import type { AbstractBlock } from 'million';
 import { TerritoryWarsService, TerritoryWarsState } from './territory-wars.service';
 
 // ONLY direct prop reads — no JS conditionals inside.
@@ -94,7 +94,7 @@ class TerritoryWarsApp {
       <div class="tw-shell">
         <header class="hero">
           <div class="hero-copy">
-            <p class="eyebrow">Streamix Actors + Million.js</p>
+            <p class="eyebrow">streamix Actors + Million.js</p>
             <h1 data-role="headline">Territory Wars</h1>
             <p class="hero-text" data-role="subtitle">
               A native, worker-driven board where your actor challenges a rival actor for control.

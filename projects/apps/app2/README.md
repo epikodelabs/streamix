@@ -1,6 +1,6 @@
 # App 2 — Julia Set Explorer
 
-Dedicated fractal renderer using Streamix `compute` coroutines (Web Workers).
+Dedicated fractal renderer using streamix `compute` coroutines (Web Workers).
 
 ## What it demonstrates
 

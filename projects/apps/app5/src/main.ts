@@ -43,7 +43,7 @@ const createPost = async () => {
         .withDefaults(useLogger())
         .withDefaults(useTimeout(8000));
     try {
-        for await (const value of client.post('/posts', { body: { title: 'Streamix HTTP', body: 'Reactive networking', userId: 1 } }, readJson)) {
+        for await (const value of client.post('/posts', { body: { title: 'streamix HTTP', body: 'Reactive networking', userId: 1 } }, readJson)) {
             setOutput('create', JSON.stringify(value, null, 2));
         }
     }

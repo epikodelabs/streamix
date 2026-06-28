@@ -51,7 +51,7 @@ function createParticle(x: number, y: number): Particle {
     <div class="stage">
       <div class="content">
         <h1>Brownian Motion</h1>
-        <p class="subtitle">{{ particles.length }} particles wandering via Streamix</p>
+        <p class="subtitle">{{ particles.length }} particles wandering via streamix</p>
       </div>
 
       @for (p of particles; track $index) {

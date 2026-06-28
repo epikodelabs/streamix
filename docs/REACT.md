@@ -1,6 +1,6 @@
 # ✨ Beyond useState and useEffect
 
-## ✨ How Streamix Turns React's Biggest Pain Point Into Your Superpower
+## ✨ How streamix Turns React's Biggest Pain Point Into Your Superpower
 
 Anyone who has spent real time with React has met this moment: an effect that started out harmless slowly turns into a liability. Dependency arrays grow longer, cleanup logic spreads across callbacks, closures stop reflecting reality, and async work begins to overlap in ways you didn’t intend. Eventually you’re stepping through logs late at night, trying to understand why your UI is confidently rendering data from a request that should have been obsolete two renders ago.
 
@@ -70,9 +70,9 @@ function SearchComponent() {
 
 ---
 
-## ✨ The Streamix Solution: One Stream, Zero Headaches
+## ✨ The streamix Solution: One Stream, Zero Headaches
 
-Here's the same functionality with Streamix:
+Here's the same functionality with streamix:
 
 ```typescript
 import { debounce, filter, fromEvent, map, pipe, switchMap } from '@epikodelabs/streamix';
@@ -132,7 +132,7 @@ function SearchComponent() {
 
 ---
 
-## ✨ Real-World Scenarios Where Streamix Shines
+## ✨ Real-World Scenarios Where streamix Shines
 
 ### ✨ 1. **Live Data Dashboards**
 
@@ -292,7 +292,7 @@ function LiveChat() {
 
 | Library | Size (minified + gzipped) |
 |---------|---------------------------|
-| Streamix | **~9-11 KB** |
+| streamix | **~9-11 KB** |
 | RxJS | ~50+ KB |
 | Your useEffect logic | Priceless (and buggy) |
 
@@ -301,15 +301,15 @@ function LiveChat() {
 Based on real migrations, teams report:
 
 - **40-60% fewer lines** in complex async components
-- **Zero race condition bugs** after switching search/autocomplete to Streamix
+- **Zero race condition bugs** after switching search/autocomplete to streamix
 - **Half the time** debugging async state issues
 - **Consistent patterns** across the codebase
 
 ---
 
-## ✨ Beyond React: Streamix Works Everywhere
+## ✨ Beyond React: streamix Works Everywhere
 
-While Streamix makes React development dramatically better, it's not React-specific:
+While streamix makes React development dramatically better, it's not React-specific:
 
 **Games** - Handle input streams, physics updates, and entity lifecycle  
 **Node.js** - Process file streams, API requests, database queries  
@@ -317,13 +317,13 @@ While Streamix makes React development dramatically better, it's not React-speci
 **React Native** - Handle gestures, sensors, and network requests  
 **CLIs** - Build interactive prompts and progress indicators
 
-Streamix is just JavaScript. It runs anywhere.
+streamix is just JavaScript. It runs anywhere.
 
 ---
 
 ## ✨ Heavy Lifting? Meet Coroutines
 
-Speaking of running anywhere-what about CPU-intensive work? Streamix includes **coroutines** that move heavy processing to Web Workers automatically:
+Speaking of running anywhere-what about CPU-intensive work? streamix includes **coroutines** that move heavy processing to Web Workers automatically:
 
 ```typescript
 import { coroutine } from '@epikodelabs/streamix';
@@ -375,14 +375,14 @@ function ImageEditor() {
 > **"Finally, reactive programming that doesn't require a PhD. My junior devs actually understand the code now."**  
 > - Senior engineer at a startup
 
-> **"Bundle size went down 40KB and our Lighthouse scores improved. Streamix just works."**  
+> **"Bundle size went down 40KB and our Lighthouse scores improved. streamix just works."**  
 > - Performance engineer at an e-commerce platform
 
 ---
 
 ## ✨ Getting Started Is Ridiculously Easy
 
-### ✨ 1. Install Streamix
+### ✨ 1. Install streamix
 
 ```bash
 npm install @epikodelabs/streamix
@@ -422,7 +422,7 @@ You'll notice:
 
 **React is amazing.** But `useEffect` wasn't designed for complex async flows. You shouldn't need a Computer Science degree to debounce a search input or poll an API without memory leaks.
 
-**Streamix gives you:**
+**streamix gives you:**
 - RxJS-style operators without the bundle bloat
 - Pull-based streams that respect React's rendering model
 - Automatic cleanup and cancellation

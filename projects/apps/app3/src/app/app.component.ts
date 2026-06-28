@@ -1,9 +1,9 @@
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import type { Subscription } from '@epikodelabs/streamix';
 import { listen, map, pipe, scope, tap, throttle } from '@epikodelabs/streamix';
 import { on } from '@epikodelabs/streamix/dom';
-import type { Subscription } from '@epikodelabs/streamix';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 type Weather = 'sunny' | 'rainy';
 
 interface AppScopeShape {
@@ -18,7 +18,7 @@ interface AppScopeShape {
     <div class="app">
       <header class="header">
         <h1>🌈 Cartoon Landscape</h1>
-        <p class="subtitle">Three.js scene powered by Streamix animation frames</p>
+        <p class="subtitle">Three.js scene powered by streamix animation frames</p>
       </header>
 
       <div class="controls">
@@ -38,7 +38,7 @@ interface AppScopeShape {
       </div>
 
       <footer class="footer">
-        <p>Powered by <strong>Streamix</strong> · Reactive Three.js rendering</p>
+        <p>Powered by <strong>streamix</strong> · Reactive Three.js rendering</p>
       </footer>
     </div>
   `,

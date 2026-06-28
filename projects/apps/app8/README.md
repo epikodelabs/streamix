@@ -1,6 +1,6 @@
 # App 8 — Territory Wars
 
-Board game powered by Streamix Actors and Million.js blocks.
+Board game powered by streamix Actors and Million.js blocks.
 
 ## What it demonstrates
 

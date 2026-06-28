@@ -26,7 +26,7 @@ interface AppScopeShape {
     <div class="app">
       <header class="header">
         <h1>📊 Stream Monitor</h1>
-        <p class="subtitle">Real-time operator demos powered by Streamix</p>
+        <p class="subtitle">Real-time operator demos powered by streamix</p>
       </header>
 
       <main class="grid">
@@ -203,7 +203,7 @@ interface AppScopeShape {
       </main>
 
       <footer class="footer">
-        <p>Powered by <strong>Streamix</strong> · Reactive streams for TypeScript</p>
+        <p>Powered by <strong>streamix</strong> · Reactive streams for TypeScript</p>
       </footer>
     </div>
   `,

@@ -1,4 +1,4 @@
-# Streamix Coroutines
+# streamix Coroutines
 
 `@epikodelabs/streamix/coroutines` runs CPU-heavy work in Web Workers without blocking the main thread.
 

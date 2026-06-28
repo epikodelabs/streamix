@@ -75,6 +75,12 @@ const PAGE_METADATA = {
     keywords: ['react', 'hooks', 'integration', 'state management', 'reactivity', 'useEffect']
   },
 
+  'PRESENTATION.md': {
+    title: 'Presentation - Visual Introduction to streamix',
+    description: 'A visual introduction to streamix: pull-based reactive streams built on async generators, with links to the full documentation.',
+    keywords: ['presentation', 'showcase', 'visual introduction', 'reactive streams', 'async generators', 'streamix']
+  },
+
   // =================================================================
   // PROJECT INFORMATION
   // =================================================================

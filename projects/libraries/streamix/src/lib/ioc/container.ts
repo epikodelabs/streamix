@@ -19,7 +19,7 @@ export type Lifetime = "singleton" | "scoped" | "transient";
 export interface ResolutionContext {
   /** The container that initiated this resolution. */
   readonly container: Container;
-  /** The active Streamix scope, if any. */
+  /** The active streamix scope, if any. */
   readonly scope: Scope | null;
   /** Resolves a required dependency. */
   resolve<T>(token: Token<T>): T;

@@ -1,6 +1,6 @@
+import { CommonModule } from '@angular/common';
 import { Component } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
-import { CommonModule } from '@angular/common';
 
 @Component({
   selector: 'app-container',
@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
   template: `
     <div class="container">
       <header>
-        <h1>🍕 Streamix Kitchen</h1>
+        <h1>🍕 streamix Kitchen</h1>
         <p>Actor-based concurrency demo</p>
       </header>
       <main>

@@ -1,4 +1,4 @@
-# ✨ Streamix: Because Your Component Deserves Better Than Operator Pipelines
+# ✨ streamix: Because Your Component Deserves Better Than Operator Pipelines
 
 RxJS is genuinely excellent. Angular uses it everywhere, and for good reason—it's battle-tested, powerful, and absolutely perfect for infrastructure-level reactivity. Application state? Beautiful. Event buses? Chef's kiss. Router events, forms, shared streams? RxJS crushes it.
 
@@ -6,7 +6,7 @@ But then someone had a bright idea: "Hey, let's use this same tool for a button 
 
 And thus began the era of using a firehose to water a houseplant.
 
-Streamix exists precisely because sometimes you just need a watering can. **It's for code that should read like instructions, not like a distributed systems architecture diagram.**
+streamix exists precisely because sometimes you just need a watering can. **It's for code that should read like instructions, not like a distributed systems architecture diagram.**
 
 ---
 
@@ -95,9 +95,9 @@ This isn't developer error. This is **trying to fit a sphere into a square hole 
 
 ---
 
-## ✨ Streamix's Actual Superpower
+## ✨ streamix's Actual Superpower
 
-Streamix is unapologetically for:
+streamix is unapologetically for:
 
 > **Pull-driven, lifecycle-scoped, single-consumer async logic that just wants to get on with its life**
 
@@ -111,7 +111,7 @@ Not for global state. Not for shared streams. Not for impressing your architect.
 
 ## ✨ The Honest Comparison Table
 
-| Use Case                           | RxJS | Streamix |
+| Use Case                           | RxJS | streamix |
 | ---------------------------------- | ---- | -------- |
 | Application-wide state             | ✅    | ⚠️       |
 | HTTP calls                         | ✅    | ✅        |
@@ -141,7 +141,7 @@ Absolutely perfect when you need infrastructure. Absolutely exhausting when you 
 
 ---
 
-### ✨ Streamix Mental Model
+### ✨ streamix Mental Model
 
 **"Process some stuff. Stop when done. Go home."**
 
@@ -156,7 +156,7 @@ The difference sounds minor. It's the difference between "building a data pipeli
 
 ---
 
-## ✨ Why Streamix Actually Slaps
+## ✨ Why streamix Actually Slaps
 
 ### ✨ 1. Just Consume The Dang Values
 
@@ -185,7 +185,7 @@ It does what it says. In order. Like a recipe. Revolutionary.
 * No accidental multicasting mysteries
 * No "but WHO ELSE is listening?!" paranoia
 
-Angular components are mortal. **Streamix embraces mortality.** How refreshing.
+Angular components are mortal. **streamix embraces mortality.** How refreshing.
 
 ---
 
@@ -196,7 +196,7 @@ In RxJS:
 * Cancellation is implicit (surprise mechanics!)
 * You need to mentally execute a state machine (fun!)
 
-In Streamix:
+In streamix:
 * Line 1 happens before line 2 (shocking, I know)
 * Cancellation is "loop stopped" (groundbreaking)
 * Reading top-to-bottom works (like literally every other code)
@@ -207,7 +207,7 @@ Your code behaves like it looks. What a concept.
 
 ### ✨ 4. Debugging Without Existential Dread
 
-Streamix makes things explicit:
+streamix makes things explicit:
 
 * Values have lineage you can actually trace
 * Cancellation means "this stopped" not "consult the operator manual"
@@ -216,14 +216,14 @@ Streamix makes things explicit:
 
 RxJS hides complexity, which is powerful until you need to debug it. Then you're reading marble diagrams at 2 AM wondering where your life went wrong.
 
-**Streamix just... shows you what happened.** Wild.
+**streamix just... shows you what happened.** Wild.
 
 ---
 
-## ✨ What Streamix Actually Is
+## ✨ What streamix Actually Is
 
-Streamix is **not** trying to be the next big reactive framework.
+streamix is **not** trying to be the next big reactive framework.
 
 It's a **control-flow primitive for async stuff that happens in order**.
 
-That's why it fits Angular so well—Angular is already the framework. Streamix is just that helpful utility that makes one specific thing way less painful.
+That's why it fits Angular so well—Angular is already the framework. streamix is just that helpful utility that makes one specific thing way less painful.

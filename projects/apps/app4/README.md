@@ -1,6 +1,6 @@
 # App 4 — Travel Blog
 
-Vanilla-JS scroll-driven animations with Streamix DOM operators.
+Vanilla-JS scroll-driven animations with streamix DOM operators.
 
 ## What it demonstrates
 

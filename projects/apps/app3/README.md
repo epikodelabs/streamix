@@ -1,15 +1,15 @@
 # App 3 — Cartoon Landscape
 
-Interactive 3D cartoon landscape built with **Three.js** and animated via **Streamix** reactive streams.
+Interactive 3D cartoon landscape built with **Three.js** and animated via **streamix** reactive streams.
 
 ## Features
 
 - **Three.js scene** — low-poly cartoon hills, trees, flowers, clouds, and a glowing sun
 - **Weather toggle** — switch between ☀️ sunshine and 🌧️ rain
-- **Streamix `onAnimationFrame`** — render loop driven by reactive animation frames
-- **Streamix `atom`** — weather state as a reactive atom
-- **Streamix `onResize`** — canvas resize via ResizeObserver stream
-- **Streamix `fromEvent` + `throttle` + `map`** — mouse parallax camera shift
+- **streamix `onAnimationFrame`** — render loop driven by reactive animation frames
+- **streamix `atom`** — weather state as a reactive atom
+- **streamix `onResize`** — canvas resize via ResizeObserver stream
+- **streamix `fromEvent` + `throttle` + `map`** — mouse parallax camera shift
 - **OrbitControls** — click and drag to orbit the camera around the scene
 - **Dynamic effects** — rain particles, sun pulse, cloud drift, tree sway, flower bounce
 

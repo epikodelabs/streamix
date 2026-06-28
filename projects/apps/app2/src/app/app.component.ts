@@ -109,7 +109,7 @@ const juliaBatchWorker = (params: BatchParams): Pixel[] => {
     <div class="app">
       <header class="header">
         <h1>🔥 Julia Set Explorer</h1>
-        <p class="subtitle">Reactive fractal rendering with Streamix coroutines</p>
+        <p class="subtitle">Reactive fractal rendering with streamix coroutines</p>
       </header>
 
       <main class="grid">
@@ -184,7 +184,7 @@ const juliaBatchWorker = (params: BatchParams): Pixel[] => {
       </main>
 
       <footer class="footer">
-        <p>Powered by <strong>Streamix</strong> · Reactive streams for TypeScript</p>
+        <p>Powered by <strong>streamix</strong> · Reactive streams for TypeScript</p>
       </footer>
     </div>
   `,

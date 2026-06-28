@@ -1,6 +1,6 @@
 # App 1 — Stream Monitor
 
-Real-time operator demos powered by Streamix.
+Real-time operator demos powered by streamix.
 
 ## What it demonstrates
 

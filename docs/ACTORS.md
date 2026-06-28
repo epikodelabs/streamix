@@ -1,4 +1,4 @@
-# Streamix Actors
+# streamix Actors
 
 An actor is a long-lived worker that holds state and responds to messages — like a tiny server running in a background thread.
 

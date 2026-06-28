@@ -1,6 +1,6 @@
-# 🧩 IoC Container — Dependency injection the Streamix way
+# 🧩 IoC Container — Dependency injection the streamix way
 
-Streamix ships with a small, functional IoC container. It is designed for apps that need to share services, manage lifetimes, and clean up resources together with reactive scopes.
+streamix ships with a small, functional IoC container. It is designed for apps that need to share services, manage lifetimes, and clean up resources together with reactive scopes.
 
 It is **not** a full framework container. There are no decorators, no class metadata, and no runtime reflection. Just tokens, factory functions, and containers.
 
@@ -151,7 +151,7 @@ infraModule(app);
 
 ## Integration with scopes
 
-Every Streamix `scope()` gets its own container that inherits from the parent scope's container. This lets you register services naturally inside a scope and have them cleaned up when the scope disposes.
+Every streamix `scope()` gets its own container that inherits from the parent scope's container. This lets you register services naturally inside a scope and have them cleaned up when the scope disposes.
 
 Object form works for state that only reads services:
 

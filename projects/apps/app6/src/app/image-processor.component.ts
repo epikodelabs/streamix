@@ -149,7 +149,7 @@ import { ImagePipelineService } from './image-pipeline.service';
 
       @if (pipeline.jobs().length) {
         <footer class="footer">
-          <p>Powered by <strong>Streamix Coroutines</strong> · Web Worker SIMD pipeline</p>
+          <p>Powered by <strong>streamix Coroutines</strong> · Web Worker SIMD pipeline</p>
         </footer>
       }
     </div>

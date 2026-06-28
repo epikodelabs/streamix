@@ -1,6 +1,6 @@
 # App 6 — Image Processor
 
-Reactive image pipeline with Streamix operators.
+Reactive image pipeline with streamix operators.
 
 ## What it demonstrates
 
