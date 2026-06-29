@@ -1,5 +1,5 @@
 import { atom, createOperator, DONE, isPromiseLike, iterate, type MaybePromise, type Operator } from "../atoms";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Creates a stream operator that schedules the emission of each value from the source

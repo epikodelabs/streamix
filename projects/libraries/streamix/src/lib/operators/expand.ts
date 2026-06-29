@@ -1,7 +1,7 @@
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from '../factories';
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Options for the expand operator.

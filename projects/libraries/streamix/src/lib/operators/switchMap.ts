@@ -3,7 +3,7 @@ import { createOperator, DONE, isPromiseLike } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { createAsyncPushable } from "../utils";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Transforms each value from the source stream into a new inner stream, promise, or array,

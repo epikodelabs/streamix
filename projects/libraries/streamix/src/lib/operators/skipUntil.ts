@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, type Operator } from "../atoms";
+import { createOperator, DONE, NEXT, normalizeError, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
@@ -35,8 +35,6 @@ export function skipUntil<T = any, N = any>(
     let gateOpened = false;
     let droppingBacklog = false;
     let isDone = false;
-
-    const normalizeError = (err: any): Error => err instanceof Error ? err : new Error(String(err));
 
     const handleEvent = (event: any): IteratorResult<T> | null => {
       if (event.type === 'error') {

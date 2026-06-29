@@ -1,5 +1,6 @@
 import {
   atom,
+  ATOM_DEBUG,
   createTestEnvironment,
   derived,
   flow,
@@ -245,6 +246,27 @@ describe('Atom System', () => {
       expect(d.disposed).toBe(true);
 
       d.dispose();
+    });
+
+    it('should re-throw from safeValue when ATOM_DEBUG.throwOnSafeValueError is true', () => {
+      const previous = ATOM_DEBUG.throwOnSafeValueError;
+      ATOM_DEBUG.throwOnSafeValueError = true;
+
+      try {
+        const source = atom(0);
+        const d = derived(() => {
+          if (source.value > 10) throw new Error('Too high');
+          return source.value;
+        }, { terminateOnError: false });
+
+        source.next(15);
+        expect(() => d.safeValue).toThrow(new Error('Too high'));
+
+        source.dispose();
+        d.dispose();
+      } finally {
+        ATOM_DEBUG.throwOnSafeValueError = previous;
+      }
     });
 
     it('should resolve async derived value from self.use atoms', async () => {

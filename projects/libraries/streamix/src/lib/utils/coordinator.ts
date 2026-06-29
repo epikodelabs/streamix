@@ -7,7 +7,7 @@
  * @module coordinator
  */
 import { DONE, NEXT } from "../atoms";
-import { normalizeError } from "./helpers";
+import { normalizeError } from "../atoms/atom";
 
 /**
 

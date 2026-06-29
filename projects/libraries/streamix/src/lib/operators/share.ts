@@ -1,5 +1,5 @@
 import { atom, createOperator, DONE, iterate, type Operator, type Writable } from "../atoms";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Shares a single subscription to the source stream between multiple consumers.

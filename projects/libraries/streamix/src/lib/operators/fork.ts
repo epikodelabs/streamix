@@ -1,7 +1,7 @@
 import { createOperator, DONE, isPromiseLike, NEXT, type MaybePromise, type Operator } from "../atoms";
 import type { Atom } from "../atoms/atom";
 import { from } from '../factories';
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Result type accepted from a fork handler. Includes stream/atom/iterable/promise

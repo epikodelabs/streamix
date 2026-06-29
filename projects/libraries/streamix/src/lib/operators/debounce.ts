@@ -1,5 +1,5 @@
 import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Creates a stream operator that emits the most recent value from the source stream

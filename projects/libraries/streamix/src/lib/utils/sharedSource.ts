@@ -8,7 +8,7 @@ import { DONE } from "../atoms/operator";
 import { getCurrentScope, getScopeMode, registerWithCurrentScope } from "../atoms/scope";
 import { createSubscription } from "../atoms/subscription";
 import { cyclicBuffer, type CyclicBuffer, type CyclicBufferMode } from "../primitives/cyclicBuffer";
-import { normalizeError } from "./helpers";
+import { normalizeError } from "../atoms/atom";
 
 export type SharedSourceMode = CyclicBufferMode;
 

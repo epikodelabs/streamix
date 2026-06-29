@@ -1,6 +1,6 @@
 import { createPushOperator, type MaybePromise } from "../atoms";
 import { timer } from "../factories";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Buffers values from the source stream and emits them as arrays every `period` milliseconds.

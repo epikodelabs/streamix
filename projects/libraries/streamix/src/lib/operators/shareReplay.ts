@@ -1,6 +1,6 @@
 import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator, type Subscription } from "../atoms";
 import { atom } from '../atoms/atom';
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Creates a stream operator that shares a single subscription to the source stream

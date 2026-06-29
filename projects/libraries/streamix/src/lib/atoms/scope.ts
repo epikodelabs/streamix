@@ -6,8 +6,7 @@ import {
   type RegistrationOptions,
   type Token,
 } from "../ioc/container";
-import { normalizeError } from "../utils/helpers";
-import { atom, derived, flow, getCurrentFormulaContext, Writable, type Atom } from "./atom";
+import { atom, derived, flow, getCurrentFormulaContext, normalizeError, Writable, type Atom } from "./atom";
 import {
   isAtomExpr,
   isDerivedExpr,
@@ -270,8 +269,8 @@ export function provide<T>(
   factory: Factory<T>,
   options?: RegistrationOptions<T>
 ): void {
-  const scope = getCurrentScope();
-  const container = scope?.container ?? globalContainer;
+  const activeScope = getCurrentScope();
+  const container = activeScope?.container ?? globalContainer;
   container.register(token, factory, options);
 }
 
@@ -281,9 +280,9 @@ export function provide<T>(
  * Falls back to the global container when called outside of a scope.
  */
 export function inject<T>(token: Token<T>): T {
-  const scope = getCurrentScope();
-  const container = scope?.container ?? globalContainer;
-  return container.resolve(token, scope);
+  const activeScope = getCurrentScope();
+  const container = activeScope?.container ?? globalContainer;
+  return container.resolve(token, activeScope);
 }
 
 /**
@@ -292,9 +291,9 @@ export function inject<T>(token: Token<T>): T {
  * Falls back to the global container when called outside of a scope.
  */
 export function injectOptional<T>(token: Token<T>): T | undefined {
-  const scope = getCurrentScope();
-  const container = scope?.container ?? globalContainer;
-  return container.resolveOptional(token, scope);
+  const activeScope = getCurrentScope();
+  const container = activeScope?.container ?? globalContainer;
+  return container.resolveOptional(token, activeScope);
 }
 
 /* ── Context Lifecycle Management ─────────────────────────────────────────── */

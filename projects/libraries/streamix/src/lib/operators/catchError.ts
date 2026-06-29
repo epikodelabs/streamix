@@ -1,5 +1,5 @@
 import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../atoms";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Creates a stream operator that catches errors from the source stream and handles them.

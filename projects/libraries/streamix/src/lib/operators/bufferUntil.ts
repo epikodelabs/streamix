@@ -2,7 +2,7 @@ import { createOperator, DONE, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Buffers values from the source iterator until the notifier emits.

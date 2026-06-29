@@ -18,6 +18,12 @@ const MARK_DIRTY = Symbol("engine.markDirty");
 const FLUSH = Symbol("engine.flush");
 export const ANALOG = Symbol("engine.analog");
 
+/** Debug flags for atom runtime behavior. Toggle in tests or dev builds. */
+export const ATOM_DEBUG = {
+  /** When true, `safeValue` on derived atoms re-throws instead of returning the last good value. */
+  throwOnSafeValueError: false,
+};
+
 export interface AtomOptions {
   discrete?: boolean;
   maxSubscribers?: number;
@@ -411,7 +417,7 @@ const disposedWeakMap = new WeakMap<object, boolean>();
 function isDisposed(obj: object): boolean { return disposedWeakMap.get(obj) === true; }
 function markDisposed(obj: object): void { disposedWeakMap.set(obj, true); }
 
-function normalizeError(err: any): Error {
+export function normalizeError(err: any): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
@@ -542,8 +548,8 @@ export function flow<T>(
 ): Atom<T> {
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   
-  const scope = getCurrentScope();
-  const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
+  const activeScope = getCurrentScope();
+  const analog = activeScope !== null && getScopeMode(activeScope) === "analog" && !options?.discrete;
 
   // State
   let current: T;
@@ -847,8 +853,8 @@ export function flow<T>(
  * ───────────────────────────────────────────────────────────────────────────*/
 
 export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable<T> {
-  const scope = getCurrentScope();
-  const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
+  const activeScope = getCurrentScope();
+  const analog = activeScope !== null && getScopeMode(activeScope) === "analog" && !options?.discrete;
   
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   const terminateOnError = options?.terminateOnError ?? false;
@@ -1207,8 +1213,8 @@ export function derived<T>(...args: any[]): Atom<T> {
   const owner = new EvaluationOwner();
   const self = createSelf(computable, owner);
 
-  const scope = getCurrentScope();
-  const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
+  const activeScope = getCurrentScope();
+  const analog = activeScope !== null && getScopeMode(activeScope) === "analog" && !options?.discrete;
 
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   const terminateOnError = options?.terminateOnError ?? false;
@@ -1448,7 +1454,10 @@ export function derived<T>(...args: any[]): Atom<T> {
     },
 
     get safeValue() {
-      try { return this.value; } catch { return current; }
+      try { return this.value; } catch (err) {
+        if (ATOM_DEBUG.throwOnSafeValueError) throw err;
+        return current;
+      }
     },
     get previous() {
       try { this.value; } catch {}

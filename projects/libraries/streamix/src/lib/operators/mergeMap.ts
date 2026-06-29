@@ -1,7 +1,8 @@
 import { createPushOperator, MaybePromise, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from '../factories';
-import { createAsyncCoordinator, normalizeError, type RunnerEvent } from '../utils';
+import { createAsyncCoordinator, type RunnerEvent } from '../utils';
+import { normalizeError } from "../atoms";
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream

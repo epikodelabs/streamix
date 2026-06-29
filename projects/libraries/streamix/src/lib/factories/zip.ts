@@ -1,6 +1,6 @@
 import { flow, type Atom } from '../atoms/atom';
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
-import { normalizeError } from '../utils/helpers';
+import { normalizeError } from "../atoms";
 
 /**
  * Combine multiple sources into a single atom that emits arrays of the latest values

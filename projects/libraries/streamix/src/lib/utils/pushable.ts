@@ -4,12 +4,12 @@ import {
 import {
   AsyncIteratorState,
   asyncPull,
-  normalizeError,
   pushComplete,
   pushError,
   pushValue,
   syncPull
 } from "./helpers";
+import { normalizeError } from "../atoms/atom";
 
 /**
  * Async iterator augmented with push methods, passed to operator setup callbacks.

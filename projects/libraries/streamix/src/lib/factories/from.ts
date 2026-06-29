@@ -1,6 +1,6 @@
 import { flow, isPromiseLike, PipeInput, toAsyncIterable, type MaybePromise } from "../atoms";
 import type { Atom } from "../atoms/atom";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 function isAtomLike(value: unknown): value is Atom<any> {
   return value != null && (value as any).type === "atom";

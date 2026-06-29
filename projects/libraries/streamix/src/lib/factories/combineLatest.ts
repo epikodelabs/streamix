@@ -1,7 +1,7 @@
 import { flow, type Atom } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 import { createAsyncCoordinator } from "../utils";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Combines multiple sources and emits a tuple containing the latest values

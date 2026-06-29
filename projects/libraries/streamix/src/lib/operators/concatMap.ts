@@ -1,7 +1,7 @@
 import { createOperator, DONE, isPromiseLike, MaybePromise, NEXT, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Creates a stream operator that maps each value from the source stream to a new

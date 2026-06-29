@@ -1,4 +1,5 @@
 import { DONE } from "../atoms";
+import { normalizeError } from "../atoms/atom";
 
 /**
  * Shared queue item structure used across all async iterator implementations
@@ -73,15 +74,6 @@ export class AsyncIteratorState<T> {
       result: DONE
     });
   }
-}
-
-/**
- * Safely normalizes any thrown/rejected value to an Error instance.
- * Preserves real Error instances (and their stack traces); otherwise wraps
- * primitives and objects in `new Error(String(err))`.
- */
-export function normalizeError(err: any): Error {
-  return err instanceof Error ? err : new Error(String(err));
 }
 
 /**

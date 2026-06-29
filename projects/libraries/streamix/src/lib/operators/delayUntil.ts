@@ -7,7 +7,7 @@ import {
 } from "../atoms";
 import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Delay values from the source until a notifier emits.

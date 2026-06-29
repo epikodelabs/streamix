@@ -1,4 +1,4 @@
-import { createOperator, DONE, NEXT, type Operator } from "../atoms";
+import { createOperator, DONE, NEXT, normalizeError, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
@@ -27,7 +27,6 @@ export function takeUntil<T = any, N = any>(
     const notifierIt = from(notifier)[Symbol.asyncIterator]();
     const runner = createAsyncCoordinator([source, notifierIt]);
 
-    const normalizeError = (err: any): Error => err instanceof Error ? err : new Error(String(err));
     let isDone = false;
 
     const iterator: AsyncIterator<T> & {

@@ -1,5 +1,5 @@
 import { createOperator, DONE, type MaybePromise, type Operator } from "../atoms";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Creates a stream operator that invokes a finalizer callback upon stream termination.

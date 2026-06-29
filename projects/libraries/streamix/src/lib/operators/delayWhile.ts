@@ -1,5 +1,5 @@
 import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 /**
  * Buffers values while a predicate returns `true` and releases them once the predicate flips to `false`.

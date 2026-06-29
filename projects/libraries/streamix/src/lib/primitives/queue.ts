@@ -9,7 +9,7 @@
  * @property {number} pending The number of operations currently in the queue (including the one running).
  * @property {boolean} isEmpty A boolean indicating whether the queue is empty.
  */
-import { normalizeError } from "../utils/helpers";
+import { normalizeError } from "../atoms";
 
 export function createQueue() {
   let last = Promise.resolve();

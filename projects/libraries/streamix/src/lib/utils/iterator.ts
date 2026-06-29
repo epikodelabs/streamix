@@ -2,12 +2,12 @@ import { DONE, isPromiseLike, type MaybePromise, type Subscription } from "../at
 import {
   AsyncIteratorState,
   asyncPull,
-  normalizeError,
   pushComplete,
   pushError,
   pushValue,
   syncPull
 } from "./helpers";
+import { normalizeError } from "../atoms/atom";
 
 type Observer<T> = {
   next: (value: T) => MaybePromise;
