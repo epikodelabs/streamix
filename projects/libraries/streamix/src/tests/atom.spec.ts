@@ -1,11 +1,12 @@
 import {
-    atom,
-    createTestEnvironment,
-    derived,
-    flow,
-    getScheduler,
-    scope,
-    type Atom
+  atom,
+  createTestEnvironment,
+  derived,
+  type DerivedScope,
+  flow,
+  getScheduler,
+  scope,
+  type Atom,
 } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -143,119 +144,96 @@ describe('Atom System', () => {
   });
 
   describe('derived()', () => {
-    it('should compute derived value', async () => {
+    it('should compute sync derived value from self.use atoms', () => {
       const source = atom(5);
-      const doubled = derived(() => source.value * 2);
+
+      const doubled = derived((self: DerivedScope) => {
+        const [s] = self.use(source);
+        return s.value * 2;
+      });
+
       expect(doubled.value).toBe(10);
       source.next(10);
       expect(doubled.value).toBe(20);
+
       source.dispose();
       doubled.dispose();
     });
 
-    it('should compute derived value from atom source', async () => {
-      const source = atom(5);
-      const doubled = derived(() => source.value * 2);
-      expect(doubled.value).toBe(10);
-      source.next(10);
-      expect(doubled.value).toBe(20);
-      source.dispose();
-      doubled.dispose();
-    });
-
-    it('should compute derived value from multiple atom sources', async () => {
+    it('should compute sync derived from multiple self.use atoms', () => {
       const a = atom(1);
       const b = atom(2);
-      const sum = derived(() => a.value + b.value);
+
+      const sum = derived((self: DerivedScope) => {
+        const [x, y] = self.use(a, b);
+        return x.value + y.value;
+      });
+
       expect(sum.value).toBe(3);
       a.next(5);
       expect(sum.value).toBe(7);
       b.next(10);
       expect(sum.value).toBe(15);
+
       a.dispose();
       b.dispose();
       sum.dispose();
-    });
-
-    it('should update when dependencies change', async () => {
-      const a = atom(1);
-      const b = atom(2);
-      const sum = derived(() => a.value + b.value);
-      expect(sum.value).toBe(3);
-      a.next(5);
-      expect(sum.value).toBe(7);
-      b.next(10);
-      expect(sum.value).toBe(15);
-      a.dispose();
-      b.dispose();
-      sum.dispose();
-    });
-
-    it('should handle multiple dependencies', async () => {
-      const a = atom(1);
-      const b = atom(2);
-      const c = atom(3);
-      const result = derived(() => a.value * b.value + c.value);
-      expect(result.value).toBe(5);
-      a.next(2);
-      expect(result.value).toBe(7);
-      b.next(3);
-      expect(result.value).toBe(9);
-      c.next(4);
-      expect(result.value).toBe(10);
-      a.dispose();
-      b.dispose();
-      c.dispose();
-      result.dispose();
     });
 
     it('should throw on circular dependency', () => {
       let derivedAtom: Atom<any>;
       const source = atom(0);
-      // This creates a circular dependency
+
       expect(() => {
-        derivedAtom = derived(() => {
-          return derivedAtom ? derivedAtom.value : source.value;
+        derivedAtom = derived((self: DerivedScope) => {
+          const [s] = self.use(source);
+          return derivedAtom ? derivedAtom.value : s.value;
         });
         derivedAtom.value;
       }).toThrow(new Error('Circular dependency detected in derived()'));
+
       source.dispose();
     });
 
-    it('should handle errors in derived', async () => {
+    it('should handle errors in derived', () => {
       const source = atom(0);
-      const d = derived(() => {
-        if (source.value > 10) throw new Error('Too high');
-        return source.value;
+
+      const d = derived((self: DerivedScope) => {
+        const [s] = self.use(source);
+        if (s.value > 10) throw new Error('Too high');
+        return s.value;
       }, { terminateOnError: false });
-      
+
       expect(d.value).toBe(0);
       source.next(15);
       expect(() => d.value).toThrow(new Error('Too high'));
-      
+
       source.next(5);
       expect(d.value).toBe(5);
-      
+
       source.dispose();
       d.dispose();
     });
 
-    it('should terminate on error when configured', async () => {
-      const source = atom(0);
+    it('should terminate on error when configured', () => {
       const d = derived(() => {
         throw new Error('fatal');
       }, { terminateOnError: true });
-      
+
       expect(() => d.value).toThrow(new Error('fatal'));
       expect(d.disposed).toBe(true);
-      
-      source.dispose();
+
       d.dispose();
     });
 
-    it('should resolve async derived value from Promise factory', async () => {
+    it('should resolve async derived value from self.use atoms', async () => {
       const source = atom(5);
-      const doubled = derived(() => Promise.resolve(source.value * 2));
+
+      const doubled = derived(async (self: DerivedScope) => {
+        const [s] = self.use(source);
+        await delay();
+        return s.value * 2;
+      });
 
       expect(doubled.value).toBeUndefined();
 
@@ -270,32 +248,14 @@ describe('Atom System', () => {
       doubled.dispose();
     });
 
-    it('should ignore stale promise when dependency changes', async () => {
-      const source = atom(1);
-      const asyncDerived = derived(() => {
-        const value = source.value;
-        return new Promise<number>(resolve => {
-          setTimeout(() => resolve(value * 10), 20);
-        });
-      });
-
-      expect(asyncDerived.value).toBeUndefined();
-
-      source.next(2);
-      await delay(30);
-      expect(asyncDerived.value).toBe(20);
-
-      source.dispose();
-      asyncDerived.dispose();
-    });
-
-    it('should track dependencies across await with explicit track function', async () => {
+    it('should track closure atoms across await with self.use()', async () => {
       const a = atom(1);
       const b = atom(2);
 
-      const d = derived(async (track) => {
+      const d = derived(async (self: DerivedScope) => {
+        const [x, y] = self.use(a, b);
         await delay(5);
-        return track(a) + track(b);
+        return x.value + y.value;
       });
 
       expect(d.value).toBeUndefined();
@@ -317,68 +277,25 @@ describe('Atom System', () => {
       d.dispose();
     });
 
-    it('should compute sync derived from a single source', async () => {
-      const source = atom(5);
-      const doubled = derived(source, s => s * 2);
+    it('should ignore stale promise when dependency changes', async () => {
+      const source = atom(1);
 
-      expect(doubled.value).toBe(10);
+      const asyncDerived = derived(async (self: DerivedScope) => {
+        const [s] = self.use(source);
+        const value = s.value;
+        return new Promise<number>(resolve => {
+          setTimeout(() => resolve(value * 10), 20);
+        });
+      });
 
-      source.next(7);
-      expect(doubled.value).toBe(14);
+      expect(asyncDerived.value).toBeUndefined();
+
+      source.next(2);
+      await delay(30);
+      expect(asyncDerived.value).toBe(20);
 
       source.dispose();
-      doubled.dispose();
-    });
-
-    it('should compute sync derived from multiple sources', async () => {
-      const a = atom(1);
-      const b = atom(2);
-      const sum = derived([a, b], (x, y) => x + y);
-
-      expect(sum.value).toBe(3);
-
-      a.next(5);
-      expect(sum.value).toBe(7);
-
-      b.next(10);
-      expect(sum.value).toBe(15);
-
-      a.dispose();
-      b.dispose();
-      sum.dispose();
-    });
-
-    it('should stay undefined until all sync sources are defined', async () => {
-      const a = atom<number>();
-      const b = atom(2);
-      const sum = derived([a, b], (x, y) => x + y);
-
-      expect(sum.value).toBeUndefined();
-
-      a.next(1);
-      expect(sum.value).toBe(3);
-
-      a.dispose();
-      b.dispose();
-      sum.dispose();
-    });
-
-    it('should become undefined when a sync source becomes undefined', async () => {
-      const a = atom<number | undefined>(1);
-      const b = atom(2);
-      const sum = derived([a, b], (x, y) => (x ?? 0) + y);
-
-      expect(sum.value).toBe(3);
-
-      a.next(undefined);
-      expect(sum.value).toBeUndefined();
-
-      a.next(5);
-      expect(sum.value).toBe(7);
-
-      a.dispose();
-      b.dispose();
-      sum.dispose();
+      asyncDerived.dispose();
     });
   });
 

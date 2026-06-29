@@ -30,7 +30,7 @@ Just a tiny object that remembers its value—and happily tells the world when i
 const count = atom(0);
 
 console.log(count.value); // 0
-console.log(count.previous); // undefined
+console.log(count.previous); // 0
 
 count.next(5);
 

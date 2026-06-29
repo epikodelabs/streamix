@@ -64,6 +64,14 @@ export interface Writable<T = any> extends Atom<T> {
 }
 
 /** Internal Node State */
+/** Scope object passed to self-based derived formulas. */
+export type DerivedScope = {
+  /** Track an atom as a dependency of the current derived computation. */
+  track<A>(atom: Atom<A>): void;
+  /** Register closure or global-scope atoms and return them for destructuring. */
+  use<T extends Atom<any>[]>(...atoms: T): T;
+} & Record<string, unknown>;
+
 interface AtomNode {
   depth: number;
   version: number;
@@ -264,6 +272,60 @@ export function trackDependencies<T>(fn: () => T): { result: T; dependencies: Se
   } finally {
     popFormulaContext();
   }
+}
+
+function isAtom(value: unknown): value is Atom<any> {
+  return value !== null && typeof value === "object" && (value as Atom<any>).type === "atom";
+}
+
+/**
+ * Creates a derived scope whose properties lazily wrap Atom values in tracking
+ * proxies. Reading `self.atom.value` through the scope registers the atom as a
+ * dependency of the current formula context.
+ */
+function createSelf(ctx: FormulaContext): DerivedScope {
+  const storage: Record<string, unknown> = {};
+  const atomProxies = new WeakMap<Atom<any>, any>();
+
+  const track = <A>(atom: Atom<A>): void => {
+    ctx.dependencies.add(atom as unknown as InternalAtomContainer);
+  };
+
+  const use = <T extends Atom<any>[]>(...atoms: T): T => {
+    atoms.forEach(track);
+    return atoms;
+  };
+  storage["track"] = track;
+  storage["use"] = use;
+
+  const wrapAtom = (atom: Atom<any>): any => {
+    let proxy = atomProxies.get(atom);
+    if (!proxy) {
+      proxy = new Proxy(atom, {
+        get(target, prop, receiver) {
+          if (prop === "value") {
+            track(target);
+          }
+          return Reflect.get(target, prop, receiver);
+        }
+      });
+      atomProxies.set(atom, proxy);
+    }
+    return proxy;
+  };
+
+  return new Proxy(storage, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (isAtom(value)) {
+        return wrapAtom(value);
+      }
+      return value;
+    },
+    set(target, prop, value, receiver) {
+      return Reflect.set(target, prop, value, receiver);
+    }
+  }) as DerivedScope;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -892,33 +954,202 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * derived() - Computed Node
+ * Computable helpers - manufactured class around callback
  * ───────────────────────────────────────────────────────────────────────────*/
 
-export function derived<T>(fn: (track: <A>(atom: Atom<A>) => A) => T | Promise<T>, options?: AtomOptions): Atom<T>;
-export function derived<T>(fn: () => T | Promise<T>, options?: AtomOptions): Atom<T>;
-export function derived<T, A>(source: Atom<A>, fn: (a: A) => T, options?: AtomOptions): Atom<T>;
-export function derived<T, A, B>(sources: [Atom<A>, Atom<B>], fn: (a: A, b: B) => T, options?: AtomOptions): Atom<T>;
-export function derived<T, A, B, C>(sources: [Atom<A>, Atom<B>, Atom<C>], fn: (a: A, b: B, c: C) => T, options?: AtomOptions): Atom<T>;
-export function derived<T, A, B, C, D>(sources: [Atom<A>, Atom<B>, Atom<C>, Atom<D>], fn: (a: A, b: B, c: C, d: D) => T, options?: AtomOptions): Atom<T>;
-export function derived<T, A, B, C, D, E>(sources: [Atom<A>, Atom<B>, Atom<C>, Atom<D>, Atom<E>], fn: (a: A, b: B, c: C, d: D, e: E) => T, options?: AtomOptions): Atom<T>;
+type AnyFn = (...args: any[]) => any;
+
+interface ComputableInstance {
+  compute(self?: DerivedScope): unknown;
+  onInit?(self?: DerivedScope): void;
+  onDispose?(): void;
+}
+
+function trackAtomsOnInstance(instance: unknown, track: (atom: Atom<any>) => void): void {
+  if (!instance || typeof instance !== "object") return;
+
+  let current: object | null = instance as object;
+  while (current && current !== Object.prototype) {
+    for (const key of Object.getOwnPropertyNames(current)) {
+      try {
+        const value = (current as any)[key];
+        if (isAtom(value)) track(value);
+      } catch {
+        // Ignore getters that throw during inspection.
+      }
+    }
+    current = Object.getPrototypeOf(current);
+  }
+}
+
+function isGeneratorFunction(fn: AnyFn): boolean {
+  return fn.constructor?.name === "GeneratorFunction";
+}
+
+function isAsyncFunction(fn: AnyFn): boolean {
+  return fn.constructor?.name === "AsyncFunction";
+}
+
+function extractAllMembers(fn: AnyFn): Record<string, unknown> {
+  const members: Record<string, unknown> = {};
+
+  const excluded = new Set(["length", "name", "prototype", "arguments", "caller"]);
+
+  for (const name of Object.getOwnPropertyNames(fn)) {
+    if (excluded.has(name)) continue;
+    members[name] = (fn as any)[name];
+  }
+
+  if (fn.prototype) {
+    for (const name of Object.getOwnPropertyNames(fn.prototype)) {
+      if (name === "constructor" || members[name] !== undefined) continue;
+      members[name] = (fn.prototype as any)[name];
+    }
+  }
+
+  return members;
+}
+
+function wrapFunctionInClass(fn: AnyFn): new () => ComputableInstance {
+  const isGenerator = isGeneratorFunction(fn);
+  const isAsync = isAsyncFunction(fn);
+  const members = extractAllMembers(fn);
+
+  class FunctionWrapper implements ComputableInstance {
+    private _fn!: AnyFn;
+    private _isGenerator!: boolean;
+    private _isAsync!: boolean;
+    [key: string]: unknown;
+
+    constructor() {
+      this._fn = fn.bind(this);
+      this._isGenerator = isGenerator;
+      this._isAsync = isAsync;
+
+      for (const [name, value] of Object.entries(members)) {
+        Object.defineProperty(this, name, {
+          value: typeof value === "function" ? (value as AnyFn).bind(this) : value,
+          writable: true,
+          configurable: true
+        });
+      }
+
+      const onConstruct = (this._fn as any).onConstruct;
+      if (typeof onConstruct === "function") {
+        onConstruct.apply(this);
+      }
+    }
+
+    compute(self: DerivedScope): unknown {
+      if (this._isGenerator) return this.runGenerator(self);
+      if (this._isAsync) return this.runAsync(self);
+      return this.runSync(self);
+    }
+
+    private runSync(self: DerivedScope): unknown {
+      return this._fn(self);
+    }
+
+    private runAsync(self: DerivedScope): unknown {
+      return this._fn(self);
+    }
+
+    private runGenerator(self: DerivedScope): unknown {
+      const gen = this._fn(self);
+      return this.iterateGenerator(gen as Generator<unknown, unknown, unknown>, self);
+    }
+
+    private iterateGenerator(gen: Generator<unknown, unknown, unknown>, self: DerivedScope): unknown {
+      const step = (value?: unknown): unknown => {
+        const result = value === undefined ? gen.next() : gen.next(value);
+
+        if (result.done) return result.value;
+
+        const yielded = result.value;
+
+        if (yielded && typeof yielded === "object" && "then" in yielded) {
+          return Promise.resolve(yielded).then(step);
+        }
+
+        if (yielded && typeof yielded === "object" && (yielded as Atom<any>).type === "atom") {
+          self.track?.(yielded as Atom<any>);
+          return step((yielded as Atom<any>).value);
+        }
+
+        return step(yielded);
+      };
+
+      return step();
+    }
+
+    onInit(self: DerivedScope) {
+      const hook = (this._fn as any).onInit;
+      if (typeof hook === "function") hook.call(this, self);
+    }
+
+    onDispose() {
+      const hook = (this._fn as any).onDispose;
+      if (typeof hook === "function") hook.call(this);
+    }
+  }
+
+  return FunctionWrapper as unknown as new () => ComputableInstance;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * derived() - Computed Node
+ * ───────────────────────────────────────────────────────────────────────────*/
+type SyncOnly<T> = T extends Promise<any> ? never : T;
+
+export function derived<T>(fn: (self: DerivedScope) => SyncOnly<T>, options?: AtomOptions): Atom<T>;
+export function derived<T>(fn: (self: DerivedScope) => Promise<T>, options?: AtomOptions): Atom<T>;
 export function derived<T>(...args: any[]): Atom<T> {
-  let fn: () => any;
+  let computableFactory: () => ComputableInstance;
   let options: AtomOptions | undefined;
 
-  if (typeof args[0] === "function") {
-    fn = args[0];
+  const first = args[0];
+
+  if (typeof first === "function") {
+    if (first.prototype && typeof first.prototype.compute === "function") {
+      const Class = first as new () => ComputableInstance;
+      computableFactory = () => new Class();
+    } else {
+      computableFactory = () => new (wrapFunctionInClass(first))();
+    }
     options = args[1];
+  } else if (first && typeof first === "object") {
+    if (first.type === "atom") {
+      const source = first as Atom<any>;
+      const valueFn = args[1] as (value: any) => any;
+      options = args[2];
+      computableFactory = () => ({
+        compute(self: DerivedScope) {
+          self.track?.(source);
+          return valueFn(source.value);
+        }
+      });
+    } else if (Array.isArray(first)) {
+      const sources = first as Atom<any>[];
+      const valueFn = args[1] as (...values: any[]) => any;
+      options = args[2];
+      computableFactory = () => ({
+        compute(self: DerivedScope) {
+          sources.forEach(s => self.track?.(s));
+          const values = sources.map(s => s.value);
+          if (values.some(v => v === undefined)) return undefined;
+          return valueFn(...values);
+        }
+      });
+    } else if (typeof first.compute === "function") {
+      computableFactory = () => first as ComputableInstance;
+    } else {
+      throw new Error("Invalid arguments for derived()");
+    }
   } else {
-    const sources = Array.isArray(args[0]) ? args[0] : [args[0]];
-    const valueFn = args[1] as (...values: any[]) => any;
-    options = args[2];
-    fn = () => {
-      const values = sources.map((s: Atom<any>) => s.value);
-      if (values.some((v: any) => v === undefined)) return undefined;
-      return valueFn(...values);
-    };
+    throw new Error("Invalid arguments for derived()");
   }
+
+  const computable = computableFactory();
 
   const scope = getCurrentScope();
   const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
@@ -936,6 +1167,7 @@ export function derived<T>(...args: any[]): Atom<T> {
   let isErrorState = false;
   let notifyPending = false;
   let promiseGeneration = 0;
+  let isAsyncFormula = false;
 
   const errorHandlers = new Set<(error: any) => void>();
   const subs = createSubscriberSet<T>(errorHandlers, analog);
@@ -979,6 +1211,13 @@ export function derived<T>(...args: any[]): Atom<T> {
       if (!depSubscriptions.has(dep)) {
         const handler = () => {
           if (disposed) return;
+
+          if (isAsyncFormula) {
+            // For async formulas, start recomputation immediately so that
+            // async result ordering is deterministic relative to the change.
+            recompute();
+            return;
+          }
 
           if (node.isAnalog && subs.size === 0) {
             node.dirty = true;
@@ -1026,15 +1265,14 @@ export function derived<T>(...args: any[]): Atom<T> {
 
     running = true;
     const ctx = pushFormulaContext();
-
-    const track = <A>(atom: Atom<A>): A => {
-      ctx.dependencies.add(atom as unknown as InternalAtomContainer);
-      return atom.value;
-    };
+    const self = createSelf(ctx);
 
     try {
-      const result = fn.length > 0 ? (fn as any)(track) : fn();
+      trackAtomsOnInstance(computable, self.track as (atom: Atom<any>) => void);
+      const result = computable.compute(self) as T | Promise<T>;
+      trackAtomsOnInstance(computable, self.track as (atom: Atom<any>) => void);
       initialized = true;
+      isAsyncFormula = isPromiseLike(result);
       processDependencies(ctx);
       return { result, context: ctx };
     } finally {
@@ -1190,12 +1428,16 @@ export function derived<T>(...args: any[]): Atom<T> {
       markDisposed(instance);
       getScheduler().remove(node);
       notifyPending = false;
-      
+
       for (const sub of depSubscriptions.values()) sub();
       depSubscriptions.clear();
       dependencies.clear();
       subs.clear();
       errorHandlers.clear();
+
+      if (typeof computable.onDispose === "function") {
+        computable.onDispose();
+      }
     },
   };
 
