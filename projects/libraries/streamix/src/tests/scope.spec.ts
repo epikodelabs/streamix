@@ -819,6 +819,26 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should support derivedExpr with callable scope reading external atoms', async () => {
+      const external = atom(2);
+      const s = scope({
+        count: 0,
+        total: derivedExpr((self) => self.count + self(external))
+      });
+
+      expect(s.total).toBe(2);
+
+      external.next(5);
+      await delay();
+      expect(s.total).toBe(5);
+
+      s.count = 3;
+      await delay();
+      expect(s.total).toBe(8);
+
+      s.dispose();
+    });
+
     it('should support pipeExpr with self reference', async () => {
       const source = atom(0);
       const s = scope({

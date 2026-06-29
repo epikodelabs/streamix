@@ -57,29 +57,48 @@ function isExprMarker(value: any): value is AtomExpr | DerivedExpr | PipeExpr | 
   return isAtomExpr(value) || isDerivedExpr(value) || isPipeExpr(value) || isFlowExpr(value) || isDynamicExpr(value);
 }
 
+function createCallableScopeProxy(scopeSelf: any): any {
+  const callable = function<T>(atom: Atom<T>): T {
+    const ctx = getCurrentFormulaContext();
+    if (ctx) ctx.dependencies.add(atom as any);
+    return atom.value;
+  };
+
+  return new Proxy(callable, {
+    get(_target, prop, receiver) {
+      return Reflect.get(scopeSelf, prop, receiver);
+    },
+    set(_target, prop, value, receiver) {
+      return Reflect.set(scopeSelf, prop, value, receiver);
+    },
+  });
+}
+
 function evaluateExprMarker(
   marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr,
   self: any,
   atoms?: any,
 ): Atom<any> {
+  const scopeSelf = createCallableScopeProxy(self);
+
   if (isAtomExpr(marker)) {
     return atom(marker.initialValue, marker.options);
   }
   if (isDerivedExpr(marker)) {
-    return derived(() => marker.fn(self));
+    return derived(() => marker.fn(scopeSelf));
   }
   if (isPipeExpr(marker)) {
-    return marker.fn(self);
+    return marker.fn(scopeSelf);
   }
   if (isFlowExpr(marker)) {
-    return flow(marker.fn(self));
+    return flow(marker.fn(scopeSelf));
   }
   if (isDynamicExpr(marker)) {
-    const value = marker.fn(self, atoms);
+    const value = marker.fn(scopeSelf, atoms);
     if (value && typeof value === "object" && (value as Atom<any>).type === "atom") {
       return value as Atom<any>;
     }
-    return derived(() => marker.fn(self, atoms));
+    return derived(() => marker.fn(scopeSelf, atoms));
   }
   throw new Error("Unknown expression marker");
 }

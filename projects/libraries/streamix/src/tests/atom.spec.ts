@@ -2,14 +2,35 @@ import {
   atom,
   createTestEnvironment,
   derived,
-  type DerivedScope,
   flow,
   getScheduler,
   scope,
   type Atom,
+  type DerivedScope,
 } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+export class MyComp {
+  id = atom(1);
+  data = atom('hello');
+
+  // ✅ THIS WORKS (Sort of)
+  asyncComputed = derived(async function(this: MyComp) {
+    const i = this.id.value; // ✅ 'this' is preserved. ✅ Tracked (pre-await).
+    await delay(100);
+    const d = this.data.value; // ✅ 'this' is preserved. ❌ NOT TRACKED (post-await).
+    return i + d;
+  });
+
+  // ✅ THIS IS GOD MODE
+  genComputed = derived(function* (this: MyComp) {
+    const i = this.id.value; // ✅ 'this' is preserved. ✅ Tracked.
+    yield delay(100);
+    const d = this.data.value; // ✅ 'this' is preserved. ✅ TRACKED!
+    return i + d;
+  });
+}
 
 describe('Atom System', () => {
   describe('atom()', () => {

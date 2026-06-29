@@ -64,10 +64,17 @@ export interface Writable<T = any> extends Atom<T> {
 }
 
 /** Internal Node State */
-/** Scope object passed to self-based derived formulas. */
+/**
+ * Scope object passed to self-based derived formulas.
+ *
+ * The scope is itself callable: `$(atom)` is shorthand for `$.read(atom)`, and
+ * `$(atom1, atom2)` destructures multiple tracked atoms.
+ */
 export type DerivedScope = {
-  /** Track an atom as a dependency of the current derived computation. */
-  track<A>(atom: Atom<A>): void;
+  <A>(atom: Atom<A>): A;
+  <T extends Atom<any>[]>(...atoms: T): { [K in keyof T]: AtomValue<T[K]> };
+  /** Read an atom and register it as a dependency of the current derived computation. */
+  read<A>(atom: Atom<A>): A;
   /** Register closure or global-scope atoms and return them for destructuring. */
   use<T extends Atom<any>[]>(...atoms: T): T;
 } & Record<string, unknown>;
@@ -246,10 +253,10 @@ interface FormulaContext {
 
 const activeFormulaStack: FormulaContext[] = [];
 
-function pushFormulaContext(): FormulaContext {
-  const context = { dependencies: new Set<InternalAtomContainer>() };
-  activeFormulaStack.push(context);
-  return context;
+function pushFormulaContext(context?: FormulaContext): FormulaContext {
+  const ctx = context ?? { dependencies: new Set<InternalAtomContainer>() };
+  activeFormulaStack.push(ctx);
+  return ctx;
 }
 
 function popFormulaContext(): void {
@@ -279,51 +286,118 @@ function isAtom(value: unknown): value is Atom<any> {
 }
 
 /**
- * Creates a derived scope whose properties lazily wrap Atom values in tracking
- * proxies. Reading `self.atom.value` through the scope registers the atom as a
- * dependency of the current formula context.
+ * Owns a single derived evaluation. Reads made through this owner are recorded
+ * as dependencies, and atom proxies created via the owner delegate `.value`
+ * reads to `owner.read()`.
  */
-function createSelf(ctx: FormulaContext): DerivedScope {
-  const storage: Record<string, unknown> = {};
-  const atomProxies = new WeakMap<Atom<any>, any>();
+class EvaluationOwner {
+  private ctx: FormulaContext | null = null;
+  private generation = 0;
+  private atomProxies = new WeakMap<Atom<any>, any>();
 
-  const track = <A>(atom: Atom<A>): void => {
-    ctx.dependencies.add(atom as unknown as InternalAtomContainer);
-  };
+  /** Read an atom and record it as a dependency of the active evaluation. */
+  read<A>(atom: Atom<A>): A {
+    if (this.ctx) {
+      this.ctx.dependencies.add(atom as unknown as InternalAtomContainer);
+    }
+    return atom.value;
+  }
 
-  const use = <T extends Atom<any>[]>(...atoms: T): T => {
-    atoms.forEach(track);
+  /** Register closure or global-scope atoms and return them for destructuring. */
+  use<T extends Atom<any>[]>(...atoms: T): T {
+    atoms.forEach(a => this.read(a));
     return atoms;
-  };
-  storage["track"] = track;
-  storage["use"] = use;
+  }
 
-  const wrapAtom = (atom: Atom<any>): any => {
-    let proxy = atomProxies.get(atom);
+  /** Return a cached proxy for an atom that intercepts `.value` reads. */
+  wrapAtom(atom: Atom<any>): any {
+    let proxy = this.atomProxies.get(atom);
     if (!proxy) {
+      const owner = this;
       proxy = new Proxy(atom, {
         get(target, prop, receiver) {
           if (prop === "value") {
-            track(target);
+            return owner.read(target);
           }
           return Reflect.get(target, prop, receiver);
         }
       });
-      atomProxies.set(atom, proxy);
+      this.atomProxies.set(atom, proxy);
     }
     return proxy;
-  };
+  }
 
-  return new Proxy(storage, {
-    get(target, prop, receiver) {
-      const value = Reflect.get(target, prop, receiver);
-      if (isAtom(value)) {
-        return wrapAtom(value);
+  /** Begin a new evaluation generation and return its context. */
+  enter(): { context: FormulaContext; generation: number } {
+    this.generation++;
+    this.ctx = { dependencies: new Set<InternalAtomContainer>() };
+    return { context: this.ctx, generation: this.generation };
+  }
+
+  /** True if the given context/generation is still the active evaluation. */
+  isCurrent(context: FormulaContext, generation: number): boolean {
+    return this.ctx === context && this.generation === generation;
+  }
+
+  /**
+   * End an evaluation and return its collected dependencies, or `null` if a
+   * newer evaluation has already superseded it.
+   */
+  leave(context: FormulaContext, generation: number): Set<InternalAtomContainer> | null {
+    if (!this.isCurrent(context, generation)) return null;
+    this.ctx = null;
+    return context.dependencies;
+  }
+}
+
+/**
+ * The callable API surface of a derived scope. Kept as a real class so methods
+ * are normal functions and the scope remains debuggable, while a Proxy wraps
+ * the computable instance to expose atom properties.
+ */
+class DerivedScopeFacade {
+  constructor(private owner: EvaluationOwner) {}
+
+  read<A>(atom: Atom<A>): A {
+    return this.owner.read(atom);
+  }
+
+  use<T extends Atom<any>[]>(...atoms: T): T {
+    return this.owner.use(...atoms);
+  }
+
+  invoke<T extends Atom<any>>(first: T, ...rest: Atom<any>[]): AtomValue<T> | AtomValue<Atom<any>>[] {
+    if (rest.length === 0) {
+      return this.owner.read(first) as AtomValue<T>;
+    }
+    return [first, ...rest].map(a => this.owner.read(a)) as AtomValue<Atom<any>>[];
+  }
+}
+
+/**
+ * Creates a derived scope proxy over the provided computable instance. Atom
+ * properties are lazily wrapped so that `.value` reads register dependencies
+ * with the owner. The returned scope is also callable: `$(atom)` reads and
+ * tracks the atom.
+ */
+function createSelf(instance: ComputableInstance, owner: EvaluationOwner): DerivedScope {
+  const facade = new DerivedScopeFacade(owner);
+  const callable = facade.invoke.bind(facade);
+
+  return new Proxy(callable, {
+    get(_target, prop, receiver) {
+      if (prop === "read" || prop === "use") {
+        const value = Reflect.get(facade, prop, receiver);
+        if (typeof value === "function") {
+          return value.bind(facade);
+        }
+        return value;
       }
-      return value;
-    },
-    set(target, prop, value, receiver) {
-      return Reflect.set(target, prop, value, receiver);
+      const instanceValue = Reflect.get(instance as object, prop, receiver);
+      if (isAtom(instanceValue)) {
+        return owner.wrapAtom(instanceValue);
+      }
+      return instanceValue;
     }
   }) as DerivedScope;
 }
@@ -965,23 +1039,6 @@ interface ComputableInstance {
   onDispose?(): void;
 }
 
-function trackAtomsOnInstance(instance: unknown, track: (atom: Atom<any>) => void): void {
-  if (!instance || typeof instance !== "object") return;
-
-  let current: object | null = instance as object;
-  while (current && current !== Object.prototype) {
-    for (const key of Object.getOwnPropertyNames(current)) {
-      try {
-        const value = (current as any)[key];
-        if (isAtom(value)) track(value);
-      } catch {
-        // Ignore getters that throw during inspection.
-      }
-    }
-    current = Object.getPrototypeOf(current);
-  }
-}
-
 function isGeneratorFunction(fn: AnyFn): boolean {
   return fn.constructor?.name === "GeneratorFunction";
 }
@@ -1072,8 +1129,7 @@ function wrapFunctionInClass(fn: AnyFn): new () => ComputableInstance {
         }
 
         if (yielded && typeof yielded === "object" && (yielded as Atom<any>).type === "atom") {
-          self.track?.(yielded as Atom<any>);
-          return step((yielded as Atom<any>).value);
+          return step(self.read(yielded as Atom<any>));
         }
 
         return step(yielded);
@@ -1124,8 +1180,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       options = args[2];
       computableFactory = () => ({
         compute(self: DerivedScope) {
-          self.track?.(source);
-          return valueFn(source.value);
+          return valueFn(self.read(source));
         }
       });
     } else if (Array.isArray(first)) {
@@ -1134,8 +1189,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       options = args[2];
       computableFactory = () => ({
         compute(self: DerivedScope) {
-          sources.forEach(s => self.track?.(s));
-          const values = sources.map(s => s.value);
+          const values = sources.map(s => self.read(s));
           if (values.some(v => v === undefined)) return undefined;
           return valueFn(...values);
         }
@@ -1150,6 +1204,8 @@ export function derived<T>(...args: any[]): Atom<T> {
   }
 
   const computable = computableFactory();
+  const owner = new EvaluationOwner();
+  const self = createSelf(computable, owner);
 
   const scope = getCurrentScope();
   const analog = scope !== null && getScopeMode(scope) === "analog" && !options?.discrete;
@@ -1166,7 +1222,6 @@ export function derived<T>(...args: any[]): Atom<T> {
   let errorValue: any = undefined;
   let isErrorState = false;
   let notifyPending = false;
-  let promiseGeneration = 0;
   let isAsyncFormula = false;
 
   const errorHandlers = new Set<(error: any) => void>();
@@ -1238,7 +1293,8 @@ export function derived<T>(...args: any[]): Atom<T> {
   const handleAsyncResult = (promise: Promise<T>, generation: number, context: FormulaContext) => {
     promise.then(
       (value) => {
-        if (disposed || promiseGeneration !== generation) return;
+        if (disposed || !owner.isCurrent(context, generation)) return;
+        owner.leave(context, generation);
         processDependencies(context);
         isErrorState = false;
         errorValue = undefined;
@@ -1246,7 +1302,8 @@ export function derived<T>(...args: any[]): Atom<T> {
         commitValue(value);
       },
       (err) => {
-        if (disposed || promiseGeneration !== generation) return;
+        if (disposed || !owner.isCurrent(context, generation)) return;
+        owner.leave(context, generation);
         processDependencies(context);
         errorValue = normalizeError(err);
         isErrorState = true;
@@ -1260,38 +1317,40 @@ export function derived<T>(...args: any[]): Atom<T> {
   };
 
   /** Core computation: tracks deps, runs fn, returns value */
-  const compute = (): { result: T | Promise<T>; context: FormulaContext } => {
+  const compute = (): { result: T | Promise<T>; context: FormulaContext; generation: number } => {
     if (running) throw new Error("Circular dependency detected in derived()");
 
     running = true;
-    const ctx = pushFormulaContext();
-    const self = createSelf(ctx);
+    const { context, generation } = owner.enter();
+    pushFormulaContext(context);
+    let asyncResult = false;
 
     try {
-      trackAtomsOnInstance(computable, self.track as (atom: Atom<any>) => void);
       const result = computable.compute(self) as T | Promise<T>;
-      trackAtomsOnInstance(computable, self.track as (atom: Atom<any>) => void);
       initialized = true;
-      isAsyncFormula = isPromiseLike(result);
-      processDependencies(ctx);
-      return { result, context: ctx };
+      asyncResult = isPromiseLike(result);
+      isAsyncFormula = asyncResult;
+      processDependencies(context);
+      return { result, context, generation };
     } finally {
       popFormulaContext();
       running = false;
+      if (!asyncResult) {
+        owner.leave(context, generation);
+      }
     }
   };
 
   /** Performs state transition if computation changes value */
   const recompute = () => {
-    const { result: next, context } = compute();
+    const { result: next, context, generation } = compute();
     node.dirty = false;
 
     isErrorState = false;
     errorValue = undefined;
 
     if (isPromiseLike(next)) {
-      promiseGeneration++;
-      handleAsyncResult(Promise.resolve(next), promiseGeneration, context);
+      handleAsyncResult(Promise.resolve(next), generation, context);
       return;
     }
 
@@ -1350,10 +1409,9 @@ export function derived<T>(...args: any[]): Atom<T> {
       // until a dependency change triggers a recompute.
       if (!initialized) {
         try {
-          const { result, context } = compute();
+          const { result, context, generation } = compute();
           if (isPromiseLike(result)) {
-            promiseGeneration++;
-            handleAsyncResult(Promise.resolve(result), promiseGeneration, context);
+            handleAsyncResult(Promise.resolve(result), generation, context);
           } else {
             current = result;
             previous = current;
