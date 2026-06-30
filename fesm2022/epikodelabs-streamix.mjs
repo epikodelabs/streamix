@@ -55,6 +55,14 @@ class AsyncIteratorState {
     }
 }
 /**
+ * Safely normalizes any thrown/rejected value to an Error instance.
+ * Preserves real Error instances (and their stack traces); otherwise wraps
+ * primitives and objects in `new Error(String(err))`.
+ */
+function normalizeError(err) {
+    return err instanceof Error ? err : new Error(String(err));
+}
+/**
  * Synchronous pull handler - implements __tryNext logic
  */
 function syncPull(state, _iterator, onDone) {
@@ -160,15 +168,16 @@ function pushError(state, _iterator, err, onPush) {
     if (state.completed)
         return;
     state.completed = true;
+    const error = normalizeError(err);
     // If someone is waiting, reject immediately
     if (state.pullReject) {
         const r = state.pullReject;
         state.pullResolve = state.pullReject = null;
-        r(err);
+        r(error);
         return;
     }
     // Otherwise store it
-    state.pendingError = { err };
+    state.pendingError = { err: error };
     onPush?.();
 }
 
@@ -203,14 +212,15 @@ function createAsyncPushable() {
             return Promise.resolve(DONE);
         },
         async throw(err) {
+            const error = normalizeError(err);
             state.completed = true;
             if (state.pullReject) {
                 const r = state.pullReject;
                 state.pullResolve = state.pullReject = null;
-                r(err);
+                r(error);
             }
             state.clear();
-            return Promise.reject(err);
+            return Promise.reject(error);
         },
         __tryNext() {
             return syncPull(state, iterator);
@@ -324,9 +334,10 @@ function createOperator(name, transformFn) {
             }
             if (typeof iterator.throw !== 'function') {
                 iterator.throw = async (err) => {
+                    const error = err instanceof Error ? err : new Error(String(err));
                     try {
                         if (typeof source.throw === 'function') {
-                            const result = await source.throw(err);
+                            const result = await source.throw(error);
                             // Source handled the throw — forward its result
                             if (result.done)
                                 return DONE;
@@ -338,7 +349,7 @@ function createOperator(name, transformFn) {
                     catch (sourceErr) {
                         // source.throw() re-threw or threw a different error.
                         // Fall through to cleanup + re-throw the original error.
-                        if (sourceErr !== err) {
+                        if (sourceErr !== error) {
                             console.warn(`Operator '${name}': source.throw() threw an unexpected error:`, sourceErr);
                         }
                     }
@@ -351,7 +362,7 @@ function createOperator(name, transformFn) {
                     catch (cleanupErr) {
                         console.warn(`Operator '${name}': source.return() threw during throw cleanup:`, cleanupErr);
                     }
-                    throw err;
+                    throw error;
                 };
             }
             return iterator;
@@ -418,6 +429,7 @@ function createPushOperator(name, setup) {
             return baseReturn ? baseReturn(value) : DONE;
         };
         output.throw = async (err) => {
+            const error = err instanceof Error ? err : new Error(String(err));
             await runCleanup();
             try {
                 if (typeof source.return === 'function')
@@ -427,10 +439,10 @@ function createPushOperator(name, setup) {
                 console.warn(`Operator '${name}': source.return() threw during output.throw():`, cleanupErr);
             }
             if (typeof output.completed === 'function' && !output.completed())
-                output.error(err);
+                output.error(error);
             if (baseThrow)
-                return baseThrow(err);
-            throw err;
+                return baseThrow(error);
+            throw error;
         };
         return output;
     });
@@ -839,7 +851,7 @@ function createAsyncCoordinator(sources = []) {
                 completed[i] = true;
                 activeCount--;
             }
-            pushEvent({ type: "error", error: err, sourceIndex: i }, i);
+            pushEvent({ type: "error", error: normalizeError(err), sourceIndex: i }, i);
             notify();
         });
     }
@@ -868,7 +880,7 @@ function createAsyncCoordinator(sources = []) {
                     completed[i] = true;
                     activeCount--;
                 }
-                pushEvent({ type: "error", error: err, sourceIndex: i }, i);
+                pushEvent({ type: "error", error: normalizeError(err), sourceIndex: i }, i);
             }
             return;
         }
@@ -1159,13 +1171,14 @@ function createAsyncIterator(opts) {
                 return Promise.resolve(DONE);
             },
             async throw(err) {
+                const error = normalizeError(err);
                 state.completed = true;
                 const unsubscribePromise = sub?.unsubscribe();
                 sub = null;
                 if (state.pullReject) {
                     const r = state.pullReject;
                     state.pullResolve = state.pullReject = null;
-                    r(err);
+                    r(error);
                 }
                 state.clear();
                 try {
@@ -1174,7 +1187,7 @@ function createAsyncIterator(opts) {
                 catch (e) {
                     console.log('AsyncIterator throw error', e);
                 }
-                return Promise.reject(err);
+                return Promise.reject(error);
             }
         };
         iterator.__hasBufferedValues = () => state.hasBufferedValues() || pendingPushes.length > 0;
@@ -1243,9 +1256,10 @@ function createBehaviorSubject(initialValue) {
         if (isCompleted)
             return;
         isCompleted = true;
-        completionInfo = { kind: 'error', error: err };
+        const error = normalizeError(err);
+        completionInfo = { kind: 'error', error };
         for (const listener of listeners) {
-            listener.error(err);
+            listener.error(error);
         }
         listeners.clear();
     };
@@ -1439,9 +1453,10 @@ function createReplaySubject(capacity = Infinity) {
         if (isCompleted)
             return;
         isCompleted = true;
-        completionInfo = { kind: 'error', error: err };
+        const error = normalizeError(err);
+        completionInfo = { kind: 'error', error };
         for (const listener of listeners) {
-            listener.error(err);
+            listener.error(error);
         }
         listeners.clear();
     };
@@ -1601,9 +1616,10 @@ function createSubject() {
         if (isCompleted)
             return;
         isCompleted = true;
-        completionInfo = { kind: 'error', error: err };
+        const error = normalizeError(err);
+        completionInfo = { kind: 'error', error };
         for (const listener of listeners) {
-            listener.error(err);
+            listener.error(error);
         }
         listeners.clear();
     };
@@ -1827,14 +1843,16 @@ async function drainIterator(iterator, getReceivers, signal) {
                     // buffering (e.g. Subject's AsyncPushable queue).
                     if (isPromiseLike(ret)) {
                         ret.catch((err) => {
-                            console.log('Subscriber callback error', err);
-                            receiver.error?.(err);
+                            const error = err instanceof Error ? err : new Error(String(err));
+                            console.log('Subscriber callback error', error);
+                            receiver.error?.(error);
                         });
                     }
                 }
                 catch (err) {
-                    console.log('Subscriber callback error', err);
-                    receiver.error?.(err);
+                    const error = err instanceof Error ? err : new Error(String(err));
+                    console.log('Subscriber callback error', error);
+                    receiver.error?.(error);
                 }
             }
         }
@@ -2084,10 +2102,11 @@ function pipeSourceThrough(source, operators) {
                     return { done: true, value };
                 },
                 async throw(err) {
+                    const error = err instanceof Error ? err : new Error(String(err));
                     if (iterator.throw) {
-                        return iterator.throw(err);
+                        return iterator.throw(error);
                     }
-                    throw err;
+                    throw error;
                 },
             };
             publicIterator[Symbol.asyncIterator] = () => publicIterator;
@@ -2146,7 +2165,7 @@ const audit = (duration) => createPushOperator('audit', (source, output) => {
             }
         }
         catch (err) {
-            output.error(err);
+            output.error(normalizeError(err));
         }
         finally {
             if (timerId) {
@@ -2417,7 +2436,7 @@ function defer(factory) {
             }
         }
         catch (error) {
-            throw error;
+            throw normalizeError(error);
         }
     }
     return createStream('defer', generator);
@@ -2842,7 +2861,7 @@ function merge(...sources) {
             for (let i = 0; i < initialResults.length; i++) {
                 const settled = initialResults[i];
                 if (settled.status === 'rejected') {
-                    throw settled.reason;
+                    throw normalizeError(settled.reason);
                 }
                 const result = settled.value;
                 if (result.done) {
@@ -2858,7 +2877,7 @@ function merge(...sources) {
                     break;
                 const event = result.value;
                 if (event.type === 'error') {
-                    throw event.error;
+                    throw normalizeError(event.error);
                 }
                 if (event.type === 'value') {
                     yield event.value;
@@ -2941,7 +2960,7 @@ function race(...streams) {
                 const event = result.value;
                 // 1. Handle errors immediately regardless of winner
                 if (event.type === 'error') {
-                    throw event.error;
+                    throw normalizeError(event.error);
                 }
                 // 2. Identify the winner from the first real value or completion
                 if (winnerIndex === null) {
@@ -3122,7 +3141,7 @@ function zip(...sources) {
                     if (r.status === 'rejected') {
                         // Propagate first rejection, cancel others first
                         await Promise.all(iterators.map((it, j) => j !== i ? it.return?.(undefined).catch(() => { }) : Promise.resolve()));
-                        throw r.reason;
+                        throw normalizeError(r.reason);
                     }
                     if (r.value.done) {
                         completed = true;
@@ -3187,7 +3206,7 @@ function buffer(period) {
         };
         const fail = (err) => {
             buf = [];
-            output.error(err);
+            output.error(normalizeError(err));
             cleanup();
         };
         intervalSubscription = timer(period, period).subscribe({
@@ -3369,14 +3388,15 @@ const bufferUntil = (notifier) => createOperator("bufferUntil", function (source
          * @returns {Promise<never>} Rejected promise with the error
          */
         async throw(err) {
+            const error = normalizeError(err);
             if (cancelled)
-                return Promise.reject(err);
+                return Promise.reject(error);
             cancelled = true;
             try {
-                await runner.throw?.(err);
+                await runner.throw?.(error);
             }
             catch { }
-            return Promise.reject(err);
+            return Promise.reject(error);
         },
         /**
          * Internal synchronous try-pull (used by Streamix for tests/operators).
@@ -3527,15 +3547,16 @@ const catchError = (handler = () => { }) => createOperator('catchError', functio
                 return NEXT(result.value);
             }
             catch (error) {
+                const normalizedError = normalizeError(error);
                 if (!errorCaughtAndHandled) {
                     errorCaughtAndHandled = true;
-                    const handlerResult = handler(error);
+                    const handlerResult = handler(normalizedError);
                     if (isPromiseLike(handlerResult))
                         await handlerResult;
                     completed = true;
                     return DONE;
                 }
-                throw error;
+                throw normalizedError;
             }
         }
     };
@@ -3601,6 +3622,7 @@ const concatMap = (project) => createOperator("concatMap", function (source) {
             return DONE;
         },
         async throw(err) {
+            const error = normalizeError(err);
             try {
                 await innerIterator?.return?.();
             }
@@ -3610,7 +3632,7 @@ const concatMap = (project) => createOperator("concatMap", function (source) {
             }
             catch { }
             innerIterator = null;
-            throw err;
+            throw error;
         }
     };
     return iterator;
@@ -3663,7 +3685,7 @@ function debounce(duration) {
                 }
             }
             catch (err) {
-                output.error(err);
+                output.error(normalizeError(err));
             }
             finally {
                 completed = true;
@@ -3747,7 +3769,7 @@ function delay(ms) {
                 }
             }
             catch (err) {
-                output.error(err);
+                output.error(normalizeError(err));
             }
             finally {
                 if (!output.completed())
@@ -3921,9 +3943,10 @@ function delayUntil(notifier) {
                 return value !== undefined ? { value, done: true } : DONE;
             },
             async throw(err) {
+                const error = normalizeError(err);
                 isDone = true;
-                await runner.throw?.(err);
-                return Promise.reject(err);
+                await runner.throw?.(error);
+                return Promise.reject(error);
             }
         };
         return iterator;
@@ -3976,7 +3999,7 @@ const delayWhile = (predicate) => createPushOperator('delayWhile', (source, outp
                 flushQueue();
         }
         catch (err) {
-            output.error(err);
+            output.error(normalizeError(err));
         }
         finally {
             if (!output.completed())
@@ -4189,7 +4212,7 @@ const exhaustMap = (project) => createOperator("exhaustMap", function (source) {
                 }
                 catch (err) {
                     isSourceDone = true;
-                    throw err;
+                    throw normalizeError(err);
                 }
                 if (isPromiseLike(projected)) {
                     try {
@@ -4197,7 +4220,7 @@ const exhaustMap = (project) => createOperator("exhaustMap", function (source) {
                     }
                     catch (err) {
                         isSourceDone = true;
-                        throw err;
+                        throw normalizeError(err);
                     }
                 }
                 const innerStream = fromAny(projected);
@@ -4217,6 +4240,7 @@ const exhaustMap = (project) => createOperator("exhaustMap", function (source) {
             return DONE;
         },
         async throw(err) {
+            const error = normalizeError(err);
             try {
                 await innerIterator?.return?.();
             }
@@ -4226,7 +4250,7 @@ const exhaustMap = (project) => createOperator("exhaustMap", function (source) {
             }
             catch { }
             innerIterator = null;
-            throw err;
+            throw error;
         }
     };
 });
@@ -4304,12 +4328,13 @@ const expand = (project, options = {}) => createOperator('expand', function (sou
             return DONE;
         },
         async throw(err) {
+            const error = normalizeError(err);
             queue.length = 0;
             try {
                 await source.return?.();
             }
             catch { }
-            throw err;
+            throw error;
         }
     };
     return iterator;
@@ -4417,7 +4442,7 @@ const finalize = (callback) => {
                 }
                 catch (err) {
                     await doFinalize();
-                    throw err;
+                    throw normalizeError(err);
                 }
             },
             async return(value) {
@@ -4429,10 +4454,11 @@ const finalize = (callback) => {
             },
             async throw(error) {
                 await doFinalize();
+                const normalizedError = normalizeError(error);
                 if (source.throw) {
-                    return source.throw(error);
+                    return source.throw(normalizedError);
                 }
-                throw error;
+                throw normalizedError;
             }
         };
         return iterator;
@@ -4573,6 +4599,7 @@ const fork = (...options) => createOperator('fork', function (source) {
             return DONE;
         },
         async throw(err) {
+            const error = normalizeError(err);
             try {
                 await innerIterator?.return?.();
             }
@@ -4582,7 +4609,7 @@ const fork = (...options) => createOperator('fork', function (source) {
             }
             catch { }
             innerIterator = null;
-            throw err;
+            throw error;
         }
     };
     return iterator;
@@ -4822,7 +4849,7 @@ function mergeMap(project, concurrent = Infinity, bufferSize = Infinity) {
             }
             catch (err) {
                 if (!output.completed())
-                    output.error(err);
+                    output.error(normalizeError(err));
             }
             finally {
                 await coordinator.return?.();
@@ -4982,7 +5009,7 @@ const observeOn = (context) => {
                 await waitForPending();
             }
             catch (err) {
-                output.error(err);
+                output.error(normalizeError(err));
             }
             finally {
                 if (!output.completed())
@@ -5019,6 +5046,7 @@ const observeOn = (context) => {
                 return DONE;
             },
             async throw(err) {
+                const error = normalizeError(err);
                 completed = true;
                 stopped = true;
                 for (const cancel of pendingCancels) {
@@ -5030,8 +5058,8 @@ const observeOn = (context) => {
                 }
                 catch { }
                 if (!output.completed())
-                    output.error(err);
-                throw err;
+                    output.error(error);
+                throw error;
             }
         };
         return iterator;
@@ -5154,7 +5182,7 @@ const sample = (period) => createPushOperator('sample', (source, output) => {
             emit();
         }
         catch (err) {
-            output.error(err);
+            output.error(normalizeError(err));
         }
         finally {
             stopSampling();
@@ -5288,7 +5316,7 @@ function share() {
                 }
             }
             catch (err) {
-                shared.error(err);
+                shared.error(normalizeError(err));
                 return;
             }
             finally {
@@ -5321,9 +5349,10 @@ function share() {
             return baseReturn ? baseReturn(value) : DONE;
         };
         outputIterator.throw = async (err) => {
+            const error = normalizeError(err);
             if (baseThrow)
-                return baseThrow(err);
-            throw err;
+                return baseThrow(error);
+            throw error;
         };
         return outputIterator;
     });
@@ -5374,7 +5403,7 @@ function shareReplay(bufferSize = Infinity) {
                 }
             }
             catch (err) {
-                output.error(err);
+                output.error(normalizeError(err));
             }
             finally {
                 sourceIterator = null;
@@ -5422,12 +5451,13 @@ function shareReplay(bufferSize = Infinity) {
                 return it.return ? it.return(value) : DONE;
             },
             async throw(err) {
+                const error = normalizeError(err);
                 const it = await ensureOutputIterator();
                 if (output && !output.completed())
-                    output.error(err);
+                    output.error(error);
                 if (it.throw)
-                    return it.throw(err);
-                throw err;
+                    return it.throw(error);
+                throw error;
             }
         };
         return iterator;
@@ -5754,7 +5784,7 @@ function switchMap(project) {
                 }
                 catch (err) {
                     if (!stopped && token === currentInnerToken) {
-                        output.error(err);
+                        output.error(normalizeError(err));
                     }
                 }
                 finally {
@@ -5773,7 +5803,7 @@ function switchMap(project) {
                 projected = project(value, index++);
             }
             catch (err) {
-                output.error(err);
+                output.error(normalizeError(err));
                 return;
             }
             if (isPromiseLike(projected)) {
@@ -5785,7 +5815,7 @@ function switchMap(project) {
                 }, (err) => {
                     if (stopped || capturedToken !== currentInnerToken)
                         return;
-                    output.error(err);
+                    output.error(normalizeError(err));
                 });
             }
             else {
@@ -5801,7 +5831,7 @@ function switchMap(project) {
                         result = tryNext.call(source);
                     }
                     catch (err) {
-                        output.error(err);
+                        output.error(normalizeError(err));
                         return;
                     }
                     if (!result)
@@ -5830,7 +5860,7 @@ function switchMap(project) {
                     checkComplete();
                 }
                 catch (err) {
-                    output.error(err);
+                    output.error(normalizeError(err));
                 }
             })();
         }
@@ -5854,6 +5884,7 @@ function switchMap(project) {
             return baseReturn ? baseReturn(undefined) : DONE;
         };
         outputIterator.throw = async (err) => {
+            const error = normalizeError(err);
             stopped = true;
             try {
                 try {
@@ -5865,8 +5896,8 @@ function switchMap(project) {
                 currentInner = null;
             }
             if (baseThrow)
-                return baseThrow(err);
-            throw err;
+                return baseThrow(error);
+            throw error;
         };
         return outputIterator;
     });
@@ -6036,12 +6067,13 @@ function takeUntil(notifier) {
                 return value !== undefined ? { value, done: true } : DONE;
             },
             async throw(err) {
+                const error = normalizeError(err);
                 if (isDone)
-                    return Promise.reject(err);
+                    return Promise.reject(error);
                 isDone = true;
-                await runner.throw?.(err);
+                await runner.throw?.(error);
                 await notifierIt.return?.();
-                return Promise.reject(err);
+                return Promise.reject(error);
             }
         };
         return iterator;
@@ -6470,7 +6502,7 @@ function createQueue() {
             result = last.then(() => operation());
         }
         catch (err) {
-            result = Promise.reject(err);
+            result = Promise.reject(normalizeError(err));
         }
         // Ensure pendingCount decrements even if the operation throws synchronously
         result = result.finally(() => {
@@ -6541,5 +6573,5 @@ const createSemaphore = (initialCount) => {
  * Generated bundle index. Do not edit.
  */
 
-export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isOperator, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
+export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isOperator, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, normalizeError, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
 //# sourceMappingURL=epikodelabs-streamix.mjs.map
