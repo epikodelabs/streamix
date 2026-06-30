@@ -24,13 +24,6 @@
   </a>
 </p>
 
-
-<br>
-
-<p align="center">
-  <img src="https://epikodelabs.github.io/streamix/presentation.gif" alt="streamix presentation" width="100%">
-</p>
-
 ---
 
 ## 🧭 About This Repository
