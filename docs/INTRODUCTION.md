@@ -27,8 +27,6 @@ streamix is a reactive streams library built on async generators. Values are com
 npm install @epikodelabs/streamix
 ```
 
----
-
 ## Core concepts
 
 ### Streams (Legacy)
