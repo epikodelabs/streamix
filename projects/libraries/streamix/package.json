@@ -18,10 +18,10 @@
   },
   "type": "module",
   "sideEffects": false,
-  "homepage": "https://epikodelabs.github.io",
+  "homepage": "https://github.com/epikodelabs",
   "repository": {
     "type": "git",
-    "url": "https://github.com/epikodelabs/epikodelabs.github.io"
+    "url": "https://github.com/epikodelabs/streamix"
   },
   "author": "Oleksii Shepel",
   "email": "oleksii.shepel@outlook.com"
