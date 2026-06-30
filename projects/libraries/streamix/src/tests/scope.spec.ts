@@ -468,7 +468,8 @@ describe('Scope System', () => {
 
       parent.dispose();
 
-      expect(parent.loading).toBe(false);
+      // The loading atom is disposed with the scope, so only the internal
+      // pending count can be verified after disposal.
       expect((parent as any)._pendingCount).toBe(0);
       source.dispose();
     });

@@ -6,7 +6,7 @@ import {
   type RegistrationOptions,
   type Token,
 } from "../ioc/container";
-import { atom, derived, flow, getCurrentFormulaContext, normalizeError, Writable, type Atom } from "./atom";
+import { atom, derived, flow, getCurrentFormulaContext, normalizeError, NO_INITIAL_VALUE, Writable, type Atom } from "./atom";
 import {
   isAtomExpr,
   isDerivedExpr,
@@ -81,6 +81,9 @@ function evaluateExprMarker(
   const scopeSelf = createCallableScopeProxy(self);
 
   if (isAtomExpr(marker)) {
+    if (marker.initialValue === undefined) {
+      return atom(NO_INITIAL_VALUE, marker.options);
+    }
     return atom(marker.initialValue, marker.options);
   }
   if (isDerivedExpr(marker)) {

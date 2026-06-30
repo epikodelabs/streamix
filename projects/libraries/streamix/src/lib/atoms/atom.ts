@@ -17,6 +17,7 @@ const NODE = Symbol("engine.node");
 const MARK_DIRTY = Symbol("engine.markDirty");
 const FLUSH = Symbol("engine.flush");
 export const ANALOG = Symbol("engine.analog");
+export const NO_INITIAL_VALUE = Symbol("streamix.noInitialValue");
 
 /** Debug flags for atom runtime behavior. Toggle in tests or dev builds. */
 export const ATOM_DEBUG = {
@@ -852,17 +853,45 @@ export function flow<T>(
  * atom() - Mutable State Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
-export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable<T> {
-  const activeScope = getCurrentScope();
-  const analog = activeScope !== null && getScopeMode(activeScope) === "analog" && !options?.discrete;
-  
-  const maxSubscribers = options?.maxSubscribers ?? 1000;
-  const terminateOnError = options?.terminateOnError ?? false;
-  const propagateErrors = options?.propagateErrors ?? true;
+const KNOWN_ATOM_OPTION_KEYS = new Set<keyof AtomOptions>([
+  "discrete",
+  "maxSubscribers",
+  "onError",
+  "terminateOnError",
+  "propagateErrors",
+]);
 
-  const hasInitialValue = arguments.length > 0;
-  let current = initialValue as T;
-  let previous = initialValue as T;
+function isAtomOptionsObject(value: unknown): value is AtomOptions {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length > 0 && keys.every(k => KNOWN_ATOM_OPTION_KEYS.has(k as keyof AtomOptions));
+}
+
+export function atom<T = any>(options?: AtomOptions): Writable<T>;
+export function atom<T = any>(noInitialValue: typeof NO_INITIAL_VALUE, options?: AtomOptions): Writable<T>;
+export function atom<T = any>(initialValue: T, options?: AtomOptions): Writable<T>;
+export function atom<T = any>(
+  initialValue?: T | typeof NO_INITIAL_VALUE | AtomOptions,
+  options?: AtomOptions
+): Writable<T> {
+  const activeScope = getCurrentScope();
+  const resolvedOptions = isAtomOptionsObject(initialValue) ? initialValue : options;
+  const analog = activeScope !== null && getScopeMode(activeScope) === "analog" && !resolvedOptions?.discrete;
+
+  const maxSubscribers = resolvedOptions?.maxSubscribers ?? 1000;
+  const terminateOnError = resolvedOptions?.terminateOnError ?? false;
+  const propagateErrors = resolvedOptions?.propagateErrors ?? true;
+
+  const hasInitialValue = initialValue !== undefined && initialValue !== NO_INITIAL_VALUE && !(isAtomOptionsObject(initialValue) && arguments.length === 1);
+  let current: T;
+  let previous: T;
+  if (hasInitialValue) {
+    current = initialValue as T;
+    previous = initialValue as T;
+  } else {
+    current = undefined as T;
+    previous = undefined as T;
+  }
   let disposed = false;
   let lastNotified = current;
   let errorValue: any = undefined;
@@ -986,7 +1015,7 @@ export function atom<T = any>(initialValue?: T, options?: AtomOptions): Writable
 
       const shouldTerminate = errorOptions?.terminate ?? terminateOnError;
       for (const h of errorHandlers) try { h(errorValue); } catch {}
-      if (options?.onError) try { options.onError(errorValue); } catch {}
+      if (resolvedOptions?.onError) try { resolvedOptions.onError(errorValue); } catch {}
 
       if (shouldTerminate) {
         disposed = true;
