@@ -102,6 +102,29 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should not deliver an initial subscribeTo emission when the atom has no value yet', async () => {
+      interface Shape {
+        user: string;
+      }
+
+      const s = scope<Shape>({
+        user: atomExpr<string>(),
+      });
+
+      const values: string[] = [];
+      const sub = s.subscribeTo('user', v => values.push(v));
+
+      await delay();
+      expect(values).toEqual([]);
+
+      s.user = 'Ada';
+      await delay();
+      expect(values).toEqual(['Ada']);
+
+      sub();
+      s.dispose();
+    });
+
     it('should not allow assignment to derived atoms', () => {
       interface Shape {
         count: number;
@@ -370,6 +393,29 @@ describe('Scope System', () => {
       s.dispose();
       source.dispose();
     });
+
+    it('should use safeValue for derived atoms in error state during snapshot', async () => {
+      interface Shape {
+        d: number;
+      }
+
+      const source = atom(5);
+      const s = scope<Shape>({
+        d: derivedExpr(() => {
+          if (source.value > 10) throw new Error('Too high');
+          return source.value;
+        }),
+      });
+
+      expect(s.snapshot().d).toBe(5);
+
+      source.next(15);
+      await delay();
+      expect(s.snapshot().d).toBe(5); // last good safeValue
+
+      s.dispose();
+      source.dispose();
+    });
   });
 
   describe('disposal', () => {
@@ -408,6 +454,22 @@ describe('Scope System', () => {
       expect(parent.child.grandchild.at('x').disposed).toBe(false);
       parent.dispose();
       expect(parent.child.grandchild.at('x').disposed).toBe(true);
+      source.dispose();
+    });
+
+    it('should decrement pending count through ancestors on disposal', async () => {
+      const source = atom<number>();
+      const parent = scope({
+        child: { a: () => flow(source) },
+      });
+
+      expect(parent.loading).toBe(true);
+      expect((parent as any)._pendingCount).toBeGreaterThan(0);
+
+      parent.dispose();
+
+      expect(parent.loading).toBe(false);
+      expect((parent as any)._pendingCount).toBe(0);
       source.dispose();
     });
 

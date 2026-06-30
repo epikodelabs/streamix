@@ -424,6 +424,32 @@ describe('Atom System', () => {
       f.dispose();
     });
 
+    it('should handle concurrent dispose() calls without duplicate cleanup', async () => {
+      let cleanups = 0;
+      const f = flow(async function*() {
+        try {
+          while (true) {
+            yield 1;
+            await delay(10);
+          }
+        } finally {
+          cleanups++;
+          await delay(30);
+        }
+      });
+
+      f.subscribe(() => {});
+      await delay(20);
+
+      f.dispose();
+      f.dispose();
+      f.dispose();
+
+      await delay(100);
+      expect(f.disposed).toBe(true);
+      expect(cleanups).toBe(1);
+    });
+
     it('should teardown previous iteration on dependency-triggered restart', async () => {
       const dep = atom(0);
       let cleanups = 0;

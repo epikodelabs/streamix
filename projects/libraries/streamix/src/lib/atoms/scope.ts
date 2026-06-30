@@ -613,7 +613,9 @@ function createScopeInternal<T extends Record<string, any>>(
             if (!atom || typeof atom.subscribe !== "function") {
               throw new Error(`Cannot subscribe to non-atom property: ${String(key)}`);
             }
-            callback(atom.value, atom.previous);
+            if (hasAtomEmitted(atom)) {
+              callback(atom.value, atom.previous);
+            }
             return atom.subscribe(callback);
           };
         }
@@ -868,6 +870,14 @@ export function markAtomAsEmitted(atom: Atom<any>): void {
 
   const scope = atomScopeRegistry.get(atom);
   if (scope) decrementPending(scope);
+}
+
+/**
+ * Returns true if the atom has produced at least one value (either an initial
+ * value or a subsequent emission).
+ */
+export function hasAtomEmitted(atom: Atom<any>): boolean {
+  return emittedAtomsRegistry.has(atom);
 }
 
 /* ── Loading State ────────────────────────────────────────────────────────── */
