@@ -46,7 +46,6 @@ export default defineConfig({
             { text: 'Getting Started', link: '/' },
             { text: 'Pricing', link: '/PRICING' },
             { text: 'Changelog', link: '/CHANGELOG' },
-            { text: 'Atoms', link: '/ATOMS' },
             { text: 'Coroutines', link: '/COROUTINES' },
             { text: 'Actors', link: '/ACTORS' },
             { text: 'Generators', link: '/GENERATORS' },

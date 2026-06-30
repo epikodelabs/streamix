@@ -1,37 +1,17 @@
 # Changelog
 
-Got it. Here's the rewritten changelog entry:
+## 2.0.49
 
----
+Normalized all catch/rejection errors to Error instances
 
-## 2.0.47
+- Apply err instanceof Error ? err : new Error(String(err)) across
+  abstractions, operators, streams, subjects, utils, converters, and primitives.
+- Add normalizeError helper in utils/helpers.ts and use it where imports allow.
+- Remove dead streams/fromAtom.ts (imported missing ../atoms/atom, not exported).
 
-### Atoms & Scopes
+## 2.0.48
 
-This release introduces a complete reactive state layer as a first-class replacement for imperative Subjects.
-
-**New primitives:**
-
-- **`atom(initial)`** — writable reactive value with a known initial value. Replaces `createBehaviorSubject`.
-- **`asyncAtom()`** — writable atom without an initial value. Replaces `createSubject`.
-- **`asyncAtom({ capacity: n })`** — same, but replays the last `n` values to late subscribers. Replaces `createReplaySubject`.
-- **`derived(factory)`** — read-only atom with automatic dependency tracking. Re-evaluates when any dependency changes.
-- **`flow(stream, initial)`** — read-only atom driven by an external stream.
-- **`iterate(atom)`** — converts any atom into an async iterable for `for await...of` loops.
-- **`scope(factory)`** — tree-shaped container that owns atoms and child scopes, tracks loading state, and exposes a typed snapshot of reactive state.
-
-**Migration from Subjects:**
-
-| Before | After |
-|--------|-------|
-| `createSubject<T>()` | `asyncAtom<T>()` |
-| `createBehaviorSubject(initial)` | `atom(initial)` |
-| `createReplaySubject(n)` | `asyncAtom<T>({ capacity: n })` |
-
-Subjects remain available for backward compatibility but are now considered legacy. New code should prefer atoms.
-
-
----
+- **Feature Complete**: This release marks the final feature-complete version of the 2.x series. The API is now considered stable and will enter a long-term support (LTS) phase, receiving only critical bug fixes. Future feature development and breaking changes will be targeted for the 3.x series.
 
 ## 2.0.46
 

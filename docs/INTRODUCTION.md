@@ -23,19 +23,11 @@
 
 <br>
 
-<p align="center">
-  <img src="https://epikodelabs.github.io/streamix/presentation.gif" width="100%">
-</p>
-
----
-
 Streamix is a reactive streams library built on async generators. Values are computed on demand — consumers pull, producers don't push blindly. The result is natural backpressure, predictable memory use, and a `for await...of`-first API that composes well with modern TypeScript.
 
 ```bash
 npm install @epikodelabs/streamix
 ```
-
----
 
 ## Core concepts
 
@@ -56,36 +48,6 @@ for await (const value of evens) {
   console.log(value); // 20, 40, 60, 80, 100
 }
 ```
-
-### Atoms
-
-Atoms are reactive values — readable, writable, and composable with `derived`. They are also streams, so they pipe and iterate like any other source.
-
-```ts
-import { atom, asyncAtom, derived } from '@epikodelabs/streamix';
-
-const count = atom(0);         // always has a value
-const label = asyncAtom<string>(); // value arrives later
-
-const summary = derived(() => `count is ${count.value}`);
-
-count.set(5);
-console.log(summary.value); // "count is 5"
-
-// As a stream
-count.pipe(map(n => n * 2)).subscribe(console.log);
-
-// With replay buffer — last 10 values replayed to late subscribers
-const log = asyncAtom<string>({ capacity: 10 });
-```
-
-**Migration from Subjects:**
-
-| Before | After |
-|--------|-------|
-| `createSubject<T>()` | `asyncAtom<T>()` |
-| `createBehaviorSubject(initial)` | `atom(initial)` |
-| `createReplaySubject(n)` | `asyncAtom<T>({ capacity: n })` |
 
 ### Operators
 
