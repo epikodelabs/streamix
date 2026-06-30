@@ -83,7 +83,7 @@ export type DerivedScope = {
   /** Read an atom and register it as a dependency of the current derived computation. */
   read<A>(atom: Atom<A>): A;
   /** Register closure or global-scope atoms and return them for destructuring. */
-  use<T extends Atom<any>[]>(...atoms: T): T;
+  use<T extends Atom<any>[]>(...atoms: T): T extends [infer U] ? U : T; // Changed this
 } & Record<string, unknown>;
 
 interface AtomNode {
@@ -311,9 +311,10 @@ class EvaluationOwner {
   }
 
   /** Register closure or global-scope atoms and return them for destructuring. */
-  use<T extends Atom<any>[]>(...atoms: T): T {
+  use<T extends Atom<any>[]>(...atoms: T): T extends [infer U] ? U : T {
     atoms.forEach(a => this.read(a));
-    return atoms;
+    // Return single atom if only one, otherwise return array
+    return (atoms.length === 1 ? atoms[0] : atoms) as any;
   }
 
   /** Return a cached proxy for an atom that intercepts `.value` reads. */
@@ -369,7 +370,7 @@ class DerivedScopeFacade {
     return this.owner.read(atom);
   }
 
-  use<T extends Atom<any>[]>(...atoms: T): T {
+  use<T extends Atom<any>[]>(...atoms: T): T extends [infer U] ? U : T {
     return this.owner.use(...atoms);
   }
 

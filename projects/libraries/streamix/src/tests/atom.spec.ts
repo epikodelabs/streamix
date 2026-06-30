@@ -149,7 +149,7 @@ describe('Atom System', () => {
       const source = atom(5);
 
       const doubled = derived((self: DerivedScope) => {
-        const [s] = self.use(source);
+        const s = self.use(source);
         return s.value * 2;
       });
 
@@ -187,7 +187,7 @@ describe('Atom System', () => {
 
       expect(() => {
         derivedAtom = derived((self: DerivedScope) => {
-          const [s] = self.use(source);
+          const s = self.use(source);
           return derivedAtom ? derivedAtom.value : s.value;
         });
         derivedAtom.value;
@@ -200,7 +200,7 @@ describe('Atom System', () => {
       const source = atom(0);
 
       const d = derived((self: DerivedScope) => {
-        const [s] = self.use(source);
+        const s = self.use(source);
         if (s.value > 10) throw new Error('Too high');
         return s.value;
       }, { terminateOnError: false });
@@ -252,7 +252,7 @@ describe('Atom System', () => {
       const source = atom(5);
 
       const doubled = derived(async (self: DerivedScope) => {
-        const [s] = self.use(source);
+        const s = self.use(source);
         await delay();
         return s.value * 2;
       });
@@ -303,7 +303,7 @@ describe('Atom System', () => {
       const source = atom(1);
 
       const asyncDerived = derived(async (self: DerivedScope) => {
-        const [s] = self.use(source);
+        const s = self.use(source);
         const value = s.value;
         return new Promise<number>(resolve => {
           setTimeout(() => resolve(value * 10), 20);
@@ -328,8 +328,8 @@ describe('Atom System', () => {
       let evaluations = 0;
       const d = derived((self: DerivedScope) => {
         evaluations++;
-        const [flag] = self.use(useA);
-        return flag.value ? self.use(a)[0].value : self.use(b)[0].value;
+        const flag = self.use(useA);
+        return flag.value ? self.use(a).value : self.use(b).value;
       });
 
       // First run reads `a` (branch taken: useA === true).
