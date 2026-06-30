@@ -536,6 +536,84 @@ function notifyChangeHandlers(atom: Atom<any>): void {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+ * Dependency Tracker — shared reconciliation logic
+ *
+ * Both derived() and flow() need to: take a freshly-collected set of read
+ * atoms, subscribe to each one's internal change-invalidation channel (via
+ * addAtomChangeHandler), and compute the max depth across all current deps
+ * (for scheduler ordering). This class is that shared bookkeeping. The
+ * *handler* passed to reconcile() stays caller-defined, since dirty/restart
+ * semantics differ between derived's pull-based dirtying and flow's
+ * restart-on-change behavior.
+ *
+ * Pruning of stale deps (ones read on a previous run but not the latest one,
+ * e.g. from a conditional branch that's no longer taken) is opt-in via
+ * `prune`. derived() runs with `prune: false` — once a dependency has been
+ * read on any run, it stays subscribed for the node's lifetime, even if a
+ * later run takes a different branch. flow() doesn't use pruning at all
+ * (it re-derives its full dependency set from scratch via clear() + reconcile()
+ * on every restart instead), so the default only matters for derived().
+ * ───────────────────────────────────────────────────────────────────────────*/
+class DependencyTracker {
+  private subscriptions = new Map<InternalAtomContainer, Subscription>();
+
+  /**
+   * Subscribes any newly-seen deps in `nextDeps` to `onInvalidate`, reusing
+   * existing subscriptions for deps already tracked. With `prune: true`
+   * (the default), also unsubscribes deps present in the tracked set but
+   * absent from `nextDeps`. With `prune: false`, no dependency is ever
+   * removed by this call — only `clear()` removes subscriptions.
+   *
+   * @returns The max `[NODE].depth` across all currently-tracked deps
+   *          (i.e. after this reconcile), or -1 if there are none.
+   */
+  reconcile(
+    nextDeps: Iterable<InternalAtomContainer>,
+    onInvalidate: () => void,
+    options?: { prune?: boolean },
+  ): number {
+    const prune = options?.prune ?? true;
+    const next = nextDeps instanceof Set ? nextDeps : new Set(nextDeps);
+
+    if (prune) {
+      for (const dep of this.subscriptions.keys()) {
+        if (!next.has(dep)) {
+          this.subscriptions.get(dep)?.();
+          this.subscriptions.delete(dep);
+        }
+      }
+    }
+
+    for (const dep of next) {
+      if (!this.subscriptions.has(dep)) {
+        addAtomChangeHandler(dep as any, onInvalidate);
+        this.subscriptions.set(
+          dep,
+          createSubscription(() => removeAtomChangeHandler(dep as any, onInvalidate)),
+        );
+      }
+    }
+
+    let maxDepth = -1;
+    for (const dep of this.subscriptions.keys()) {
+      if (dep[NODE]?.depth > maxDepth) maxDepth = dep[NODE].depth;
+    }
+    return maxDepth;
+  }
+
+  /** Unsubscribe from every currently-tracked dependency. */
+  clear(): void {
+    for (const sub of this.subscriptions.values()) sub();
+    this.subscriptions.clear();
+  }
+
+  /** Number of currently-tracked dependencies (mainly for debugging/tests). */
+  get size(): number {
+    return this.subscriptions.size;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
  * flow() - Async Resource Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
@@ -580,17 +658,12 @@ export function flow<T>(
   const errorHandlers = new Set<(error: any) => void>();
   const subs = createSubscriberSet<T>(errorHandlers, analog);
   const subscriptions = new Set<Subscription>();
-  const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
+  const depTracker = new DependencyTracker();
 
   // Iteration Control
   let iterator: AsyncIterator<T> | Iterator<T> | undefined;
   let abortController: AbortController | undefined;
   let disposePromise: Promise<void> | null = null;
-
-  const clearDepSubscriptions = () => {
-    for (const sub of depSubscriptions.values()) sub();
-    depSubscriptions.clear();
-  };
 
   const broadcast = (val: T) => subs.broadcast(val, previous);
 
@@ -620,7 +693,7 @@ export function flow<T>(
       node.version++;
       subs.clear();
       activeSubCount = 0;
-      clearDepSubscriptions();
+      depTracker.clear();
 
       await stop().catch(() => {});
       
@@ -672,26 +745,19 @@ export function flow<T>(
     }
 
     // 3. Update Dependencies (context is already popped; we still hold the reference)
-    let maxDepth = -1;
-    for (const dep of context.dependencies) {
-      if (dep[NODE]?.depth > maxDepth) maxDepth = dep[NODE].depth;
-      if (!depSubscriptions.has(dep)) {
-        const handler = () => {
-          if (disposed || activeSubCount <= 0) return;
+    node.depth = depTracker.reconcile(
+      context.dependencies,
+      () => {
+        if (disposed || activeSubCount <= 0) return;
 
-          restartPending = true;
+        restartPending = true;
 
-          if (subs.size > 0) {
-            instance[MARK_DIRTY]();
-          }
-        };
-        addAtomChangeHandler(dep as any, handler);
-        depSubscriptions.set(dep, createSubscription(() => {
-          removeAtomChangeHandler(dep as any, handler);
-        }));
-      }
-    }
-    node.depth = maxDepth + 1;
+        if (subs.size > 0) {
+          instance[MARK_DIRTY]();
+        }
+      },
+      { prune: false }, // flow never drops a dep once subscribed; only clear() on dispose/restart-teardown removes them
+    ) + 1;
 
     // 4. Run Loop
     try {
@@ -835,7 +901,7 @@ export function flow<T>(
         subscriptions.clear();
         subs.clear();
         errorHandlers.clear();
-        clearDepSubscriptions();
+        depTracker.clear();
       }
     },
 
@@ -1206,8 +1272,8 @@ export function derived<T>(...args: any[]): Atom<T> {
       computableFactory = () => new Class();
     } else {
       computableFactory = () => new (wrapFunctionInClass(first))();
+      options = args[1];
     }
-    options = args[1];
   } else if (first && typeof first === "object") {
     if (first.type === "atom") {
       const source = first as Atom<any>;
@@ -1262,7 +1328,7 @@ export function derived<T>(...args: any[]): Atom<T> {
   const errorHandlers = new Set<(error: any) => void>();
   const subs = createSubscriberSet<T>(errorHandlers, analog);
   const dependencies = new Set<InternalAtomContainer>();
-  const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
+  const depTracker = new DependencyTracker();
 
   const broadcast = () => subs.broadcast(current, previous);
 
@@ -1282,47 +1348,37 @@ export function derived<T>(...args: any[]): Atom<T> {
     }
   };
 
+  // Note: derived() does not prune dependencies that go unread on a later
+  // run (e.g. a conditional branch that's no longer taken). Once an atom has
+  // been read by this formula on any run, it stays subscribed for the
+  // node's lifetime — only dispose() tears the subscriptions down. This
+  // trades a small amount of over-subscription (occasional extra dirtying
+  // from a branch you're no longer on) for simpler, more predictable
+  // dependency lifetime.
   const processDependencies = (context: FormulaContext) => {
-    const oldDeps = new Set(depSubscriptions.keys());
-    dependencies.clear();
+    for (const dep of context.dependencies) dependencies.add(dep);
 
-    for (const dep of oldDeps) {
-      if (!context.dependencies.has(dep)) {
-        depSubscriptions.get(dep)?.();
-        depSubscriptions.delete(dep);
-      }
-    }
+    node.depth = depTracker.reconcile(
+      context.dependencies,
+      () => {
+        if (disposed) return;
 
-    let maxDepth = -1;
-    for (const dep of context.dependencies) {
-      dependencies.add(dep);
-      if (dep[NODE]?.depth > maxDepth) maxDepth = dep[NODE].depth;
+        if (isAsyncFormula) {
+          // For async formulas, start recomputation immediately so that
+          // async result ordering is deterministic relative to the change.
+          recompute();
+          return;
+        }
 
-      if (!depSubscriptions.has(dep)) {
-        const handler = () => {
-          if (disposed) return;
+        if (node.isAnalog && subs.size === 0) {
+          node.dirty = true;
+          return;
+        }
 
-          if (isAsyncFormula) {
-            // For async formulas, start recomputation immediately so that
-            // async result ordering is deterministic relative to the change.
-            recompute();
-            return;
-          }
-
-          if (node.isAnalog && subs.size === 0) {
-            node.dirty = true;
-            return;
-          }
-
-          instance[MARK_DIRTY]();
-        };
-        addAtomChangeHandler(dep as any, handler);
-        depSubscriptions.set(dep, createSubscription(() => {
-          removeAtomChangeHandler(dep as any, handler);
-        }));
-      }
-    }
-    node.depth = maxDepth + 1;
+        instance[MARK_DIRTY]();
+      },
+      { prune: false },
+    ) + 1;
   };
 
   const handleAsyncResult = (promise: Promise<T>, generation: number, context: FormulaContext) => {
@@ -1525,8 +1581,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       getScheduler().remove(node);
       notifyPending = false;
 
-      for (const sub of depSubscriptions.values()) sub();
-      depSubscriptions.clear();
+      depTracker.clear();
       dependencies.clear();
       subs.clear();
       errorHandlers.clear();
