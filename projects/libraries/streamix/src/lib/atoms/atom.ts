@@ -1199,43 +1199,23 @@ export function derived<T>(...args: any[]): Atom<T> {
   let options: AtomOptions | undefined;
 
   const first = args[0];
+  const second = args[1];
 
+  // Handle the two supported overloads:
+  // 1. derived((self) => T, options?)
+  // 2. derived((self) => Promise<T>, options?)
   if (typeof first === "function") {
+    // Check if it's a class with compute method (for ComputableInstance)
     if (first.prototype && typeof first.prototype.compute === "function") {
       const Class = first as new () => ComputableInstance;
       computableFactory = () => new Class();
     } else {
+      // Regular function
       computableFactory = () => new (wrapFunctionInClass(first))();
     }
-    options = args[1];
-  } else if (first && typeof first === "object") {
-    if (first.type === "atom") {
-      const source = first as Atom<any>;
-      const valueFn = args[1] as (value: any) => any;
-      options = args[2];
-      computableFactory = () => ({
-        compute(self: DerivedScope) {
-          return valueFn(self.read(source));
-        }
-      });
-    } else if (Array.isArray(first)) {
-      const sources = first as Atom<any>[];
-      const valueFn = args[1] as (...values: any[]) => any;
-      options = args[2];
-      computableFactory = () => ({
-        compute(self: DerivedScope) {
-          const values = sources.map(s => self.read(s));
-          if (values.some(v => v === undefined)) return undefined;
-          return valueFn(...values);
-        }
-      });
-    } else if (typeof first.compute === "function") {
-      computableFactory = () => first as ComputableInstance;
-    } else {
-      throw new Error("Invalid arguments for derived()");
-    }
+    options = second as AtomOptions | undefined;
   } else {
-    throw new Error("Invalid arguments for derived()");
+    throw new Error("derived() requires a function as the first argument");
   }
 
   const computable = computableFactory();
@@ -1285,12 +1265,6 @@ export function derived<T>(...args: any[]): Atom<T> {
   const processDependencies = (context: FormulaContext) => {
     let maxDepth = -1;
 
-    // FIX 1: DO NOT prune dependencies that disappeared from the current evaluation.
-    // Once a dependency is read, it remains tracked for the lifetime of the derived atom.
-    // This ensures that even if a later evaluation takes a different branch and doesn't
-    // read a previously-read atom, changes to that atom still trigger a recompute.
-
-    // Add newly discovered dependencies.
     for (const dep of context.dependencies) {
       dependencies.add(dep);
 
@@ -1308,12 +1282,7 @@ export function derived<T>(...args: any[]): Atom<T> {
           return;
         }
 
-        // FIX 2: Different behavior for discrete vs analog mode
-        // - Discrete mode: recompute eagerly on dependency change (for both
-        //   subscriber and non-subscriber cases) to keep values in sync.
-        // - Analog mode: just mark dirty and defer to scheduler or value read.
         if (!node.isAnalog) {
-          // Discrete mode: eager recompute
           if (!node.flushing && !running) {
             node.dirty = true;
             recompute();
@@ -1323,7 +1292,6 @@ export function derived<T>(...args: any[]): Atom<T> {
           return;
         }
 
-        // Analog mode: mark dirty and defer
         instance[MARK_DIRTY]();
       };
 
@@ -1366,7 +1334,6 @@ export function derived<T>(...args: any[]): Atom<T> {
     );
   };
 
-  /** Core computation: tracks deps, runs fn, returns value */
   const compute = (): { result: T | Promise<T>; context: FormulaContext; generation: number } => {
     if (running) throw new Error("Circular dependency detected in derived()");
 
@@ -1391,7 +1358,6 @@ export function derived<T>(...args: any[]): Atom<T> {
     }
   };
 
-  /** Performs state transition if computation changes value */
   const recompute = () => {
     const { result: next, context, generation } = compute();
     node.dirty = false;
@@ -1454,9 +1420,6 @@ export function derived<T>(...args: any[]): Atom<T> {
       const ctx = getCurrentFormulaContext();
       if (ctx) ctx.dependencies.add(instance);
 
-      // Eager initialization must precede the dirty pull. If the initial
-      // computation throws, mark the node initialized so the error is stable
-      // until a dependency change triggers a recompute.
       if (!initialized) {
         try {
           const { result, context, generation } = compute();
@@ -1477,13 +1440,8 @@ export function derived<T>(...args: any[]): Atom<T> {
           }
         }
       } else if (node.dirty) {
-        // Lazy pull-to-refresh for both discrete and analog modes.
-        // In discrete mode, this is typically a no-op since we eagerly recompute
-        // in the handler, but it's kept for safety.
         try {
           recompute();
-          // In analog mode, value reads make the result live but still defer
-          // subscriber notification to the scheduler.
           if (notifyPending && subs.size > 0) instance[MARK_DIRTY]();
         } catch (err) {
           errorValue = normalizeError(err);
@@ -1519,7 +1477,7 @@ export function derived<T>(...args: any[]): Atom<T> {
     [FLUSH]() { node.flush(); },
 
     subscribe(callback) {
-      try { this.value; } catch {} // Ensure initialization
+      try { this.value; } catch {}
       if (disposed) return createSubscription(() => {});
       if (subs.size >= maxSubscribers) throw new Error(`Maximum subscriber limit (${maxSubscribers}) reached`);
       if (callback) subs.add(callback);
