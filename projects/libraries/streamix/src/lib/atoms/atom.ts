@@ -1285,14 +1285,10 @@ export function derived<T>(...args: any[]): Atom<T> {
   const processDependencies = (context: FormulaContext) => {
     let maxDepth = -1;
 
-    // Remove subscriptions that disappeared.
-    for (const dep of depSubscriptions.keys()) {
-      if (context.dependencies.has(dep)) continue;
-
-      depSubscriptions.get(dep)?.();
-      depSubscriptions.delete(dep);
-      dependencies.delete(dep);
-    }
+    // FIX 1: DO NOT prune dependencies that disappeared from the current evaluation.
+    // Once a dependency is read, it remains tracked for the lifetime of the derived atom.
+    // This ensures that even if a later evaluation takes a different branch and doesn't
+    // read a previously-read atom, changes to that atom still trigger a recompute.
 
     // Add newly discovered dependencies.
     for (const dep of context.dependencies) {
@@ -1308,17 +1304,26 @@ export function derived<T>(...args: any[]): Atom<T> {
         if (disposed) return;
 
         if (isAsyncFormula) {
-          // Async formulas restart immediately so stale promises
-          // cannot commit after newer evaluations.
           recompute();
           return;
         }
 
-        if (node.isAnalog && subs.size === 0) {
-          node.dirty = true;
+        // FIX 2: Different behavior for discrete vs analog mode
+        // - Discrete mode: recompute eagerly on dependency change (for both
+        //   subscriber and non-subscriber cases) to keep values in sync.
+        // - Analog mode: just mark dirty and defer to scheduler or value read.
+        if (!node.isAnalog) {
+          // Discrete mode: eager recompute
+          if (!node.flushing && !running) {
+            node.dirty = true;
+            recompute();
+          } else {
+            instance[MARK_DIRTY]();
+          }
           return;
         }
 
+        // Analog mode: mark dirty and defer
         instance[MARK_DIRTY]();
       };
 
@@ -1414,7 +1419,7 @@ export function derived<T>(...args: any[]): Atom<T> {
     } catch (err) {
       errorValue = normalizeError(err);
       isErrorState = true;
-      node.dirty = false; // Reset dirty even on error
+      node.dirty = false;
       notifyPending = false;
       if (terminateOnError) {
         instance.dispose();
@@ -1472,7 +1477,9 @@ export function derived<T>(...args: any[]): Atom<T> {
           }
         }
       } else if (node.dirty) {
-        // Lazy pull-to-refresh
+        // Lazy pull-to-refresh for both discrete and analog modes.
+        // In discrete mode, this is typically a no-op since we eagerly recompute
+        // in the handler, but it's kept for safety.
         try {
           recompute();
           // In analog mode, value reads make the result live but still defer
