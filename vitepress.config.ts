@@ -11,6 +11,7 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Home', link: '/' },
+      { text: 'Streamix v2', link: 'https://epikodelabs.github.io/streamix-v2' },
       { text: 'Pricing', link: '/PRICING' },
       { text: 'Changelog', link: '/CHANGELOG' },
       { text: 'API Reference', link: '/api/' },
