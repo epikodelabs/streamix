@@ -637,6 +637,34 @@ export function flow<T>(
     try { await disposePromise; } finally { disposePromise = null; }
   };
 
+  // Races a pending `iterator.next()` against the given AbortSignal.
+  //
+  // Passing `signal` into a source factory only helps if the source itself
+  // checks it (e.g. forwards it to `fetch`). Sources that don't — a raw
+  // websocket listener, a timer-based generator, anything waiting on an
+  // external event — would otherwise leave the run loop blocked on an
+  // in-flight `next()` call even after `stop()` aborts, since the loop only
+  // re-checks `signal.aborted` *between* awaits. Racing here guarantees the
+  // loop unblocks the moment the signal fires, regardless of whether the
+  // source cooperates. Cleanup of the underlying iterator (`iterator.return()`)
+  // still happens via `stop()`, independently of this race.
+  const nextOrAbort = (
+    iter: AsyncIterator<T> | Iterator<T>,
+    sig: AbortSignal
+  ): Promise<IteratorResult<T>> => {
+    if (sig.aborted) return Promise.resolve({ done: true, value: undefined as any });
+
+    const pending = Promise.resolve(iter.next());
+    return new Promise<IteratorResult<T>>((resolve, reject) => {
+      const onAbort = () => resolve({ done: true, value: undefined as any });
+      sig.addEventListener("abort", onAbort, { once: true });
+      pending.then(
+        (result) => { sig.removeEventListener("abort", onAbort); resolve(result); },
+        (err) => { sig.removeEventListener("abort", onAbort); reject(err); }
+      );
+    });
+  };
+
   const startIteration = async (targetVersion: number) => {
     if (disposed || targetVersion !== node.version) return;
 
@@ -697,7 +725,7 @@ export function flow<T>(
     // 4. Run Loop
     try {
       while (targetVersion === node.version && !disposed && !signal.aborted) {
-        const result = await iterator.next();
+        const result = await nextOrAbort(iterator, signal);
         if (result.done || targetVersion !== node.version || signal.aborted) break;
         
         previous = current;
