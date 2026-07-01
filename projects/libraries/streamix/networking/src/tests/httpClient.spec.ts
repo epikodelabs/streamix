@@ -808,6 +808,29 @@ describe('middleware', () => {
       await expectAsync(middleware(next)(context)).toBeRejectedWithError(/missing Location header/);
     });
   });
+
+  it('distinguishes user abort from timeout', async () => {
+    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
+      return new Promise((_, reject) => {
+        req.signal.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        });
+      });
+    });
+
+    const client = createHttpClient().withDefaults(
+      useCustom(fetch),
+      useBase('http://test.local'),
+      useTimeout(10000), // long timeout so it never fires
+    );
+
+    const stream = client.get('/user-abort', readJson);
+    stream.abort();
+
+    // With the bug, this would be rejected with "Request timed out..."
+    // After the fix, it preserves the original DOMException message
+    await expectAsync(collect(stream)).toBeRejectedWithError(/Aborted/);
+  });
 });
 
 /* ================================================== */
