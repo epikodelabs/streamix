@@ -1,10 +1,10 @@
 import {
-    atom,
-    createAsyncIterator,
-    createSubscription,
-    flow,
-    normalizeError,
-    type Atom,
+  atom,
+  createAsyncIterator,
+  createSubscription,
+  flow,
+  normalizeError,
+  type Atom,
 } from '@epikodelabs/streamix';
 
 const LOG_PREFIX = '[httpClient]';
@@ -24,7 +24,7 @@ function createReplayAtom<T>(): Atom<T> & {
   fail(err: any): void;
   dispose(): void;
 } {
-  const output = atom<T>(undefined, { discrete: true });
+  const output = atom<T>({ discrete: true });
   const replay: T[] = [];
   let completed = false;
   let errorValue: any;
