@@ -564,7 +564,11 @@ export const useLogger = (
 export const useTimeout = (ms: number): Middleware => {
   return (next) => async (context: Context) => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), ms);
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, ms);
 
     const combinedSignal = context['signal']
       ? (AbortSignal as any).any([context['signal'], controller.signal])
@@ -578,7 +582,7 @@ export const useTimeout = (ms: number): Middleware => {
       return context;
     } catch (error: any) {
       clearTimeout(timeoutId);
-      if (error.name === 'AbortError') {
+      if (error.name === 'AbortError' && timedOut) {
         throw new Error(`${LOG_PREFIX} Request timed out for ${context.method ?? 'UNKNOWN'} ${context.url}`);
       }
       throw normalizeError(error);
@@ -798,7 +802,10 @@ export const createHttpClient = (): HttpClient => {
       yield* ctx.data;
     }) as HttpStream<T>;
 
-    stream.abort = () => abortController.abort();
+    stream.abort = () => {
+      abortController.abort(new DOMException('The operation was aborted.', 'AbortError'));
+    };
+    
     return stream;
   };
 
