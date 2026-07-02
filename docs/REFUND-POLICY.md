@@ -2,25 +2,33 @@
 
 Effective date: May 7, 2026
 
-## Current policy
+## Open-source access
 
-`streamix` is currently distributed as a free, open-source package. The documentation site also does not currently process direct purchases or subscription payments.
+`streamix` is distributed as a free, open-source package under the GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`). Access to the public package, documentation site, and public GitHub repository is free of charge, so no refunds apply to open-source access.
 
-Because there is no direct paid checkout flow at this time, there are currently no standard refunds to issue for access to the package or documentation website.
+## Commercial license refunds
 
-## Third-party purchases
+Commercial licenses for `streamix` are delivered digitally and grant perpetual rights. Because of this, **all license purchases are final and non-refundable** unless otherwise required by law.
 
-If you purchase any third-party service, hosting, support, consulting, or marketplace product related to `streamix` through another provider, that purchase is governed by the refund terms of the provider or the separate written agreement that applies to that purchase.
+Refunds may be considered at our sole discretion in the following cases:
 
-## Future paid offerings
+- A technical defect prevents activation and cannot be resolved — we will first offer a replacement license.
+- The license was not used and was mis-delivered — refund requests may be considered within 7 days of purchase.
 
-If `epikodelabs` later introduces paid products or services, this page will be updated to describe:
+No refunds are provided for:
 
-- Eligibility for refunds
-- Applicable refund windows
-- Non-refundable fees, if any
-- The process for submitting refund requests
+- Change of mind
+- Discontinued projects
+- Failure to read the license terms before purchase
 
-## Contact
+## Paid services
 
-Questions about billing or future commercial terms may be sent to: `oleksii.shepel@outlook.com`
+For separate paid services such as consulting or custom support, refund terms are defined in the applicable statement of work or written agreement.
+
+## How to request a refund
+
+Contact `oleksii.shepel@outlook.com` with your invoice number and a brief explanation. We aim to respond within 2 business days.
+
+## Questions
+
+Questions about billing or refund eligibility may be sent to: `oleksii.shepel@outlook.com`
