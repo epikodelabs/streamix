@@ -1,4 +1,4 @@
-import type { MaybePromise } from "../atoms/operator";
+import { isPromiseLike, type MaybePromise } from "../atoms/operator";
 import type { Scope } from "../atoms/scope";
 import type { Token } from "./token";
 export { createToken } from "./token";
@@ -163,9 +163,6 @@ function findRegistration(
   return undefined;
 }
 
-function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-  return !!value && typeof (value as any).then === "function";
-}
 
 async function runCleanup(instance: TrackedInstance): Promise<Error | null> {
   if (!instance.cleanup) return null;

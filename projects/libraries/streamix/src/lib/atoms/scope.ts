@@ -10,6 +10,7 @@ import { atom, derived, flow, getCurrentFormulaContext, normalizeError, NO_INITI
 import {
   isAtomExpr,
   isDerivedExpr,
+  isExprMarker as isExprMarkerBase,
   isFlowExpr,
   isPipeExpr,
   type AtomExpr,
@@ -52,8 +53,8 @@ export function method<T extends (...args: any[]) => any>(fn: T): Method<T> {
   return { [METHOD]: true, fn };
 }
 
-function isExprMarker(value: any): value is AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr {
-  return isAtomExpr(value) || isDerivedExpr(value) || isPipeExpr(value) || isFlowExpr(value) || isDynamicExpr(value);
+function isExprMarkerOrDynamic(value: any): value is AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr {
+  return isExprMarkerBase(value) || isDynamicExpr(value);
 }
 
 function createCallableScopeProxy(scopeSelf: any): any {
@@ -387,7 +388,7 @@ function toDefinedState(state: DefinedInput<any>, visited: WeakSet<object> = new
   const result: any = {};
   for (const key of Reflect.ownKeys(state)) {
     const value = (state as any)[key];
-    if (isExprMarker(value)) {
+    if (isExprMarkerOrDynamic(value)) {
       result[key] = value;
     } else if (isMethod(value)) {
       result[key] = value;
@@ -425,7 +426,7 @@ function transformScopeState<T extends Record<string, any>>(
   // scope proxy, and recursively convert nested plain objects into scopes.
   for (const key of Reflect.ownKeys(state)) {
     const value = (state as any)[key];
-    if (isExprMarker(value)) {
+    if (isExprMarkerOrDynamic(value)) {
       rawState[key] = value;
     } else if (isMethod(value)) {
       rawState[key] = value.fn.bind(scopeProxy);
@@ -455,7 +456,7 @@ function transformScopeState<T extends Record<string, any>>(
     Object.defineProperty(self, key, {
       get() {
         const value = rawState[key];
-        if (isExprMarker(value)) {
+        if (isExprMarkerOrDynamic(value)) {
           if (evaluating.has(key)) {
             throw new Error(`Circular dependency detected in scope state at key: ${String(key)}`);
           }
@@ -493,7 +494,7 @@ function transformScopeState<T extends Record<string, any>>(
   // always receive the underlying reactive unit.
   function getRawAtom(key: string | symbol): any {
     let value = rawState[key];
-    if (isExprMarker(value)) {
+    if (isExprMarkerOrDynamic(value)) {
       void (self as any)[key];
       value = rawState[key];
     }
@@ -520,7 +521,7 @@ function transformScopeState<T extends Record<string, any>>(
   // Eagerly evaluate expression markers so the returned rawState contains atoms.
   // The self getters handle lazy dependencies and circularity detection.
   for (const key of Reflect.ownKeys(rawState)) {
-    if (isExprMarker(rawState[key])) {
+    if (isExprMarkerOrDynamic(rawState[key])) {
       void (self as any)[key];
     }
   }
