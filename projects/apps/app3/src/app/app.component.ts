@@ -134,8 +134,8 @@ export class AppComponent implements OnInit, OnDestroy {
     private baseCamPos!: THREE.Vector3;
     private parallaxTarget = { x: 0, y: 0 };
     ngOnInit(): void {
-        const weatherSub = this.appScope.at('weather').subscribe((w) => this.applyWeather(w));
-        this.appScope.cleanups.add(() => weatherSub());
+        const unsubscribe = this.appScope.at('weather').subscribe((w) => this.applyWeather(w));
+        this.appScope.cleanups.add(() => unsubscribe());
     }
     ngAfterViewInit(): void {
         this.initScene();

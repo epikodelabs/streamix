@@ -40,13 +40,13 @@ export const select = <T = any>(
 
     async function* generator() {
       let currentIndex = 0;
-      let nextTargetIndexPromise = asyncIndexIterator.next();
+      let nextTargetIndex$ = asyncIndexIterator.next();
 
       while (true) {
         const result: IteratorResult<T> = await source.next();
         if (result.done) break;
 
-        const targetIndexResult = await nextTargetIndexPromise;
+        const targetIndexResult = await nextTargetIndex$;
         
         if (targetIndexResult.done) return;
 
@@ -56,7 +56,7 @@ export const select = <T = any>(
           yield result.value;
 
           // fetch next target index
-          nextTargetIndexPromise = asyncIndexIterator.next();
+          nextTargetIndex$ = asyncIndexIterator.next();
         }
 
         currentIndex++;

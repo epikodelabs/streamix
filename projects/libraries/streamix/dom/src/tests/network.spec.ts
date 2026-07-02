@@ -139,7 +139,7 @@ idescribe('onNetwork', () => {
     );
 
     const values: NetworkState[] = [];
-    const sub = on('network').subscribe(v => values.push(v));
+    const unsubscribe = on('network').subscribe(v => values.push(v));
     await flush();
 
     expect(values[0]).toEqual(
@@ -153,7 +153,7 @@ idescribe('onNetwork', () => {
       })
     );
 
-    sub();
+    unsubscribe();
   });
 
   it('emits on online / offline events', async () => {
@@ -171,7 +171,7 @@ idescribe('onNetwork', () => {
     );
 
     const values: NetworkState[] = [];
-    const sub = on('network').subscribe(v => values.push(v));
+    const unsubscribe = on('network').subscribe(v => values.push(v));
     await flush();
 
     env.setOnline(false);
@@ -181,7 +181,7 @@ idescribe('onNetwork', () => {
     await flush();
 
     expect(values.map(v => v.online)).toEqual([true, false, true]);
-    sub();
+    unsubscribe();
   });
 
   it('emits on connection change events (Network Information API)', async () => {
@@ -199,7 +199,7 @@ idescribe('onNetwork', () => {
     );
 
     const values: NetworkState[] = [];
-    const sub = on('network').subscribe(v => values.push(v));
+    const unsubscribe = on('network').subscribe(v => values.push(v));
     await flush();
 
     env.connection.downlink = 42;
@@ -208,7 +208,7 @@ idescribe('onNetwork', () => {
 
     expect(values.length).toBe(2);
     expect(values[1].downlink).toBe(42);
-    sub();
+    unsubscribe();
   });
 
   it('supports async iteration', async () => {
@@ -254,11 +254,11 @@ idescribe('onNetwork', () => {
     );
 
     const values: NetworkState[] = [];
-    const sub = on('network').subscribe(v => values.push(v));
+    const unsubscribe = on('network').subscribe(v => values.push(v));
     await flush();
 
     expect(values.length).toBe(1); // snapshot still emitted
-    sub();
+    unsubscribe();
   });
 
   it('does nothing when navigator is unavailable', () => {
@@ -313,14 +313,14 @@ idescribe('onNetwork', () => {
     );
 
     const values: NetworkState[] = [];
-    const sub = on('network').subscribe(v => values.push(v));
+    const unsubscribe = on('network').subscribe(v => values.push(v));
     await flush();
 
     // Should still emit snapshot
     expect(values.length).toBe(1);
     
     // Should not crash when unsubscribing
-    expect(() => sub()).not.toThrow();
+    expect(() => unsubscribe()).not.toThrow();
   });
 
   it('handles connection without removeEventListener method', async () => {
@@ -347,11 +347,11 @@ idescribe('onNetwork', () => {
       })
     );
 
-    const sub = on('network').subscribe();
+    const unsubscribe = on('network').subscribe();
     await flush();
 
     // Should not crash when unsubscribing
-    expect(() => sub()).not.toThrow();
+    expect(() => unsubscribe()).not.toThrow();
   });
 
   it('does not restart when start() called multiple times', async () => {
@@ -400,17 +400,17 @@ idescribe('onNetwork', () => {
       })
     );
 
-    const sub = on('network').subscribe();
+    const unsubscribe = on('network').subscribe();
     await flush();
 
-    sub();
+    unsubscribe();
     await flush();
 
     (env.removeEventListener as jasmine.Spy).calls.reset();
     (env.connection.removeEventListener as jasmine.Spy).calls.reset();
 
     // Calling unsubscribe again should not call removeEventListener
-    sub();
+    unsubscribe();
     await flush();
 
     expect(env.removeEventListener).not.toHaveBeenCalled();
@@ -431,12 +431,12 @@ idescribe('onNetwork', () => {
       })
     );
 
-    const sub = on('network').subscribe();
+    const unsubscribe = on('network').subscribe();
     await flush();
 
     // Should not crash on unsubscribe even if cleanup has issues
     try {
-      sub();
+      unsubscribe();
       expect(true).toBe(true); // Passed
     } catch (e) {
       // Cleanup errors should be caught

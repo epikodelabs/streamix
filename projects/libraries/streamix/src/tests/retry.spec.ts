@@ -244,10 +244,10 @@ describe('retry', () => {
     const values: number[] = [];
     const atom = retry(factory, 3, 50);
 
-    const sub = atom.subscribe(v => { if (v !== undefined) values.push(v); });
+    const unsubscribe = atom.subscribe(v => { if (v !== undefined) values.push(v); });
 
     await sleep(0);
-    sub();
+    unsubscribe();
 
     await sleep(60);
 
@@ -258,7 +258,7 @@ describe('retry', () => {
   it('should wait for a promised delay before retrying', async () => {
     let attempt = 0;
     let delayResolve!: (value: number) => void;
-    const delayPromise = new Promise<number>((resolve) => {
+    const delay$ = new Promise<number>((resolve) => {
       delayResolve = resolve;
     });
 
@@ -275,7 +275,7 @@ describe('retry', () => {
 
     const result: number[] = [];
     void (async () => {
-      for await (const value of iterate(retry(factory, 1, delayPromise))) {
+      for await (const value of iterate(retry(factory, 1, delay$))) {
         result.push(value);
       }
     })();
@@ -300,9 +300,9 @@ describe('retry', () => {
     });
 
     const atom = retry(factory, 1, 0);
-    const sub = atom.subscribe(() => fail('Should not emit'));
+    const unsubscribe = atom.subscribe(() => fail('Should not emit'));
 
-    sub();
+    unsubscribe();
 
     await sleep(10);
 
@@ -328,10 +328,10 @@ describe('retry', () => {
     const values: number[] = [];
     const atom = retry(factory, 3, 0);
 
-    const sub = atom.subscribe(v => { if (v !== undefined) values.push(v); });
+    const unsubscribe = atom.subscribe(v => { if (v !== undefined) values.push(v); });
 
     await sleep(35);
-    sub();
+    unsubscribe();
     await sleep(20);
 
     expect(iterationCount).toBeGreaterThan(0);
@@ -357,10 +357,10 @@ describe('retry', () => {
 
     const atom = retry(factory, 2, 100);
 
-    const sub = atom.subscribe(() => {});
+    const unsubscribe = atom.subscribe(() => {});
 
     await sleep(10);
-    sub();
+    unsubscribe();
     await sleep(50);
 
     expect(factory).toHaveBeenCalledTimes(1);

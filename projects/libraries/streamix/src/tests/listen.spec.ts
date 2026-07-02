@@ -73,10 +73,10 @@ idescribe('fromEvent', () => {
 
   it('supports promise-based targets and event names', async () => {
     const element = document.createElement('button');
-    const targetPromise = Promise.resolve(element);
-    const eventPromise = new Promise<string>((resolve) => setTimeout(() => resolve('click'), 0));
+    const target$ = Promise.resolve(element);
+    const event$ = new Promise<string>((resolve) => setTimeout(() => resolve('click'), 0));
 
-    const atom = listen(targetPromise, eventPromise);
+    const atom = listen(target$, event$);
     let received: Event | undefined;
     const unsubscribe = atom.subscribe(ev => { received = ev; });
 
@@ -165,11 +165,11 @@ idescribe('fromEvent', () => {
       return originalAdd.apply(this, args as any);
     };
 
-    const targetPromise = new Promise<EventTarget>((resolve) => {
+    const target$ = new Promise<EventTarget>((resolve) => {
       setTimeout(() => resolve(element), 20);
     });
 
-    const atom = listen(targetPromise, Promise.resolve('click'));
+    const atom = listen(target$, Promise.resolve('click'));
     const unsubscribe = atom.subscribe(() => listenerAdded = true);
 
     unsubscribe();

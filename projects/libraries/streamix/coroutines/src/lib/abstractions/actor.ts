@@ -1025,7 +1025,7 @@ function createActor<S = any, Q = any, D = any, FromMain = any>(
   let running = false;
   let nextRequestId = 1;
   const pendingRequests = new Map<string, PendingActorRequest<S>>();
-  let shutdownPromise: Promise<void> | null = null;
+  let shutdown$: Promise<void> | null = null;
   let finishShutdown: (() => void) | null = null;
   let shouldReleaseBlobUrl = false;
   let hasReleasedBlobUrl = false;
@@ -1070,9 +1070,9 @@ function createActor<S = any, Q = any, D = any, FromMain = any>(
   const shutdown = (releaseBlobUrlOnExit: boolean) => {
     shouldReleaseBlobUrl ||= releaseBlobUrlOnExit;
 
-    if (shutdownPromise) {
+    if (shutdown$) {
       releaseWorkerScript();
-      return shutdownPromise;
+      return shutdown$;
     }
 
     running = false;
@@ -1085,7 +1085,7 @@ function createActor<S = any, Q = any, D = any, FromMain = any>(
       return Promise.resolve();
     }
 
-    shutdownPromise = new Promise<void>((resolve) => {
+    shutdown$ = new Promise<void>((resolve) => {
       let settled = false;
 
       const finalizeShutdown = () => {
@@ -1121,7 +1121,7 @@ function createActor<S = any, Q = any, D = any, FromMain = any>(
       }
     });
 
-    return shutdownPromise;
+    return shutdown$;
   };
 
   const handleMessage = (event: MessageEvent<WorkerProtocolMessage>) => {

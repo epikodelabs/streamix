@@ -86,14 +86,14 @@ describe('cyclicBuffer', () => {
     buffer.push(2);
 
     let pushed = false;
-    const pushPromise = buffer.push(3).then(() => { pushed = true; });
+    const push$ = buffer.push(3).then(() => { pushed = true; });
 
     await flushMicrotasks();
     expect(pushed).toBe(false);
 
     const it = buffer[Symbol.asyncIterator]();
     await it.next();
-    await pushPromise;
+    await push$;
 
     expect(pushed).toBe(true);
     expect((await it.next()).value).toBe(2);

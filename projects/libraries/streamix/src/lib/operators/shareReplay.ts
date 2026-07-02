@@ -82,7 +82,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
   return createOperator<T, T>('shareReplay', function (this: Operator, source) {
     let initialized = false;
     let replayIndex = 0;
-    let liveSub: Subscription | null = null;
+    let unsubscribe: Subscription | null = null;
     let liveCompletionHandler: (() => void) | null = null;
     let done = false;
     let pendingResolve: ((r: IteratorResult<T>) => void) | null = null;
@@ -105,9 +105,9 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       if (subscriberCount === 0 && isConnected) {
         disconnect();
       }
-      if (liveSub) {
-        liveSub();
-        liveSub = null;
+      if (unsubscribe) {
+        unsubscribe();
+        unsubscribe = null;
       }
       if (liveCompletionHandler) {
         (live as any)._onDispose.delete(liveCompletionHandler);
@@ -141,8 +141,8 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
           return DONE;
         }
 
-        if (!liveSub) {
-          liveSub = live.subscribe((value: T) => {
+        if (!unsubscribe) {
+          unsubscribe = live.subscribe((value: T) => {
             if (done) return;
             if (pendingResolve) {
               const resolve = pendingResolve;

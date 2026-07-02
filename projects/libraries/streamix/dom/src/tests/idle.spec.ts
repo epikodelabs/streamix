@@ -136,7 +136,7 @@ idescribe('onIdle', () => {
     );
 
     const values: IdleDeadline[] = [];
-    const sub = on('idle').subscribe(v => values.push(v));
+    const unsubscribe = on('idle').subscribe(v => values.push(v));
     await flush();
 
     env.fireIdle();
@@ -146,7 +146,7 @@ idescribe('onIdle', () => {
     expect(values[0].didTimeout).toBeFalse();
     expect(values[0].timeRemaining()).toBeGreaterThan(0);
 
-    sub();
+    unsubscribe();
   });
 
   it('passes timeout option to requestIdleCallback when provided', async () => {
@@ -157,7 +157,7 @@ idescribe('onIdle', () => {
       patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
     );
 
-    const sub = on('idle', 123).subscribe();
+    const unsubscribe = on('idle', 123).subscribe();
     await flush();
 
     expect(env.requestIdleCallback).toHaveBeenCalledWith(
@@ -165,7 +165,7 @@ idescribe('onIdle', () => {
       { timeout: 123 }
     );
 
-    sub();
+    unsubscribe();
   });
 
   it('continues scheduling until unsubscribed', async () => {
@@ -177,7 +177,7 @@ idescribe('onIdle', () => {
     );
 
     const values: IdleDeadline[] = [];
-    const sub = on('idle').subscribe(v => values.push(v));
+    const unsubscribe = on('idle').subscribe(v => values.push(v));
     await flush();
 
     env.fireIdle();
@@ -186,7 +186,7 @@ idescribe('onIdle', () => {
     await flush();
 
     expect(values.length).toBe(2);
-    sub();
+    unsubscribe();
   });
 
   it('cancels idle callback on unsubscribe', async () => {
@@ -197,10 +197,10 @@ idescribe('onIdle', () => {
       patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
     );
 
-    const sub = on('idle').subscribe();
+    const unsubscribe = on('idle').subscribe();
     await flush();
 
-    sub();
+    unsubscribe();
     await flush();
 
     expect(env.cancelIdleCallback).toHaveBeenCalled();
@@ -221,7 +221,7 @@ idescribe('onIdle', () => {
     );
 
     const values: IdleDeadline[] = [];
-    const sub = on('idle').subscribe(v => values.push(v));
+    const unsubscribe = on('idle').subscribe(v => values.push(v));
     await flush();
 
     env.fireAll();
@@ -230,7 +230,7 @@ idescribe('onIdle', () => {
     expect(values.length).toBe(1);
     expect(values[0].didTimeout).toBeFalse();
 
-    sub();
+    unsubscribe();
   });
 
   it('clears timeout on unsubscribe in fallback mode', async () => {
@@ -243,10 +243,10 @@ idescribe('onIdle', () => {
       patchGlobal('clearTimeout', env.clearTimeoutMock)
     );
 
-    const sub = on('idle').subscribe();
+    const unsubscribe = on('idle').subscribe();
     await flush();
 
-    sub();
+    unsubscribe();
     await flush();
 
     expect(env.clearTimeoutMock).toHaveBeenCalled();
@@ -293,11 +293,11 @@ idescribe('onIdle', () => {
     );
 
     const values: IdleDeadline[] = [];
-    const sub = on('idle').subscribe(v => values.push(v));
+    const unsubscribe = on('idle').subscribe(v => values.push(v));
     await flush();
 
     expect(values).toEqual([]);
-    sub();
+    unsubscribe();
   });
 
   it('does not restart when startLoop() called multiple times', async () => {
@@ -329,16 +329,16 @@ idescribe('onIdle', () => {
       patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
     );
 
-    const sub = on('idle').subscribe();
+    const unsubscribe = on('idle').subscribe();
     await flush();
 
-    sub();
+    unsubscribe();
     await flush();
 
     env.cancelIdleCallback.calls.reset();
 
     // Calling unsubscribe again should not call cancelIdleCallback
-    sub();
+    unsubscribe();
     await flush();
 
     expect(env.cancelIdleCallback).not.toHaveBeenCalled();
@@ -353,10 +353,10 @@ idescribe('onIdle', () => {
       patchGlobal('clearTimeout', clearTimeoutSpy)
     );
 
-    const sub = on('idle').subscribe();
+    const unsubscribe = on('idle').subscribe();
     await flush();
 
-    sub();
+    unsubscribe();
     await flush();
 
     // Should use clearTimeout as fallback
@@ -371,7 +371,7 @@ idescribe('onIdle', () => {
       patchGlobal('cancelIdleCallback', env.cancelIdleCallback)
     );
 
-    const sub = on('idle').subscribe();
+    const unsubscribe = on('idle').subscribe();
     await flush();
 
     // Should be called with callback and undefined/empty options
@@ -380,7 +380,7 @@ idescribe('onIdle', () => {
     expect(calls[0].args.length).toBeLessThanOrEqual(2);
     expect(typeof calls[0].args[0]).toBe('function');
 
-    sub();
+    unsubscribe();
   });
 
   it('handles SSR environment (setTimeout unavailable)', () => {
@@ -391,11 +391,11 @@ idescribe('onIdle', () => {
     );
 
     const values: IdleDeadline[] = [];
-    const sub = on('idle').subscribe(v => values.push(v));
+    const unsubscribe = on('idle').subscribe(v => values.push(v));
 
     // Should not crash, but also not emit
     expect(values.length).toBe(0);
-    expect(() => sub()).not.toThrow();
+    expect(() => unsubscribe()).not.toThrow();
   });
 });
 

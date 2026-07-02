@@ -56,7 +56,7 @@ export function createAsyncIterator<T>(opts: {
 
   return () => {
     const state = new AsyncIteratorState<T>();
-    let sub: Subscription | null = null;
+    let unsubscribe: Subscription | null = null;
     let observer: Observer<T> | null = null;
 
     const pendingPushes: Array<{
@@ -67,7 +67,7 @@ export function createAsyncIterator<T>(opts: {
 
     const ensureSubscribed = () => {
       if (state.completed) return;
-      if (!sub && !observer) {
+      if (!unsubscribe && !observer) {
         const _observer: Observer<T> = {
           next(value: T) {
             return pushValue(state, iterator, value, iterator.__onPush);
@@ -84,7 +84,7 @@ export function createAsyncIterator<T>(opts: {
         };
 
         observer = _observer;
-        sub = register(_observer);
+        unsubscribe = register(_observer);
 
         for (const push of pendingPushes) {
           if (push.type === 'next') {
@@ -101,10 +101,10 @@ export function createAsyncIterator<T>(opts: {
     };
 
     const handleDone = () => {
-      const unsubscribePromise = sub?.();
-      sub = null;
-      if (unsubscribePromise && isPromiseLike(unsubscribePromise)) {
-        (unsubscribePromise as Promise<unknown>).catch((err: any) => {
+      const unsubscribe$ = unsubscribe?.();
+      unsubscribe = null;
+      if (unsubscribe$ && isPromiseLike(unsubscribe$)) {
+        (unsubscribe$ as Promise<unknown>).catch((err: any) => {
           console.log('AsyncIterator handleDone error', err);
         });
       }
@@ -126,10 +126,10 @@ export function createAsyncIterator<T>(opts: {
 
       async return() {
         state.markCompleted();
-        const unsubscribePromise = sub?.();
-        sub = null;
+        const unsubscribe$ = unsubscribe?.();
+        unsubscribe = null;
         try {
-          await unsubscribePromise;
+          await unsubscribe$;
         } catch (err: any) {
           console.log('AsyncIterator return error', err);
         }
@@ -139,8 +139,8 @@ export function createAsyncIterator<T>(opts: {
       async throw(err) {
         const error = normalizeError(err);
         state.completed = true;
-        const unsubscribePromise = sub?.();
-        sub = null;
+        const unsubscribe$ = unsubscribe?.();
+        unsubscribe = null;
         if (state.pullReject) {
           const r = state.pullReject;
           state.pullResolve = state.pullReject = null;
@@ -148,7 +148,7 @@ export function createAsyncIterator<T>(opts: {
         }
         state.clear();
         try {
-          await unsubscribePromise;
+          await unsubscribe$;
         } catch (e: any) {
           console.log('AsyncIterator throw error', e);
         }

@@ -31,12 +31,12 @@ idescribe('onBattery', () => {
 
     try {
       const values: any[] = [];
-      const sub = on('battery').subscribe(v => values.push(v));
+      const unsubscribe = on('battery').subscribe(v => values.push(v));
 
       await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(values.length).toBe(0);
-      sub();
+      unsubscribe();
     } finally {
       restore();
     }
@@ -45,19 +45,19 @@ idescribe('onBattery', () => {
   it('does not emit when unsubscribed before getBattery resolves', async () => {
     let resolveBattery!: (value: any) => void;
 
-    const batteryPromise = new Promise<any>((resolve) => {
+    const battery$ = new Promise<any>((resolve) => {
       resolveBattery = resolve;
     });
 
     (navigator as any).getBattery = jasmine
       .createSpy('getBattery')
-      .and.returnValue(batteryPromise);
+      .and.returnValue(battery$);
 
     const updates: any[] = [];
-    const sub = on('battery').subscribe(update => updates.push(update));
+    const unsubscribe = on('battery').subscribe(update => updates.push(update));
 
     // Unsubscribe before getBattery resolves.
-    sub();
+    unsubscribe();
 
     resolveBattery({
       charging: true,
@@ -101,7 +101,7 @@ idescribe('onBattery', () => {
       .and.resolveTo(battery);
 
     const updates: any[] = [];
-    const sub = on('battery').subscribe(update => updates.push(update));
+    const unsubscribe = on('battery').subscribe(update => updates.push(update));
 
     await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -113,7 +113,7 @@ idescribe('onBattery', () => {
 
     expect(updates.at(-1)?.level).toBe(0.75);
 
-    sub();
+    unsubscribe();
     expect(listeners['levelchange'].length).toBe(0);
     expect(listeners['chargingchange'].length).toBe(0);
   });
@@ -142,19 +142,19 @@ idescribe('onBattery', () => {
   });
 
   it('handles getBattery rejection', async () => {
-    const rejectedPromise = Promise.reject(new Error('Battery API error'));
+    const rejected$ = Promise.reject(new Error('Battery API error'));
     // Catch to prevent unhandled rejection before test starts
-    rejectedPromise.catch(() => {});
+    rejected$.catch(() => {});
     
     const getBatterySpy = jasmine
       .createSpy('getBattery')
-      .and.returnValue(rejectedPromise);
+      .and.returnValue(rejected$);
       
     (navigator as any).getBattery = getBatterySpy;
 
     const values: any[] = [];
     const errors: any[] = [];
-    const sub = on('battery').subscribe(v => values.push(v));
+    const unsubscribe = on('battery').subscribe(v => values.push(v));
 
     // Wait for rejection to be handled
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -162,24 +162,24 @@ idescribe('onBattery', () => {
     // Should not crash or emit values
     expect(values.length).toBe(0);
     expect(errors.length).toBe(0);
-    sub();
+    unsubscribe();
   });
 
   it('stops before battery resolves when all subscribers unsubscribe', async () => {
     let resolveBattery!: (value: any) => void;
-    const batteryPromise = new Promise<any>((resolve) => {
+    const battery$ = new Promise<any>((resolve) => {
       resolveBattery = resolve;
     });
 
     let addListenerCalled = false;
     (navigator as any).getBattery = jasmine
       .createSpy('getBattery')
-      .and.returnValue(batteryPromise);
+      .and.returnValue(battery$);
 
-    const sub = on('battery').subscribe();
+    const unsubscribe = on('battery').subscribe();
     
     // Unsubscribe before battery resolves
-    sub();
+    unsubscribe();
 
     // Now resolve battery
     resolveBattery({
@@ -213,13 +213,13 @@ idescribe('onBattery', () => {
       .createSpy('getBattery')
       .and.resolveTo(battery);
 
-    const sub = on('battery').subscribe();
+    const unsubscribe = on('battery').subscribe();
     await new Promise(resolve => setTimeout(resolve, 100));
 
     // createSharedSource swallows cleanup errors
     let didThrow = false;
     try {
-      sub();
+      unsubscribe();
     } catch (e) {
       didThrow = true;
     }
@@ -242,16 +242,16 @@ idescribe('onBattery', () => {
       .createSpy('getBattery')
       .and.resolveTo(battery);
 
-    const sub = on('battery').subscribe();
+    const unsubscribe = on('battery').subscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
-    sub();
+    unsubscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     removeEventListenerSpy.calls.reset();
 
     // Calling unsubscribe again should not call removeEventListener
-    sub();
+    unsubscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(removeEventListenerSpy).not.toHaveBeenCalled();

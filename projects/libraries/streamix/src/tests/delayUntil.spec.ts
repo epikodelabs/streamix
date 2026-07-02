@@ -124,11 +124,11 @@ describe('delayUntil', () => {
 
   it('should flush buffer when notifier promise resolves', async () => {
     const source = atom<number>();
-    const notifierPromise = new Promise<void>((resolve) => setTimeout(resolve, 20));
+    const notifier$ = new Promise<void>((resolve) => setTimeout(resolve, 20));
 
     const emittedValues: number[] = [];
     const reader = (async () => {
-      for await (const value of iterate(pipe(source, delayUntil(notifierPromise)))) {
+      for await (const value of iterate(pipe(source, delayUntil(notifier$)))) {
         emittedValues.push(value);
       }
     })();

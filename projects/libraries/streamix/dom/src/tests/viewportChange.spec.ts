@@ -121,7 +121,7 @@ idescribe('onViewportChange', () => {
     );
 
     const values: any[] = [];
-    const sub = on('viewportChange').subscribe(v => values.push(v));
+    const unsubscribe = on('viewportChange').subscribe(v => values.push(v));
     await flush();
 
     expect(values[0]).toEqual(
@@ -134,7 +134,7 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    sub();
+    unsubscribe();
   });
 
   it('emits on viewport resize', async () => {
@@ -149,7 +149,7 @@ idescribe('onViewportChange', () => {
     );
 
     const values: any[] = [];
-    const sub = on('viewportChange').subscribe(v => values.push(v));
+    const unsubscribe = on('viewportChange').subscribe(v => values.push(v));
     await flush();
 
     env.resize(1280, 720);
@@ -162,7 +162,7 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    sub();
+    unsubscribe();
   });
 
   it('adds visualViewport listeners on start', async () => {
@@ -174,11 +174,11 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    const sub = on('viewportChange').subscribe();
+    const unsubscribe = on('viewportChange').subscribe();
     await flush();
 
     expect(env.visualViewport.addEventListener).toHaveBeenCalled();
-    sub();
+    unsubscribe();
   });
 
   it('removes visualViewport listeners on stop', async () => {
@@ -190,10 +190,10 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    const sub = on('viewportChange').subscribe();
+    const unsubscribe = on('viewportChange').subscribe();
     await flush();
 
-    sub();
+    unsubscribe();
     await flush();
 
     expect(env.visualViewport.removeEventListener).toHaveBeenCalled();
@@ -241,12 +241,12 @@ idescribe('onViewportChange', () => {
     );
 
     const values: any[] = [];
-    const sub = on('viewportChange').subscribe(v => values.push(v));
+    const unsubscribe = on('viewportChange').subscribe(v => values.push(v));
     await flush();
 
     // Snapshot still emitted using innerWidth / innerHeight
     expect(values.length).toBe(1);
-    sub();
+    unsubscribe();
   });
 
   it('falls back to window event listeners when visualViewport is unavailable', async () => {
@@ -259,13 +259,13 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    const sub = on('viewportChange').subscribe();
+    const unsubscribe = on('viewportChange').subscribe();
     await flush();
 
     expect(addSpy).toHaveBeenCalledWith('resize', jasmine.any(Function));
     expect(addSpy).toHaveBeenCalledWith('scroll', jasmine.any(Function));
 
-    sub();
+    unsubscribe();
     await flush();
 
     expect(removeSpy).toHaveBeenCalledWith('resize', jasmine.any(Function));
@@ -306,16 +306,16 @@ idescribe('onViewportChange', () => {
 
     const removeSpy = env.visualViewport.removeEventListener as jasmine.Spy;
 
-    const sub = on('viewportChange').subscribe();
+    const unsubscribe = on('viewportChange').subscribe();
     await flush();
 
-    sub();
+    unsubscribe();
     await flush();
 
     removeSpy.calls.reset();
 
     // Calling unsubscribe again should not call removeEventListener
-    sub();
+    unsubscribe();
     await flush();
 
     expect(removeSpy).not.toHaveBeenCalled();
@@ -346,7 +346,7 @@ idescribe('onViewportChange', () => {
     );
 
     const values: any[] = [];
-    const sub = on('viewportChange').subscribe(v => values.push(v));
+    const unsubscribe = on('viewportChange').subscribe(v => values.push(v));
     await flush();
 
     // Verify scroll listener was added
@@ -358,7 +358,7 @@ idescribe('onViewportChange', () => {
 
     expect(values.length).toBeGreaterThan(1);
 
-    sub();
+    unsubscribe();
   });
 
   it('handles SSR environment (window undefined)', async () => {
@@ -415,7 +415,7 @@ idescribe('onViewportChange', () => {
       })
     );
 
-    const sub = on('viewportChange').subscribe();
+    const unsubscribe = on('viewportChange').subscribe();
     await flush();
 
     // Simulate target becoming null
@@ -426,7 +426,7 @@ idescribe('onViewportChange', () => {
     );
 
     // Should not throw
-    expect(() => sub()).not.toThrow();
+    expect(() => unsubscribe()).not.toThrow();
   });
 });
 

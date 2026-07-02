@@ -11,7 +11,7 @@ describe('distinctUntilKeyChanged', () => {
     const atom = pipe(subject, distinctUntilKeyChanged('key'));
     const results: any[] = [];
 
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -24,7 +24,7 @@ describe('distinctUntilKeyChanged', () => {
     subject.next({ key: 3, value: 'e' });
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual([
       { key: 1, value: 'a' },
@@ -37,7 +37,7 @@ describe('distinctUntilKeyChanged', () => {
     const atom = pipe(subject, distinctUntilKeyChanged('key'));
     const results: any[] = [];
 
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -48,7 +48,7 @@ describe('distinctUntilKeyChanged', () => {
     subject.next({ key: 1, value: 'c' });
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual([{ key: 1, value: 'a' }]);
   });
@@ -57,7 +57,7 @@ describe('distinctUntilKeyChanged', () => {
     const atom = pipe(subject, distinctUntilKeyChanged('key'));
     const results: any[] = [];
 
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -65,7 +65,7 @@ describe('distinctUntilKeyChanged', () => {
 
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual([]);
   });
@@ -74,7 +74,7 @@ describe('distinctUntilKeyChanged', () => {
     const atom = pipe(subject, distinctUntilKeyChanged('key'));
     let error: any = null;
 
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       try {
         for await (const _ of iterate(atom)) {
           void _;
@@ -86,7 +86,7 @@ describe('distinctUntilKeyChanged', () => {
 
     subject.fail(new Error('Test Error'));
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(error).toEqual(new Error('Test Error'));
   });
@@ -95,7 +95,7 @@ describe('distinctUntilKeyChanged', () => {
     const atom = pipe(subject, distinctUntilKeyChanged(Promise.resolve('key')));
     const results: any[] = [];
 
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -106,7 +106,7 @@ describe('distinctUntilKeyChanged', () => {
     subject.next({ key: 2, value: 'c' });
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual([
       { key: 1, value: 'a' },
@@ -119,7 +119,7 @@ describe('distinctUntilKeyChanged', () => {
     const atom = pipe(subject, distinctUntilKeyChanged('key', comparator));
     const results: any[] = [];
 
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -131,7 +131,7 @@ describe('distinctUntilKeyChanged', () => {
     subject.next({ key: 6, value: 'skip again' });
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual([
       { key: 5, value: 'first' },

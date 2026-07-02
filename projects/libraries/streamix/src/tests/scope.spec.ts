@@ -91,14 +91,14 @@ describe('Scope System', () => {
       const s = scope<Shape>({ count: 0 });
 
       const values: number[] = [];
-      const sub = s.subscribeTo('count', v => values.push(v));
+      const unsubscribe = s.subscribeTo('count', v => values.push(v));
 
       s.count = 1;
       s.count = 2;
       await delay();
       expect(values).toEqual([0, 1, 2]);
 
-      sub();
+      unsubscribe();
       s.dispose();
     });
 
@@ -112,7 +112,7 @@ describe('Scope System', () => {
       });
 
       const values: string[] = [];
-      const sub = s.subscribeTo('user', v => values.push(v));
+      const unsubscribe = s.subscribeTo('user', v => values.push(v));
 
       await delay();
       expect(values).toEqual([]);
@@ -121,7 +121,7 @@ describe('Scope System', () => {
       await delay();
       expect(values).toEqual(['Ada']);
 
-      sub();
+      unsubscribe();
       s.dispose();
     });
 
@@ -229,14 +229,14 @@ describe('Scope System', () => {
 
       const values: number[] = [];
       const s = scope<Shape>({ count: 0 });
-      const sub = s.subscribeTo('count', (v: number) => values.push(v));
+      const unsubscribe = s.subscribeTo('count', (v: number) => values.push(v));
 
       s.count = 1;
       s.count = 2;
       await delay();
 
       expect(values).toEqual([0, 1, 2]);
-      sub();
+      unsubscribe();
       s.dispose();
     });
 
@@ -830,13 +830,13 @@ describe('Scope System', () => {
       const s = scope({ count: 0 });
       const values: number[] = [];
 
-      const sub = s.subscribeTo('count', v => values.push(v));
+      const unsubscribe = s.subscribeTo('count', v => values.push(v));
       s.count = 1;
       s.count = 2;
       await delay();
 
       expect(values).toEqual([0, 1, 2]);
-      sub();
+      unsubscribe();
       s.dispose();
     });
 

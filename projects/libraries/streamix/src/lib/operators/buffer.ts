@@ -23,13 +23,13 @@ export function buffer<T>(period: MaybePromise<number>) {
       buf = [];
     };
 
-    let intervalSubscription: any;
+    let unsubscribe: any;
     let pendingIntervalUnsubscribe = false;
 
     const requestIntervalUnsubscribe = (): void => {
-      if (intervalSubscription) {
-        const sub = intervalSubscription;
-        intervalSubscription = undefined;
+      if (unsubscribe) {
+        const sub = unsubscribe;
+        unsubscribe = undefined;
         sub();
         return;
       }
@@ -55,7 +55,7 @@ export function buffer<T>(period: MaybePromise<number>) {
       cleanup();
     };
 
-    intervalSubscription = timer(period, period).subscribe(() => flush());
+    unsubscribe = timer(period, period).subscribe(() => flush());
 
     if (pendingIntervalUnsubscribe) {
       requestIntervalUnsubscribe();

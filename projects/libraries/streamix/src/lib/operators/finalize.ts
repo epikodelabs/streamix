@@ -18,15 +18,15 @@ export const finalize = <T = any>(callback: () => MaybePromise<void>) => {
 
   let finalized = false;
   let completed = false;
-  let finalizationPromise: Promise<void> | null = null;
+  let finalization$: Promise<void> | null = null;
 
   const doFinalize = async () => {
     if (!finalized) {
       finalized = true;
       completed = true;
 
-      if (!finalizationPromise) {
-        finalizationPromise = (async () => {
+      if (!finalization$) {
+        finalization$ = (async () => {
           try {
             await callback?.();
           } catch {
@@ -35,9 +35,9 @@ export const finalize = <T = any>(callback: () => MaybePromise<void>) => {
         })();
       }
 
-      await finalizationPromise;
-    } else if (finalizationPromise) {
-      await finalizationPromise;
+      await finalization$;
+    } else if (finalization$) {
+      await finalization$;
     }
   };
 

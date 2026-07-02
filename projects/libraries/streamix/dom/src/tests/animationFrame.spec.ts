@@ -58,7 +58,7 @@ idescribe('onAnimationFrame', () => {
         finally {
             unsubscribe();
         }
-    }
+    });
     it('should cancel animation frame on unsubscribe', (done) => {
         const originalRAF = (globalThis as any).requestAnimationFrame;
         const originalCancel = (globalThis as any).cancelAnimationFrame;
@@ -221,11 +221,11 @@ idescribe('onAnimationFrame', () => {
         delete (globalThis as any).performance;
         try {
             const values: number[] = [];
-            const sub = on('animationFrame').subscribe(v => values.push(v));
+            const unsubscribe = on('animationFrame').subscribe(v => values.push(v));
             setTimeout(() => {
                 // Should not emit without performance
                 expect(values.length).toBe(0);
-                sub();
+                unsubscribe();
                 (globalThis as any).performance = originalPerformance;
                 done();
             }, 50);

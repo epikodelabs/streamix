@@ -219,13 +219,13 @@ idescribe('onOrientation', () => {
     const stream = on('orientation');
     const removeListenerSpy = window.screen.orientation.removeEventListener as jasmine.Spy;
     
-    const sub = stream.subscribe(() => { });
-    sub();
+    const unsubscribe = stream.subscribe(() => { });
+    unsubscribe();
     
     removeListenerSpy.calls.reset();
     
     // Try to trigger another stop - should be a no-op
-    sub();
+    unsubscribe();
 
     setTimeout(() => {
       try {
@@ -255,14 +255,14 @@ idescribe('onOrientation', () => {
     // Make removeEventListener throw an error
     removeListenerSpy.and.callFake(() => { throw new Error('removeEventListener error'); });
     
-    const sub = stream.subscribe(() => { });
+    const unsubscribe = stream.subscribe(() => { });
     
     await new Promise(resolve => setTimeout(resolve, 50));
     
     // createSharedSource swallows cleanup errors
     let didThrow = false;
     try {
-      sub();
+      unsubscribe();
     } catch (e) {
       didThrow = true;
     }

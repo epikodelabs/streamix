@@ -100,10 +100,10 @@ idescribe('onMutation', () => {
   });
 
   it('should resolve promised element and options before observing', (done) => {
-    const elementPromise = Promise.resolve(observedElement);
-    const optionsPromise = Promise.resolve({ attributes: true });
+    const element$ = Promise.resolve(observedElement);
+    const options$ = Promise.resolve({ attributes: true });
 
-    const mutation = on('mutation', elementPromise, optionsPromise);
+    const mutation = on('mutation', element$, options$);
     const unsubscribe = mutation.subscribe((mutations: MutationRecord[]) => {
         try {
           expect(mutations.some(m => m.type === 'attributes')).toBeTrue();
@@ -160,7 +160,7 @@ idescribe('onMutation', () => {
       const mutations = [{ type: 'attributes', attributeName: 'x' } as any] as MutationRecord[];
 
       const values: MutationRecord[][] = [];
-      const sub = on('mutation', observedElement).subscribe(v => values.push(v));
+      const unsubscribe = on('mutation', observedElement).subscribe(v => values.push(v));
 
       // Allow observer.observe to happen
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -173,7 +173,7 @@ idescribe('onMutation', () => {
       expect(values[0]).not.toBe(mutations);
       expect(values[0][0]).toBe(mutations[0]);
 
-      await sub();
+      await unsubscribe();
       await new Promise(resolve => setTimeout(resolve, 0));
       expect(disconnectSpy).toHaveBeenCalled();
     } finally {
@@ -204,17 +204,17 @@ idescribe('onMutation', () => {
       let resolveElement!: (el: Element) => void;
       let resolveOptions!: (opts: MutationObserverInit) => void;
 
-      const elementPromise = new Promise<Element>((resolve) => {
+      const element$ = new Promise<Element>((resolve) => {
         resolveElement = resolve;
       });
-      const optionsPromise = new Promise<MutationObserverInit>((resolve) => {
+      const options$ = new Promise<MutationObserverInit>((resolve) => {
         resolveOptions = resolve;
       });
 
       const values: MutationRecord[][] = [];
-      const sub = on('mutation', elementPromise, optionsPromise).subscribe(v => values.push(v));
+      const unsubscribe = on('mutation', element$, options$).subscribe(v => values.push(v));
 
-      sub();
+      unsubscribe();
 
       resolveElement(observedElement);
       resolveOptions({ attributes: true });
@@ -234,12 +234,12 @@ idescribe('onMutation', () => {
 
   it('handles null element from promise resolution', async () => {
     const values: MutationRecord[][] = [];
-    const sub = on('mutation', Promise.resolve(null as any)).subscribe(v => values.push(v));
+    const unsubscribe = on('mutation', Promise.resolve(null as any)).subscribe(v => values.push(v));
 
     await new Promise(resolve => setTimeout(resolve, 50));
 
     expect(values).toEqual([]);
-    sub();
+    unsubscribe();
   });
 
   it('handles synchronous null element gracefully', async () => {
@@ -264,10 +264,10 @@ idescribe('onMutation', () => {
   });
 
   it('resolves options promise independently', async () => {
-    const optionsPromise = Promise.resolve({ attributes: true });
+    const options$ = Promise.resolve({ attributes: true });
 
     const values: MutationRecord[][] = [];
-    const sub = on('mutation', observedElement, optionsPromise).subscribe(v => values.push(v));
+    const unsubscribe = on('mutation', observedElement, options$).subscribe(v => values.push(v));
 
     await new Promise(resolve => setTimeout(resolve, 50));
 
@@ -277,7 +277,7 @@ idescribe('onMutation', () => {
 
     expect(values.some(arr => arr.some(m => m.type === 'attributes'))).toBeTrue();
 
-    sub();
+    unsubscribe();
   });
 });
 

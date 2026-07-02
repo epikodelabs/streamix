@@ -37,8 +37,8 @@ export const skip = <T = any>(count: MaybePromise<number>) =>
           const result = await source.next();
           if (result.done) return DONE;
 
-          const remainingOrPromise = getRemaining();
-          const currentRemaining = isPromiseLike(remainingOrPromise) ? await remainingOrPromise : remainingOrPromise;
+          const remainingOr$ = getRemaining();
+          const currentRemaining = isPromiseLike(remainingOr$) ? await remainingOr$ : remainingOr$;
           if (currentRemaining > 0) {
             remaining = currentRemaining - 1;
             // skip this value, continue loop

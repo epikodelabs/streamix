@@ -306,10 +306,10 @@ describe('mergeMap', () => {
       })
     );
 
-    const sub = merged.subscribe((val: number) => {
+    const unsubscribe = merged.subscribe((val: number) => {
       results.push(val);
       if (val === 10) {
-        sub();
+        unsubscribe();
       }
     });
 

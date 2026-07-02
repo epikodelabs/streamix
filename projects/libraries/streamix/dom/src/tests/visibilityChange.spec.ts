@@ -106,11 +106,11 @@ idescribe('onVisibilityChange', () => {
     );
 
     const values: DocumentVisibilityState[] = [];
-    const sub = on('visibilityChange').subscribe(v => values.push(v));
+    const unsubscribe = on('visibilityChange').subscribe(v => values.push(v));
     await flush();
 
     expect(values).toEqual(['hidden']);
-    sub();
+    unsubscribe();
   });
 
   it('emits on visibilitychange events', async () => {
@@ -125,7 +125,7 @@ idescribe('onVisibilityChange', () => {
     );
 
     const values: DocumentVisibilityState[] = [];
-    const sub = on('visibilityChange').subscribe(v => values.push(v));
+    const unsubscribe = on('visibilityChange').subscribe(v => values.push(v));
     await flush();
 
     env.setVisibility('hidden');
@@ -137,7 +137,7 @@ idescribe('onVisibilityChange', () => {
     await flush();
 
     expect(values).toEqual(['visible', 'hidden', 'visible']);
-    sub();
+    unsubscribe();
   });
 
   it('adds listener once and removes on last unsubscribe', async () => {
@@ -213,11 +213,11 @@ idescribe('onVisibilityChange', () => {
     );
 
     const values: DocumentVisibilityState[] = [];
-    const sub = on('visibilityChange').subscribe(v => values.push(v));
+    const unsubscribe = on('visibilityChange').subscribe(v => values.push(v));
     await flush();
 
     expect(values).toEqual(['visible']);
-    sub();
+    unsubscribe();
   });
 
   it('returns "visible" when document is undefined (SSR)', async () => {
@@ -243,11 +243,11 @@ idescribe('onVisibilityChange', () => {
     );
 
     const values: DocumentVisibilityState[] = [];
-    const sub = on('visibilityChange').subscribe(v => values.push(v));
+    const unsubscribe = on('visibilityChange').subscribe(v => values.push(v));
     await flush();
 
     expect(values).toEqual(['visible']);
-    sub();
+    unsubscribe();
   });
 
   it('does not restart when start() called multiple times', async () => {
@@ -285,16 +285,16 @@ idescribe('onVisibilityChange', () => {
       })
     );
 
-    const sub = on('visibilityChange').subscribe();
+    const unsubscribe = on('visibilityChange').subscribe();
     await flush();
 
-    sub();
+    unsubscribe();
     await flush();
 
     env.removeEventListener.calls.reset();
 
     // Calling unsubscribe again should not call removeEventListener
-    sub();
+    unsubscribe();
     await flush();
 
     expect(env.removeEventListener).not.toHaveBeenCalled();

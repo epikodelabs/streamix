@@ -113,11 +113,11 @@ idescribe("jsonp", () => {
     const stream = jsonp<typeof testData>("https://example.com/data");
     const iterator = iterate(stream)[Symbol.asyncIterator]();
 
-    const valuePromise = iterator.next();
+    const value$ = iterator.next();
     await iterator.return?.(undefined); // Early close
 
     try {
-      await valuePromise;
+      await value$;
     } catch {
       // Expected to potentially throw or return done due to abort
     }

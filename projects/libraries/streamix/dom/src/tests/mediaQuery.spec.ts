@@ -138,7 +138,7 @@ idescribe('onMediaQuery', () => {
       };
     });
 
-    const iterPromise = (async () => {
+    const iter$ = (async () => {
       const values: boolean[] = [];
       for await (const v of on('mediaQuery', query)) {
         values.push(v);
@@ -151,7 +151,7 @@ idescribe('onMediaQuery', () => {
 
     listeners.forEach(cb => cb({ matches: true } as MediaQueryListEvent));
 
-    expect(await iterPromise).toEqual([false, true]);
+    expect(await iter$).toEqual([false, true]);
   });
 
   it('uses addListener/removeListener for promise queries when addEventListener is not available', async () => {
@@ -171,13 +171,13 @@ idescribe('onMediaQuery', () => {
     });
 
     let resolveQuery!: (value: string) => void;
-    const queryPromise = new Promise<string>((resolve) => {
+    const query$ = new Promise<string>((resolve) => {
       resolveQuery = resolve;
     });
 
     const callback = jasmine.createSpy('callback');
-    const stream: Atom<boolean> = on('mediaQuery', queryPromise);
-    const sub = stream.subscribe(callback);
+    const stream: Atom<boolean> = on('mediaQuery', query$);
+    const unsubscribe = stream.subscribe(callback);
 
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(callback).toHaveBeenCalledWith(false, false); // immediate false for thenable path
@@ -191,7 +191,7 @@ idescribe('onMediaQuery', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(callback).toHaveBeenCalledWith(true, true);
 
-    sub();
+    unsubscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(listeners.length).toBe(0);
   });
@@ -212,12 +212,12 @@ idescribe('onMediaQuery', () => {
     (window as any).matchMedia = matchMediaSpy;
 
     let resolveQuery: (value: string) => void;
-    const queryPromise = new Promise<string>(resolve => {
+    const query$ = new Promise<string>(resolve => {
       resolveQuery = resolve;
     });
 
     const callback = jasmine.createSpy('callback');
-    const stream: Atom<boolean> = on('mediaQuery', queryPromise);
+    const stream: Atom<boolean> = on('mediaQuery', query$);
     const unsubscribe = stream.subscribe(callback);
 
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -250,7 +250,7 @@ idescribe('onMediaQuery', () => {
 
     const stream: Atom<boolean> = on('mediaQuery', query);
     const callback = jasmine.createSpy('callback');
-    const sub = stream.subscribe(callback);
+    const unsubscribe = stream.subscribe(callback);
 
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(listeners.length).toBe(1);
@@ -259,7 +259,7 @@ idescribe('onMediaQuery', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(callback).toHaveBeenCalledWith(true, true);
 
-    sub();
+    unsubscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(listeners.length).toBe(0);
   });
@@ -318,30 +318,30 @@ idescribe('onMediaQuery', () => {
     const stream = on('mediaQuery', query);
     
     // Try to unsubscribe without subscribing
-    const sub = stream.subscribe();
+    const unsubscribe = stream.subscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
     
-    sub();
+    unsubscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
     
     // Calling unsubscribe again should be safe
-    expect(() => sub()).not.toThrow();
+    expect(() => unsubscribe()).not.toThrow();
   });
 
   it('handles stop before promise query resolves', async () => {
     let resolveQuery: (value: string) => void;
-    const queryPromise = new Promise<string>(resolve => {
+    const query$ = new Promise<string>(resolve => {
       resolveQuery = resolve;
     });
 
     const callback = jasmine.createSpy('callback');
-    const stream = on('mediaQuery', queryPromise);
-    const sub = stream.subscribe(callback);
+    const stream = on('mediaQuery', query$);
+    const unsubscribe = stream.subscribe(callback);
 
     await new Promise(resolve => setTimeout(resolve, 0));
 
     // Unsubscribe before promise resolves
-    sub();
+    unsubscribe();
 
     // Now resolve
     resolveQuery!('(min-width: 1000px)');

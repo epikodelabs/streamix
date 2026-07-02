@@ -74,7 +74,7 @@ describe("finalize", () => {
   it("should await finalizer when iterator.return is used", async () => {
     const finalizers: string[] = [];
     let resolveFinalize!: () => void;
-    const finalizePromise = new Promise<void>((resolve) => {
+    const finalize$ = new Promise<void>((resolve) => {
       resolveFinalize = resolve;
     });
 
@@ -91,14 +91,14 @@ describe("finalize", () => {
 
     await iterator.next();
     await iterator.return?.();
-    await finalizePromise;
+    await finalize$;
     expect(finalizers).toEqual(["finalized"]);
   });
 
   it("should await finalizer when iterator.throw is used", async () => {
     const finalizers: string[] = [];
     let resolveFinalize!: () => void;
-    const finalizePromise = new Promise<void>((resolve) => {
+    const finalize$ = new Promise<void>((resolve) => {
       resolveFinalize = resolve;
     });
 
@@ -113,7 +113,7 @@ describe("finalize", () => {
     }).apply(sourceIterator);
 
     await expectAsync(iterator.throw?.(new Error("stop"))).toBeRejectedWithError("stop");
-    await finalizePromise;
+    await finalize$;
     expect(finalizers).toEqual(["finalized"]);
   });
 

@@ -264,7 +264,7 @@ export function webSocket<T = any>(
    * Starts socket initialization immediately so callers can interact with the
    * underlying WebSocket before the first subscription pull.
    */
-  const initPromise = (async () => {
+  const init$ = (async () => {
     try {
       const resolvedUrl = isPromiseLike(url) ? await url : url;
       const created = factory(resolvedUrl);
@@ -308,7 +308,7 @@ export function webSocket<T = any>(
     });
 
     try {
-      await initPromise;
+      await init$;
 
       if (terminalError) {
         throw terminalError;

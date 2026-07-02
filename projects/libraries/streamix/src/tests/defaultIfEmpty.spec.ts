@@ -7,7 +7,7 @@ describe('defaultIfEmpty', () => {
     const atom = pipe(subject, defaultIfEmpty(defaultValue));
     const results: string[] = [];
 
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -15,7 +15,7 @@ describe('defaultIfEmpty', () => {
 
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual([defaultValue]);
   });
@@ -26,7 +26,7 @@ describe('defaultIfEmpty', () => {
     const atom = pipe(subject, defaultIfEmpty(defaultValue));
     const results: string[] = [];
 
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -36,7 +36,7 @@ describe('defaultIfEmpty', () => {
     subject.next('Value 2');
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual(['Value 1', 'Value 2']);
   });
@@ -51,7 +51,7 @@ describe('defaultIfEmpty', () => {
     );
     const results: string[] = [];
 
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -60,7 +60,7 @@ describe('defaultIfEmpty', () => {
     subject.next('Value 1');
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual([defaultValue]);
   });
@@ -75,7 +75,7 @@ describe('defaultIfEmpty', () => {
     );
     const results: string[] = [];
 
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -85,7 +85,7 @@ describe('defaultIfEmpty', () => {
     subject.next('Value 2');
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual(['Value 3', 'Value 3']);
   });

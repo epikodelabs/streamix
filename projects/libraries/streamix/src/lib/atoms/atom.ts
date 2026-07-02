@@ -586,7 +586,7 @@ export function flow<T>(
   // Iteration Control
   let iterator: AsyncIterator<T> | Iterator<T> | undefined;
   let abortController: AbortController | undefined;
-  let disposePromise: Promise<void> | null = null;
+  let dispose$: Promise<void> | null = null;
 
   const clearDepSubscriptions = () => {
     for (const sub of depSubscriptions.values()) sub();
@@ -613,9 +613,9 @@ export function flow<T>(
 
   const disposeInstance = async (): Promise<void> => {
     if (disposed) return;
-    if (disposePromise) return disposePromise;
+    if (dispose$) return dispose$;
 
-    disposePromise = (async () => {
+    dispose$ = (async () => {
       disposed = true;
       markDisposed(instance);
       node.version++;
@@ -634,7 +634,7 @@ export function flow<T>(
       getScheduler().remove(node);
     })();
 
-    try { await disposePromise; } finally { disposePromise = null; }
+    try { await dispose$; } finally { dispose$ = null; }
   };
 
   // Races a pending `iterator.next()` against the given AbortSignal.
@@ -829,13 +829,13 @@ export function flow<T>(
       if (callback) subs.add(callback);
       activeSubCount++;
 
-      const sub = createSubscription(async () => {
+      const unsubscribe = createSubscription(async () => {
         if (callback) subs.delete(callback);
-        subscriptions.delete(sub);
+        subscriptions.delete(unsubscribe);
         if (--activeSubCount <= 0) await disposeInstance();
       });
-      subscriptions.add(sub);
-      return sub;
+      subscriptions.add(unsubscribe);
+      return unsubscribe;
     },
 
     onError(handler: (error: any) => void): Subscription {
@@ -989,12 +989,12 @@ export function atom<T = any>(
       if (subs.size >= maxSubscribers) throw new Error(`Maximum subscriber limit (${maxSubscribers}) reached`);
       if (callback) subs.add(callback);
 
-      const sub = createSubscription(() => {
+      const unsubscribe = createSubscription(() => {
         if (callback) subs.delete(callback);
-        subscriptions.delete(sub);
+        subscriptions.delete(unsubscribe);
       });
-      subscriptions.add(sub);
-      return sub;
+      subscriptions.add(unsubscribe);
+      return unsubscribe;
     },
 
     onError(handler: (error: any) => void): Subscription {

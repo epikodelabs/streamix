@@ -20,10 +20,10 @@ function firstValue<T>(stream: any, timeoutMs = 250): Promise<T> {
       timeoutMs
     );
 
-    let sub: any;
-    sub = stream.subscribe((v: T) => {
+    let unsubscribe: any;
+    unsubscribe = stream.subscribe((v: T) => {
         clearTimeout(timeoutId);
-        sub?.();
+        unsubscribe?.();
         resolve(v);
       });
   });
@@ -126,9 +126,9 @@ idescribe('onIntersection', () => {
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
       await withGlobal('MutationObserver', FakeMutationObserver as any, async () => {
-        const elementPromise = Promise.resolve(element);
-        const optionsPromise = Promise.resolve({ rootMargin: '0px' });
-        await expectAsync(firstValue<boolean>(on('intersection', elementPromise, optionsPromise))).toBeResolvedTo(
+        const element$ = Promise.resolve(element);
+        const options$ = Promise.resolve({ rootMargin: '0px' });
+        await expectAsync(firstValue<boolean>(on('intersection', element$, options$))).toBeResolvedTo(
           true
         );
       });
@@ -193,13 +193,13 @@ idescribe('onIntersection', () => {
   it('handles SSR (IntersectionObserver undefined)', async () => {
     await withGlobal('IntersectionObserver', undefined, async () => {
       const values: boolean[] = [];
-      const sub = on('intersection', element).subscribe(v => values.push(v));
+      const unsubscribe = on('intersection', element).subscribe(v => values.push(v));
 
       await new Promise(r => setTimeout(r, 50));
 
       // Should not emit without IntersectionObserver
       expect(values).toEqual([]);
-      sub();
+      unsubscribe();
     });
   });
 
@@ -213,13 +213,13 @@ idescribe('onIntersection', () => {
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
       const values: boolean[] = [];
-      const sub = on('intersection', Promise.resolve(null as any)).subscribe(v => values.push(v));
+      const unsubscribe = on('intersection', Promise.resolve(null as any)).subscribe(v => values.push(v));
 
       await new Promise(r => setTimeout(r, 50));
 
       // Should not emit with null element
       expect(values).toEqual([]);
-      sub();
+      unsubscribe();
     });
   });
 
@@ -233,16 +233,16 @@ idescribe('onIntersection', () => {
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
       const values: boolean[] = [];
-      const sub = on('intersection', Promise.resolve(element)).subscribe(
+      const unsubscribe = on('intersection', Promise.resolve(element)).subscribe(
         v => values.push(v)
       );
 
-      sub();
+      unsubscribe();
       await new Promise(r => setTimeout(r, 50));
 
       // Should not emit when signal is aborted
       expect(values).toEqual([]);
-      sub();
+      unsubscribe();
     });
   });
 
@@ -276,11 +276,11 @@ idescribe('onIntersection', () => {
     }
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
-      const sub = on('intersection', element).subscribe();
+      const unsubscribe = on('intersection', element).subscribe();
       await new Promise(r => setTimeout(r, 50));
 
       // Should not throw when unsubscribing
-      expect(() => sub()).not.toThrow();
+      expect(() => unsubscribe()).not.toThrow();
     });
   });
 

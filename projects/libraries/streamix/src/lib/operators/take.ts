@@ -48,8 +48,8 @@ export const take = <T = any>(count: MaybePromise<number>) =>
 
         emitted++;
 
-        const countOrPromise = getCount();
-        const limit = isPromiseLike(countOrPromise) ? await countOrPromise : countOrPromise;
+        const countOr$ = getCount();
+        const limit = isPromiseLike(countOr$) ? await countOr$ : countOr$;
         if (emitted > limit) {
           done = true;
           try {

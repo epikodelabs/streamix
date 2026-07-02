@@ -54,9 +54,9 @@ describe('delay', () => {
 
   it('should respect promise-based delay inputs', async () => {
     const source = from([1]);
-    const delayPromise = Promise.resolve(10);
+    const delay$ = Promise.resolve(10);
 
-    const delayedAtom = pipe(source, delay(delayPromise));
+    const delayedAtom = pipe(source, delay(delay$));
     const startTime = Date.now();
 
     const results: number[] = [];
@@ -70,9 +70,9 @@ describe('delay', () => {
 
   it('should treat undefined delay durations as immediate', async () => {
     const source = from([42]);
-    const delayPromise = Promise.resolve<number | undefined>(undefined);
+    const delay$ = Promise.resolve<number | undefined>(undefined);
 
-    const delayedAtom = pipe(source, delay(delayPromise as any));
+    const delayedAtom = pipe(source, delay(delay$ as any));
     const startTime = Date.now();
 
     const results: number[] = [];

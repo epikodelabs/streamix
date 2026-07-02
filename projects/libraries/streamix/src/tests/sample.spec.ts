@@ -87,8 +87,8 @@ describe('sample', () => {
   });
 
   it('should work with promise-based periods', async () => {
-    const periodPromise = Promise.resolve(10);
-    const sampled = pipe(subject, sample(periodPromise));
+    const period$ = Promise.resolve(10);
+    const sampled = pipe(subject, sample(period$));
     const results: number[] = [];
 
     (async () => {

@@ -30,7 +30,7 @@ idescribe('onResize', () => {
     (div as any).getBoundingClientRect = () => ({ width: 10.4, height: 20.6 } as any);
 
     const values: any[] = [];
-    const sub = on('resize', div).subscribe(v => values.push(v));
+    const unsubscribe = on('resize', div).subscribe(v => values.push(v));
 
     setTimeout(() => {
       try {
@@ -43,12 +43,12 @@ idescribe('onResize', () => {
         setTimeout(() => {
           try {
             expect(values.at(-1)).toEqual({ width: 100, height: 0 });
-            sub();
+            unsubscribe();
             expect(disconnectSpy).toHaveBeenCalled();
             expect(observeSpy).toHaveBeenCalled();
             done();
           } catch (err: any) {
-            sub();
+            unsubscribe();
             done.fail(err);
           } finally {
             (div as any).getBoundingClientRect = originalRect;
@@ -58,7 +58,7 @@ idescribe('onResize', () => {
           }
         }, 0);
       } catch (err: any) {
-        sub();
+        unsubscribe();
         (div as any).getBoundingClientRect = originalRect;
         document.body.removeChild(div);
         if (originalObserver) (globalThis as any).ResizeObserver = originalObserver;
@@ -84,14 +84,14 @@ idescribe('onResize', () => {
     (globalThis as any).ResizeObserver = FakeResizeObserver;
 
     let resolveElement!: (el: HTMLElement) => void;
-    const elementPromise = new Promise<HTMLElement>((resolve) => {
+    const element$ = new Promise<HTMLElement>((resolve) => {
       resolveElement = resolve;
     });
 
     const values: any[] = [];
-    const sub = on('resize', elementPromise).subscribe(v => values.push(v));
+    const unsubscribe = on('resize', element$).subscribe(v => values.push(v));
 
-    sub();
+    unsubscribe();
 
     const div = document.createElement('div');
     document.body.appendChild(div);
@@ -114,7 +114,7 @@ idescribe('onResize', () => {
     document.body.appendChild(div);
 
     const values: any[] = [];
-    const sub = on('resize', div).subscribe(v => values.push(v));
+    const unsubscribe = on('resize', div).subscribe(v => values.push(v));
 
     // initial
     await new Promise(requestAnimationFrame);
@@ -129,7 +129,7 @@ idescribe('onResize', () => {
     expect(values[0].width).toBe(100);
     expect(values.at(-1).width).toBe(200);
 
-    sub();
+    unsubscribe();
     document.body.removeChild(div);
   });
 
@@ -209,8 +209,8 @@ idescribe('onResize', () => {
     const div = document.createElement('div');
     document.body.appendChild(div);
 
-    const sub = on('resize', div).subscribe(() => {});
-    sub();
+    const unsubscribe = on('resize', div).subscribe(() => {});
+    unsubscribe();
 
     setTimeout(() => done(), 0);
   });
@@ -222,12 +222,12 @@ idescribe('onResize', () => {
     document.body.appendChild(div);
 
     let resolveElement: (element: HTMLElement) => void;
-    const elementPromise = new Promise<HTMLElement>(resolve => {
+    const element$ = new Promise<HTMLElement>(resolve => {
       resolveElement = resolve;
     });
 
     const values: any[] = [];
-    const unsubscribe = on('resize', elementPromise!).subscribe(v => values.push(v));
+    const unsubscribe = on('resize', element$!).subscribe(v => values.push(v));
 
     resolveElement!(div);
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -322,14 +322,14 @@ idescribe('onResize', () => {
     (globalThis as any).ResizeObserver = FakeResizeObserver;
 
     const values: any[] = [];
-    const sub = on('resize', Promise.resolve(null as any)).subscribe(v => values.push(v));
+    const unsubscribe = on('resize', Promise.resolve(null as any)).subscribe(v => values.push(v));
 
     await new Promise(resolve => setTimeout(resolve, 50));
 
     expect(observeSpy).not.toHaveBeenCalled();
     expect(values).toEqual([]);
 
-    sub();
+    unsubscribe();
 
     if (originalObserver) (globalThis as any).ResizeObserver = originalObserver;
     else delete (globalThis as any).ResizeObserver;
@@ -343,13 +343,13 @@ idescribe('onResize', () => {
       throw new Error('disconnect error');
     });
 
-    const sub = on('resize', div).subscribe();
+    const unsubscribe = on('resize', div).subscribe();
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // createSharedSource swallows cleanup errors
     let didThrow = false;
     try {
-      sub();
+      unsubscribe();
     } catch (e) {
       didThrow = true;
     }
@@ -366,16 +366,16 @@ idescribe('onResize', () => {
 
     const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect').and.callThrough();
 
-    const sub = on('resize', div).subscribe();
+    const unsubscribe = on('resize', div).subscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
-    sub();
+    unsubscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     disconnectSpy.calls.reset();
 
     // Calling unsubscribe again should not call disconnect
-    sub();
+    unsubscribe();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(disconnectSpy).not.toHaveBeenCalled();

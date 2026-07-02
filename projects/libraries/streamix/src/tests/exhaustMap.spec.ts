@@ -95,7 +95,7 @@ describe('exhaustMap', () => {
       })
     );
 
-    const errPromise = (async () => {
+    const err$ = (async () => {
       try {
         for await (const value of iterate(output)) {
           results.push(value);
@@ -111,7 +111,7 @@ describe('exhaustMap', () => {
     subject.next(3);
     await wait(10);
     subject.next(2);
-    const error = await errPromise;
+    const error = await err$;
 
     expect(error).toBeInstanceOf(Error);
     expect((error as any)!.message).toBe('boom');

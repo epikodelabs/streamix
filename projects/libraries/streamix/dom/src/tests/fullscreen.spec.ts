@@ -292,17 +292,17 @@ idescribe("fullscreen", () => {
 
   it("unsubscribes when called as a function", () => {
     const stream = on('fullscreen');
-    const sub = stream.subscribe(() => {});
-    sub();
-    expect(sub.unsubscribed).toBe(true);
+    const unsubscribe = stream.subscribe(() => {});
+    unsubscribe();
+    expect(unsubscribe.unsubscribed).toBe(true);
   });
 
   it("handles rapid subscribe/unsubscribe cycles", () => {
     const stream = on('fullscreen');
 
     for (let i = 0; i < 5; i++) {
-      const sub = stream.subscribe(() => {});
-      sub();
+      const unsubscribe = stream.subscribe(() => {});
+      unsubscribe();
     }
 
     expect(document.removeEventListener).toHaveBeenCalled();
@@ -312,12 +312,12 @@ idescribe("fullscreen", () => {
     const stream = on('fullscreen');
     const values: boolean[] = [];
 
-    const sub = stream.subscribe((value) => values.push(value));
+    const unsubscribe = stream.subscribe((value) => values.push(value));
     
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(values).toEqual([false]);
     
-    sub();
+    unsubscribe();
 
     fullscreenElement = document.createElement("div");
     triggerEvent("fullscreenchange");
@@ -369,11 +369,11 @@ idescribe("fullscreen", () => {
     msFullscreenElement = null;
 
     const values: boolean[] = [];
-    const sub = on('fullscreen').subscribe(v => values.push(v));
+    const unsubscribe = on('fullscreen').subscribe(v => values.push(v));
     await delay(50);
 
     expect(values[0]).toBe(true);
-    sub();
+    unsubscribe();
   });
 
   it('detects msFullscreenElement', async () => {
@@ -383,16 +383,16 @@ idescribe("fullscreen", () => {
     mozFullScreenElement = null;
 
     const values: boolean[] = [];
-    const sub = on('fullscreen').subscribe(v => values.push(v));
+    const unsubscribe = on('fullscreen').subscribe(v => values.push(v));
     await delay(50);
 
     expect(values[0]).toBe(true);
-    sub();
+    unsubscribe();
   });
 
   it('handles teardown errors gracefully', async () => {
     const stream = on('fullscreen');
-    const sub = stream.subscribe();
+    const unsubscribe = stream.subscribe();
 
     await new Promise(resolve => setTimeout(resolve, 50));
 
@@ -404,7 +404,7 @@ idescribe("fullscreen", () => {
     // createSharedSource swallows cleanup errors
     let didThrow = false;
     try {
-      sub();
+      unsubscribe();
     } catch (e) {
       didThrow = true;
     }
@@ -429,16 +429,16 @@ idescribe("fullscreen", () => {
 
   it('does not stop when already stopped', async () => {
     const stream = on('fullscreen');
-    const sub = stream.subscribe();
+    const unsubscribe = stream.subscribe();
     await delay(50);
 
-    sub();
+    unsubscribe();
     await delay(50);
 
     (document.removeEventListener as jasmine.Spy).calls.reset();
 
     // Calling unsubscribe again should not call removeEventListener
-    sub();
+    unsubscribe();
     await delay(50);
 
     expect(document.removeEventListener).not.toHaveBeenCalled();

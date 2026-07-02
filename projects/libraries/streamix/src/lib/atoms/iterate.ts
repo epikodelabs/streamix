@@ -38,7 +38,7 @@ export function iterate<T>(source: Atom<T> | AsyncIterable<T>): AsyncIterableIte
   let onPush: (() => void) | undefined;
   let finish: (() => MaybePromise<void>) | undefined;
   let checkError: (() => any) | undefined;
-  let errorSub: any;
+  let errorUnsubscribe: any;
 
   const notifyPush = () => {
     if (onPush) {
@@ -54,7 +54,7 @@ export function iterate<T>(source: Atom<T> | AsyncIterable<T>): AsyncIterableIte
     if (initialized) return;
     initialized = true;
 
-    const sub = atom.subscribe((value) => {
+    const unsubscribe = atom.subscribe((value) => {
       if (done) return;
       if (resolveNext) {
         resolveNext({ value, done: false });
@@ -70,10 +70,10 @@ export function iterate<T>(source: Atom<T> | AsyncIterable<T>): AsyncIterableIte
 
     finish = () => {
       if (done) return;
-      const cleanup = sub();
-      if (errorSub) {
-        errorSub();
-        errorSub = undefined;
+      const cleanup = unsubscribe();
+      if (errorUnsubscribe) {
+        errorUnsubscribe();
+        errorUnsubscribe = undefined;
       }
       const err = atom.error;
       if (resolveNext) {
@@ -101,7 +101,7 @@ export function iterate<T>(source: Atom<T> | AsyncIterable<T>): AsyncIterableIte
       return cleanup;
     };
 
-    errorSub = atom.onError(() => {
+    errorUnsubscribe = atom.onError(() => {
       if (done) return;
       if (finish) finish();
     });

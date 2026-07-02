@@ -25,10 +25,10 @@ describe('loop', () => {
     const atom = loop(0, x => x < 10, x => x + 1);
     const emitted: number[] = [];
 
-    const sub = atom.subscribe(v => {
+    const unsubscribe = atom.subscribe(v => {
       if (v !== undefined) emitted.push(v);
       if (v === 3) {
-        sub();
+        unsubscribe();
       }
     });
 

@@ -38,9 +38,9 @@ describe("channel", () => {
   it("should hand off values on an unbuffered channel", async () => {
     const ch = channel<number>();
 
-    const receivePromise = ch.receive();
+    const receive$ = ch.receive();
     await ch.send(42);
-    const value = await receivePromise;
+    const value = await receive$;
 
     expect(value).toBe(42);
   });

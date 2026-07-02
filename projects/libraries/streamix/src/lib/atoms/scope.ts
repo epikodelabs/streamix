@@ -854,10 +854,10 @@ export function registerWithCurrentScope(atom: Atom<any>): void {
   // - flow atoms stay active and actually receive values from their source, and
   // - every emission is recorded for scope.loading.
   try {
-    const sub = atom.subscribe(() => markAtomAsEmitted(atom));
+    const unsubscribe = atom.subscribe(() => markAtomAsEmitted(atom));
     scopeRef.cleanups.add(() => {
       if ((atom as any).disposed) return;
-      sub();
+      unsubscribe();
     });
   } catch {
     // ignore initialization errors (e.g. derived that throws on first run)

@@ -87,11 +87,11 @@ describe('Atom System', () => {
     it('should return subscription with unsubscribe', async () => {
       const a = atom(0);
       let calls = 0;
-      const sub = a.subscribe(() => calls++);
+      const unsubscribe = a.subscribe(() => calls++);
       a.next(1);
       await delay(); // Allow microtask queue to drain
       expect(calls).toBe(1);
-      sub();
+      unsubscribe();
       a.next(2);
       await delay(); // Allow microtask queue to drain
       expect(calls).toBe(1);
@@ -420,10 +420,10 @@ describe('Atom System', () => {
       });
       
       let values: number[] = [];
-      const sub = f.subscribe(v => values.push(v));
+      const unsubscribe = f.subscribe(v => values.push(v));
       
       await delay(30);
-      sub();
+      unsubscribe();
       
       expect(values.length).toBeLessThan(5);
       f.dispose();

@@ -502,19 +502,19 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
     }));
     ngOnInit(): void {
         const clicksAtom = this.appScope.at('clicks');
-        const bufferSub = pipe(clicksAtom, bufferCount(5)).subscribe((batch: string[]) => {
+        const bufferUnsubscribe = pipe(clicksAtom, bufferCount(5)).subscribe((batch: string[]) => {
             this.batches.unshift(batch);
             if (this.batches.length > 8)
                 this.batches.pop();
             this.cdr.detectChanges();
         });
-        this.appScope.cleanups.add(() => bufferSub());
+        this.appScope.cleanups.add(() => bufferUnsubscribe());
 
-        const combinedSub = this.appScope.at('combined').subscribe(v => {
+        const unsubscribe = this.appScope.at('combined').subscribe(v => {
             this.combinedValue = v;
             this.cdr.detectChanges();
         });
-        this.appScope.cleanups.add(() => combinedSub());
+        this.appScope.cleanups.add(() => unsubscribe());
 
         this.initMetricsStream();
         this.initLogStream();
@@ -570,7 +570,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         };
         const batchSize = 200;
         let pixelsDone = 0;
-        const sub = pipe(range(0, width * height), map((i: number) => {
+        const unsubscribe = pipe(range(0, width * height), map((i: number) => {
             const px = i % width;
             const py = Math.floor(i / width);
             const x0 = (px - centerX) / zoom;
@@ -601,7 +601,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
             this.juliaGenerating = false;
             this.cdr.detectChanges();
         })).subscribe(() => { });
-        this.appScope.cleanups.add(() => sub());
+        this.appScope.cleanups.add(() => unsubscribe());
     }
     private initMetricsStream(): void {
         const s = pipe(interval(800), scan(acc => {
@@ -636,16 +636,16 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
             return;
         const value$ = pipe(listen(input, 'input'), map(() => input.value as string));
         // Raw counter
-        const rawSub = pipe(value$, tap(() => { this.rawSearchCount++; this.cdr.detectChanges(); })).subscribe(() => { });
-        this.appScope.cleanups.add(() => rawSub());
+        const rawUnsubscribe = pipe(value$, tap(() => { this.rawSearchCount++; this.cdr.detectChanges(); })).subscribe(() => { });
+        this.appScope.cleanups.add(() => rawUnsubscribe());
         // Debounced results
-        const resultSub = pipe(value$, debounce(400), filter(q => q.length > 1), tap(() => { this.debouncedSearchCount++; this.cdr.detectChanges(); }), tap((query: string) => {
+        const unsubscribe = pipe(value$, debounce(400), filter(q => q.length > 1), tap(() => { this.debouncedSearchCount++; this.cdr.detectChanges(); }), tap((query: string) => {
             this.searchResults.unshift(`Matched "${query}" (${Math.floor(Math.random() * 50)} results)`);
             if (this.searchResults.length > 5)
                 this.searchResults.pop();
             this.cdr.detectChanges();
         })).subscribe(() => { });
-        this.appScope.cleanups.add(() => resultSub());
+        this.appScope.cleanups.add(() => unsubscribe());
     }
     private initLogStream(): void {
         const metricLog$ = pipe(interval(2000), throttle(2000), map(() => {

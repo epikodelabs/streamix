@@ -33,7 +33,7 @@ export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePr
     const fullUrl = `${resolvedUrl}${resolvedUrl.includes('?') ? '&' : '?'}${resolvedCallbackParam}=${encodeURIComponent(uniqueCallbackName)}`;
 
     // Promise that resolves when JSONP callback fires or rejects on error
-    const dataPromise = new Promise<T>((resolve, reject) => {
+    const data$ = new Promise<T>((resolve, reject) => {
       (window as any)[uniqueCallbackName] = (data: T) => resolve(data);
       script.onerror = () => reject(new Error(`JSONP request failed: ${fullUrl}`));
     });
@@ -49,7 +49,7 @@ export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePr
       }
     };
 
-    const abortPromise = new Promise<never>((_, reject) => {
+    const abort$ = new Promise<never>((_, reject) => {
       if (signal?.aborted) {
         reject(new Error('Aborted'));
       } else {
@@ -59,7 +59,7 @@ export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePr
 
     try {
       // Race the dataPromise against abort signal
-      yield await Promise.race([dataPromise, abortPromise]);
+      yield await Promise.race([data$, abort$]);
     } finally {
       cleanup();
     }

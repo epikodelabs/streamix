@@ -31,7 +31,7 @@ describe("commit", () => {
   it("should not emit buffered values before a delayed retry commits", async () => {
     let attempt = 0;
     let resolveDelay!: (value: number) => void;
-    const delayPromise = new Promise<number>((resolve) => {
+    const delay$ = new Promise<number>((resolve) => {
       resolveDelay = resolve;
     });
 
@@ -49,7 +49,7 @@ describe("commit", () => {
 
     const values: number[] = [];
     const finished = (async () => {
-      for await (const value of iterate(commit(factory, 1, delayPromise))) {
+      for await (const value of iterate(commit(factory, 1, delay$))) {
         if (value !== undefined) values.push(value);
       }
     })();
@@ -97,10 +97,10 @@ describe("commit", () => {
       0
     );
 
-    const sub = atom.subscribe(v => { if (v !== undefined) values.push(v); });
+    const unsubscribe = atom.subscribe(v => { if (v !== undefined) values.push(v); });
 
     await sleep(35);
-    sub();
+    unsubscribe();
     await sleep(20);
 
     expect(iterationCount).toBeGreaterThan(0);

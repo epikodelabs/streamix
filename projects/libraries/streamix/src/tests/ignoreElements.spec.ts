@@ -6,7 +6,7 @@ describe('ignoreElements', () => {
     const atom = pipe(subject, ignoreElements());
 
     const results: number[] = [];
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -17,7 +17,7 @@ describe('ignoreElements', () => {
     subject.next(3);
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual([]);
   });
@@ -27,7 +27,7 @@ describe('ignoreElements', () => {
     const atom = pipe(subject, ignoreElements());
 
     let error: any = null;
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       try {
         for await (const _ of iterate(atom)) {
           void _;
@@ -41,7 +41,7 @@ describe('ignoreElements', () => {
     subject.next(2);
     subject.fail(new Error('Test error'));
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(error).toEqual(jasmine.any(Error));
     expect(error.message).toBe('Test error');
@@ -52,7 +52,7 @@ describe('ignoreElements', () => {
     const atom = pipe(subject, ignoreElements());
 
     const results: number[] = [];
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -62,7 +62,7 @@ describe('ignoreElements', () => {
     subject.next(20);
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual([]);
   });
@@ -72,7 +72,7 @@ describe('ignoreElements', () => {
     const atom = pipe(subject, ignoreElements());
 
     const results: string[] = [];
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       for await (const value of iterate(atom)) {
         results.push(value);
       }
@@ -82,7 +82,7 @@ describe('ignoreElements', () => {
     subject.next('value2');
     subject.dispose();
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(results).toEqual([]);
   });
@@ -92,7 +92,7 @@ describe('ignoreElements', () => {
     const atom = pipe(subject, ignoreElements());
 
     let error: any = null;
-    const consumptionPromise = (async () => {
+    const consumption$ = (async () => {
       try {
         for await (const _ of iterate(atom)) {
           void _;
@@ -106,7 +106,7 @@ describe('ignoreElements', () => {
     subject.next('value2');
     subject.fail(new Error('Some error'));
 
-    await consumptionPromise;
+    await consumption$;
 
     expect(error).toEqual(jasmine.any(Error));
     expect(error.message).toBe('Some error');
