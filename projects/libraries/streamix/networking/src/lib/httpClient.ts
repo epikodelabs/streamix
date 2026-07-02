@@ -11,25 +11,15 @@ const logWarning = (message: string, ...details: any[]) => {
 };
 
 /**
- * Represents a stream of HTTP responses.
- */
-/**
- * Represents a stream of HTTP responses.
+ * An {@link Atom} that represents a stream of HTTP responses.
  *
- * This is a special type of stream that includes a method to abort the
- * underlying HTTP request, providing control over long-running or cancellable
- * operations.
+ * The stream yields values produced by a response parser and exposes an
+ * `abort()` method that cancels the underlying request.
  */
 export type HttpStream<T = any> = Atom<T> & { abort: () => void };
 
 /**
- * HTTP request options.
- */
-/**
- * HTTP request options.
- *
- * This object defines the configuration for an HTTP request, including
- * headers, URL parameters, body content, and credentials.
+ * Options for configuring an HTTP request.
  */
 export type HttpOptions = {
   headers?: Record<string, string>;
@@ -39,13 +29,11 @@ export type HttpOptions = {
 };
 
 /**
- * Represents the HTTP request context.
- */
-/**
- * Represents the HTTP request context.
+ * The request/response context that flows through the middleware chain.
  *
- * This object is passed through the middleware chain and contains all
- * relevant information about the request and response lifecycle.
+ * Middleware can read and mutate this object. After the final middleware runs,
+ * `response` contains the raw {@link Response} and `parser` is used to turn it
+ * into a stream of values.
  */
 export type Context = {
   url: string;
@@ -70,40 +58,20 @@ type HttpContextError = Error & {
 };
 
 /**
- * A middleware function for modifying the HTTP request context.
- */
-/**
- * A middleware function for modifying the HTTP request context.
- *
- * Middleware functions are composed in a chain, where each middleware
- * can process the `Context` object before passing it to the next function
- * via the `next` parameter.
+ * A middleware function that transforms a {@link Context} before the request
+ * is sent or after the response is received.
  */
 export type Middleware = (
   next: (context: Context) => Promise<Context>,
 ) => (context: Context) => Promise<Context>;
 
 /**
- * A function to parse the HTTP response body into a stream of values.
- */
-/**
- * A function to parse the HTTP response body into a stream of values.
- *
- * A parser takes a `Response` object and returns an `AsyncIterable` that
- * yields the parsed data. This allows for streaming responses and handling
- * various data formats.
+ * Parses a {@link Response} into an async iterable of values.
  */
 export type ParserFunction<T = any> = (response: Response) => AsyncIterable<T>;
 
 /**
- * HTTP Client for making requests with middleware support.
- */
-/**
- * HTTP Client for making requests with middleware support.
- *
- * This object provides methods for standard HTTP verbs (`get`, `post`, etc.)
- * and a `withDefaults` method to configure the client with a set of middleware
- * functions that will be applied to every request.
+ * An HTTP client built from a chain of middleware.
  */
 export type HttpClient = {
   withDefaults(this: HttpClient, ...middlewares: Middleware[]): HttpClient;
@@ -142,10 +110,7 @@ export type HttpClient = {
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
 /**
- * Creates a middleware function that sets a custom fetch function within a context object.
- *
- * This is useful for mocking HTTP requests in tests or for using a different
- * fetch implementation, such as `node-fetch` in a server environment.
+ * Middleware that installs a custom `fetch` implementation on the context.
  */
 export const useCustom = (customFetch: Function): Middleware => {
   return (next) => async (context: Context) => {
@@ -155,11 +120,7 @@ export const useCustom = (customFetch: Function): Middleware => {
 };
 
 /**
- * Resolves relative URLs against a base URL.
- *
- * This middleware is useful for making API requests without repeating the
- * base URL for every call. It will resolve relative paths like `/users/1`
- * against the provided `baseUrl`.
+ * Middleware that resolves relative URLs against a base URL.
  */
 export const useBase = (baseUrl: string): Middleware => {
   return (next) => async (context: Context) => {
@@ -174,10 +135,7 @@ export const useBase = (baseUrl: string): Middleware => {
 };
 
 /**
- * Sets the `Accept` header for the request.
- *
- * This middleware ensures that the request specifies the desired content
- * type for the response, such as `application/json`.
+ * Middleware that sets the `Accept` request header.
  */
 export const useAccept = (contentType: string): Middleware => {
   return (next) => async (context) => {
@@ -187,11 +145,7 @@ export const useAccept = (contentType: string): Middleware => {
 };
 
 /**
- * Handles OAuth 2.0 authentication and token refresh.
- *
- * This middleware automatically adds an `Authorization` header to the request
- * with a bearer token. If a 401 Unauthorized response is received, it attempts
- * to refresh the token and retry the request.
+ * Middleware that adds an OAuth2 bearer token and refreshes it on 401 responses.
  */
 export const useOauth = ({
   getToken,
@@ -233,11 +187,7 @@ export const useOauth = ({
 };
 
 /**
- * Retry middleware for handling transient errors.
- *
- * This middleware automatically retries a failed request, with an exponential
- * backoff delay between attempts. This is useful for handling temporary network
- * failures or flaky API services.
+ * Middleware that retries failed requests with exponential backoff.
  */
 export const useRetry = (
   maxRetries: number = 3,
@@ -272,11 +222,7 @@ export const useRetry = (
 };
 
 /**
- * Handles HTTP redirects.
- *
- * This middleware automatically follows 3xx redirect responses up to a
- * specified maximum number of times. It updates the URL in the context and
- * handles the change in HTTP method for a 303 See Other redirect.
+ * Middleware that follows HTTP redirect responses up to a maximum number of hops.
  */
 export const useRedirect = (maxRedirects: number = 5): Middleware => {
   return (next) => async (initialContext) => {
@@ -360,7 +306,7 @@ export const useRedirect = (maxRedirects: number = 5): Middleware => {
 };
 
 /**
- * Sets a custom header for the request.
+ * Middleware that sets a custom request header.
  */
 export const useHeader = (name: string, value: string): Middleware => {
   return (next) => async (context) => {
@@ -370,10 +316,7 @@ export const useHeader = (name: string, value: string): Middleware => {
 };
 
 /**
- * Removes headers from the request context by name.
- *
- * This is useful for stripping default headers (like `Content-Type`) that
- * would otherwise trigger a CORS preflight on simple GET requests.
+ * Middleware that removes the named headers from the request context.
  */
 export const useStripHeaders = (...names: string[]): Middleware => {
   return (next) => async (context) => {
@@ -390,7 +333,7 @@ export const useStripHeaders = (...names: string[]): Middleware => {
 };
 
 /**
- * Appends query parameters to the request URL.
+ * Middleware that appends query parameters to the request URL.
  */
 export const useParams = (data: Record<string, any>): Middleware => {
   return (next) => async (context) => {
@@ -400,11 +343,7 @@ export const useParams = (data: Record<string, any>): Middleware => {
 };
 
 /**
- * Handles errors thrown by the next middleware in the chain.
- *
- * This middleware provides a way to gracefully handle errors without
- * breaking the entire chain. It catches errors and allows you to
- * define a custom fallback behavior.
+ * Middleware that catches errors and returns a fallback context instead of throwing.
  */
 export const useFallback = (
   handler: (error: any, context: Context) => Context,
@@ -419,7 +358,7 @@ export const useFallback = (
 };
 
 /**
- * Logs request and response information.
+ * Middleware that logs the request method/URL and response status.
  */
 export const useLogger = (
   logger: (message: string) => void = console.log,
@@ -433,10 +372,8 @@ export const useLogger = (
 };
 
 /**
- * Sets a timeout for the request.
- *
- * This middleware adds a timeout to the request, automatically aborting it
- * if it takes longer than the specified number of milliseconds.
+ * Middleware that aborts the request if it does not complete within the given
+ * number of milliseconds.
  */
 export const useTimeout = (ms: number): Middleware => {
   return (next) => async (context: Context) => {
@@ -472,63 +409,10 @@ export const useTimeout = (ms: number): Middleware => {
 // ─── HTTP Client Implementation ──────────────────────────────────────────────
 
 /**
- * Creates an HTTP client with middleware support and streaming capabilities.
+ * Creates an {@link HttpClient} instance.
  *
- * The client is a factory for creating request streams. Middleware can be
- * configured globally for the client using `withDefaults`.
- *
- * @returns {HttpClient} An instance of the HTTP client.
- *
- * @example
- * ```typescript
- * async function fetchData() {
- *   const client = createHttpClient().withDefaults(
- *     useBase("https://api.example.com"),
- *     useAccept("application/json"),
- *     useLogger(),
- *     useTimeout(5000),
- *     useFallback((error, context) => {
- *       console.error("Request failed:", error);
- *       return context;
- *     })
- *   );
- *
- *   const responseStream = client.get("/data", readJson);
- *
- *   try {
- *     for await (const value of responseStream) {
- *       console.log("Received data:", value);
- *     }
- *   } catch (error) {
- *     console.error("Unexpected error:", error);
- *   }
- * }
- *
- * fetchData();
- *
- * async function postData() {
- *   const client = createHttpClient().use(
- *     useBase("https://api.example.com"),
- *     useLogger(),
- *     useFallback((error, context) => {
- *       console.error("Post request failed:", error);
- *       return context;
- *     })
- *   );
- *
- *   const responseStream = client.post("/items");
- *
- *   try {
- *     for await (const value of responseStream) {
- *       console.log("Post response:", value);
- *     }
- *   } catch (error) {
- *     console.error("Post request error:", error);
- *   }
- * }
- *
- * postData();
- * ```
+ * Use `withDefaults()` to register middleware that will be applied to every
+ * request made through the client.
  */
 export const createHttpClient = (): HttpClient => {
   const defaultHeaders = { 'Content-Type': 'application/json' };
@@ -709,9 +593,7 @@ export const createHttpClient = (): HttpClient => {
 // ─── Parsers ─────────────────────────────────────────────────────────────────
 
 /**
- * Yields the response status and status text as a single object.
- *
- * This parser ignores the response body and emits the HTTP status metadata only.
+ * Parser that yields the response status, status text, and headers.
  */
 export const readStatus: ParserFunction<{
   status: number;
@@ -731,10 +613,7 @@ export const readStatus: ParserFunction<{
 };
 
 /**
- * Parses a Response object as JSON.
- *
- * This is a standard parser function that reads the entire response body,
- * parses it as a JSON object, and then emits that single object.
+ * Parser that reads the response body and yields the parsed JSON value.
  */
 export const readJson: ParserFunction = async function* <T>(
   response: Response,
@@ -744,11 +623,7 @@ export const readJson: ParserFunction = async function* <T>(
 };
 
 /**
- **
- * Parses a Response object as text.
- *
- * This parser reads the entire response body as a text string and emits
- * that string as a single value.
+ * Parser that yields the response body as a string.
  */
 export const readText: ParserFunction<string> = async function* (response) {
   const data = (await response.text()) as string;
@@ -756,10 +631,7 @@ export const readText: ParserFunction<string> = async function* (response) {
 };
 
 /**
- * Parses a Response object as an ArrayBuffer.
- *
- * This parser reads the entire response body into an `ArrayBuffer` and
- * emits it as a single value. This is useful for handling binary data.
+ * Parser that yields the response body as an {@link ArrayBuffer}.
  */
 export const readArrayBuffer: ParserFunction<ArrayBuffer> =
   async function* (response) {
@@ -768,10 +640,7 @@ export const readArrayBuffer: ParserFunction<ArrayBuffer> =
   };
 
 /**
- * Parses a Response object as a Blob.
- *
- * This parser reads the entire response body into a `Blob` object and
- * emits it as a single value. This is useful for working with files or images.
+ * Parser that yields the response body as a {@link Blob}.
  */
 export const readBlob: ParserFunction<Blob> = async function* (response) {
   const data = await response.blob();
@@ -779,10 +648,7 @@ export const readBlob: ParserFunction<Blob> = async function* (response) {
 };
 
 /**
- * Type for the chunks emitted by the readChunks function.
- *
- * This object contains a parsed chunk of data, the current progress of the
- * download, and a `done` flag indicating completion.
+ * Metadata emitted by {@link readChunks} for each chunk of the response body.
  */
 export type ChunkData<T> = {
   chunk: T;
@@ -791,11 +657,8 @@ export type ChunkData<T> = {
 };
 
 /**
- * Reads and processes streamed response chunks based on Content-Type.
- *
- * This is a versatile parser that can handle a variety of streaming formats,
- * including binary data and line-delimited JSON (NDJSON). It emits chunks
- * as they arrive, along with progress information.
+ * Parser that streams response chunks and yields each chunk together with
+ * download progress metadata.
  */
 export const readChunks = <T = Uint8Array>(
   chunkParser: (chunk: any) => T = (chunk) => chunk,
@@ -869,12 +732,12 @@ export const readChunks = <T = Uint8Array>(
   };
 
 /**
- * Parses raw binary chunks (returns Uint8Array as-is).
+ * Chunk parser that returns a {@link Uint8Array} unchanged.
  */
 export const readBinaryChunk = (chunk: Uint8Array): Uint8Array => chunk;
 
 /**
- * Decodes a binary chunk into a text string.
+ * Chunk parser that decodes a binary chunk into a UTF-8 string.
  */
 export function readTextChunk(chunk: any, encoding = 'utf-8'): string {
   if (chunk === null || chunk === undefined) return '';
@@ -887,7 +750,7 @@ export function readTextChunk(chunk: any, encoding = 'utf-8'): string {
 }
 
 /**
- * Parses a binary chunk as JSON.
+ * Chunk parser that parses a string chunk as JSON.
  */
 export const readJsonChunk = (chunk: string): any => {
   try {
@@ -899,7 +762,7 @@ export const readJsonChunk = (chunk: string): any => {
 };
 
 /**
- * Parses a single NDJSON line.
+ * Chunk parser that parses a single NDJSON line as JSON.
  */
 export const readNdjsonChunk = (line: string): any => {
   try {
@@ -911,7 +774,7 @@ export const readNdjsonChunk = (line: string): any => {
 };
 
 /**
- * Converts a binary chunk to a Base64 string.
+ * Chunk parser that encodes a binary chunk as a Base64 string.
  */
 export const readBase64Chunk = (chunk: Uint8Array): string => {
   const chunkSize = 8192;
@@ -929,7 +792,7 @@ export const readBase64Chunk = (chunk: Uint8Array): string => {
 };
 
 /**
- * Parses a text chunk as CSV data.
+ * Chunk parser that splits a CSV text chunk into rows and columns.
  */
 export const readCsvChunk = (chunk: string): string[][] => {
   return chunk
@@ -943,11 +806,8 @@ function getEncoding(contentType: string): string {
 }
 
 /**
- * Reads and collects the entire response body from a `ReadableStream`.
- *
- * This function returns a stream that yields the full data as it's read.
- * It's useful for scenarios where you need the complete response body
- * before processing the data, such as for images or complete files.
+ * Parser that reads the entire response body and yields it as a single
+ * concatenated {@link Uint8Array}.
  */
 export const readFull: ParserFunction<Uint8Array> = async function* (
   response,
