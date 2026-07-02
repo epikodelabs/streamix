@@ -17,14 +17,9 @@ import { createSubscription, type Subscription } from "./subscription";
 const NODE = Symbol("engine.node");
 const MARK_DIRTY = Symbol("engine.markDirty");
 const FLUSH = Symbol("engine.flush");
+
 export const ANALOG = Symbol("engine.analog");
 export const NO_INITIAL_VALUE = Symbol("streamix.noInitialValue");
-
-/** Debug flags for atom runtime behavior. Toggle in tests or dev builds. */
-export const ATOM_DEBUG = {
-  /** When true, `safeValue` on derived atoms re-throws instead of returning the last good value. */
-  throwOnSafeValueError: false,
-};
 
 export interface AtomOptions {
   discrete?: boolean;
@@ -1486,7 +1481,6 @@ export function derived<T>(...args: any[]): Atom<T> {
 
     get safeValue() {
       try { return this.value; } catch (err) {
-        if (ATOM_DEBUG.throwOnSafeValueError) throw err;
         return current;
       }
     },
