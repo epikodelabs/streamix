@@ -34,7 +34,7 @@ Commercial licenses remove the AGPL obligation for your own proprietary code. Th
 
 ### How to purchase
 
-1. Sign in with GitHub on the [`epikodelabs` website](https://epikodelabs.github.io/).
+1. Sign in with GitHub on the [`epikodelabs`](https://epikodelabs.github.io/) website.
 2. Complete the one-time payment.
 3. Your GitHub account is added to the private licensed repository.
 
