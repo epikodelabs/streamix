@@ -1,4 +1,4 @@
-import { AsyncCoordinator, createAsyncCoordinator, getIterator, raceNext, type Coordinator } from "../utils/coordinator";
+import { AsyncCoordinator, createAsyncCoordinator, getIterator, raceNext } from "../utils/coordinator";
 import { isAtom } from "../utils/helpers";
 import { iterate } from "./iterate";
 import { DONE, isPromiseLike, NEXT, type MaybePromise } from "./operator";
@@ -568,7 +568,7 @@ export interface AtomFromIteratorOptions<T> extends AtomOptions {
 }
 
 export function atomFromIterator<T>(
-  source: AsyncIterable<T> | Coordinator<T>,
+  source: AsyncIterable<T>,
   options?: AtomFromIteratorOptions<T>
 ): Atom<T> {
   const activeScope = getCurrentScope();
