@@ -8,10 +8,10 @@ describe('timer', () => {
     const atom = timer(0, intervalMs);
 
     const emittedValues: number[] = [];
-    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    const unsubscribe = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     await delay(250);
-    subscription();
+    unsubscribe();
 
     expect(emittedValues.length).toBeGreaterThan(1);
     for (let i = 1; i < emittedValues.length; i++) {
@@ -24,9 +24,9 @@ describe('timer', () => {
     const atom = timer(0, intervalMs);
 
     const emittedValues: number[] = [];
-    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    const unsubscribe = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
-    subscription();
+    unsubscribe();
 
     const previousLength = emittedValues.length;
     await delay(intervalMs * 2);
@@ -37,10 +37,10 @@ describe('timer', () => {
   it('should support promise-based delay and interval inputs', async () => {
     const atom = timer(Promise.resolve(0), Promise.resolve(10));
     const emitted: number[] = [];
-    const subscription = atom.subscribe(v => {
+    const unsubscribe = atom.subscribe(v => {
       if (v !== undefined) emitted.push(v);
       if (emitted.length === 2) {
-        subscription();
+        unsubscribe();
       }
     });
 
@@ -51,10 +51,10 @@ describe('timer', () => {
   it('should use the delay value when no interval is provided', async () => {
     const atom = timer(20);
     const emittedValues: number[] = [];
-    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    const unsubscribe = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     await delay(80);
-    subscription();
+    unsubscribe();
 
     expect(emittedValues[0]).toBe(0);
     expect(emittedValues[1]).toBe(1);

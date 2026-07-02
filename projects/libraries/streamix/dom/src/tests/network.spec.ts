@@ -271,11 +271,11 @@ idescribe('onNetwork', () => {
     delete (globalThis as any).navigator;
 
     try {
-      const subscription = on('network').subscribe(() => {});
+      const unsubscribe = on('network').subscribe(() => {});
 
       expect(addSpy).not.toHaveBeenCalled();
 
-      subscription();
+      unsubscribe();
     } finally {
       (globalThis as any).addEventListener = originalAdd;
       (globalThis as any).removeEventListener = originalRemove;

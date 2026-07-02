@@ -73,7 +73,7 @@ idescribe('onMediaQuery', () => {
     const stream: Atom<boolean> = on('mediaQuery', query);
     const callback = jasmine.createSpy('callback');
 
-    const subscription = stream.subscribe(callback);
+    const unsubscribe = stream.subscribe(callback);
     
     // Wait for initial emission
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -81,7 +81,7 @@ idescribe('onMediaQuery', () => {
     const mql = mqlMap[query];
     expect(mql.listeners.length).toBe(1);
 
-    subscription();
+    unsubscribe();
     
     // Wait for cleanup
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -218,13 +218,13 @@ idescribe('onMediaQuery', () => {
 
     const callback = jasmine.createSpy('callback');
     const stream: Atom<boolean> = on('mediaQuery', queryPromise);
-    const subscription = stream.subscribe(callback);
+    const unsubscribe = stream.subscribe(callback);
 
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(callback).toHaveBeenCalledWith(false, false);
 
-    subscription();
+    unsubscribe();
     resolveQuery!(query);
 
     await new Promise(resolve => setTimeout(resolve, 0));

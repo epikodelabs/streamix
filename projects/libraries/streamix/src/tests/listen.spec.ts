@@ -11,13 +11,13 @@ idescribe('fromEvent', () => {
     const atom = listen(element, 'click');
 
     let received: Event | undefined;
-    const subscription = atom.subscribe(ev => { received = ev; });
+    const unsubscribe = atom.subscribe(ev => { received = ev; });
 
     element.click();
     await flushMicrotasks();
 
     expect(received).toBeInstanceOf(Event);
-    subscription();
+    unsubscribe();
   });
 
   it('should emit multiple events correctly', async () => {
@@ -25,14 +25,14 @@ idescribe('fromEvent', () => {
     const atom = listen(element, 'click');
 
     const emitted: Event[] = [];
-    const subscription = atom.subscribe(ev => { if (ev !== undefined) emitted.push(ev); });
+    const unsubscribe = atom.subscribe(ev => { if (ev !== undefined) emitted.push(ev); });
 
     element.click();
     element.click();
     await flushMicrotasks();
 
     expect(emitted.length).toBe(2);
-    subscription();
+    unsubscribe();
   });
 
   it('should remove event listener and unsubscribe on unsubscribe', async () => {
@@ -47,9 +47,9 @@ idescribe('fromEvent', () => {
       return originalRemove.apply(this, args as any);
     };
 
-    const subscription = atom.subscribe(() => {});
+    const unsubscribe = atom.subscribe(() => {});
 
-    subscription();
+    unsubscribe();
 
     await delay(10);
     expect(listenerRemoved).toBe(true);
@@ -60,11 +60,11 @@ idescribe('fromEvent', () => {
     const atom = listen(element, 'click');
 
     let count = 0;
-    const subscription = atom.subscribe(() => count++);
+    const unsubscribe = atom.subscribe(() => count++);
 
     element.click();
     await flushMicrotasks();
-    subscription();
+    unsubscribe();
     element.click();
 
     await delay(10);
@@ -78,14 +78,14 @@ idescribe('fromEvent', () => {
 
     const atom = listen(targetPromise, eventPromise);
     let received: Event | undefined;
-    const subscription = atom.subscribe(ev => { received = ev; });
+    const unsubscribe = atom.subscribe(ev => { received = ev; });
 
     await delay(20);
     element.click();
     await flushMicrotasks();
 
     expect(received).toBeInstanceOf(Event);
-    subscription();
+    unsubscribe();
   });
 
   it('should emit to multiple subscribers', async () => {
@@ -115,7 +115,7 @@ idescribe('fromEvent', () => {
     const atom = listen(element, 'click');
 
     const received: Event[] = [];
-    const subscription = atom.subscribe(async (ev) => {
+    const unsubscribe = atom.subscribe(async (ev) => {
       await Promise.resolve();
       received.push(ev);
     });
@@ -126,7 +126,7 @@ idescribe('fromEvent', () => {
     expect(received.length).toBe(1);
     expect(received[0]).toBeInstanceOf(Event);
 
-    subscription();
+    unsubscribe();
   });
 
   it('should await async subscribers before reading next value', async () => {
@@ -137,7 +137,7 @@ idescribe('fromEvent', () => {
     let maxActive = 0;
     const received: Event[] = [];
 
-    const subscription = atom.subscribe(async (ev) => {
+    const unsubscribe = atom.subscribe(async (ev) => {
       active++;
       maxActive = Math.max(maxActive, active);
       await delay(5);
@@ -152,7 +152,7 @@ idescribe('fromEvent', () => {
     expect(received.length).toBe(2);
     expect(maxActive).toBe(1);
 
-    subscription();
+    unsubscribe();
   });
 
   it('does not attach listener when unsubscribed before pending target resolves', async () => {
@@ -170,9 +170,9 @@ idescribe('fromEvent', () => {
     });
 
     const atom = listen(targetPromise, Promise.resolve('click'));
-    const subscription = atom.subscribe(() => listenerAdded = true);
+    const unsubscribe = atom.subscribe(() => listenerAdded = true);
 
-    subscription();
+    unsubscribe();
 
     await delay(40);
     expect(listenerAdded).toBe(false);

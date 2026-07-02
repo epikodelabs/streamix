@@ -48,7 +48,7 @@ describe('race', () => {
     const stream2: Writable = atom<number>();
     const results: number[] = [];
 
-    const subscription = (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    const unsubscribe = (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
     stream1.dispose();
@@ -57,7 +57,7 @@ describe('race', () => {
     await delay();
 
     expect(results).toEqual([1]);
-    expect(subscription.unsubscribed).toBe(true);
+    expect(unsubscribe.unsubscribed).toBe(true);
   });
 
   it('should not crash when the winning stream errors', async () => {
@@ -82,7 +82,7 @@ describe('race', () => {
     const stream3: Writable = atom<number>();
     const results: number[] = [];
 
-    const subscription = (race(stream1, stream2, stream3) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    const unsubscribe = (race(stream1, stream2, stream3) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     stream1.next(1);
     stream2.next(2);
@@ -94,7 +94,7 @@ describe('race', () => {
     await delay();
 
     expect(results).toEqual([1]);
-    expect(subscription.unsubscribed).toBe(true);
+    expect(unsubscribe.unsubscribed).toBe(true);
   });
 
   it('should work with streams that emit after a delay', async () => {
@@ -111,10 +111,10 @@ describe('race', () => {
     });
 
     const results: number[] = [];
-    const subscription = (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    const unsubscribe = (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     await delay(100);
-    subscription();
+    unsubscribe();
 
     expect(results).toEqual([3, 4]);
   });
@@ -131,12 +131,12 @@ describe('race', () => {
     });
 
     const results: number[] = [];
-    const subscription = (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
+    const unsubscribe = (race(stream1, stream2) as Writable<number | undefined>).subscribe(v => { if (v !== undefined) results.push(v); });
 
     await delay(150);
 
     expect(results).toEqual([3]);
-    expect(subscription.unsubscribed).toBe(true);
+    expect(unsubscribe.unsubscribed).toBe(true);
   });
 
   it('should emit nothing if the winning stream completes immediately (and cancel losers)', async () => {

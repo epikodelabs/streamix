@@ -6,7 +6,7 @@ idescribe('onAnimationFrame', () => {
         const stream = on('animationFrame');
         const emittedDeltas: number[] = [];
         let count = 0;
-        const subscription = pipe(stream, takeWhile(() => count < 5)).subscribe((delta: number) => {
+        const unsubscribe = pipe(stream, takeWhile(() => count < 5)).subscribe((delta: number) => {
             count++;
             emittedDeltas.push(delta);
         });
@@ -23,24 +23,24 @@ idescribe('onAnimationFrame', () => {
             expect(avgDelta).toBeGreaterThan(5);
         }
         finally {
-            subscription();
+            unsubscribe();
         }
     });
     it('should stop emitting when condition is met', async () => {
         const stream = pipe(on('animationFrame'), takeWhile((_, index) => index < 5));
         const emittedCount: number[] = [];
-        const subscription = stream.subscribe((delta: number) => {
+        const unsubscribe = stream.subscribe((delta: number) => {
             expect(delta).toBeGreaterThanOrEqual(0);
             emittedCount.push(delta);
         });
         await new Promise(resolve => setTimeout(resolve, 200));
-        subscription();
+        unsubscribe();
         expect(emittedCount.length).toBe(5);
     });
     it('should emit multiple times when condition allows', async () => {
         const stream = pipe(on('animationFrame'), takeWhile((_, index) => index < 10));
         const emittedDeltas: number[] = [];
-        const subscription = stream.subscribe((delta: number) => {
+        const unsubscribe = stream.subscribe((delta: number) => {
             emittedDeltas.push(delta);
         });
         try {
@@ -56,9 +56,9 @@ idescribe('onAnimationFrame', () => {
             });
         }
         finally {
-            subscription();
+            unsubscribe();
         }
-    });
+    }
     it('should cancel animation frame on unsubscribe', (done) => {
         const originalRAF = (globalThis as any).requestAnimationFrame;
         const originalCancel = (globalThis as any).cancelAnimationFrame;
@@ -137,11 +137,11 @@ idescribe('onAnimationFrame', () => {
         };
         try {
             const stream = on('animationFrame');
-            const subscription = stream.subscribe((delta: number) => {
+            const unsubscribe = stream.subscribe((delta: number) => {
                 emittedDeltas.push(delta);
             });
             await new Promise(resolve => originalSetTimeout(resolve, 100));
-            subscription();
+            unsubscribe();
             await new Promise(resolve => originalSetTimeout(resolve, 10));
             // Should have emitted deltas using setTimeout fallback
             expect(emittedDeltas.length).toBeGreaterThan(0);
@@ -171,9 +171,9 @@ idescribe('onAnimationFrame', () => {
         (globalThis as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
             return globalThis.setTimeout(() => cb(performance.now()), 0) as any;
         };
-        const subscription = on('animationFrame').subscribe();
+        const unsubscribe = on('animationFrame').subscribe();
         setTimeout(() => {
-            subscription();
+            unsubscribe();
             expect(clearSpy).toHaveBeenCalled();
             (globalThis as any).requestAnimationFrame = originalRAF;
             (globalThis as any).cancelAnimationFrame = originalCancel;
@@ -196,19 +196,19 @@ idescribe('onAnimationFrame', () => {
         };
         (globalThis as any).cancelAnimationFrame = jasmine.createSpy('cancelAnimationFrame');
         const deltas: number[] = [];
-        const subscription = on('animationFrame').subscribe((delta: number) => {
+        const unsubscribe = on('animationFrame').subscribe((delta: number) => {
             deltas.push(delta);
             if (deltas.length === 3) {
                 try {
                     // First tick is always 0, second is non-monotonic => 0, third is 110-100 => 10
                     expect(deltas).toEqual([0, 0, 10]);
-                    subscription();
+                    unsubscribe();
                     (globalThis as any).requestAnimationFrame = originalRAF;
                     (globalThis as any).cancelAnimationFrame = originalCancel;
                     done();
                 }
                 catch (err: any) {
-                    subscription();
+                    unsubscribe();
                     (globalThis as any).requestAnimationFrame = originalRAF;
                     (globalThis as any).cancelAnimationFrame = originalCancel;
                     done.fail(err);
@@ -261,19 +261,19 @@ idescribe('onAnimationFrame', () => {
         };
         (globalThis as any).cancelAnimationFrame = jasmine.createSpy('cancelAnimationFrame');
         const deltas: number[] = [];
-        const subscription = on('animationFrame').subscribe((delta: number) => {
+        const unsubscribe = on('animationFrame').subscribe((delta: number) => {
             deltas.push(delta);
             if (deltas.length === 3) {
                 try {
                     // All deltas should be 0 since timestamps are strictly decreasing
                     expect(deltas).toEqual([0, 0, 0]);
-                    subscription();
+                    unsubscribe();
                     (globalThis as any).requestAnimationFrame = originalRAF;
                     (globalThis as any).cancelAnimationFrame = originalCancel;
                     done();
                 }
                 catch (err: any) {
-                    subscription();
+                    unsubscribe();
                     (globalThis as any).requestAnimationFrame = originalRAF;
                     (globalThis as any).cancelAnimationFrame = originalCancel;
                     done.fail(err);

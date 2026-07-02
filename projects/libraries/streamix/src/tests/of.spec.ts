@@ -33,9 +33,9 @@ describe('of', () => {
     const atom = of(value);
 
     const emittedValues: string[] = [];
-    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    const unsubscribe = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
-    subscription();
+    unsubscribe();
 
     await delay();
     expect(emittedValues).toEqual([]);

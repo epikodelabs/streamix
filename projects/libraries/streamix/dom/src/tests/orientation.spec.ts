@@ -36,14 +36,14 @@ idescribe('onOrientation', () => {
 
   it('should emit initial orientation immediately', (done) => {
     const stream = on('orientation');
-    const subscription = stream.subscribe((value) => {
+    const unsubscribe = stream.subscribe((value) => {
         try {
           expect(value).toBe('portrait');
         } catch (err: any) {
           done.fail(err);
         }
       });
-    subscription();
+    unsubscribe();
     done();
   });
 
@@ -60,7 +60,7 @@ idescribe('onOrientation', () => {
     });
 
     let callCount = 0;
-    const subscription = stream.subscribe((value: any) => {
+    const unsubscribe = stream.subscribe((value: any) => {
         callCount++;
         try {
           if (callCount === 1) {
@@ -76,7 +76,7 @@ idescribe('onOrientation', () => {
             }, 0);
           } else if (callCount === 2) {
             expect(value).toBe('landscape');
-            subscription();
+            unsubscribe();
             done();
           }
         } catch (err: any) {
@@ -91,14 +91,14 @@ idescribe('onOrientation', () => {
     mockOrientation.type = 'landscape-primary';
 
     const stream = on('orientation');
-    const subscription = stream.subscribe((value) => {
+    const unsubscribe = stream.subscribe((value) => {
         try {
           expect(value).toBe('landscape');
         } catch (err: any) {
           done.fail(err);
         }
       });
-    subscription();
+    unsubscribe();
     done();
   });
 
@@ -107,7 +107,7 @@ idescribe('onOrientation', () => {
     mockOrientation.type = 'portrait-secondary';
 
     const stream = on('orientation');
-    const subscription = stream.subscribe((value) => {
+    const unsubscribe = stream.subscribe((value) => {
         try {
           expect(value).toBe('portrait');
         } catch (err: any) {
@@ -115,7 +115,7 @@ idescribe('onOrientation', () => {
         }
       });
 
-    subscription();
+    unsubscribe();
     done();
   });
 
@@ -124,7 +124,7 @@ idescribe('onOrientation', () => {
     mockOrientation.type = 'landscape-secondary';
 
     const stream = on('orientation');
-    const subscription = stream.subscribe((value) => {
+    const unsubscribe = stream.subscribe((value) => {
         try {
           expect(value).toBe('landscape');
         } catch (err: any) {
@@ -132,7 +132,7 @@ idescribe('onOrientation', () => {
         }
       });
 
-    subscription();
+    unsubscribe();
     done();
   });
 
@@ -143,7 +143,7 @@ idescribe('onOrientation', () => {
     const stream = on('orientation');
     const values: any[] = [];
 
-    const subscription = stream.subscribe((value) => {
+    const unsubscribe = stream.subscribe((value) => {
         values.push(value);
       });
 
@@ -151,10 +151,10 @@ idescribe('onOrientation', () => {
       try {
         expect(values).toEqual(['portrait']);
         expect(mockOrientation.addEventListener).not.toHaveBeenCalled();
-        subscription();
+        unsubscribe();
         done();
       } catch (err: any) {
-        subscription();
+        unsubscribe();
         done.fail(err);
       }
     }, 0);
@@ -162,11 +162,11 @@ idescribe('onOrientation', () => {
 
   it('should clean up event listeners on unsubscribe', () => {
     const stream = on('orientation');
-    const subscription = stream.subscribe(() => { });
+    const unsubscribe = stream.subscribe(() => { });
 
     const removeListenerSpy = (window.screen.orientation.removeEventListener as jasmine.Spy);
 
-    subscription();
+    unsubscribe();
 
     expect(removeListenerSpy).toHaveBeenCalledWith('change', jasmine.any(Function));
   });

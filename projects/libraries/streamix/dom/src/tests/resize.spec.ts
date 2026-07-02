@@ -144,11 +144,11 @@ idescribe('onResize', () => {
     // Spy on the cleanup mechanism
     const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect');
 
-    const subscription = resize.subscribe(() => { });
+    const unsubscribe = resize.subscribe(() => { });
 
     // Remove element and verify cleanup
     document.body.removeChild(divToTest);
-    subscription();
+    unsubscribe();
 
     expect(disconnectSpy).toHaveBeenCalled();
   });
@@ -160,9 +160,9 @@ idescribe('onResize', () => {
     const resize = on('resize', divToTest);
     const disconnectSpy = spyOn(ResizeObserver.prototype, 'disconnect');
 
-    const subscription = resize.subscribe(() => { });
+    const unsubscribe = resize.subscribe(() => { });
 
-    subscription();
+    unsubscribe();
 
     expect(disconnectSpy).toHaveBeenCalled();
     document.body.removeChild(divToTest);
@@ -175,11 +175,11 @@ idescribe('onResize', () => {
     const resize = on('resize', divToTest);
     let errorOccurred = false;
 
-    const subscription = resize.subscribe(() => { });
+    const unsubscribe = resize.subscribe(() => { });
 
     setTimeout(() => {
       document.body.removeChild(divToTest);
-      subscription();
+      unsubscribe();
       expect(errorOccurred).toBe(false);
       done();
     }, 50);
@@ -192,7 +192,7 @@ idescribe('onResize', () => {
     document.body.appendChild(div);
 
     const values: any[] = [];
-    const subscription = on('resize', div).subscribe(v => values.push(v));
+    const unsubscribe = on('resize', div).subscribe(v => values.push(v));
 
     // Wait for initial deferred emission
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -200,7 +200,7 @@ idescribe('onResize', () => {
     expect(values[0].width).toBe(100);
     expect(values[0].height).toBe(50);
     
-    subscription();
+    unsubscribe();
     document.body.removeChild(div);
   });
 
@@ -227,7 +227,7 @@ idescribe('onResize', () => {
     });
 
     const values: any[] = [];
-    const subscription = on('resize', elementPromise!).subscribe(v => values.push(v));
+    const unsubscribe = on('resize', elementPromise!).subscribe(v => values.push(v));
 
     resolveElement!(div);
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -237,7 +237,7 @@ idescribe('onResize', () => {
     expect(values.length).toBeGreaterThan(0);
     expect(values[0].width).toBeGreaterThan(0);
 
-    subscription();
+    unsubscribe();
     document.body.removeChild(div);
   });
 
@@ -250,10 +250,10 @@ idescribe('onResize', () => {
       delete (globalThis as any).ResizeObserver;
 
       const callback = jasmine.createSpy('callback');
-      const subscription = on('resize', div).subscribe(callback);
+      const unsubscribe = on('resize', div).subscribe(callback);
 
       expect(callback).not.toHaveBeenCalled();
-      subscription();
+      unsubscribe();
     } finally {
       if (originalObserver) {
         (globalThis as any).ResizeObserver = originalObserver;
@@ -273,13 +273,13 @@ idescribe('onResize', () => {
       delete (globalThis as any).ResizeObserver;
 
       const callback = jasmine.createSpy('callback');
-      const subscription = on('resize', div).subscribe(callback);
+      const unsubscribe = on('resize', div).subscribe(callback);
 
       // Should not emit without ResizeObserver
       expect(callback).not.toHaveBeenCalled();
       
       // Should not crash on unsubscribe
-      expect(() => subscription()).not.toThrow();
+      expect(() => unsubscribe()).not.toThrow();
     } finally {
       if (originalObserver) {
         (globalThis as any).ResizeObserver = originalObserver;

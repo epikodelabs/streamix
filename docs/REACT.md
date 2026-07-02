@@ -97,12 +97,12 @@ function SearchComponent() {
         tap(() => setLoading(false))
     );
 
-    const subscription = stream.subscribe(data => {
+    const unsubscribe = stream.subscribe(data => {
       setResults(data);
     });
 
     return () => {
-      subscription();
+      unsubscribe();
     };
   }, []); // One dependency. Done.
 
@@ -152,12 +152,12 @@ function MetricsDashboard() {
         })
     );
 
-    const subscription = stream.subscribe(data => {
+    const unsubscribe = stream.subscribe(data => {
       setMetrics(data);
     });
 
     return () => {
-      subscription();
+      unsubscribe();
     };
   }, []);
 
@@ -192,12 +192,12 @@ function UsernameInput() {
         tap(() => setChecking(false))
     );
 
-    const subscription = stream.subscribe(result => {
+    const unsubscribe = stream.subscribe(result => {
       setAvailable(result.available);
     });
 
     return () => {
-      subscription();
+      unsubscribe();
     };
   }, []);
 
@@ -238,13 +238,13 @@ function InfiniteList() {
         )
     );
 
-    const subscription = stream.subscribe(newItems => {
+    const unsubscribe = stream.subscribe(newItems => {
       setItems(prev => [...prev, ...newItems]);
       setPage(p => p + 1);
     });
 
     return () => {
-      subscription();
+      unsubscribe();
     };
   }, [page]);
 
@@ -268,12 +268,12 @@ function LiveChat() {
         map(event => JSON.parse(event.data))
     );
 
-    const subscription = stream.subscribe(message => {
+    const unsubscribe = stream.subscribe(message => {
       setMessages(prev => [...prev, message]);
     });
 
     return () => {
-      subscription();
+      unsubscribe();
       ws.close();
     };
   }, []);

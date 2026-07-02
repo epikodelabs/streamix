@@ -26,11 +26,11 @@ idescribe('onMutation', () => {
       childList: true,
     });
 
-    const subscription = mutation.subscribe((mutations: any) => {
+    const unsubscribe = mutation.subscribe((mutations: any) => {
         expect(mutations.length).toBeGreaterThan(0);
         expect(mutations[0].type).toBe('childList');
         expect(mutations[0].addedNodes.length).toBe(1);
-        subscription();
+        unsubscribe();
         done();
       });
 
@@ -51,11 +51,11 @@ idescribe('onMutation', () => {
       childList: true,
     });
 
-    const subscription = mutation.subscribe((mutations: any) => {
+    const unsubscribe = mutation.subscribe((mutations: any) => {
         expect(mutations.length).toBeGreaterThan(0);
         expect(mutations[0].type).toBe('childList');
         expect(mutations[0].removedNodes.length).toBe(1);
-        subscription();
+        unsubscribe();
         done();
       });
 
@@ -78,13 +78,13 @@ idescribe('onMutation', () => {
       childList: true,
     });
 
-    const subscription = mutation.subscribe((mutations: any[]) => {
+    const unsubscribe = mutation.subscribe((mutations: any[]) => {
         console.log('Mutations observed:', mutations);
         try {
           expect(mutations.length).toBe(1);
           expect(mutations[0].type).toBe('childList');
           expect(mutations[0].addedNodes.length).toBe(1);
-          subscription();
+          unsubscribe();
           done();
         } catch (error: any) {
           done.fail(error);
@@ -104,11 +104,11 @@ idescribe('onMutation', () => {
     const optionsPromise = Promise.resolve({ attributes: true });
 
     const mutation = on('mutation', elementPromise, optionsPromise);
-    const subscription = mutation.subscribe((mutations: MutationRecord[]) => {
+    const unsubscribe = mutation.subscribe((mutations: MutationRecord[]) => {
         try {
           expect(mutations.some(m => m.type === 'attributes')).toBeTrue();
           expect(mutations.some(m => m.attributeName === 'data-test')).toBeTrue();
-          subscription();
+          unsubscribe();
           done();
         } catch (error: any) {
           done.fail(error);
@@ -125,11 +125,11 @@ idescribe('onMutation', () => {
     (globalThis as any).MutationObserver = undefined;
 
     const mutation = on('mutation', observedElement, { childList: true });
-    const subscription = mutation.subscribe(() => fail('Should not emit without MutationObserver'));
+    const unsubscribe = mutation.subscribe(() => fail('Should not emit without MutationObserver'));
 
     setTimeout(() => {
       observedElement.appendChild(document.createElement('span'));
-      subscription();
+      unsubscribe();
       (globalThis as any).MutationObserver = savedObserver;
       done();
     }, 150);

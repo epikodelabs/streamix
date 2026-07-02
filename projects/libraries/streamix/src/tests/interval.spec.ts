@@ -34,10 +34,10 @@ describe('interval', () => {
     const atom = interval(intervalMs);
 
     const emittedValues: number[] = [];
-    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    const unsubscribe = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     await delay(intervalMs * 3);
-    subscription();
+    unsubscribe();
 
     const previousLength = emittedValues.length;
     await delay(intervalMs * 2);
@@ -50,9 +50,9 @@ describe('interval', () => {
     const atom = interval(intervalMs);
 
     const emittedValues: number[] = [];
-    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    const unsubscribe = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
-    subscription();
+    unsubscribe();
 
     const previousLength = emittedValues.length;
     await delay(intervalMs * 2);
@@ -64,11 +64,11 @@ describe('interval', () => {
     const atom = interval(0);
 
     const emittedValues: number[] = [];
-    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    const unsubscribe = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     await delay(10);
     expect(emittedValues.length).toBeGreaterThan(0);
-    subscription();
+    unsubscribe();
   });
 
   it('should allow multiple subscriptions', async () => {
@@ -102,10 +102,10 @@ describe('interval', () => {
     const atom = interval(intervalMs);
 
     const emittedValues: number[] = [];
-    const subscription = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+    const unsubscribe = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
 
     await delay(intervalMs * 1.5);
-    subscription();
+    unsubscribe();
 
     const firstLength = emittedValues.length;
 

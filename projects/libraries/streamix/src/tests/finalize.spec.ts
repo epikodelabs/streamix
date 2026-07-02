@@ -62,10 +62,10 @@ describe("finalize", () => {
     );
 
     const values: number[] = [];
-    const subscription = atom.subscribe(v => values.push(v));
+    const unsubscribe = atom.subscribe(v => values.push(v));
 
     await wait(30);
-    subscription();
+    unsubscribe();
     await wait(10);
 
     expect(finalizers).toEqual(["finalized"]);

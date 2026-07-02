@@ -10,9 +10,9 @@ describe('combineLatest', () => {
     const combined = combineLatest(firstTimer, secondTimer);
     const emitted: number[][] = [];
 
-    const subscription = combined.subscribe(v => { if (v !== undefined) emitted.push(v); });
+    const unsubscribe = combined.subscribe(v => { if (v !== undefined) emitted.push(v); });
     await delay(250);
-    subscription();
+    unsubscribe();
 
     expect(emitted.length).toBeGreaterThan(4);
     expect(emitted[0]).toEqual([0, 0]);
@@ -25,16 +25,16 @@ describe('combineLatest', () => {
     const combined = combineLatest(firstTimer, secondTimer);
     let emissionCount = 0;
 
-    const subscription = combined.subscribe(v => {
+    const unsubscribe = combined.subscribe(v => {
       if (v !== undefined) {
         emissionCount++;
-        subscription();
+        unsubscribe();
       }
     });
 
     await delay(50);
     expect(emissionCount).toBe(1);
-    expect(subscription.unsubscribed).toBe(true);
+    expect(unsubscribe.unsubscribed).toBe(true);
   });
 
   it('should combine multiple streams correctly', async () => {
@@ -45,9 +45,9 @@ describe('combineLatest', () => {
     const combined = combineLatest(firstTimer, secondTimer, thirdTimer);
     const emitted: number[][] = [];
 
-    const subscription = combined.subscribe(v => { if (v !== undefined) emitted.push(v); });
+    const unsubscribe = combined.subscribe(v => { if (v !== undefined) emitted.push(v); });
     await delay(1200);
-    subscription();
+    unsubscribe();
 
     expect(emitted.length).toBeGreaterThan(0);
     expect(emitted[0]).toEqual([0, 0, 0]);
