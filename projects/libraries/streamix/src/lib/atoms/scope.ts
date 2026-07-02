@@ -18,6 +18,7 @@ import {
   type FlowExpr,
   type PipeExpr,
 } from "./expr";
+import { isAtom, isAtomLike } from "../utils/helpers";
 import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
 import type { Subscription } from "./subscription";
 
@@ -344,12 +345,8 @@ const INTERNAL_SCOPE_KEYS = new Set([
   "at",
 ]);
 
-function isAtomLike(value: any): value is Atom<any> | Scope {
-  return value && typeof value === "object" && (value.type === "atom" || value.type === "scope");
-}
-
-function isAtom(value: any): value is Atom<any> {
-  return value && typeof value === "object" && value.type === "atom";
+function isAtomOrScopeLike(value: any): value is Atom<any> | Scope {
+  return isAtomLike(value) || isScope(value);
 }
 
 function isPlainObject(value: any): boolean {
@@ -394,7 +391,7 @@ function toDefinedState(state: DefinedInput<any>, visited: WeakSet<object> = new
       result[key] = value;
     } else if (typeof value === "function") {
       result[key] = dynamicExpr(value);
-    } else if (isAtomLike(value)) {
+    } else if (isAtomOrScopeLike(value)) {
       result[key] = value;
     } else if (isPlainObject(value)) {
       if (visited.has(value)) {
@@ -432,7 +429,7 @@ function transformScopeState<T extends Record<string, any>>(
       rawState[key] = value.fn.bind(scopeProxy);
     } else if (typeof value === "function") {
       rawState[key] = value.bind(scopeProxy);
-    } else if (isAtomLike(value)) {
+    } else if (isAtomOrScopeLike(value)) {
       rawState[key] = value;
     } else if (isPlainObject(value)) {
       if (visited.has(value)) {

@@ -77,11 +77,11 @@ function getTrackedInstances(container: Container): TrackedInstance[] {
   return trackedInstancesMap.get(container)!;
 }
 
-function isDisposed(container: Container): boolean {
+function isContainerDisposed(container: Container): boolean {
   return disposedSet.has(container);
 }
 
-function markDisposed(container: Container): void {
+function markContainerDisposed(container: Container): void {
   disposedSet.add(container);
 }
 
@@ -192,7 +192,7 @@ export function createContainer(parent: Container | null = null): Container {
       factory: Factory<T>,
       options: RegistrationOptions<T> = {}
     ): Container {
-      if (isDisposed(container)) {
+      if (isContainerDisposed(container)) {
         throw new Error("Cannot register services on a disposed container");
       }
       getRegistrations(container).set(token, {
@@ -205,14 +205,14 @@ export function createContainer(parent: Container | null = null): Container {
     },
 
     resolve<T>(token: Token<T>, scope: Scope | null = null): T {
-      if (isDisposed(container)) {
+      if (isContainerDisposed(container)) {
         throw new Error("Cannot resolve services from a disposed container");
       }
       return resolveInternal(container, token, scope, new Set<Token<any>>());
     },
 
     resolveOptional<T>(token: Token<T>, scope: Scope | null = null): T | undefined {
-      if (isDisposed(container)) return undefined;
+      if (isContainerDisposed(container)) return undefined;
       if (!container.has(token)) return undefined;
       return container.resolve(token, scope);
     },
@@ -226,8 +226,8 @@ export function createContainer(parent: Container | null = null): Container {
     },
 
     async dispose(): Promise<void> {
-      if (isDisposed(container)) return;
-      markDisposed(container);
+      if (isContainerDisposed(container)) return;
+      markContainerDisposed(container);
 
       const errors: Error[] = [];
       const tracked = getTrackedInstances(container);

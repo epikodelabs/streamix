@@ -1,8 +1,5 @@
 import { iterate, type Atom } from "../atoms";
-
-function isAtomLike(value: unknown): value is Atom<any> {
-  return value != null && (value as any).type === "atom";
-}
+import { isAtomLike } from "../utils/helpers";
 
 /**
  * Returns a promise that resolves with the first emitted value from an `AtomBase` or atom.

@@ -1,3 +1,4 @@
+import { isAtom } from "../utils/helpers";
 import { iterate } from "./iterate";
 import { isPromiseLike, type MaybePromise } from "./operator";
 
@@ -288,9 +289,6 @@ export function trackDependencies<T>(fn: () => T): { result: T; dependencies: Se
   }
 }
 
-function isAtom(value: unknown): value is Atom<any> {
-  return value !== null && typeof value === "object" && (value as Atom<any>).type === "atom";
-}
 
 /**
  * Owns a single derived evaluation. Reads made through this owner are recorded

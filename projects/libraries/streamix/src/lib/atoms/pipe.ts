@@ -1,3 +1,4 @@
+import { isAtomLike, isAsyncIterable, isIterable } from "../utils/helpers";
 import { flow, type Atom } from "./atom";
 import { isPromiseLike, type MaybePromise, type Operator } from "./operator";
 
@@ -13,17 +14,6 @@ export type PipeInput<T = any> =
 
 
 
-function isAtomLike(value: unknown): value is Atom<any> {
-  return value != null && (value as any).type === "atom";
-}
-
-function isAsyncIterable(value: unknown): value is AsyncIterable<any> {
-  return value != null && typeof (value as any)[Symbol.asyncIterator] === "function";
-}
-
-function isIterable(value: unknown): value is Iterable<any> {
-  return value != null && typeof (value as any)[Symbol.iterator] === "function";
-}
 
 /**
  * Normalizes a supported source into an async iterable.

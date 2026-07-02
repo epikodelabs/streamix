@@ -1,18 +1,8 @@
 import { flow, isPromiseLike, PipeInput, toAsyncIterable, type MaybePromise } from "../atoms";
 import type { Atom } from "../atoms/atom";
 import { normalizeError } from "../atoms";
+import { isAtomLike, isAsyncIterable, isIterable } from "../utils/helpers";
 
-function isAtomLike(value: unknown): value is Atom<any> {
-  return value != null && (value as any).type === "atom";
-}
-
-function isAsyncIterable(value: unknown): value is AsyncIterable<any> {
-  return value != null && typeof (value as any)[Symbol.asyncIterator] === "function";
-}
-
-function isIterable(value: unknown): value is Iterable<any> {
-  return value != null && typeof (value as any)[Symbol.iterator] === "function";
-}
 
 /**
  * Normalizes any value type into an AtomBase using your system's native atom/flow primitives.
