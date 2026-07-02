@@ -28,19 +28,18 @@ async function minifyFiles(filePaths) {
     let sourcemap = fs.existsSync(sourcemapFile);
     let match = (filePath.match(/.*[f]?esm(\d+).*/));
     let ecma = match && match.length > 1 ? match[1] : 'es6';
+    let sourceMapContent = sourcemap ? fs.readFileSync(sourcemapFile, "utf8") : undefined;
     let terser = await Terser.minify(fs.readFileSync(filePath, "utf8"), {
       ecma,
       compress: true,
       mangle: true,
-      sourceMap: {
-        content: 'inline'
-      },
+      sourceMap: sourcemap ? { content: sourceMapContent } : false,
       output: {
         comments: false,
       }
     });
     fs.writeFileSync(filePath, terser.code);
-    if(sourcemap) {
+    if(sourcemap && terser.map) {
       fs.writeFileSync(sourcemapFile, terser.map);
     }
   }
@@ -58,7 +57,7 @@ let maps = allFiles.filter(path => path.match(/\.map$/));
 // await deleteFiles(maps);
 
 let js = allFiles.filter(path => path.match(/\.[mc]?js$/));
-// await minifyFiles(js);
+await minifyFiles(js);
 
 let definitions = allFiles.filter(path => path.match(/\.d\.ts$/));
 await deleteFiles(definitions);
