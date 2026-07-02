@@ -1,3 +1,4 @@
+import { createCoordinator, getIterator, raceNext, type Coordinator, type Execution } from "../utils/coordinator";
 import { isAtom } from "../utils/helpers";
 import { iterate } from "./iterate";
 import { isPromiseLike, type MaybePromise } from "./operator";
@@ -530,61 +531,37 @@ function notifyChangeHandlers(atom: Atom<any>): void {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * flow() - Async Resource Node
+ * atomFromIterator() - Atom runtime over an async iterable
  * ───────────────────────────────────────────────────────────────────────────*/
 
-interface InternalFlowAtom<T> extends Atom<T>, InternalAtomContainer {
-  fail(err: any, options?: { terminate?: boolean }): void;
+export interface AtomFromIteratorOptions<T> extends AtomOptions {
+  initialValue?: T;
 }
 
-export function flow<T>(
-  source: AsyncIterable<T> | Iterable<T> | ((signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>),
-  options?: AtomOptions
+export function atomFromIterator<T>(
+  source: AsyncIterable<T> | Coordinator<T>,
+  options?: AtomFromIteratorOptions<T>
 ): Atom<T> {
-  const maxSubscribers = options?.maxSubscribers ?? 1000;
-  
   const activeScope = getCurrentScope();
   const analog = activeScope !== null && getScopeMode(activeScope) === "analog" && !options?.discrete;
+  const maxSubscribers = options?.maxSubscribers ?? 1000;
 
-  // State
-  let current: T;
-  let previous: T;
-
-  // If the source is an atom, initialize the flow's current value from the
-  // atom's current value so consumers see the latest value immediately.
-  if (source != null && typeof source === "object" && (source as any).type === "atom") {
-    try {
-      current = (source as any).safeValue;
-      previous = current;
-    } catch {
-      current = undefined as T;
-      previous = undefined as T;
-    }
-  } else {
-    current = undefined as T;
-    previous = undefined as T;
-  }
+  let current: T = options?.initialValue !== undefined ? options.initialValue : undefined as T;
+  let previous: T = current;
   let disposed = false;
   let started = false;
   let activeSubCount = 0;
   let errorValue: any = undefined;
+  let isErrorState = false;
   let hasNewValue = false;
-  let restartPending = false;
+
   const disposeHandlers = new Set<() => void>();
   const errorHandlers = new Set<(error: any) => void>();
   const subs = createSubscriberSet<T>(errorHandlers, analog);
   const subscriptions = new Set<Subscription>();
-  const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
 
-  // Iteration Control
-  let iterator: AsyncIterator<T> | Iterator<T> | undefined;
-  let abortController: AbortController | undefined;
-  let dispose$: Promise<void> | null = null;
-
-  const clearDepSubscriptions = () => {
-    for (const sub of depSubscriptions.values()) sub();
-    depSubscriptions.clear();
-  };
+  let iterator: AsyncIterator<T> | undefined;
+  let runPromise: Promise<void> | null = null;
 
   const broadcast = (val: T) => subs.broadcast(val, previous);
 
@@ -594,163 +571,70 @@ export function flow<T>(
     broadcast(current);
   };
 
-  const stop = async (
-    controller: AbortController | undefined = abortController,
-    iter: AsyncIterator<T> | Iterator<T> | undefined = iterator
-  ): Promise<void> => {
-    controller?.abort();
-    if (iter && typeof (iter as any).return === "function") {
-      try { await (iter as any).return(); } catch { /* ignore */ }
+  const stopIterator = async () => {
+    if (iterator && typeof (iterator as any).return === "function") {
+      try { await (iterator as any).return(); } catch {}
     }
+    iterator = undefined;
   };
 
   const disposeInstance = async (): Promise<void> => {
     if (disposed) return;
-    if (dispose$) return dispose$;
+    disposed = true;
+    markDisposed(instance);
+    node.version++;
+    subs.clear();
+    activeSubCount = 0;
 
-    dispose$ = (async () => {
-      disposed = true;
-      markDisposed(instance);
-      node.version++;
-      subs.clear();
-      activeSubCount = 0;
-      clearDepSubscriptions();
+    await stopIterator();
 
-      await stop().catch(() => {});
-      
-      for (const handler of disposeHandlers) await Promise.resolve(handler()).catch(() => {});
-      disposeHandlers.clear();
-      
-      for (const sub of subscriptions) await sub().catch(() => {});
-      subscriptions.clear();
-      
-      getScheduler().remove(node);
-    })();
+    for (const handler of disposeHandlers) await Promise.resolve(handler()).catch(() => {});
+    disposeHandlers.clear();
 
-    try { await dispose$; } finally { dispose$ = null; }
+    for (const sub of subscriptions) await sub().catch(() => {});
+    subscriptions.clear();
+
+    getScheduler().remove(node);
   };
 
-  // Races a pending `iterator.next()` against the given AbortSignal.
-  //
-  // Passing `signal` into a source factory only helps if the source itself
-  // checks it (e.g. forwards it to `fetch`). Sources that don't — a raw
-  // websocket listener, a timer-based generator, anything waiting on an
-  // external event — would otherwise leave the run loop blocked on an
-  // in-flight `next()` call even after `stop()` aborts, since the loop only
-  // re-checks `signal.aborted` *between* awaits. Racing here guarantees the
-  // loop unblocks the moment the signal fires, regardless of whether the
-  // source cooperates. Cleanup of the underlying iterator (`iterator.return()`)
-  // still happens via `stop()`, independently of this race.
-  const nextOrAbort = (
-    iter: AsyncIterator<T> | Iterator<T>,
-    sig: AbortSignal
-  ): Promise<IteratorResult<T>> => {
-    if (sig.aborted) return Promise.resolve({ done: true, value: undefined as any });
+  const run = async () => {
+    if (runPromise) return runPromise;
+    runPromise = (async () => {
+      iterator = source[Symbol.asyncIterator]();
+      try {
+        while (!disposed) {
+          const result = await iterator.next();
+          if (disposed || result.done) break;
 
-    const pending = Promise.resolve(iter.next());
-    return new Promise<IteratorResult<T>>((resolve, reject) => {
-      const onAbort = () => resolve({ done: true, value: undefined as any });
-      sig.addEventListener("abort", onAbort, { once: true });
-      pending.then(
-        (result) => { sig.removeEventListener("abort", onAbort); resolve(result); },
-        (err) => { sig.removeEventListener("abort", onAbort); reject(err); }
-      );
-    });
-  };
-
-  const startIteration = async (targetVersion: number) => {
-    if (disposed || targetVersion !== node.version) return;
-
-    abortController = new AbortController();
-    const signal = abortController.signal;
-    
-    // 1. Resolve Source & Track Dependencies.
-    // Use try/finally so the formula context is always popped — even if
-    // asyncIter.call() or syncIter.call() throws an exception.
-    let iterable: AsyncIterable<T> | Iterable<T>;
-    const context = pushFormulaContext();
-    try {
-      if (typeof source === "function") iterable = source(signal);
-      else iterable = source;
-
-      if (disposed || targetVersion !== node.version) return; // finally pops context
-
-      // 2. Acquire Iterator
-      const asyncIter = (iterable as any)[Symbol.asyncIterator];
-      const syncIter = (iterable as any)[Symbol.iterator];
-      iterator = asyncIter ? asyncIter.call(iterable) : (syncIter ? syncIter.call(iterable) : undefined);
-
-      if (!iterator) {
-        instance.fail(new Error("Source is not iterable"));
-        void disposeInstance();
-        return; // finally pops context
-      }
-    } catch (err) {
-      instance.fail(normalizeError(err));
-      void disposeInstance();
-      return; // finally pops context
-    } finally {
-      popFormulaContext();
-    }
-
-    // 3. Update Dependencies (context is already popped; we still hold the reference)
-    let maxDepth = -1;
-    for (const dep of context.dependencies) {
-      if (dep[NODE]?.depth > maxDepth) maxDepth = dep[NODE].depth;
-      if (!depSubscriptions.has(dep)) {
-        const handler = () => {
-          if (disposed || activeSubCount <= 0) return;
-
-          restartPending = true;
-
-          if (subs.size > 0) {
-            instance[MARK_DIRTY]();
-          }
-        };
-        addAtomChangeHandler(dep as any, handler);
-        depSubscriptions.set(dep, createSubscription(() => {
-          removeAtomChangeHandler(dep as any, handler);
-        }));
-      }
-    }
-    node.depth = maxDepth + 1;
-
-    // 4. Run Loop
-    try {
-      while (targetVersion === node.version && !disposed && !signal.aborted) {
-        const result = await nextOrAbort(iterator, signal);
-        if (result.done || targetVersion !== node.version || signal.aborted) break;
-        
-        previous = current;
-        current = result.value;
-        markAtomAsEmitted(instance as any);
-        notifyChangeHandlers(instance);
-
-        if (analog) {
-          // In analog mode, buffer the emission and broadcast the latest value
-          // once per scheduler flush instead of on every source emission.
+          previous = current;
+          current = result.value;
           hasNewValue = true;
+          isErrorState = false;
+          errorValue = undefined;
+          markAtomAsEmitted(instance as any);
+          notifyChangeHandlers(instance);
 
-          if (subs.size > 0) {
-            instance[MARK_DIRTY]();
+          if (analog) {
+            if (subs.size > 0) instance[MARK_DIRTY]();
+          } else {
+            broadcast(current);
           }
-        } else {
-          broadcast(current);
         }
-
-        // Yield to event loop
-        await new Promise<void>(r => queueMicrotask(r));
+        if (!disposed) await disposeInstance();
+      } catch (err) {
+        if (!disposed) {
+          errorValue = normalizeError(err);
+          isErrorState = true;
+          for (const h of errorHandlers) try { h(errorValue); } catch {}
+          if (options?.onError) try { options.onError(errorValue); } catch {}
+          instance.fail(errorValue, { terminate: true });
+        }
+      } finally {
+        await stopIterator();
+        runPromise = null;
       }
-      
-      if (targetVersion === node.version && !disposed) await disposeInstance();
-    } catch (err) {
-      if (targetVersion === node.version && !disposed) {
-        errorValue = normalizeError(err);
-        for (const h of errorHandlers) try { h(errorValue); } catch {}
-        if (options?.onError) try { options.onError(errorValue); } catch {}
-        instance.fail(errorValue, { terminate: true });
-      }
-    }
+    })();
+    return runPromise;
   };
 
   const node: AtomNode = {
@@ -760,41 +644,23 @@ export function flow<T>(
       if (disposed || (!node.dirty && !hasNewValue) || node.flushing) return;
       node.flushing = true;
       try {
-        // Analog mode: broadcast the latest buffered value first, then restart
-        // if a dependency change requested it.
         broadcastLatest();
-        if (restartPending) {
-          restartPending = false;
-          // Tear down the previous iteration before starting a new one so that
-          // sources with real cleanup (subscriptions, generators, sockets) are
-          // not leaked on every dependency-triggered restart.
-          const oldController = abortController;
-          const oldIterator = iterator;
-          abortController = undefined;
-          iterator = undefined;
-          void stop(oldController, oldIterator).catch(() => {});
-
-          // Restart triggers a new iteration version
-          const targetVersion = ++node.version;
-          startIteration(targetVersion).catch(() => {
-             if (node.version !== targetVersion || disposed) void disposeInstance();
-          });
-        }
       } finally {
         node.flushing = false;
       }
     },
   };
 
-  const instance: InternalFlowAtom<T> = {
+  const instance: Atom<T> & InternalAtomContainer & { fail(err: any, options?: { terminate?: boolean }): void } = {
     type: "atom",
 
     get disposed() { return disposed || isDisposed(this); },
     get error() { return errorValue; },
     get subscriberCount() { return subs.size; },
-    
+
     get value() {
       if (disposed) throw new Error("Atom has been disposed");
+      if (isErrorState && errorValue) throw errorValue;
       const ctx = getCurrentFormulaContext();
       if (ctx) ctx.dependencies.add(instance);
       return current;
@@ -816,7 +682,7 @@ export function flow<T>(
 
       if (!started) {
         started = true;
-        startIteration(node.version);
+        run().catch(() => {});
       }
 
       if (callback) subs.add(callback);
@@ -831,33 +697,22 @@ export function flow<T>(
       return unsubscribe;
     },
 
-    onError(handler: (error: any) => void): Subscription {
+    onError(handler) {
       if (disposed) return createSubscription(() => {});
       errorHandlers.add(handler);
       if (errorValue !== undefined) try { handler(errorValue); } catch {}
       return createSubscription(() => { errorHandlers.delete(handler); });
     },
 
-    fail(err: any, errorOptions?: { terminate?: boolean }) {
+    fail(err, errorOptions?) {
       if (disposed) return;
       errorValue = normalizeError(err);
+      isErrorState = true;
       for (const h of errorHandlers) try { h(errorValue); } catch {}
       if (options?.onError) try { options.onError(errorValue); } catch {}
 
       if (errorOptions?.terminate ?? false) {
-        disposed = true;
-        markDisposed(instance);
-        getScheduler().remove(node);
-        abortController?.abort();
-        stop().catch(() => {}); // Best effort stop
-        
-        for (const h of disposeHandlers) Promise.resolve(h()).catch(() => {});
-        disposeHandlers.clear();
-        for (const s of subscriptions) s();
-        subscriptions.clear();
-        subs.clear();
-        errorHandlers.clear();
-        clearDepSubscriptions();
+        void disposeInstance();
       }
     },
 
@@ -868,7 +723,97 @@ export function flow<T>(
   Object.defineProperty(instance, "_onDispose", { get: () => disposeHandlers, enumerable: false });
   (instance as any)[ANALOG] = analog;
   registerWithCurrentScope(instance as any);
+
   return instance;
+}
+
+function watchDependencies(
+  deps: Iterable<InternalAtomContainer>,
+  callback: (dep: InternalAtomContainer) => void
+): () => void {
+  const handlers = new Map<InternalAtomContainer, () => void>();
+  for (const dep of deps) {
+    const handler = () => {
+      cleanup();
+      callback(dep);
+    };
+    addAtomChangeHandler(dep as any, handler);
+    handlers.set(dep, handler);
+  }
+  function cleanup() {
+    for (const [dep, handler] of handlers) {
+      removeAtomChangeHandler(dep as any, handler);
+    }
+    handlers.clear();
+  }
+  return cleanup;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * flow() - Async Resource Node
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+export function flow<T>(
+  source: AsyncIterable<T> | Iterable<T> | ((signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>),
+  options?: AtomOptions
+): Atom<T> {
+  let initialValue: T | undefined;
+  let hasInitialValue = false;
+
+  if (isAtom(source)) {
+    try {
+      initialValue = (source as any).safeValue;
+      hasInitialValue = true;
+    } catch {
+      // ignore
+    }
+  }
+
+  let coordinator: Coordinator<T>;
+
+  const execution: Execution<T> = {
+    async *run(signal) {
+      while (!signal.aborted) {
+        const context = pushFormulaContext();
+        let iterable: AsyncIterable<T> | Iterable<T>;
+        try {
+          iterable = typeof source === "function" ? source(signal) : source;
+        } finally {
+          popFormulaContext();
+        }
+
+        const iterator = getIterator(iterable);
+        const deps = context.dependencies;
+
+        let depChanged = false;
+        const cleanup = watchDependencies(deps, () => {
+          depChanged = true;
+          coordinator.restart();
+        });
+
+        signal.addEventListener("abort", cleanup, { once: true });
+
+        try {
+          while (!signal.aborted && !depChanged) {
+            const result = await raceNext(iterator, signal);
+            if (signal.aborted || depChanged) break;
+            if (result.done) break;
+            yield result.value;
+          }
+        } finally {
+          cleanup();
+          if (typeof (iterator as any).return === "function") {
+            await (iterator as any).return().catch(() => {});
+          }
+        }
+
+        if (!depChanged && !signal.aborted) return;
+      }
+    }
+  };
+
+  coordinator = createCoordinator(execution);
+  return atomFromIterator(coordinator, hasInitialValue ? { ...options, initialValue } : options);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────

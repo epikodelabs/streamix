@@ -527,3 +527,138 @@ export function createAsyncCoordinator(
 
   return iterator as AsyncCoordinator<any>;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Execution Coordinator
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+/**
+ * A single reactive execution that can be started and cancelled by a
+ * {@link Coordinator}.
+ */
+export interface Execution<T> {
+  /**
+   * Start the execution. The returned iterable will be consumed by the
+   * coordinator. The coordinator guarantees that only one execution is active
+   * at a time; when it needs to restart, it aborts the previous signal first.
+   */
+  run(signal: AbortSignal): AsyncIterable<T> | Iterable<T>;
+}
+
+/**
+ * An async iterable that owns a single active execution, provides cancellation,
+ * and enforces latest-result semantics.
+ *
+ * Calling {@link Coordinator.restart} aborts the active execution and begins a
+ * new one. Values emitted by older executions are discarded.
+ */
+export interface Coordinator<T> extends AsyncIterable<T> {
+  restart(): void;
+}
+
+export function getIterator<T>(iterable: AsyncIterable<T> | Iterable<T>): AsyncIterator<T> | Iterator<T> {
+  const asyncIter = (iterable as any)[Symbol.asyncIterator];
+  if (asyncIter) return asyncIter.call(iterable);
+  const syncIter = (iterable as any)[Symbol.iterator];
+  if (syncIter) return syncIter.call(iterable);
+  throw new Error("Source is not iterable");
+}
+
+export function raceNext<T>(
+  iterator: AsyncIterator<T> | Iterator<T>,
+  signal: AbortSignal
+): Promise<IteratorResult<T>> {
+  if (signal.aborted) {
+    return Promise.resolve({ done: true, value: undefined as any });
+  }
+
+  const pending = Promise.resolve(iterator.next());
+  return new Promise<IteratorResult<T>>((resolve, reject) => {
+    const onAbort = () => resolve({ done: true, value: undefined as any });
+    signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(
+      (result) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(result);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      }
+    );
+  });
+}
+
+/**
+ * Creates an execution coordinator.
+ *
+ * The coordinator owns exactly three things:
+ * - one active execution
+ * - cancellation of that execution
+ * - latest-result semantics
+ *
+ * The returned object is an async iterable that yields values from the active
+ * execution. Calling `restart()` aborts the current execution and starts a new
+ * one. Values produced by an aborted execution are discarded.
+ *
+ * @typeParam T - The type of value produced by the execution.
+ * @param execution - The execution to coordinate.
+ * @returns A {@link Coordinator} for the execution.
+ */
+export function createCoordinator<T>(execution: Execution<T>): Coordinator<T> {
+  let version = 0;
+  let controller: AbortController | undefined;
+
+  async function* iterate() {
+    while (true) {
+      controller?.abort();
+      controller = new AbortController();
+      const localVersion = ++version;
+      const signal = controller.signal;
+
+      const iterable = execution.run(signal);
+      const iterator = getIterator(iterable);
+
+      try {
+        while (!signal.aborted && localVersion === version) {
+          const result = await raceNext(iterator, signal);
+
+          if (signal.aborted || localVersion !== version) break;
+          if (result.done) break;
+
+          yield result.value;
+        }
+      } finally {
+        if (typeof (iterator as any).return === "function") {
+          try {
+            await (iterator as any).return();
+          } catch {
+            // ignore cleanup errors
+          }
+        }
+      }
+
+      // If the version hasn't changed, the execution completed naturally.
+      if (localVersion === version) return;
+    }
+  }
+
+  const iterable = iterate();
+  const baseReturn = iterable.return.bind(iterable);
+  const baseThrow = iterable.throw?.bind(iterable);
+
+  return Object.assign(iterable, {
+    restart() {
+      version++;
+      controller?.abort();
+    },
+    return(value?: any) {
+      controller?.abort();
+      return baseReturn(value);
+    },
+    throw(e?: any) {
+      controller?.abort();
+      return baseThrow ? baseThrow(e) : Promise.reject(e);
+    }
+  });
+}
