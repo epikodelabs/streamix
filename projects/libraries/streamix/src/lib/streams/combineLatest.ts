@@ -51,6 +51,9 @@ export function combineLatest<T extends unknown[] = any[]>(
             break;
 
           case "complete":
+            if (!hasEmitted.has(event.sourceIndex)) {
+              return;
+            }
             completedCount++;
             break;
 

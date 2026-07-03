@@ -32,7 +32,7 @@ export type Subscription = {
    * - Executes cleanup logic (if provided) exactly once
    * - Stream receivers may still get `complete()` as a cleanup signal
    *
-   * Errors thrown by cleanup logic are caught and logged.
+   * Errors thrown by cleanup logic are caught and suppressed.
    *
    * @returns A `MaybePromise<void>` that resolves when cleanup completes
    */
@@ -87,16 +87,14 @@ export function createSubscription(
      * This method:
      * 1. Marks the subscription as unsubscribed
      * 2. Executes the `teardown` callback (if present)
-     * 3. Suppresses and logs any errors thrown during cleanup
+     * 3. Suppresses any errors thrown during cleanup
      */
     unsubscribe: async function (): Promise<void> {
       if (!_unsubscribed) {
         _unsubscribed = true;
         try {
           await this.teardown?.();
-        } catch (err) {
-          console.error("Error during unsubscribe callback:", err);
-        }
+        } catch {}
       }
     },
 

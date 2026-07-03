@@ -1,4 +1,4 @@
-import { combineLatest, from, type Subscription, timer } from '@epikodelabs/streamix';
+import { combineLatest, createStream, from, type Subscription, timer } from '@epikodelabs/streamix';
 
 describe('combineLatest', () => {
   it('should combine timer streams correctly', (done) => {
@@ -172,6 +172,28 @@ describe('combineLatest', () => {
       },
       error: (error) => done.fail(error),
     });
+  });
+
+  it('completes when a source completes before emitting and another never emits', async () => {
+    const never = createStream<number>('never', async function* () {
+      await new Promise(() => {});
+    });
+    const values: unknown[] = [];
+
+    await Promise.race([
+      new Promise<void>((resolve, reject) => {
+        combineLatest(from([] as number[]), never).subscribe({
+          next: (value) => values.push(value),
+          complete: resolve,
+          error: reject,
+        });
+      }),
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error('timed out')), 50)
+      ),
+    ]);
+
+    expect(values).toEqual([]);
   });
 });
 

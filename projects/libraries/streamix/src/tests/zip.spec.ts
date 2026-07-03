@@ -1,4 +1,4 @@
-import { createSubject, from, zip } from '@epikodelabs/streamix';
+import { createStream, createSubject, from, zip } from '@epikodelabs/streamix';
 
 describe('zip', () => {
   it('should zip values from multiple streams', (done) => {
@@ -35,6 +35,28 @@ describe('zip', () => {
       },
       error: (err: any) => done.fail(err),
     });
+  });
+
+  it('completes when one source is empty even if another never emits', async () => {
+    const never = createStream<string>('never', async function* () {
+      await new Promise(() => {});
+    });
+    const values: unknown[] = [];
+
+    await Promise.race([
+      new Promise<void>((resolve, reject) => {
+        zip(from([] as number[]), never).subscribe({
+          next: (value) => values.push(value),
+          complete: resolve,
+          error: reject,
+        });
+      }),
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error('timed out')), 50)
+      ),
+    ]);
+
+    expect(values).toEqual([]);
   });
 
   it('should zip until the shortest stream completes', (done) => {

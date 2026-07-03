@@ -1,6 +1,6 @@
 import { createStream, type Stream } from '../abstractions';
 import { fromAny } from '../converters';
-import { normalizeError } from '../utils/helpers';
+import { createAsyncCoordinator, normalizeError } from '../utils';
 
 /**
  * Combine multiple streams into a single stream that emits arrays of the latest values
@@ -22,44 +22,46 @@ export function zip<T extends readonly unknown[] = any[]>(
       const resolved = fromAny(source as any);
       return resolved[Symbol.asyncIterator]() as AsyncIterator<T[number]>;
     });
+    const runner = createAsyncCoordinator<T[number]>(iterators);
+    const queues = sources.map(() => [] as T[number][]);
+    const completed = new Set<number>();
+
+    const canEmitTuple = () => queues.every(queue => queue.length > 0);
+    const cannotEmitMore = () =>
+      queues.some((queue, index) => completed.has(index) && queue.length === 0);
 
     try {
       while (true) {
-        // Pull from all iterators; if any completes, cancel the rest immediately
-        const results = await Promise.allSettled(iterators.map(it => it.next()));
+        if (cannotEmitMore()) break;
 
-        let completed = false;
-        const values: T[number][] = [];
-        for (let i = 0; i < results.length; i++) {
-          const r = results[i];
-          if (r.status === 'rejected') {
-            // Propagate first rejection, cancel others first
-            await Promise.all(iterators.map((it, j) =>
-              j !== i ? it.return?.(undefined).catch(() => { }) : Promise.resolve()
-            ));
-            throw normalizeError(r.reason);
-          }
-          if (r.value.done) {
-            completed = true;
+        const result = await runner.next();
+        if (result.done) break;
+
+        const event = result.value;
+
+        if (event.type === 'error') {
+          throw normalizeError(event.error);
+        }
+
+        if (event.type === 'complete') {
+          completed.add(event.sourceIndex);
+        } else {
+          queues[event.sourceIndex].push(event.value);
+        }
+
+        while (canEmitTuple()) {
+          yield queues.map(queue => queue.shift()!) as unknown as T;
+          if (cannotEmitMore()) {
             break;
           }
-          values.push(r.value.value);
         }
 
-        if (completed) {
-          // Cancel any pending iterators that haven't resolved yet
-          await Promise.all(
-            iterators.map(it => it.return?.(undefined).catch(() => { }))
-          );
+        if (cannotEmitMore()) {
           break;
         }
-
-        yield values as unknown as T;
       }
     } finally {
-      await Promise.all(
-        iterators.map(it => (typeof it.return === 'function' ? it.return(undefined).catch(() => { }) : Promise.resolve()))
-      );
+      await runner.return?.();
     }
   };
 
