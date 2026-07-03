@@ -536,6 +536,23 @@ describe('switchMap', () => {
     expect(innerClosed).toBe(1);
   });
 
+  it('restores source push handlers when returned', async () => {
+    const originalOnPush = () => {};
+    const sourceIterator: any = {
+      __onPush: originalOnPush,
+      __tryNext: () => null,
+      next: async () => {
+        throw new Error("next() should not be used when __tryNext is present");
+      }
+    };
+
+    const iterator = switchMap<number, number>((value) => from([value])).apply(sourceIterator);
+
+    expect(sourceIterator.__onPush).not.toBe(originalOnPush);
+    await iterator.return?.();
+    expect(sourceIterator.__onPush).toBe(originalOnPush);
+  });
+
   it('coverage: should stop and cleanup when iterator.throw is called', async () => {
     let innerClosed = 0;
 

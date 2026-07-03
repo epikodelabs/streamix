@@ -90,13 +90,11 @@ async function drainIterator<T>(
           if (isPromiseLike(ret)) {
             (ret  as Promise<unknown>).catch((err: any) => {
               const error = err instanceof Error ? err : new Error(String(err));
-              console.log('Subscriber callback error', error);
               receiver.error?.(error);
             });
           }
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err));
-          console.log('Subscriber callback error', error);
           receiver.error?.(error);
         }
       }

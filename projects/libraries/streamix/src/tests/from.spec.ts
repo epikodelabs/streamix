@@ -109,5 +109,25 @@ describe('from', () => {
       });
     });
   });
+
+  it('pulls async iterables lazily', async () => {
+    let pulls = 0;
+
+    async function* source() {
+      pulls++;
+      yield 1;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      pulls++;
+      yield 2;
+    }
+
+    const iterator = from(source())[Symbol.asyncIterator]();
+
+    expect(pulls).toBe(0);
+    expect(await iterator.next()).toEqual({ done: false, value: 1 });
+    expect(pulls).toBe(1);
+
+    await iterator.return?.();
+  });
 });
 

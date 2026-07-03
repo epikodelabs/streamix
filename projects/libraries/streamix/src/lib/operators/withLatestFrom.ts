@@ -1,10 +1,10 @@
 import {
   createPushOperator,
   isPromiseLike,
-  Stream
+  type Stream
 } from '../abstractions';
-import { eachValueFrom, fromAny } from '../converters';
-import { createAsyncCoordinator } from '../utils';
+import { fromAny } from '../converters';
+import { createAsyncCoordinator, normalizeError } from '../utils';
 
 /**
  * Combines the source stream with the latest values from one or more auxiliary streams or promises.
@@ -33,126 +33,90 @@ import { createAsyncCoordinator } from '../utils';
 export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
   ...args: any[]
 ) {
-  // Normalize parameters immediately and synchronously to prevent execution pipeline lag
   const normalizedInputs = (args.length === 1 && Array.isArray(args[0]))
     ? (args[0] as (Stream<unknown> | Promise<unknown>)[])
     : (args as (Stream<unknown> | Promise<unknown>)[]);
 
   return createPushOperator<T, [T, ...R]>("withLatestFrom", (source, output) => {
     const abortController = new AbortController();
-    let runner: ReturnType<typeof createAsyncCoordinator> | null = null;
+    let runner: ReturnType<typeof createAsyncCoordinator<unknown>> | null = null;
     let isSettled = false;
+
+    const completeOutput = () => {
+      if (!isSettled && !output.completed()) {
+        isSettled = true;
+        output.complete();
+      }
+    };
+
+    const errorOutput = (err: unknown) => {
+      if (!isSettled) {
+        isSettled = true;
+        output.error(normalizeError(err));
+      }
+    };
 
     void (async () => {
       try {
         if (abortController.signal.aborted) return;
 
-        // 1. Concurrently resolve promises or pass streams down to standard token format
-        const resolvedAux: unknown[] = [];
+        const resolvedInputs: unknown[] = [];
         for (const input of normalizedInputs) {
-          resolvedAux.push(isPromiseLike(input) ? await Promise.resolve(input) : input);
+          resolvedInputs.push(isPromiseLike(input) ? await Promise.resolve(input) : input);
         }
 
-        // Post-await safety guard
         if (abortController.signal.aborted) return;
 
-        // 2. Initialize iterators and track baseline structural dimensions
-        const auxIterators = resolvedAux.map((input) => eachValueFrom(fromAny(input)));
+        const auxIterators = resolvedInputs.map((input) =>
+          fromAny(input as any)[Symbol.asyncIterator]() as AsyncIterator<unknown>
+        );
         const latestValues = new Array(auxIterators.length).fill(undefined);
         const hasValue = new Array(auxIterators.length).fill(false);
-
-        // 3. Pre-warm auxiliary streams to catch any initial synchronous values safely
-        const initialAuxValues = await Promise.all(auxIterators.map((iterator) => iterator.next()));
-        for (let index = 0; index < initialAuxValues.length; index++) {
-          const result = initialAuxValues[index];
-          if (!result.done) {
-            latestValues[index] = result.value;
-            hasValue[index] = true;
-          }
-        }
-
-        // Post-warming check to ensure downstream didn't unsubscribe during the initialization microtasks
-        if (abortController.signal.aborted) return;
-
-                // 4. Drain any buffered source values silently (they arrived before auxiliaries had values)
-        const sourceWithSyncPull = source as AsyncIterator<T> & { __tryNext?: () => IteratorResult<T> | null };
-        if (sourceWithSyncPull.__tryNext) {
-          while (true) {
-            let buffered: IteratorResult<T> | null;
-            try {
-              buffered = sourceWithSyncPull.__tryNext();
-            } catch (err) {
-              if (!isSettled) {
-                isSettled = true;
-                output.error(err instanceof Error ? err : new Error(String(err)));
-              }
-              return;
-            }
-            if (!buffered || buffered.done) break;
-          }
-        }
-
-        if (abortController.signal.aborted) return;
-
-        // 5. Build coordinate multiplexer mapping across source and side channels
-        runner = createAsyncCoordinator([...auxIterators, source]);
         const sourceIndex = auxIterators.length;
 
-        // 6. Core Coordinator Event Processing Loop
+        runner = createAsyncCoordinator<unknown>([
+          ...auxIterators,
+          source as AsyncIterator<unknown>
+        ]);
+
         while (!abortController.signal.aborted) {
           const nextEvent = await runner.next();
           if (nextEvent.done || abortController.signal.aborted) break;
 
-          const ev = nextEvent.value;
+          const event = nextEvent.value;
 
-          // Handle inner or stream propagation errors cleanly
-          if (ev.type === 'error') {
-            if (!isSettled) {
-              isSettled = true;
-              output.error(ev.error instanceof Error ? ev.error : new Error(String(ev.error)));
-            }
+          if (event.type === "error") {
+            errorOutput(event.error);
             return;
           }
 
-          // Disregard control signals
-          if (ev.type !== 'value') {
-            continue;
-          }
+          if (event.sourceIndex === sourceIndex) {
+            if (event.type === "complete") {
+              completeOutput();
+              return;
+            }
 
-          // Case A: Event originates from the primary source stream
-          if (ev.sourceIndex === sourceIndex) {
-            // Only emit if all auxiliary streams have recorded at least one historical value
             if (hasValue.length > 0 && hasValue.every(Boolean)) {
-              output.push([ev.value, ...latestValues] as [T, ...R]);
+              output.push([event.value, ...latestValues] as [T, ...R]);
             }
             continue;
           }
 
-          // Case B: Event originates from an auxiliary/side channel stream
-          latestValues[ev.sourceIndex] = ev.value;
-          hasValue[ev.sourceIndex] = true;
+          if (event.type === "value") {
+            latestValues[event.sourceIndex] = event.value;
+            hasValue[event.sourceIndex] = true;
+          }
         }
 
-        // 7. Loop closed cleanly without error triggers -> Complete pipeline execution
-        if (!isSettled && !output.completed()) {
-          isSettled = true;
-          output.complete();
-        }
+        completeOutput();
       } catch (err) {
-        // Safe lock catchment blocks for out-of-band exceptions during async scheduling phases
-        if (!isSettled) {
-          isSettled = true;
-          output.error(err instanceof Error ? err : new Error(String(err)));
-        }
+        errorOutput(err);
       } finally {
         abortController.abort();
         void runner?.return?.();
       }
     })();
 
-    /**
-     * Synchronous pipeline teardown handler returned to the engine infrastructure.
-     */
     return () => {
       abortController.abort();
       void runner?.return?.();

@@ -96,6 +96,24 @@ describe('merge', () => {
     });
   });
 
+  it('emits available values without waiting for every source to emit first', async () => {
+    const never = createStream<number>('never', async function* () {
+      await new Promise(() => {});
+    });
+
+    const iterator = merge(from([1]), never)[Symbol.asyncIterator]();
+
+    const first = await Promise.race([
+      iterator.next(),
+      new Promise<IteratorResult<number>>((_, reject) =>
+        setTimeout(() => reject(new Error('timed out')), 50)
+      ),
+    ]);
+
+    expect(first).toEqual({ done: false, value: 1 });
+    await iterator.return?.();
+  });
+
   it('cleans up underlying iterators when the consumer stops early', async () => {
     const cleanupCalls: number[] = [];
 

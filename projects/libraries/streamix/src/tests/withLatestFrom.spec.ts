@@ -313,6 +313,28 @@ describe('withLatestFrom', () => {
     expect(results).toEqual([[2, 'A']]);
   });
 
+  it('completes when the source completes before an auxiliary emits', async () => {
+    const neverAux = createStream<string>('neverAux', async function* () {
+      await new Promise(() => {});
+    });
+    const results: any[] = [];
+
+    await Promise.race([
+      new Promise<void>((resolve, reject) => {
+        from([1, 2]).pipe(withLatestFrom(neverAux)).subscribe({
+          next: (value) => results.push(value),
+          complete: resolve,
+          error: reject,
+        });
+      }),
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error('timed out')), 50)
+      ),
+    ]);
+
+    expect(results).toEqual([]);
+  });
+
   it('supports auxiliary inputs that are plain values and promises', async () => {
     const mainStream = from([1, 2]);
     const combined = mainStream.pipe(withLatestFrom(100 as any, Promise.resolve('X') as any));

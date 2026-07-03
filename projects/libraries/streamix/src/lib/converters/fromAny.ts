@@ -31,10 +31,9 @@ export function fromAny<R = any>(
     // Await promise if needed
     const resolved = isPromiseLike(value) ? await value : value;
     const candidate = resolved as any;
-    
-    // Handle arrays, iterables, and async iterables - emit each element
-    if (Array.isArray(resolved)) {
-      for (const item of resolved) {
+
+    if (isStreamLike<R>(resolved)) {
+      for await (const item of resolved) {
         yield item;
       }
     } else if (candidate != null && typeof candidate[Symbol.asyncIterator] === 'function') {

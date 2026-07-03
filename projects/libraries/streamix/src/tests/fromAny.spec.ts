@@ -110,6 +110,21 @@ describe('fromAny', () => {
     expect(caughtError).toBe(error);
   });
 
+  it('should stream values from a promise that resolves to a stream', async () => {
+    const sourceStream = createStream('promised-stream', async function* () {
+      yield 1;
+      yield 2;
+    });
+    const result = fromAny(Promise.resolve(sourceStream) as any);
+
+    const values: number[] = [];
+    for await (const value of result) {
+      values.push(value);
+    }
+
+    expect(values).toEqual([1, 2]);
+  });
+
   it('should emit each element from a promise of array', async () => {
     const array = [1, 2, 3, 4, 5];
     const result = fromAny(array);

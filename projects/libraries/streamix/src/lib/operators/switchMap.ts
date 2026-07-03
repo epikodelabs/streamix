@@ -118,7 +118,20 @@ export function switchMap<T = any, R = any>(
       }
     };
 
-    const tryNext = (source as any).__tryNext as undefined | (() => IteratorResult<T> | null);
+    const sourceWithPush = source as AsyncIterator<T> & {
+      __tryNext?: () => IteratorResult<T> | null;
+      __onPush?: () => void;
+    };
+    const tryNext = sourceWithPush.__tryNext;
+    const originalOnPush = sourceWithPush.__onPush;
+    let wiredOnPush: (() => void) | undefined;
+
+    const restoreSourcePush = () => {
+      if (wiredOnPush && sourceWithPush.__onPush === wiredOnPush) {
+        sourceWithPush.__onPush = originalOnPush;
+      }
+      wiredOnPush = undefined;
+    };
 
     if (typeof tryNext === "function") {
       const drain = () => {
@@ -127,6 +140,7 @@ export function switchMap<T = any, R = any>(
           try {
             result = tryNext.call(source);
           } catch (err) {
+            restoreSourcePush();
             output.error(normalizeError(err));
             return;
           }
@@ -134,6 +148,7 @@ export function switchMap<T = any, R = any>(
           if (!result) return;
           if (result.done) {
             inputCompleted = true;
+            restoreSourcePush();
             checkComplete();
             return;
           }
@@ -142,7 +157,8 @@ export function switchMap<T = any, R = any>(
         }
       };
 
-      (source as any).__onPush = drain;
+      wiredOnPush = drain;
+      sourceWithPush.__onPush = wiredOnPush;
       drain();
     } else {
       void (async () => {
@@ -166,6 +182,7 @@ export function switchMap<T = any, R = any>(
 
     (outputIterator as any).return = async () => {
       stopped = true;
+      restoreSourcePush();
       try {
         try {
           await currentInner?.it.return?.();
@@ -182,6 +199,7 @@ export function switchMap<T = any, R = any>(
     (outputIterator as any).throw = async (err: any) => {
       const error = normalizeError(err);
       stopped = true;
+      restoreSourcePush();
       try {
         try {
           await currentInner?.it.return?.();

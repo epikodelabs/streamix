@@ -34,65 +34,28 @@ export function merge<T = any>(...sources: (Stream<T> | Promise<T>)[]): Stream<T
   const gen = async function* () {
     if (sources.length === 0) return;
 
-    const iterators = sources.map((source) => {
-      const resolved = fromAny<T>(source as any);
-      return resolved[Symbol.asyncIterator]() as AsyncIterator<T>;
-    });
-
-    // Track coordinator so the outer finally can clean it up even if it was
-    // created before an early return/throw.
-    let coordinator: ReturnType<typeof createAsyncCoordinator> | null = null;
+    const iterators = sources.map((source) =>
+      fromAny<T>(source as any)[Symbol.asyncIterator]() as AsyncIterator<T>
+    );
+    const coordinator = createAsyncCoordinator<T>(iterators);
 
     try {
-      const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));
-
-      const activeIterators: AsyncIterator<T>[] = [];
-
-      for (let i = 0; i < initialResults.length; i++) {
-        const settled = initialResults[i];
-        if (settled.status === 'rejected') {
-          throw normalizeError(settled.reason);
-        }
-
-        const result = settled.value;
-        if (result.done) {
-          continue;
-        }
-
-        yield result.value;
-        activeIterators.push(iterators[i]);
-      }
-
-      coordinator = createAsyncCoordinator(activeIterators);
-
       while (true) {
         const result = await coordinator.next();
         if (result.done) break;
 
         const event = result.value;
-        if (event.type === 'error') {
+        if (event.type === "error") {
           throw normalizeError(event.error);
         }
-        if (event.type === 'value') {
+        if (event.type === "value") {
           yield event.value;
         }
       }
     } finally {
-      // coordinator.return() cleans up iterators that were handed to it.
-      // For iterators that never made it into activeIterators (completed on
-      // first pull), call return() directly so no iterator leaks.
-      if (coordinator) {
-        await coordinator.return?.();
-      } else {
-        // Early exit before coordinator was created — clean up all iterators.
-        await Promise.all(
-          iterators.map((it) => {
-            try { return Promise.resolve(it.return?.()).catch(() => {}); } catch { return Promise.resolve(); }
-          })
-        );
-      }
+      await coordinator.return?.();
     }
   };
 
-  return createStream<T>('merge', gen);
+  return createStream<T>("merge", gen);
 }
