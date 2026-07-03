@@ -1,8 +1,7 @@
-import { createPushOperator, MaybePromise, type Operator } from "../atoms";
+import { createPushOperator, MaybePromise, normalizeError, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from '../factories';
 import { createAsyncCoordinator, type RunnerEvent } from '../utils';
-import { normalizeError } from "../atoms";
 
 /**
  * Creates a stream operator that maps each value from the source stream to an "inner" stream
@@ -43,7 +42,7 @@ export function mergeMap<T = any, R = any>(
 ) {
   return createPushOperator<T, R>('mergeMap', function (source, output) {
     let stopped = false;
-    const coordinator = createAsyncCoordinator([source]);
+    const coordinator = createAsyncCoordinator<T | R>([source as AsyncIterator<T | R>]);
 
     void (async () => {
       const SOURCE_INDEX = 0;
@@ -55,7 +54,7 @@ export function mergeMap<T = any, R = any>(
       const startInner = (value: T) => {
         const projected = project(value, projectIndex++);
         const inner = from(projected as any);
-        coordinator.addSource(inner[Symbol.asyncIterator]() as AsyncIterator<R>);
+        coordinator.addSource(inner[Symbol.asyncIterator]() as AsyncIterator<T | R>);
         pendingInners++;
       };
 

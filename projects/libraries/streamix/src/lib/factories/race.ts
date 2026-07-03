@@ -28,9 +28,9 @@ export function race<T extends readonly unknown[] = any[]>(
     const iterators = streams.map(s =>
       toAsyncIterable(s)[Symbol.asyncIterator]() as AsyncIterator<T[number]>
     );
-    const runner = createAsyncCoordinator(iterators);
+    const runner = createAsyncCoordinator<T[number]>(iterators);
 
-    let winnerIndex: number | null = null;
+    let hasWinner = false;
 
     try {
       while (true) {
@@ -44,27 +44,21 @@ export function race<T extends readonly unknown[] = any[]>(
           throw normalizeError(event.error);
         }
 
-        // 2. Identify the winner from the first real value or completion
-        if (winnerIndex === null) {
-          winnerIndex = event.sourceIndex;
-
-          // Once we have a winner, tell the runner to stop polling the others
-          // by calling return on the losers. Await all cleanups so resources
-          // are freed before we continue yielding from the winner.
+        // 2. Identify the winner from the first real value or completion.
+        if (!hasWinner) {
+          hasWinner = true;
           await Promise.all(
-            iterators.map((it, idx) =>
-              idx !== winnerIndex ? it.return?.().catch(() => {}) : null
+            iterators.map((_, idx) =>
+              idx !== event.sourceIndex ? runner.removeSource(idx) : undefined
             )
           );
         }
 
-        // 3. Only process events from the winner
-        if (winnerIndex !== null && event.sourceIndex === winnerIndex) {
-          if (event.type === 'value') {
-            yield event.value;
-          } else if (event.type === 'complete') {
-            break;
-          }
+        // Loser events queued before the winner was selected are pruned by removeSource().
+        if (event.type === 'value') {
+          yield event.value;
+        } else if (event.type === 'complete') {
+          break;
         }
       }
     } finally {

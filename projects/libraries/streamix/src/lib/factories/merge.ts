@@ -38,14 +38,10 @@ export function merge<T = any>(...sources: PipeInput<T>[]): Atom<T> {
     const iterators = sources.map((source) =>
       toAsyncIterable(source)[Symbol.asyncIterator]() as AsyncIterator<T>
     );
-
-    // Track coordinator so the outer finally can clean it up even if it was
-    // created before an early return/throw.
-    let coordinator: ReturnType<typeof createAsyncCoordinator> | null = null;
+    let coordinator: ReturnType<typeof createAsyncCoordinator<T>> | null = null;
 
     try {
       const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));
-
       const activeIterators: AsyncIterator<T>[] = [];
 
       for (let i = 0; i < initialResults.length; i++) {
@@ -55,15 +51,13 @@ export function merge<T = any>(...sources: PipeInput<T>[]): Atom<T> {
         }
 
         const result = settled.value;
-        if (result.done) {
-          continue;
-        }
+        if (result.done) continue;
 
         yield result.value;
         activeIterators.push(iterators[i]);
       }
 
-      coordinator = createAsyncCoordinator(activeIterators);
+      coordinator = createAsyncCoordinator<T>(activeIterators);
 
       while (true) {
         const result = await coordinator.next();
@@ -78,16 +72,16 @@ export function merge<T = any>(...sources: PipeInput<T>[]): Atom<T> {
         }
       }
     } finally {
-      // coordinator.return() cleans up iterators that were handed to it.
-      // For iterators that never made it into activeIterators (completed on
-      // first pull), call return() directly so no iterator leaks.
       if (coordinator) {
         await coordinator.return?.();
       } else {
-        // Early exit before coordinator was created — clean up all iterators.
         await Promise.all(
-          iterators.map((it) => {
-            try { return Promise.resolve(it.return?.()).catch(() => {}); } catch { return Promise.resolve(); }
+          iterators.map((iterator) => {
+            try {
+              return Promise.resolve(iterator.return?.()).catch(() => {});
+            } catch {
+              return Promise.resolve();
+            }
           })
         );
       }

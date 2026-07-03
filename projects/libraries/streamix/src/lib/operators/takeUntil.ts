@@ -25,9 +25,25 @@ export function takeUntil<T = any, N = any>(
 ): Operator<T, T> {
   return createOperator<T, T>("takeUntil", function (source: AsyncIterator<T>) {
     const notifierIt = from(notifier)[Symbol.asyncIterator]();
-    const runner = createAsyncCoordinator([source, notifierIt]);
+    const runner = createAsyncCoordinator<T | N>([
+      source as AsyncIterator<T | N>,
+      notifierIt as AsyncIterator<T | N>
+    ]);
+    const SOURCE_INDEX = 0;
 
     let isDone = false;
+
+    const close = async () => {
+      isDone = true;
+      await runner.return?.();
+      return DONE;
+    };
+
+    const closeSync = () => {
+      isDone = true;
+      runner.return?.().catch(() => {});
+      return DONE;
+    };
 
     const iterator: AsyncIterator<T> & {
       __tryNext?: () => IteratorResult<T> | null;
@@ -40,39 +56,24 @@ export function takeUntil<T = any, N = any>(
           const result = await runner.next();
           
           if (result.done) {
-            // Both sources completed - this means notifier never emitted and source is done
             isDone = true;
             return DONE;
           }
 
           const event = result.value;
-          
-          switch (event.type) {
-            case 'value':
-              if (event.sourceIndex === 0) {
-                // Source value - forward it (preserving dropped flag)
-                return NEXT(event.value);
-              }
-              // Notifier emitted - stop immediately
-              isDone = true;
-              await notifierIt.return?.();
-              return DONE;
-              
-            case 'complete':
-              if (event.sourceIndex === 0) {
-                // Source completed normally - we're done
-                isDone = true;
-                return DONE;
-              } else {
-                // Notifier completed without emitting - ignore, keep taking from source
-                // Just continue
-              }
-              break;
-              
-            case 'error':
-              isDone = true;
-              throw normalizeError(event.error);
+
+          if (event.type === 'error') {
+            await close();
+            throw normalizeError(event.error);
           }
+
+          if (event.type === 'complete') {
+            if (event.sourceIndex === SOURCE_INDEX) return close();
+            continue;
+          }
+
+          if (event.sourceIndex === SOURCE_INDEX) return NEXT(event.value as T);
+          return close();
         }
       },
 
@@ -85,45 +86,30 @@ export function takeUntil<T = any, N = any>(
           if (!result || result.done) break;
 
           const event = result.value;
-          
-          switch (event.type) {
-            case 'value':
-              if (event.sourceIndex === 0) {
-                return NEXT(event.value);
-              }
-              isDone = true;
-              // Can't await in sync method, but we can schedule cleanup
-              notifierIt.return?.().catch(() => {});
-              return DONE;
-              
-            case 'complete':
-              if (event.sourceIndex === 0) {
-                isDone = true;
-                return DONE;
-              }
-              // Ignore notifier completion
-              break;
-              
-            case 'error':
-              isDone = true;
-              throw normalizeError(event.error);
+
+          if (event.type === 'error') {
+            closeSync();
+            throw normalizeError(event.error);
           }
+
+          if (event.type === 'complete') {
+            if (event.sourceIndex === SOURCE_INDEX) return closeSync();
+            continue;
+          }
+
+          if (event.sourceIndex === SOURCE_INDEX) return NEXT(event.value as T);
+          return closeSync();
         }
         
         return isDone ? DONE : null;
       },
 
-      __hasBufferedValues: () => {
-        return runner.__hasBufferedValues?.() ?? false;
-      },
+      __hasBufferedValues: () => runner.__hasBufferedValues?.() ?? false,
 
       async return(value?: any) {
         if (isDone) return value !== undefined ? { value, done: true } : DONE;
         isDone = true;
-        
-        // Clean up both iterators
         await runner.return?.();
-        await notifierIt.return?.();
         
         return value !== undefined ? { value, done: true } : DONE;
       },
@@ -132,9 +118,7 @@ export function takeUntil<T = any, N = any>(
         const error = normalizeError(err);
         if (isDone) return Promise.reject(error);
         isDone = true;
-        
-        await runner.throw?.(error);
-        await notifierIt.return?.();
+        await runner.return?.();
         
         return Promise.reject(error);
       }

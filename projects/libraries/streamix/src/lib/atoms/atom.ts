@@ -798,10 +798,9 @@ export function flow<T>(
 
   const iterable: AsyncIterable<T> = {
     [Symbol.asyncIterator]() {
-      let generation = 0;
       let controller: AbortController | undefined;
       let coordinator: AsyncCoordinator<T>;
-      const sourceGeneration = new Map<number, number>();
+      let activeSourceIndex = 0;
       let stopped = false;
 
       const makeSource = (): AsyncIterator<T> => {
@@ -825,12 +824,11 @@ export function flow<T>(
           cleanupDeps = watchDependencies(context.dependencies, () => {
             if (stopped) return;
 
-            generation++;
             controller?.abort();
+            void coordinator.removeSource(activeSourceIndex);
 
             const nextSource = makeSource();
-            const index = coordinator.addSource(nextSource);
-            sourceGeneration.set(index, generation);
+            activeSourceIndex = coordinator.addSource(nextSource);
           });
 
           signal.addEventListener("abort", () => cleanupDeps?.(), { once: true });
@@ -853,8 +851,7 @@ export function flow<T>(
       };
 
       const firstSource = makeSource();
-      coordinator = createAsyncCoordinator([firstSource], { syncDrain: true });
-      sourceGeneration.set(0, generation);
+      coordinator = createAsyncCoordinator<T>([firstSource], { syncDrain: true });
 
       const iterator: AsyncIterator<T> = {
         async next() {
@@ -864,11 +861,6 @@ export function flow<T>(
             if (event.done) return DONE;
 
             const item = event.value;
-            const itemGeneration = sourceGeneration.get(item.sourceIndex);
-
-            if (itemGeneration !== generation) {
-              continue;
-            }
 
             if (item.type === "value") {
               return NEXT(item.value);
@@ -1301,8 +1293,7 @@ export function derived<T>(...args: any[]): Atom<T> {
 
   let asyncCoordinator: AsyncCoordinator<T> | undefined;
   let asyncController: AbortController | undefined;
-  let asyncGeneration = 0;
-  const asyncSourceGeneration = new Map<number, number>();
+  let asyncSourceIndex: number | undefined;
   let asyncReaderStarted = false;
 
   const broadcast = () => subs.broadcast(current, previous);
@@ -1380,11 +1371,6 @@ export function derived<T>(...args: any[]): Atom<T> {
           if (disposed || result.done) break;
 
           const event = result.value;
-          const eventGeneration = asyncSourceGeneration.get(event.sourceIndex);
-
-          if (eventGeneration !== asyncGeneration) {
-            continue;
-          }
 
           if (event.type === 'value') {
             isErrorState = false;
@@ -1417,17 +1403,19 @@ export function derived<T>(...args: any[]): Atom<T> {
     ownerGeneration: number,
   ) => {
     asyncController?.abort();
+    if (asyncCoordinator && asyncSourceIndex !== undefined) {
+      void asyncCoordinator.removeSource(asyncSourceIndex);
+    }
+
     asyncController = new AbortController();
 
-    const sourceGeneration = ++asyncGeneration;
     const source = promiseSource(promise, asyncController.signal);
 
     if (!asyncCoordinator) {
-      asyncCoordinator = createAsyncCoordinator([source], { syncDrain: true });
-      asyncSourceGeneration.set(0, sourceGeneration);
+      asyncCoordinator = createAsyncCoordinator<T>([source], { syncDrain: true });
+      asyncSourceIndex = 0;
     } else {
-      const index = asyncCoordinator.addSource(source);
-      asyncSourceGeneration.set(index, sourceGeneration);
+      asyncSourceIndex = asyncCoordinator.addSource(source);
     }
 
     promise
@@ -1610,7 +1598,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       asyncController?.abort();
       void asyncCoordinator?.return?.();
       asyncCoordinator = undefined;
-      asyncSourceGeneration.clear();
+      asyncSourceIndex = undefined;
 
       for (const sub of depSubscriptions.values()) sub();
       depSubscriptions.clear();

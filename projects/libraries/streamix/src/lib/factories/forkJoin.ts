@@ -55,7 +55,7 @@ export function forkJoin<R extends readonly unknown[] = any[]>(
       toAsyncIterable(source as PipeInput<R[number]>)[Symbol.asyncIterator]() as AsyncIterator<R[number]>
     );
 
-    const coordinator = createAsyncCoordinator(iterators);
+    const coordinator = createAsyncCoordinator<R[number]>(iterators);
     let completedCount = 0;
 
     try {

@@ -25,7 +25,7 @@ export function combineLatest<T extends unknown[] = any[]>(
     const iterators = sources.map((s) =>
       toAsyncIterable(s)[Symbol.asyncIterator]() as AsyncIterator<T[number]>
     );
-    const runner = createAsyncCoordinator(iterators);
+    const runner = createAsyncCoordinator<T[number]>(iterators);
 
     const latestValues = new Array(sources.length).fill(undefined);
     const hasEmitted = new Set<number>();

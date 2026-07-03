@@ -1,8 +1,7 @@
-import { createOperator, DONE, type Operator } from "../atoms";
+import { createOperator, DONE, normalizeError, type Operator } from "../atoms";
 import type { PipeInput } from "../atoms/pipe";
 import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
-import { normalizeError } from "../atoms";
 
 /**
  * Buffers values from the source iterator until the notifier emits.
@@ -17,7 +16,10 @@ import { normalizeError } from "../atoms";
 export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
   createOperator<T, T[]>("bufferUntil", function (this: Operator, source: AsyncIterator<T>) {
     const notifierIt = from(notifier)[Symbol.asyncIterator]();
-    const runner = createAsyncCoordinator([source, notifierIt]);
+    const runner = createAsyncCoordinator<T | N>([
+      source as AsyncIterator<T | N>,
+      notifierIt as AsyncIterator<T | N>
+    ]);
 
     // Buffered source values
     let buffer: T[] = [];
@@ -43,9 +45,15 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
       return { value: values, done: false };
     };
 
-    const finish = async () => {
-      if (cancelled || sourceCompleted) return;
-      sourceCompleted = true;
+    const close = () => {
+      if (cancelled) return;
+      cancelled = true;
+      runner.return?.().catch(() => {});
+    };
+
+    const closeAsync = async () => {
+      if (cancelled) return;
+      cancelled = true;
       try {
         await runner.return?.();
       } catch {}
@@ -88,6 +96,7 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
 
           if (runnerResult.done) {
             // Flush any remaining buffered values when runner completes
+            sourceCompleted = true;
             return flushBuffer();
           }
 
@@ -108,18 +117,14 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
               // Source completed: flush buffer if any, then finish
               if (event.sourceIndex === 0) {
                 sourceCompleted = true;
+                await closeAsync();
                 if (buffer.length > 0) return flushBuffer();
-                await finish();
                 return DONE;
               }
               break;
 
             case "error":
-              // Propagate error and cancel iterator
-              cancelled = true;
-              try {
-                await runner.return?.();
-              } catch {}
+              await closeAsync();
               throw normalizeError(event.error);
           }
         }
@@ -133,10 +138,7 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
        */
       async return(value?: any) {
         if (cancelled) return value !== undefined ? { value, done: true } : DONE;
-        cancelled = true;
-        try {
-          await runner.return?.();
-        } catch {}
+        await closeAsync();
         return value !== undefined ? { value, done: true } : DONE;
       },
 
@@ -149,10 +151,7 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
       async throw(err?: any) {
         const error = normalizeError(err);
         if (cancelled) return Promise.reject(error);
-        cancelled = true;
-        try {
-          await runner.throw?.(error);
-        } catch {}
+        await closeAsync();
         return Promise.reject(error);
       },
 
@@ -170,7 +169,10 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
           const runnerResult = runner.__tryNext();
           if (!runnerResult) return null;
 
-          if (runnerResult.done) return flushBuffer();
+          if (runnerResult.done) {
+            sourceCompleted = true;
+            return flushBuffer();
+          }
 
           const event = runnerResult.value;
 
@@ -186,15 +188,14 @@ export const bufferUntil = <T = any, N = any>(notifier: PipeInput<N>) =>
             case "complete":
               if (event.sourceIndex === 0) {
                 sourceCompleted = true;
+                close();
                 if (buffer.length > 0) return flushBuffer();
-                runner.return?.().catch(() => {});
                 return DONE;
               }
               break;
 
             case "error":
-              cancelled = true;
-              runner.return?.().catch(() => {});
+              close();
               throw normalizeError(event.error);
           }
         }

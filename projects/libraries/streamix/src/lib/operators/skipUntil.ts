@@ -30,37 +30,48 @@ export function skipUntil<T = any, N = any>(
 ): Operator<T, T> {
   return createOperator<T, T>("skipUntil", function (source: AsyncIterator<T>) {
     const notifierIt = from(notifier)[Symbol.asyncIterator]();
-    const runner = createAsyncCoordinator([source, notifierIt]);
+    const runner = createAsyncCoordinator<T | N>([
+      source as AsyncIterator<T | N>,
+      notifierIt as AsyncIterator<T | N>
+    ]);
+    const SOURCE_INDEX = 0;
+    const NOTIFIER_INDEX = 1;
 
     let gateOpened = false;
     let droppingBacklog = false;
     let isDone = false;
 
+    const close = () => {
+      isDone = true;
+      runner.return?.().catch(() => {});
+    };
+
     const handleEvent = (event: any): IteratorResult<T> | null => {
       if (event.type === 'error') {
-        isDone = true;
+        close();
         throw normalizeError(event.error);
       }
 
       if (event.type === 'complete') {
-        if (event.sourceIndex === 0) {
-          isDone = true;
+        if (event.sourceIndex === SOURCE_INDEX) {
+          close();
           return DONE;
         }
         // Notifier completing without emission is handled by gateOpened remaining false
         return null;
       }
 
-      if (event.sourceIndex === 1) {
+      if (event.sourceIndex === NOTIFIER_INDEX) {
         // Notifier emitted: open the gate
         if (!gateOpened) {
           gateOpened = true;
           droppingBacklog = !!(source as any).__hasBufferedValues?.();
+          runner.removeSource(NOTIFIER_INDEX).catch(() => {});
         }
         return null;
       }
 
-      // Source value (sourceIndex === 0)
+      // Source value
       if (gateOpened && droppingBacklog) {
         // Drop values that were already buffered before the gate opened.
         droppingBacklog = !!(source as any).__hasBufferedValues?.();
@@ -68,7 +79,7 @@ export function skipUntil<T = any, N = any>(
       }
 
       if (gateOpened) {
-        return NEXT(event.value);
+        return NEXT(event.value as T);
       }
 
       // Gate not yet open — skip this value and continue waiting.
@@ -89,7 +100,10 @@ export function skipUntil<T = any, N = any>(
 
           // 2. Wait for runner
           const result = await runner.next();
-          if (result.done) return DONE;
+          if (result.done) {
+            isDone = true;
+            return DONE;
+          }
 
           const out = handleEvent(result.value);
           if (out) return out;

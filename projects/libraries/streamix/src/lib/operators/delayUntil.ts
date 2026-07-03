@@ -1,13 +1,13 @@
 import {
-    Atom,
-    createOperator,
-    DONE,
-    NEXT,
-    type Operator
+  Atom,
+  createOperator,
+  DONE,
+  NEXT,
+  normalizeError,
+  type Operator
 } from "../atoms";
 import { from } from "../factories";
 import { createAsyncCoordinator } from "../utils";
-import { normalizeError } from "../atoms";
 
 /**
  * Delay values from the source until a notifier emits.
@@ -41,12 +41,22 @@ export function delayUntil<T = any, N = any>(
 ): Operator<T, T> {
   return createOperator<T, T>("delayUntil", function (source: AsyncIterator<T>) {
     const notifierIt = from(notifier)[Symbol.asyncIterator]();
-    const runner = createAsyncCoordinator([notifierIt, source]);
+    const runner = createAsyncCoordinator<T | N>([
+      notifierIt as AsyncIterator<T | N>,
+      source as AsyncIterator<T | N>
+    ]);
+    const NOTIFIER_INDEX = 0;
+    const SOURCE_INDEX = 1;
 
     const buffer: T[] = [];
     let gateOpened = false;
     let isDone = false;
     let sourceCompleted = false;
+
+    const close = () => {
+      isDone = true;
+      runner.return?.().catch(() => {});
+    };
 
     /**
      * Internal logic to handle events from the runner.
@@ -54,12 +64,12 @@ export function delayUntil<T = any, N = any>(
      */
     const handleEvent = (event: any): IteratorResult<T> | null => {
       if (event.type === 'error') {
-        isDone = true;
+        close();
         throw normalizeError(event.error);
       }
 
       if (event.type === 'complete') {
-        if (event.sourceIndex === 1) {
+        if (event.sourceIndex === SOURCE_INDEX) {
           // Source completed
           sourceCompleted = true;
           if (gateOpened) {
@@ -72,25 +82,26 @@ export function delayUntil<T = any, N = any>(
           // Notifier completed without ever emitting - discard buffer
           if (!gateOpened) {
             buffer.length = 0;
-            isDone = true;
+            close();
             return DONE;
           }
           return null;
         }
       }
 
-      if (event.sourceIndex === 1) {
+      if (event.sourceIndex === SOURCE_INDEX) {
         if (gateOpened) {
           // Gate is open - forward immediately
-          return NEXT(event.value);
+          return NEXT(event.value as T);
         } else {
           // Gate is closed - buffer
-          buffer.push(event.value);
+          buffer.push(event.value as T);
         }
       } else {
         // Notifier emitted - open the gate (even if it's the first and only emission)
         if (!gateOpened) {
           gateOpened = true;
+          runner.removeSource(NOTIFIER_INDEX).catch(() => {});
           // Immediately try to flush one buffered value
           return iterator.flushOne!();
         }
@@ -115,7 +126,7 @@ export function delayUntil<T = any, N = any>(
 
           // 2. If source completed and gate opened, but buffer is empty, we're done
           if (sourceCompleted && gateOpened && buffer.length === 0) {
-            isDone = true;
+            close();
             return DONE;
           }
 
@@ -123,12 +134,12 @@ export function delayUntil<T = any, N = any>(
           const result = await runner.next();
           if (result.done) {
             // Runner completed - this means both sources are done
-            isDone = true;
             // Flush any remaining buffered values if gate was opened
             if (gateOpened && buffer.length > 0) {
               const flushed = this.flushOne!();
               if (flushed) return flushed;
             }
+            isDone = true;
             return DONE;
           }
 
@@ -148,7 +159,7 @@ export function delayUntil<T = any, N = any>(
 
         // 2. If source completed and gate opened, but buffer is empty
         if (sourceCompleted && gateOpened && buffer.length === 0) {
-          isDone = true;
+          close();
           return DONE;
         }
 
@@ -188,7 +199,7 @@ export function delayUntil<T = any, N = any>(
       async throw(err) {
         const error = normalizeError(err);
         isDone = true;
-        await runner.throw?.(error);
+        await runner.return?.();
         return Promise.reject(error);
       }
     };

@@ -60,7 +60,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = readonly 
 
   return createPushOperator<T, [T, ...R]>("withLatestFrom", (source, output) => {
     const abortController = new AbortController();
-    let runner: ReturnType<typeof createAsyncCoordinator> | null = null;
+    let runner: ReturnType<typeof createAsyncCoordinator<T | R[number]>> | null = null;
     let isSettled = false;
 
     void (async () => {
@@ -78,7 +78,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = readonly 
 
         // 2. Initialize iterators and track baseline structural dimensions
         const auxIterators = resolvedAux.map((input) =>
-          toAsyncIterable(input as any)[Symbol.asyncIterator]()
+          toAsyncIterable(input as any)[Symbol.asyncIterator]() as AsyncIterator<T | R[number]>
         );
         const latestValues = new Array(auxIterators.length).fill(undefined);
         const hasValue = new Array(auxIterators.length).fill(false);
@@ -115,7 +115,10 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = readonly 
         }
 
         // 4. Build coordinate multiplexer mapping across source and side channels.
-        runner = createAsyncCoordinator([...auxIterators, source]);
+        runner = createAsyncCoordinator<T | R[number]>([
+          ...auxIterators,
+          source as AsyncIterator<T | R[number]>
+        ]);
         const sourceIndex = auxIterators.length;
 
         // 6. Core Coordinator Event Processing Loop
