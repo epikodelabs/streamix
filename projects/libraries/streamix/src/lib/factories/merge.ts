@@ -1,7 +1,7 @@
+import { normalizeError } from "../atoms";
 import { flow, type Atom } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 import { createAsyncCoordinator } from "../utils";
-import { normalizeError } from "../atoms";
 
 /**
  * Merges multiple source streams into a single atom, emitting values as they arrive from any source.
@@ -46,11 +46,12 @@ export function merge<T = any>(...sources: PipeInput<T>[]): Atom<T> {
         if (result.done) break;
 
         const event = result.value;
-        if (event.type === 'error') {
-          throw normalizeError(event.error);
-        }
-        if (event.type === 'value') {
-          yield event.value;
+        switch (event.type) {
+          case 'value':
+            yield event.value;
+            break;
+          case 'error':
+            throw normalizeError(event.error);
         }
       }
     } finally {

@@ -1,7 +1,7 @@
+import { normalizeError } from "../atoms";
 import { flow, type Atom } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 import { createAsyncCoordinator } from "../utils";
-import { normalizeError } from "../atoms";
 
 /**
  * Combines multiple sources and emits a tuple containing the latest values
@@ -52,6 +52,12 @@ export function combineLatest<T extends unknown[] = any[]>(
 
           case "complete":
             completedCount++;
+            // If a source completes without ever emitting a value,
+            // it's impossible to ever produce a combination.
+            if (!hasEmitted.has(event.sourceIndex)) {
+              // Force completion of the whole operator.
+              completedCount = sources.length;
+            }
             break;
 
           case "error":

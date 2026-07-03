@@ -1,6 +1,7 @@
+import { normalizeError } from '../atoms';
 import { flow, type Atom } from '../atoms/atom';
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
-import { normalizeError } from "../atoms";
+import { createAsyncCoordinator } from '../utils';
 
 /**
  * Combine multiple sources into a single atom that emits arrays of the latest values
@@ -18,46 +19,46 @@ export function zip<T extends readonly unknown[] = any[]>(
     if (sources.length === 0) return;
 
     const iterators = sources.map((source) =>
-      toAsyncIterable(source)[Symbol.asyncIterator]() as AsyncIterator<T[number]>
+      toAsyncIterable(source)[Symbol.asyncIterator]()
     );
+    const runner = createAsyncCoordinator<T[number]>(iterators);
 
     try {
       while (true) {
-        // Pull from all iterators; if any completes, cancel the rest immediately
-        const results = await Promise.allSettled(iterators.map(it => it.next()));
+        const tuple = new Array(iterators.length);
+        const seen = new Set<number>();
+        let isComplete = false;
 
-        let completed = false;
-        const values: T[number][] = [];
-        for (let i = 0; i < results.length; i++) {
-          const r = results[i];
-          if (r.status === 'rejected') {
-            // Propagate first rejection, cancel others first
-            await Promise.all(iterators.map((it, j) =>
-              j !== i ? it.return?.(undefined).catch(() => { }) : Promise.resolve()
-            ));
-            throw normalizeError(r.reason);
-          }
-          if (r.value.done) {
-            completed = true;
+        while (seen.size < iterators.length) {
+          const result = await runner.next();
+          if (result.done) {
+            isComplete = true;
             break;
           }
-          values.push(r.value.value);
+
+          const event = result.value;
+          if (seen.has(event.sourceIndex)) continue;
+
+          if (event.type === 'error') {
+            throw normalizeError(event.error);
+          }
+          if (event.type === 'complete') {
+            isComplete = true;
+            break;
+          }
+
+          tuple[event.sourceIndex] = event.value;
+          seen.add(event.sourceIndex);
         }
 
-        if (completed) {
-          // Cancel any pending iterators that haven't resolved yet
-          await Promise.all(
-            iterators.map(it => it.return?.(undefined).catch(() => { }))
-          );
+        if (isComplete) {
           break;
         }
 
-        yield values as unknown as T;
+        yield tuple as unknown as T;
       }
     } finally {
-      await Promise.all(
-        iterators.map(it => (typeof it.return === 'function' ? it.return(undefined).catch(() => { }) : Promise.resolve()))
-      );
+      await runner.return?.();
     }
   });
 }
