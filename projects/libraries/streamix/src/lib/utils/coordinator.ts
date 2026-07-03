@@ -151,8 +151,14 @@ export function createAsyncCoordinator<T = any>(
   // Optional key -> source iterator mapping for reference-based removal.
   const keyToSource = new Map<any, AsyncIterator<T>>();
 
+  /** Checks if all sources are completed. */
   const allDone = () => activeCount === 0;
 
+  /**
+   * Pushes a runner event to the coordinator's queue.
+   * @param event The event to push.
+   * @param sourceIndex The index of the source that generated the event.
+   */
   function pushEvent(event: RunnerEvent<T>, sourceIndex: number) {
     queue.push({
       result: NEXT(event),
@@ -160,6 +166,10 @@ export function createAsyncCoordinator<T = any>(
     });
   }
 
+  /**
+   * Removes all queued events from a specific source.
+   * @param sourceIndex The index of the source whose events should be removed.
+   */
   function removeQueuedEvents(sourceIndex: number) {
     for (let i = queue.length - 1; i >= 0; i--) {
       if (queue[i].sourceIndex === sourceIndex) {
@@ -168,6 +178,10 @@ export function createAsyncCoordinator<T = any>(
     }
   }
 
+  /**
+   * Marks a source as complete and decrements the active count.
+   * @param index The index of the source to mark as complete.
+   */
   function markSourceComplete(index: number) {
     if (!completed[index]) {
       completed[index] = true;
@@ -175,6 +189,10 @@ export function createAsyncCoordinator<T = any>(
     }
   }
 
+  /**
+   * Removes the key associated with a source iterator.
+   * @param source The source iterator to remove from the key map.
+   */
   function removeSourceKey(source: AsyncIterator<T>) {
     for (const [key, mappedSource] of keyToSource.entries()) {
       if (mappedSource === source) {
@@ -183,6 +201,11 @@ export function createAsyncCoordinator<T = any>(
     }
   }
 
+  /**
+   * Detaches a source from the coordinator, cleaning up its state.
+   * @param index The index of the source to detach.
+   * @returns The detached source iterator, or null if not found.
+   */
   function detachSource(index: number): AsyncIterator<T> | null {
     if (index < 0 || index >= sourceList.length) return null;
 
@@ -200,7 +223,12 @@ export function createAsyncCoordinator<T = any>(
     return source;
   }
 
-  function safeReturnSource(source: AsyncIterator<T>, label: string): Promise<void> {
+  /**
+   * Safely calls the `return()` method on a source iterator, ignoring errors.
+   * @param source The source iterator to return.
+   * @returns A promise that resolves when the source has been returned.
+   */
+  function safeReturnSource(source: AsyncIterator<T>): Promise<void> {
     if (!source.return) return Promise.resolve();
 
     try {
@@ -208,13 +236,15 @@ export function createAsyncCoordinator<T = any>(
         () => undefined,
         () => undefined
       );
-    } catch (err) {
-      void label;
-      normalizeError(err);
+    } catch {
       return Promise.resolve();
     }
   }
 
+  /**
+   * Notifies a waiting consumer that a new event is available or all sources
+   * are complete.
+   */
   function notify() {
     if (batchDepth > 0) {
       return;
@@ -234,6 +264,10 @@ export function createAsyncCoordinator<T = any>(
     }
   }
 
+  /**
+   * Asynchronously pulls the next value from a source.
+   * @param i The index of the source to pull from.
+   */
   function pullAsync(i: number) {
     // CRITICAL: Don't start a new pull if already pulling, completed, removed, or returned
     if (!sourceList[i] || completed[i] || pulling[i] || iteratorReturned) return;
@@ -276,6 +310,10 @@ export function createAsyncCoordinator<T = any>(
     );
   }
 
+  /**
+   * Drains a single event from one source, using `__tryNext` if available.
+   * @param i The index of the source to drain.
+   */
   function drainOneSource(i: number) {
     if (!sourceList[i] || completed[i] || iteratorReturned) return;
 
@@ -305,6 +343,9 @@ export function createAsyncCoordinator<T = any>(
     }
   }
 
+  /**
+   * Drains one event from all active sources.
+   */
   function drainSources() {
     // CRITICAL: Prevent recursive drains
     if (isDraining || iteratorReturned) return;
@@ -326,7 +367,11 @@ export function createAsyncCoordinator<T = any>(
     notify();
   }
 
-  // Wire up push notifications for a source
+  /**
+   * Wires up a source's `__onPush` handler to trigger a drain.
+   * @param src The source iterator.
+   * @param index The index of the source.
+   */
   function wireSource(src: AsyncIterator<T> & { __onPush?: () => void }, index: number) {
     const orig = src.__onPush;
     const wired = () => {
@@ -341,6 +386,11 @@ export function createAsyncCoordinator<T = any>(
     src.__onPush = wired;
   }
 
+  /**
+   * Restores the original `__onPush` handler for a source.
+   * @param src The source iterator.
+   * @param index The index of the source.
+   */
   function restoreSource(src: AsyncIterator<T>, index: number) {
     const source = src as AsyncIterator<T> & { __onPush?: () => void };
     if (source.__onPush === wiredPushHandlers[index]) {
@@ -414,7 +464,7 @@ export function createAsyncCoordinator<T = any>(
       await Promise.all(
         sourceList
           .filter((source): source is AsyncIterator<T> => source !== null)
-          .map(source => safeReturnSource(source, 'Coordinator source return error'))
+          .map(source => safeReturnSource(source))
       );
 
       if (waitingResolve) {
@@ -481,7 +531,7 @@ export function createAsyncCoordinator<T = any>(
       const source = detachSource(index);
       if (!source) return;
 
-      await safeReturnSource(source, 'Coordinator removeSource error');
+      await safeReturnSource(source);
 
       // Notify in case we're waiting and all sources are now done
       notify();
@@ -557,23 +607,14 @@ export function createAsyncCoordinator<T = any>(
   return iterator as AsyncCoordinator<T>;
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
- * Execution Coordinator
- * ───────────────────────────────────────────────────────────────────────────*/
-
 /**
- * A single reactive execution that can be started and cancelled by a
- * {@link Coordinator}.
+ * Gets an iterator from an iterable object.
+ * Supports both synchronous and asynchronous iterables.
+ *
+ * @param iterable The iterable to get an iterator from.
+ * @returns An `AsyncIterator` or `Iterator`.
+ * @throws If the provided object is not iterable.
  */
-export interface Execution<T> {
-  /**
-   * Start the execution. The returned iterable will be consumed by the
-   * coordinator. The coordinator guarantees that only one execution is active
-   * at a time; when it needs to restart, it aborts the previous signal first.
-   */
-  run(signal: AbortSignal): AsyncIterable<T> | Iterable<T>;
-}
-
 export function getIterator<T>(iterable: AsyncIterable<T> | Iterable<T>): AsyncIterator<T> | Iterator<T> {
   const asyncIter = (iterable as any)[Symbol.asyncIterator];
   if (asyncIter) return asyncIter.call(iterable);
@@ -582,6 +623,10 @@ export function getIterator<T>(iterable: AsyncIterable<T> | Iterable<T>): AsyncI
   throw new Error("Source is not iterable");
 }
 
+/**
+ * Races an iterator's `next()` call against an `AbortSignal`.
+ * If the signal is aborted, the promise resolves with a `done: true` result.
+ */
 export function raceNext<T>(
   iterator: AsyncIterator<T> | Iterator<T>,
   signal: AbortSignal
