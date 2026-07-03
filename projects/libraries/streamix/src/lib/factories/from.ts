@@ -30,6 +30,7 @@ export function from<R = any>(
   let resolved = false;
   let error: any = undefined;
   let pendingResolution: Promise<void> | undefined;
+  let asyncSource: AsyncIterable<R> | undefined;
 
   const resolveItems = async () => {
     if (resolved) return;
@@ -45,9 +46,7 @@ export function from<R = any>(
             items.push(isPromiseLike(item) ? await item : item);
           }
         } else if (candidate != null && isAsyncIterable(resolvedValue) && typeof resolvedValue !== "string") {
-          for await (const item of resolvedValue as AsyncIterable<R>) {
-            items.push(item);
-          }
+          asyncSource = resolvedValue as AsyncIterable<R>;
         } else if (candidate != null && isIterable(resolvedValue) && typeof resolvedValue !== "string") {
           for (const item of resolvedValue as Iterable<R>) {
             items.push(isPromiseLike(item) ? await item : item);
@@ -71,6 +70,10 @@ export function from<R = any>(
   const streamProvider = async function* (_signal?: AbortSignal) {
     await resolveItems();
     if (error) throw error;
+    if (asyncSource) {
+      yield* asyncSource;
+      return;
+    }
     for (const item of items) {
       yield item;
     }
@@ -83,7 +86,7 @@ export function from<R = any>(
   const originalSubscribe = innerFlow.subscribe.bind(innerFlow);
   innerFlow.subscribe = (callback?: (value: R) => MaybePromise) => {
     if (innerFlow.disposed) {
-      if (!error) {
+      if (!error && !asyncSource) {
         for (const item of items) {
           try {
             callback?.(item);
@@ -105,17 +108,27 @@ export function from<R = any>(
   innerFlow[Symbol.asyncIterator] = function (): AsyncIterator<R> {
     let index = 0;
     let done = false;
+    let asyncIterator: AsyncIterator<R> | undefined;
 
     return {
       async next(): Promise<IteratorResult<R>> {
         await resolveItems();
         if (error) throw error;
+        if (asyncSource) {
+          asyncIterator ??= asyncSource[Symbol.asyncIterator]();
+          return asyncIterator.next();
+        }
         if (done) return { value: undefined as any, done: true };
         if (index < items.length) {
           return { value: items[index++], done: false };
         }
         done = true;
         return { value: undefined as any, done: true };
+      },
+      async return(value?: any) {
+        done = true;
+        await asyncIterator?.return?.();
+        return value !== undefined ? { value, done: true } : { value: undefined as any, done: true };
       },
     } as AsyncIterator<R>;
   };

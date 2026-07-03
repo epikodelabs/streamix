@@ -63,13 +63,35 @@ describe('merge', () => {
     let caught: any;
     try {
       for await (const v of iterate(atom)) {
-        fail(`unexpected value ${v}`);
+        void v;
       }
     } catch (e) {
       caught = e;
     }
 
     expect(caught.message).toBe('boom');
+  });
+
+  it('should emit ready values without waiting for every source to emit first', async () => {
+    const never: AsyncIterable<number> = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => new Promise<IteratorResult<number>>(() => {}),
+          return: async () => ({ done: true, value: undefined as any }),
+        };
+      }
+    };
+    const iterator = iterate(merge(from([1]), never))[Symbol.asyncIterator]();
+
+    const first = await Promise.race([
+      iterator.next(),
+      delay(50).then(() => ({ done: true as const, value: -1 }))
+    ]);
+
+    void iterator.return?.();
+
+    expect(first.done).toBeFalse();
+    expect(first.value).toBe(1);
   });
 
   it('should emit nothing immediately when no sources are provided', async () => {

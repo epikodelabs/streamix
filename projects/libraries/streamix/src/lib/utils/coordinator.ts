@@ -139,6 +139,8 @@ export function createAsyncCoordinator<T = any>(
   const completed: boolean[] = sources.map(() => false);
   const pulling: boolean[] = sources.map(() => false);
   const pendingPulls: boolean[] = sources.map(() => false);
+  const originalPushHandlers: Array<(() => void) | undefined> = [];
+  const wiredPushHandlers: Array<(() => void) | undefined> = [];
 
   let waitingResolve: ((v: any) => void) | null = null;
   let isDraining = false;
@@ -193,6 +195,7 @@ export function createAsyncCoordinator<T = any>(
     pendingPulls[index] = false;
     sourceList[index] = null;
     removeQueuedEvents(index);
+    restoreSource(source, index);
 
     return source;
   }
@@ -203,12 +206,11 @@ export function createAsyncCoordinator<T = any>(
     try {
       return Promise.resolve(source.return()).then(
         () => undefined,
-        (err: any) => {
-          console.log(label, err);
-        }
+        () => undefined
       );
     } catch (err) {
-      console.log(label, normalizeError(err));
+      void label;
+      normalizeError(err);
       return Promise.resolve();
     }
   }
@@ -308,7 +310,7 @@ export function createAsyncCoordinator<T = any>(
     if (isDraining || iteratorReturned) return;
     isDraining = true;
 
-            try {
+    try {
       for (let i = 0; i < sourceList.length; i++) {
         if (!sourceList[i] || completed[i]) continue;
 
@@ -327,13 +329,25 @@ export function createAsyncCoordinator<T = any>(
   // Wire up push notifications for a source
   function wireSource(src: AsyncIterator<T> & { __onPush?: () => void }, index: number) {
     const orig = src.__onPush;
-    src.__onPush = () => {
+    const wired = () => {
       orig?.();
       if (sourceList[index] !== src) return;
       // Drain this source immediately on push to preserve push-time ordering.
       drainOneSource(index);
       notify();
     };
+    originalPushHandlers[index] = orig;
+    wiredPushHandlers[index] = wired;
+    src.__onPush = wired;
+  }
+
+  function restoreSource(src: AsyncIterator<T>, index: number) {
+    const source = src as AsyncIterator<T> & { __onPush?: () => void };
+    if (source.__onPush === wiredPushHandlers[index]) {
+      source.__onPush = originalPushHandlers[index];
+    }
+    originalPushHandlers[index] = undefined;
+    wiredPushHandlers[index] = undefined;
   }
 
   // Wire up initial sources
@@ -390,6 +404,10 @@ export function createAsyncCoordinator<T = any>(
         completed[i] = true;
         pulling[i] = false;
         pendingPulls[i] = false;
+        const source = sourceList[i];
+        if (source) {
+          restoreSource(source, i);
+        }
       }
 
       keyToSource.clear();

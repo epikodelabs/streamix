@@ -150,6 +150,26 @@ describe('fromAny', () => {
     expect(values).toEqual([10, 20, 30]);
   });
 
+  it('should stream async iterables before they complete', async () => {
+    async function* source() {
+      yield 1;
+      await new Promise<void>(() => {});
+    }
+
+    const iterator = from(source())[Symbol.asyncIterator]();
+    const first = await Promise.race([
+      iterator.next(),
+      new Promise<IteratorResult<number>>((resolve) =>
+        setTimeout(() => resolve({ done: true, value: -1 }), 50)
+      )
+    ]);
+
+    await iterator.return?.();
+
+    expect(first.done).toBeFalse();
+    expect(first.value).toBe(1);
+  });
+
   it('should be usable multiple times', async () => {
     const source = from([1, 2, 3]);
 

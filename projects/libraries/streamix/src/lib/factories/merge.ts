@@ -38,27 +38,9 @@ export function merge<T = any>(...sources: PipeInput<T>[]): Atom<T> {
     const iterators = sources.map((source) =>
       toAsyncIterable(source)[Symbol.asyncIterator]() as AsyncIterator<T>
     );
-    let coordinator: ReturnType<typeof createAsyncCoordinator<T>> | null = null;
+    const coordinator = createAsyncCoordinator<T>(iterators);
 
     try {
-      const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));
-      const activeIterators: AsyncIterator<T>[] = [];
-
-      for (let i = 0; i < initialResults.length; i++) {
-        const settled = initialResults[i];
-        if (settled.status === 'rejected') {
-          throw normalizeError(settled.reason);
-        }
-
-        const result = settled.value;
-        if (result.done) continue;
-
-        yield result.value;
-        activeIterators.push(iterators[i]);
-      }
-
-      coordinator = createAsyncCoordinator<T>(activeIterators);
-
       while (true) {
         const result = await coordinator.next();
         if (result.done) break;
@@ -72,19 +54,7 @@ export function merge<T = any>(...sources: PipeInput<T>[]): Atom<T> {
         }
       }
     } finally {
-      if (coordinator) {
-        await coordinator.return?.();
-      } else {
-        await Promise.all(
-          iterators.map((iterator) => {
-            try {
-              return Promise.resolve(iterator.return?.()).catch(() => {});
-            } catch {
-              return Promise.resolve();
-            }
-          })
-        );
-      }
+      await coordinator.return?.();
     }
   });
 }

@@ -104,9 +104,7 @@ export function createAsyncIterator<T>(opts: {
       const unsubscribe$ = unsubscribe?.();
       unsubscribe = null;
       if (unsubscribe$ && isPromiseLike(unsubscribe$)) {
-        (unsubscribe$ as Promise<unknown>).catch((err: any) => {
-          console.log('AsyncIterator handleDone error', err);
-        });
+        (unsubscribe$ as Promise<unknown>).catch(() => {});
       }
     };
 
@@ -130,9 +128,7 @@ export function createAsyncIterator<T>(opts: {
         unsubscribe = null;
         try {
           await unsubscribe$;
-        } catch (err: any) {
-          console.log('AsyncIterator return error', err);
-        }
+        } catch {}
         return Promise.resolve(DONE);
       },
 
@@ -149,9 +145,7 @@ export function createAsyncIterator<T>(opts: {
         state.clear();
         try {
           await unsubscribe$;
-        } catch (e: any) {
-          console.log('AsyncIterator throw error', e);
-        }
+        } catch {}
         return Promise.reject(error);
       }
     };
