@@ -85,6 +85,24 @@ Full catalog: `audit`, `buffer`, `bufferCount`, `bufferUntil`, `bufferWhile`, `c
 | `timer(delay, period?)` | Delayed, optionally repeating |
 | `zip(...sources)` | Pair emissions by index |
 
+### Subjects
+
+Subjects are hot streams for push-based producers. Use them when an event source is naturally imperative, when several consumers need the same live emissions, or when late subscribers need a current value or replayed history.
+
+```ts
+import { createSubject, createBehaviorSubject, createReplaySubject } from '@epikodelabs/streamix';
+
+const events = createSubject<{ type: string }>();
+events.subscribe(event => console.log(event.type));
+events.next({ type: 'ready' });
+
+const current = createBehaviorSubject(0);
+current.next(1);
+
+const recent = createReplaySubject<string>(3);
+recent.next('connected');
+```
+
 ### Custom operators
 
 ```ts
@@ -182,7 +200,7 @@ This gives you on-demand computation, bounded memory, and consumer-driven backpr
 | Backpressure | Consumer-driven | Manual patterns required |
 | Async/await | Native | Limited |
 | Bundle size | Small | Larger |
-| Reactive state | Atoms + derived | BehaviorSubject + manual |
+| Hot producers | Subjects + async iteration | Subjects + observable subscriptions |
 
 ---
 

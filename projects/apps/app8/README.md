@@ -7,7 +7,7 @@ Board game powered by Streamix Actors and Million.js blocks.
 - **Actors** — user actor, game actor, rival actor communicating via message bus
 - **Web Workers** — rival AI runs in a worker thread
 - **Million.js blocks** — high-performance DOM patching for the board grid
-- **Reactive state** — `state$` stream drives UI updates without Angular templates for the board
+- **State stream** — `state$` drives UI updates without Angular templates for the board
 
 ## Run
 
