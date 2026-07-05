@@ -1247,7 +1247,8 @@ function wrapFunctionInClass(fn: AnyFn): new () => ComputableInstance {
 /* ─────────────────────────────────────────────────────────────────────────────
  * derived() - Computed Node
  * ───────────────────────────────────────────────────────────────────────────*/
-type SyncOnly<T> = T extends Promise<any> ? never : T;
+
+export type SyncOnly<T> = T extends Promise<any> ? never : T;
 
 export function derived<T>(fn: (self: DerivedScope) => SyncOnly<T>, options?: AtomOptions): Atom<T>;
 export function derived<T>(fn: (self: DerivedScope) => Promise<T>, options?: AtomOptions): Atom<T>;

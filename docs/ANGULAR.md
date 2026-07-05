@@ -1,4 +1,4 @@
-**🚀 Streamix and the Angular Ecosystem**
+## 🚀 Streamix and the Angular Ecosystem
 
 Streamix isn’t a lightweight wrapper around Angular primitives. It brings its own **comprehensive** implementation of reactive state (atoms + derived), scoped lifecycles, dependency injection, async resources, and more.
 
