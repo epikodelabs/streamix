@@ -51,6 +51,7 @@ export default defineConfig({
             { text: 'Coroutines', link: '/COROUTINES' },
             { text: 'Actors', link: '/ACTORS' },
             { text: 'Generators', link: '/GENERATORS' },
+            { text: 'IoC Containers', link: '/IOC' },
             { text: 'Angular', link: '/ANGULAR' },
             { text: 'React', link: '/REACT' },
             { text: 'Presentation', link: '/PRESENTATION' }
