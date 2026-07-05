@@ -1,444 +1,120 @@
-# ✨ Beyond useState and useEffect
+# ⚛️ streamix and React
 
-## ✨ How streamix Turns React's Biggest Pain Point Into Your Superpower
+React apps can use streamix today. It is a TypeScript ESM library, so it can be
+imported from components, hooks, services, or event handlers.
 
-Anyone who has spent real time with React has met this moment: an effect that started out harmless slowly turns into a liability. Dependency arrays grow longer, cleanup logic spreads across callbacks, closures stop reflecting reality, and async work begins to overlap in ways you didn’t intend. Eventually you’re stepping through logs late at night, trying to understand why your UI is confidently rendering data from a request that should have been obsolete two renders ago.
+The caveat: streamix does not disappear into React's model. It brings its own
+atoms, scopes, cleanup, async pipelines, DOM sources, networking, IoC, and
+coroutines. React already has conventions for many of those jobs.
 
-**There's a better way.** And it doesn't require rewriting your entire app.
+So the honest answer is:
 
----
+> streamix is React-compatible, but it is not React-native.
 
-## ✨ The useEffect Nightmare You're Living
+It can be useful in React, especially for async orchestration, but it should be
+treated as a separate runtime with a clear boundary.
 
-Let's be honest about what "simple" React code actually looks like:
+## ✅ Where It Fits
 
-```typescript
-function SearchComponent() {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+streamix fits best when React owns the UI and streamix owns workflow logic:
 
-  useEffect(() => {
-    // Don't search on empty
-    if (!query || query.length < 3) {
-      setResults([]);
-      return;
-    }
+- event streams that are easier to express as pipelines
+- sequential async workflows
+- browser APIs that produce ongoing values
+- Web Worker or coroutine-style workloads
+- component-local orchestration with explicit cleanup
+- services that feed React at a controlled boundary
 
-    let cancelled = false;
-    const timeoutId = setTimeout(async () => {
-      setLoading(true);
-      setError(null);
+A typical integration is manual but valid:
 
-      try {
-        const response = await fetch(`/api/search?q=${query}`);
-        const data = await response.json();
-        
-        if (!cancelled) {
-          setResults(data);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err.message);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }, 300);
+```tsx
+useEffect(() => {
+  const unsubscribe = stream.subscribe(value => {
+    setValue(value);
+  });
 
-    return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-    };
-  }, [query]); // Hope you didn't forget this!
-
-  return (
-    <div>
-      <input value={query} onChange={e => setQuery(e.target.value)} />
-      {loading && <Spinner />}
-      {error && <Error message={error} />}
-      <ResultsList results={results} />
-    </div>
-  );
-}
+  return () => unsubscribe();
+}, [stream]);
 ```
 
-**40 lines of defensive code just to search.** And you're still vulnerable to race conditions if the user types fast enough.
+## ⚠️ Where It Does Not Blend In
 
----
+streamix overlaps with React and its ecosystem:
 
-## ✨ The streamix Solution: One Stream, Zero Headaches
+| Concern | React ecosystem | streamix |
+| --- | --- | --- |
+| Local UI state | `useState`, `useReducer`, external stores | atoms and derived atoms |
+| Subscriptions | `useSyncExternalStore` | atom subscriptions and async iterables |
+| Lifecycle | `useEffect` cleanup | scopes and cleanup sets |
+| DOM events | JSX handlers and refs | `listen` and DOM sources |
+| Data fetching | loaders, TanStack Query, SWR, Suspense patterns | pipelines and networking |
+| Dependency sharing | Context and app patterns | streamix IoC |
+| Workers | browser workers and framework tooling | coroutines and actors |
 
-Here's the same functionality with streamix:
+This does not make streamix incompatible. It means you need to decide which
+runtime owns each part of the problem.
 
-```typescript
-import { debounce, filter, fromEvent, map, pipe, switchMap } from '@epikodelabs/streamix';
-import { useState, useEffect } from 'react';
+## 📊 Current Fit
 
-function SearchComponent() {
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
+| Area | Fit | Notes |
+| --- | --- | --- |
+| Package use | Good | React apps can import streamix normally. |
+| TypeScript | Good | APIs are typed and work in TS projects. |
+| Tree shaking | Good | ESM package with `sideEffects: false`. |
+| Component usage | Partial | Works through effects, refs, and manual subscriptions. |
+| Hook support | Missing | No official `useAtom`, `useStream`, or `useScope`. |
+| External-store bridge | Missing | No official `useSyncExternalStore` adapter. |
+| Concurrent rendering | Unclear | No policy for snapshots, tearing, or render-phase reads. |
+| Suspense | Missing | No official Suspense resource adapter. |
+| SSR | Unclear | DOM, networking, and workers need explicit boundaries. |
 
-  useEffect(() => {
-    const input = document.getElementById('search-input');
-    
-    const stream = pipe(
-        fromEvent(input, 'input'),
-        map(e => e.target.value),
-        filter(query => query.length >= 3),
-        debounce(300),
-        tap(() => setLoading(true)),
-        switchMap(query => 
-          fetch(`/api/search?q=${query}`).then(r => r.json())
-        ),
-        tap(() => setLoading(false))
-    );
+## 🧩 What A React Adapter Would Need
 
-    const unsubscribe = stream.subscribe(data => {
-      setResults(data);
-    });
+A React-specific entry point could make the boundary easier to repeat:
 
-    return () => {
-      unsubscribe();
-    };
-  }, []); // One dependency. Done.
-
-  return (
-    <div>
-      <input id="search-input" />
-      {loading && <Spinner />}
-      <ResultsList results={results} />
-    </div>
-  );
-}
+```ts
+@epikodelabs/streamix/react
 ```
 
-**Notice what disappeared:**
-- No manual debounce logic with `setTimeout`
-- No `cancelled` flag dance
-- No cleanup function spaghetti
-- No race condition bugs
-- No dependency array paranoia
+Useful APIs:
 
-**Notice what you got:**
-- Automatic request cancellation via `switchMap`
-- Built-in debouncing
-- Declarative data flow
-- Zero stale closure bugs
-- Actually readable code
+- `useScope(options?)` - create and dispose a streamix scope with a component
+- `useAtom(atom)` - read an atom through `useSyncExternalStore`
+- `useStream(source, initialValue?)` - expose the latest stream value to React
+- `useSubscription(source, callback, deps?)` - bind a subscription to effect cleanup
+- `useAsyncIterable(source, options?)` - consume async iterables with cancellation
+- `createSuspenseResource(source)` - adapt async work to Suspense
 
----
+These helpers would not make streamix part of React's core model. They would make
+the boundary safer.
 
-## ✨ Real-World Scenarios Where streamix Shines
+## 🛠️ Practical Guidance
 
-### ✨ 1. **Live Data Dashboards**
+Use React first for React-shaped problems:
 
-Stop polling with `setInterval`. Start streaming.
+- local UI state
+- rendering subscriptions
+- JSX event handlers
+- route and framework data loading
+- server rendering boundaries
+- existing data-cache workflows
 
-```typescript
-function MetricsDashboard() {
-  const [metrics, setMetrics] = useState({});
+Use streamix when the problem is better described as workflow orchestration:
 
-  useEffect(() => {
-    const stream = pipe(
-        interval(5000),
-        switchMap(() => fetch('/api/metrics').then(r => r.json())),
-        catchError(err => {
-          console.error('Metrics failed:', err);
-          return of(metrics); // Keep showing last good data
-        })
-    );
+- "listen to this source, transform it, cancel stale work"
+- "run these async steps in order"
+- "coordinate background work"
+- "consume browser events as a stream"
+- "keep this orchestration outside the component tree"
 
-    const unsubscribe = stream.subscribe(data => {
-      setMetrics(data);
-    });
+The clean architecture is not "replace React patterns with streamix." It is
+"let React render, let streamix orchestrate, and keep the handoff small."
 
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+## 🎯 Final Assessment
 
-  return <MetricsGrid data={metrics} />;
-}
-```
+streamix can work well in React, but it should not be presented as seamless
+React ecosystem integration.
 
-**No more:** `setInterval` + manual cleanup + state staleness issues  
-**Just:** A stream that handles everything
-
-### ✨ 2. **Form Validation with Server-Side Checks**
-
-Debounce, validate, check availability-all in one flow:
-
-```typescript
-function UsernameInput() {
-  const [username, setUsername] = useState('');
-  const [available, setAvailable] = useState(null);
-  const [checking, setChecking] = useState(false);
-
-  useEffect(() => {
-    const stream = pipe(
-        fromEvent(document.getElementById('username'), 'input'),
-        map(e => e.target.value),
-        tap(setUsername),
-        filter(name => name.length >= 3),
-        debounce(500),
-        tap(() => setChecking(true)),
-        switchMap(name => 
-          fetch(`/api/check-username?name=${name}`).then(r => r.json())
-        ),
-        tap(() => setChecking(false))
-    );
-
-    const unsubscribe = stream.subscribe(result => {
-      setAvailable(result.available);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
-  return (
-    <div>
-      <input id="username" />
-      {checking && <span>Checking...</span>}
-      {available !== null && (
-        <span>{available ? '✓ Available' : '✗ Taken'}</span>
-      )}
-    </div>
-  );
-}
-```
-
-### ✨ 3. **Infinite Scroll That Actually Works**
-
-No more "did I already fetch page 5?" confusion:
-
-```typescript
-function InfiniteList() {
-  const [items, setItems] = useState([]);
-  const [page, setPage] = useState(1);
-
-  useEffect(() => {
-    const stream = pipe(
-        fromEvent(window, 'scroll'),
-        filter(() => {
-          const bottom = window.innerHeight + window.scrollY >= 
-                        document.body.offsetHeight - 500;
-          return bottom;
-        }),
-        debounce(200),
-        map(() => page),
-        distinctUntilChanged(), // Only when page actually changes
-        switchMap(currentPage => 
-          fetch(`/api/items?page=${currentPage}`).then(r => r.json())
-        )
-    );
-
-    const unsubscribe = stream.subscribe(newItems => {
-      setItems(prev => [...prev, ...newItems]);
-      setPage(p => p + 1);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [page]);
-
-  return <ItemGrid items={items} />;
-}
-```
-
-### ✨ 4. **WebSocket Connections Without Tears**
-
-React + WebSockets usually means cleanup hell. Not anymore:
-
-```typescript
-function LiveChat() {
-  const [messages, setMessages] = useState([]);
-
-  useEffect(() => {
-    const ws = new WebSocket('wss://chat.example.com');
-    
-    const stream = pipe(
-        fromEvent(ws, 'message'),
-        map(event => JSON.parse(event.data))
-    );
-
-    const unsubscribe = stream.subscribe(message => {
-      setMessages(prev => [...prev, message]);
-    });
-
-    return () => {
-      unsubscribe();
-      ws.close();
-    };
-  }, []);
-
-  return <MessageList messages={messages} />;
-}
-```
-
-**The WebSocket closes automatically when the component unmounts.** No manual cleanup required.
-
----
-
-## ✨ The Numbers Don't Lie
-
-### ✨ Bundle Size Comparison
-
-| Library | Size (minified + gzipped) |
-|---------|---------------------------|
-| streamix | **~9-11 KB** |
-| RxJS | ~50+ KB |
-| Your useEffect logic | Priceless (and buggy) |
-
-### ✨ Code Reduction
-
-Based on real migrations, teams report:
-
-- **40-60% fewer lines** in complex async components
-- **Zero race condition bugs** after switching search/autocomplete to streamix
-- **Half the time** debugging async state issues
-- **Consistent patterns** across the codebase
-
----
-
-## ✨ Beyond React: streamix Works Everywhere
-
-While streamix makes React development dramatically better, it's not React-specific:
-
-**Games** - Handle input streams, physics updates, and entity lifecycle  
-**Node.js** - Process file streams, API requests, database queries  
-**Electron** - Coordinate IPC, file system watching, background tasks  
-**React Native** - Handle gestures, sensors, and network requests  
-**CLIs** - Build interactive prompts and progress indicators
-
-streamix is just JavaScript. It runs anywhere.
-
----
-
-## ✨ Heavy Lifting? Meet Coroutines
-
-Speaking of running anywhere-what about CPU-intensive work? streamix includes **coroutines** that move heavy processing to Web Workers automatically:
-
-```typescript
-import { coroutine } from '@epikodelabs/streamix';
-
-const processImage = coroutine(function applyFilters(data: ImageData) {
-  // This runs in a background thread
-  const pixels = data.pixels;
-  
-  for (let i = 0; i < pixels.length; i += 4) {
-    pixels[i] = Math.min(255, pixels[i] * 1.2);     // R
-    pixels[i + 1] = Math.min(255, pixels[i + 1] * 1.2); // G
-    pixels[i + 2] = Math.min(255, pixels[i + 2] * 1.2); // B
-  }
-  
-  return { pixels, width: data.width, height: data.height };
-});
-
-function ImageEditor() {
-  const [image, setImage] = useState(null);
-  const [processing, setProcessing] = useState(false);
-
-  const handleFilter = async () => {
-    setProcessing(true);
-    const result = await processImage.processTask(image);
-    setImage(result);
-    setProcessing(false);
-  };
-
-  return (
-    <div>
-      <canvas ref={canvasRef} />
-      <button onClick={handleFilter} disabled={processing}>
-        {processing ? 'Processing...' : 'Apply Filter'}
-      </button>
-    </div>
-  );
-}
-```
-
-**Your UI stays smooth while the filter runs.** No frozen frames. No janky animations. Just responsive UX.
-
----
-
-## ✨ Why Developers Are Switching
-
-> **"We migrated our search component and deleted 200 lines of useEffect cleanup code. Our bug count dropped to zero."**  
-> - Frontend lead at a SaaS company
-
-> **"Finally, reactive programming that doesn't require a PhD. My junior devs actually understand the code now."**  
-> - Senior engineer at a startup
-
-> **"Bundle size went down 40KB and our Lighthouse scores improved. streamix just works."**  
-> - Performance engineer at an e-commerce platform
-
----
-
-## ✨ Getting Started Is Ridiculously Easy
-
-### ✨ 1. Install streamix
-
-```bash
-npm install @epikodelabs/streamix
-```
-
-### ✨ 2. Pick One Pain Point
-
-Don't rewrite everything. Start with your most annoying `useEffect`:
-- That search component with the race condition
-- The polling dashboard that leaks memory
-- The form validation that's always one step behind
-
-### ✨ 3. Replace useEffect Hell with a Stream
-
-```typescript
-// Before: 50 lines of defensive useEffect code
-
-// After: One readable stream
-const stream = pipe(
-    fromEvent(input, 'input'),
-    debounce(300),
-    switchMap(fetchResults)
-);
-```
-
-### ✨ 4. Watch Your Code Quality Improve
-
-You'll notice:
-- Fewer bugs in code review
-- Less time debugging async issues
-- More consistent patterns across components
-- Junior devs shipping features faster
-
----
-
-## ✨ The Bottom Line
-
-**React is amazing.** But `useEffect` wasn't designed for complex async flows. You shouldn't need a Computer Science degree to debounce a search input or poll an API without memory leaks.
-
-**streamix gives you:**
-- RxJS-style operators without the bundle bloat
-- Pull-based streams that respect React's rendering model
-- Automatic cleanup and cancellation
-- TypeScript support out of the box
-- Zero dependencies, ~9KB gzipped
-- Works with any framework (or no framework)
-
-**Stop fighting your tools.** Start streaming.
-
----
-
-## ✨ Resources
-
-- [Full Documentation](https://epikodelabs.github.io/streamix)
-- [Interactive Examples](https://stackblitz.com/edit/stackblitz-starters-873uh85w)
-- [API Reference](https://epikodelabs.github.io/streamix)
-- [Feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
-
-**AGPL-3.0-or-later** · Made with ❤️ for developers who value clean code
+> streamix is React-compatible today. It can live inside React apps as a
+> companion runtime for async orchestration, but because it implements overlapping
+> primitives itself, the integration boundary should be explicit.

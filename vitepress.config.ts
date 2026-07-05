@@ -51,7 +51,6 @@ export default defineConfig({
             { text: 'Coroutines', link: '/COROUTINES' },
             { text: 'Actors', link: '/ACTORS' },
             { text: 'Generators', link: '/GENERATORS' },
-            { text: '<s>Subjects</s>', link: '/SUBJECTS' },
             { text: 'Angular', link: '/ANGULAR' },
             { text: 'React', link: '/REACT' },
             { text: 'Presentation', link: '/PRESENTATION' }
