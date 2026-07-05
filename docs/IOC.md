@@ -1,4 +1,4 @@
-# 🧩 IoC Container — Dependency injection the streamix way
+# 🧩 IoC Container — Dependency Injection the Streamix Way
 
 streamix ships with a small, functional IoC container. It is designed for apps that need to share services, manage lifetimes, and clean up resources together with reactive scopes.
 

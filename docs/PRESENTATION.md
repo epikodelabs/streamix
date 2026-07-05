@@ -1,6 +1,6 @@
 # Presentation
 
-A visual introduction to streamix — the reactive streams library built on async generators.
+A visual introduction to streamix — the reactive flows library built on async generators.
 
 <p align="center">
   <img src="https://epikodelabs.github.io/streamix/presentation.gif" alt="streamix presentation" width="100%">
@@ -33,7 +33,6 @@ Most reactive libraries push values eagerly. streamix does the opposite:
 - **[Coroutines](/COROUTINES)** — Web Worker task runners and pipelines
 - **[Actors](/ACTORS)** — long-lived stateful workers with messaging
 - **[Generators](/GENERATORS)** — iterator protocol and async iteration
-- **[~~Subjects~~](/SUBJECTS)** — event emitters and multicast *(see [Atoms](/ATOMS))*
 - **[Angular](/ANGULAR)** and **[React](/REACT)** integrations
 
 ---

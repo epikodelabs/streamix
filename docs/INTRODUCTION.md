@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Pull-based reactive streams built on async generators.</strong>
+  <strong>Reactive flows built on async generators.</strong>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
   </a>
 </p>
 
-streamix is a reactive streams library built on async generators. Values are computed on demand — consumers pull, producers don't push blindly. The result is natural backpressure, predictable memory use, and a `for await...of`-first API that composes well with modern TypeScript.
+streamix is a reactive flows library built on async generators. It gives you synchronous state reads, composable derived values, lifecycle-aware scopes, and flows that work naturally with modern TypeScript.
 
 ```bash
 npm install @epikodelabs/streamix
@@ -29,33 +29,12 @@ npm install @epikodelabs/streamix
 
 ## Core concepts
 
-### Streams (Legacy)
-
-> **Deprecated:** The imperative `createStream` API shown in this section is deprecated and no longer exported from `@epikodelabs/streamix`. New code should build async sequences with [`atom`](/ATOMS), [`flow`](/ATOMS), [`loop`](/api/#function-loop), or plain async generators combined with [`pipe`](/api/#function-pipe).
-
-A stream is an async iterable sequence. You can iterate it directly or pipe it through operators.
-
-```ts
-import { filter, map, pipe, range, take } from '@epikodelabs/streamix';
-
-const evens = pipe(
-  range(1, 20),
-  filter(n => n % 2 === 0),
-  map(n => n * 10),
-  take(5)
-);
-
-for await (const value of evens) {
-  console.log(value); // 20, 40, 60, 80, 100
-}
-```
-
 ### Atoms
 
-Atoms are reactive values — readable, writable, and composable with `derived`. They are also streams, so they pipe and iterate like any other source.
+Atoms are reactive values: readable, writable, composable with `derived`, and consumable as async iterables when you need pipelines.
 
 ```ts
-import { atom, derived, pipe } from '@epikodelabs/streamix';
+import { atom, derived, iterate, map, pipe, take } from '@epikodelabs/streamix';
 
 const count = atom(0);         // always has a value
 const label = atom<string>();  // value arrives later
@@ -65,24 +44,17 @@ const summary = derived(() => `count is ${count.value}`);
 count.next(5);
 console.log(summary.value); // "count is 5"
 
-// As a stream
-pipe(count, map(n => n * 2)).subscribe(console.log);
+const doubled = pipe(iterate(count), map(n => n * 2), take(3));
+for await (const value of doubled) console.log(value);
 ```
-
-**Migration from Subjects:**
-
-| Before | After |
-|--------|-------|
-| `createSubject<T>()` | `atom<T>()` |
-| `createBehaviorSubject(initial)` | `atom(initial)` |
 
 ### Operators
 
-Operators transform streams. Sync and async callbacks are both supported.
+Operators transform flows. Sync and async callbacks are both supported.
 
 ```ts
 pipe(
-  stream,
+  iterate(count),
   map(async x => await enrich(x)),
   filter(x => x.valid),
   debounce(200),
@@ -92,18 +64,18 @@ pipe(
 
 Full catalog: `audit`, `buffer`, `bufferCount`, `bufferUntil`, `bufferWhile`, `catchError`, `concatMap`, `debounce`, `defaultIfEmpty`, `delay`, `delayUntil`, `distinctUntilChanged`, `distinctUntilKeyChanged`, `endWith`, `exhaustMap`, `expand`, `filter`, `finalize`, `first`, `fork`, `groupBy`, `ignoreElements`, `last`, `map`, `mergeMap`, `observeOn`, `partition`, `reduce`, `sample`, `scan`, `select`, `shareReplay`, `skip`, `skipUntil`, `skipWhile`, `slidingPair`, `startWith`, `switchMap`, `take`, `takeUntil`, `takeWhile`, `tap`, `throttle`, `throwError`, `toArray`, `withLatestFrom`.
 
-### Stream factories
+### Flow Factories
 
 | Factory | Description |
 |---------|-------------|
 | `combineLatest(...sources)` | Latest value from each source, combined |
 | `concat(...sources)` | Sources run sequentially |
-| `defer(factory)` | Fresh stream per subscriber |
+| `defer(factory)` | Fresh flow per subscriber |
 | `EMPTY()` | Completes immediately |
 | `forkJoin(...sources)` | Emits once when all complete |
 | `from(source)` | Arrays, iterables, generators, promises |
 | `fromEvent(target, event)` | DOM / Node events |
-| `fromPromise(p)` | Promise as a single-emission stream |
+| `fromPromise(p)` | Promise as a single-emission flow |
 | `interval(ms)` | Counter every `ms` milliseconds |
 | `merge(...sources)` | Interleaved concurrent emissions |
 | `of(...values)` | Fixed sequence, then complete |
@@ -130,7 +102,7 @@ const onlyPrime = () =>
   }));
 ```
 
-### `query()` — promise from a stream
+### `query()` - promise from a flow
 
 ```ts
 const first = await pipe(interval(1000), take(1)).query();
@@ -188,7 +160,7 @@ for await (const data of api.get('/items', readJson)) {
 
 ## Why pull-based?
 
-Most reactive libraries push values eagerly. streamix pulls — the consumer asks for the next value, and only then is it computed.
+Most reactive libraries push values eagerly. streamix pulls: the consumer asks for the next value, and only then is it computed.
 
 ```ts
 async function* primes() {
@@ -217,7 +189,7 @@ This gives you on-demand computation, bounded memory, and consumer-driven backpr
 | Backpressure | Consumer-driven | Manual patterns required |
 | Async/await | Native | Limited |
 | Bundle size | Small | Larger |
-| Reactive state | Atoms + derived | BehaviorSubject + manual |
+| Reactive state | Atoms + derived | Manual stores |
 
 ---
 

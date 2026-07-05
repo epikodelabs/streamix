@@ -1,4 +1,4 @@
-# streamix Actors
+# Streamix Actors
 
 An actor is a long-lived worker that holds state and responds to messages — like a tiny server running in a background thread.
 
@@ -57,7 +57,7 @@ This is the only function you write. It runs inside the background worker.
 |---|---|
 | `utils.outbox.send(to, topic, payload)` | Fire-and-forget message to another actor or `"main"` |
 | `utils.outbox.request(to, topic, payload)` | Ask another actor or `"main"` for data and wait for the reply |
-| `utils.inbox` | The actor's inbound stream — useful for background tasks running inside the worker |
+| `utils.inbox` | The actor's inbound flow — useful for background tasks running inside the worker |
 | `utils.concurrency` | Channels, `select`, timeouts, cancellation — for coordinating work inside the worker |
 
 ---

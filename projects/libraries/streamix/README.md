@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Reactive streams built on async generators.</strong><br>
+  <strong>Reactive flows built on async generators.</strong><br>
   Small bundle. Pull-based execution. Familiar operator API.
 </p>
 
@@ -36,19 +36,19 @@ Built on top of async generators, streamix combines:
 * 🌳 **Scopes** for lifecycle management
 * 🧵 **Coroutines** for background computation
 * 🎭 **Actors** for isolated stateful workers
-* 🔄 **Streams** for asynchronous composition
+* 🔄 **Flows** for asynchronous composition
 
 Whether you are building a dashboard, CLI tool, browser application, or computation-heavy workflow, streamix provides a consistent model for managing values, events, state, and concurrency.
 
 ### Highlights
 
-* ⚛️ **Atoms & Scopes** — reactive state with automatic dependency tracking and lifecycle management
-* 🧵 **Coroutines & Actors** — browser-side concurrency powered by Web Workers
-* 🔄 **Pull-based Streams** — values are computed only when consumers request them
-* 🧩 **Familiar Operators** — `map`, `filter`, `switchMap`, `debounce`, `scan`, and many more
-* ⏱️ **Async Iterator First** — designed around `for await...of`
-* 🧪 **`query()` for promises** — await the next emitted value with automatic cleanup
-* 🌐 **Optional add-ons** — HTTP client, WebSocket helpers, and DOM observation utilities
+* ⚛️ **Atoms & Scopes** - reactive state with automatic dependency tracking and lifecycle management
+* 🧵 **Coroutines & Actors** - browser-side concurrency powered by Web Workers
+* 🔄 **Pull-based flows** - values are computed only when consumers request them
+* 🧩 **Familiar Operators** - `map`, `filter`, `switchMap`, `debounce`, `scan`, and many more
+* ⏱️ **Async Iterator First** - designed around `for await...of`
+* 🧪 **`query()` for promises** - await the next emitted value with automatic cleanup
+* 🌐 **Optional add-ons** - HTTP client, WebSocket helpers, and DOM observation utilities
 
 ---
 
@@ -113,7 +113,7 @@ const primes = compute(async function* () {
 });
 ```
 
-### Stream Processing
+### Flow Processing
 
 ```typescript
 import { range, map, filter, take, pipe } from '@epikodelabs/streamix';
@@ -143,9 +143,9 @@ for await (const ingredient of potionRecipe) {
 
 Atoms are the primary reactive primitive in streamix.
 
-* `atom(initial?)` — writable reactive value (omit the initial value for a hot atom)
-* `derived()` — computed reactive value
-* `flow()` — stream-backed reactive value
+* `atom(initial?)` - writable reactive value; omit the initial value when it arrives later
+* `derived()` - computed reactive value
+* `flow()` - flow-backed reactive value
 
 Scopes provide lifecycle management and automatic disposal.
 
@@ -182,12 +182,12 @@ for await (const value of iterate(a)) {
 }
 ```
 
-**Migration from Subjects to Atoms:**
+**Writable and initialized atoms:**
 
-| Subject                          | Atom Equivalent           |
-| -------------------------------- | ------------------------- |
-| `createSubject()`                | `atom()`                  |
-| `createBehaviorSubject(initial)` | `atom(initial)`           |
+| Need | API |
+| ---- | --- |
+| Value that arrives later | `atom<T>()` |
+| Value with an initial state | `atom(initial)` |
 
 ---
 
@@ -210,20 +210,20 @@ const primes = compute(async function* () {
 
 Coroutines support:
 
-* `compute()` — worker-backed async generators
-* `compose()` — worker-side pipeline fusion
-* `actor()` — long-lived stateful workers
+* `compute()` - worker-backed async generators
+* `compose()` - worker-side pipeline fusion
+* `actor()` - long-lived stateful workers
 
 Actors provide isolated state, inbox/outbox messaging, and background coordination.
 
 ---
 
-### 🔄 Streams
+### 🔄 Flows
 
-Streams are async generators that compose naturally through operators.
+Flows compose naturally through operators.
 
 ```typescript
-import { createStream } from '@epikodelabs/streamix';
+import { pipe, take } from '@epikodelabs/streamix';
 
 async function* countdown() {
   for (let i = 10; i > 0; i--) {
@@ -234,28 +234,14 @@ async function* countdown() {
   yield '🚀 Launch!';
 }
 
-const launchStream = createStream('countdown', countdown);
+const launchSequence = pipe(countdown(), take(11));
 
-for await (const msg of launchStream) {
+for await (const msg of launchSequence) {
   console.log(msg);
 }
 ```
 
-Streams are pull-based by default, meaning work is performed only when values are consumed.
-
----
-
-### Legacy Subjects
-
-Subjects remain available for backward compatibility.
-
-```typescript
-import { atom } from '@epikodelabs/streamix';
-
-const chat = atom<string>();
-```
-
-New applications should generally prefer Atoms.
+Flows are pull-based by default, meaning work is performed only when values are consumed.
 
 ---
 
@@ -263,33 +249,31 @@ New applications should generally prefer Atoms.
 
 ```text
 projects/libraries/streamix/
-├── src/           # Core runtime (atoms, streams, scopes, operators)
-├── aggregates/    # Aggregate operators
-├── coroutines/    # Coroutines and actors
-├── dom/           # DOM observation utilities
-└── networking/    # HTTP client, WebSocket, JSONP
+|-- src/           # Core runtime (atoms, scopes, operators)
+|-- aggregates/    # Aggregate operators
+|-- coroutines/    # Coroutines and actors
+|-- dom/           # DOM observation utilities
+`-- networking/    # HTTP client, WebSocket, JSONP
 ```
 
 ---
 
 ## 🚀 What's New?
 
-### v2.0.47 — Atoms Evolution
+### v2.0.47 - Atoms Evolution
 
-The atoms API is now a complete replacement for imperative Subjects:
+The atoms API is the primary state primitive:
 
-* **`atom()`** — hot atom without initial value
-* **`iterate(atom)`** — convert any atom to async iterable
-
-Subjects remain available for compatibility but are now considered legacy.
+* **`atom()`** - hot atom without initial value
+* **`iterate(atom)`** - convert any atom to async iterable
 
 ### Coroutines
 
 The coroutine layer is one of the strongest parts of the library:
 
-* **`compute()`** — reusable worker-pool execution
-* **`compose()`** — worker-side pipeline fusion
-* **`actor()`** — long-lived stateful workers
+* **`compute()`** - reusable worker-pool execution
+* **`compose()`** - worker-side pipeline fusion
+* **`actor()`** - long-lived stateful workers
 
 If you are evaluating streamix for browser-side concurrency, start with `@epikodelabs/streamix/coroutines`.
 

@@ -1,6 +1,6 @@
 # Atoms and Scopes
 
-Atoms and scopes form the reactive state layer in streamix. They complement the async generator streams and give you simple primitives for live values, computed values, async sources, and clean lifecycle management.
+Atoms and scopes form the reactive state layer in streamix. They build on flows and give you simple primitives for live values, computed values, async workflows, and clean lifecycle management.
 
 ### Mental Model
 

@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Reactive streams built on async generators.</strong><br>
+  <strong>Reactive flows built on async generators.</strong><br>
   Small bundle. Pull-based execution. Familiar operator API.
 </p>
 
@@ -35,7 +35,7 @@
 
 ## 🧭 About This Repository
 
-This is the **streamix solution repository** — a monorepo that contains the core reactive-streams library, optional add-on modules, demo applications, documentation sources, and build tooling.
+This is the **streamix solution repository** — a monorepo that contains the core reactive flows library, optional add-on modules, demo applications, documentation sources, and build tooling.
 
 If you are looking for the library documentation and API reference, see:
 - **[Library README](./projects/libraries/streamix/README.md)** — package-level install and usage
@@ -50,7 +50,7 @@ streamix/
 ├── projects/
 │   ├── libraries/
 │   │   └── streamix/           # Core npm package (@epikodelabs/streamix)
-│   │       ├── src/            # Streams, operators, subjects
+│   │       ├── src/            # Flows, atoms, scopes, operators
 │   │       ├── aggregates/     # Aggregate operators (average, min/max, etc.)
 │   │       ├── coroutines/     # Web Worker coroutines & actors
 │   │       ├── dom/            # DOM observation utilities
@@ -114,7 +114,7 @@ The static site is output to `dist/.vitepress/dist/`.
 
 | Package | Path | Description |
 |---------|------|-------------|
-| `@epikodelabs/streamix` | `projects/libraries/streamix/src` | Core reactive streams |
+| `@epikodelabs/streamix` | `projects/libraries/streamix/src` | Core reactive flows |
 | `@epikodelabs/streamix/aggregates` | `projects/libraries/streamix/aggregates` | Aggregate operators |
 | `@epikodelabs/streamix/coroutines` | `projects/libraries/streamix/coroutines` | Web Worker utilities |
 | `@epikodelabs/streamix/dom` | `projects/libraries/streamix/dom` | DOM observers |

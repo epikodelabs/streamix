@@ -1,4 +1,4 @@
-# ⚛️ streamix and React
+# ⚛️ Streamix and React
 
 React apps can use streamix today. It is a TypeScript ESM library, so it can be
 imported from components, hooks, services, or event handlers.
@@ -18,7 +18,7 @@ treated as a separate runtime with a clear boundary.
 
 streamix fits best when React owns the UI and streamix owns workflow logic:
 
-- event streams that are easier to express as pipelines
+- event flows that are easier to express as pipelines
 - sequential async workflows
 - browser APIs that produce ongoing values
 - Web Worker or coroutine-style workloads
@@ -29,12 +29,12 @@ A typical integration is manual but valid:
 
 ```tsx
 useEffect(() => {
-  const unsubscribe = stream.subscribe(value => {
+  const unsubscribe = flow.subscribe(value => {
     setValue(value);
   });
 
   return () => unsubscribe();
-}, [stream]);
+}, [flow]);
 ```
 
 ## ⚠️ Where It Does Not Blend In
@@ -62,7 +62,7 @@ runtime owns each part of the problem.
 | TypeScript | Good | APIs are typed and work in TS projects. |
 | Tree shaking | Good | ESM package with `sideEffects: false`. |
 | Component usage | Partial | Works through effects, refs, and manual subscriptions. |
-| Hook support | Missing | No official `useAtom`, `useStream`, or `useScope`. |
+| Hook support | Missing | No official `useAtom`, `useFlow`, or `useScope`. |
 | External-store bridge | Missing | No official `useSyncExternalStore` adapter. |
 | Concurrent rendering | Unclear | No policy for snapshots, tearing, or render-phase reads. |
 | Suspense | Missing | No official Suspense resource adapter. |
@@ -80,7 +80,7 @@ Useful APIs:
 
 - `useScope(options?)` - create and dispose a streamix scope with a component
 - `useAtom(atom)` - read an atom through `useSyncExternalStore`
-- `useStream(source, initialValue?)` - expose the latest stream value to React
+- `useFlow(flow, initialValue?)` - expose the latest flow value to React
 - `useSubscription(source, callback, deps?)` - bind a subscription to effect cleanup
 - `useAsyncIterable(source, options?)` - consume async iterables with cancellation
 - `createSuspenseResource(source)` - adapt async work to Suspense
@@ -104,7 +104,7 @@ Use streamix when the problem is better described as workflow orchestration:
 - "listen to this source, transform it, cancel stale work"
 - "run these async steps in order"
 - "coordinate background work"
-- "consume browser events as a stream"
+- "consume browser events as a flow"
 - "keep this orchestration outside the component tree"
 
 The clean architecture is not "replace React patterns with streamix." It is
