@@ -17,13 +17,13 @@
   "dependencies": {
     "tslib": "^2.8.1"
   },
-  "main": "public-api.ts",
+  "main": "fesm2022/epikodelabs-streamix.mjs",
   "type": "module",
   "sideEffects": false,
-  "homepage": "https://epikodelabs.github.io",
+  "homepage": "https://epikodelabs.github.io/streamix",
   "repository": {
     "type": "git",
-    "url": "https://github.com/epikodelabs/epikodelabs.github.io"
+    "url": "https://github.com/epikodelabs/streamix.git"
   },
   "author": "Oleksii Shepel",
   "email": "oleksii.shepel@outlook.com"

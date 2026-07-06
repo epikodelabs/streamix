@@ -9,22 +9,25 @@ on:
 jobs:
   coverage:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
+          cache: npm
 
       - name: Install dependencies
-        run: npm i
+        run: npm ci
 
       - name: Run tests with coverage
-        run: npx testify --headless --coverage
+        run: npm run jasmine:coverage
 
       - name: Upload coverage to Codecov
-        run: |
-          curl -s https://codecov.io/bash | bash -s -- -f coverage/lcov.info -r epikodelabs/streamix
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/lcov.info
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

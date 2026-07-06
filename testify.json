@@ -4,16 +4,14 @@
     "./projects/libraries/streamix/coroutines/src/lib",
     "./projects/libraries/streamix/dom/src/lib",
     "./projects/libraries/streamix/networking/src/lib",
-    "./projects/libraries/streamix/src/lib",
-    "./projects/libraries/streamix/tracing/src/lib"
+    "./projects/libraries/streamix/src/lib"
   ],
   "testDirs": [
     "./projects/libraries/streamix/aggregates/src/tests",
     "./projects/libraries/streamix/coroutines/src/tests",
     "./projects/libraries/streamix/dom/src/tests",
     "./projects/libraries/streamix/networking/src/tests",
-    "./projects/libraries/streamix/src/tests",
-    "./projects/libraries/streamix/tracing/src/tests"
+    "./projects/libraries/streamix/src/tests"
   ],
   "exclude": [
     "**/node_modules/**",
@@ -24,7 +22,7 @@
   "preserveOutputs": false,
   "outDir": "dist/.vite-jasmine-build",
   "browser": "chrome",
-  "headless": false,
+  "headless": true,
   "port": 8888,
   "viteBuildOptions": {
     "target": "es2022",

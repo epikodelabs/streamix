@@ -110,7 +110,7 @@
         "build": {
           "builder": "@angular-devkit/build-angular:application",
           "options": {
-            "outputPath": "dist/app2",
+            "outputPath": "dist/apps/app2",
             "index": "projects/apps/app2/src/index.html",
             "browser": "projects/apps/app2/src/main.ts",
             "polyfills": [],
@@ -203,7 +203,7 @@
         "build": {
           "builder": "@angular-devkit/build-angular:application",
           "options": {
-            "outputPath": "dist/app3",
+            "outputPath": "dist/apps/app3",
             "index": "projects/apps/app3/src/index.html",
             "browser": "projects/apps/app3/src/main.ts",
             "polyfills": [],
@@ -296,7 +296,7 @@
         "build": {
           "builder": "@angular-devkit/build-angular:application",
           "options": {
-            "outputPath": "dist/app4",
+            "outputPath": "dist/apps/app4",
             "index": "projects/apps/app4/src/index.html",
             "browser": "projects/apps/app4/src/main.ts",
             "polyfills": [],
