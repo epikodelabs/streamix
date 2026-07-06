@@ -19,17 +19,16 @@ const replacements = [
   [/\(\.\.\/\.\.\/README\.md\)/g, '(../../)'],
 ];
 
-const readmePath = path.join(apiRoot, 'README.md');
-const indexPath = path.join(apiRoot, 'index.md');
-
-if (fs.existsSync(readmePath) && !fs.existsSync(indexPath)) {
-  fs.renameSync(readmePath, indexPath);
-}
-
 function processDirectory(dir) {
   if (!fs.existsSync(dir)) {
     return;
   }
+  const readmePath = path.join(dir, 'README.md');
+  const indexPath = path.join(dir, 'index.md');
+  if (fs.existsSync(readmePath) && !fs.existsSync(indexPath)) {
+    fs.renameSync(readmePath, indexPath);
+  }
+
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -44,6 +43,14 @@ function processDirectory(dir) {
     for (const [pattern, replacement] of replacements) {
       updated = updated.replace(pattern, replacement);
     }
+    updated = updated.replace(
+      /\]\((?:\.\/)?(?:\.\.\/)+README(?:\.md)?\)/g,
+      '](/api/)'
+    );
+    updated = updated.replace(
+      /\]\(((?!https?:|mailto:|data:)(?:\.\/)?[^)]+\/)README(?:\.md)?\)/g,
+      ']($1)'
+    );
     updated = updated.replace(
       /\]\((?!https?:|mailto:|data:)([^)]+?)\.md(#[^)]+)?\)/g,
       (_match, pathPart, hash = '') => `](${pathPart}${hash})`

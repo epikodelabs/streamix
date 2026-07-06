@@ -40,7 +40,7 @@ export function delayUntil<T = any, N = any>(
 ): Operator<T, T> {
   return createOperator<T, T>("delayUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
-    const runner = createAsyncCoordinator([notifierIt, source]);
+    const runner = createAsyncCoordinator<T | N>([notifierIt, source]);
 
     const buffer: T[] = [];
     let gateOpened = false;

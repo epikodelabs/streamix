@@ -20,7 +20,7 @@ import { createAsyncCoordinator, normalizeError } from "../utils";
 export const bufferUntil = <T = any, N = any>(notifier: Stream<N>) =>
   createOperator<T, T[]>("bufferUntil", function (this: Operator, source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
-    const runner = createAsyncCoordinator([source, notifierIt]);
+    const runner = createAsyncCoordinator<T | N>([source, notifierIt]);
 
     // Buffered source values
     let buffer: T[] = [];

@@ -35,7 +35,7 @@ export function skipUntil<T = any, N = any>(
 ): Operator<T, T> {
   return createOperator<T, T>("skipUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
-    const runner = createAsyncCoordinator([source, notifierIt]);
+    const runner = createAsyncCoordinator<T | N>([source, notifierIt]);
 
     let gateOpened = false;
     let droppingBacklog = false;

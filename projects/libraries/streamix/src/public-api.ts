@@ -1,5 +1,5 @@
 /*
- * Public API Surface of generator
+ * Public API Surface of streamix
  */
 
 export * from './lib';

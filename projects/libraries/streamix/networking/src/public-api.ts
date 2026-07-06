@@ -1,5 +1,5 @@
 /*
- * Public API Surface of actionstack
+ * Public API Surface of streamix networking
  */
 
 export * from "./lib";

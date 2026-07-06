@@ -45,7 +45,7 @@ export function mergeMap<T = any, R = any>(
 ) {
   return createPushOperator<T, R>('mergeMap', function (source, output) {
     let stopped = false;
-    const coordinator = createAsyncCoordinator([source]);
+    const coordinator = createAsyncCoordinator<T | R>([source]);
 
     void (async () => {
       const SOURCE_INDEX = 0;

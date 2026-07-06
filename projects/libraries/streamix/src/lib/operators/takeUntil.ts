@@ -30,7 +30,7 @@ export function takeUntil<T = any, N = any>(
 ): Operator<T, T> {
   return createOperator<T, T>("takeUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
-    const runner = createAsyncCoordinator([source, notifierIt]);
+    const runner = createAsyncCoordinator<T | N>([source, notifierIt]);
 
     let isDone = false;
 
@@ -56,7 +56,7 @@ export function takeUntil<T = any, N = any>(
             case 'value':
               if (event.sourceIndex === 0) {
                 // Source value - forward it (preserving dropped flag)
-                return NEXT(event.value);
+                return NEXT(event.value as T);
               }
               // Notifier emitted - stop immediately
               isDone = true;
@@ -94,7 +94,7 @@ export function takeUntil<T = any, N = any>(
           switch (event.type) {
             case 'value':
               if (event.sourceIndex === 0) {
-                return NEXT(event.value);
+                return NEXT(event.value as T);
               }
               isDone = true;
               // Can't await in sync method, but we can schedule cleanup

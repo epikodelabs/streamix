@@ -1,5 +1,12 @@
 {
-  "entryPoints": ["projects/libraries/streamix/src/public-api.ts"],
+  "entryPoints": [
+    "projects/libraries/streamix/src/public-api.ts",
+    "projects/libraries/streamix/aggregates/src/public-api.ts",
+    "projects/libraries/streamix/coroutines/src/public-api.ts",
+    "projects/libraries/streamix/dom/src/public-api.ts",
+    "projects/libraries/streamix/networking/src/public-api.ts"
+  ],
+  "tsconfig": "typedoc.tsconfig.json",
   "out": "docs/api",
   "gitRemote": "origin",
   "gitRevision": "main",
@@ -7,7 +14,7 @@
   "plugin": ["typedoc-plugin-markdown"],
   "theme": "markdown",
   "hideGenerator": true,
-  "skipErrorChecking": true,
+  "skipErrorChecking": false,
   "excludePrivate": true,
   "excludeProtected": true,
   "excludeInternal": true,
@@ -15,9 +22,22 @@
   "readme": "none",
   "externalSymbolLinkMappings": {
     "typescript": {
-      "AbortSignal": "#"
+      "ArrayBuffer": "#",
+      "AbortSignal": "#",
+      "AsyncIterable": "#",
+      "Blob": "#",
+      "Iterable": "#",
+      "Response": "#",
+      "Uint8Array": "#"
     }
   },
+  "intentionallyNotExported": [
+    "Actor",
+    "Coroutine",
+    "CoroutineDefinitionRest",
+    "TaskRunner",
+    "WorkerUtilsCompatibility"
+  ],
   "sort": ["source-order"],
   "kindSortOrder": [
     "Document",
