@@ -83,7 +83,7 @@ export function compose<T = any, R = any>(
   for (const s of scripts) {
     if (isCoroutineScript(s)) {
       workerScripts.push(s);
-    } else if (s && typeof (s as TaskRunner).processTask === "function") {
+    } else if (s && typeof (s as TaskRunner).run === "function") {
       taskRunners.push(s as TaskRunner);
     }
   }
@@ -102,26 +102,26 @@ export function compose<T = any, R = any>(
     });
   }
 
-  const processTask = async (data: T): Promise<R> => {
+  const run = async (data: T): Promise<R> => {
     let result: any = data;
 
     if (workerRunner) {
-      result = await workerRunner.processTask(result);
+      result = await workerRunner.run(result);
     }
 
     for (const runner of taskRunners) {
-      result = await runner.processTask(result);
+      result = await runner.run(result);
     }
 
     return result;
   };
 
-  const finalize = async (): Promise<void> => {
+  const dispose = async (): Promise<void> => {
     const errors: Error[] = [];
 
     if (workerRunner) {
       try {
-        await workerRunner.finalize();
+        await workerRunner.dispose();
       } catch (e) {
         errors.push(e instanceof Error ? e : new Error(String(e)));
       }
@@ -129,7 +129,7 @@ export function compose<T = any, R = any>(
 
     for (const runner of taskRunners) {
       try {
-        await runner.finalize();
+        await runner.dispose();
       } catch (e) {
         errors.push(e instanceof Error ? e : new Error(String(e)));
       }
@@ -141,7 +141,7 @@ export function compose<T = any, R = any>(
   };
 
   return {
-    processTask,
-    finalize,
+    run: run,
+    dispose: dispose,
   } as Coroutine<T, R>;
 }

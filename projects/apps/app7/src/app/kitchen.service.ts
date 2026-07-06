@@ -138,7 +138,7 @@ async function bakeOnReservedOven(request: BakeRequest): Promise<BakeResult> {
   }
 
   try {
-    await oven.worker.processTask({ order: request.order, recipe: request.recipe });
+    await oven.worker.run({ order: request.order, recipe: request.recipe });
     return { ovenId: oven.id, price: prices.get(request.order.item) ?? 10 };
   } finally {
     reservedOvens.delete(oven.id);
@@ -649,7 +649,7 @@ export class KitchenService {
     await Promise.all([
       main.outbox.stop(cashier),
       main.outbox.stop(chef),
-      ...ovens.map(o => o.worker.finalize()),
+      ...ovens.map(o => o.worker.dispose()),
     ]);
   }
 

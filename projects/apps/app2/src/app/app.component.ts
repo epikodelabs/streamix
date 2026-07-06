@@ -350,7 +350,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   ngAfterViewInit(): void {
     this.appScope.cleanups.add(() => {
       this.abortController?.abort();
-      this.runner.finalize();
+      this.runner.dispose();
     });
     this.drawJulia();
   }

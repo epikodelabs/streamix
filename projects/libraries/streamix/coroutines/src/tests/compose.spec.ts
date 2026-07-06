@@ -3,16 +3,16 @@ import { compose, coroutine } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
 idescribe("compose", () => {
-  it("should process tasks sequentially via processTask", async () => {
+  it("should process tasks sequentially via run", async () => {
     const c1 = coroutine((x: number) => x + 1);
     const c2 = coroutine((x: number) => x * 2);
 
     const composed = compose(c1, c2);
 
-    const result = await composed.processTask(3); // (3 + 1) * 2
+    const result = await composed.run(3); // (3 + 1) * 2
     expect(result).toBe(8);
 
-    await composed.finalize();
+    await composed.dispose();
   });
 
   it("should process tasks sequentially in a stream", async () => {
@@ -29,13 +29,13 @@ idescribe("compose", () => {
 
     const results: number[] = [];
     for await (const v of stream) {
-      results.push(await composed.processTask(v));
+      results.push(await composed.run(v));
     }
 
     // (1+1)*2 = 4, (2+1)*2 = 6, (3+1)*2 = 8
     expect(results).toEqual([4, 6, 8]);
 
-    await composed.finalize();
+    await composed.dispose();
   });
 
   it("should await async coroutine stages before passing values to the next stage", async () => {
@@ -47,10 +47,10 @@ idescribe("compose", () => {
 
     const composed = compose(c1, c2);
 
-    const result = await composed.processTask(3);
+    const result = await composed.run(3);
     expect(result).toBe(8);
 
-    await composed.finalize();
+    await composed.dispose();
   });
 
   it("should propagate errors from inner coroutine", async () => {
@@ -63,43 +63,43 @@ idescribe("compose", () => {
     const composed = compose(c1, c2);
 
     try {
-      await composed.processTask(1); // (1+1) => 2, then boom
+      await composed.run(1); // (1+1) => 2, then boom
       fail("Expected error to be thrown");
     } catch (err: any) {
       expect(err.message).toBe("boom");
     }
 
-    await composed.finalize();
+    await composed.dispose();
   });
 
-  it("should finalize all tasks", async () => {
+  it("should dispose all tasks", async () => {
     const finalized: string[] = [];
 
     const c1 = {
-      processTask: async (x: number) => x + 1,
-      finalize: async () => finalized.push("c1"),
+      run: async (x: number) => x + 1,
+      dispose: async () => finalized.push("c1"),
     } as any;
     const c2 = {
-      processTask: async (x: number) => x * 2,
-      finalize: async () => finalized.push("c2"),
+      run: async (x: number) => x * 2,
+      dispose: async () => finalized.push("c2"),
     } as any;
 
     const composed = compose(c1, c2);
 
-    const result = await composed.processTask(5);
+    const result = await composed.run(5);
     expect(result).toBe(12);
 
-    await composed.finalize();
+    await composed.dispose();
     expect(finalized).toEqual(["c1", "c2"]);
   });
 
   it("should handle empty composes gracefully", async () => {
     const composed = compose(); // no tasks
-    const result = await composed.processTask(42);
+    const result = await composed.run(42);
 
     expect(result).toBe(42);
 
-    await composed.finalize();
+    await composed.dispose();
   });
 
   it("passes through values when no tasks are provided", async () => {
@@ -111,32 +111,32 @@ idescribe("compose", () => {
     const passThrough = compose();
     const results: number[] = [];
     for await (const v of stream) {
-      results.push(await passThrough.processTask(v));
+      results.push(await passThrough.run(v));
     }
 
     expect(results).toEqual([1, 2]);
   });
 
-  it("should finalize every task even when one finalizer throws", async () => {
+  it("should dispose every task even when one finalizer throws", async () => {
     const finalized: string[] = [];
 
     const composed = compose(
       {
-        processTask: async (x: number) => x + 1,
-        finalize: async () => {
+        run: async (x: number) => x + 1,
+        dispose: async () => {
           finalized.push("c1");
           throw new Error("boom");
         },
       } as any,
       {
-        processTask: async (x: number) => x * 2,
-        finalize: async () => {
+        run: async (x: number) => x * 2,
+        dispose: async () => {
           finalized.push("c2");
         },
       } as any
     );
 
-    await expectAsync(composed.finalize()).toBeRejectedWithError("boom");
+    await expectAsync(composed.dispose()).toBeRejectedWithError("boom");
     expect(finalized).toEqual(["c1", "c2"]);
   });
 });

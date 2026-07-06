@@ -1,15 +1,15 @@
 import {
-  background,
-  channel,
-  ChannelClosedError,
-  ContextCancelledError,
-  otherwise,
-  receive,
-  select,
-  send,
-  withCancel,
-  withDeadline,
-  withTimeout,
+    background,
+    channel,
+    ChannelClosedError,
+    ContextCancelledError,
+    otherwise,
+    receive,
+    select,
+    send,
+    withCancel,
+    withDeadline,
+    withTimeout,
 } from "../utils";
 import { acquireBlobUrl, releaseBlobUrl } from "../worker/blob";
 import type { WorkerProtocolMessage } from "../worker/messages";
@@ -225,7 +225,7 @@ export type ActorMessageContext = {
  * Request handler used by `utils.outbox.request(name, topic, payload)`.
  *
  * Keep this function small, or delegate to a `coroutine(...)` instance via
- * `request: dataWorker.processTask` when data resolution itself is expensive.
+ * `request: dataWorker.run` when data resolution itself is expensive.
  */
 export type ActorRequestHandler<Q = any, D = any> = (
   topic: string,

@@ -1,6 +1,6 @@
 import { acquireBlobUrl, releaseBlobUrl } from "./blob";
-import { createDefaultMessageHandler } from "./messages";
 import type { PendingTaskMap, WorkerProtocolMessage } from "./messages";
+import { createDefaultMessageHandler } from "./messages";
 import type { WorkerScriptConfig } from "./runner";
 import type { TaskRunner } from "./types";
 import { generateTaskId } from "./utils";
@@ -127,7 +127,7 @@ export function createTaskPool<T, R>({
     });
   };
 
-  const processTask = async (value: T): Promise<R> => {
+  const run = async (value: T): Promise<R> => {
     const worker = await checkoutWorker();
     try {
       return await submitTask(worker, value);
@@ -136,7 +136,7 @@ export function createTaskPool<T, R>({
     }
   };
 
-  const finalize = async () => {
+  const dispose = async () => {
     if (isFinalizing) {
       return;
     }
@@ -168,7 +168,7 @@ export function createTaskPool<T, R>({
   };
 
   return {
-    processTask,
-    finalize,
+    run: run,
+    dispose: dispose,
   };
 }

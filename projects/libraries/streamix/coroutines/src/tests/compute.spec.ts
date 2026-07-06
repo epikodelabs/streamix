@@ -16,7 +16,7 @@ idescribe("compute", () => {
     const run = compute<number, number>((x: number) => x * 2);
     const result = await run(5);
     expect(result).toBe(10);
-    await run.finalize();
+    await run.dispose();
   });
 
   it("should reuse the same pool across calls", async () => {
@@ -27,7 +27,7 @@ idescribe("compute", () => {
 
     expect(r1).toBe(2);
     expect(r2).toBe(6);
-    await run.finalize();
+    await run.dispose();
   });
 
   it("should process many values sequentially", async () => {
@@ -39,7 +39,7 @@ idescribe("compute", () => {
     }
 
     expect(results).toEqual([4, 9, 16, 25]);
-    await run.finalize();
+    await run.dispose();
   });
 
   it("should propagate errors from the worker task", async () => {
@@ -60,7 +60,7 @@ idescribe("compute", () => {
       console.log = originalLog;
       console.error = originalError;
       console.warn = originalWarn;
-      await run.finalize();
+      await run.dispose();
     }
   });
 
@@ -77,7 +77,7 @@ idescribe("compute", () => {
     const result = await pending;
 
     expect(result).toBe(12);
-    await run.finalize();
+    await run.dispose();
   });
 
   it("should preserve helper snippets when building from a coroutine script", async () => {
@@ -89,6 +89,6 @@ idescribe("compute", () => {
     const result = await run(5);
 
     expect(result).toBe(15);
-    await run.finalize();
+    await run.dispose();
   });
 });

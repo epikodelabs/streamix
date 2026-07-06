@@ -11,7 +11,7 @@ export interface ComputeRunner<T = any, R = any> {
   /** Submits input to the compute pool and resolves with the worker result. */
   (params: T | Promise<T>): Promise<R>;
   /** Terminates all workers in the pool and rejects queued work. */
-  finalize: () => Promise<void>;
+  dispose: () => Promise<void>;
 }
 
 /**
@@ -22,14 +22,14 @@ export interface ComputeRunner<T = any, R = any> {
  * runtime compilation overhead; workers are pre-initialized with the task.
  *
  * The returned async function submits params to that pool. The pool lives
- * for as long as the function exists. Call `.finalize()` when done to
+ * for as long as the function exists. Call `.dispose()` when done to
  * terminate the underlying workers.
  *
  * @example
  * ```ts
  * const run = compute((x: number) => x * 2);
  * const result = await run(5); // 10
- * await run.finalize();
+ * await run.dispose();
  * ```
  */
 export function compute<T = any, R = any>(
@@ -51,10 +51,10 @@ export function compute<T = any, R = any>(
 
   const run = async (params: T | Promise<T>): Promise<R> => {
     const resolved = isPromiseLike(params) ? await params : params;
-    return pool.processTask(resolved);
+    return pool.run(resolved);
   };
 
-  run.finalize = () => pool.finalize();
+  run.dispose = () => pool.dispose();
   return run;
 }
 
@@ -83,9 +83,9 @@ export function computeScript<T = any, R = any>(
 
   const run = async (params: T | Promise<T>): Promise<R> => {
     const resolved = isPromiseLike(params) ? await params : params;
-    return pool.processTask(resolved);
+    return pool.run(resolved);
   };
 
-  run.finalize = () => pool.finalize();
+  run.dispose = () => pool.dispose();
   return run;
 }

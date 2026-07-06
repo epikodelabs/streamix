@@ -1,8 +1,8 @@
-import {flow, finalize, from, interval, map, pipe, iterate} from '@epikodelabs/streamix';
+import { finalize, flow, from, interval, iterate, map, pipe } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-describe("finalize", () => {
+describe("dispose", () => {
   it("should call finalizer on normal completion", async () => {
     const called: string[] = [];
     const atom = pipe(from([1, 2, 3]), finalize(() => { called.push("finalized"); }));
@@ -74,7 +74,7 @@ describe("finalize", () => {
   it("should await finalizer when iterator.return is used", async () => {
     const finalizers: string[] = [];
     let resolveFinalize!: () => void;
-    const finalize$ = new Promise<void>((resolve) => {
+    const dispose$ = new Promise<void>((resolve) => {
       resolveFinalize = resolve;
     });
 
@@ -91,14 +91,14 @@ describe("finalize", () => {
 
     await iterator.next();
     await iterator.return?.();
-    await finalize$;
+    await dispose$;
     expect(finalizers).toEqual(["finalized"]);
   });
 
   it("should await finalizer when iterator.throw is used", async () => {
     const finalizers: string[] = [];
     let resolveFinalize!: () => void;
-    const finalize$ = new Promise<void>((resolve) => {
+    const dispose$ = new Promise<void>((resolve) => {
       resolveFinalize = resolve;
     });
 
@@ -113,7 +113,7 @@ describe("finalize", () => {
     }).apply(sourceIterator);
 
     await expectAsync(iterator.throw?.(new Error("stop"))).toBeRejectedWithError("stop");
-    await finalize$;
+    await dispose$;
     expect(finalizers).toEqual(["finalized"]);
   });
 

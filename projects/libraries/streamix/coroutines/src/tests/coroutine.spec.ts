@@ -1,17 +1,17 @@
 import { flow } from "@epikodelabs/streamix";
 import {
-  ChannelClosedError,
-  ContextCancelledError,
-  background,
-  channel,
-  coroutine,
-  otherwise,
-  receive,
-  select,
-  send,
-  withCancel,
-  withDeadline,
-  withTimeout
+    ChannelClosedError,
+    ContextCancelledError,
+    background,
+    channel,
+    coroutine,
+    otherwise,
+    receive,
+    select,
+    send,
+    withCancel,
+    withDeadline,
+    withTimeout
 } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
@@ -185,7 +185,7 @@ idescribe('coroutine', () => {
 
     const processed: number[] = [];
     for await (const v of stream) {
-      processed.push(await co.processTask(v as number));
+      processed.push(await co.run(v as number));
     }
 
     expect(processed).toEqual([2, 3, 4]); // Fixed expectation: x + 1
@@ -198,27 +198,27 @@ idescribe('coroutine', () => {
     const co = coroutine(mainTask);
 
     const results = await Promise.all([
-      co.processTask(1),
-      co.processTask(2),
-      co.processTask(3),
+      co.run(1),
+      co.run(2),
+      co.run(3),
     ]);
 
     expect(results).toEqual([2, 4, 6]); // Fixed expectation: x * 2
     expect(mockWorkerCreations).toBe(1);
   });
 
-  it('should finalize and terminate all workers', async () => {
+  it('should dispose and terminate all workers', async () => {
     const mainTask = (x: number) => x * 2;
     (globalThis as any).currentMainTask = mainTask;
 
     const co = coroutine(mainTask);
 
-    const result = await co.processTask(2);
+    const result = await co.run(2);
     expect(result).toBe(4);
-    await co.finalize();
+    await co.dispose();
   });
 
-  it('should throw error from processTask directly', async () => {
+  it('should throw error from run directly', async () => {
     // Silence them
     console.log = () => {};
     console.error = () => {};
@@ -232,8 +232,8 @@ idescribe('coroutine', () => {
     const co = coroutine(mainTask);
 
     try {
-      await co.processTask(1);
-      fail('Expected processTask to throw error');
+      await co.run(1);
+      fail('Expected run to throw error');
     } catch (err: any) {
       expect(err.message).toBe('boom');
     }
@@ -258,8 +258,8 @@ idescribe('coroutine', () => {
     const co = coroutine(mainTask);
 
     try {
-      await co.processTask(1);
-      fail('Expected processTask to throw error');
+      await co.run(1);
+      fail('Expected run to throw error');
     } catch (err: any) {
       expect(err.message).toBe('Worker task threw undefined');
     }
@@ -297,7 +297,7 @@ idescribe('coroutine', () => {
 
     try {
       for await (const v of stream) {
-        processed.push(await co.processTask(v as number));
+        processed.push(await co.run(v as number));
       }
     } catch (err: any) {
       errorCaught = true;
@@ -323,9 +323,9 @@ idescribe('coroutine', () => {
       (globalThis as any).currentMainTask = mainTask;
 
       const co = coroutine(mainTask);
-      const result = await co.processTask(1);
+      const result = await co.run(1);
       expect(result).toBe(2);
-      await co.finalize();
+      await co.dispose();
     } finally {
       if (originalDescriptor) {
         Object.defineProperty(navigator, "hardwareConcurrency", originalDescriptor);
@@ -339,10 +339,10 @@ idescribe('coroutine', () => {
 
     const co = coroutine(mainTask, {});
 
-    const r = await co.processTask(1);
+    const r = await co.run(1);
     expect(r).toBe(2);
 
-    await co.finalize();
+    await co.dispose();
   });
 
   it('should reject with "Unknown worker error" when worker error message is missing', async () => {
@@ -392,8 +392,8 @@ idescribe('coroutine', () => {
 
       const co = coroutine(mainTask);
 
-      await expectAsync(co.processTask(1)).toBeRejectedWithError("Unknown worker error");
-      await co.finalize();
+      await expectAsync(co.run(1)).toBeRejectedWithError("Unknown worker error");
+      await co.dispose();
     } finally {
       (globalThis as any).Worker = originalWorker;
     }
@@ -408,11 +408,11 @@ idescribe('coroutine', () => {
     }
 
     const co = coroutine(mainTask, helperNamed, function () { return 2; });
-    await co.processTask(1);
-    await co.finalize();
+    await co.run(1);
+    await co.dispose();
   });
 
-  it('should reject queued processTask requests when finalized', async () => {
+  it('should reject queued run requests when finalized', async () => {
     const mainTask = (x: number) => {
       if (x === 1) {
         return new Promise<number>(() => {}); // never resolves
@@ -422,24 +422,24 @@ idescribe('coroutine', () => {
     (globalThis as any).currentMainTask = mainTask;
 
     const co = coroutine(mainTask);
-    const active = co.processTask(1);
-    const queued = co.processTask(2);
+    const active = co.run(1);
+    const queued = co.run(2);
 
-    await co.finalize();
+    await co.dispose();
 
     await expectAsync(active).toBeRejectedWithError(/finalized before the worker task completed/);
     await expectAsync(queued).toBeRejectedWithError(/finalized before a worker became available/);
   });
 
-  it('finalize is safe when called before any worker is created', async () => {
+  it('dispose is safe when called before any worker is created', async () => {
     const mainTask = (x: number) => x;
     (globalThis as any).currentMainTask = mainTask;
     const co = coroutine(mainTask);
 
-    await co.finalize();
+    await co.dispose();
 
     // After finalization, new tasks should be rejected.
-    await expectAsync(co.processTask(1)).toBeRejectedWithError(
+    await expectAsync(co.run(1)).toBeRejectedWithError(
       /finalized before a worker became available/
     );
   });

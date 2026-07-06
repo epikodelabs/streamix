@@ -1,6 +1,6 @@
 import { acquireBlobUrl, releaseBlobUrl } from "./blob";
-import { createDefaultMessageHandler } from "./messages";
 import type { PendingTaskMap, WorkerProtocolMessage } from "./messages";
+import { createDefaultMessageHandler } from "./messages";
 import type { TaskRunner } from "./types";
 import { generateTaskId } from "./utils";
 
@@ -37,7 +37,7 @@ const toError = (error: unknown): Error =>
 /**
  * Internal dedicated-worker task executor used by `coroutine()` and `compose()`.
  *
- * A runner owns one reusable worker instance, queues calls to `processTask()`,
+ * A runner owns one reusable worker instance, queues calls to `run()`,
  * and exposes only the high-level `TaskRunner` contract.
  */
 export function createTaskRunner<T, R>({
@@ -124,7 +124,7 @@ export function createTaskRunner<T, R>({
     }
   };
 
-  const processTask = (value: T): Promise<R> => {
+  const run = (value: T): Promise<R> => {
     if (isFinalizing) {
       return Promise.reject(new Error(`${name} finalized before a worker became available`));
     }
@@ -135,7 +135,7 @@ export function createTaskRunner<T, R>({
     });
   };
 
-  const finalize = async () => {
+  const dispose = async () => {
     if (isFinalizing) {
       return;
     }
@@ -167,7 +167,7 @@ export function createTaskRunner<T, R>({
   };
 
   return {
-    finalize,
-    processTask,
+    dispose: dispose,
+    run: run,
   };
 }

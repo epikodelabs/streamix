@@ -38,8 +38,8 @@ function createCoroutineImpl<T, R>(
   });
 
   return {
-    processTask: runner.processTask,
-    finalize: runner.finalize,
+    run: runner.run,
+    dispose: runner.dispose,
     helpers,
     main,
     functions,
@@ -50,9 +50,9 @@ function createCoroutineImpl<T, R>(
  * Creates a reusable coroutine task runner with its worker script baked once.
  *
  * A coroutine owns one dedicated worker, reuses it across calls, and queues
- * `processTask()` submissions on that worker. The returned `Coroutine` can be
+ * `run()` submissions on that worker. The returned `Coroutine` can be
  * used with `pipe()` in stream pipelines or called directly. Call
- * `.finalize()` when done to terminate the underlying worker. Raw helper
+ * `.dispose()` when done to terminate the underlying worker. Raw helper
  * snippets can be provided through an optional trailing options object.
  */
 export function coroutine<T, R>(
@@ -77,3 +77,4 @@ export function coroutine<T, R>(
 }
 
 export type { CoroutineScript } from "../worker/types";
+
