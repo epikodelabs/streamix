@@ -290,6 +290,7 @@ If you are evaluating streamix for browser-side concurrency, start with `@epikod
 ## 📚 Documentation
 
 * [Full Documentation](https://epikodelabs.github.io/streamix)
+* [Migration Guide: v2 to v3](./MIGRATION.md)
 * [Medium: A Generator-Driven, Pull-Based Reactive Core](https://medium.com/p/a1eb9e7ce1d7)
 * [Medium: streamix vs redux-saga](https://medium.com/p/0bfc206ad41c)
 
