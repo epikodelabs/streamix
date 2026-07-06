@@ -47,6 +47,7 @@ export default defineConfig({
             { text: 'Getting Started', link: '/' },
             { text: 'Pricing', link: '/PRICING' },
             { text: 'Changelog', link: '/CHANGELOG' },
+            { text: 'Migration Guide', link: '/MIGRATION' },  // Main migration guide
             { text: 'Atoms', link: '/ATOMS' },
             { text: 'Coroutines', link: '/COROUTINES' },
             { text: 'Actors', link: '/ACTORS' },
@@ -112,6 +113,16 @@ export default defineConfig({
     ['meta', { name: 'theme-color', content: '#3c82f6' }],
     ['meta', { name: 'og:type', content: 'website' }],
     ['meta', { name: 'og:locale', content: 'en' }],
-    ['meta', { name: 'og:site_name', content: 'streamix' }]
+    ['meta', { name: 'og:site_name', content: 'streamix' }],
+    ['script', { 
+      src: 'https://www.googletagmanager.com/gtag/js?id=G-R225GQFN7D',
+      async: ''
+    }],
+    ['script', {}, `
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-R225GQFN7D');
+    `]
   ]
 })

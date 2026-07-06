@@ -1,4 +1,4 @@
-# Migration Guide: v2 to v3
+# 🚀 Migration Guide: v2 to v3
 
 This guide helps existing streamix v2 users migrate to the current v3 API on the `main` branch.
 
@@ -19,9 +19,9 @@ The goal is not to rewrite every stream pipeline. The goal is to move stateful a
 
 ---
 
-## What changed?
+## 🔄 What changed?
 
-### v2 style
+### 📌 v2 style
 
 In v2, applications were commonly organized around streams, subjects, subscriptions, and operators.
 
@@ -53,7 +53,7 @@ events.subscribe(event => {
 events.next({ type: "ready" });
 ```
 
-### v3 style
+### ✨ v3 style
 
 In v3, current state is represented directly as atoms and derived values.
 
@@ -83,7 +83,7 @@ app.dispose();
 
 ---
 
-## Quick mapping
+## 📋 Quick mapping
 
 | v2 pattern | v3 direction |
 | --- | --- |
@@ -103,7 +103,7 @@ app.dispose();
 
 ---
 
-## 1. Streams and flows are still here
+## 1. 🌊 Streams and flows are still here
 
 Do not rewrite every stream pipeline just because you are migrating.
 
@@ -150,7 +150,7 @@ The main migration rule is:
 
 ---
 
-## 2. Replace BehaviorSubject-style state with `atom(initial)`
+## 2. ⚛️ Replace BehaviorSubject-style state with `atom(initial)`
 
 Use `atom(initial)` when the value has an initial state.
 
@@ -176,7 +176,7 @@ This is the most direct migration because both patterns represent a current valu
 
 ---
 
-## 3. Replace plain Subjects based on intent
+## 3. 🎯 Replace plain Subjects based on intent
 
 A v2 `createSubject()` could mean two different things:
 
@@ -210,7 +210,7 @@ Do not force every event stream into an atom. Atoms are for values. Flows are fo
 
 ---
 
-## 4. Replace ReplaySubject-style history intentionally
+## 4. 📜 Replace ReplaySubject-style history intentionally
 
 A replay subject combines two responsibilities:
 
@@ -238,7 +238,7 @@ const recent = pipe(
 
 ---
 
-## 5. Replace computed stream state with `derived()`
+## 5. 🔄 Replace computed stream state with `derived()`
 
 If a stream pipeline only exists to compute state from other state, it is usually a derived value in v3.
 
@@ -278,7 +278,7 @@ console.log(user.fullName);
 
 ---
 
-## 6. Prefer scopes for feature-level state
+## 6. 🌳 Prefer scopes for feature-level state
 
 Atoms are useful on their own, but scopes are the preferred way to model a feature, module, form, page, or component-like state tree.
 
@@ -328,7 +328,7 @@ A scope owns its internal reactive values and cleanup. When the scope is dispose
 
 ---
 
-## 7. Use `flow()` for async reactive state
+## 7. 🌐 Use `flow()` for async reactive state
 
 Use `flow()` when async work should produce a current reactive value.
 
@@ -353,7 +353,7 @@ If you need a long-lived async source that should not restart, avoid reading rea
 
 ---
 
-## 8. Use `iterate(atom)` when you need async iteration
+## 8. 🔁 Use `iterate(atom)` when you need async iteration
 
 Atoms expose current values, but they can still be consumed as async iterables.
 
@@ -369,7 +369,7 @@ This is useful when migrating existing `for await...of` consumers gradually.
 
 ---
 
-## 9. Keep `query()` where it still expresses the intent
+## 9. 🔎 Keep `query()` where it still expresses the intent
 
 v2 used `query()` to await the next emitted value with automatic cleanup.
 
@@ -388,7 +388,7 @@ for await (const value of values) {
 
 ---
 
-## 10. Update coroutine lifecycle names
+## 10. 🛠️ Update coroutine lifecycle names
 
 Coroutine APIs now use shorter lifecycle names.
 
@@ -416,7 +416,7 @@ Use `run()` for one task execution and `dispose()` for cleanup.
 
 ---
 
-## Migration order
+## 📍 Migration order
 
 A safe migration path:
 
@@ -434,7 +434,7 @@ A safe migration path:
 
 ---
 
-## Common examples
+## 💡 Common examples
 
 ### Counter
 
@@ -495,7 +495,7 @@ search.query = "streamix";
 
 ---
 
-## FAQ
+## ❓ FAQ
 
 ### Do I have to remove all streams?
 
@@ -519,7 +519,7 @@ Use direct `.value` reads for current state. Use `subscribe()` for callbacks. Us
 
 ---
 
-## Final rule of thumb
+## 🎯 Final rule of thumb
 
 ```txt
 atom      = current value
