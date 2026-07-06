@@ -2,11 +2,20 @@
 
 This guide helps existing streamix v2 users migrate to the current v3 API on the `main` branch.
 
+The `v2` branch is a compact async-iterable streaming toolkit. Its public model is built around:
+
+- pull-based streams,
+- hot Subjects,
+- method-style `.pipe(...)`,
+- `for await...of`,
+- `query()` for awaiting the next value,
+- coroutine and actor add-ons.
+
 v3 keeps the async-generator and async-iterator foundation, but changes the recommended application model:
 
 > **Atoms for values. Flows for sequences. Scopes for ownership. Flow-backed atoms for async state.**
 
-The goal is not to remove everything you wrote with streams. The goal is to move stateful application logic away from subject-style orchestration and toward a smaller reactive model built around atoms, derived values, flows, and scopes.
+The goal is not to rewrite every stream pipeline. The goal is to move stateful application logic away from subject-style orchestration and toward atoms, derived values, flows, and scopes.
 
 ---
 
@@ -14,7 +23,7 @@ The goal is not to remove everything you wrote with streams. The goal is to move
 
 ### v2 style
 
-In v2, applications were usually organized around streams, subjects, subscriptions, and operators.
+In v2, applications were commonly organized around streams, subjects, subscriptions, and operators.
 
 ```ts
 const count = createBehaviorSubject(0);
@@ -32,9 +41,21 @@ count.next(5);
 subscription();
 ```
 
+Subjects were the imperative/hot source primitive:
+
+```ts
+const events = createSubject<{ type: string }>();
+
+events.subscribe(event => {
+  console.log(event.type);
+});
+
+events.next({ type: "ready" });
+```
+
 ### v3 style
 
-In v3, state is represented directly as atoms and derived values.
+In v3, current state is represented directly as atoms and derived values.
 
 ```ts
 const count = atom(0);
@@ -66,11 +87,14 @@ app.dispose();
 
 | v2 pattern | v3 direction |
 | --- | --- |
-| `createSubject<T>()` for events | `atom<T>()` |
+| `createSubject<T>()` | `atom<T>()` for latest event state, or a flow/source for pure sequences |
 | `createBehaviorSubject<T>(initial)` | `atom(initial)` |
+| `createReplaySubject<T>(capacity)` | explicit history atom, `scan(...)`, or a flow-level replay helper where appropriate |
 | `subject.next(value)` | `atom.set(value)` |
+| `subject.complete()` | `atom.dispose()` or owning `scope.dispose()` |
 | `subject.subscribe(...)` | `atom.subscribe(...)` or `iterate(atom)` |
 | `stream.pipe(...)` | `pipe(source, ...)` |
+| `stream.query()` | keep `query()` where available, or consume with `for await...of` |
 | computed stream state | `derived(...)` |
 | async resource state | `flow(...)` |
 | manual subscription groups | `scope(...)` and `.dispose()` |
@@ -79,7 +103,7 @@ app.dispose();
 
 ---
 
-## 1. Streams are still here
+## 1. Streams and flows are still here
 
 Do not rewrite every stream pipeline just because you are migrating.
 
@@ -91,15 +115,31 @@ Streams/flows are still the right tool for:
 - `for await...of`,
 - event or data streams that do not need to expose a current value.
 
+### Before: v2 method-style pipe
+
 ```ts
-const result = pipe(
+const values = range(1, 20).pipe(
+  filter(n => n % 2 === 0),
+  map(n => n * 10),
+  take(5)
+);
+
+for await (const value of values) {
+  console.log(value);
+}
+```
+
+### After: v3 function-style pipe
+
+```ts
+const values = pipe(
   range(1, 20),
   filter(n => n % 2 === 0),
   map(n => n * 10),
   take(5)
 );
 
-for await (const value of result) {
+for await (const value of values) {
   console.log(value);
 }
 ```
@@ -110,7 +150,7 @@ The main migration rule is:
 
 ---
 
-## 2. Replace subject-style state with atoms
+## 2. Replace BehaviorSubject-style state with `atom(initial)`
 
 Use `atom(initial)` when the value has an initial state.
 
@@ -120,6 +160,7 @@ Use `atom(initial)` when the value has an initial state.
 const count = createBehaviorSubject(0);
 
 count.next(1);
+console.log(count.value);
 ```
 
 ### After
@@ -131,17 +172,73 @@ count.set(1);
 console.log(count.value);
 ```
 
-Use `atom<T>()` when the value arrives later.
+This is the most direct migration because both patterns represent a current value.
+
+---
+
+## 3. Replace plain Subjects based on intent
+
+A v2 `createSubject()` could mean two different things:
+
+1. a hot event stream,
+2. a mutable piece of application state.
+
+In v3, choose based on the role.
+
+### If it represents current state, use `atom<T>()`
 
 ```ts
-const message = atom<string>();
+const status = atom<string>();
 
-message.set("ready");
+status.set("ready");
+
+console.log(status.value);
+```
+
+### If it represents a pure event sequence, keep it as a flow/source
+
+```ts
+const clicks = fromEvent(button, "click");
+
+const clicksUntilSubmit = pipe(
+  clicks,
+  takeUntil(submit)
+);
+```
+
+Do not force every event stream into an atom. Atoms are for values. Flows are for sequences.
+
+---
+
+## 4. Replace ReplaySubject-style history intentionally
+
+A replay subject combines two responsibilities:
+
+- it is a hot event source,
+- it stores recent history.
+
+In v3, model the history explicitly.
+
+```ts
+const messages = atom<string[]>([]);
+
+function pushMessage(message: string) {
+  messages.set([...messages.value, message].slice(-10));
+}
+```
+
+Or keep history in a flow pipeline when it belongs to the sequence:
+
+```ts
+const recent = pipe(
+  source,
+  scan((items, item) => [...items, item].slice(-10), [] as Item[])
+);
 ```
 
 ---
 
-## 3. Replace computed state pipelines with `derived()`
+## 5. Replace computed stream state with `derived()`
 
 If a stream pipeline only exists to compute state from other state, it is usually a derived value in v3.
 
@@ -167,7 +264,7 @@ const fullName = derived(() => `${firstName.value} ${lastName.value}`);
 console.log(fullName.value);
 ```
 
-Inside a scope, this becomes even smaller:
+Inside a scope, this becomes smaller:
 
 ```ts
 const user = scope({
@@ -181,7 +278,7 @@ console.log(user.fullName);
 
 ---
 
-## 4. Prefer scopes for feature-level state
+## 6. Prefer scopes for feature-level state
 
 Atoms are useful on their own, but scopes are the preferred way to model a feature, module, form, page, or component-like state tree.
 
@@ -190,10 +287,16 @@ Atoms are useful on their own, but scopes are the preferred way to model a featu
 ```ts
 const firstName = createBehaviorSubject("Ada");
 const lastName = createBehaviorSubject("Lovelace");
-const subscriptions = [];
 
-subscriptions.push(firstName.subscribe(...));
-subscriptions.push(lastName.subscribe(...));
+const fullName = combineLatest(firstName, lastName).pipe(
+  map(([first, last]) => `${first} ${last}`)
+);
+
+const subscriptions = [
+  firstName.subscribe(...),
+  lastName.subscribe(...),
+  fullName.subscribe(...),
+];
 
 for (const unsubscribe of subscriptions) {
   unsubscribe();
@@ -225,7 +328,7 @@ A scope owns its internal reactive values and cleanup. When the scope is dispose
 
 ---
 
-## 5. Use `flow()` for async reactive state
+## 7. Use `flow()` for async reactive state
 
 Use `flow()` when async work should produce a current reactive value.
 
@@ -250,7 +353,7 @@ If you need a long-lived async source that should not restart, avoid reading rea
 
 ---
 
-## 6. Use `iterate(atom)` when you need async iteration
+## 8. Use `iterate(atom)` when you need async iteration
 
 Atoms expose current values, but they can still be consumed as async iterables.
 
@@ -266,34 +369,26 @@ This is useful when migrating existing `for await...of` consumers gradually.
 
 ---
 
-## 7. Replace `stream.pipe(...)` with `pipe(source, ...)`
+## 9. Keep `query()` where it still expresses the intent
 
-v2 examples often used method-style piping.
-
-```ts
-const result = source.pipe(
-  filter(Boolean),
-  map(transform),
-  take(5)
-);
-```
-
-v3 examples should prefer function-style `pipe`.
+v2 used `query()` to await the next emitted value with automatic cleanup.
 
 ```ts
-const result = pipe(
-  source,
-  filter(Boolean),
-  map(transform),
-  take(5)
-);
+const firstTick = await interval(1000).pipe(take(1)).query();
 ```
 
-This keeps flows close to plain async iterables and avoids requiring every source to carry a `.pipe()` method.
+In v3, you can still keep this style where the API supports it. For plain async iterables, `for await...of` is the universal fallback.
+
+```ts
+for await (const value of values) {
+  console.log(value);
+  break;
+}
+```
 
 ---
 
-## 8. Update coroutine lifecycle names
+## 10. Update coroutine lifecycle names
 
 Coroutine APIs now use shorter lifecycle names.
 
@@ -321,18 +416,21 @@ Use `run()` for one task execution and `dispose()` for cleanup.
 
 ---
 
-## 9. Migration order
+## Migration order
 
 A safe migration path:
 
-1. Keep existing flow/stream pipelines that already work.
-2. Convert subject-style state to `atom()`.
-3. Convert computed state pipelines to `derived()`.
-4. Move feature-level atom groups into `scope()`.
-5. Convert async resource state to `flow()`.
-6. Replace method-style `.pipe(...)` examples with `pipe(source, ...)` when touching code.
-7. Rename coroutine lifecycle calls from `processTask`/`finalize` to `run`/`dispose`.
-8. Add `.dispose()` calls for scopes and long-lived resources.
+1. Keep existing stream pipelines that already work.
+2. Convert `createBehaviorSubject(initial)` state to `atom(initial)`.
+3. Review each `createSubject()` and decide whether it is state or a sequence.
+4. Convert state-like Subjects to `atom<T>()`.
+5. Keep event-like Subjects as flows/sources when they are really sequences.
+6. Convert computed state pipelines to `derived()`.
+7. Move feature-level atom groups into `scope()`.
+8. Convert async resource state to `flow()`.
+9. Replace method-style `.pipe(...)` with `pipe(source, ...)` when touching code.
+10. Rename coroutine lifecycle calls from `processTask`/`finalize` to `run`/`dispose`.
+11. Add `.dispose()` calls for scopes and long-lived resources.
 
 ---
 
@@ -403,9 +501,9 @@ search.query = "streamix";
 
 No. Streams/flows are still core to streamix. Use them for sequences. Use atoms and scopes for state.
 
-### Are subjects still recommended?
+### Are Subjects still recommended?
 
-No. Existing subject-style code can be migrated gradually, but new stateful code should use atoms and scopes.
+No for new stateful code. Existing subject-style code can be migrated gradually. Event-like sources can remain sequence-oriented, but state-like Subjects should move to atoms or scopes.
 
 ### Should every atom be inside a scope?
 
