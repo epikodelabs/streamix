@@ -16,8 +16,7 @@
   "exclude": [
     "**/node_modules/**",
     "**/env.spec.ts",
-    "**/src/tests/_skipped/**",
-    "**/coroutines/src/tests/**"
+    "**/src/tests/_skipped/**"
   ],
   "preserveOutputs": false,
   "outDir": "dist/.vite-jasmine-build",
