@@ -1,4 +1,4 @@
-# 🚀 Migration Guide: v2 to v3
+# 🚀 Streamix Migration Guide From v2
 
 This guide helps existing streamix v2 users migrate to the current v3 API on the `main` branch.
 
