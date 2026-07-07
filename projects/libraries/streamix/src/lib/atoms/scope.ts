@@ -27,6 +27,12 @@ import type { Subscription } from "./subscription";
 const DYNAMIC_EXPR = Symbol("streamix.dynamicExpr");
 const METHOD = Symbol("streamix.method");
 
+const DYNAMIC_ATOM_FACTORY_EXPR = Symbol("streamix.dynamicAtomFactoryExpr");
+
+interface DynamicAtomFactoryExpr<T = any, Self = any> {
+  [DYNAMIC_ATOM_FACTORY_EXPR]: true;
+  fn: (self: Self, atoms?: any) => Atom<T>;
+}
 interface DynamicExpr<T = any, Self = any> {
   [DYNAMIC_EXPR]: true;
   fn: (self: Self, atoms?: any) => Atom<T> | T;
@@ -45,6 +51,14 @@ function dynamicExpr<T, Self = any>(fn: (self: Self, atoms?: any) => Atom<T> | T
   return { [DYNAMIC_EXPR]: true, fn };
 }
 
+function isDynamicAtomFactoryExpr(value: any): value is DynamicAtomFactoryExpr {
+  return value != null && typeof value === "object" && value[DYNAMIC_ATOM_FACTORY_EXPR] === true;
+}
+
+function dynamicAtomFactoryExpr<T, Self = any>(fn: (self: Self, atoms?: any) => Atom<T>): DynamicAtomFactoryExpr<T, Self> {
+  return { [DYNAMIC_ATOM_FACTORY_EXPR]: true, fn };
+}
+
 function isMethod(value: any): value is Method {
   return value != null && typeof value === "object" && value[METHOD] === true;
 }
@@ -53,12 +67,12 @@ export function method<T extends (...args: any[]) => any>(fn: T): Method<T> {
   return { [METHOD]: true, fn };
 }
 
-function isExprMarkerOrDynamic(value: any): value is AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr {
-  return isExprMarkerBase(value) || isDynamicExpr(value);
+function isExprMarkerOrDynamic(value: any): value is AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr | DynamicAtomFactoryExpr {
+  return isExprMarkerBase(value) || isDynamicExpr(value) || isDynamicAtomFactoryExpr(value);
 }
 
 function evaluateExprMarker(
-  marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr,
+  marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr | DynamicAtomFactoryExpr,
   self: any,
   atoms?: any,
 ): Atom<any> {
@@ -69,10 +83,20 @@ function evaluateExprMarker(
   if (isPipeExpr(marker)) return marker.fn(self);
   if (isFlowExpr(marker)) return flow(marker.fn(self));
   if (isDynamicExpr(marker)) {
-    const value = marker.fn(self, atoms);
-    return value && typeof value === "object" && (value as any).type === "atom"
-      ? (value as Atom<any>)
-      : derived(() => marker.fn(self, atoms));
+    const capturedSelf = self;
+    const capturedAtoms = atoms;
+    return derived(() => {
+      // Execute the formula passing the correct self proxy and atoms accessor from the closure
+      const value = marker.fn(capturedSelf, capturedAtoms);
+      return value && typeof value === "object" && (value as any).type === "atom"
+        ? (value as Atom<any>).value
+        : value;
+    });
+  }
+  if (isDynamicAtomFactoryExpr(marker)) {
+    // For dynamic atom factories, execute the function and return the atom directly.
+    // The self and atoms are captured from the closure.
+    return marker.fn(self, atoms);
   }
   throw new Error("Unknown expression marker");
 }
@@ -218,8 +242,23 @@ function materializeState(
     } else if (isMethod(item)) {
       rawState[key] = item.fn.bind(scopeProxy);
     } else if (typeof item === "function") {
-      // Direct raw functions inferred safely as implicit computed properties
-      rawState[key] = dynamicExpr(item.bind(scopeProxy));
+      // Check if it's a method action factory: (self) => () => { ... }
+      // We can temporarily evaluate it safely with a dummy proxy to inspect its return type
+      const dummyAtoms = new Proxy({}, {
+        get: () => undefined, // Always return undefined for any property access
+        has: () => false,
+        ownKeys: () => [],
+        getOwnPropertyDescriptor: () => undefined
+      });
+      const evaluated = item(scopeProxy, dummyAtoms);
+      if (typeof evaluated === "function") {
+        rawState[key] = evaluated;
+      } else if (evaluated && typeof evaluated === "object" && (evaluated as any).type === "atom") {
+        rawState[key] = dynamicAtomFactoryExpr(item);
+      } else {
+        // Otherwise it is an implicit computed property (derived formula)
+        rawState[key] = dynamicExpr(item);
+      }
     } else if (isAtomLike(item) || isScope(item)) {
       rawState[key] = item;
     } else if (isPlainObject(item)) {
