@@ -58,52 +58,41 @@ function isExprMarkerOrDynamic(value: any): value is AtomExpr | DerivedExpr | Pi
   return isExprMarkerBase(value) || isDynamicExpr(value);
 }
 
-function createCallableScopeProxy(scopeSelf: any): any {
-  const callable = function<T>(atom: Atom<T>): T {
-    const ctx = getCurrentFormulaContext();
-    if (ctx) ctx.dependencies.add(atom as any);
-    return atom.value;
-  };
-
-  return new Proxy(callable, {
-    get(_target, prop, receiver) {
-      return Reflect.get(scopeSelf, prop, receiver);
-    },
-    set(_target, prop, value, receiver) {
-      return Reflect.set(scopeSelf, prop, value, receiver);
-    },
-  });
-}
-
 function evaluateExprMarker(
   marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr,
   self: any,
   atoms?: any,
 ): Atom<any> {
-  const scopeSelf = createCallableScopeProxy(self);
-
   if (isAtomExpr(marker)) {
     if (marker.initialValue === undefined) {
       return atom(NO_INITIAL_VALUE, marker.options);
     }
+
     return atom(marker.initialValue, marker.options);
   }
+
   if (isDerivedExpr(marker)) {
-    return derived(() => marker.fn(scopeSelf));
+    return derived(() => marker.fn(self));
   }
+
   if (isPipeExpr(marker)) {
-    return marker.fn(scopeSelf);
+    return marker.fn(self);
   }
+
   if (isFlowExpr(marker)) {
-    return flow(marker.fn(scopeSelf));
+    return flow(marker.fn(self));
   }
+
   if (isDynamicExpr(marker)) {
-    const value = marker.fn(scopeSelf, atoms);
+    const value = marker.fn(self, atoms);
+
     if (value && typeof value === "object" && (value as Atom<any>).type === "atom") {
       return value as Atom<any>;
     }
-    return derived(() => marker.fn(scopeSelf, atoms));
+
+    return derived(() => marker.fn(self, atoms));
   }
+
   throw new Error("Unknown expression marker");
 }
 
@@ -420,7 +409,7 @@ function transformScopeState<T extends Record<string, any>>(
   state: T,
   visited: WeakMap<object, boolean>,
   scopeProxy: any,
-): any {
+): { rawState: any; self: any } {
   const rawState: any = {};
   const evaluating = new Set<string | symbol>();
 
@@ -452,8 +441,15 @@ function transformScopeState<T extends Record<string, any>>(
   }
 
   // Build a plain `self` object with getters/setters backed by rawState.
-  // No Proxy is used for `self`.
-  const self: any = {};
+  // It is also callable to allow reading external atoms directly.
+  const self: any = function (atom: any) {
+    if (isAtom(atom)) {
+      const ctx = getCurrentFormulaContext();
+      if (ctx) ctx.dependencies.add(atom as any);
+      return atom.value;
+    }
+    return undefined;
+  };
   for (const key of Reflect.ownKeys(rawState)) {
     Object.defineProperty(self, key, {
       get() {
@@ -528,7 +524,7 @@ function transformScopeState<T extends Record<string, any>>(
     }
   }
 
-  return rawState;
+  return { rawState, self };
 }
 
 /**
@@ -542,6 +538,7 @@ function createScopeInternal<T extends Record<string, any>>(
 ): ScopeReturn<T> {
   const parent = currentScope ?? getGlobalScope();
   const mode = resolveMode(options, parent);
+  let selfRef: any;
 
   // Create the base scope structure
   const parentContainer = isScope(parent) ? parent.container : globalContainer;
@@ -598,20 +595,33 @@ function createScopeInternal<T extends Record<string, any>>(
 
     // Pre-create the proxy so the factory can use `self` for reads, writes,
     // subscriptions, and dependency tracking during setup.
-    const atAccessor = (key: string | symbol) => newScope._rawState[key];
-    const atProxy = new Proxy(atAccessor, {
-      get(_, key) {
-        if (typeof key === "string" && key in atAccessor) {
-          return Reflect.get(atAccessor, key);
-        }
-        return newScope._rawState[key];
-      },
-    });
+    const atAccessor: any = (key: string | symbol) => {
+      let value = newScope._rawState[key];
+
+      if (isExprMarkerOrDynamic(value)) {
+        void (selfRef as any)[key];
+        value = newScope._rawState[key];
+      }
+
+      return value;
+    };
+
+    function exposeAtomAccessorKey(key: string | symbol): void {
+      if (key in atAccessor) return;
+
+      Object.defineProperty(atAccessor, key, {
+        get() {
+          return atAccessor(key);
+        },
+        enumerable: true,
+        configurable: true,
+      });
+    }
 
     const scopeProxy = new Proxy(newScope, {
       get(target, prop, receiver) {
         if (prop === "at") {
-          return atProxy;
+          return atAccessor;
         }
         if (prop === "subscribeTo") {
           return (key: string | symbol, callback: (current: any, previous?: any) => void) => {
@@ -668,7 +678,9 @@ function createScopeInternal<T extends Record<string, any>>(
       },
     });
 
-    const result = factory.call(scopeProxy, scopeProxy);
+    const transformed = factory.call(scopeProxy, scopeProxy);
+    const result = (transformed && transformed['rawState']) ? transformed['rawState'] : transformed;
+    selfRef = (transformed && transformed['self']) ? transformed['self'] : scopeProxy;
 
     if (result && typeof result === "object") {
       // Store the original factory result so the proxy can route reads/writes
@@ -691,12 +703,17 @@ function createScopeInternal<T extends Record<string, any>>(
       for (const key of exportKeys) {
         newScope._exports.add(key);
       }
+
+      for (const key of Reflect.ownKeys(newScope._rawState)) {
+        exposeAtomAccessorKey(key);
+      }
     }
 
     // Treat loading like any other atom: keep it in _rawState so the proxy
     // can expose its value and route at()/subscribeTo() to it.
     (newScope as any)._rawState['loading'] = loadingAtom;
-
+    exposeAtomAccessorKey("loading");
+    
     // Ensure nested scopes point to this proxied parent so identity checks like
     // `parent.child.parent === parent` hold.
     for (const value of Object.values(newScope._rawState)) {
