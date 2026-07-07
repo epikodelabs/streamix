@@ -6,7 +6,8 @@ import {
   type RegistrationOptions,
   type Token,
 } from "../ioc/container";
-import { atom, derived, flow, getCurrentFormulaContext, normalizeError, NO_INITIAL_VALUE, Writable, type Atom } from "./atom";
+import { isAtom, isAtomLike } from "../utils/helpers";
+import { atom, derived, flow, getCurrentFormulaContext, NO_INITIAL_VALUE, normalizeError, Writable, type Atom } from "./atom";
 import {
   isAtomExpr,
   isDerivedExpr,
@@ -18,7 +19,6 @@ import {
   type FlowExpr,
   type PipeExpr,
 } from "./expr";
-import { isAtom, isAtomLike } from "../utils/helpers";
 import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
 import type { Subscription } from "./subscription";
 
@@ -236,6 +236,11 @@ export interface Scope<T extends Record<string, any> = Record<string, any>> {
   /** @internal Original factory results for raw atom access. */
   _rawState: Record<string | symbol, any>;
 }
+
+/** A simplified helper type to define contextual scope configurations. */
+export type ScopeConfig<T extends Record<string, any>> = 
+  & DefinedInput<T> 
+  & ThisType<ScopeReturn<ScopeOf<T>>>;
 
 // Active execution context tracking frames
 let currentScope: Scope | null = null;
@@ -750,12 +755,12 @@ function createScopeInternal<T extends Record<string, any>>(
  * ```
  */
 export function scope<T extends Record<string, any>>(
-  state: DefinedInput<T>,
+  state: ScopeConfig<T>,
   options?: { mode?: "discrete" | "analog" },
 ): ScopeReturn<ScopeOf<T>>;
 
 export function scope<T extends Record<string, any>>(
-  factory: () => DefinedInput<T>,
+  factory: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>,
   options?: { mode?: "discrete" | "analog" },
 ): ScopeReturn<ScopeOf<T>>;
 
@@ -949,4 +954,3 @@ function collectScopeValues(sc: Scope, result: Record<string, any>): void {
     }
   }
 }
-
