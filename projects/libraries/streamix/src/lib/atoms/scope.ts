@@ -7,7 +7,7 @@ import {
   type Token,
 } from "../ioc/container";
 import { isAtom, isAtomLike } from "../utils/helpers";
-import { atom, derived, flow, getCurrentFormulaContext, NO_INITIAL_VALUE, normalizeError, Writable, type Atom } from "./atom";
+import { atom, derived, getCurrentFormulaContext, NO_INITIAL_VALUE, normalizeError, Writable, type Atom } from "./atom";
 import {
   isAtomExpr,
   isDerivedExpr,
@@ -81,7 +81,7 @@ function evaluateExprMarker(
   }
   if (isDerivedExpr(marker)) return derived(() => marker.fn(self));
   if (isPipeExpr(marker)) return marker.fn(self);
-  if (isFlowExpr(marker)) return flow(marker.fn(self));
+  if (isFlowExpr(marker)) return marker.fn(self);
   if (isDynamicExpr(marker)) {
     const capturedSelf = self;
     const capturedAtoms = atoms;
