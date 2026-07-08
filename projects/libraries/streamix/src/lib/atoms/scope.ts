@@ -71,8 +71,8 @@ function evaluateExprMarker(
     return atom(marker.initialValue === undefined ? NO_INITIAL_VALUE : marker.initialValue, marker.options);
   }
   if (isDerivedExpr(marker)) return derived(() => marker.fn(self));
-  if (isPipeExpr(marker)) return marker.fn(self);
-  if (isFlowExpr(marker)) return marker.fn(self);
+  if (isPipeExpr(marker)) return marker.fn(self, atoms);
+  if (isFlowExpr(marker)) return marker.fn(self, atoms);
   if (isDynamicExpr(marker)) {
     const value = marker.fn(self, atoms);
 
@@ -142,6 +142,10 @@ type ScopeValue<T> =
   : T extends Record<string, any> ? ScopeReturn<ScopeOf<T>> : Writable<T>;
 
 type ScopeOf<T extends Record<string, any>> = { [K in keyof T]: ScopeValue<T[K]>; };
+
+export type ScopeAtoms<T> = T extends Record<string, any>
+  ? { [K in keyof T]: T[K] extends Scope<infer U> ? ScopeAtoms<U> : AtomOf<ScopeValue<T[K]>> }
+  : any;
 
 export type ScopeReturn<T extends Record<string, any>> = Scope<T> & UnwrapScopeValues<T> & {
   at: AtomAccessor<T>;

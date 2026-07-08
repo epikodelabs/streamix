@@ -1,6 +1,7 @@
 import {
   atom,
   atomExpr,
+  combineLatest,
   derived,
   derivedExpr,
   flow,
@@ -1016,6 +1017,12 @@ describe('Scope System', () => {
       expect(() => scope({
         a: derivedExpr((self) => self.b as number),
         b: derivedExpr((self) => self.a as number)
+      })).toThrowError(/Circular dependency/);
+    });
+
+    it('should throw on circular expression markers with atoms', () => {
+      expect(() => scope({
+        c: pipeExpr((_self, atoms) => pipe(combineLatest(atoms.a, atoms.b), map(([a, b]) => a + b)))
       })).toThrowError(/Circular dependency/);
     });
 
