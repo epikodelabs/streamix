@@ -7,7 +7,7 @@ import {
   type Token,
 } from "../ioc/container";
 import { isAtom, isAtomLike } from "../utils/helpers";
-import { atom, derived, getCurrentFormulaContext, NO_INITIAL_VALUE, normalizeError, Writable, type Atom } from "./atom";
+import { atom, derived, NO_INITIAL_VALUE, normalizeError, Writable, type Atom } from "./atom";
 import {
   isAtomExpr,
   isDerivedExpr,
@@ -26,7 +26,6 @@ import type { Subscription } from "./subscription";
 
 const DYNAMIC_EXPR = Symbol("streamix.dynamicExpr");
 const METHOD = Symbol("streamix.method");
-
 const DYNAMIC_ATOM_FACTORY_EXPR = Symbol("streamix.dynamicAtomFactoryExpr");
 
 interface DynamicAtomFactoryExpr<T = any, Self = any> {
@@ -83,19 +82,15 @@ function evaluateExprMarker(
   if (isPipeExpr(marker)) return marker.fn(self);
   if (isFlowExpr(marker)) return marker.fn(self);
   if (isDynamicExpr(marker)) {
-    const capturedSelf = self;
-    const capturedAtoms = atoms;
+    // Fix: Read self and atoms dynamically at execution time to avoid stale closure scopes
     return derived(() => {
-      // Execute the formula passing the correct self proxy and atoms accessor from the closure
-      const value = marker.fn(capturedSelf, capturedAtoms);
+      const value = marker.fn(self, atoms);
       return value && typeof value === "object" && (value as any).type === "atom"
         ? (value as Atom<any>).value
         : value;
     });
   }
   if (isDynamicAtomFactoryExpr(marker)) {
-    // For dynamic atom factories, execute the function and return the atom directly.
-    // The self and atoms are captured from the closure.
     return marker.fn(self, atoms);
   }
   throw new Error("Unknown expression marker");
@@ -135,16 +130,16 @@ type DefinedValue<Top extends Record<string, any>, T> =
   | ((self: Top, atoms: DefinedAtomAccessor<Top>) => T | Atom<T>);
 
 type ScopeValue<T> =
-  T extends ScopeReturn<any> ? T :
-  T extends Atom<any> ? T :
-  T extends Scope<infer U> ? ScopeReturn<ScopeOf<U>> :
-  T extends (...args: any[]) => any ? T :
-  T extends readonly any[] ? Writable<T> :
-  T extends DerivedExpr<infer U, any> ? Atom<U> :
-  T extends PipeExpr<infer U, any> ? Atom<U> :
-  T extends FlowExpr<infer U, any> ? Atom<U> :
-  T extends AtomExpr<infer U> ? Atom<U> :
-  T extends Record<string, any> ? ScopeReturn<ScopeOf<T>> : Writable<T>;
+  | T extends ScopeReturn<any> ? T
+  : T extends Atom<any> ? T
+  : T extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
+  : T extends (...args: any[]) => any ? T
+  : T extends readonly any[] ? Writable<T>
+  : T extends DerivedExpr<infer U, any> ? Atom<U>
+  : T extends PipeExpr<infer U, any> ? Atom<U>
+  : T extends FlowExpr<infer U, any> ? Atom<U>
+  : T extends AtomExpr<infer U> ? Atom<U>
+  : T extends Record<string, any> ? ScopeReturn<ScopeOf<T>> : Writable<T>;
 
 type ScopeOf<T extends Record<string, any>> = { [K in keyof T]: ScopeValue<T[K]>; };
 
@@ -181,7 +176,6 @@ export type DefinedInput<Top extends Record<string, any>, Shape extends Record<s
         : DefinedValue<Top, Shape[K]>;
 };
 
-// State context tracking frames
 let currentScope: Scope | null = null;
 const atomScopeRegistry = new WeakMap<Atom<any>, Scope>();
 const emittedAtomsRegistry = new WeakSet<Atom<any>>();
@@ -223,10 +217,6 @@ function isPlainObject(value: any): boolean {
   return proto === Object.prototype || proto === null;
 }
 
-/**
- * Single-pass translation routine converting raw structures or function descriptors 
- * into localized, dependency-tracked reactive atom definitions.
- */
 function materializeState(
   input: any,
   visited: WeakMap<object, boolean>,
@@ -242,10 +232,8 @@ function materializeState(
     } else if (isMethod(item)) {
       rawState[key] = item.fn.bind(scopeProxy);
     } else if (typeof item === "function") {
-      // Check if it's a method action factory: (self) => () => { ... }
-      // We can temporarily evaluate it safely with a dummy proxy to inspect its return type
       const dummyAtoms = new Proxy({}, {
-        get: () => undefined, // Always return undefined for any property access
+        get: () => undefined,
         has: () => false,
         ownKeys: () => [],
         getOwnPropertyDescriptor: () => undefined
@@ -256,7 +244,6 @@ function materializeState(
       } else if (evaluated && typeof evaluated === "object" && (evaluated as any).type === "atom") {
         rawState[key] = dynamicAtomFactoryExpr(item);
       } else {
-        // Otherwise it is an implicit computed property (derived formula)
         rawState[key] = dynamicExpr(item);
       }
     } else if (isAtomLike(item) || isScope(item)) {
@@ -274,19 +261,16 @@ function materializeState(
     }
   }
 
-  // The 'self' instance serves as localized execution context for internal computation frames
   const self: any = function (targetAtom: any) {
     if (isAtom(targetAtom)) {
-      const ctx = getCurrentFormulaContext();
-      if (ctx) ctx.dependencies.add(targetAtom as any);
-      return targetAtom.value;
+      return targetAtom.value; // Fix: Let targetAtom.value handle dependency tracking intrinsically
     }
   };
 
   const getRawAtom = (key: string | symbol): any => {
     let current = rawState[key];
     if (isExprMarkerOrDynamic(current)) {
-      void self[key]; // Evaluates via dynamic getter cascade
+      void self[key]; 
       current = rawState[key];
     }
     return current;
@@ -314,9 +298,7 @@ function materializeState(
           }
         }
         if (isAtom(current)) {
-          const ctx = getCurrentFormulaContext();
-          if (ctx) ctx.dependencies.add(current as any);
-          return current.value;
+          return current.value; // Fix: Prevent redundant context dependencies appends
         }
         return current;
       },
@@ -333,7 +315,7 @@ function materializeState(
     });
   }
 
-  // Materialize dependencies immediately
+  // Materialize dependencies safely
   for (const key of Reflect.ownKeys(rawState)) {
     if (isExprMarkerOrDynamic(rawState[key])) {
       void self[key];
@@ -382,11 +364,14 @@ function createScopeInternal<T extends Record<string, any>>(
   currentScope = newScope;
 
   try {
-    // Isolated initialization of core loading tracking primitive
-    const loadingAtom = (() => {
-      currentScope = null;
-      try { return atom(true); } finally { currentScope = newScope; }
-    })();
+    // Fix: Safely instantiate loading atom ensuring clean global scope context reversal
+    let loadingAtom: any;
+    currentScope = null;
+    try {
+      loadingAtom = atom(true);
+    } finally {
+      currentScope = newScope;
+    }
 
     newScope._rawState["loading"] = loadingAtom;
 
@@ -431,8 +416,6 @@ function createScopeInternal<T extends Record<string, any>>(
         const activeItem = target._rawState[prop];
         if (activeItem && typeof activeItem === "object") {
           if (activeItem.type === "atom") {
-            const ctx = getCurrentFormulaContext();
-            if (ctx) ctx.dependencies.add(activeItem);
             return activeItem.value;
           }
           if (activeItem.type === "scope") return activeItem;
@@ -581,10 +564,6 @@ export function hasAtomEmitted(atomInstance: Atom<any>): boolean {
 
 /* ── Hierarchical Structural Loading State Engine ─────────────────────────── */
 
-/**
- * Unified, non-recursive parent chain balance updates. 
- * Prevents stack overflows during mass generation inside nested contexts.
- */
 function updatePendingHierarchy(startNode: Scope | RootScope | null, dynamicDelta: number): void {
   if (dynamicDelta === 0) return;
   let current: Scope | RootScope | null = startNode;
