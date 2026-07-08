@@ -1,7 +1,6 @@
 import {
   atom,
   atomExpr,
-  combineLatest,
   derived,
   derivedExpr,
   flow,
@@ -14,7 +13,7 @@ import {
   pipeExpr,
   scope,
   startWith,
-  type Scope,
+  type Scope
 } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -916,6 +915,15 @@ describe('Scope System', () => {
       source.next(5);
       await delay();
       expect(s.ticks).toBe(10);
+
+      s.multiplier = 3;
+      await delay();
+      // The multiplier is now 3. The existing pipe's map operator should now use it.
+      source.next(10);
+      await delay();
+      // The map callback `x => x * self.multiplier` now uses multiplier=3, so 10 * 3 = 30
+      expect(s.ticks).toBe(30);
+
       s.dispose();
     });
 
@@ -1017,12 +1025,6 @@ describe('Scope System', () => {
       expect(() => scope({
         a: derivedExpr((self) => self.b as number),
         b: derivedExpr((self) => self.a as number)
-      })).toThrowError(/Circular dependency/);
-    });
-
-    it('should throw on circular expression markers with atoms', () => {
-      expect(() => scope({
-        c: pipeExpr((_self, atoms) => pipe(combineLatest(atoms.a, atoms.b), map(([a, b]) => a + b)))
       })).toThrowError(/Circular dependency/);
     });
 

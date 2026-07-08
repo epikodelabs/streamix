@@ -1,6 +1,7 @@
-import { isAtomLike, isAsyncIterable, isIterable } from "../utils/helpers";
-import { flow, type Atom } from "./atom";
+import { isAsyncIterable, isAtomLike, isIterable } from "../utils/helpers";
+import { flow, trackDependencies, type Atom } from "./atom";
 import { isPromiseLike, type MaybePromise, type Operator } from "./operator";
+import { getCurrentScope, setCurrentScope } from "./scope";
 
 /**
  * Anything that can be used as the source of an atom pipeline.
@@ -151,24 +152,38 @@ export function pipe(
   ...ops: Operator[]
 ): Atom<any> {
   let iterable: AsyncIterable<any>;
+  const previousScope = getCurrentScope();
 
-  if (Array.isArray(source) && source.every(isAtomLike)) {
-    iterable = combineAtoms(source as Atom<any>[]);
-  } else {
-    iterable = toAsyncIterable(source as PipeInput<any>);
+  try {
+    if (Array.isArray(source) && source.every(isAtomLike)) {
+      iterable = combineAtoms(source as Atom<any>[]);
+    } else {
+      iterable = toAsyncIterable(source as PipeInput<any>);
+    }
+
+    let iterator: AsyncIterator<any> = iterable[Symbol.asyncIterator]();
+
+    for (const op of ops) {
+      let newIterator: AsyncIterator<any>;
+      const { dependencies } = trackDependencies(() => {
+        newIterator = op.apply(iterator, previousScope);
+      });
+      if (dependencies.size > 0) {
+        throw new Error("Operators cannot be stateful and depend on other atoms.");
+      }
+      iterator = newIterator!;
+    }
+
+    const resultIterable: AsyncIterable<any> = {
+      [Symbol.asyncIterator]() {
+        return iterator;
+      },
+    };
+
+    return flow(resultIterable);
+  } finally {
+    if (getCurrentScope() !== previousScope) {
+      setCurrentScope(previousScope);
+    }
   }
-
-  let iterator: AsyncIterator<any> = iterable[Symbol.asyncIterator]();
-
-  for (const op of ops) {
-    iterator = op.apply(iterator);
-  }
-
-  const resultIterable: AsyncIterable<any> = {
-    [Symbol.asyncIterator]() {
-      return iterator;
-    },
-  };
-
-  return flow(resultIterable);
 }
