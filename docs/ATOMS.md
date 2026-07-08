@@ -98,6 +98,48 @@ const cart = scope({
 - Built-in dependency injection with `provide` / `inject`
 - Automatic cleanup on `dispose()`
 
+### Pitfalls: The Standard `this` Shorthand (Loss of Reactivity)
+
+A common mistake when designing nested scopes is attempting to use standard JavaScript `this` shorthand syntax inside nested methods to calculate derived (computed) properties.
+
+```ts
+// ❌ WRONG: Bypasses dependency-tracking context!
+const app = scope({
+  query: "",
+  count(this) {
+    return this.query.length;
+  },
+  user: {
+    firstName: "",
+    lastName: "",
+    fullName(this) {
+      return `${this.firstName} ${this.lastName}`.trim();
+    },
+  },
+});
+```
+
+**Why this is wrong:**
+1. **Bypasses Formula Tracking:** streamix monitors property reads using reactive formula context layers (such as `derived` or `flow`). Standard methods using `this` execute outside this tracking system.
+2. **No Dependency Registration:** Since streamix cannot track that `fullName` read `firstName` and `lastName`, updates to those properties will not trigger recalculations.
+3. **Actions vs. Computeds:** Plain function properties are materialized as side-effect methods (actions) rather than reactive computations.
+
+**The Correct Approach (Maintaining Reactivity):**
+Declare computed properties using formula callbacks with the local `self` parameter:
+
+```ts
+// ✅ CORRECT: Registers reactive dependencies!
+const app = scope({
+  query: "",
+  count: (self) => self.query.length,
+  user: {
+    firstName: "",
+    lastName: "",
+    fullName: (self) => `${self.firstName} ${self.lastName}`.trim(),
+  },
+});
+```
+
 ### Modes
 
 - **Discrete**: Immediate synchronous notifications (default for events/tests)
