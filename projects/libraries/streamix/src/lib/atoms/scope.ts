@@ -50,14 +50,6 @@ function dynamicExpr<T, Self = any>(fn: (self: Self, atoms?: any) => Atom<T> | T
   return { [DYNAMIC_EXPR]: true, fn };
 }
 
-function isDynamicAtomFactoryExpr(value: any): value is DynamicAtomFactoryExpr {
-  return value != null && typeof value === "object" && value[DYNAMIC_ATOM_FACTORY_EXPR] === true;
-}
-
-function dynamicAtomFactoryExpr<T, Self = any>(fn: (self: Self, atoms?: any) => Atom<T>): DynamicAtomFactoryExpr<T, Self> {
-  return { [DYNAMIC_ATOM_FACTORY_EXPR]: true, fn };
-}
-
 function isMethod(value: any): value is Method {
   return value != null && typeof value === "object" && value[METHOD] === true;
 }
@@ -66,8 +58,8 @@ export function method<T extends (...args: any[]) => any>(fn: T): Method<T> {
   return { [METHOD]: true, fn };
 }
 
-function isExprMarkerOrDynamic(value: any): value is AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr | DynamicAtomFactoryExpr {
-  return isExprMarkerBase(value) || isDynamicExpr(value) || isDynamicAtomFactoryExpr(value);
+function isExprMarkerOrDynamic(value: any): value is AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr {
+  return isExprMarkerBase(value) || isDynamicExpr(value);
 }
 
 function evaluateExprMarker(
@@ -82,16 +74,24 @@ function evaluateExprMarker(
   if (isPipeExpr(marker)) return marker.fn(self);
   if (isFlowExpr(marker)) return marker.fn(self);
   if (isDynamicExpr(marker)) {
-    // Fix: Read self and atoms dynamically at execution time to avoid stale closure scopes
+    const value = marker.fn(self, atoms);
+
+    // If the factory returns an atom, a pipe, or a flow, return it directly.
+    if (isAtomLike(value)) {
+      return value;
+    }
+
+    // If the factory returned a nested FlowExpr/PipeExpr/AtomExpr, evaluate it directly!
+    if (isExprMarkerBase(value)) {
+      return evaluateExprMarker(value, self, atoms);
+    }
+    
     return derived(() => {
-      const value = marker.fn(self, atoms);
-      return value && typeof value === "object" && (value as any).type === "atom"
-        ? (value as Atom<any>).value
-        : value;
+      const inner = marker.fn(self, atoms);
+      return inner && typeof inner === "object" && (inner as any).type === "atom"
+        ? (inner as Atom<any>).value
+        : inner;
     });
-  }
-  if (isDynamicAtomFactoryExpr(marker)) {
-    return marker.fn(self, atoms);
   }
   throw new Error("Unknown expression marker");
 }
@@ -241,8 +241,6 @@ function materializeState(
       const evaluated = item(scopeProxy, dummyAtoms);
       if (typeof evaluated === "function") {
         rawState[key] = evaluated;
-      } else if (evaluated && typeof evaluated === "object" && (evaluated as any).type === "atom") {
-        rawState[key] = dynamicAtomFactoryExpr(item);
       } else {
         rawState[key] = dynamicExpr(item);
       }
@@ -263,7 +261,7 @@ function materializeState(
 
   const self: any = function (targetAtom: any) {
     if (isAtom(targetAtom)) {
-      return targetAtom.value; // Fix: Let targetAtom.value handle dependency tracking intrinsically
+      return targetAtom.value; // Let targetAtom.value handle dependency tracking intrinsically
     }
   };
 
@@ -298,7 +296,7 @@ function materializeState(
           }
         }
         if (isAtom(current)) {
-          return current.value; // Fix: Prevent redundant context dependencies appends
+          return current.value; // Prevent redundant context dependencies appends
         }
         return current;
       },
@@ -364,7 +362,7 @@ function createScopeInternal<T extends Record<string, any>>(
   currentScope = newScope;
 
   try {
-    // Fix: Safely instantiate loading atom ensuring clean global scope context reversal
+    // Safely instantiate loading atom ensuring clean global scope context reversal
     let loadingAtom: any;
     currentScope = null;
     try {
