@@ -11,7 +11,7 @@ import { createSharedSource } from "../utils/sharedSource";
  * @param options Optional event listener options.
  * @returns An atom that emits the event objects as they occur.
  */
-export function listen<T extends Event = Event>(
+export function fromEvent<T extends Event = Event>(
   target: MaybePromise<EventTarget>,
   event: MaybePromise<string>,
   options?: AddEventListenerOptions | boolean
