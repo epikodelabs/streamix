@@ -489,14 +489,10 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
 
     try {
       const result = sub.callback(current, previous);
-      const thenable = result && typeof (result as any).then === "function"
-        ? (result as PromiseLike<void>)
-        : null;
-
-      if (thenable) {
-        thenable.then(
+      if (isPromiseLike(result)) {
+        Promise.resolve(result).then(
           () => finish(sub),
-          (err: any) => {
+          err => {
             const e = normalizeError(err);
             for (const h of Array.from(errorHandlers)) try { h(e); } catch {}
             finish(sub);
