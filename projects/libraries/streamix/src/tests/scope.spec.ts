@@ -148,7 +148,7 @@ describe('Scope System', () => {
       }
 
       const s = scope<Shape>({
-        a: flowExpr(() => (async function* () { yield 1; })()),
+        a: flowExpr(() => flow(async function* () { yield 1; })),
       });
 
       expect(() => {

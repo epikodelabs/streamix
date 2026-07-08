@@ -23,7 +23,7 @@ export interface PipeExpr<T = any, Self = any> {
 
 export interface FlowExpr<T = any, Self = any> {
   [FLOW_EXPR]: true;
-  fn: (self: Self) => AsyncIterable<T> | Iterable<T>;
+  fn: (self: Self) => Atom<T>;
 }
 
 export function isAtomExpr(value: any): value is AtomExpr {
@@ -54,7 +54,7 @@ export function pipeExpr<T, Self = any>(fn: (self: Self) => Atom<T>): PipeExpr<T
   return { [PIPE_EXPR]: true, fn };
 }
 
-export function flowExpr<T, Self = any>(fn: (self: Self) => AsyncIterable<T> | Iterable<T>): FlowExpr<T, Self> {
+export function flowExpr<T, Self = any>(fn: (self: Self) => Atom<T>): FlowExpr<T, Self> {
   return { [FLOW_EXPR]: true, fn };
 }
 
