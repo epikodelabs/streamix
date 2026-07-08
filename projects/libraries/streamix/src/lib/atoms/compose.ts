@@ -83,11 +83,11 @@ export function compose<
 
   return createOperator(
     name,
-    (source, scope) => {
+    source => {
       let current: AsyncIterator<any> = source;
 
       for (const operator of operators) {
-        current = operator.apply(current, scope);
+        current = operator.apply(current);
       }
 
       return current;

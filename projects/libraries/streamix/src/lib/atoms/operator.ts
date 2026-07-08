@@ -1,6 +1,5 @@
 import { AsyncPushable, createAsyncPushable } from "../utils/pushable";
 import type { Atom } from "./atom";
-import { Scope, setCurrentScope } from "./scope";
 
 /**
  * Represents a value that can either be a synchronous return or a promise that
@@ -67,7 +66,7 @@ export type Operator<T = any, R = T> = {
    * asynchronous iterator of type `T` and returns a new asynchronous iterator of type `R`.
    * @param source The source async iterator to apply the transformation to.
    */
-  apply: (source: AsyncIterator<T>, scope?: Scope | null) => AsyncIterator<R>;
+  apply: (source: AsyncIterator<T>) => AsyncIterator<R>;
 };
 
 /**
@@ -107,13 +106,13 @@ export const isOperator = (value: unknown): value is Operator =>
  */
 export function createOperator<T = any, R = T>(
   name: string,
-  transformFn: (this: Operator<T, R>, source: AsyncIterator<T>, scope?: Scope | null) => AsyncIterator<R>
+  transformFn: (this: Operator<T, R>, source: AsyncIterator<T>) => AsyncIterator<R>
 ): Operator<T, R> {
   const op: Operator<T, R> = {
     name,
     type: 'operator',
-    apply(source, scope) {
-      const iterator = transformFn.call(this, source, scope);
+    apply(source) {
+      const iterator = transformFn.call(this, source);
 
       if (typeof iterator.return !== 'function') {
         // Capture the source's return method before we add our own, so an
@@ -190,7 +189,7 @@ export function createPushOperator<T, R = T>(
   name: string,
   setup: (source: AsyncIterator<T>, output: AsyncPushable<R>) => (() => MaybePromise<void>) | void
 ): Operator<T, R> {
-  return createOperator<T, R>(name, function (this: Operator<T, R>, source, scope) {
+  return createOperator<T, R>(name, function (this: Operator<T, R>, source) {
     const output = createAsyncPushable<R>();
     let cancelled = false;
 
@@ -200,14 +199,7 @@ export function createPushOperator<T, R = T>(
       return originalPush(value);
     };
 
-    const previousScope = setCurrentScope(scope ?? null);
-    let cleanup: (() => MaybePromise<void>) | void;
-    try {
-      cleanup = setup(source, output);
-    } finally {
-      setCurrentScope(previousScope);
-    }
-
+    let cleanup = setup(source, output);
     let cleanupCalled = false;
     const runCleanup = async () => {
       if (cleanupCalled) return;

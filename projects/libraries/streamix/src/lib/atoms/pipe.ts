@@ -166,7 +166,7 @@ export function pipe(
     for (const op of ops) {
       let newIterator: AsyncIterator<any>;
       const { dependencies } = trackDependencies(() => {
-        newIterator = op.apply(iterator, previousScope);
+        newIterator = op.apply(iterator);
       });
       if (dependencies.size > 0) {
         throw new Error("Operators cannot be stateful and depend on other atoms.");
@@ -182,8 +182,6 @@ export function pipe(
 
     return flow(resultIterable);
   } finally {
-    if (getCurrentScope() !== previousScope) {
-      setCurrentScope(previousScope);
-    }
+    setCurrentScope(previousScope);
   }
 }
