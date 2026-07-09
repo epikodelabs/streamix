@@ -375,7 +375,11 @@ export function createAsyncCoordinator<T = any>(
   function wireSource(src: AsyncIterator<T> & { __onPush?: () => void }, index: number) {
     const orig = src.__onPush;
     const wired = () => {
-      orig?.();
+      try {
+        orig?.();
+      } catch {
+        // Preserve draining even if the source's push hook throws.
+      }
       if (sourceList[index] !== src) return;
       // Drain this source immediately on push to preserve push-time ordering.
       drainOneSource(index);

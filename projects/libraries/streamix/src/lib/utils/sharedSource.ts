@@ -45,9 +45,11 @@ export function createSharedSource<T>(
   let completed = false;
   let terminalError: any;
   let readerRunning = false;
+  let pendingDistributions = 0;
 
   const callbacks = new Set<(current: T, previous: T) => MaybePromise>();
   const callbackPromises: Promise<any>[] = [];
+  const distributionWaiters: Array<() => void> = [];
   type IteratorWaiter = {
     resolve: (result: IteratorResult<T>) => void;
     reject: (e: Error) => void;
@@ -71,6 +73,18 @@ export function createSharedSource<T>(
     }
   };
 
+  const releaseDistributionWaiters = (): void => {
+    if (pendingDistributions > 0 && !completed && buffer !== null) return;
+    while (distributionWaiters.length > 0) {
+      distributionWaiters.shift()!();
+    }
+  };
+
+  const resetPendingDistributions = (): void => {
+    pendingDistributions = 0;
+    releaseDistributionWaiters();
+  };
+
   const doConnect = async (): Promise<void> => {
     if (connected || completed) return;
     connected = true;
@@ -91,6 +105,7 @@ export function createSharedSource<T>(
     if (completed) return;
     completed = true;
     terminalError = err;
+    releaseDistributionWaiters();
     if (iterator !== null && !iterator.closed) {
       const it = iterator;
       iterator = null;
@@ -113,6 +128,7 @@ export function createSharedSource<T>(
       buffer.close();
       buffer = null;
     }
+    resetPendingDistributions();
   };
 
   const distribute = async (value: T): Promise<void> => {
@@ -125,7 +141,11 @@ export function createSharedSource<T>(
     }
     callbackPromises.length = 0;
     for (const cb of callbacks) {
-      callbackPromises.push(Promise.resolve(cb(value, value)).catch(() => {}));
+      try {
+        callbackPromises.push(Promise.resolve(cb(value, value)).catch(() => {}));
+      } catch {
+        // ignore subscriber callback errors
+      }
     }
     if (callbackPromises.length > 0) {
       await Promise.all(callbackPromises);
@@ -144,10 +164,14 @@ export function createSharedSource<T>(
           const result = await it.next();
           if (result.done || activeBuffer !== buffer) break;
           await distribute(result.value);
+          if (!analog && pendingDistributions > 0) {
+            pendingDistributions--;
+          }
+          releaseDistributionWaiters();
         }
       } catch (err) {
         // buffer closed or consumer stopped
-        if (!completed && err instanceof Error) {
+        if (!completed && activeBuffer === buffer && err instanceof Error) {
           complete(err);
         }
       } finally {
@@ -173,6 +197,7 @@ export function createSharedSource<T>(
     if (callbacks.size === 0 && iterator === null && buffer !== null) {
       buffer.close();
       buffer = null;
+      resetPendingDistributions();
       if (connected) {
         void doCleanup();
       }
@@ -180,8 +205,31 @@ export function createSharedSource<T>(
   };
 
   const pushToAll = async (value: T): Promise<void> => {
-    if (completed || buffer === null) return;
-    await buffer.push(value);
+    const activeBuffer = buffer;
+    if (completed || activeBuffer === null) return;
+
+    if (!analog) {
+      pendingDistributions++;
+    }
+
+    await activeBuffer.push(value);
+
+    if (analog) return;
+
+    if (completed || activeBuffer !== buffer) {
+      if (pendingDistributions > 0) {
+        pendingDistributions--;
+      }
+      releaseDistributionWaiters();
+      return;
+    }
+
+    if (pendingDistributions === 0) return;
+
+    await new Promise<void>((resolve) => {
+      distributionWaiters.push(resolve);
+      releaseDistributionWaiters();
+    });
   };
 
   const instance: any = {
@@ -267,6 +315,7 @@ export function createSharedSource<T>(
         buffer.close();
         buffer = null;
       }
+      resetPendingDistributions();
       void doCleanup();
     },
   };
