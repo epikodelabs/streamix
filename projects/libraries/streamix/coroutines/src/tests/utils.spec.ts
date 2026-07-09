@@ -1,6 +1,7 @@
 import {
   background,
   channel,
+  CHANNEL_INTERNALS,
   ChannelClosedError,
   ContextCancelledError,
   createAbortError,
@@ -468,5 +469,192 @@ describe("selection", () => {
     // b should still be able to receive normally later
     setTimeout(() => b.send(2), 5);
     expect(await b.receive()).toBe(2);
+  });
+
+  it("select resolves a pending receive with ok:false when the channel closes", async () => {
+    const ch = channel<number>();
+
+    const pending = select([receive(ch, "r")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    ch.close();
+
+    const result = await pending;
+    expect(result.op).toBe("receive");
+    expect(result.name).toBe("r");
+    expect(result.ok).toBeFalse();
+    expect(result.value).toBeUndefined();
+  });
+
+  it("select resolves a pending send when a receiver arrives later", async () => {
+    const ch = channel<number>();
+
+    const pending = select([send(ch, 123, "s")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const receive$ = ch.receive();
+    const result = await pending;
+
+    expect(result.op).toBe("send");
+    expect(result.name).toBe("s");
+    expect(result.ok).toBeTrue();
+    expect(await receive$).toBe(123);
+  });
+
+  it("select rejects a pending send when the channel closes", async () => {
+    const ch = channel<number>();
+
+    const pending = select([send(ch, 1, "s")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    ch.close();
+
+    await expectAsync(pending).toBeRejectedWithError(ChannelClosedError);
+  });
+
+  it("select flushes a queued send into the buffer after space is freed", async () => {
+    const ch = channel<number>(1);
+    await ch.send(1);
+
+    const pending = select([send(ch, 2, "s")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(await ch.receive()).toBe(1);
+
+    const result = await pending;
+    expect(result.op).toBe("send");
+    expect(result.name).toBe("s");
+    expect(result.ok).toBeTrue();
+    expect(await ch.receive()).toBe(2);
+  });
+
+  it("channel internals reject select sends registered after close", () => {
+    const ch = channel<number>();
+    ch.close();
+
+    const registration = {
+      id: Symbol("select"),
+      isSettled: () => false,
+      settle: () => false,
+      reject: jasmine.createSpy("reject").and.returnValue(true),
+    };
+
+    const unregister = (ch as any)[CHANNEL_INTERNALS].registerSelectSend(1, registration, {
+      index: 0,
+      caseRef: send(ch, 1, "s"),
+      name: "s",
+    });
+
+    expect(registration.reject).toHaveBeenCalledWith(jasmine.any(ChannelClosedError));
+    unregister();
+  });
+
+  it("channel internals can unregister a pending select send more than once", () => {
+    const ch = channel<number>();
+
+    const unregister = (ch as any)[CHANNEL_INTERNALS].registerSelectSend(
+      1,
+      {
+        id: Symbol("select"),
+        isSettled: () => false,
+        settle: () => false,
+        reject: () => false,
+      },
+      {
+        index: 0,
+        caseRef: send(ch, 1, "s"),
+        name: "s",
+      }
+    );
+
+    unregister();
+    unregister();
+
+    expect(ch.tryReceive()).toBeUndefined();
+  });
+
+  it("channel internals discard settled select receivers before dispatch", () => {
+    const ch = channel<number>();
+
+    const unregister = (ch as any)[CHANNEL_INTERNALS].registerSelectReceive(
+      {
+        id: Symbol("receive"),
+        isSettled: () => true,
+        settle: () => true,
+        reject: () => false,
+      },
+      {
+        index: 0,
+        caseRef: receive(ch, "r"),
+        name: "r",
+      }
+    );
+
+    expect(ch.trySend(1)).toBeFalse();
+
+    unregister();
+  });
+
+  it("channel internals discard settled select senders before receiving", () => {
+    const ch = channel<number>();
+
+    const unregister = (ch as any)[CHANNEL_INTERNALS].registerSelectSend(
+      1,
+      {
+        id: Symbol("send"),
+        isSettled: () => true,
+        settle: () => true,
+        reject: () => false,
+      },
+      {
+        index: 0,
+        caseRef: send(ch, 1, "s"),
+        name: "s",
+      }
+    );
+
+    expect(ch.tryReceive()).toBeUndefined();
+
+    unregister();
+  });
+
+  it("channel internals pair queued select senders with queued select receivers during flush", async () => {
+    const ch = channel<number>(1);
+    const internals = (ch as any)[CHANNEL_INTERNALS];
+
+    await ch.send(1);
+
+    const receiverRegistration = {
+      id: Symbol("receive"),
+      isSettled: () => false,
+      settle: jasmine.createSpy("settleReceive").and.returnValue(true),
+      reject: jasmine.createSpy("rejectReceive").and.returnValue(false),
+    };
+    const senderRegistration = {
+      id: Symbol("send"),
+      isSettled: () => false,
+      settle: jasmine.createSpy("settleSend").and.returnValue(true),
+      reject: jasmine.createSpy("rejectSend").and.returnValue(false),
+    };
+
+    const unregisterReceive = internals.registerSelectReceive(receiverRegistration, {
+      index: 0,
+      caseRef: receive(ch, "r"),
+      name: "r",
+    });
+    const unregisterSend = internals.registerSelectSend(2, senderRegistration, {
+      index: 1,
+      caseRef: send(ch, 2, "s"),
+      name: "s",
+    });
+
+    expect(ch.tryReceive()).toEqual(jasmine.objectContaining({ ok: true, value: 1 }));
+    expect(receiverRegistration.settle).toHaveBeenCalledWith(
+      jasmine.objectContaining({ op: "receive", value: 2, ok: true, name: "r" })
+    );
+    expect(senderRegistration.settle).toHaveBeenCalledWith(
+      jasmine.objectContaining({ op: "send", ok: true, name: "s" })
+    );
+
+    unregisterReceive();
+    unregisterSend();
   });
 });

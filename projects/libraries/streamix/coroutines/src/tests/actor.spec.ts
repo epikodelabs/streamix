@@ -25,6 +25,7 @@ idescribe("actor", () => {
   let actorCounter = 0;
 
   const nextActorName = () => `actor-${++actorCounter}`;
+  const pause = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
 
   beforeAll(() => {
     originalWorker = (globalThis as any).Worker;
@@ -224,6 +225,12 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = undefined;
     actorCounter = 0;
     main.inbox.clear();
+  });
+
+  it("should require a non-empty actor name", () => {
+    expect(() => actor("", async (_msg: unknown, state: number) => state, 0)).toThrowError(
+      "Actor name must be a non-empty string"
+    );
   });
 
   it("should eagerly initialize behavior actor with state", async () => {
@@ -747,5 +754,283 @@ idescribe("actor", () => {
     expect(betaState.hits).toEqual([7]);
 
     await Promise.all([main.outbox.stop(alpha), main.outbox.stop(beta)]);
+  });
+
+  it("should reject requests and stops for unknown actor targets", async () => {
+    await expectAsync(main.outbox.request("missing", "topic", 1)).toBeRejectedWithError(
+      'Unknown actor target "missing"'
+    );
+    await expectAsync(main.outbox.stop("missing")).toBeRejectedWithError(
+      'Unknown actor target "missing"'
+    );
+  });
+
+  it("should deduplicate repeated direct send targets", async () => {
+    type State = { hits: number[] };
+
+    async function behavior(msg: unknown, state: State) {
+      if (isActorBusMessage<number>(msg) && msg.topic === "hit") {
+        return { hits: [...state.hits, msg.payload] };
+      }
+
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const alpha = actor("alpha", behavior, { hits: [] });
+    const beta = actor("beta", behavior, { hits: [] });
+    const gamma = actor("gamma", behavior, { hits: [] });
+
+    main.outbox.send(["alpha", "beta", "alpha"], "hit", 7);
+    await pause();
+
+    const [alphaState, betaState, gammaState] = await Promise.all([
+      main.outbox.request<unknown, State>("alpha", "read", undefined),
+      main.outbox.request<unknown, State>("beta", "read", undefined),
+      main.outbox.request<unknown, State>("gamma", "read", undefined),
+    ]);
+
+    expect(alphaState.hits).toEqual([7]);
+    expect(betaState.hits).toEqual([7]);
+    expect(gammaState.hits).toEqual([]);
+
+    await Promise.all([main.outbox.stop(alpha), main.outbox.stop(beta), main.outbox.stop(gamma)]);
+  });
+
+  it("should exclude the sender during publish unless includeSelf is enabled", async () => {
+    type State = { hits: string[] };
+
+    async function behavior(msg: unknown, state: State) {
+      if (isActorBusMessage<string>(msg) && msg.topic === "announce") {
+        return { hits: [...state.hits, msg.payload] };
+      }
+
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const alpha = actor("alpha", behavior, { hits: [] });
+    const beta = actor("beta", behavior, { hits: [] });
+
+    main.outbox.publish("announce", "first", { from: "alpha" });
+    main.outbox.publish("announce", "second", { from: "alpha", includeSelf: true });
+    await pause();
+
+    const [alphaState, betaState] = await Promise.all([
+      main.outbox.request<unknown, State>("alpha", "read", undefined),
+      main.outbox.request<unknown, State>("beta", "read", undefined),
+    ]);
+
+    expect(alphaState.hits).toEqual(["second"]);
+    expect(betaState.hits).toEqual(["first", "second"]);
+
+    await Promise.all([main.outbox.stop(alpha), main.outbox.stop(beta)]);
+  });
+
+  it("should swallow async main inbox subscriber failures", async () => {
+    const seen: string[] = [];
+
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "ping") {
+        utils.outbox.send("main", "reply", "pong");
+      }
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const warn = spyOn(console, "warn");
+    const a = actor(nextActorName(), behavior, 0);
+    const unsubscribeFailing = main.inbox.subscribe(async (message: ActorBusMessage<any>) => {
+      if (message.to === "main") {
+        throw new Error("subscriber failed");
+      }
+    });
+    const unsubscribeHealthy = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main") {
+        seen.push(message.payload);
+      }
+    });
+
+    main.outbox.send(a, "ping", undefined);
+    await pause();
+
+    expect(seen).toEqual(["pong"]);
+    expect(warn).toHaveBeenCalled();
+    expect(warn.calls.mostRecent().args[0]).toBe("Actor bus subscriber failed:");
+
+    unsubscribeFailing();
+    unsubscribeHealthy();
+    await main.outbox.stop(a);
+  });
+
+  it("should reject worker requests with multiple targets", async () => {
+    const errors: string[] = [];
+
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "go") {
+        try {
+          await utils.outbox.request(["main", "other"], "echo", "hello");
+        } catch (error: any) {
+          utils.outbox.send("main", "error", error.message);
+        }
+      }
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const a = actor(nextActorName(), behavior, 0);
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main" && message.topic === "error") {
+        errors.push(message.payload);
+      }
+    });
+
+    main.outbox.send(a, "go", undefined);
+    await pause();
+
+    expect(errors).toEqual(["Actor request requires exactly one target"]);
+
+    unsubscribe();
+    await main.outbox.stop(a);
+  });
+
+  it("should reject worker requests without a registered target handler", async () => {
+    const errors: string[] = [];
+
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "go") {
+        try {
+          await utils.outbox.request("missing", "echo", "hello");
+        } catch (error: any) {
+          utils.outbox.send("main", "error", error.message);
+        }
+      }
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const a = actor(nextActorName(), behavior, 0);
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main" && message.topic === "error") {
+        errors.push(message.payload);
+      }
+    });
+
+    main.outbox.send(a, "go", undefined);
+    await pause();
+
+    expect(errors).toEqual(['No actor request handler registered for "missing"']);
+
+    unsubscribe();
+    await main.outbox.stop(a);
+  });
+
+  it("should reject worker requests without a topic", async () => {
+    const errors: string[] = [];
+
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "go") {
+        try {
+          await utils.outbox.request("main", "", "hello");
+        } catch (error: any) {
+          utils.outbox.send("main", "error", error.message);
+        }
+      }
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const a = actor(nextActorName(), behavior, 0);
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main" && message.topic === "error") {
+        errors.push(message.payload);
+      }
+    });
+    const unregister = registerActorRequestHandler("main", () => "ok");
+
+    main.outbox.send(a, "go", undefined);
+    await pause();
+
+    expect(errors).toEqual(["Actor request requires a topic"]);
+
+    unregister();
+    unsubscribe();
+    await main.outbox.stop(a);
+  });
+
+  it("should convert async worker request handler rejections into error messages", async () => {
+    const errors: string[] = [];
+
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "go") {
+        try {
+          await utils.outbox.request("main", "echo", "hello");
+        } catch (error: any) {
+          utils.outbox.send("main", "error", error.message);
+        }
+      }
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const a = actor(nextActorName(), behavior, 0);
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main" && message.topic === "error") {
+        errors.push(message.payload);
+      }
+    });
+    const unregister = registerActorRequestHandler("main", () => Promise.reject("bad request"));
+
+    main.outbox.send(a, "go", undefined);
+    await pause();
+
+    expect(errors).toEqual(["bad request"]);
+
+    unregister();
+    unsubscribe();
+    await main.outbox.stop(a);
+  });
+
+  it("should fall back to a default message for falsy worker request errors", async () => {
+    const errors: string[] = [];
+
+    async function behavior(msg: any, state: number, utils: any) {
+      if (msg.kind === "actor-bus" && msg.topic === "go") {
+        try {
+          await utils.outbox.request("main", "echo", "hello");
+        } catch (error: any) {
+          utils.outbox.send("main", "error", error.message);
+        }
+      }
+      return state;
+    }
+
+    (globalThis as any).currentMainTask = behavior;
+
+    const a = actor(nextActorName(), behavior, 0);
+    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+      if (message.to === "main" && message.topic === "error") {
+        errors.push(message.payload);
+      }
+    });
+    const unregister = registerActorRequestHandler("main", () => {
+      throw undefined;
+    });
+
+    main.outbox.send(a, "go", undefined);
+    await pause();
+
+    expect(errors).toEqual(["Actor request failed"]);
+
+    unregister();
+    unsubscribe();
+    await main.outbox.stop(a);
   });
 });
