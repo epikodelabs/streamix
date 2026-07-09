@@ -123,6 +123,7 @@ export function createAsyncIterator<T>(opts: {
       },
 
       async return() {
+        ensureSubscribed();
         state.markCompleted();
         const unsubscribe$ = unsubscribe?.();
         unsubscribe = null;
@@ -133,6 +134,7 @@ export function createAsyncIterator<T>(opts: {
       },
 
       async throw(err) {
+        ensureSubscribed();
         const error = normalizeError(err);
         state.completed = true;
         const unsubscribe$ = unsubscribe?.();
