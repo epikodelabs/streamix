@@ -236,18 +236,7 @@ function materializeState(
     } else if (isMethod(item)) {
       rawState[key] = item.fn.bind(scopeProxy);
     } else if (typeof item === "function") {
-      const dummyAtoms = new Proxy({}, {
-        get: () => undefined,
-        has: () => false,
-        ownKeys: () => [],
-        getOwnPropertyDescriptor: () => undefined
-      });
-      const evaluated = item(scopeProxy, dummyAtoms);
-      if (typeof evaluated === "function") {
-        rawState[key] = evaluated;
-      } else {
-        rawState[key] = dynamicExpr(item);
-      }
+      rawState[key] = dynamicExpr(item);
     } else if (isAtomLike(item) || isScope(item)) {
       rawState[key] = item;
     } else if (isPlainObject(item)) {
