@@ -1,8 +1,7 @@
 import { flow } from "@epikodelabs/streamix";
 import { compose, coroutine } from "@epikodelabs/streamix/coroutines";
-import { idescribe } from "./env.spec";
 
-idescribe("compose", () => {
+describe("compose coroutines", () => {
   it("should process tasks sequentially via run", async () => {
     const c1 = coroutine((x: number) => x + 1);
     const c2 = coroutine((x: number) => x * 2);
@@ -140,5 +139,3 @@ idescribe("compose", () => {
     expect(finalized).toEqual(["c1", "c2"]);
   });
 });
-
-
