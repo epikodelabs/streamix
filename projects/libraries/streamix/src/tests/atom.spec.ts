@@ -5,6 +5,7 @@ import {
   flow,
   getScheduler,
   scope,
+  trackDependencies,
   type Atom,
   type DerivedScope,
 } from '@epikodelabs/streamix';
@@ -118,6 +119,21 @@ describe('Atom System', () => {
       a.dispose();
     });
 
+    it('should keep the last safe value and clear errors via clearError()', () => {
+      const a = atom(5, { terminateOnError: false });
+
+      a.fail('boom');
+
+      expect(() => a.value).toThrowError('boom');
+      expect(a.safeValue).toBe(5);
+
+      a.clearError?.();
+
+      expect(a.error).toBeUndefined();
+      expect(a.value).toBe(5);
+      a.dispose();
+    });
+
     it('should terminate on error when configured', async () => {
       const a = atom(0, { terminateOnError: true });
       a.subscribe(() => {});
@@ -141,9 +157,40 @@ describe('Atom System', () => {
       expect(a.value).toBe(5);
       a.dispose();
     });
+
+    it('should not schedule error broadcasts when propagateErrors is false', () => {
+      const env = createTestEnvironment();
+
+      env.run(() => {
+        const a = atom(1, { propagateErrors: false });
+        let broadcasts = 0;
+        a.subscribe(() => broadcasts++);
+
+        a.fail(new Error('hidden'));
+
+        expect(broadcasts).toBe(0);
+        expect(getScheduler().isDirty).toBe(false);
+        a.dispose();
+      });
+
+      env.reset();
+    });
   });
 
   describe('derived()', () => {
+    it('should track dependencies read outside derived scopes', () => {
+      const left = atom(2);
+      const right = atom(3);
+
+      const tracked = trackDependencies(() => left.value + right.value);
+
+      expect(tracked.result).toBe(5);
+      expect(Array.from(tracked.dependencies)).toEqual([left, right]);
+
+      left.dispose();
+      right.dispose();
+    });
+
     it('should compute sync derived value from self.use atoms', () => {
       const source = atom(5);
 
@@ -191,6 +238,54 @@ describe('Atom System', () => {
         });
         derivedAtom.value;
       }).toThrow(new Error('Circular dependency detected in derived()'));
+
+      source.dispose();
+    });
+
+    it('should support generator-based derived formulas', async () => {
+      const source = atom(3);
+
+      const generated = derived(function* () {
+        const current = yield source;
+        const incremented = yield Promise.resolve(current + 1);
+        return incremented * 2;
+      });
+
+      expect(generated.value).toBeUndefined();
+      await delay();
+      expect(generated.value).toBe(8);
+
+      source.next(4);
+      await delay();
+      expect(generated.value).toBe(10);
+
+      source.dispose();
+      generated.dispose();
+    });
+
+    it('should support class-based computables and dispose hooks', () => {
+      const source = atom(2);
+      let disposed = 0;
+
+      class CounterComputable {
+        compute(self: DerivedScope) {
+          return self.read(source) * 3;
+        }
+
+        onDispose() {
+          disposed++;
+        }
+      }
+
+      const computed = derived<number>(CounterComputable as any);
+
+      expect(computed.value).toBe(6);
+
+      source.next(4);
+      expect(computed.value).toBe(12);
+
+      computed.dispose();
+      expect(disposed).toBe(1);
 
       source.dispose();
     });
@@ -299,6 +394,34 @@ describe('Atom System', () => {
       asyncDerived.dispose();
     });
 
+    it('should preserve the last safe value after async derived rejection', async () => {
+      const source = atom(1);
+
+      const unstable = derived(async (self: DerivedScope) => {
+        const current = self.use(source).value;
+        await delay(5);
+
+        if (current > 1) {
+          throw 'async boom';
+        }
+
+        return current * 10;
+      });
+
+      expect(unstable.value).toBeUndefined();
+      await delay(15);
+      expect(unstable.value).toBe(10);
+
+      source.next(2);
+      await delay(15);
+
+      expect(() => unstable.value).toThrowError('async boom');
+      expect(unstable.safeValue).toBe(10);
+
+      source.dispose();
+      unstable.dispose();
+    });
+
     it('should not prune a dependency once read, even after a later run takes a different branch', () => {
       const useA = atom(true);
       const a = atom(1);
@@ -339,9 +462,31 @@ describe('Atom System', () => {
       b.dispose();
       d.dispose();
     });
+
+    it('should reject invalid derived inputs', () => {
+      expect(() => (derived as any)(123)).toThrowError('derived() requires a function as the first argument');
+    });
   });
 
   describe('flow()', () => {
+    it('should seed flow atoms from another atom safeValue', async () => {
+      const source = atom(7);
+      const streamed = flow(source);
+      const values: number[] = [];
+
+      expect(streamed.value).toBe(7);
+
+      const unsubscribe = streamed.subscribe(value => values.push(value));
+      source.next(9);
+      await delay(10);
+
+      expect(values).toContain(9);
+
+      unsubscribe();
+      streamed.dispose();
+      source.dispose();
+    });
+
     it('should handle async iterable source', async () => {
       async function* generate() {
         yield 1;

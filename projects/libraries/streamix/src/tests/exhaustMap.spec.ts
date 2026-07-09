@@ -117,4 +117,74 @@ describe('exhaustMap', () => {
     expect((error as any)!.message).toBe('boom');
     expect(results).toEqual([1]);
   });
+
+  it('continues to source completion when the outer source has no synchronous buffer hooks', async () => {
+    let calls = 0;
+    const source = {
+      async next() {
+        calls++;
+        if (calls === 1) {
+          return { value: 1, done: false as const };
+        }
+
+        return { value: undefined, done: true as const };
+      }
+    } as AsyncIterator<number>;
+
+    const iterator = exhaustMap((value: number) => [value]).apply(source);
+
+    expect(await iterator.next()).toEqual({ value: 1, done: false });
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+  });
+
+  it('drops synchronously buffered outer values while an inner stream is active and stops when the source buffer reports done', async () => {
+    let calls = 0;
+    const source = {
+      async next() {
+        calls++;
+        return calls === 1
+          ? { value: 1, done: false as const }
+          : { value: undefined, done: true as const };
+      },
+      __tryNext() {
+        return calls === 1
+          ? null
+          : { value: undefined, done: true as const };
+      }
+    } as AsyncIterator<number> & { __tryNext: () => IteratorResult<number> | null };
+
+    const iterator = exhaustMap((value: number) => [value]).apply(source);
+
+    expect(await iterator.next()).toEqual({ value: 1, done: false });
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+  });
+
+  it('supports synchronous projected values and direct return/throw cleanup', async () => {
+    const sourceReturn = jasmine.createSpy('sourceReturn').and.resolveTo({ value: undefined, done: true });
+    let calls = 0;
+    const source = {
+      async next() {
+        calls++;
+        return calls === 1
+          ? { value: 2, done: false as const }
+          : new Promise<IteratorResult<number>>(() => {});
+      },
+      return: sourceReturn,
+    } as AsyncIterator<number>;
+
+    const iterator = exhaustMap((value: number) => value * 10).apply(source);
+
+    expect(await iterator.next()).toEqual({ value: 20, done: false });
+    expect(await iterator.return?.()).toEqual({ value: undefined, done: true });
+    expect(sourceReturn).toHaveBeenCalled();
+
+    const throwingIterator = exhaustMap((value: number) => value * 10).apply({
+      async next() {
+        return { value: 3, done: false as const };
+      },
+      return: sourceReturn,
+    } as AsyncIterator<number>);
+
+    await expectAsync(throwingIterator.throw?.('stop')).toBeRejectedWithError('stop');
+  });
 });

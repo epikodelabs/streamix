@@ -243,6 +243,29 @@ describe('withLatestFrom', () => {
     expect(results).toEqual([[1, 'A']]);
   });
 
+  it('should synchronously drain a buffered auxiliary push source during setup', async () => {
+    const main = createAsyncPushable<number>();
+    const aux = createAsyncPushable<string>();
+    aux.push('A');
+
+    const atom = withLatestFrom(aux).apply(main as any);
+    const results: Array<[number, string]> = [];
+
+    const finished = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
+      }
+    })();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    main.push(1);
+    main.dispose();
+    aux.dispose();
+    await finished;
+
+    expect(results).toEqual([[1, 'A']]);
+  });
+
   it('should fail when an auxiliary promise rejects during setup', async () => {
     const atom = pipe(from([1]), withLatestFrom(Promise.reject(new Error('aux setup failed')) as any));
 
