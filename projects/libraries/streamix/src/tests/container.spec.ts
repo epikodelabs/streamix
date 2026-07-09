@@ -68,6 +68,29 @@ describe('IoC Container', () => {
       expect(container.resolve(A)).toBe(1);
       expect(container.resolve(B)).toBe('two');
     });
+
+    it('throws when registering on a disposed container', async () => {
+      const Token = createToken<number>('disposed-register');
+      const container = createContainer();
+
+      await container.dispose();
+
+      expect(() => container.register(Token, () => 1)).toThrowError(
+        'Cannot register services on a disposed container'
+      );
+    });
+
+    it('throws when resolving from a disposed container', async () => {
+      const Token = createToken<number>('disposed-resolve');
+      const container = createContainer().register(Token, () => 1);
+
+      await container.dispose();
+
+      expect(() => container.resolve(Token)).toThrowError(
+        'Cannot resolve services from a disposed container'
+      );
+      expect(container.resolveOptional(Token)).toBeUndefined();
+    });
   });
 
   describe('dependency resolution', () => {
@@ -95,6 +118,17 @@ describe('IoC Container', () => {
       });
 
       expect(container.resolve(Consumer)).toBe('default');
+    });
+
+    it('resolves existing optional dependencies via context', () => {
+      const Optional = createToken<string>('optional-present');
+      const Consumer = createToken<string>('consumer-present');
+
+      const container = createContainer()
+        .register(Optional, () => 'configured')
+        .register(Consumer, (ctx) => ctx.resolveOptional(Optional) ?? 'default');
+
+      expect(container.resolve(Consumer)).toBe('configured');
     });
   });
 

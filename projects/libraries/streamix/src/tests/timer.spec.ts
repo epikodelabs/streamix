@@ -59,4 +59,49 @@ describe('timer', () => {
     expect(emittedValues[0]).toBe(0);
     expect(emittedValues[1]).toBe(1);
   });
+
+  it('should cancel a pending first timeout before the first emission', async () => {
+    const atom = timer(50, 10);
+    const emittedValues: number[] = [];
+    const originalClearTimeout = globalThis.clearTimeout;
+    const clearTimeoutSpy = jasmine
+      .createSpy('clearTimeout')
+      .and.callFake(originalClearTimeout);
+
+    (globalThis as any).clearTimeout = clearTimeoutSpy;
+
+    try {
+      const unsubscribe = atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
+
+      await delay(10);
+      await unsubscribe();
+      await delay(70);
+
+      expect(emittedValues).toEqual([]);
+      expect(clearTimeoutSpy).toHaveBeenCalled();
+    } finally {
+      (globalThis as any).clearTimeout = originalClearTimeout;
+    }
+  });
+
+  it('should stop during the interval wait after the first emission', async () => {
+    const atom = timer(0, 50);
+    const emittedValues: number[] = [];
+    let unsubscribe!: () => void | Promise<void>;
+
+    unsubscribe = atom.subscribe(v => {
+      if (v === undefined) {
+        return;
+      }
+
+      emittedValues.push(v);
+      if (v === 0) {
+        void unsubscribe();
+      }
+    });
+
+    await delay(90);
+
+    expect(emittedValues).toEqual([0]);
+  });
 });

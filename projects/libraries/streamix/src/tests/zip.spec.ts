@@ -96,4 +96,22 @@ describe('zip', () => {
 
     expect(result).toEqual([]);
   });
+
+  it('should propagate source errors', async () => {
+    const source = atom<number>();
+    const zipped = zip(source, from(['a']));
+
+    const pending = (async () => {
+      const values: any[] = [];
+      for await (const value of zipped as any) {
+        values.push(value);
+      }
+      return values;
+    })();
+
+    const error = new Error('zip boom');
+    source.fail(error);
+
+    await expectAsync(pending).toBeRejectedWith(error);
+  });
 });

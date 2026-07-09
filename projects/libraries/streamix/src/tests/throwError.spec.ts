@@ -27,4 +27,19 @@ describe('throwError', () => {
 
     expect(results).toEqual([]);
   });
+
+  it('should await promised error messages', async () => {
+    const atom = pipe(from([1]), throwError(Promise.resolve('Async boom!')));
+
+    let caught: Error | undefined;
+    try {
+      for await (const _ of iterate(atom)) {
+        void _;
+      }
+    } catch (err) {
+      caught = err as Error;
+    }
+
+    expect(caught?.message).toBe('Async boom!');
+  });
 });

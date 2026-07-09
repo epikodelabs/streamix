@@ -91,4 +91,15 @@ idescribe("compute", () => {
     expect(result).toBe(15);
     await run.dispose();
   });
+
+  it("should build from a coroutine script without helpers", async () => {
+    const run = computeScript<number, number>({
+      main: (data: number) => data + 4,
+    });
+
+    const result = await run(5);
+
+    expect(result).toBe(9);
+    await run.dispose();
+  });
 });
