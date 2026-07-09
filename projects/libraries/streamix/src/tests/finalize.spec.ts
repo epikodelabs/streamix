@@ -135,4 +135,33 @@ describe("dispose", () => {
 
     expect(caught?.message).toBe("source error");
   });
+
+  it("should return DONE on next after completion without re-finalizing", async () => {
+    let calls = 0;
+    const iterator = finalize(() => {
+      calls++;
+    }).apply(from([1])[Symbol.asyncIterator]());
+
+    expect(await iterator.next()).toEqual({ value: 1, done: false });
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+    expect(calls).toBe(1);
+  });
+
+  it("should fall back when source does not implement return or throw", async () => {
+    const finalizers: string[] = [];
+    const source = {
+      async next() {
+        return { done: false as const, value: 1 };
+      }
+    } as AsyncIterator<number>;
+
+    const iterator = finalize(() => {
+      finalizers.push("finalized");
+    }).apply(source);
+
+    expect(await iterator.return?.()).toEqual({ value: undefined, done: true });
+    await expectAsync(iterator.throw?.("stop")).toBeRejectedWithError("stop");
+    expect(finalizers).toEqual(["finalized"]);
+  });
 });

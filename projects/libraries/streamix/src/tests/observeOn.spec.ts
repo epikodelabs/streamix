@@ -1,4 +1,4 @@
-import {flow, iterate, observeOn, pipe} from '@epikodelabs/streamix';
+import { flow, iterate, observeOn, pipe } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -152,5 +152,65 @@ describe('observeOn', () => {
 
     expect(values).toEqual([1, 2]);
     expect(setTimeoutSpy).toHaveBeenCalled();
+  });
+
+  it('should cancel pending macrotasks when iterator.return is used', async () => {
+    const sourceReturn = jasmine.createSpy('sourceReturn').and.rejectWith(new Error('ignored'));
+    const source = {
+      step: 0,
+      async next() {
+        this.step++;
+        if (this.step === 1) return { value: 1, done: false as const };
+        if (this.step === 2) return { value: 2, done: false as const };
+        return new Promise<IteratorResult<number>>(() => {});
+      },
+      return: sourceReturn,
+    } as AsyncIterator<number> & { step: number };
+
+    const iterator = observeOn<number>('macrotask').apply(source);
+    await Promise.resolve();
+
+    expect(await iterator.return?.()).toEqual({ value: undefined, done: true });
+    expect(sourceReturn).toHaveBeenCalled();
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+  });
+
+  it('should cancel idle callbacks and normalize iterator.throw errors', async () => {
+    const idleIds: number[] = [];
+    const cancelIdleCallbackSpy = jasmine.createSpy('cancelIdleCallback');
+    (globalThis as any).requestIdleCallback = jasmine
+      .createSpy('requestIdleCallback')
+      .and.callFake((_callback: IdleRequestCallback) => {
+        const id = idleIds.length + 1;
+        idleIds.push(id);
+        return id;
+      });
+    (globalThis as any).cancelIdleCallback = cancelIdleCallbackSpy;
+
+    const stream = flow(async function* () {
+      yield 1;
+      yield 2;
+    });
+
+    const iterator = observeOn<number>('idle').apply(stream[Symbol.asyncIterator]());
+    await wait(0);
+
+    await expectAsync(iterator.throw?.('stop')).toBeRejectedWithError('stop');
+    expect(cancelIdleCallbackSpy).toHaveBeenCalledWith(idleIds[0]);
+  });
+
+  it('should cancel idle fallback timeouts when iterator.return is used before they fire', async () => {
+    (globalThis as any).requestIdleCallback = undefined;
+
+    const stream = flow(async function* () {
+      yield 1;
+      yield 2;
+    });
+
+    const iterator = observeOn<number>('idle').apply(stream[Symbol.asyncIterator]());
+    await Promise.resolve();
+
+    expect(await iterator.return?.()).toEqual({ value: undefined, done: true });
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
   });
 });

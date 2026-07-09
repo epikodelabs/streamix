@@ -33,4 +33,32 @@ describe('take', () => {
 
     expect(results).toEqual([]);
   });
+
+  it('should support promised limits and stay done after the limit is reached', async () => {
+    const iterator = take<number>(Promise.resolve(1)).apply(from([1, 2])[Symbol.asyncIterator]());
+
+    expect(await iterator.next()).toEqual({ value: 1, done: false });
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+  });
+
+  it('should ignore source.return errors when stopping after the limit', async () => {
+    const source = {
+      index: 0,
+      async next() {
+        this.index++;
+        if (this.index === 1) return { value: 1, done: false as const };
+        if (this.index === 2) return { value: 2, done: false as const };
+        return { value: undefined, done: true as const };
+      },
+      async return() {
+        throw new Error('ignored');
+      }
+    } as AsyncIterator<number> & { index: number };
+
+    const iterator = take<number>(1).apply(source);
+
+    expect(await iterator.next()).toEqual({ value: 1, done: false });
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+  });
 });

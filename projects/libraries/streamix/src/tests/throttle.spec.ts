@@ -1,4 +1,4 @@
-import { atom, iterate, pipe, throttle, type Writable } from '@epikodelabs/streamix';
+import { atom, from, iterate, pipe, throttle, type Writable } from '@epikodelabs/streamix';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -150,5 +150,47 @@ describe('throttle', () => {
     await reader;
     
     expect(output).toEqual([1, 2]);
+  });
+
+  it('should flush a queued trailing value before the next leading value when the timer has not fired yet', async () => {
+    const dateNowSpy = spyOn(Date, 'now').and.returnValues(0, 50, 150, 150);
+    const output: number[] = [];
+
+    for await (const value of iterate(pipe(from([1, 2, 3]), throttle<number>(100)))) {
+      output.push(value);
+    }
+
+    expect(dateNowSpy).toHaveBeenCalled();
+    expect(output).toEqual([1, 2, 3]);
+  });
+
+  it('should normalize non-Error source failures and clear pending timers', async () => {
+    const subject: Writable<any> = atom<number>();
+
+    const reader = (async () => {
+      for await (const _ of iterate(pipe(subject, throttle<number>(50)))) {
+        void _;
+      }
+    })();
+
+    subject.next(1);
+    subject.next(2);
+    subject.fail('boom' as any);
+
+    await expectAsync(reader).toBeRejectedWithError('boom');
+  });
+
+  it('should clear a pending timer when downstream stops during cooldown', async () => {
+    const subject: Writable<any> = atom<number>();
+    const iterator = iterate(pipe(subject, throttle<number>(50)))[Symbol.asyncIterator]();
+
+    subject.next(1);
+    expect(await iterator.next()).toEqual({ value: 1, done: false });
+
+    subject.next(2);
+    expect(await iterator.return?.()).toEqual({ value: undefined, done: true });
+
+    await sleep(70);
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
   });
 });

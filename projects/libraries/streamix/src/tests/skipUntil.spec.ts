@@ -70,4 +70,16 @@ describe('skipUntil', () => {
 
     await expectAsync(reader).toBeRejectedWith(jasmine.objectContaining({ message: 'Notifier failed' }));
   });
+
+  it('supports iterator teardown helpers directly', async () => {
+    const iterator = skipUntil(from([true])).apply(from([1, 2])[Symbol.asyncIterator]()) as AsyncIterator<number> & {
+      __tryNext?: () => IteratorResult<number> | null;
+      __hasBufferedValues?: () => boolean;
+    };
+
+    expect(iterator.__hasBufferedValues?.()).toBeFalse();
+    expect(await iterator.return?.(123)).toEqual({ value: 123, done: true });
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+    expect(iterator.__tryNext?.()).toEqual({ value: undefined, done: true });
+  });
 });

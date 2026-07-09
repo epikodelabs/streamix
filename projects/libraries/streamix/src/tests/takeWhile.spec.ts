@@ -72,4 +72,14 @@ describe('takeWhile', () => {
 
     expect(results).toEqual([100, 100, 100]);
   });
+
+  it('should support async predicates and remain done after the first failure', async () => {
+    const iterator = takeWhile<number>(async (value) => value < 2).apply(
+      from([1, 2, 3])[Symbol.asyncIterator]()
+    );
+
+    expect(await iterator.next()).toEqual({ value: 1, done: false });
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+    expect(await iterator.next()).toEqual({ value: undefined, done: true });
+  });
 });

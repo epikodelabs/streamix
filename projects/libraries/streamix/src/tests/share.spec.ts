@@ -87,4 +87,113 @@ describe('share', () => {
 
     expect(await iterator.return?.()).toEqual({ value: undefined, done: true });
   });
+
+  it('closes unused upstream iterators when already connected', async () => {
+    const sharedOperator = share<number>();
+    let source1Calls = 0;
+    const source1 = {
+      async next() {
+        source1Calls++;
+        if (source1Calls === 1) {
+          return { value: 1, done: false as const };
+        }
+
+        return new Promise<IteratorResult<number>>(() => {});
+      },
+      async return() {
+        return { value: undefined, done: true as const };
+      }
+    } as AsyncIterator<number>;
+    const source2Return = jasmine.createSpy('source2Return').and.returnValue(
+      Promise.reject(new Error('ignored'))
+    );
+    const source2 = {
+      async next() {
+        return { value: 2, done: false as const };
+      },
+      return: source2Return,
+    } as AsyncIterator<number>;
+
+    const first = sharedOperator.apply(source1);
+    const firstIterator = first[Symbol.asyncIterator]();
+    expect(await firstIterator.next()).toEqual({ value: 1, done: false });
+
+    const second = sharedOperator.apply(source2);
+    const secondIterator = second[Symbol.asyncIterator]();
+    await wait(0);
+
+    expect(source2Return).toHaveBeenCalled();
+    await secondIterator.return?.();
+    await firstIterator.return?.();
+  });
+
+  it('allows already-connected subscriptions whose fresh upstream iterator has no return method', async () => {
+    const sharedOperator = share<number>();
+    let source1Calls = 0;
+    const source1 = {
+      async next() {
+        source1Calls++;
+        if (source1Calls === 1) {
+          return { value: 1, done: false as const };
+        }
+
+        return new Promise<IteratorResult<number>>(() => {});
+      },
+      async return() {
+        return { value: undefined, done: true as const };
+      }
+    } as AsyncIterator<number>;
+    const source2 = {
+      async next() {
+        return { value: 2, done: false as const };
+      }
+    } as AsyncIterator<number>;
+
+    const firstIterator = sharedOperator.apply(source1)[Symbol.asyncIterator]();
+    expect(await firstIterator.next()).toEqual({ value: 1, done: false });
+
+    const secondIterator = sharedOperator.apply(source2)[Symbol.asyncIterator]();
+    await secondIterator.return?.();
+    await firstIterator.return?.();
+  });
+
+  it('does not disconnect while another subscriber is still active and normalizes iterator.throw', async () => {
+    const sharedOperator = share<number>();
+    const sourceReturn = jasmine.createSpy('sourceReturn').and.returnValue(
+      Promise.resolve({ value: undefined, done: true })
+    );
+    let sourceCalls = 0;
+    const source = {
+      async next() {
+        sourceCalls++;
+        if (sourceCalls === 1) {
+          return { value: 1, done: false as const };
+        }
+
+        return new Promise<IteratorResult<number>>(() => {});
+      },
+      return: sourceReturn,
+    } as AsyncIterator<number>;
+
+    const first = sharedOperator.apply(source);
+    const second = sharedOperator.apply({
+      async next() {
+        return new Promise<IteratorResult<number>>(() => {});
+      },
+      async return() {
+        return { value: undefined, done: true as const };
+      }
+    });
+
+    const firstIterator = first[Symbol.asyncIterator]();
+    const secondIterator = second[Symbol.asyncIterator]();
+
+    expect(await firstIterator.next()).toEqual({ value: 1, done: false });
+    expect(await firstIterator.return?.()).toEqual({ value: undefined, done: true });
+    expect(sourceReturn).not.toHaveBeenCalled();
+
+    await expectAsync(secondIterator.throw?.('boom')).toBeRejectedWithError('boom');
+    expect(sourceReturn).not.toHaveBeenCalled();
+    await secondIterator.return?.();
+  });
 });

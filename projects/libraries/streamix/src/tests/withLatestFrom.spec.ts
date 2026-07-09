@@ -171,4 +171,90 @@ describe('withLatestFrom', () => {
 
     expect(caught?.message).toBe('MAIN');
   });
+
+  it('should emit nothing when a pull-based auxiliary stream completes without a value', async () => {
+    const atom = pipe(
+      from([1, 2, 3]),
+      withLatestFrom(from([] as string[]))
+    );
+
+    const results: Array<[number, string]> = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([]);
+  });
+
+  it('should keep dropping push-source values when a synchronous auxiliary has no initial value', async () => {
+    const main = createAsyncPushable<number>();
+    const atom = pipe(main, withLatestFrom(from([] as string[])));
+    const results: Array<[number, string]> = [];
+
+    const finished = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
+      }
+    })();
+
+    main.push(1);
+    main.push(2);
+    main.dispose();
+    await finished;
+
+    expect(results).toEqual([]);
+  });
+
+  it('should synchronously preload auxiliary values for push-based sources', async () => {
+    const main = createAsyncPushable<number>();
+    const atom = pipe(main, withLatestFrom(from(['A'])));
+    const results: Array<[number, string]> = [];
+
+    const finished = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
+      }
+    })();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    main.push(1);
+    main.dispose();
+    await finished;
+
+    expect(results).toEqual([[1, 'A']]);
+  });
+
+  it('should preload synchronous auxiliary values when the operator is applied directly to a push source', async () => {
+    const main = createAsyncPushable<number>();
+    const atom = withLatestFrom(from(['A'])).apply(main as any);
+    const results: Array<[number, string]> = [];
+
+    const finished = (async () => {
+      for await (const value of iterate(atom)) {
+        results.push(value);
+      }
+    })();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    main.push(1);
+    main.dispose();
+    await finished;
+
+    expect(results).toEqual([[1, 'A']]);
+  });
+
+  it('should fail when an auxiliary promise rejects during setup', async () => {
+    const atom = pipe(from([1]), withLatestFrom(Promise.reject(new Error('aux setup failed')) as any));
+
+    let caught: Error | undefined;
+    try {
+      for await (const _ of iterate(atom)) {
+        void _;
+      }
+    } catch (err) {
+      caught = err as Error;
+    }
+
+    expect(caught?.message).toBe('aux setup failed');
+  });
 });
