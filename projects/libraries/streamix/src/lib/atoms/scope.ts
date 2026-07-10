@@ -110,8 +110,17 @@ type UnwrapSnapshotValues<T> = {
           : T[K];
 };
 
+type WidenValue<T> =
+  T extends string ? string
+  : T extends number ? number
+  : T extends boolean ? boolean
+  : T extends bigint ? bigint
+  : T extends symbol ? symbol
+  : T extends readonly (infer U)[] ? WidenValue<U>[]
+  : T;
+
 type UnwrapScopeValues<T> = {
-  [K in keyof T]: T[K] extends Atom<infer U> ? U : T[K];
+  [K in keyof T]: T[K] extends Atom<infer U> ? WidenValue<U> : T[K];
 };
 
 type AtomOf<T> = T extends Writable<infer U> ? Writable<U> : T extends Atom<infer U> ? Atom<U> : never;
@@ -138,10 +147,62 @@ type ScopeValue<T> =
   : T extends DerivedExpr<infer U, any> ? Atom<U>
   : T extends PipeExpr<infer U, any> ? Atom<U>
   : T extends FlowExpr<infer U, any> ? Atom<U>
-  : T extends AtomExpr<infer U> ? Atom<U>
+  : T extends AtomExpr<infer U> ? Writable<U>
   : T extends Record<string, any> ? ScopeReturn<ScopeOf<T>> : Writable<T>;
 
 type ScopeOf<T extends Record<string, any>> = { [K in keyof T]: ScopeValue<T[K]>; };
+
+type ScopeResolvedFunctionValue<TResult> =
+  TResult extends ScopeReturn<any> ? TResult
+  : TResult extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
+  : TResult extends Writable<any> ? TResult
+  : TResult extends Atom<any> ? TResult
+  : TResult extends AtomExpr<infer U> ? Writable<WidenValue<U>>
+  : TResult extends DerivedExpr<infer U, any> ? Atom<U>
+  : TResult extends PipeExpr<infer U, any> ? Atom<U>
+  : TResult extends FlowExpr<infer U, any> ? Atom<U>
+  : Atom<WidenValue<TResult>>;
+
+type ScopeResolvedValue<T> =
+  T extends ScopeReturn<any> ? T
+  : T extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
+  : T extends Method<infer TFn> ? TFn
+  : T extends Writable<any> ? T
+  : T extends Atom<any> ? T
+  : T extends AtomExpr<infer U> ? Writable<WidenValue<U>>
+  : T extends DerivedExpr<infer U, any> ? Atom<U>
+  : T extends PipeExpr<infer U, any> ? Atom<U>
+  : T extends FlowExpr<infer U, any> ? Atom<U>
+  : T extends (...args: any[]) => infer TResult ? ScopeResolvedFunctionValue<TResult>
+  : T extends readonly any[] ? Writable<WidenValue<T>>
+  : T extends Record<string, any> ? ScopeReturnFromConfig<T>
+  : Writable<WidenValue<T>>;
+
+type ScopeOfConfig<T extends Record<string, any>> = { [K in keyof T]: ScopeResolvedValue<T[K]>; };
+
+type ScopePublicValue<T> = T extends Atom<infer U> ? WidenValue<U> : T;
+
+type IsReadonlyScopeConfigValue<T> =
+  T extends DerivedExpr<any, any> ? true
+  : T extends PipeExpr<any, any> ? true
+  : T extends FlowExpr<any, any> ? true
+  : T extends (...args: any[]) => any ? true
+  : T extends AtomExpr<any> ? false
+  : T extends Writable<any> ? false
+  : T extends Atom<any> ? true
+  : false;
+
+type ReadonlyScopeConfigKeys<T extends Record<string, any>> = {
+  [K in keyof T]-?: IsReadonlyScopeConfigValue<T[K]> extends true ? K : never;
+}[keyof T];
+
+type WritableScopeConfigKeys<T extends Record<string, any>> = Exclude<keyof T, ReadonlyScopeConfigKeys<T>>;
+
+type UnwrapScopeValuesFromConfig<T extends Record<string, any>> = {
+  readonly [K in ReadonlyScopeConfigKeys<T>]: ScopePublicValue<ScopeResolvedValue<T[K]>>;
+} & {
+  [K in WritableScopeConfigKeys<T>]: ScopePublicValue<ScopeResolvedValue<T[K]>>;
+};
 
 export type ScopeAtoms<T> = T extends Record<string, any>
   ? { [K in keyof T]: T[K] extends Scope<infer U> ? ScopeAtoms<U> : AtomOf<ScopeValue<T[K]>> }
@@ -152,6 +213,11 @@ export type ScopeReturn<T extends Record<string, any>> = Scope<T> & UnwrapScopeV
   subscribeTo<K extends keyof T>(key: K, callback: (value: AtomValueOf<T[K]>) => void): Subscription;
 };
 
+export type ScopeReturnFromConfig<T extends Record<string, any>> = Scope<ScopeOfConfig<T>> & UnwrapScopeValuesFromConfig<T> & {
+  at: AtomAccessor<ScopeOfConfig<T>>;
+  subscribeTo<K extends keyof ScopeOfConfig<T>>(key: K, callback: (value: AtomValueOf<ScopeOfConfig<T>[K]>) => void): Subscription;
+};
+
 export interface Scope<T extends Record<string, any> = Record<string, any>> {
   type: "scope";
   atoms: Set<Atom<any> | Scope>;
@@ -159,7 +225,7 @@ export interface Scope<T extends Record<string, any> = Record<string, any>> {
   mode: "discrete" | "analog";
   parent: Scope | RootScope | null;
   container: Container;
-  loading: boolean;
+  readonly loading: boolean;
   snapshot(): UnwrapSnapshotValues<T>;
   dispose(): void;
   /** @internal */ _pendingCount: number;
@@ -209,11 +275,6 @@ export function injectOptional<T>(token: Token<T>): T | undefined {
 
 /* ── Context Lifecycle Management ─────────────────────────────────────────── */
 
-const INTERNAL_SCOPE_KEYS = new Set<string | symbol>([
-  "type", "atoms", "cleanups", "mode", "parent", "container", 
-  "snapshot", "dispose", "_pendingCount", "_exports", "_disposed", "_rawState", "at"
-]);
-
 function isPlainObject(value: any): boolean {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   if (value instanceof Date || value instanceof RegExp || value instanceof Map || value instanceof Set) return false;
@@ -233,6 +294,15 @@ function defineCallableAccessorProperty(
     enumerable: true,
     configurable: true,
   });
+}
+
+function isReadonlyScopeStateKey(key: string | symbol, item: any): boolean {
+  if (key === "loading") return true;
+  if (isAtomExpr(item)) return false;
+  if (isDynamicExpr(item)) return true;
+  if (isDerivedExpr(item) || isPipeExpr(item) || isFlowExpr(item)) return true;
+  if (isAtomLike(item)) return typeof (item as any).next !== "function";
+  return false;
 }
 
 function materializeState(
@@ -336,9 +406,16 @@ function defineScopeStateProperty(
   key: string | symbol,
   read: (key: string | symbol) => any,
 ): void {
-  Object.defineProperty(scopeRef, key, {
+  const currentItem = scopeRef._rawState[key];
+  const readonly = isReadonlyScopeStateKey(key, currentItem);
+
+  const descriptor: PropertyDescriptor = {
     get() {
       const activeItem = read(key);
+      const updatedItem = scopeRef._rawState[key];
+      if (isReadonlyScopeStateKey(key, updatedItem) !== readonly) {
+        defineScopeStateProperty(scopeRef, key, read);
+      }
       if (activeItem && typeof activeItem === "object") {
         if (activeItem.type === "atom") {
           return activeItem.value;
@@ -347,20 +424,27 @@ function defineScopeStateProperty(
       }
       return activeItem;
     },
-    set(value: any) {
+    enumerable: true,
+    configurable: true,
+  };
+
+  if (!readonly) {
+    descriptor.set = (value: any) => {
       const activeItem = read(key);
       if (activeItem && typeof activeItem === "object" && activeItem.type === "atom") {
         if (typeof activeItem.next !== "function") {
+          defineScopeStateProperty(scopeRef, key, read);
           throw new TypeError(`Cannot assign to read-only scope property: ${String(key)}`);
         }
         activeItem.next(value);
         return;
       }
       scopeRef._rawState[key] = value;
-    },
-    enumerable: true,
-    configurable: true,
-  });
+      defineScopeStateProperty(scopeRef, key, read);
+    };
+  }
+
+  Object.defineProperty(scopeRef, key, descriptor);
 }
 
 function createScopeInternal<T extends Record<string, any>>(
@@ -501,6 +585,8 @@ function createScopeInternal<T extends Record<string, any>>(
   }
 }
 
+export function scope<const TConfig extends Record<string, any>>(state: TConfig, options?: { mode?: "discrete" | "analog" }): ScopeReturnFromConfig<TConfig>;
+export function scope<const TConfig extends Record<string, any>>(factory: (this: ScopeReturnFromConfig<TConfig>) => TConfig, options?: { mode?: "discrete" | "analog" }): ScopeReturnFromConfig<TConfig>;
 export function scope<T extends Record<string, any>>(state: ScopeConfig<T>, options?: { mode?: "discrete" | "analog" }): ScopeReturn<ScopeOf<T>>;
 export function scope<T extends Record<string, any>>(factory: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>, options?: { mode?: "discrete" | "analog" }): ScopeReturn<ScopeOf<T>>;
 export function scope(arg: any, options?: any): any {

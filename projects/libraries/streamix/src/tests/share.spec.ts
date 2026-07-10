@@ -115,11 +115,11 @@ describe('share', () => {
     } as AsyncIterator<number>;
 
     const first = sharedOperator.apply(source1);
-    const firstIterator = first[Symbol.asyncIterator]();
+    const firstIterator = (first as AsyncIterableIterator<number>)[Symbol.asyncIterator]();
     expect(await firstIterator.next()).toEqual({ value: 1, done: false });
 
     const second = sharedOperator.apply(source2);
-    const secondIterator = second[Symbol.asyncIterator]();
+    const secondIterator = (second as AsyncIterableIterator<number>)[Symbol.asyncIterator]();
     await wait(0);
 
     expect(source2Return).toHaveBeenCalled();
@@ -149,10 +149,10 @@ describe('share', () => {
       }
     } as AsyncIterator<number>;
 
-    const firstIterator = sharedOperator.apply(source1)[Symbol.asyncIterator]();
+    const firstIterator = (sharedOperator.apply(source1) as AsyncIterableIterator<number>)[Symbol.asyncIterator]();
     expect(await firstIterator.next()).toEqual({ value: 1, done: false });
 
-    const secondIterator = sharedOperator.apply(source2)[Symbol.asyncIterator]();
+    const secondIterator = (sharedOperator.apply(source2) as AsyncIterableIterator<number>)[Symbol.asyncIterator]();
     await secondIterator.return?.();
     await firstIterator.return?.();
   });
@@ -185,8 +185,8 @@ describe('share', () => {
       }
     });
 
-    const firstIterator = first[Symbol.asyncIterator]();
-    const secondIterator = second[Symbol.asyncIterator]();
+    const firstIterator = (first as AsyncIterableIterator<number>)[Symbol.asyncIterator]();
+    const secondIterator = (second as AsyncIterableIterator<number>)[Symbol.asyncIterator]();
 
     expect(await firstIterator.next()).toEqual({ value: 1, done: false });
     expect(await firstIterator.return?.()).toEqual({ value: undefined, done: true });

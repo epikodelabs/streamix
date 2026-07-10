@@ -1248,6 +1248,7 @@ export type SyncOnly<T> = T extends Promise<any> ? never : T;
 
 export function derived<T>(fn: (self: DerivedScope) => SyncOnly<T>, options?: AtomOptions): Atom<T>;
 export function derived<T>(fn: (self: DerivedScope) => Promise<T>, options?: AtomOptions): Atom<T>;
+export function derived<T>(fn: (self: DerivedScope) => Generator<Atom<any> | Promise<any>, T, any>, options?: AtomOptions): Atom<T>;
 export function derived<T>(...args: any[]): Atom<T> {
   let computableFactory: () => ComputableInstance;
   let options: AtomOptions | undefined;

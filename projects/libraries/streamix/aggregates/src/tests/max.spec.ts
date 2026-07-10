@@ -1,9 +1,9 @@
-import { atom, pipe } from '@epikodelabs/streamix';
+import { atom, pipe, type Writable } from '@epikodelabs/streamix';
 import { max } from '@epikodelabs/streamix/aggregates';
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 describe('max', () => {
-    let subject: ReturnType<typeof atom>;
-    let source: ReturnType<typeof atom>;
+    let subject: Writable<number>;
+    let source: Writable<number>;
     beforeEach(() => {
         subject = atom<number>();
         source = subject;

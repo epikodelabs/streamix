@@ -245,7 +245,7 @@ describe('Atom System', () => {
     it('should support generator-based derived formulas', async () => {
       const source = atom(3);
 
-      const generated = derived(function* () {
+      const generated = derived<number>(function* (): Generator<Atom<number> | Promise<number>, number, number> {
         const current = yield source;
         const incremented = yield Promise.resolve(current + 1);
         return incremented * 2;

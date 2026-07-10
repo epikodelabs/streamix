@@ -142,6 +142,20 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should expose derived properties as readonly descriptors', () => {
+      const s = scope({
+        count: 0,
+        doubled: derivedExpr((self) => self.count * 2),
+      });
+
+      const countDescriptor = Object.getOwnPropertyDescriptor(s, 'count');
+      const doubledDescriptor = Object.getOwnPropertyDescriptor(s, 'doubled');
+
+      expect(typeof countDescriptor?.set).toBe('function');
+      expect(doubledDescriptor?.set).toBeUndefined();
+      s.dispose();
+    });
+
     it('should not allow assignment to flow atoms', async () => {
       interface Shape {
         a: number;
@@ -154,6 +168,20 @@ describe('Scope System', () => {
       expect(() => {
         (s as any).a = 99;
       }).toThrowError();
+      s.dispose();
+    });
+
+    it('should expose flow and pipe properties as readonly descriptors', async () => {
+      const source = atom(0);
+      const s = scope({
+        flowValue: flowExpr(() => flow(source)),
+        pipeValue: pipeExpr(() => pipe(source, map((value) => value * 2))),
+      });
+
+      expect(Object.getOwnPropertyDescriptor(s, 'flowValue')?.set).toBeUndefined();
+      expect(Object.getOwnPropertyDescriptor(s, 'pipeValue')?.set).toBeUndefined();
+
+      source.dispose();
       s.dispose();
     });
 
@@ -191,7 +219,7 @@ describe('Scope System', () => {
 
       const s = scope<Shape>({
         count: 0,
-        increment: (self) => () => { self.count = self.count + 1; },
+        increment: (self: any) => () => { self.count = self.count + 1; },
       });
 
       expect(s.count).toBe(0);
@@ -632,7 +660,7 @@ describe('Scope System', () => {
 
       const s = scope<Shape>(() => ({
         source: atomExpr<number>(),
-        a: (_, atoms) => flow(atoms.source),
+        a: (_self: Shape, atoms: any) => flow<number>(atoms.source),
       }), { mode: 'analog' });
 
       const values: number[] = [];
@@ -954,6 +982,17 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should expose atomExpr properties as writable descriptors', () => {
+      const s = scope({
+        user: atomExpr<string>(),
+      });
+
+      const userDescriptor = Object.getOwnPropertyDescriptor(s, 'user');
+
+      expect(typeof userDescriptor?.set).toBe('function');
+      s.dispose();
+    });
+
     it('should support atomExpr with an initial value', async () => {
       const s = scope({
         count: atomExpr(0)
@@ -967,6 +1006,17 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should expose function-derived properties as readonly and atomExpr properties as writable', () => {
+      const s = scope({
+        count: atomExpr(0),
+        a: (self: any) => self.count * 2,
+      });
+
+      expect(typeof Object.getOwnPropertyDescriptor(s, 'count')?.set).toBe('function');
+      expect(Object.getOwnPropertyDescriptor(s, 'a')?.set).toBeUndefined();
+      s.dispose();
+    });
+
     it('should support methods with this bound to scope', () => {
       interface Shape {
         count: number;
@@ -975,7 +1025,7 @@ describe('Scope System', () => {
 
       const s = scope<Shape>({
         count: 0,
-        increment: (self) => () => { self.count++; },
+        increment: (self: any) => () => { self.count++; },
       });
 
       expect(s.count).toBe(0);
@@ -1146,8 +1196,8 @@ describe('Scope System', () => {
       }
 
       expect(() => scope<Shape>(() => ({
-        a: (self) => self.b,
-        b: (self) => self.a,
+        a: (self: any) => self.b,
+        b: (self: any) => self.a,
       }))).toThrowError(/Circular dependency/);
     });
 

@@ -1,8 +1,8 @@
-import { atom, pipe } from '@epikodelabs/streamix';
+import { atom, pipe, type Writable } from '@epikodelabs/streamix';
 import { unique } from '@epikodelabs/streamix/aggregates';
 describe('unique', () => {
-    let subject: ReturnType<typeof atom>;
-    let source: ReturnType<typeof atom>;
+    let subject: Writable<any>;
+    let source: Writable<any>;
     beforeEach(() => {
         subject = atom<any>();
         source = subject;

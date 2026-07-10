@@ -226,7 +226,7 @@ describe('withLatestFrom', () => {
 
   it('should preload synchronous auxiliary values when the operator is applied directly to a push source', async () => {
     const main = createAsyncPushable<number>();
-    const atom = withLatestFrom(from(['A'])).apply(main as any);
+    const atom = withLatestFrom(from(['A'])).apply(main as any) as unknown as AsyncIterable<[number, string]>;
     const results: Array<[number, string]> = [];
 
     const finished = (async () => {
@@ -248,7 +248,7 @@ describe('withLatestFrom', () => {
     const aux = createAsyncPushable<string>();
     aux.push('A');
 
-    const atom = withLatestFrom(aux).apply(main as any);
+    const atom = withLatestFrom(aux).apply(main as any) as unknown as AsyncIterable<[number, string]>;
     const results: Array<[number, string]> = [];
 
     const finished = (async () => {
