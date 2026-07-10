@@ -221,6 +221,20 @@ function isPlainObject(value: any): boolean {
   return proto === Object.prototype || proto === null;
 }
 
+function defineCallableAccessorProperty(
+  target: Record<string | symbol, any>,
+  key: string | symbol,
+  read: (key: string | symbol) => any,
+): void {
+  if (Object.prototype.hasOwnProperty.call(target, key)) return;
+
+  Object.defineProperty(target, key, {
+    get: () => read(key),
+    enumerable: true,
+    configurable: true,
+  });
+}
+
 function materializeState(
   input: any,
   visited: WeakMap<object, boolean>,
@@ -258,36 +272,37 @@ function materializeState(
     }
   };
 
-  const getRawAtom = (key: string | symbol): any => {
+  let atomsAccessor: any;
+
+  const resolveRawItem = (key: string | symbol): any => {
     let current = rawState[key];
     if (isExprMarkerOrDynamic(current)) {
-      void self[key]; 
-      current = rawState[key];
+      if (evaluating.has(key)) throw new Error(`Circular dependency loop encountered on: ${String(key)}`);
+      evaluating.add(key);
+      try {
+        current = evaluateExprMarker(current, self, atomsAccessor);
+        rawState[key] = current;
+      } finally {
+        evaluating.delete(key);
+      }
     }
     return current;
   };
 
-  const atomsProxy = new Proxy(getRawAtom, {
-    get: (_, key) => (typeof key === "symbol" && key in getRawAtom) ? (getRawAtom as any)[key] : getRawAtom(key),
-    has: (_, key) => key in rawState,
-    ownKeys: () => Reflect.ownKeys(rawState),
-    getOwnPropertyDescriptor: (_, key) => Object.getOwnPropertyDescriptor(rawState, key)
-  });
+  const getRawAtom = (key: string | symbol): any => {
+    return resolveRawItem(key);
+  };
+
+  atomsAccessor = (key: string | symbol) => getRawAtom(key);
+
+  for (const key of Reflect.ownKeys(rawState)) {
+    defineCallableAccessorProperty(atomsAccessor, key, getRawAtom);
+  }
 
   for (const key of Reflect.ownKeys(rawState)) {
     Object.defineProperty(self, key, {
       get() {
-        let current = rawState[key];
-        if (isExprMarkerOrDynamic(current)) {
-          if (evaluating.has(key)) throw new Error(`Circular dependency loop encountered on: ${String(key)}`);
-          evaluating.add(key);
-          try {
-            current = evaluateExprMarker(current, self, atomsProxy);
-            rawState[key] = current;
-          } finally {
-            evaluating.delete(key);
-          }
-        }
+        const current = resolveRawItem(key);
         if (isAtom(current)) {
           return current.value; // Prevent redundant context dependencies appends
         }
@@ -314,6 +329,38 @@ function materializeState(
   }
 
   return { rawState, self };
+}
+
+function defineScopeStateProperty(
+  scopeRef: Scope,
+  key: string | symbol,
+  read: (key: string | symbol) => any,
+): void {
+  Object.defineProperty(scopeRef, key, {
+    get() {
+      const activeItem = read(key);
+      if (activeItem && typeof activeItem === "object") {
+        if (activeItem.type === "atom") {
+          return activeItem.value;
+        }
+        if (activeItem.type === "scope") return activeItem;
+      }
+      return activeItem;
+    },
+    set(value: any) {
+      const activeItem = read(key);
+      if (activeItem && typeof activeItem === "object" && activeItem.type === "atom") {
+        if (typeof activeItem.next !== "function") {
+          throw new TypeError(`Cannot assign to read-only scope property: ${String(key)}`);
+        }
+        activeItem.next(value);
+        return;
+      }
+      scopeRef._rawState[key] = value;
+    },
+    enumerable: true,
+    configurable: true,
+  });
 }
 
 function createScopeInternal<T extends Record<string, any>>(
@@ -366,90 +413,74 @@ function createScopeInternal<T extends Record<string, any>>(
 
     newScope._rawState["loading"] = loadingAtom;
 
-    const atAccessor: any = Object.assign(
-      (key: string | symbol) => {
-        let current = newScope._rawState[key];
-        if (isExprMarkerOrDynamic(current)) {
-          void resolvedSelf[key];
-          current = newScope._rawState[key];
-        }
-        return current;
-      },
-      { loading: loadingAtom }
-    );
-
-    const defineAccessorKey = (key: string | symbol) => {
-      if (key in atAccessor) return;
-      Object.defineProperty(atAccessor, key, {
-        get: () => atAccessor(key),
-        enumerable: true,
-        configurable: true
-      });
+    const getScopeItem = (key: string | symbol): any => {
+      let current = newScope._rawState[key];
+      if (isExprMarkerOrDynamic(current)) {
+        const selfRef = resolvedSelf ?? newScope;
+        void selfRef[key];
+        current = newScope._rawState[key];
+      }
+      return current;
     };
 
-    const scopeProxy = new Proxy(newScope, {
-      get(target, prop, receiver) {
-        if (prop === "at") return atAccessor;
-        if (prop === "subscribeTo") {
-          return (key: string | symbol, callback: Function) => {
-            const node = target._rawState[key];
-            if (!node || typeof node.subscribe !== "function") {
-              throw new Error(`Cannot subscribe to non-atom structure at key: ${String(key)}`);
-            }
-            if (emittedAtomsRegistry.has(node)) {
-              callback(node.value, node.previous);
-            }
-            return node.subscribe(callback);
-          };
-        }
-        if (INTERNAL_SCOPE_KEYS.has(prop)) return Reflect.get(target, prop, receiver);
+    const atAccessor: any = (key: string | symbol) => getScopeItem(key);
 
-        const activeItem = target._rawState[prop];
-        if (activeItem && typeof activeItem === "object") {
-          if (activeItem.type === "atom") {
-            return activeItem.value;
-          }
-          if (activeItem.type === "scope") return activeItem;
-        }
-        return Reflect.get(target, prop, receiver);
+    const defineAccessorKey = (key: string | symbol) => {
+      defineCallableAccessorProperty(atAccessor, key, getScopeItem);
+    };
+
+    Object.defineProperties(newScope, {
+      at: {
+        value: atAccessor,
+        enumerable: false,
+        configurable: true,
+        writable: false,
       },
-      set(target, prop, value, receiver): boolean {
-        if (INTERNAL_SCOPE_KEYS.has(prop)) return Reflect.set(target, prop, value, receiver);
-        const activeItem = target._rawState[prop];
-        if (activeItem && typeof activeItem === "object" && activeItem.type === "atom") {
-          if (typeof activeItem.next !== "function") return false;
-          activeItem.next(value);
-          return true;
-        }
-        target._rawState[prop] = value;
-        return Reflect.set(target, prop, value, receiver);
-      }
+      subscribeTo: {
+        value: (key: string | symbol, callback: Function) => {
+          const node = getScopeItem(key);
+          if (!node || typeof node.subscribe !== "function") {
+            throw new Error(`Cannot subscribe to non-atom structure at key: ${String(key)}`);
+          }
+          if (emittedAtomsRegistry.has(node)) {
+            callback(node.value, node.previous);
+          }
+          return node.subscribe(callback);
+        },
+        enumerable: false,
+        configurable: true,
+        writable: false,
+      },
     });
 
-    const output = factory.call(scopeProxy, scopeProxy);
+    defineScopeStateProperty(newScope, "loading", getScopeItem);
+    defineAccessorKey("loading");
+
+    const output = factory.call(newScope, newScope);
     const dataState = (output && output.rawState) ? output.rawState : output;
-    resolvedSelf = (output && output.self) ? output.self : scopeProxy;
+    resolvedSelf = (output && output.self) ? output.self : newScope;
 
     if (dataState && typeof dataState === "object") {
       if ("loading" in dataState) {
         console.warn("[streamix] scope(): 'loading' key is reserved and was overwritten.");
       }
 
-      Object.assign(newScope, dataState);
       newScope._rawState = dataState;
 
       for (const key of Reflect.ownKeys(dataState)) {
         newScope._exports.add(key);
         defineAccessorKey(key);
+        defineScopeStateProperty(newScope, key, getScopeItem);
       }
     }
 
     newScope._rawState["loading"] = loadingAtom;
     defineAccessorKey("loading");
+    defineScopeStateProperty(newScope, "loading", getScopeItem);
 
     for (const item of Object.values(newScope._rawState)) {
       if (item && typeof item === "object" && (item as any).type === "scope") {
-        (item as Scope).parent = scopeProxy as any;
+        (item as Scope).parent = newScope as any;
       }
     }
 
@@ -461,7 +492,7 @@ function createScopeInternal<T extends Record<string, any>>(
       if (!loadingAtom.disposed) loadingAtom.dispose();
     });
 
-    return scopeProxy as any;
+    return newScope as any;
   } catch (err) {
     disposeScope(newScope);
     throw normalizeError(err);
