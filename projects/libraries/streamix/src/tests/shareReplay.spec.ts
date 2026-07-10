@@ -47,6 +47,20 @@ describe('shareReplay', () => {
     expect(await collect(op.apply(emptySource<number>() as any))).toEqual([1, 2]);
   });
 
+  it('replays only the last buffered values in source order', async () => {
+    const op = shareReplay<number>(2);
+    let next = 0;
+    const source: AsyncIterator<number> = {
+      next: async () => {
+        next++;
+        return next <= 3 ? NEXT(next) : DONE;
+      },
+    };
+
+    expect(await collect(op.apply(source as any))).toEqual([1, 2, 3]);
+    expect(await collect(op.apply(emptySource<number>() as any))).toEqual([2, 3]);
+  });
+
   it('propagates source errors to later consumers', async () => {
     const op = shareReplay<number>();
     let calls = 0;

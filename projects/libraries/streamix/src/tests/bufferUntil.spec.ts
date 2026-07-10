@@ -1,4 +1,4 @@
-import { atom, bufferUntil, iterate, pipe } from '@epikodelabs/streamix';
+import { atom, bufferUntil, from, iterate, pipe } from '@epikodelabs/streamix';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -195,5 +195,19 @@ describe("bufferUntil", () => {
 
     expect(sourceReturnCalls).toBeGreaterThanOrEqual(1);
     expect(notifierReturnCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it("supports synchronous helper inspection and flushing", async () => {
+    const iterator = bufferUntil(from([true])).apply(iterate(from([1, 2]))[Symbol.asyncIterator]()) as AsyncIterator<number[]> & {
+      __tryNext?: () => IteratorResult<number[]> | null;
+      __hasBufferedValues?: () => boolean;
+    };
+
+    expect(iterator.__hasBufferedValues?.()).toBeFalse();
+    await waitTick();
+
+    expect(iterator.__tryNext?.()).toEqual({ value: [1, 2], done: false });
+    expect(iterator.__tryNext?.()).toEqual({ value: undefined, done: true });
+    expect(iterator.__hasBufferedValues?.()).toBeTrue();
   });
 });

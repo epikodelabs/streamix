@@ -75,6 +75,21 @@ describe('fromAny', () => {
     expect(values).toEqual([1, 2, 3, 4, 5]);
   });
 
+  it('should invoke function inputs when consumed and flatten iterable results', async () => {
+    const factory = jasmine.createSpy('factory').and.callFake(() => [1, 2, 3]);
+
+    expect(await collect<number>(from(factory))).toEqual([1, 2, 3]);
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it('should propagate synchronous factory errors', async () => {
+    const source = from(() => {
+      throw new Error('Factory failed');
+    });
+
+    await expectAsync(collect(source)).toBeRejectedWithError('Factory failed');
+  });
+
   it('should handle promise of array', async () => {
     const values = await collect<number>(Promise.resolve([1, 2, 3]));
     expect(values).toEqual([1, 2, 3]);

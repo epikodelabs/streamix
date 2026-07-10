@@ -80,6 +80,46 @@ describe("commit", () => {
     expect(promisedValues).toEqual([7]);
   });
 
+  it("should retry when the factory throws before producing a source", async () => {
+    let attempt = 0;
+    const values: number[] = [];
+
+    for await (const value of iterate(commit(() => {
+      attempt++;
+      if (attempt < 3) {
+        throw new Error(`factory fail ${attempt}`);
+      }
+      return [attempt];
+    }, 2, 0))) {
+      if (value !== undefined) values.push(value);
+    }
+
+    expect(attempt).toBe(3);
+    expect(values).toEqual([3]);
+  });
+
+  it("should surface the last error after exhausting retries without emitting buffered values", async () => {
+    let attempt = 0;
+    const factory = jasmine.createSpy("factory").and.callFake(() =>
+      flow<number>(async function* () {
+        attempt++;
+        yield attempt;
+        throw new Error(`fail ${attempt}`);
+      })
+    );
+
+    const values: number[] = [];
+    const reader = (async () => {
+      for await (const value of iterate(commit(factory, 2, 0))) {
+        if (value !== undefined) values.push(value);
+      }
+    })();
+
+    await expectAsync(reader).toBeRejectedWithError("fail 3");
+    expect(factory).toHaveBeenCalledTimes(3);
+    expect(values).toEqual([]);
+  });
+
   it("should not emit a partial batch when unsubscribed mid-attempt", async () => {
     let iterationCount = 0;
     const values: number[] = [];

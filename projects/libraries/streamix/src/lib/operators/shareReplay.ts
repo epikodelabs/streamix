@@ -1,5 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator, type Subscription } from "../atoms";
-import { atom } from '../atoms/atom';
+import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from "../atoms";
 import { normalizeError } from "../atoms";
 
 /**
@@ -24,14 +23,22 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
   let isConnected = false;
   let resolvedSize: number | undefined;
   let sourceIterator: AsyncIterator<T> | null = null;
-  let subscriberCount = 0;
+  let activeConnection: symbol | null = null;
 
   const replay: T[] = [];
   let replayHead = 0;
 
-  let live = atom<T>();
   let completed = false;
   let errorValue: any;
+
+  type Subscriber = {
+    done: boolean;
+    queue: T[];
+    pendingResolve: ((result: IteratorResult<T>) => void) | null;
+    pendingReject: ((error: any) => void) | null;
+  };
+
+  const subscribers = new Set<Subscriber>();
 
   const pushReplay = (value: T) => {
     if (resolvedSize === undefined || resolvedSize === Infinity) {
@@ -47,46 +54,109 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
     }
   };
 
+  const snapshotReplay = (): T[] => {
+    if (resolvedSize === undefined || resolvedSize === Infinity) {
+      return [...replay];
+    }
+
+    if (resolvedSize <= 0 || replay.length === 0) {
+      return [];
+    }
+
+    if (replay.length < resolvedSize) {
+      return [...replay];
+    }
+
+    return [...replay.slice(replayHead), ...replay.slice(0, replayHead)];
+  };
+
+  const broadcastValue = (value: T) => {
+    for (const subscriber of subscribers) {
+      if (subscriber.done) continue;
+
+      if (subscriber.pendingResolve) {
+        const resolve = subscriber.pendingResolve;
+        subscriber.pendingResolve = subscriber.pendingReject = null;
+        resolve({ value, done: false });
+      } else {
+        subscriber.queue.push(value);
+      }
+    }
+  };
+
+  const broadcastCompletion = () => {
+    for (const subscriber of subscribers) {
+      if (subscriber.done || subscriber.queue.length > 0 || !subscriber.pendingResolve) {
+        continue;
+      }
+
+      const resolve = subscriber.pendingResolve;
+      subscriber.pendingResolve = subscriber.pendingReject = null;
+      resolve(DONE);
+    }
+  };
+
+  const broadcastError = (error: any) => {
+    for (const subscriber of subscribers) {
+      if (subscriber.done || !subscriber.pendingReject) {
+        continue;
+      }
+
+      const reject = subscriber.pendingReject;
+      subscriber.pendingResolve = subscriber.pendingReject = null;
+      reject(error);
+    }
+  };
+
   const disconnect = () => {
     if (sourceIterator) {
       const it = sourceIterator;
       sourceIterator = null;
       isConnected = false;
+      activeConnection = null;
       void it.return?.().catch(() => {});
     }
   };
 
   const connectSource = (source: AsyncIterator<T>) => {
+    const connection = Symbol("shareReplayConnection");
     sourceIterator = source;
     isConnected = true;
+    activeConnection = connection;
     void (async () => {
       try {
         while (true) {
           const result = await source.next();
           if (result.done) break;
           pushReplay(result.value);
-          live.next(result.value);
+          broadcastValue(result.value);
         }
       } catch (err) {
         errorValue = normalizeError(err);
-        live.fail(errorValue);
+        broadcastError(errorValue);
         return;
       } finally {
+        if (activeConnection !== connection) {
+          return;
+        }
+
         sourceIterator = null;
         completed = true;
-        live.dispose();
+        isConnected = false;
+        activeConnection = null;
+        broadcastCompletion();
       }
     })();
   };
 
   return createOperator<T, T>('shareReplay', function (this: Operator, source) {
     let initialized = false;
-    let replayIndex = 0;
-    let unsubscribe: Subscription | null = null;
-    let liveCompletionHandler: (() => void) | null = null;
-    let done = false;
-    let pendingResolve: ((r: IteratorResult<T>) => void) | null = null;
-    let pendingReject: ((e: any) => void) | null = null;
+    const subscriber: Subscriber = {
+      done: false,
+      queue: [],
+      pendingResolve: null,
+      pendingReject: null,
+    };
 
     const ensureConnected = async () => {
       if (initialized) return;
@@ -94,88 +164,56 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       if (resolvedSize === undefined) {
         resolvedSize = isPromiseLike(bufferSize) ? await bufferSize : bufferSize;
       }
-      if (!isConnected) connectSource(source);
-      else if (typeof source.return === 'function') {
+
+      subscriber.queue.push(...snapshotReplay());
+      subscribers.add(subscriber);
+
+      if (!completed && errorValue === undefined && !isConnected) {
+        connectSource(source);
+      } else if (typeof source.return === 'function') {
         await Promise.resolve(source.return()).catch(() => {});
       }
     };
 
     const cleanup = () => {
-      subscriberCount = Math.max(0, subscriberCount - 1);
-      if (subscriberCount === 0 && isConnected) {
+      if (subscriber.done) return;
+
+      subscriber.done = true;
+      subscribers.delete(subscriber);
+
+      if (subscribers.size === 0 && isConnected) {
         disconnect();
       }
-      if (unsubscribe) {
-        unsubscribe();
-        unsubscribe = null;
-      }
-      if (liveCompletionHandler) {
-        (live as any)._onDispose.delete(liveCompletionHandler);
-        liveCompletionHandler = null;
-      }
-      done = true;
-      if (pendingResolve) {
-        pendingResolve(DONE);
-        pendingResolve = pendingReject = null;
+
+      if (subscriber.pendingResolve) {
+        subscriber.pendingResolve(DONE);
+        subscriber.pendingResolve = subscriber.pendingReject = null;
       }
     };
 
-    subscriberCount++;
-
     const iterator: AsyncIterator<T> = {
       async next() {
-        if (done) return DONE;
+        if (subscriber.done) return DONE;
 
         await ensureConnected();
 
+        if (subscriber.queue.length > 0) {
+          return { value: subscriber.queue.shift()!, done: false };
+        }
+
         if (errorValue !== undefined) {
+          cleanup();
           throw errorValue;
         }
 
-        if (replayIndex < replay.length) {
-          return { value: replay[replayIndex++], done: false };
-        }
-
         if (completed) {
-          done = true;
+          cleanup();
           return DONE;
         }
 
-        if (!unsubscribe) {
-          unsubscribe = live.subscribe((value: T) => {
-            if (done) return;
-            if (pendingResolve) {
-              const resolve = pendingResolve;
-              pendingResolve = pendingReject = null;
-              resolve({ value, done: false });
-            }
-          });
-
-          liveCompletionHandler = () => {
-            const err = (live as any)._error;
-            if (err !== undefined) {
-              const error = normalizeError(err);
-              errorValue = error;
-              if (pendingReject) {
-                const reject = pendingReject;
-                pendingResolve = pendingReject = null;
-                reject(error);
-              }
-            } else {
-              completed = true;
-              if (pendingResolve) {
-                const resolve = pendingResolve;
-                pendingResolve = pendingReject = null;
-                resolve(DONE);
-              }
-            }
-          };
-          (live as any)._onDispose.add(liveCompletionHandler);
-        }
-
         return new Promise<IteratorResult<T>>((resolve, reject) => {
-          pendingResolve = resolve;
-          pendingReject = reject;
+          subscriber.pendingResolve = resolve;
+          subscriber.pendingReject = reject;
         });
       },
 

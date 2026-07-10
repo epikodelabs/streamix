@@ -171,6 +171,39 @@ idescribe('onOrientation', () => {
     expect(removeListenerSpy).toHaveBeenCalledWith('change', jasmine.any(Function));
   });
 
+  it('does not emit changes after unsubscribe', (done) => {
+    const stream = on('orientation');
+    const addListenerSpy = window.screen.orientation.addEventListener as jasmine.Spy;
+    let changeCallback: (() => void) | undefined;
+
+    addListenerSpy.and.callFake((event: string, callback: () => void) => {
+      if (event === 'change') {
+        changeCallback = callback;
+      }
+    });
+
+    const values: string[] = [];
+    const unsubscribe = stream.subscribe((value: any) => {
+      values.push(value);
+    });
+
+    setTimeout(() => {
+      unsubscribe();
+      mockOrientation.angle = 90;
+      mockOrientation.type = 'landscape-primary';
+      changeCallback?.();
+
+      setTimeout(() => {
+        try {
+          expect(values).toEqual(['portrait']);
+          done();
+        } catch (err: any) {
+          done.fail(err);
+        }
+      }, 0);
+    }, 0);
+  });
+
   it('should share the same listener across multiple subscribers', () => {
     const stream = on('orientation');
     const addListenerSpy = window.screen.orientation.addEventListener as jasmine.Spy;

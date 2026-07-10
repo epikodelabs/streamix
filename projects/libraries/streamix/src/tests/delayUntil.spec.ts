@@ -1,4 +1,4 @@
-import { atom, delayUntil, iterate, pipe } from '@epikodelabs/streamix';
+import { atom, delayUntil, from, iterate, pipe } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -65,6 +65,28 @@ describe('delayUntil', () => {
 
     await reader;
     expect(emittedValues).toEqual([]);
+  });
+
+  it('should flush buffered values if the notifier emits after the source completes', async () => {
+    const source = atom<number>();
+    const condition = atom<any>();
+
+    const emittedValues: number[] = [];
+    const reader = (async () => {
+      for await (const value of iterate(pipe(source, delayUntil(condition)))) {
+        emittedValues.push(value);
+      }
+    })();
+
+    source.next(1);
+    source.next(2);
+    source.dispose();
+
+    await wait(0);
+    condition.next('start');
+
+    await reader;
+    expect(emittedValues).toEqual([1, 2]);
   });
 
   it('should emit the source stream values after condition stream emits', async () => {
@@ -163,5 +185,21 @@ describe('delayUntil', () => {
 
     await reader;
     expect(emittedValues).toEqual([5, 6, 7]);
+  });
+
+  it('supports synchronous draining helpers after an immediate notifier emission', async () => {
+    const iterator = delayUntil(from([true])).apply(iterate(from([1, 2]))[Symbol.asyncIterator]()) as AsyncIterator<number> & {
+      __tryNext?: () => IteratorResult<number> | null;
+      __hasBufferedValues?: () => boolean;
+    };
+
+    await wait(0);
+
+    expect(iterator.__hasBufferedValues?.()).toBeTrue();
+    expect(iterator.__tryNext?.()).toEqual({ value: 1, done: false });
+    expect(iterator.__tryNext?.()).toEqual({ value: 2, done: false });
+    expect(iterator.__tryNext?.()).toBeNull();
+    expect(iterator.__tryNext?.()).toEqual({ value: undefined, done: true });
+    expect(await iterator.return?.('closed')).toEqual({ value: 'closed', done: true });
   });
 });

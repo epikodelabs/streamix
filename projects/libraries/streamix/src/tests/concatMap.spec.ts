@@ -1,6 +1,7 @@
 import { concatMap, flow, from, iterate, atom as makeAtom, pipe, type Atom, type Writable } from '@epikodelabs/streamix';
 
 describe('concatMap', () => {
+  const waitTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
   let project: (value: any) => any;
 
@@ -81,6 +82,29 @@ describe('concatMap', () => {
     }
 
     expect(emittedValues).toEqual(['inner1a', 'inner1b', 'inner2a', 'inner2b']);
+  });
+
+  it('passes incrementing outer indices to the projection', async () => {
+    const seen: Array<[string, number]> = [];
+    const emittedValues: string[] = [];
+    const atom = pipe(
+      from(['a', 'b', 'c']),
+      concatMap((value, index) => {
+        seen.push([value, index]);
+        return [`${index}:${value}`];
+      })
+    );
+
+    for await (const value of iterate(atom)) {
+      emittedValues.push(value);
+    }
+
+    expect(seen).toEqual([
+      ['a', 0],
+      ['b', 1],
+      ['c', 2],
+    ]);
+    expect(emittedValues).toEqual(['0:a', '1:b', '2:c']);
   });
 
   it('edge: should queue rapid successive emissions and process sequentially', async () => {
@@ -226,6 +250,42 @@ describe('concatMap', () => {
 
     expect(caughtError?.message).toBe('Error at 2');
     expect(results).toEqual([10]);
+  });
+
+  it('tears down the active inner iterator and source on return', async () => {
+    const innerReturn = jasmine.createSpy('innerReturn').and.resolveTo({ value: undefined, done: true });
+    const sourceReturn = jasmine.createSpy('sourceReturn').and.resolveTo({ value: undefined, done: true });
+    let outerCalls = 0;
+
+    const source = {
+      async next() {
+        outerCalls++;
+        if (outerCalls === 1) {
+          return { value: 1, done: false as const };
+        }
+
+        return new Promise<IteratorResult<number>>(() => {});
+      },
+      return: sourceReturn,
+    } as AsyncIterator<number>;
+
+    const iterator = concatMap<number, number>(() => ({
+      [Symbol.asyncIterator]() {
+        return {
+          async next() {
+            return new Promise<IteratorResult<number>>(() => {});
+          },
+          return: innerReturn,
+        };
+      },
+    })).apply(source);
+
+    void iterator.next();
+    await waitTick();
+
+    expect(await iterator.return?.('stop')).toEqual({ value: undefined, done: true });
+    expect(innerReturn).toHaveBeenCalled();
+    expect(sourceReturn).toHaveBeenCalled();
   });
 });
 
