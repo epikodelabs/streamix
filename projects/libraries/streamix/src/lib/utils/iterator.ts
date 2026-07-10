@@ -1,5 +1,4 @@
 import { DONE } from "../abstractions";
-
 import type { Receiver, StrictReceiver, Subscription } from "../abstractions";
 import { isPromiseLike } from "../abstractions";
 import {
@@ -22,7 +21,7 @@ export type AsyncIteratorResult<T> =
  * Creates a factory that produces fresh `AsyncIterator` instances backed by
  * an internal queue with producer-backpressure.
  *
- * The `register` callback receives a `Receiver<T>` whose `next()`/`complete()`/
+ * The `register` callback receives an `Observer<T>` whose `next()`/`complete()`/
  * `error()` methods push into the iterator's queue. `next()` returns a
  * `Promise<void>` (or `void`) — the promise acts as a backpressure signal
  * from the consumer: it resolves only when the consumer pulls the value with
@@ -44,8 +43,11 @@ export type AsyncIteratorResult<T> =
  */
 export function createAsyncIterator<T>(opts: {
   register: (receiver: Receiver<T>) => Subscription;
+  conflate?: boolean;
 }) {
   const { register } = opts;
+
+  const conflate = opts.conflate ?? false;
 
   return () => {
     const state = new AsyncIteratorState<T>();
@@ -154,6 +156,8 @@ export function createAsyncIterator<T>(opts: {
     iterator.__pushNext = (value: T) => {
       if (receiver) {
         receiver.next(value);
+      } else if (conflate && pendingPushes.length > 0) {
+        pendingPushes[pendingPushes.length - 1] = { type: 'next', value };
       } else {
         pendingPushes.push({ type: 'next', value });
       }

@@ -24,6 +24,16 @@ export type RunnerEvent<T> =
   | { type: "complete"; sourceIndex: number }
   | { type: "error"; error: any; sourceIndex: number };
 
+/**
+ * Options for {@link createAsyncCoordinator}.
+ */
+export interface AsyncCoordinatorOptions {
+  /**
+   * If true, drain initial sources synchronously instead of deferring to a microtask.
+   */
+  syncDrain?: boolean;
+}
+
 
 /**
  * An async iterator that coordinates multiple sources.
@@ -47,15 +57,29 @@ export interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
   /**
    * Dynamically add a new source to the coordinator.
    * @param source - The async iterator to add.
+   * @param key - Optional key used to remove the source by reference later.
    * @returns The index assigned to the new source.
    */
-  addSource(source: AsyncIterator<T>): number;
+  addSource(source: AsyncIterator<T>, key?: any): number;
 
   /**
    * Remove a source from the coordinator and clean it up.
    * @param index - The index of the source to remove.
    */
   removeSource(index: number): Promise<void>;
+
+  /**
+   * Remove a source by the key passed to {@link addSource}.
+   * @param key - The key of the source to remove.
+   */
+  removeSourceByKey(key: any): Promise<void>;
+
+  /**
+   * Batch multiple source additions/removals and emit a single notification
+   * after the batch completes.
+   * @param callback - Function that performs source changes.
+   */
+  batch(callback: () => void): void;
 
   /**
    * Get the number of currently active (non-completed, non-removed) sources.
@@ -91,7 +115,7 @@ export interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
  *
  * @example
  * ```ts
- * const coordinator = createAsyncCoordinator([stream1, stream2]);
+ * const coordinator = createAsyncCoordinator<number>([stream1, stream2]);
  * for await (const event of coordinator) {
  *   if (event.type === 'value') {
  *     // event.value from event.sourceIndex
@@ -100,7 +124,8 @@ export interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
  * ```
  */
 export function createAsyncCoordinator<T = any>(
-  sources: AsyncIterator<T>[] = []
+  sources: AsyncIterator<T>[] = [],
+  options?: AsyncCoordinatorOptions
 ): AsyncCoordinator<T> {
   type CoordinatorQueueItem = {
     result: IteratorResult<RunnerEvent<T>>;
@@ -121,9 +146,19 @@ export function createAsyncCoordinator<T = any>(
   let isDraining = false;
   let iteratorReturned = false;
   let activeCount = sources.length;
+  let batchDepth = 0;
 
+  // Optional key -> source iterator mapping for reference-based removal.
+  const keyToSource = new Map<any, AsyncIterator<T>>();
+
+  /** Checks if all sources are completed. */
   const allDone = () => activeCount === 0;
 
+  /**
+   * Pushes a runner event to the coordinator's queue.
+   * @param event The event to push.
+   * @param sourceIndex The index of the source that generated the event.
+   */
   function pushEvent(event: RunnerEvent<T>, sourceIndex: number) {
     queue.push({
       result: NEXT(event),
@@ -131,6 +166,10 @@ export function createAsyncCoordinator<T = any>(
     });
   }
 
+  /**
+   * Removes all queued events from a specific source.
+   * @param sourceIndex The index of the source whose events should be removed.
+   */
   function removeQueuedEvents(sourceIndex: number) {
     for (let i = queue.length - 1; i >= 0; i--) {
       if (queue[i].sourceIndex === sourceIndex) {
@@ -139,6 +178,10 @@ export function createAsyncCoordinator<T = any>(
     }
   }
 
+  /**
+   * Marks a source as complete and decrements the active count.
+   * @param index The index of the source to mark as complete.
+   */
   function markSourceComplete(index: number) {
     if (!completed[index]) {
       completed[index] = true;
@@ -146,21 +189,30 @@ export function createAsyncCoordinator<T = any>(
     }
   }
 
-  function restoreSource(src: AsyncIterator<T>, index: number) {
-    const source = src as AsyncIterator<T> & { __onPush?: () => void };
-    if (source.__onPush === wiredPushHandlers[index]) {
-      source.__onPush = originalPushHandlers[index];
+  /**
+   * Removes the key associated with a source iterator.
+   * @param source The source iterator to remove from the key map.
+   */
+  function removeSourceKey(source: AsyncIterator<T>) {
+    for (const [key, mappedSource] of keyToSource.entries()) {
+      if (mappedSource === source) {
+        keyToSource.delete(key);
+      }
     }
-    originalPushHandlers[index] = undefined;
-    wiredPushHandlers[index] = undefined;
   }
 
+  /**
+   * Detaches a source from the coordinator, cleaning up its state.
+   * @param index The index of the source to detach.
+   * @returns The detached source iterator, or null if not found.
+   */
   function detachSource(index: number): AsyncIterator<T> | null {
     if (index < 0 || index >= sourceList.length) return null;
 
     const source = sourceList[index];
     if (!source) return null;
 
+    removeSourceKey(source);
     markSourceComplete(index);
     pulling[index] = false;
     pendingPulls[index] = false;
@@ -171,6 +223,11 @@ export function createAsyncCoordinator<T = any>(
     return source;
   }
 
+  /**
+   * Safely calls the `return()` method on a source iterator, ignoring errors.
+   * @param source The source iterator to return.
+   * @returns A promise that resolves when the source has been returned.
+   */
   function safeReturnSource(source: AsyncIterator<T>): Promise<void> {
     if (!source.return) return Promise.resolve();
 
@@ -184,7 +241,15 @@ export function createAsyncCoordinator<T = any>(
     }
   }
 
+  /**
+   * Notifies a waiting consumer that a new event is available or all sources
+   * are complete.
+   */
   function notify() {
+    if (batchDepth > 0) {
+      return;
+    }
+
     if (!waitingResolve) return;
 
     if (queue.length > 0) {
@@ -199,6 +264,10 @@ export function createAsyncCoordinator<T = any>(
     }
   }
 
+  /**
+   * Asynchronously pulls the next value from a source.
+   * @param i The index of the source to pull from.
+   */
   function pullAsync(i: number) {
     // CRITICAL: Don't start a new pull if already pulling, completed, removed, or returned
     if (!sourceList[i] || completed[i] || pulling[i] || iteratorReturned) return;
@@ -241,6 +310,10 @@ export function createAsyncCoordinator<T = any>(
     );
   }
 
+  /**
+   * Drains a single event from one source, using `__tryNext` if available.
+   * @param i The index of the source to drain.
+   */
   function drainOneSource(i: number) {
     if (!sourceList[i] || completed[i] || iteratorReturned) return;
 
@@ -270,6 +343,9 @@ export function createAsyncCoordinator<T = any>(
     }
   }
 
+  /**
+   * Drains one event from all active sources.
+   */
   function drainSources() {
     // CRITICAL: Prevent recursive drains
     if (isDraining || iteratorReturned) return;
@@ -291,11 +367,19 @@ export function createAsyncCoordinator<T = any>(
     notify();
   }
 
-  // Wire up push notifications for a source
+  /**
+   * Wires up a source's `__onPush` handler to trigger a drain.
+   * @param src The source iterator.
+   * @param index The index of the source.
+   */
   function wireSource(src: AsyncIterator<T> & { __onPush?: () => void }, index: number) {
     const orig = src.__onPush;
     const wired = () => {
-      orig?.();
+      try {
+        orig?.();
+      } catch {
+        // Preserve draining even if the source's push hook throws.
+      }
       if (sourceList[index] !== src) return;
       // Drain this source immediately on push to preserve push-time ordering.
       drainOneSource(index);
@@ -304,6 +388,20 @@ export function createAsyncCoordinator<T = any>(
     originalPushHandlers[index] = orig;
     wiredPushHandlers[index] = wired;
     src.__onPush = wired;
+  }
+
+  /**
+   * Restores the original `__onPush` handler for a source.
+   * @param src The source iterator.
+   * @param index The index of the source.
+   */
+  function restoreSource(src: AsyncIterator<T>, index: number) {
+    const source = src as AsyncIterator<T> & { __onPush?: () => void };
+    if (source.__onPush === wiredPushHandlers[index]) {
+      source.__onPush = originalPushHandlers[index];
+    }
+    originalPushHandlers[index] = undefined;
+    wiredPushHandlers[index] = undefined;
   }
 
   // Wire up initial sources
@@ -366,10 +464,11 @@ export function createAsyncCoordinator<T = any>(
         }
       }
 
+      keyToSource.clear();
       await Promise.all(
         sourceList
           .filter((source): source is AsyncIterator<T> => source !== null)
-          .map(safeReturnSource)
+          .map(source => safeReturnSource(source))
       );
 
       if (waitingResolve) {
@@ -389,9 +488,10 @@ export function createAsyncCoordinator<T = any>(
      * The source will be immediately wired for push notifications and drained.
      * 
      * @param source AsyncIterator to add
+     * @param key Optional key for reference-based removal
      * @returns The index assigned to this source (for tracking)
      */
-    addSource(source: AsyncIterator<T>): number {
+    addSource(source: AsyncIterator<T>, key?: any): number {
       if (iteratorReturned) {
         throw new Error('Cannot add source to returned coordinator');
       }
@@ -412,6 +512,10 @@ export function createAsyncCoordinator<T = any>(
       }
       activeCount++;
 
+      if (key !== undefined) {
+        keyToSource.set(key, source);
+      }
+
       // Wire up push notification
       wireSource(source, index);
 
@@ -428,8 +532,6 @@ export function createAsyncCoordinator<T = any>(
      * @param index Index of the source to remove
      */
     async removeSource(index: number): Promise<void> {
-      if (index < 0 || index >= sourceList.length) return;
-
       const source = detachSource(index);
       if (!source) return;
 
@@ -437,6 +539,43 @@ export function createAsyncCoordinator<T = any>(
 
       // Notify in case we're waiting and all sources are now done
       notify();
+    },
+
+    /**
+     * Remove a source by the key passed to {@link addSource}.
+     * 
+     * @param key Key of the source to remove
+     */
+    async removeSourceByKey(key: any): Promise<void> {
+      const source = keyToSource.get(key);
+      if (!source) return;
+
+      const index = sourceList.indexOf(source);
+      if (index >= 0) {
+        await iterator.removeSource(index);
+      } else {
+        keyToSource.delete(key);
+      }
+    },
+
+    /**
+     * Batch multiple source additions/removals and emit a single notification
+     * after the batch completes.
+     * 
+     * @param callback Function that performs source changes
+     */
+    batch(callback: () => void): void {
+      batchDepth++;
+      try {
+        callback();
+      } finally {
+        batchDepth--;
+        if (batchDepth === 0) {
+          // drainSources flushes buffered events and triggers notify() now that
+          // the batch has ended.
+          drainSources();
+        }
+      }
     },
 
     /**
@@ -460,10 +599,59 @@ export function createAsyncCoordinator<T = any>(
     }
   };
 
-  // Initial drain - schedule to prevent blocking
+  // Initial drain - sync or microtask based on options
   if (sources.length > 0) {
-    Promise.resolve().then(() => drainSources());
+    if (options?.syncDrain) {
+      drainSources();
+    } else {
+      Promise.resolve().then(() => drainSources());
+    }
   }
 
   return iterator as AsyncCoordinator<T>;
+}
+
+/**
+ * Gets an iterator from an iterable object.
+ * Supports both synchronous and asynchronous iterables.
+ *
+ * @param iterable The iterable to get an iterator from.
+ * @returns An `AsyncIterator` or `Iterator`.
+ * @throws If the provided object is not iterable.
+ */
+export function getIterator<T>(iterable: AsyncIterable<T> | Iterable<T>): AsyncIterator<T> | Iterator<T> {
+  const asyncIter = (iterable as any)[Symbol.asyncIterator];
+  if (asyncIter) return asyncIter.call(iterable);
+  const syncIter = (iterable as any)[Symbol.iterator];
+  if (syncIter) return syncIter.call(iterable);
+  throw new Error("Source is not iterable");
+}
+
+/**
+ * Races an iterator's `next()` call against an `AbortSignal`.
+ * If the signal is aborted, the promise resolves with a `done: true` result.
+ */
+export function raceNext<T>(
+  iterator: AsyncIterator<T> | Iterator<T>,
+  signal: AbortSignal
+): Promise<IteratorResult<T>> {
+  if (signal.aborted) {
+    return Promise.resolve({ done: true, value: undefined as any });
+  }
+
+  const pending = Promise.resolve(iterator.next());
+  return new Promise<IteratorResult<T>>((resolve, reject) => {
+    const onAbort = () => resolve({ done: true, value: undefined as any });
+    signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(
+      (result) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(result);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      }
+    );
+  });
 }
