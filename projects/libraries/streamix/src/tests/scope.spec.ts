@@ -952,6 +952,36 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should recalculate async shorthand derived callbacks when post-await self dependencies change', async () => {
+      const s = scope({
+        price: 1,
+        tax: 2,
+        total: async (self: any) => {
+          void self.price, self.tax;
+          await delay(5);
+          return self.price + self.tax;
+        }
+      });
+
+      expect(s.total).toBeUndefined();
+
+      await delay(10);
+      expect(s.total).toBe(3);
+
+      s.price = 5;
+      await delay(10);
+      expect(s.total).toBe(3);
+      await delay(10);
+      expect(s.total).toBe(7);
+
+      s.tax = 4;
+      expect(s.total).toBe(7);
+      await delay(10);
+      expect(s.total).toBe(9);
+
+      s.dispose();
+    });
+
     it('should support pipeExpr with self reference', async () => {
       const source = atom(0);
       const s = scope({

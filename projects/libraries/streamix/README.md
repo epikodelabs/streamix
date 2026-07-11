@@ -90,7 +90,7 @@ For async computed values, capture dependencies before the first `await`:
 const total = derived(async ($) => {
   void $.price, $.tax;
   await loadRates();
-  return $.price + $.value;
+  return $.price + $.tax;
 });
 ```
 
