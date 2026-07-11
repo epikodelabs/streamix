@@ -14,7 +14,7 @@ export interface AtomExpr<T = any> {
 
 export interface DerivedExpr<T = any, Self = any> {
   [DERIVED_EXPR]: true;
-  fn: (self: Self) => T;
+  fn: (self: Self) => T | Promise<T>;
 }
 
 export interface PipeExpr<T = any, Self = any> {
@@ -47,7 +47,9 @@ export function atomExpr<T>(initialValue?: T, options?: AtomOptions): AtomExpr<T
   return { [ATOM_EXPR]: true, initialValue, options };
 }
 
-export function derivedExpr<T, Self = any>(fn: (self: Self) => T): DerivedExpr<T, Self> {
+export function derivedExpr<T, Self = any>(fn: (self: Self) => T): DerivedExpr<T, Self>;
+export function derivedExpr<T, Self = any>(fn: (self: Self) => Promise<T>): DerivedExpr<T, Self>;
+export function derivedExpr<T, Self = any>(fn: (self: Self) => T | Promise<T>): DerivedExpr<T, Self> {
   return { [DERIVED_EXPR]: true, fn };
 }
 

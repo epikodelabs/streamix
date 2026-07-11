@@ -930,6 +930,28 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should support async derivedExpr callbacks', async () => {
+      const s = scope({
+        count: 1,
+        doubled: async (self: any) => {
+          await delay(5);
+          return self.count * 2;
+        }
+      });
+
+      const typedValue: number = s.doubled;
+      expect(typedValue).toBeUndefined();
+
+      await delay(10);
+      expect(s.doubled).toBe(2);
+
+      s.count = 3;
+      await delay(10);
+      expect(s.doubled).toBe(6);
+
+      s.dispose();
+    });
+
     it('should support pipeExpr with self reference', async () => {
       const source = atom(0);
       const s = scope({

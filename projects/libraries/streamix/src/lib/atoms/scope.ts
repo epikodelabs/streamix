@@ -62,6 +62,78 @@ function isExprMarkerOrDynamic(value: any): value is AtomExpr | DerivedExpr | Pi
   return isExprMarkerBase(value) || isDynamicExpr(value);
 }
 
+function createTrackedScopeValueReader(
+  readAtom: <T>(atom: Atom<T>) => T,
+): (value: any) => any {
+  const wrappedScopes = new WeakMap<object, any>();
+
+  const readValue = (value: any): any => {
+    if (isAtom(value)) {
+      return readAtom(value);
+    }
+
+    if (isScope(value)) {
+      const existing = wrappedScopes.get(value as object);
+      if (existing) {
+        return existing;
+      }
+
+      const wrappedScope = new Proxy(value, {
+        get(target, prop, receiver) {
+          if (
+            prop === "at" ||
+            prop === "subscribeTo" ||
+            prop === "dispose" ||
+            prop === "loading" ||
+            typeof prop === "symbol" ||
+            !Object.prototype.hasOwnProperty.call((target as any)._rawState, prop)
+          ) {
+            const result = Reflect.get(target, prop, receiver);
+            return typeof result === "function" ? result.bind(target) : result;
+          }
+
+          return readValue((target as any)._rawState[prop]);
+        },
+      });
+
+      wrappedScopes.set(value as object, wrappedScope);
+      return wrappedScope;
+    }
+
+    return value;
+  };
+
+  return readValue;
+}
+
+function createTrackedScopeSelf(
+  scopeSelf: any,
+  atoms: ((key: string | symbol) => any) | undefined,
+  readAtom: <T>(atom: Atom<T>) => T,
+): any {
+  const readValue = createTrackedScopeValueReader(readAtom);
+
+  return new Proxy(function (targetAtom: any) {
+    if (isAtom(targetAtom)) {
+      return readAtom(targetAtom);
+    }
+    return scopeSelf(targetAtom);
+  }, {
+    get(_target, prop, receiver) {
+      if (atoms && (typeof prop === "string" || typeof prop === "symbol")) {
+        return readValue(atoms(prop));
+      }
+
+      const result = Reflect.get(scopeSelf, prop, receiver);
+      return readValue(result);
+    },
+    set(_target, prop, value) {
+      Reflect.set(scopeSelf, prop, value);
+      return true;
+    },
+  });
+}
+
 function evaluateExprMarker(
   marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr | DynamicAtomFactoryExpr,
   self: any,
@@ -70,7 +142,9 @@ function evaluateExprMarker(
   if (isAtomExpr(marker)) {
     return atom(marker.initialValue === undefined ? NO_INITIAL_VALUE : marker.initialValue, marker.options);
   }
-  if (isDerivedExpr(marker)) return derived(() => marker.fn(self));
+  if (isDerivedExpr(marker)) {
+    return derived((derivedSelf) => marker.fn(createTrackedScopeSelf(self, atoms, derivedSelf.read.bind(derivedSelf))));
+  }
   if (isPipeExpr(marker)) return marker.fn(self, atoms);
   if (isFlowExpr(marker)) return marker.fn(self, atoms);
   if (isDynamicExpr(marker)) {
@@ -86,8 +160,9 @@ function evaluateExprMarker(
       return evaluateExprMarker(value, self, atoms);
     }
     
-    return derived(() => {
-      const inner = marker.fn(self, atoms);
+    return derived((derivedSelf) => {
+      const trackedSelf = createTrackedScopeSelf(self, atoms, derivedSelf.read.bind(derivedSelf));
+      const inner = marker.fn(trackedSelf, atoms);
       return inner && typeof inner === "object" && (inner as any).type === "atom"
         ? (inner as Atom<any>).value
         : inner;
@@ -136,7 +211,7 @@ type DefinedValue<Top extends Record<string, any>, T> =
   | DerivedExpr<T, Top>
   | PipeExpr<T, Top>
   | FlowExpr<T, Top>
-  | ((self: Top, atoms: DefinedAtomAccessor<Top>) => T | Atom<T>);
+  | ((self: Top, atoms: DefinedAtomAccessor<Top>) => T | Promise<T> | Atom<T>);
 
 type ScopeValue<T> =
   | T extends ScopeReturn<any> ? T
@@ -153,15 +228,15 @@ type ScopeValue<T> =
 type ScopeOf<T extends Record<string, any>> = { [K in keyof T]: ScopeValue<T[K]>; };
 
 type ScopeResolvedFunctionValue<TResult> =
-  TResult extends ScopeReturn<any> ? TResult
-  : TResult extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
-  : TResult extends Writable<any> ? TResult
-  : TResult extends Atom<any> ? TResult
-  : TResult extends AtomExpr<infer U> ? Writable<WidenValue<U>>
-  : TResult extends DerivedExpr<infer U, any> ? Atom<U>
-  : TResult extends PipeExpr<infer U, any> ? Atom<U>
-  : TResult extends FlowExpr<infer U, any> ? Atom<U>
-  : Atom<WidenValue<TResult>>;
+  Awaited<TResult> extends ScopeReturn<any> ? Awaited<TResult>
+  : Awaited<TResult> extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
+  : Awaited<TResult> extends Writable<any> ? Awaited<TResult>
+  : Awaited<TResult> extends Atom<any> ? Awaited<TResult>
+  : Awaited<TResult> extends AtomExpr<infer U> ? Writable<WidenValue<U>>
+  : Awaited<TResult> extends DerivedExpr<infer U, any> ? Atom<U>
+  : Awaited<TResult> extends PipeExpr<infer U, any> ? Atom<U>
+  : Awaited<TResult> extends FlowExpr<infer U, any> ? Atom<U>
+  : Atom<WidenValue<Awaited<TResult>>>;
 
 type ScopeResolvedValue<T> =
   T extends ScopeReturn<any> ? T
