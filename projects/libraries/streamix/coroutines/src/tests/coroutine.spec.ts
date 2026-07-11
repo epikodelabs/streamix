@@ -1,17 +1,17 @@
 import { flow } from "@epikodelabs/streamix";
 import {
-    ChannelClosedError,
-    ContextCancelledError,
-    background,
-    channel,
-    coroutine,
-    otherwise,
-    receive,
-    select,
-    send,
-    withCancel,
-    withDeadline,
-    withTimeout
+  ChannelClosedError,
+  ContextCancelledError,
+  background,
+  channel,
+  coroutine,
+  otherwise,
+  receive,
+  select,
+  send,
+  withCancel,
+  withDeadline,
+  withTimeout
 } from "@epikodelabs/streamix/coroutines";
 import { idescribe } from "./env.spec";
 
@@ -33,6 +33,13 @@ idescribe('coroutine', () => {
 
     // Set up globalThis variable for main task
     (globalThis as any).currentMainTask = undefined;
+
+    const serializeWorkerError = (error: unknown): string => {
+      if (error instanceof Error) return error.message || error.name || "Error";
+      if (error === undefined) return "Worker task threw undefined";
+      if (error === null) return "Worker task threw null";
+      return String(error);
+    };
 
     class MockWorker {
       onmessage: ((ev: any) => void) | null = null;
@@ -114,7 +121,7 @@ idescribe('coroutine', () => {
                 this.onmessage?.(event);
                 this.listeners['message']?.forEach(fn => fn(event));
               }).catch(err => {
-                const message = err instanceof Error ? err.message : err === undefined ? "Worker task threw undefined" : String(err);
+                const message = serializeWorkerError(err);
                 const event: MessageEvent<any> = {
                   data: { ...msg, type: 'error', error: message }
                 } as any;
@@ -123,7 +130,7 @@ idescribe('coroutine', () => {
               });
               
             } catch (err: any) {
-              const message = err instanceof Error ? err.message : err === undefined ? "Worker task threw undefined" : String(err);
+              const message = serializeWorkerError(err);
               const event: MessageEvent<any> = {
                 data: { ...msg, type: 'error', error: message }
               } as any;
