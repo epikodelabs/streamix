@@ -1055,6 +1055,50 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should support setup callback extensions with typed self', async () => {
+      const s = scope({
+        count: 0,
+        name: 'Alice',
+        doubled: (self: any) => self.count * 2,
+      }, (self) => ({
+        increment(amount = 1) {
+          self.count += amount;
+        },
+        rename(name: string) {
+          self.name = name;
+        },
+      }));
+
+      s.increment(2);
+      s.rename('Bob');
+      await delay();
+
+      expect(s.count).toBe(2);
+      expect(s.name).toBe('Bob');
+      expect(s.doubled).toBe(4);
+      s.dispose();
+    });
+
+    it('should run setup callback side effects when it returns void', () => {
+      let initialCount = -1;
+      const s = scope({ count: 3 }, (self) => {
+        initialCount = self.count;
+        self.cleanups.add(() => { initialCount = 0; });
+      });
+
+      expect(initialCount).toBe(3);
+      s.dispose();
+      expect(initialCount).toBe(0);
+    });
+
+    it('should reject setup callback extensions that collide with state keys', () => {
+      expect(() => scope({ count: 0 }, () => ({
+        count() {
+          return 1;
+        },
+      }))).toThrowError(/existing state key/);
+    });
+
     it('should support derivedExpr depending on another derivedExpr', async () => {
       const s = scope({
         count: 1,

@@ -181,6 +181,9 @@ type ScopeResolvedValue<T> =
 type ScopeOfConfig<T extends Record<string, any>> = { [K in keyof T]: ScopeResolvedValue<T[K]>; };
 
 type ScopePublicValue<T> = T extends Atom<infer U> ? WidenValue<U> : T;
+type ScopeSetupResult = Record<string | symbol, any> | void;
+type ScopeSetupReturn<T> = T extends void ? {} : T;
+type ScopeOptions = { mode?: "discrete" | "analog" };
 
 type IsReadonlyScopeConfigValue<T> =
   T extends DerivedExpr<any, any> ? true
@@ -447,9 +450,33 @@ function defineScopeStateProperty(
   Object.defineProperty(scopeRef, key, descriptor);
 }
 
+function defineScopeExtensionProperties(scopeRef: Scope, extensions: Record<string | symbol, any>): void {
+  for (const key of Reflect.ownKeys(extensions)) {
+    if (key === "loading" || key === "at" || key === "subscribeTo") {
+      throw new Error(`Cannot define reserved scope property: ${String(key)}`);
+    }
+
+    if (scopeRef._exports.has(key)) {
+      throw new Error(`Cannot define scope extension over existing state key: ${String(key)}`);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(scopeRef, key)) {
+      throw new Error(`Cannot define scope extension over existing scope property: ${String(key)}`);
+    }
+
+    Object.defineProperty(scopeRef, key, {
+      value: extensions[key],
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+}
+
 function createScopeInternal<T extends Record<string, any>>(
   factory: (this: any, self: any) => any,
-  options?: { mode?: "discrete" | "analog" },
+  setup?: (self: any) => ScopeSetupResult,
+  options?: ScopeOptions,
 ): ScopeReturn<T> {
   const parent = currentScope ?? getGlobalScope();
   const mode = resolveMode(options, parent);
@@ -568,6 +595,14 @@ function createScopeInternal<T extends Record<string, any>>(
       }
     }
 
+    const extensions = setup?.(newScope as any);
+    if (extensions != null) {
+      if (typeof extensions !== "object") {
+        throw new TypeError("scope() setup callback must return an object or void.");
+      }
+      defineScopeExtensionProperties(newScope, extensions);
+    }
+
     if (newScope._pendingCount === 0 && loadingAtom.value !== false) {
       loadingAtom.next(false);
     }
@@ -585,18 +620,53 @@ function createScopeInternal<T extends Record<string, any>>(
   }
 }
 
-export function scope<TConfig extends Record<string, any>>(state: TConfig, options?: { mode?: "discrete" | "analog" }): ScopeReturnFromConfig<TConfig>;
-export function scope<TConfig extends Record<string, any>>(factory: (this: ScopeReturnFromConfig<TConfig>) => TConfig, options?: { mode?: "discrete" | "analog" }): ScopeReturnFromConfig<TConfig>;
-export function scope<T extends Record<string, any>>(state: ScopeConfig<T>, options?: { mode?: "discrete" | "analog" }): ScopeReturn<ScopeOf<T>>;
-export function scope<T extends Record<string, any>>(factory: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>, options?: { mode?: "discrete" | "analog" }): ScopeReturn<ScopeOf<T>>;
-export function scope(arg: any, options?: any): any {
-  const isFn = typeof arg === "function";
+export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
+  definition: TConfig,
+  setup?: (self: ScopeReturnFromConfig<TConfig>) => TSetup,
+  options?: ScopeOptions,
+): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
+export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
+  definition: (this: ScopeReturnFromConfig<TConfig>) => TConfig,
+  setup?: (self: ScopeReturnFromConfig<TConfig>) => TSetup,
+  options?: ScopeOptions,
+): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
+export function scope<TConfig extends Record<string, any>>(definition: TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
+export function scope<TConfig extends Record<string, any>>(definition: (this: ScopeReturnFromConfig<TConfig>) => TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
+export function scope<T extends Record<string, any>, TSetup extends ScopeSetupResult>(
+  definition: ScopeConfig<T>,
+  setup?: (self: ScopeReturn<ScopeOf<T>>) => TSetup,
+  options?: ScopeOptions,
+): ScopeReturn<ScopeOf<T>> & ScopeSetupReturn<TSetup>;
+export function scope<T extends Record<string, any>, TSetup extends ScopeSetupResult>(
+  definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>,
+  setup?: (self: ScopeReturn<ScopeOf<T>>) => TSetup,
+  options?: ScopeOptions,
+): ScopeReturn<ScopeOf<T>> & ScopeSetupReturn<TSetup>;
+export function scope<T extends Record<string, any>>(definition: ScopeConfig<T>, options?: ScopeOptions): ScopeReturn<ScopeOf<T>>;
+export function scope<T extends Record<string, any>>(definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>, options?: ScopeOptions): ScopeReturn<ScopeOf<T>>;
+export function scope(
+  definition: any,
+  setupOrOptions?: ((self: any) => ScopeSetupResult) | ScopeOptions,
+  options?: ScopeOptions,
+): any {
+  const isFactory = typeof definition === "function";
+  let setup: ((self: any) => ScopeSetupResult) | undefined;
+  let resolvedOptions: ScopeOptions | undefined;
+
+  if (typeof setupOrOptions === "function") {
+    setup = setupOrOptions;
+    resolvedOptions = options;
+  } else {
+    resolvedOptions = setupOrOptions;
+  }
+
   return createScopeInternal(
-    function (this: any, scopeProxy: any) {
-      const source = isFn ? arg.call(this) : arg;
-      return materializeState(source, new WeakMap(), scopeProxy);
+    function (this: any, scopeRef: any) {
+      const source = isFactory ? definition.call(this) : definition;
+      return materializeState(source, new WeakMap(), scopeRef);
     },
-    options
+    setup,
+    resolvedOptions
   );
 }
 
