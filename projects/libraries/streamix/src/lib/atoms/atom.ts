@@ -650,9 +650,7 @@ export function atomFromIterator<T>(
         if (!disposed) {
           errorValue = normalizeError(err);
           isErrorState = true;
-          for (const h of errorHandlers) try { h(errorValue); } catch {}
-          if (options?.onError) try { options.onError(errorValue); } catch {}
-          instance.fail(errorValue, { terminate: true });
+          instance.fail(errorValue, { terminate: options?.terminateOnError });
         }
       } finally {
         await stopIterator();
@@ -906,36 +904,22 @@ export function flow<T>(
  * atom() - Mutable State Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
-const KNOWN_ATOM_OPTION_KEYS = new Set<keyof AtomOptions>([
-  "discrete",
-  "maxSubscribers",
-  "onError",
-  "terminateOnError",
-  "propagateErrors",
-]);
-
-function isAtomOptionsObject(value: unknown): value is AtomOptions {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const keys = Object.keys(value);
-  return keys.length > 0 && keys.every(k => KNOWN_ATOM_OPTION_KEYS.has(k as keyof AtomOptions));
-}
-
-export function atom<T = any>(options?: AtomOptions): Writable<T>;
+export function atom<T = any>(): Writable<T>;
 export function atom<T = any>(noInitialValue: typeof NO_INITIAL_VALUE, options?: AtomOptions): Writable<T>;
 export function atom<T = any>(initialValue: T, options?: AtomOptions): Writable<T>;
 export function atom<T = any>(
-  initialValue?: T | typeof NO_INITIAL_VALUE | AtomOptions,
+  initialValue?: T | typeof NO_INITIAL_VALUE,
   options?: AtomOptions
 ): Writable<T> {
   const activeScope = getCurrentScope();
-  const resolvedOptions = isAtomOptionsObject(initialValue) ? initialValue : options;
+  const resolvedOptions = options;
   const analog = activeScope !== null && getScopeMode(activeScope) === "analog" && !resolvedOptions?.discrete;
 
   const maxSubscribers = resolvedOptions?.maxSubscribers ?? 1000;
   const terminateOnError = resolvedOptions?.terminateOnError ?? false;
   const propagateErrors = resolvedOptions?.propagateErrors ?? true;
 
-  const hasInitialValue = initialValue !== undefined && initialValue !== NO_INITIAL_VALUE && !(isAtomOptionsObject(initialValue) && arguments.length === 1);
+  const hasInitialValue = arguments.length > 0 && initialValue !== NO_INITIAL_VALUE;
   let current: T;
   let previous: T;
   if (hasInitialValue) {
@@ -1246,6 +1230,11 @@ function wrapFunctionInClass(fn: AnyFn): new () => ComputableInstance {
 
 export type SyncOnly<T> = T extends Promise<any> ? never : T;
 
+/**
+ * Async derived callbacks only track atoms read before the first `await`.
+ * Capture dependencies up front with `self.use(...)` / `self.read(...)`, or
+ * use `flow()` when the computation is primarily async and cancellation-aware.
+ */
 export function derived<T>(fn: (self: DerivedScope) => SyncOnly<T>, options?: AtomOptions): Atom<T>;
 export function derived<T>(fn: (self: DerivedScope) => Promise<T>, options?: AtomOptions): Atom<T>;
 export function derived<T>(fn: (self: DerivedScope) => Generator<Atom<any> | Promise<any>, T, any>, options?: AtomOptions): Atom<T>;
@@ -1276,6 +1265,10 @@ export function derived<T>(...args: any[]): Atom<T> {
   const computable = computableFactory();
   const owner = new EvaluationOwner();
   const self = createSelf(computable, owner);
+
+  if (typeof computable.onInit === "function") {
+    computable.onInit(self);
+  }
 
   const activeScope = getCurrentScope();
   const analog = activeScope !== null && getScopeMode(activeScope) === "analog" && !options?.discrete;

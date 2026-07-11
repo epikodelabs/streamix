@@ -84,6 +84,19 @@ count.set(5);
 console.log(doubled.value); // 10
 ```
 
+For async computed values, capture dependencies before the first `await`:
+
+```typescript
+const total = derived(async ($) => {
+  const price = $.use(priceAtom);
+  const tax = $.use(taxAtom);
+  await loadRates();
+  return price.value + tax.value;
+});
+```
+
+If the computation is primarily async or needs cancellation/restart semantics, prefer `flow()`.
+
 ### Scope-Based Lifecycle
 
 ```typescript
@@ -146,6 +159,8 @@ Atoms are the primary reactive primitive in streamix.
 * `atom(initial?)` - writable reactive value; omit the initial value when it arrives later
 * `derived()` - computed reactive value
 * `flow()` - flow-backed reactive value
+
+Async `derived()` callbacks only track atoms read before the first `await`. Use `self.use(...)` / `self.read(...)` up front, or switch to `flow()` for async resources.
 
 Scopes provide lifecycle management and automatic disposal.
 

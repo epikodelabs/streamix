@@ -23,6 +23,15 @@ describe('Atom System', () => {
       a.dispose();
     });
 
+    it('should treat a single object argument as an initial value', () => {
+      const value = { discrete: false, terminateOnError: true };
+      const a = atom(value);
+
+      expect(a.value).toBe(value);
+      expect(a.value.discrete).toBe(false);
+      a.dispose();
+    });
+
     it('should create an atom without initial value', () => {
       const a = atom<number>();
       expect(a.value).toBeUndefined();
@@ -263,13 +272,21 @@ describe('Atom System', () => {
       generated.dispose();
     });
 
-    it('should support class-based computables and dispose hooks', () => {
+    it('should support class-based computables init and dispose hooks', () => {
       const source = atom(2);
+      let initialized = 0;
       let disposed = 0;
 
       class CounterComputable {
+        multiplier = 1;
+
+        onInit() {
+          initialized++;
+          this.multiplier = 3;
+        }
+
         compute(self: DerivedScope) {
-          return self.read(source) * 3;
+          return self.read(source) * this.multiplier;
         }
 
         onDispose() {
@@ -279,6 +296,7 @@ describe('Atom System', () => {
 
       const computed = derived<number>(CounterComputable as any);
 
+      expect(initialized).toBe(1);
       expect(computed.value).toBe(6);
 
       source.next(4);
@@ -565,6 +583,31 @@ describe('Atom System', () => {
 
       await delay(50);
       expect(error?.message).toBe('test error');
+      f.dispose();
+    });
+
+    it('should not double-report flow errors and should honor terminateOnError false', async () => {
+      let optionErrors = 0;
+      let subscriptionErrors = 0;
+
+      const f = flow(async function*() {
+        yield 1;
+        throw new Error('boom');
+      }, {
+        terminateOnError: false,
+        onError: () => { optionErrors++; },
+      });
+
+      f.onError(() => { subscriptionErrors++; });
+      f.subscribe(() => {});
+
+      await delay(50);
+
+      expect(optionErrors).toBe(1);
+      expect(subscriptionErrors).toBe(1);
+      expect(f.disposed).toBe(false);
+      expect(f.safeValue).toBe(1);
+      expect(() => f.value).toThrowError('boom');
       f.dispose();
     });
 

@@ -60,6 +60,18 @@ const fullName = derived($ =>
 
 The `$` helper tracks dependencies. You can also use async functions — the atom keeps the last good value while pending.
 
+Async `derived()` callbacks only track atoms read before the first `await`. Capture dependencies up front with `$.use(...)` or `$.read(...)`:
+
+```ts
+const total = derived(async $ => {
+  void $.price, $.tax;
+  await loadRates();
+  return $.price + $.tax;
+});
+```
+
+If the computation is mostly async work or needs cancellation/restart behavior, prefer `flow()`.
+
 ### Flow Atoms
 
 For async/generators, iterables, or factories:
