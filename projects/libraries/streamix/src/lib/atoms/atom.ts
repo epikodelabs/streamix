@@ -1332,7 +1332,10 @@ export function derived<T>(...args: any[]): Atom<T> {
         if (disposed) return;
 
         if (isAsyncFormula) {
-          recompute();
+          // Async derived values follow stale-while-revalidate semantics:
+          // keep serving the current cached value, mark stale immediately,
+          // and let the queued flush start revalidation in the background.
+          instance[MARK_DIRTY]();
           return;
         }
 

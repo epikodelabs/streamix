@@ -351,11 +351,11 @@ describe('Atom System', () => {
 
       expect(doubled.value).toBeUndefined();
 
-      await delay();
+      await delay(15);
       expect(doubled.value).toBe(10);
 
       source.next(7);
-      await delay();
+      await delay(15);
       expect(doubled.value).toBe(14);
 
       source.dispose();
@@ -378,17 +378,40 @@ describe('Atom System', () => {
 
       a.next(5);
       expect(d.value).toBe(3); // old value until async recompute resolves
-      await delay(10);
+      await delay(15);
       expect(d.value).toBe(7);
 
       b.next(10);
       expect(d.value).toBe(7); // old value until async recompute resolves
-      await delay(10);
+      await delay(15);
       expect(d.value).toBe(15);
 
       a.dispose();
       b.dispose();
       d.dispose();
+    });
+
+    it('should keep the stale async derived value readable while background revalidation runs', async () => {
+      const source = atom(1);
+
+      const total = derived(async (self: DerivedScope) => {
+        const current = self.use(source);
+        await delay(5);
+        return current.value * 10;
+      });
+
+      expect(total.value).toBeUndefined();
+      await delay(10);
+      expect(total.value).toBe(10);
+
+      source.next(2);
+      expect(total.value).toBe(10);
+
+      await delay(15);
+      expect(total.value).toBe(20);
+
+      source.dispose();
+      total.dispose();
     });
 
     it('should ignore stale promise when dependency changes', async () => {

@@ -946,7 +946,7 @@ describe('Scope System', () => {
       expect(s.doubled).toBe(2);
 
       s.count = 3;
-      await delay(10);
+      await delay(15);
       expect(s.doubled).toBe(6);
 
       s.dispose();
@@ -969,14 +969,13 @@ describe('Scope System', () => {
       expect(s.total).toBe(3);
 
       s.price = 5;
-      await delay(10);
       expect(s.total).toBe(3);
-      await delay(10);
+      await delay(15);
       expect(s.total).toBe(7);
 
       s.tax = 4;
       expect(s.total).toBe(7);
-      await delay(10);
+      await delay(15);
       expect(s.total).toBe(9);
 
       s.dispose();
@@ -1087,7 +1086,7 @@ describe('Scope System', () => {
       });
 
       expect(runs).toBe(1);
-      await delay(10);
+      await delay(15);
       expect(s.doubled).toBe(2);
       expect(runs).toBe(1);
       s.dispose();
