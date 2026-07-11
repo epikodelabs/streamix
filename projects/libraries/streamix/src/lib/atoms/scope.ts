@@ -201,7 +201,7 @@ type WritableScopeConfigKeys<T extends Record<string, any>> = Exclude<keyof T, R
 type UnwrapScopeValuesFromConfig<T extends Record<string, any>> = {
   readonly [K in ReadonlyScopeConfigKeys<T>]: ScopePublicValue<ScopeResolvedValue<T[K]>>;
 } & {
-  [K in WritableScopeConfigKeys<T>]: ScopePublicValue<ScopeResolvedValue<T[K]>>;
+  -readonly [K in WritableScopeConfigKeys<T>]: ScopePublicValue<ScopeResolvedValue<T[K]>>;
 };
 
 export type ScopeAtoms<T> = T extends Record<string, any>
@@ -585,8 +585,8 @@ function createScopeInternal<T extends Record<string, any>>(
   }
 }
 
-export function scope<const TConfig extends Record<string, any>>(state: TConfig, options?: { mode?: "discrete" | "analog" }): ScopeReturnFromConfig<TConfig>;
-export function scope<const TConfig extends Record<string, any>>(factory: (this: ScopeReturnFromConfig<TConfig>) => TConfig, options?: { mode?: "discrete" | "analog" }): ScopeReturnFromConfig<TConfig>;
+export function scope<TConfig extends Record<string, any>>(state: TConfig, options?: { mode?: "discrete" | "analog" }): ScopeReturnFromConfig<TConfig>;
+export function scope<TConfig extends Record<string, any>>(factory: (this: ScopeReturnFromConfig<TConfig>) => TConfig, options?: { mode?: "discrete" | "analog" }): ScopeReturnFromConfig<TConfig>;
 export function scope<T extends Record<string, any>>(state: ScopeConfig<T>, options?: { mode?: "discrete" | "analog" }): ScopeReturn<ScopeOf<T>>;
 export function scope<T extends Record<string, any>>(factory: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>, options?: { mode?: "discrete" | "analog" }): ScopeReturn<ScopeOf<T>>;
 export function scope(arg: any, options?: any): any {
