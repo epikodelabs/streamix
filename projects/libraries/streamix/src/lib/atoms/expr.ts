@@ -47,10 +47,10 @@ export function atomExpr<T>(initialValue?: T, options?: AtomOptions): AtomExpr<T
   return { [ATOM_EXPR]: true, initialValue, options };
 }
 
-export function derivedExpr<T, Self = any>(fn: (self: Self) => T): DerivedExpr<T, Self>;
-export function derivedExpr<T, Self = any>(fn: (self: Self) => Promise<T>): DerivedExpr<T, Self>;
-export function derivedExpr<T, Self = any>(fn: (self: Self) => T | Promise<T>): DerivedExpr<T, Self> {
-  return { [DERIVED_EXPR]: true, fn };
+export function derivedExpr<TReturn, Self = any>(
+  fn: (self: Self) => TReturn,
+): DerivedExpr<Awaited<TReturn>, Self> {
+  return { [DERIVED_EXPR]: true, fn: fn as (self: Self) => Awaited<TReturn> | Promise<Awaited<TReturn>> };
 }
 
 export function pipeExpr<T, Self = any>(fn: (self: Self, atoms: ScopeAtoms<Self>) => Atom<T>): PipeExpr<T, Self> {
