@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
+import { createPushOperator, isPromiseLike, normalizeError, type MaybePromise } from "../atoms";
 
 /**
  * Creates a throttle operator that emits the first value immediately, then ignores subsequent
@@ -74,7 +74,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
         if (pendingResult !== undefined) flushPending();
       } catch (err) {
         // Normalise to Error, consistent with every other operator.
-        output.fail(err instanceof Error ? err : new Error(String(err)));
+        output.fail(normalizeError(err));
       } finally {
         aborted = true;
         if (timer) { clearTimeout(timer); timer = null; }

@@ -1,3 +1,4 @@
+import { normalizeError } from "../atoms";
 import { isPromiseLike, type MaybePromise } from "../atoms/operator";
 import type { Scope } from "../atoms/scope";
 import type { Token } from "./token";
@@ -173,7 +174,7 @@ async function runCleanup(instance: TrackedInstance): Promise<Error | null> {
     }
     return null;
   } catch (err) {
-    return err instanceof Error ? err : new Error(String(err));
+    return normalizeError(err);
   }
 }
 

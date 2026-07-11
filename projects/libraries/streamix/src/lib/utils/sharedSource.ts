@@ -3,12 +3,11 @@ import {
   type MaybePromise,
   type Subscription,
 } from "../atoms";
-import { ANALOG, type Atom } from "../atoms/atom";
+import { ANALOG, normalizeError, type Atom } from "../atoms/atom";
 import { DONE } from "../atoms/operator";
 import { getCurrentScope, getScopeMode, registerWithCurrentScope } from "../atoms/scope";
 import { createSubscription } from "../atoms/subscription";
 import { cyclicBuffer, type CyclicBuffer, type CyclicBufferMode } from "../primitives/cyclicBuffer";
-import { normalizeError } from "../atoms/atom";
 
 export type SharedSourceMode = CyclicBufferMode;
 
@@ -171,8 +170,8 @@ export function createSharedSource<T>(
         }
       } catch (err) {
         // buffer closed or consumer stopped
-        if (!completed && activeBuffer === buffer && err instanceof Error) {
-          complete(err);
+        if (!completed && activeBuffer === buffer) {
+          complete(normalizeError(err));
         }
       } finally {
         readerRunning = false;

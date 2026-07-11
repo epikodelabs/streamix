@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, type Operator } from "../atoms";
+import { createPushOperator, isPromiseLike, normalizeError, type Operator } from "../atoms";
 import type { Atom } from '../atoms/atom';
 import { toAsyncIterable } from '../atoms/pipe';
 import { createAsyncCoordinator } from '../utils';
@@ -165,7 +165,7 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = readonly 
         // Safe lock catchment blocks for out-of-band exceptions during async scheduling phases
         if (!isSettled) {
           isSettled = true;
-          output.fail(err instanceof Error ? err : new Error(String(err)));
+          output.fail(normalizeError(err));
         }
       } finally {
         abortController.abort();

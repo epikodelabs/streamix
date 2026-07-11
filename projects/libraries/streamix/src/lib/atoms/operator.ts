@@ -1,5 +1,5 @@
 import { AsyncPushable, createAsyncPushable } from "../utils/pushable";
-import type { Atom } from "./atom";
+import { normalizeError, type Atom } from "./atom";
 
 /**
  * Represents a value that can either be a synchronous return or a promise that
@@ -134,7 +134,7 @@ export function createOperator<T = any, R = T>(
 
       if (typeof iterator.throw !== 'function') {
         iterator.throw = async (err?: any) => {
-          const error = err instanceof Error ? err : new Error(String(err));
+          const error = normalizeError(err);
           try {
             if (typeof source.throw === 'function') {
               const result = await source.throw(error);
@@ -228,7 +228,7 @@ export function createPushOperator<T, R = T>(
     };
 
     (output as any).throw = async (err: any) => {
-      const error = err instanceof Error ? err : new Error(String(err));
+      const error = normalizeError(err);
       await runCleanup();
       try {
         if (typeof source.return === 'function') await source.return();
