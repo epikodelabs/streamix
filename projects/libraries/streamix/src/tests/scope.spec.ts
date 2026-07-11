@@ -1028,6 +1028,41 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should evaluate shorthand derived callbacks only once during initialization', () => {
+      let runs = 0;
+
+      const s = scope({
+        count: 1,
+        doubled: (self: any) => {
+          runs += 1;
+          return self.count * 2;
+        },
+      });
+
+      expect(runs).toBe(1);
+      expect(s.doubled).toBe(2);
+      s.dispose();
+    });
+
+    it('should evaluate async shorthand derived callbacks only once during initialization', async () => {
+      let runs = 0;
+
+      const s = scope({
+        count: 1,
+        doubled: async (self: any) => {
+          runs += 1;
+          await delay(5);
+          return self.count * 2;
+        },
+      });
+
+      expect(runs).toBe(1);
+      await delay(10);
+      expect(s.doubled).toBe(2);
+      expect(runs).toBe(1);
+      s.dispose();
+    });
+
     it('should expose function-derived properties as readonly and atomExpr properties as writable', () => {
       const s = scope({
         count: atomExpr(0),

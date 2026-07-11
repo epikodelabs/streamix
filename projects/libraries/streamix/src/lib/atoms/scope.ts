@@ -19,6 +19,7 @@ import {
   type FlowExpr,
   type PipeExpr,
 } from "./expr";
+import { isPromiseLike } from "./operator";
 import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
 import type { Subscription } from "./subscription";
 
@@ -26,12 +27,7 @@ import type { Subscription } from "./subscription";
 
 const DYNAMIC_EXPR = Symbol("streamix.dynamicExpr");
 const METHOD = Symbol("streamix.method");
-const DYNAMIC_ATOM_FACTORY_EXPR = Symbol("streamix.dynamicAtomFactoryExpr");
 
-interface DynamicAtomFactoryExpr<T = any, Self = any> {
-  [DYNAMIC_ATOM_FACTORY_EXPR]: true;
-  fn: (self: Self, atoms?: any) => Atom<T>;
-}
 interface DynamicExpr<T = any, Self = any> {
   [DYNAMIC_EXPR]: true;
   fn: (self: Self, atoms?: any) => Atom<T> | T;
@@ -62,24 +58,40 @@ function isExprMarkerOrDynamic(value: any): value is AtomExpr | DerivedExpr | Pi
   return isExprMarkerBase(value) || isDynamicExpr(value);
 }
 
+function unwrapDynamicValue<T>(value: T | Atom<T>): T {
+  return value && typeof value === "object" && (value as any).type === "atom"
+    ? (value as Atom<T>).value
+    : value as T;
+}
+
+
+/**
+ * A mutable holder for the "read" function a tracked-self Proxy should call.
+ * Kept as a ref (rather than baking the function into the Proxy's closure)
+ * so a single Proxy instance can be reused across multiple recomputations of
+ * a derived atom -- each recomputation just swaps out `current` instead of
+ * allocating a brand-new Proxy. See recommendation 7.
+ */
+type ReaderRef = { current: <T>(atom: Atom<T>) => T };
+
 function createTrackedScopeSelf(
   scopeSelf: any,
   atoms: ((key: string | symbol) => any) | undefined,
-  readAtom: <T>(atom: Atom<T>) => T,
+  readerRef: ReaderRef,
 ): any {
   return new Proxy(function (targetAtom: any) {
     if (isAtom(targetAtom)) {
-      return readAtom(targetAtom);
+      return readerRef.current(targetAtom);
     }
     return scopeSelf?.(targetAtom);
   }, {
     get(_target, prop, receiver) {
       if (atoms && (typeof prop === "string" || typeof prop === "symbol")) {
         const value = atoms(prop);
-        return isAtom(value) ? readAtom(value) : value;
+        return isAtom(value) ? readerRef.current(value) : value;
       }
       const result = Reflect.get(scopeSelf, prop, receiver);
-      return isAtom(result) ? readAtom(result) : result;
+      return isAtom(result) ? readerRef.current(result) : result;
     },
     set(_target, prop, value) {
       Reflect.set(scopeSelf, prop, value);
@@ -89,7 +101,7 @@ function createTrackedScopeSelf(
 }
 
 function evaluateExprMarker(
-  marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr | DynamicAtomFactoryExpr,
+  marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr,
   self: any,
   atoms?: any,
 ): Atom<any> {
@@ -97,12 +109,37 @@ function evaluateExprMarker(
     return atom(marker.initialValue === undefined ? NO_INITIAL_VALUE : marker.initialValue, marker.options);
   }
   if (isDerivedExpr(marker)) {
-    return derived((derivedSelf) => marker.fn(createTrackedScopeSelf(self, atoms, derivedSelf.read.bind(derivedSelf))));
+    // One Proxy for the lifetime of this derived atom; only the active reader
+    // changes between recomputations (recommendation 7).
+    const readerRef: ReaderRef = {
+      current: () => {
+        throw new Error("streamix: derived reader accessed outside of an active evaluation");
+      },
+    };
+    const trackedSelf = createTrackedScopeSelf(self, atoms, readerRef);
+    return derived((derivedSelf) => {
+      readerRef.current = derivedSelf.read.bind(derivedSelf);
+      return marker.fn(trackedSelf);
+    });
   }
   if (isPipeExpr(marker)) return marker.fn(self, atoms);
   if (isFlowExpr(marker)) return marker.fn(self, atoms);
   if (isDynamicExpr(marker)) {
-    const value = marker.fn(self, atoms);
+    // Probe fn() exactly once to determine its shape (atom / expr marker /
+    // plain value) and to discover which atoms it reads. This same `value`
+    // is reused as the first emission below -- fn is never called twice for
+    // the same logical evaluation. It's only re-invoked later when a
+    // dependency actually changes, which is normal derived recomputation,
+    // not double evaluation.
+    const initialDependencies = new Set<Atom<any>>();
+    const initialReaderRef: ReaderRef = {
+      current: <T>(dep: Atom<T>) => {
+        initialDependencies.add(dep as Atom<any>);
+        return dep.value;
+      },
+    };
+    const initialSelf = createTrackedScopeSelf(self, atoms, initialReaderRef);
+    const value = marker.fn(initialSelf, atoms);
 
     if (isAtomLike(value)) {
       return value;
@@ -111,13 +148,50 @@ function evaluateExprMarker(
     if (isExprMarkerBase(value)) {
       return evaluateExprMarker(value, self, atoms);
     }
-    
+
+    let seeded = true;
+    // Same reuse trick as the DerivedExpr branch: one Proxy, swapped reader.
+    const readerRef: ReaderRef = {
+      current: () => {
+        throw new Error("streamix: derived reader accessed outside of an active evaluation");
+      },
+    };
+    const trackedSelf = createTrackedScopeSelf(self, atoms, readerRef);
+
     return derived((derivedSelf) => {
-      const trackedSelf = createTrackedScopeSelf(self, atoms, derivedSelf.read.bind(derivedSelf));
+      readerRef.current = derivedSelf.read.bind(derivedSelf);
+
+      const attachInitialDependencies = () => {
+        for (const dependency of initialDependencies) {
+          derivedSelf.read(dependency);
+        }
+      };
+
+      if (seeded) {
+        seeded = false;
+
+        if (isPromiseLike(value)) {
+          return Promise.resolve(value).then(
+            (resolvedValue) => {
+              attachInitialDependencies();
+              return unwrapDynamicValue(resolvedValue);
+            },
+            (error) => {
+              attachInitialDependencies();
+              throw error;
+            },
+          );
+        }
+
+        attachInitialDependencies();
+        return value;
+      }
+
       const inner = marker.fn(trackedSelf, atoms);
-      return inner && typeof inner === "object" && (inner as any).type === "atom"
-        ? (inner as Atom<any>).value
-        : inner;
+      if (isPromiseLike(inner)) {
+        return Promise.resolve(inner).then((resolvedValue) => unwrapDynamicValue(resolvedValue));
+      }
+      return unwrapDynamicValue(inner);
     });
   }
   throw new Error("Unknown expression marker");
@@ -128,13 +202,11 @@ function evaluateExprMarker(
 type UnwrapSnapshotValues<T> = {
   [K in keyof T]: T[K] extends Scope<infer U>
     ? UnwrapSnapshotValues<U>
-    : T[K] extends Scope & Record<string, any>
-      ? UnwrapSnapshotValues<T[K]>
-      : T[K] extends { value: infer U }
-        ? U
-        : T[K] extends Record<string, any>
-          ? UnwrapSnapshotValues<T[K]>
-          : T[K];
+    : T[K] extends { value: infer U }
+      ? U
+      : T[K] extends Record<string, any>
+        ? UnwrapSnapshotValues<T[K]>
+        : T[K];
 };
 
 type WidenValue<T> =
@@ -439,12 +511,24 @@ function defineScopeStateProperty(
   const currentItem = scopeRef._rawState[key];
   const readonly = isReadonlyScopeStateKey(key, currentItem);
 
+  // An unresolved marker's readonly-ness can only change once it resolves
+  // into its real underlying atom/value on first read. Once that's already
+  // happened (currentItem isn't a marker), the readonly status is settled
+  // for the life of this descriptor, so we never need to re-check it again.
+  let settled = !isExprMarkerOrDynamic(currentItem);
+
   const descriptor: PropertyDescriptor = {
     get() {
       const activeItem = read(key);
-      const updatedItem = scopeRef._rawState[key];
-      if (isReadonlyScopeStateKey(key, updatedItem) !== readonly) {
-        defineScopeStateProperty(scopeRef, key, read);
+      if (!settled) {
+        const updatedItem = scopeRef._rawState[key];
+        if (!isExprMarkerOrDynamic(updatedItem)) {
+          settled = true;
+          if (isReadonlyScopeStateKey(key, updatedItem) !== readonly) {
+            defineScopeStateProperty(scopeRef, key, read);
+            return (scopeRef as any)[key];
+          }
+        }
       }
       if (activeItem && typeof activeItem === "object") {
         if (activeItem.type === "atom") {
@@ -704,7 +788,11 @@ export function disposeScope(sc: Scope): void {
   sc._disposed = true;
 
   for (const hook of sc.cleanups) {
-    try { hook(); } catch {}
+    try {
+      hook();
+    } catch (err) {
+      console.error("[streamix] scope cleanup hook threw during disposal:", err);
+    }
   }
   sc.cleanups.clear();
 
@@ -718,10 +806,14 @@ export function disposeScope(sc: Scope): void {
   for (const activeItem of sc.atoms) {
     try {
       if (!(activeItem as any).disposed) (activeItem as any).dispose();
-    } catch {}
+    } catch (err) {
+      console.error("[streamix] atom disposal threw during scope disposal:", err);
+    }
   }
   sc.atoms.clear();
-  sc.container.dispose().catch(() => {});
+  sc.container.dispose().catch((err) => {
+    console.error("[streamix] container disposal failed during scope disposal:", err);
+  });
 }
 
 /* ── Registry Linkage Handlers ───────────────────────────────────────────── */
@@ -776,7 +868,7 @@ function updatePendingHierarchy(startNode: Scope | RootScope | null, dynamicDelt
   while (isScope(current) && !current._disposed) {
     current._pendingCount = Math.max(0, current._pendingCount + dynamicDelta);
     const loadingAtom = current._rawState["loading"] as Writable<boolean> | undefined;
-    
+
     if (loadingAtom) {
       const isCurrentlyLoading = current._pendingCount > 0;
       if (loadingAtom.value !== isCurrentlyLoading) {
