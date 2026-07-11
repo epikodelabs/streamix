@@ -621,29 +621,29 @@ function createScopeInternal<T extends Record<string, any>>(
 }
 
 export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
-  definition: TConfig,
-  setup?: (self: ScopeReturnFromConfig<TConfig>) => TSetup,
-  options?: ScopeOptions,
-): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
-export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: (this: ScopeReturnFromConfig<TConfig>) => TConfig,
   setup?: (self: ScopeReturnFromConfig<TConfig>) => TSetup,
   options?: ScopeOptions,
 ): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
-export function scope<TConfig extends Record<string, any>>(definition: TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
-export function scope<TConfig extends Record<string, any>>(definition: (this: ScopeReturnFromConfig<TConfig>) => TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
-export function scope<T extends Record<string, any>, TSetup extends ScopeSetupResult>(
-  definition: ScopeConfig<T>,
-  setup?: (self: ScopeReturn<ScopeOf<T>>) => TSetup,
+export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
+  definition: TConfig,
+  setup?: (self: ScopeReturnFromConfig<TConfig>) => TSetup,
   options?: ScopeOptions,
-): ScopeReturn<ScopeOf<T>> & ScopeSetupReturn<TSetup>;
+): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
+export function scope<TConfig extends Record<string, any>>(definition: (this: ScopeReturnFromConfig<TConfig>) => TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
+export function scope<TConfig extends Record<string, any>>(definition: TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
 export function scope<T extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>,
   setup?: (self: ScopeReturn<ScopeOf<T>>) => TSetup,
   options?: ScopeOptions,
 ): ScopeReturn<ScopeOf<T>> & ScopeSetupReturn<TSetup>;
-export function scope<T extends Record<string, any>>(definition: ScopeConfig<T>, options?: ScopeOptions): ScopeReturn<ScopeOf<T>>;
+export function scope<T extends Record<string, any>, TSetup extends ScopeSetupResult>(
+  definition: ScopeConfig<T>,
+  setup?: (self: ScopeReturn<ScopeOf<T>>) => TSetup,
+  options?: ScopeOptions,
+): ScopeReturn<ScopeOf<T>> & ScopeSetupReturn<TSetup>;
 export function scope<T extends Record<string, any>>(definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>, options?: ScopeOptions): ScopeReturn<ScopeOf<T>>;
+export function scope<T extends Record<string, any>>(definition: ScopeConfig<T>, options?: ScopeOptions): ScopeReturn<ScopeOf<T>>;
 export function scope(
   definition: any,
   setupOrOptions?: ((self: any) => ScopeSetupResult) | ScopeOptions,

@@ -1079,6 +1079,30 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should infer setup callback self for factory definitions', async () => {
+      const s = scope(() => ({
+        count: 0,
+        name: 'Alice',
+        doubled: (self: any) => self.count * 2,
+      }), (self) => ({
+        increment() {
+          self.count += 1;
+        },
+        rename(name: string) {
+          self.name = name;
+        },
+      }));
+
+      s.increment();
+      s.rename('Bob');
+      await delay();
+
+      expect(s.count).toBe(1);
+      expect(s.name).toBe('Bob');
+      expect(s.doubled).toBe(2);
+      s.dispose();
+    });
+
     it('should run setup callback side effects when it returns void', () => {
       let initialCount = -1;
       const s = scope({ count: 3 }, (self) => {
