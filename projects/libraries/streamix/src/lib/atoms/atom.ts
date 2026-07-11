@@ -67,6 +67,7 @@ export interface Atom<T = any> {
   readonly safeValue: T;
   readonly previous: T;
   readonly disposed: boolean;
+  readonly dirty: boolean;
   readonly error?: any;
   readonly subscriberCount?: number;
   subscribe(callback?: (current: T, previous: T) => MaybePromise): Subscription;
@@ -115,7 +116,7 @@ export type DerivedScope = {
 interface AtomNode {
   depth: number;
   version: number;
-  dirty: boolean;
+  queued: boolean;
   isResource: boolean;
   isAnalog: boolean;
   flush: () => void;
@@ -144,12 +145,12 @@ export interface Scheduler {
 class DefaultScheduler implements Scheduler {
   private isBatchScheduled = false;
   private isFlushing = false;
-  private dirtyNodes = new Set<AtomNode>();
+  private queuedNodes = new Set<AtomNode>();
   private flushingNodes = new Set<AtomNode>();
 
-  // Min-heap of dirty nodes ordered by depth (shallow first).
-  // A node may appear multiple times if it was re-dirtied; stale entries are
-  // skipped via dirtyNodes membership and node.dirty checks.
+  // Min-heap of queued nodes ordered by depth (shallow first).
+  // A node may appear multiple times if it was re-queued; stale entries are
+  // skipped via queuedNodes membership and node.queued checks.
   private heap: AtomNode[] = [];
   private heapSeq = 0;
   private heapSeqMap = new WeakMap<AtomNode, number>();
@@ -209,16 +210,16 @@ class DefaultScheduler implements Scheduler {
     this.isFlushing = true;
 
     try {
-      while (this.dirtyNodes.size > 0) {
+      while (this.queuedNodes.size > 0) {
         let node = this.heapPop();
         while (node !== undefined) {
-          if (this.dirtyNodes.has(node) && !this.flushingNodes.has(node)) {
-            this.dirtyNodes.delete(node);
-            if (node.dirty) {
+          if (this.queuedNodes.has(node) && !this.flushingNodes.has(node)) {
+            this.queuedNodes.delete(node);
+            if (node.queued) {
               this.flushingNodes.add(node);
               try {
                 node.flush();
-                node.dirty = false;
+                node.queued = false;
               } finally {
                 this.flushingNodes.delete(node);
               }
@@ -240,11 +241,11 @@ class DefaultScheduler implements Scheduler {
       return;
     }
 
-    if (node.dirty && !this.flushingNodes.has(node)) {
+    if (node.queued && !this.flushingNodes.has(node)) {
       this.flushingNodes.add(node);
       try {
         node.flush();
-        node.dirty = false;
+        node.queued = false;
       } finally {
         this.flushingNodes.delete(node);
       }
@@ -252,7 +253,8 @@ class DefaultScheduler implements Scheduler {
   }
 
   queueFlush(node: AtomNode): void {
-    this.dirtyNodes.add(node);
+    node.queued = true;
+    this.queuedNodes.add(node);
     this.heapPush(node);
     if (this.isBatchScheduled) return;
 
@@ -263,11 +265,12 @@ class DefaultScheduler implements Scheduler {
   }
 
   remove(node: AtomNode): void {
-    this.dirtyNodes.delete(node);
+    node.queued = false;
+    this.queuedNodes.delete(node);
     this.flushingNodes.delete(node);
   }
 
-  get isDirty(): boolean { return this.dirtyNodes.size > 0; }
+  get isDirty(): boolean { return this.queuedNodes.size > 0; }
 }
 
 let currentScheduler: Scheduler = new DefaultScheduler();
@@ -533,6 +536,7 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
 // Dependent atoms register here so they are marked dirty immediately when a
 // dependency changes, even in analog mode where public broadcasts are batched.
 const atomChangeHandlers = new WeakMap<Atom<any>, Set<() => void>>();
+const atomDirtyHandlers = new WeakMap<Atom<any>, Set<(dirty: boolean) => void>>();
 
 function addAtomChangeHandler(atom: Atom<any>, handler: () => void): void {
   let handlers = atomChangeHandlers.get(atom);
@@ -552,6 +556,24 @@ function notifyChangeHandlers(atom: Atom<any>): void {
   if (!handlers) return;
   for (const h of Array.from(handlers)) {
     try { h(); } catch { /* suppress dependent errors */ }
+  }
+}
+
+export function onAtomDirtyChange(atom: Atom<any>, handler: (dirty: boolean) => void): () => void {
+  let handlers = atomDirtyHandlers.get(atom);
+  if (!handlers) {
+    handlers = new Set();
+    atomDirtyHandlers.set(atom, handlers);
+  }
+  handlers.add(handler);
+  return () => handlers?.delete(handler);
+}
+
+function notifyDirtyHandlers(atom: Atom<any>, dirty: boolean): void {
+  const handlers = atomDirtyHandlers.get(atom);
+  if (!handlers) return;
+  for (const h of Array.from(handlers)) {
+    try { h(dirty); } catch { /* suppress dirty observers */ }
   }
 }
 
@@ -579,6 +601,7 @@ export function atomFromIterator<T>(
   let errorValue: any = undefined;
   let isErrorState = false;
   let hasNewValue = false;
+  let dirty = false;
 
   const disposeHandlers = new Set<() => void>();
   const errorHandlers = new Set<(error: any) => void>();
@@ -587,6 +610,12 @@ export function atomFromIterator<T>(
 
   let iterator: AsyncIterator<T> | undefined;
   let runPromise: Promise<void> | null = null;
+
+  const setDirty = (next: boolean) => {
+    if (dirty === next) return;
+    dirty = next;
+    notifyDirtyHandlers(instance, next);
+  };
 
   const broadcast = (val: T) => subs.broadcast(val, previous);
 
@@ -606,6 +635,7 @@ export function atomFromIterator<T>(
   const disposeInstance = async (): Promise<void> => {
     if (disposed) return;
     disposed = true;
+    setDirty(false);
     markDisposed(instance);
     node.version++;
     subs.clear();
@@ -661,12 +691,13 @@ export function atomFromIterator<T>(
   };
 
   const node: AtomNode = {
-    depth: 0, version: 0, dirty: false, flushing: false,
+    depth: 0, version: 0, queued: false, flushing: false,
     isResource: true, isAnalog: analog,
     flush() {
-      if (disposed || (!node.dirty && !hasNewValue) || node.flushing) return;
+      if (disposed || (!dirty && !hasNewValue) || node.flushing) return;
       node.flushing = true;
       try {
+        setDirty(false);
         broadcastLatest();
       } finally {
         node.flushing = false;
@@ -678,6 +709,7 @@ export function atomFromIterator<T>(
     type: "atom",
 
     get disposed() { return disposed || isDisposed(this); },
+    get dirty() { return dirty; },
     get error() { return errorValue; },
     get subscriberCount() { return subs.size; },
 
@@ -693,8 +725,8 @@ export function atomFromIterator<T>(
 
     [NODE]: node,
     [MARK_DIRTY]() {
-      if (disposed || node.dirty) return;
-      node.dirty = true;
+      if (disposed || dirty) return;
+      setDirty(true);
       getScheduler().queueFlush(node);
     },
     [FLUSH]() { node.flush(); },
@@ -942,8 +974,8 @@ export function atom<T = any>(
   const broadcast = () => subs.broadcast(current, previous);
 
   const flushInternal = () => {
-    if (!node.dirty || disposed) return;
-    node.dirty = false;
+    if (!node.queued || disposed) return;
+    node.queued = false;
     if (Object.is(lastNotified, current)) return;
     
     lastNotified = current;
@@ -952,10 +984,10 @@ export function atom<T = any>(
   };
 
   const node: AtomNode = {
-    depth: 0, version: 0, dirty: false, flushing: false,
+    depth: 0, version: 0, queued: false, flushing: false,
     isResource: false, isAnalog: analog,
     flush() {
-      if (disposed || !node.dirty || node.flushing) return;
+      if (disposed || !node.queued || node.flushing) return;
       
       node.flushing = true;
       try {
@@ -970,6 +1002,7 @@ export function atom<T = any>(
     type: "atom",
 
     get disposed() { return disposed || isDisposed(this); },
+    get dirty() { return false; },
     get error() { return errorValue; },
     get subscriberCount() { return subs.size; },
     
@@ -986,8 +1019,7 @@ export function atom<T = any>(
 
     [NODE]: node,
     [MARK_DIRTY]() {
-      if (disposed || node.dirty) return;
-      node.dirty = true;
+      if (disposed || node.queued) return;
       getScheduler().queueFlush(node);
     },
     [FLUSH]() { node.flush(); },
@@ -1036,7 +1068,7 @@ export function atom<T = any>(
         // no need to re-queue this node — flushInternal() would short-circuit on
         // the Object.is(lastNotified, current) guard anyway, but getting here at
         // all wastes a microtask per discrete emit.
-        node.dirty = false;
+        node.queued = false;
         lastNotified = current;
         node.version++;
         broadcast();
@@ -1286,6 +1318,7 @@ export function derived<T>(...args: any[]): Atom<T> {
   let isErrorState = false;
   let notifyPending = false;
   let isAsyncFormula = false;
+  let dirty = false;
 
   const errorHandlers = new Set<(error: any) => void>();
   const subs = createSubscriberSet<T>(errorHandlers, analog);
@@ -1297,6 +1330,12 @@ export function derived<T>(...args: any[]): Atom<T> {
   let asyncGeneration = 0;
   const asyncSourceGeneration = new Map<number, number>();
   let asyncReaderStarted = false;
+
+  const setDirty = (next: boolean) => {
+    if (dirty === next) return;
+    dirty = next;
+    notifyDirtyHandlers(instance, next);
+  };
 
   const broadcast = () => subs.broadcast(current, previous);
 
@@ -1341,8 +1380,15 @@ export function derived<T>(...args: any[]): Atom<T> {
 
         if (!node.isAnalog) {
           if (!node.flushing && !running) {
-            node.dirty = true;
-            recompute();
+            try {
+              recompute();
+            } catch (err) {
+              errorValue = normalizeError(err);
+              isErrorState = true;
+              if (terminateOnError) {
+                instance.dispose();
+              }
+            }
           } else {
             instance[MARK_DIRTY]();
           }
@@ -1464,7 +1510,7 @@ export function derived<T>(...args: any[]): Atom<T> {
 
   const recompute = () => {
     const { result: next, context, generation } = compute();
-    node.dirty = false;
+    setDirty(false);
 
     isErrorState = false;
     errorValue = undefined;
@@ -1478,10 +1524,10 @@ export function derived<T>(...args: any[]): Atom<T> {
   };
 
   const flushInternal = () => {
-    if ((!node.dirty && !notifyPending) || disposed || node.flushing) return;
+    if ((!dirty && !notifyPending) || disposed || node.flushing) return;
     node.flushing = true;
     try {
-      if (node.dirty) recompute();
+      if (dirty) recompute();
       if (notifyPending && subs.size > 0) {
         broadcast();
         notifyPending = false;
@@ -1489,7 +1535,7 @@ export function derived<T>(...args: any[]): Atom<T> {
     } catch (err) {
       errorValue = normalizeError(err);
       isErrorState = true;
-      node.dirty = false;
+      setDirty(false);
       notifyPending = false;
       if (terminateOnError) {
         instance.dispose();
@@ -1502,10 +1548,10 @@ export function derived<T>(...args: any[]): Atom<T> {
   };
 
   const node: AtomNode = {
-    depth: 0, version: 0, dirty: false, flushing: false,
+    depth: 0, version: 0, queued: false, flushing: false,
     isResource: false, isAnalog: analog,
     flush() {
-      if (disposed || (!node.dirty && !notifyPending) || node.flushing) return;
+      if (disposed || (!dirty && !notifyPending) || node.flushing) return;
       flushInternal();
     },
   };
@@ -1514,6 +1560,7 @@ export function derived<T>(...args: any[]): Atom<T> {
     type: "atom",
 
     get disposed() { return disposed || isDisposed(this); },
+    get dirty() { return dirty; },
     get error() { return errorValue; },
     get subscriberCount() { return subs.size; },
 
@@ -1543,7 +1590,7 @@ export function derived<T>(...args: any[]): Atom<T> {
             throw errorValue;
           }
         }
-      } else if (node.dirty) {
+      } else if (dirty) {
         try {
           recompute();
           if (notifyPending && subs.size > 0) instance[MARK_DIRTY]();
@@ -1573,8 +1620,8 @@ export function derived<T>(...args: any[]): Atom<T> {
 
     [NODE]: node,
     [MARK_DIRTY]() {
-      if (disposed || node.dirty) return;
-      node.dirty = true;
+      if (disposed || dirty) return;
+      setDirty(true);
       getScheduler().queueFlush(node);
     },
     [FLUSH]() { node.flush(); },
@@ -1599,6 +1646,7 @@ export function derived<T>(...args: any[]): Atom<T> {
     dispose() {
       if (disposed) return;
       disposed = true;
+      setDirty(false);
       markDisposed(instance);
       getScheduler().remove(node);
       notifyPending = false;

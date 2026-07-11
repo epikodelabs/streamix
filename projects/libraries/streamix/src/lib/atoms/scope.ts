@@ -7,7 +7,7 @@ import {
   type Token,
 } from "../ioc/container";
 import { isAtom, isAtomLike } from "../utils/helpers";
-import { atom, derived, NO_INITIAL_VALUE, normalizeError, Writable, type Atom } from "./atom";
+import { atom, derived, NO_INITIAL_VALUE, normalizeError, onAtomDirtyChange, Writable, type Atom } from "./atom";
 import {
   isAtomExpr,
   isDerivedExpr,
@@ -328,9 +328,11 @@ export interface Scope<T extends Record<string, any> = Record<string, any>> {
   parent: Scope | RootScope | null;
   container: Container;
   readonly loading: boolean;
+  readonly dirty: boolean;
   snapshot(): UnwrapSnapshotValues<T>;
   dispose(): void;
   /** @internal */ _pendingCount: number;
+  /** @internal */ _dirtyCount: number;
   /** @internal */ _exports: Set<string | symbol>;
   /** @internal */ _disposed: boolean;
   /** @internal */ _rawState: Record<string | symbol, any>;
@@ -399,7 +401,7 @@ function defineCallableAccessorProperty(
 }
 
 function isReadonlyScopeStateKey(key: string | symbol, item: any): boolean {
-  if (key === "loading") return true;
+  if (key === "loading" || key === "dirty") return true;
   if (isAtomExpr(item)) return false;
   if (isDynamicExpr(item)) return true;
   if (isDerivedExpr(item) || isPipeExpr(item) || isFlowExpr(item)) return true;
@@ -563,7 +565,7 @@ function defineScopeStateProperty(
 
 function defineScopeExtensionProperties(scopeRef: Scope, extensions: Record<string | symbol, any>): void {
   for (const key of Reflect.ownKeys(extensions)) {
-    if (key === "loading" || key === "at" || key === "subscribeTo") {
+    if (key === "loading" || key === "dirty" || key === "at" || key === "subscribeTo") {
       throw new Error(`Cannot define reserved scope property: ${String(key)}`);
     }
 
@@ -602,6 +604,7 @@ function createScopeInternal<T extends Record<string, any>>(
     parent,
     container: createContainer(parentContainer),
     loading: true,
+    dirty: false,
     snapshot() {
       const out: Record<string, any> = {};
       collectScopeValues(this as any, out);
@@ -611,6 +614,7 @@ function createScopeInternal<T extends Record<string, any>>(
       disposeScope(this);
     },
     _pendingCount: 0,
+    _dirtyCount: 0,
     _exports: new Set(),
     _disposed: false,
     _rawState: {},
@@ -625,15 +629,18 @@ function createScopeInternal<T extends Record<string, any>>(
 
   try {
     // Safely instantiate loading atom ensuring clean global scope context reversal
-    let loadingAtom: any;
+    let loadingAtom: Writable<boolean>;
+    let dirtyAtom: Writable<boolean>;
     currentScope = null;
     try {
       loadingAtom = atom(true);
+      dirtyAtom = atom(false);
     } finally {
       currentScope = newScope;
     }
 
     newScope._rawState["loading"] = loadingAtom;
+    newScope._rawState["dirty"] = dirtyAtom;
 
     const getScopeItem = (key: string | symbol): any => {
       let current = newScope._rawState[key];
@@ -677,6 +684,8 @@ function createScopeInternal<T extends Record<string, any>>(
 
     defineScopeStateProperty(newScope, "loading", getScopeItem);
     defineAccessorKey("loading");
+    defineScopeStateProperty(newScope, "dirty", getScopeItem);
+    defineAccessorKey("dirty");
 
     const output = factory.call(newScope, newScope);
     const dataState = (output && output.rawState) ? output.rawState : output;
@@ -686,10 +695,14 @@ function createScopeInternal<T extends Record<string, any>>(
       if ("loading" in dataState) {
         console.warn("[streamix] scope(): 'loading' key is reserved and was overwritten.");
       }
+      if ("dirty" in dataState) {
+        console.warn("[streamix] scope(): 'dirty' key is reserved and was overwritten.");
+      }
 
       newScope._rawState = dataState;
 
       for (const key of Reflect.ownKeys(dataState)) {
+        if (key === "dirty") continue;
         newScope._exports.add(key);
         defineAccessorKey(key);
         defineScopeStateProperty(newScope, key, getScopeItem);
@@ -697,8 +710,11 @@ function createScopeInternal<T extends Record<string, any>>(
     }
 
     newScope._rawState["loading"] = loadingAtom;
+    newScope._rawState["dirty"] = dirtyAtom;
     defineAccessorKey("loading");
     defineScopeStateProperty(newScope, "loading", getScopeItem);
+    defineAccessorKey("dirty");
+    defineScopeStateProperty(newScope, "dirty", getScopeItem);
 
     for (const item of Object.values(newScope._rawState)) {
       if (item && typeof item === "object" && (item as any).type === "scope") {
@@ -720,6 +736,7 @@ function createScopeInternal<T extends Record<string, any>>(
 
     newScope.cleanups.add(() => {
       if (!loadingAtom.disposed) loadingAtom.dispose();
+      if (!dirtyAtom.disposed) dirtyAtom.dispose();
     });
 
     return newScope as any;
@@ -798,6 +815,8 @@ export function disposeScope(sc: Scope): void {
 
   updatePendingHierarchy(sc.parent, -sc._pendingCount);
   sc._pendingCount = 0;
+  updateDirtyHierarchy(sc.parent, -sc._dirtyCount);
+  sc._dirtyCount = 0;
 
   if (isScope(sc.parent)) {
     sc.parent.atoms.delete(sc);
@@ -826,6 +845,9 @@ export function registerWithCurrentScope(atomInstance: Atom<any>): void {
   atomScopeRegistry.set(atomInstance, targetContext);
 
   updatePendingHierarchy(targetContext, 1);
+  if (atomInstance.dirty) {
+    updateDirtyHierarchy(targetContext, 1);
+  }
 
   const disposers = (atomInstance as any)._onDispose;
   if (disposers instanceof Set) {
@@ -833,6 +855,9 @@ export function registerWithCurrentScope(atomInstance: Atom<any>): void {
       targetContext.atoms.delete(atomInstance);
       if (!emittedAtomsRegistry.has(atomInstance) && !targetContext._disposed) {
         updatePendingHierarchy(targetContext, -1);
+      }
+      if (atomInstance.dirty && !targetContext._disposed) {
+        updateDirtyHierarchy(targetContext, -1);
       }
     };
     disposers.add(earlyDetachmentHook);
@@ -845,6 +870,12 @@ export function registerWithCurrentScope(atomInstance: Atom<any>): void {
       if (!(atomInstance as any).disposed) unsub();
     });
   } catch {}
+
+  const stopDirtyTracking = onAtomDirtyChange(atomInstance, (dirty) => {
+    if (targetContext._disposed) return;
+    updateDirtyHierarchy(targetContext, dirty ? 1 : -1);
+  });
+  targetContext.cleanups.add(() => stopDirtyTracking());
 }
 
 export function markAtomAsEmitted(atomInstance: Atom<any>): void {
@@ -873,6 +904,24 @@ function updatePendingHierarchy(startNode: Scope | RootScope | null, dynamicDelt
       const isCurrentlyLoading = current._pendingCount > 0;
       if (loadingAtom.value !== isCurrentlyLoading) {
         loadingAtom.next(isCurrentlyLoading);
+      }
+    }
+    current = current.parent;
+  }
+}
+
+function updateDirtyHierarchy(startNode: Scope | RootScope | null, dynamicDelta: number): void {
+  if (dynamicDelta === 0) return;
+  let current: Scope | RootScope | null = startNode;
+
+  while (isScope(current) && !current._disposed) {
+    current._dirtyCount = Math.max(0, current._dirtyCount + dynamicDelta);
+    const dirtyAtom = current._rawState["dirty"] as Writable<boolean> | undefined;
+
+    if (dirtyAtom) {
+      const isCurrentlyDirty = current._dirtyCount > 0;
+      if (dirtyAtom.value !== isCurrentlyDirty) {
+        dirtyAtom.next(isCurrentlyDirty);
       }
     }
     current = current.parent;

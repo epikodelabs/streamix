@@ -360,6 +360,61 @@ describe('Scope System', () => {
     });
   });
 
+  describe('dirty state', () => {
+    it('should be true while an async derived scope value is stale', async () => {
+      const s = scope({
+        price: 1,
+        tax: 2,
+        total: async (self: any) => {
+          void self.price, self.tax;
+          await delay(5);
+          return self.price + self.tax;
+        }
+      });
+
+      expect(s.dirty).toBe(false);
+      await delay(10);
+      expect(s.total).toBe(3);
+      expect(s.dirty).toBe(false);
+
+      s.price = 5;
+      expect(s.dirty).toBe(true);
+      expect(s.total).toBe(3);
+
+      await delay(15);
+      expect(s.total).toBe(7);
+      expect(s.dirty).toBe(false);
+
+      s.dispose();
+    });
+
+    it('should reflect dirty nested scopes', async () => {
+      const child = scope({
+        count: 1,
+        doubled: async (self: any) => {
+          void self.count;
+          await delay(5);
+          return self.count * 2;
+        }
+      });
+
+      const parent = scope({ child });
+
+      await delay(10);
+      expect(parent.dirty).toBe(false);
+
+      child.count = 3;
+      expect(child.dirty).toBe(true);
+      expect(parent.dirty).toBe(true);
+
+      await delay(15);
+      expect(child.dirty).toBe(false);
+      expect(parent.dirty).toBe(false);
+
+      parent.dispose();
+    });
+  });
+
   describe('snapshot', () => {
     it('should capture all atom values', () => {
       interface Shape {
