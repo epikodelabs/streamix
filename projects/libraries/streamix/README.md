@@ -88,10 +88,9 @@ For async computed values, capture dependencies before the first `await`:
 
 ```typescript
 const total = derived(async ($) => {
-  const price = $.use(priceAtom);
-  const tax = $.use(taxAtom);
+  void $.price, $.tax;
   await loadRates();
-  return price.value + tax.value;
+  return $.price + $.value;
 });
 ```
 
