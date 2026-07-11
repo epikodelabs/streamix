@@ -251,6 +251,29 @@ describe('Atom System', () => {
       sum.dispose();
     });
 
+    it('should support callable derived scope reads for single and multiple atoms', () => {
+      const a = atom(1);
+      const b = atom(2);
+
+      const total = derived(($: DerivedScope) => {
+        const single = $(a);
+        const [left, right] = $(a, b);
+        return single + left + right;
+      });
+
+      expect(total.value).toBe(4);
+
+      a.next(3);
+      expect(total.value).toBe(8);
+
+      b.next(5);
+      expect(total.value).toBe(11);
+
+      a.dispose();
+      b.dispose();
+      total.dispose();
+    });
+
     it('should throw on circular dependency', () => {
       let derivedAtom: Atom<any>;
       const source = atom(0);
@@ -321,6 +344,34 @@ describe('Atom System', () => {
       expect(disposed).toBe(1);
 
       source.dispose();
+    });
+
+    it('should proxy atom properties on class-based computables', () => {
+      const price = atom(2);
+      const tax = atom(3);
+
+      class InvoiceComputable {
+        price = price;
+        tax = tax;
+
+        compute(self: DerivedScope) {
+          return (self as any).price.value + (self as any).tax.value;
+        }
+      }
+
+      const total = derived<number>(InvoiceComputable as any);
+
+      expect(total.value).toBe(5);
+
+      price.next(4);
+      expect(total.value).toBe(7);
+
+      tax.next(6);
+      expect(total.value).toBe(10);
+
+      price.dispose();
+      tax.dispose();
+      total.dispose();
     });
 
     it('should handle errors in derived', () => {
@@ -480,6 +531,70 @@ describe('Atom System', () => {
 
       source.dispose();
       unstable.dispose();
+    });
+
+    it('should notify onError subscribers immediately when a derived atom is already in error state', () => {
+      const broken = derived(() => {
+        throw new Error('boom');
+      }, { terminateOnError: false });
+
+      expect(() => broken.value).toThrowError('boom');
+
+      let message = '';
+      broken.onError(err => {
+        message = err.message;
+      });
+
+      expect(message).toBe('boom');
+      broken.dispose();
+    });
+
+    it('should terminate async derived atoms on rejection when configured', async () => {
+      const source = atom(1);
+
+      const broken = derived(async (self: DerivedScope) => {
+        const current = self.use(source);
+        await delay(5);
+        if (current.value === 1) {
+          throw new Error('fatal async');
+        }
+        return current.value;
+      }, { terminateOnError: true });
+
+      expect(broken.value).toBeUndefined();
+      await delay(15);
+
+      expect(broken.disposed).toBe(true);
+      expect(() => broken.value).toThrowError('Atom has been disposed');
+      source.dispose();
+    });
+
+    it('should expose derived subscriberCount as subscriptions change', () => {
+      const source = atom(1);
+      const doubled = derived((self: DerivedScope) => self.read(source) * 2);
+
+      const unsubA = doubled.subscribe(() => {});
+      const unsubB = doubled.subscribe(() => {});
+
+      expect(doubled.subscriberCount).toBe(2);
+
+      unsubA();
+      expect(doubled.subscriberCount).toBe(1);
+
+      unsubB();
+      expect(doubled.subscriberCount).toBe(0);
+
+      source.dispose();
+      doubled.dispose();
+    });
+
+    it('should expose derived atoms as async iterables', () => {
+      const doubled = derived(() => 2);
+      const iterator = doubled[Symbol.asyncIterator]() as AsyncIterableIterator<number>;
+
+      expect(typeof iterator.next).toBe('function');
+      expect(iterator[Symbol.asyncIterator]()).toBe(iterator);
+      doubled.dispose();
     });
 
     it('should not prune a dependency once read, even after a later run takes a different branch', () => {
@@ -651,6 +766,54 @@ describe('Atom System', () => {
       expect(f.safeValue).toBe(1);
       expect(() => f.value).toThrowError('boom');
       f.dispose();
+    });
+
+    it('should notify late onError subscribers immediately for failed flows', async () => {
+      const f = flow(async function*() {
+        throw new Error('late boom');
+      }, { terminateOnError: false });
+
+      f.subscribe(() => {});
+      await delay(30);
+
+      let message = '';
+      f.onError(err => {
+        message = err.message;
+      });
+
+      expect(message).toBe('late boom');
+      f.dispose();
+    });
+
+    it('should terminate flows on errors when configured', async () => {
+      const f = flow(async function*() {
+        yield 1;
+        throw new Error('fatal flow');
+      }, { terminateOnError: true });
+
+      f.subscribe(() => {});
+      await delay(30);
+
+      expect(f.disposed).toBe(true);
+    });
+
+    it('should expose flow subscriberCount as subscriptions change', () => {
+      const source = atom(1);
+      const f = flow(source);
+
+      const unsubA = f.subscribe(() => {});
+      const unsubB = f.subscribe(() => {});
+
+      expect(f.subscriberCount).toBe(2);
+
+      unsubA();
+      expect(f.subscriberCount).toBe(1);
+
+      unsubB();
+      expect(f.subscriberCount).toBe(0);
+
+      f.dispose();
+      source.dispose();
     });
 
     it('should handle concurrent dispose() calls without duplicate cleanup', async () => {

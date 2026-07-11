@@ -6,6 +6,7 @@ import {
   flow,
   flowExpr,
   getCurrentScope,
+  hasAtomEmitted,
   globalScope,
   map,
   method,
@@ -194,6 +195,21 @@ describe('Scope System', () => {
       expect(parent.child.parent).toBe(parent);
       parent.dispose();
     });
+
+    it('should keep Date values as writable atoms instead of nested scopes', async () => {
+      const createdAt = new Date('2024-01-01T00:00:00.000Z');
+      const updatedAt = new Date('2024-01-02T00:00:00.000Z');
+      const s = scope({ createdAt } as any) as any;
+
+      expect(s.createdAt).toBe(createdAt);
+
+      s.createdAt = updatedAt;
+      await delay();
+
+      expect(s.createdAt).toBe(updatedAt);
+      expect(s.at('createdAt').value).toBe(updatedAt);
+      s.dispose();
+    });
   });
 
   describe('self proxy in factory', () => {
@@ -357,6 +373,22 @@ describe('Scope System', () => {
 
       parent.dispose();
       source.dispose();
+    });
+
+    it('should clear loading when an uninitialized child atom is disposed before first emission', async () => {
+      const s = scope(() => ({
+        pending: atom<number>(),
+      }));
+
+      expect(s.loading).toBe(true);
+      expect(hasAtomEmitted(s.at('pending'))).toBe(false);
+
+      s.at('pending').dispose();
+      await delay();
+
+      expect(s.loading).toBe(false);
+      expect((s as any)._pendingCount).toBe(0);
+      s.dispose();
     });
   });
 
@@ -597,6 +629,31 @@ describe('Scope System', () => {
 
       s.dispose();
       expect(cleaned).toBe(true);
+    });
+
+    it('should report cleanup hook failures during disposal', () => {
+      const error = spyOn(console, 'error');
+      const s = scope(() => {
+        const current = getCurrentScope() as any;
+        current.cleanups.add(() => {
+          throw new Error('cleanup failed');
+        });
+        return {};
+      });
+
+      s.dispose();
+      expect(error).toHaveBeenCalled();
+    });
+
+    it('should report container disposal failures', async () => {
+      const error = spyOn(console, 'error');
+      const s = scope({});
+      spyOn(s.container, 'dispose').and.returnValue(Promise.reject(new Error('container failed')));
+
+      s.dispose();
+      await delay();
+
+      expect(error).toHaveBeenCalled();
     });
   });
 
@@ -1014,6 +1071,27 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should support shorthand derived callbacks with callable self reading external atoms', async () => {
+      const external = atom(2);
+      const s = scope({
+        count: 1,
+        total: (self: any) => self.count + self(external)
+      });
+
+      expect(s.total).toBe(3);
+
+      external.next(5);
+      await delay();
+      expect(s.total).toBe(6);
+
+      s.count = 3;
+      await delay();
+      expect(s.total).toBe(8);
+
+      external.dispose();
+      s.dispose();
+    });
+
     it('should support async derivedExpr callbacks', async () => {
       const s = scope({
         count: 1,
@@ -1101,6 +1179,20 @@ describe('Scope System', () => {
       source.next(5);
       await delay();
       expect(s.flowValue).toBe(5);
+      s.dispose();
+    });
+
+    it('should support shorthand dynamic callbacks that return expression markers', async () => {
+      const s = scope({
+        count: 2,
+        doubled: () => derivedExpr((self) => self.count * 2)
+      });
+
+      expect(s.doubled).toBe(4);
+
+      s.count = 4;
+      await delay();
+      expect(s.doubled).toBe(8);
       s.dispose();
     });
 
@@ -1293,6 +1385,26 @@ describe('Scope System', () => {
       }))).toThrowError(/existing state key/);
     });
 
+    it('should reject reserved setup callback extension keys', () => {
+      expect(() => scope({ count: 0 }, () => ({
+        loading() {
+          return true;
+        },
+      } as any))).toThrowError(/reserved scope property/);
+    });
+
+    it('should reject setup callback extensions that collide with scope instance members', () => {
+      expect(() => scope({ count: 0 }, () => ({
+        dispose() {
+          return undefined;
+        },
+      } as any))).toThrowError(/existing scope property/);
+    });
+
+    it('should reject non-object setup callback return values', () => {
+      expect(() => scope({ count: 0 }, () => 123 as any)).toThrowError(/object or void/);
+    });
+
     it('should support derivedExpr depending on another derivedExpr', async () => {
       const s = scope({
         count: 1,
@@ -1325,6 +1437,30 @@ describe('Scope System', () => {
 
       expect(s.count).toBe(0);
       expect(s.doubled).toBe(0);
+      s.dispose();
+    });
+
+    it('should throw when subscribeTo targets a non-atom scope member', () => {
+      const s = scope({
+        nested: { value: 1 },
+      });
+
+      expect(() => s.subscribeTo('nested' as any, () => {})).toThrowError(/non-atom structure/);
+      s.dispose();
+    });
+
+    it('should warn when shorthand state attempts to overwrite reserved loading and dirty keys', () => {
+      const warn = spyOn(console, 'warn');
+      const s = scope({
+        loading: 123,
+        dirty: 456,
+        value: 1,
+      } as any);
+
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(s.loading).toBe(false);
+      expect(s.dirty).toBe(false);
+      expect(s['value']).toBe(1);
       s.dispose();
     });
   });

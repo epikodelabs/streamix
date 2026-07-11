@@ -67,6 +67,21 @@ describe('operator helpers', () => {
     await expectAsync(iterator.throw?.(new Error('boom'))!).toBeResolvedTo(NEXT(99));
   });
 
+  it('should resolve default throw() to DONE when the source handles the error and completes', async () => {
+    const source: AsyncIterator<number> = {
+      next: async () => DONE,
+      throw: async () => DONE,
+    };
+
+    const operator = createOperator<number>('identity', src => ({
+      next: () => src.next(),
+    }));
+
+    const iterator = operator.apply(source);
+
+    await expectAsync(iterator.throw?.(new Error('boom'))!).toBeResolvedTo(DONE);
+  });
+
   it('should preserve custom iterator return and throw implementations', async () => {
     const source: AsyncIterator<number> = {
       next: async () => DONE,
@@ -114,6 +129,21 @@ describe('operator helpers', () => {
 
     await expectAsync(iterator.throw?.('boom')!).toBeRejectedWithError('boom');
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('should normalize non-Error throw values in default operator throw()', async () => {
+    const source: AsyncIterator<number> = {
+      next: async () => DONE,
+      return: async () => DONE,
+    };
+
+    const operator = createOperator<number>('identity', src => ({
+      next: () => src.next(),
+    }));
+
+    const iterator = operator.apply(source);
+
+    await expectAsync(iterator.throw?.('boom')!).toBeRejectedWithError('boom');
   });
 
   it('should run push-operator cleanup once and ignore pushes after return()', async () => {
@@ -167,6 +197,23 @@ describe('operator helpers', () => {
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
+  it('should handle push operators without cleanup callbacks', async () => {
+    const source: AsyncIterator<number> = {
+      next: async () => DONE,
+      return: jasmine.createSpy('return').and.resolveTo(DONE),
+    };
+
+    const operator = createPushOperator<number>('pusher', (_source, output) => {
+      output.push(1);
+    });
+
+    const iterator = operator.apply(source);
+
+    await expectAsync(iterator.next()).toBeResolvedTo(NEXT(1));
+    await expectAsync(iterator.return?.('done')!).toBeResolvedTo(DONE);
+    expect((source.return as jasmine.Spy)).toHaveBeenCalledTimes(1);
+  });
+
   it('should await push-operator cleanup before calling source.return()', async () => {
     const events: string[] = [];
     const source: AsyncIterator<number> = {
@@ -191,5 +238,25 @@ describe('operator helpers', () => {
     await expectAsync(iterator.next()).toBeResolvedTo(NEXT(1));
     await expectAsync(iterator.return?.('done')!).toBeResolvedTo(DONE);
     expect(events).toEqual(['cleanup:start', 'cleanup:end', 'source:return']);
+  });
+
+  it('should warn when source.return() throws during push-operator return()', async () => {
+    const warn = spyOn(console, 'warn');
+    const source: AsyncIterator<number> = {
+      next: async () => DONE,
+      return: async () => {
+        throw new Error('return failed');
+      },
+    };
+
+    const operator = createPushOperator<number>('pusher', (_source, output) => {
+      output.push(1);
+    });
+
+    const iterator = operator.apply(source);
+
+    await expectAsync(iterator.next()).toBeResolvedTo(NEXT(1));
+    await expectAsync(iterator.return?.('done')!).toBeResolvedTo(DONE);
+    expect(warn).toHaveBeenCalled();
   });
 });
