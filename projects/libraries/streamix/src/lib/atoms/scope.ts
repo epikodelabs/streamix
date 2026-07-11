@@ -283,6 +283,10 @@ type ScopePublicValue<T> = T extends Atom<infer U> ? WidenValue<U> : T;
 type ScopeSetupResult = Record<string | symbol, any> | void;
 type ScopeSetupReturn<T> = T extends void ? {} : T;
 type ScopeOptions = { mode?: "discrete" | "analog" };
+type ScopeReservedAtoms = {
+  loading: Writable<boolean>;
+  dirty: Writable<boolean>;
+};
 
 type IsReadonlyScopeConfigValue<T> =
   T extends DerivedExpr<any, any> ? true
@@ -311,13 +315,13 @@ export type ScopeAtoms<T> = T extends Record<string, any>
   : any;
 
 export type ScopeReturn<T extends Record<string, any>> = Scope<T> & UnwrapScopeValues<T> & {
-  at: AtomAccessor<T>;
-  subscribeTo<K extends keyof T>(key: K, callback: (value: AtomValueOf<T[K]>) => void): Subscription;
+  at: AtomAccessor<T & ScopeReservedAtoms>;
+  subscribeTo<K extends keyof (T & ScopeReservedAtoms)>(key: K, callback: (value: AtomValueOf<(T & ScopeReservedAtoms)[K]>) => void): Subscription;
 };
 
 export type ScopeReturnFromConfig<T extends Record<string, any>> = Scope<ScopeOfConfig<T>> & UnwrapScopeValuesFromConfig<T> & {
-  at: AtomAccessor<ScopeOfConfig<T>>;
-  subscribeTo<K extends keyof ScopeOfConfig<T>>(key: K, callback: (value: AtomValueOf<ScopeOfConfig<T>[K]>) => void): Subscription;
+  at: AtomAccessor<ScopeOfConfig<T> & ScopeReservedAtoms>;
+  subscribeTo<K extends keyof (ScopeOfConfig<T> & ScopeReservedAtoms)>(key: K, callback: (value: AtomValueOf<(ScopeOfConfig<T> & ScopeReservedAtoms)[K]>) => void): Subscription;
 };
 
 export interface Scope<T extends Record<string, any> = Record<string, any>> {

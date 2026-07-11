@@ -167,6 +167,21 @@ describe('Atom System', () => {
       a.dispose();
     });
 
+    it('should always expose dirty as false for writable atoms', async () => {
+      const a = atom(0);
+
+      expect(a.dirty).toBe(false);
+      a.next(1);
+      expect(a.dirty).toBe(false);
+
+      a.fail(new Error('boom'), { terminate: false });
+      expect(a.dirty).toBe(false);
+
+      a.recover?.();
+      expect(a.dirty).toBe(false);
+      a.dispose();
+    });
+
     it('should not schedule error broadcasts when propagateErrors is false', () => {
       const env = createTestEnvironment();
 
@@ -401,14 +416,18 @@ describe('Atom System', () => {
       });
 
       expect(total.value).toBeUndefined();
+      expect(total.dirty).toBe(false);
       await delay(10);
       expect(total.value).toBe(10);
+      expect(total.dirty).toBe(false);
 
       source.next(2);
+      expect(total.dirty).toBe(true);
       expect(total.value).toBe(10);
 
       await delay(15);
       expect(total.value).toBe(20);
+      expect(total.dirty).toBe(false);
 
       source.dispose();
       total.dispose();
@@ -694,6 +713,7 @@ describe('Atom System', () => {
       f.dispose();
       dep.dispose();
     });
+
   });
 
 

@@ -67,6 +67,33 @@ describe('operator helpers', () => {
     await expectAsync(iterator.throw?.(new Error('boom'))!).toBeResolvedTo(NEXT(99));
   });
 
+  it('should preserve custom iterator return and throw implementations', async () => {
+    const source: AsyncIterator<number> = {
+      next: async () => DONE,
+      return: jasmine.createSpy('sourceReturn').and.resolveTo({ done: true, value: 'source' }),
+      throw: jasmine.createSpy('sourceThrow').and.resolveTo(DONE),
+    };
+
+    const customReturn = jasmine.createSpy('customReturn').and.resolveTo({ done: true, value: 'custom' });
+    const customThrow = jasmine.createSpy('customThrow').and.resolveTo(NEXT(7));
+
+    const operator = createOperator<number>('identity', () => ({
+      next: () => source.next(),
+      return: customReturn,
+      throw: customThrow,
+    }));
+
+    const iterator = operator.apply(source);
+
+    await expectAsync(iterator.return?.('ignored')!).toBeResolvedTo({ done: true, value: 'custom' });
+    await expectAsync(iterator.throw?.('ignored')!).toBeResolvedTo(NEXT(7));
+
+    expect(customReturn).toHaveBeenCalled();
+    expect(customThrow).toHaveBeenCalled();
+    expect(source.return).not.toHaveBeenCalled();
+    expect(source.throw).not.toHaveBeenCalled();
+  });
+
   it('should rethrow the original error after throw cleanup', async () => {
     const warn = spyOn(console, 'warn');
     const source: AsyncIterator<number> = {
@@ -138,5 +165,31 @@ describe('operator helpers', () => {
 
     await expectAsync(iterator.throw?.('kaboom')!).toBeRejectedWithError('kaboom');
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('should await push-operator cleanup before calling source.return()', async () => {
+    const events: string[] = [];
+    const source: AsyncIterator<number> = {
+      next: async () => DONE,
+      return: async () => {
+        events.push('source:return');
+        return DONE;
+      },
+    };
+
+    const operator = createPushOperator<number>('pusher', (_source, output) => {
+      output.push(1);
+      return async () => {
+        events.push('cleanup:start');
+        await Promise.resolve();
+        events.push('cleanup:end');
+      };
+    });
+
+    const iterator = operator.apply(source);
+
+    await expectAsync(iterator.next()).toBeResolvedTo(NEXT(1));
+    await expectAsync(iterator.return?.('done')!).toBeResolvedTo(DONE);
+    expect(events).toEqual(['cleanup:start', 'cleanup:end', 'source:return']);
   });
 });

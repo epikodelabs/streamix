@@ -388,6 +388,35 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should expose dirty through the backing dirty atom and subscribeTo', async () => {
+      const s = scope({
+        count: 1,
+        doubled: async (self: any) => {
+          void self.count;
+          await delay(5);
+          return self.count * 2;
+        }
+      });
+
+      const values: boolean[] = [];
+      const unsubscribe = s.subscribeTo('dirty', (value: boolean) => values.push(value));
+
+      await delay(10);
+      expect(s.at.dirty.value).toBe(false);
+
+      s.count = 3;
+      expect(s.dirty).toBe(true);
+      expect(s.at.dirty.value).toBe(true);
+
+      await delay(15);
+      expect(s.dirty).toBe(false);
+      expect(s.at.dirty.value).toBe(false);
+      expect(values).toEqual([false, true, false]);
+
+      unsubscribe();
+      s.dispose();
+    });
+
     it('should reflect dirty nested scopes', async () => {
       const child = scope({
         count: 1,
