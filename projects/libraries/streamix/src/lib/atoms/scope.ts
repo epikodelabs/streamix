@@ -62,70 +62,24 @@ function isExprMarkerOrDynamic(value: any): value is AtomExpr | DerivedExpr | Pi
   return isExprMarkerBase(value) || isDynamicExpr(value);
 }
 
-function createTrackedScopeValueReader(
-  readAtom: <T>(atom: Atom<T>) => T,
-): (value: any) => any {
-  const wrappedScopes = new WeakMap<object, any>();
-
-  const readValue = (value: any): any => {
-    if (isAtom(value)) {
-      return readAtom(value);
-    }
-
-    if (isScope(value)) {
-      const existing = wrappedScopes.get(value as object);
-      if (existing) {
-        return existing;
-      }
-
-      const wrappedScope = new Proxy(value, {
-        get(target, prop, receiver) {
-          if (
-            prop === "at" ||
-            prop === "subscribeTo" ||
-            prop === "dispose" ||
-            prop === "loading" ||
-            typeof prop === "symbol" ||
-            !Object.prototype.hasOwnProperty.call((target as any)._rawState, prop)
-          ) {
-            const result = Reflect.get(target, prop, receiver);
-            return typeof result === "function" ? result.bind(target) : result;
-          }
-
-          return readValue((target as any)._rawState[prop]);
-        },
-      });
-
-      wrappedScopes.set(value as object, wrappedScope);
-      return wrappedScope;
-    }
-
-    return value;
-  };
-
-  return readValue;
-}
-
 function createTrackedScopeSelf(
   scopeSelf: any,
   atoms: ((key: string | symbol) => any) | undefined,
   readAtom: <T>(atom: Atom<T>) => T,
 ): any {
-  const readValue = createTrackedScopeValueReader(readAtom);
-
   return new Proxy(function (targetAtom: any) {
     if (isAtom(targetAtom)) {
       return readAtom(targetAtom);
     }
-    return scopeSelf(targetAtom);
+    return scopeSelf?.(targetAtom);
   }, {
     get(_target, prop, receiver) {
       if (atoms && (typeof prop === "string" || typeof prop === "symbol")) {
-        return readValue(atoms(prop));
+        const value = atoms(prop);
+        return isAtom(value) ? readAtom(value) : value;
       }
-
       const result = Reflect.get(scopeSelf, prop, receiver);
-      return readValue(result);
+      return isAtom(result) ? readAtom(result) : result;
     },
     set(_target, prop, value) {
       Reflect.set(scopeSelf, prop, value);
@@ -150,12 +104,10 @@ function evaluateExprMarker(
   if (isDynamicExpr(marker)) {
     const value = marker.fn(self, atoms);
 
-    // If the factory returns an atom, a pipe, or a flow, return it directly.
     if (isAtomLike(value)) {
       return value;
     }
 
-    // If the factory returned a nested FlowExpr/PipeExpr/AtomExpr, evaluate it directly!
     if (isExprMarkerBase(value)) {
       return evaluateExprMarker(value, self, atoms);
     }
