@@ -209,7 +209,11 @@ type UnwrapSnapshotValues<T> = {
         : T[K];
 };
 
-type WidenValue<T> =
+/**
+ * Widens literal primitives and readonly arrays into the mutable public value shape
+ * exposed by scope proxies and atoms.
+ */
+export type WidenValue<T> =
   T extends string ? string
   : T extends number ? number
   : T extends boolean ? boolean
@@ -218,14 +222,26 @@ type WidenValue<T> =
   : T extends readonly (infer U)[] ? WidenValue<U>[]
   : T;
 
-type UnwrapScopeValues<T> = {
+/**
+ * Converts atom-backed scope members into their public value shape.
+ */
+export type UnwrapScopeValues<T> = {
   [K in keyof T]: T[K] extends Atom<infer U> ? WidenValue<U> : T[K];
 };
 
-type AtomOf<T> = T extends Writable<infer U> ? Writable<U> : T extends Atom<infer U> ? Atom<U> : never;
-type AtomValueOf<T> = T extends Atom<infer U> ? U : never;
+/**
+ * Resolves the atom type associated with a scope field.
+ */
+export type AtomOf<T> = T extends Writable<infer U> ? Writable<U> : T extends Atom<infer U> ? Atom<U> : never;
+/**
+ * Extracts the runtime value type from an atom.
+ */
+export type AtomValueOf<T> = T extends Atom<infer U> ? U : never;
 
-type AtomAccessor<T> = { [K in keyof T]: AtomOf<T[K]> } & (<K extends keyof T>(key: K) => AtomOf<T[K]>);
+/**
+ * Accessor surface used by `scope.at`, exposing raw atoms by property or key lookup.
+ */
+export type AtomAccessor<T> = { [K in keyof T]: AtomOf<T[K]> } & (<K extends keyof T>(key: K) => AtomOf<T[K]>);
 type DefinedAtomAccessor<Shape extends Record<string, any>> = { [K in keyof Shape]: Atom<Shape[K]> } & (<K extends keyof Shape>(key: K) => Atom<Shape[K]>);
 
 type DefinedValue<Top extends Record<string, any>, T> =
@@ -237,7 +253,10 @@ type DefinedValue<Top extends Record<string, any>, T> =
   | FlowExpr<T, Top>
   | ((self: Top, atoms: DefinedAtomAccessor<Top>) => T | Promise<T> | Atom<T>);
 
-type ScopeValue<T> =
+/**
+ * Normalizes shorthand scope member definitions into their owned runtime node shape.
+ */
+export type ScopeValue<T> =
   | T extends ScopeReturn<any> ? T
   : T extends Atom<any> ? T
   : T extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
@@ -251,7 +270,10 @@ type ScopeValue<T> =
 
 type ScopeOf<T extends Record<string, any>> = { [K in keyof T]: ScopeValue<T[K]>; };
 
-type ScopeResolvedFunctionValue<TResult> =
+/**
+ * Resolves the public runtime type of a function-valued scope member.
+ */
+export type ScopeResolvedFunctionValue<TResult> =
   Awaited<TResult> extends ScopeReturn<any> ? Awaited<TResult>
   : Awaited<TResult> extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
   : Awaited<TResult> extends Writable<any> ? Awaited<TResult>
@@ -262,7 +284,10 @@ type ScopeResolvedFunctionValue<TResult> =
   : Awaited<TResult> extends FlowExpr<infer U, any> ? Atom<U>
   : Atom<WidenValue<Awaited<TResult>>>;
 
-type ScopeResolvedValue<T> =
+/**
+ * Resolves config-form scope member definitions into their public runtime type.
+ */
+export type ScopeResolvedValue<T> =
   T extends ScopeReturn<any> ? T
   : T extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
   : T extends Method<infer TFn> ? TFn
@@ -277,18 +302,39 @@ type ScopeResolvedValue<T> =
   : T extends Record<string, any> ? ScopeReturnFromConfig<T>
   : Writable<WidenValue<T>>;
 
-type ScopeOfConfig<T extends Record<string, any>> = { [K in keyof T]: ScopeResolvedValue<T[K]>; };
+/**
+ * Applies {@link ScopeResolvedValue} across a config object.
+ */
+export type ScopeOfConfig<T extends Record<string, any>> = { [K in keyof T]: ScopeResolvedValue<T[K]>; };
 
-type ScopePublicValue<T> = T extends Atom<infer U> ? WidenValue<U> : T;
-type ScopeSetupResult = Record<string | symbol, any> | void;
-type ScopeSetupReturn<T> = T extends void ? {} : T;
-type ScopeOptions = { mode?: "discrete" | "analog" };
-type ScopeReservedAtoms = {
+/**
+ * Converts an atom-backed member into the value shape exposed on the scope proxy.
+ */
+export type ScopePublicValue<T> = T extends Atom<infer U> ? WidenValue<U> : T;
+/**
+ * Return type allowed from the optional `scope(..., setup)` callback.
+ */
+export type ScopeSetupResult = Record<string | symbol, any> | void;
+/**
+ * Maps a setup callback return value into the extension surface added to the scope.
+ */
+export type ScopeSetupReturn<T> = T extends void ? {} : T;
+/**
+ * Options that control how a scope batches and emits updates.
+ */
+export type ScopeOptions = { mode?: "discrete" | "analog" };
+/**
+ * Built-in atoms that every scope owns in addition to user-defined state.
+ */
+export type ScopeReservedAtoms = {
   loading: Writable<boolean>;
   dirty: Writable<boolean>;
 };
 
-type IsReadonlyScopeConfigValue<T> =
+/**
+ * Predicate used to determine whether a config-form scope member becomes readonly.
+ */
+export type IsReadonlyScopeConfigValue<T> =
   T extends DerivedExpr<any, any> ? true
   : T extends PipeExpr<any, any> ? true
   : T extends FlowExpr<any, any> ? true
@@ -298,27 +344,45 @@ type IsReadonlyScopeConfigValue<T> =
   : T extends Atom<any> ? true
   : false;
 
-type ReadonlyScopeConfigKeys<T extends Record<string, any>> = {
+/**
+ * Keys of a config-form scope definition that become readonly on the public proxy.
+ */
+export type ReadonlyScopeConfigKeys<T extends Record<string, any>> = {
   [K in keyof T]-?: IsReadonlyScopeConfigValue<T[K]> extends true ? K : never;
 }[keyof T];
 
-type WritableScopeConfigKeys<T extends Record<string, any>> = Exclude<keyof T, ReadonlyScopeConfigKeys<T>>;
+/**
+ * Keys of a config-form scope definition that remain writable on the public proxy.
+ */
+export type WritableScopeConfigKeys<T extends Record<string, any>> = Exclude<keyof T, ReadonlyScopeConfigKeys<T>>;
 
-type UnwrapScopeValuesFromConfig<T extends Record<string, any>> = {
+/**
+ * Public proxy shape produced from config-form scope definitions.
+ */
+export type UnwrapScopeValuesFromConfig<T extends Record<string, any>> = {
   readonly [K in ReadonlyScopeConfigKeys<T>]: ScopePublicValue<ScopeResolvedValue<T[K]>>;
 } & {
   -readonly [K in WritableScopeConfigKeys<T>]: ScopePublicValue<ScopeResolvedValue<T[K]>>;
 };
 
+/**
+ * Maps a scope state shape to the raw atom graph used by expression helpers.
+ */
 export type ScopeAtoms<T> = T extends Record<string, any>
   ? { [K in keyof T]: T[K] extends Scope<infer U> ? ScopeAtoms<U> : AtomOf<ScopeValue<T[K]>> }
   : any;
 
+/**
+ * Runtime proxy type returned from `scope()` when the state shape is already normalized.
+ */
 export type ScopeReturn<T extends Record<string, any>> = Scope<T> & UnwrapScopeValues<T> & {
   at: AtomAccessor<T & ScopeReservedAtoms>;
   subscribeTo<K extends keyof (T & ScopeReservedAtoms)>(key: K, callback: (value: AtomValueOf<(T & ScopeReservedAtoms)[K]>) => void): Subscription;
 };
 
+/**
+ * Runtime proxy type returned from `scope()` when using config-form shorthand definitions.
+ */
 export type ScopeReturnFromConfig<T extends Record<string, any>> = Scope<ScopeOfConfig<T>> & UnwrapScopeValuesFromConfig<T> & {
   at: AtomAccessor<ScopeOfConfig<T> & ScopeReservedAtoms>;
   subscribeTo<K extends keyof (ScopeOfConfig<T> & ScopeReservedAtoms)>(key: K, callback: (value: AtomValueOf<(ScopeOfConfig<T> & ScopeReservedAtoms)[K]>) => void): Subscription;
