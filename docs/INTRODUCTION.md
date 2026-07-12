@@ -44,7 +44,7 @@ const summary = derived(() => `count is ${count.value}`);
 count.next(5);
 console.log(summary.value); // "count is 5"
 
-const doubled = pipe(iterate(count), map(n => n * 2), take(3));
+const doubled = pipe(iterate(count), map(n => n * 2), take(1));
 for await (const value of doubled) console.log(value);
 ```
 
@@ -53,13 +53,18 @@ for await (const value of doubled) console.log(value);
 Operators transform flows. Sync and async callbacks are both supported.
 
 ```ts
-pipe(
-  iterate(count),
-  map(async x => await enrich(x)),
+import { filter, map, pipe, range, take } from '@epikodelabs/streamix';
+
+const valid = pipe(
+  range(1, 100),
+  map(x => enrich(x)),
   filter(x => x.valid),
-  debounce(200),
   take(10)
-)
+);
+
+for await (const item of valid) {
+  console.log(item);
+}
 ```
 
 Full catalog: `audit`, `buffer`, `bufferCount`, `bufferUntil`, `bufferWhile`, `catchError`, `concatMap`, `debounce`, `defaultIfEmpty`, `delay`, `delayUntil`, `distinctUntilChanged`, `distinctUntilKeyChanged`, `endWith`, `exhaustMap`, `expand`, `filter`, `finalize`, `first`, `fork`, `groupBy`, `ignoreElements`, `last`, `map`, `mergeMap`, `observeOn`, `partition`, `reduce`, `sample`, `scan`, `select`, `shareReplay`, `skip`, `skipUntil`, `skipWhile`, `slidingPair`, `startWith`, `switchMap`, `take`, `takeUntil`, `takeWhile`, `tap`, `throttle`, `throwError`, `toArray`, `withLatestFrom`.
@@ -102,13 +107,15 @@ const onlyPrime = () =>
   }));
 ```
 
-### `query()` - promise from a flow
+### Consume a single emission
 
 ```ts
-const first = await pipe(interval(1000), take(1)).query();
+for await (const first of pipe(interval(1000), take(1))) {
+  console.log(first);
+}
 ```
 
-Resolves to the first emitted value and unsubscribes automatically.
+The pipeline completes after the first emitted value.
 
 ---
 
@@ -117,23 +124,24 @@ Resolves to the first emitted value and unsubscribes automatically.
 Offload heavy work to Web Workers without losing composability.
 
 ```ts
-import { actor, compose, compute, coroutine, main } from '@epikodelabs/streamix/coroutines';
+import { actor, coroutine, main } from '@epikodelabs/streamix/coroutines';
 
-// Run a function in a worker pool
+// Run a function in one dedicated worker
 const square = coroutine(function square(value: number) {
   return value * value;
 });
-const result = await square.processTask(7); // 49
-await square.finalize();
+const result = await square.run(7); // 49
+await square.dispose();
 
 // Long-lived stateful worker
-const counter = actor('counter', (msg: { action: 'inc' | 'get' }, state: number) => {
-  if (msg.action === 'inc') return state + 1;
+const counter = actor('counter', (msg: { topic: string; payload?: { amount?: number } }, state: number) => {
+  if (msg.topic === 'inc') return state + (msg.payload?.amount ?? 1);
   return state;
 }, 0);
 
-const one = await main.outbox.request(counter, 'update', { action: 'inc' }); // 1
-const two = await main.outbox.request(counter, 'update', { action: 'inc' }); // 2
+main.outbox.send(counter, 'inc', { amount: 1 });
+const one = await main.outbox.request(counter, 'inc', { amount: 0 }); // 1
+const two = await main.outbox.request(counter, 'inc', { amount: 1 }); // 2
 await main.outbox.stop(counter);
 ```
 
@@ -172,7 +180,7 @@ async function* primes() {
 }
 
 // Only 5 primes are ever computed
-for await (const p of pipe(primes, take(5))) {
+for await (const p of pipe(primes(), take(5))) {
   console.log(p);
 }
 ```
