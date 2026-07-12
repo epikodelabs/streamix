@@ -44,7 +44,7 @@ const summary = derived(() => `count is ${count.value}`);
 count.next(5);
 console.log(summary.value); // "count is 5"
 
-const doubled = pipe(iterate(count), map(n => n * 2), take(1));
+const doubled = pipe(count, map(n => n * 2), take(1));
 for await (const value of doubled) console.log(value);
 ```
 
