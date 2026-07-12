@@ -1,6 +1,6 @@
 {
   "name": "@epikodelabs/streamix",
-  "version": "2.0.49",
+  "version": "2.0.50",
   "description": "Pull-based reactive streams with coroutines and async iterators",
   "license": "AGPL-3.0-or-later",
   "keywords": [
