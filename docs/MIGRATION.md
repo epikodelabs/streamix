@@ -84,23 +84,44 @@ app.dispose();
 const counter = scope({
   count: 0,
   doubled: self => self.count * 2,
-  increment() { this.count++; }
-});
+}, self => ({
+  increment() {
+    self.count += 1;
+  },
+}));
 ```
 
 **Form**
 ```ts
 const form = scope({
   email: "",
-  isValid: self => self.email.includes("@")
-});
+  password: "",
+  isValid: self => self.email.includes("@") && self.password.length >= 8,
+}, self => ({
+  submit() {
+    if (!self.isValid) return;
+    // submit form
+  },
+}));
 ```
 
 **Async Data**
 ```ts
-const user = flow(async function* () {
-  const res = await fetch(`/api/users/${id}`);
-  yield await res.json();
+const user = scope({
+  userId: "",
+  profile: self => {
+    const userId = self.userId;
+
+    return flow(async function* (signal) {
+      if (!userId) {
+        yield null;
+        return;
+      }
+
+      const res = await fetch(`/api/users/${userId}`, { signal });
+      yield await res.json();
+    });
+  },
 });
 ```
 
