@@ -60,7 +60,7 @@ const fullName = derived($ =>
 
 The `$` helper tracks dependencies. You can also use async functions — the atom keeps the last good value while pending.
 
-Async `derived()` callbacks only track atoms read before the first `await`. Capture dependencies up front with `$.use(...)` or `$.read(...)`:
+Async `derived()` callbacks only track atoms read before the first `await`. Capture dependencies up front with `$.use(...)` or `$.read(...)`, or by explicitly touching them in a void expression:
 
 ```ts
 const total = derived(async $ => {
