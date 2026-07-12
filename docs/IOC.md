@@ -153,21 +153,7 @@ infraModule(app);
 
 Every streamix `scope()` gets its own container that inherits from the parent scope's container. This lets you register services naturally inside a scope and have them cleaned up when the scope disposes.
 
-Object form works for state that only reads services:
-
-```ts
-import { scope, inject, createToken } from '@epikodelabs/streamix';
-
-const Config = createToken<{ apiUrl: string }>('config');
-
-const feature = scope({
-  apiUrl: () => inject(Config).apiUrl,
-});
-
-feature.dispose(); // scope container and its services are cleaned up
-```
-
-Use the factory form when you also need to register services at setup time with `provide()`:
+Prefer the factory form for IoC-backed scope state so services are resolved eagerly while the scope is active and then closed over by reactive values:
 
 ```ts
 import { scope, provide, inject, createToken } from '@epikodelabs/streamix';
@@ -176,16 +162,20 @@ const Config = createToken<{ apiUrl: string }>('config');
 
 const feature = scope(() => {
   provide(Config, () => ({ apiUrl: '/api/v1' }), { lifetime: 'singleton' });
+  const config = inject(Config); // resolved while this scope is active
 
   return {
-    apiUrl: () => inject(Config).apiUrl,
+    apiUrl: config.apiUrl,
+    apiBase: () => `${config.apiUrl}/users`,
   };
 });
 
-feature.dispose(); // scope container and its services are cleaned up
+feature.dispose(); // triggers scope disposal and service cleanup
 ```
 
-`provide()` and `inject()` use the current scope's container when called inside a scope, and fall back to the global container outside of one.
+`provide()` and `inject()` use the current scope's container when called during scope creation, and fall back to the global container outside of a scope. If a reactive callback needs a service, resolve it eagerly while the scope is being created and close over the resolved value instead of calling `inject()` later inside `derived()`/`flow()`/scope computed callbacks.
+
+Note that `scope.dispose()` is synchronous. It starts service cleanup immediately, but async container cleanups continue in the background. If you need to await service cleanup deterministically, dispose the container directly with `await container.dispose()`.
 
 ## Global container
 
@@ -210,6 +200,8 @@ beforeEach(() => {
   resetGlobalContainer();
 });
 ```
+
+`resetGlobalContainer()` replaces the global container with a fresh one. It does not dispose the old container first, so explicitly dispose the previous global container when cleanup matters.
 
 ## When not to use it
 
