@@ -6,22 +6,39 @@ export const DERIVED_EXPR = Symbol("streamix.derivedExpr");
 export const PIPE_EXPR = Symbol("streamix.pipeExpr");
 export const FLOW_EXPR = Symbol("streamix.flowExpr");
 
+/**
+ * Scope-definition marker for a writable atom.
+ *
+ * Use inside `scope({...})` when a field should stay writable but needs atom
+ * options or an explicitly optional initial value.
+ */
 export interface AtomExpr<T = any> {
   [ATOM_EXPR]: true;
   initialValue?: T;
   options?: AtomOptions;
 }
 
+/**
+ * Scope-definition marker for a readonly derived value.
+ */
 export interface DerivedExpr<T = any, Self = any> {
   [DERIVED_EXPR]: true;
   fn: (self: Self) => T | Promise<T>;
 }
 
+/**
+ * Scope-definition marker for an atom produced from the current scope state and
+ * raw atom graph.
+ */
 export interface PipeExpr<T = any, Self = any> {
   [PIPE_EXPR]: true;
   fn: (self: Self, atoms: ScopeAtoms<Self>) => Atom<T>;
 }
 
+/**
+ * Scope-definition marker for a flow-backed atom produced from the current
+ * scope state and raw atom graph.
+ */
 export interface FlowExpr<T = any, Self = any> {
   [FLOW_EXPR]: true;
   fn: (self: Self, atoms: ScopeAtoms<Self>) => Atom<T>;
@@ -43,20 +60,41 @@ export function isFlowExpr(value: any): value is FlowExpr {
   return value != null && typeof value === "object" && value[FLOW_EXPR] === true;
 }
 
+/**
+ * Marks a scope field as a writable atom expression.
+ *
+ * ```ts
+ * const s = scope({
+ *   count: atomExpr(0),
+ * });
+ * ```
+ */
 export function atomExpr<T>(initialValue?: T, options?: AtomOptions): AtomExpr<T> {
   return { [ATOM_EXPR]: true, initialValue, options };
 }
 
+/**
+ * Marks a scope field as a readonly derived expression.
+ *
+ * Plain functions in config-form scopes are also treated as derived values, but
+ * this marker is useful when a more explicit definition is desired.
+ */
 export function derivedExpr<TReturn, Self = any>(
   fn: (self: Self) => TReturn,
 ): DerivedExpr<Awaited<TReturn>, Self> {
   return { [DERIVED_EXPR]: true, fn: fn as (self: Self) => Awaited<TReturn> | Promise<Awaited<TReturn>> };
 }
 
+/**
+ * Marks a scope field as an atom produced by a pipe-style expression.
+ */
 export function pipeExpr<T, Self = any>(fn: (self: Self, atoms: ScopeAtoms<Self>) => Atom<T>): PipeExpr<T, Self> {
   return { [PIPE_EXPR]: true, fn };
 }
 
+/**
+ * Marks a scope field as an atom produced by a flow-style expression.
+ */
 export function flowExpr<T, Self = any>(fn: (self: Self, atoms: ScopeAtoms<Self>) => Atom<T>): FlowExpr<T, Self> {
   return { [FLOW_EXPR]: true, fn };
 }

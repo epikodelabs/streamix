@@ -329,6 +329,7 @@ export type ScopeSetupResult = Record<string | symbol, any> | void;
  * Maps a setup callback return value into the extension surface added to the scope.
  */
 export type ScopeSetupReturn<T> = T extends void ? {} : T;
+type ScopeSetupReturnFromArg<T> = T extends (...args: any[]) => infer TResult ? ScopeSetupReturn<TResult> : {};
 /**
  * Wrapped scope surface exposed as the first `self` parameter in setup callbacks.
  */
@@ -337,11 +338,19 @@ export type ScopeSetupSelf<T extends Record<string, any>> = T & Scope;
  * Wrapped scope surface exposed as the first `self` parameter in config-form setup callbacks.
  */
 export type ScopeSetupSelfFromConfig<T extends Record<string, any>> = T & Scope;
-type ScopeSetupCallback<TSelf, TScope, TResult extends ScopeSetupResult> = (self: TSelf, scope: TScope) => TResult;
+type ScopeSetupCallback<TSelf, TScope> = (self: TSelf, scope: TScope) => ScopeSetupResult;
 /**
  * Options that control how a scope batches and emits updates.
  */
-export type ScopeOptions = { mode?: "discrete" | "analog" };
+export type ScopeOptions = {
+  /**
+   * Notification mode for atoms created inside the scope.
+   *
+   * `discrete` emits synchronously. `analog` batches/coalesces updates until the
+   * scheduler flushes them.
+   */
+  mode?: "discrete" | "analog";
+};
 /**
  * Built-in atoms that every scope owns in addition to user-defined state.
  */
@@ -407,16 +416,32 @@ export type ScopeReturnFromConfig<T extends Record<string, any>> = Simplify<Scop
   subscribeTo<K extends keyof (ScopeOfConfig<T> & ScopeReservedAtoms)>(key: K, callback: (value: AtomValueOf<(ScopeOfConfig<T> & ScopeReservedAtoms)[K]>) => void): Subscription;
 }>;
 
+/**
+ * Runtime scope instance.
+ *
+ * A scope owns the atoms created from a definition object, exposes their current
+ * values as properties, and provides lifecycle cleanup through {@link dispose}.
+ */
 export interface Scope<T extends Record<string, any> = Record<string, any>> {
+  /** Runtime discriminator for scope-like values. */
   type: "scope";
+  /** Owned atoms and nested scopes. */
   atoms: Set<Atom<any> | Scope>;
+  /** Cleanup callbacks that run when the scope is disposed. */
   cleanups: Set<() => void>;
+  /** Current notification mode. */
   mode: "discrete" | "analog";
+  /** Parent scope or root scope, if this scope was created inside another scope. */
   parent: Scope | RootScope | null;
+  /** Dependency-injection container associated with this scope. */
   container: Container;
+  /** True until all owned atoms have emitted at least once. */
   readonly loading: boolean;
+  /** True when an owned analog atom has a queued update. */
   readonly dirty: boolean;
+  /** Returns a plain object snapshot of the current scope values. */
   snapshot(): UnwrapSnapshotValues<T>;
+  /** Disposes owned atoms/scopes and runs registered cleanups. */
   dispose(): void;
   /** @internal */ _pendingCount: number;
   /** @internal */ _dirtyCount: number;
@@ -425,6 +450,12 @@ export interface Scope<T extends Record<string, any> = Record<string, any>> {
   /** @internal */ _rawState: Record<string | symbol, any>;
 }
 
+/**
+ * Accepted normalized definition shape for `scope<T>(...)`.
+ *
+ * Values become writable atoms, function values become derived values, nested
+ * objects become nested scopes, and `method(...)` marks imperative actions.
+ */
 export type ScopeConfig<T extends Record<string, any>> = DefinedInput<T> & ThisType<ScopeReturn<ScopeOf<T>>>;
 
 export type DefinedInput<Top extends Record<string, any>, Shape extends Record<string, any> = Top> = {
@@ -835,30 +866,75 @@ function createScopeInternal<T extends Record<string, any>>(
   }
 }
 
+/**
+ * Creates a scope from a config factory and optional setup extension.
+ *
+ * Config-form scopes infer shorthand members directly: values become atoms,
+ * functions become readonly derived values, nested objects become nested scopes,
+ * and `method(...)` values become callable actions.
+ */
 export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: (this: Simplify<ScopeReturnFromConfig<TConfig>>) => TConfig,
-  setup: ScopeSetupCallback<ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>, ScopeReturnFromConfig<TConfig>, TSetup>,
+  setup?: (self: ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>, scope: ScopeReturnFromConfig<TConfig>) => TSetup,
   options?: ScopeOptions,
 ): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
+/**
+ * Creates a scope from a plain object definition and optional setup extension.
+ *
+ * Use this form for the best inference:
+ *
+ * ```ts
+ * const counter = scope({ count: 0 }, self => ({
+ *   increment: () => {
+ *     self.count++;
+ *   },
+ * }));
+ * ```
+ */
 export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: TConfig,
-  setup: ScopeSetupCallback<ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>, ScopeReturnFromConfig<TConfig>, TSetup>,
+  setup?: (self: ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>, scope: ScopeReturnFromConfig<TConfig>) => TSetup,
   options?: ScopeOptions,
 ): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
+/**
+ * Creates a scope from a config factory.
+ */
 export function scope<TConfig extends Record<string, any>>(definition: (this: Simplify<ScopeReturnFromConfig<TConfig>>) => TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
+/**
+ * Creates a scope from a plain object definition.
+ */
 export function scope<TConfig extends Record<string, any>>(definition: TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
-export function scope<T extends Record<string, any>, TSetup extends ScopeSetupResult>(
+/**
+ * Creates a scope with an explicit normalized state shape.
+ *
+ * Use when the public state shape is known up front. If setup adds dynamic
+ * methods and you also want a declared base interface, prefer:
+ *
+ * ```ts
+ * interface Shape {
+ *   count: number;
+ * }
+ *
+ * const definition = { count: 0 } satisfies Shape;
+ * const counter = scope(definition, self => ({
+ *   increment: () => {
+ *     self.count++;
+ *   },
+ * }));
+ * ```
+ */
+export function scope<T extends Record<string, any>>(
   definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>,
-  setup: ScopeSetupCallback<ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, ScopeReturn<ScopeOf<T>>, TSetup>,
-  options?: ScopeOptions,
-): ScopeReturn<ScopeOf<T>> & ScopeSetupReturn<TSetup>;
-export function scope<T extends Record<string, any>, TSetup extends ScopeSetupResult>(
+  ...args: [setup: ScopeSetupCallback<ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, ScopeReturn<ScopeOf<T>>>, options?: ScopeOptions] | [options?: ScopeOptions]
+): ScopeReturn<ScopeOf<T>> & ScopeSetupReturnFromArg<typeof args[0]>;
+/**
+ * Creates a scope with an explicit normalized state shape from an object
+ * definition.
+ */
+export function scope<T extends Record<string, any>>(
   definition: ScopeConfig<T>,
-  setup: ScopeSetupCallback<ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, ScopeReturn<ScopeOf<T>>, TSetup>,
-  options?: ScopeOptions,
-): ScopeReturn<ScopeOf<T>> & ScopeSetupReturn<TSetup>;
-export function scope<T extends Record<string, any>>(definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>, options?: ScopeOptions): ScopeReturn<ScopeOf<T>>;
-export function scope<T extends Record<string, any>>(definition: ScopeConfig<T>, options?: ScopeOptions): ScopeReturn<ScopeOf<T>>;
+  ...args: [setup: ScopeSetupCallback<ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, ScopeReturn<ScopeOf<T>>>, options?: ScopeOptions] | [options?: ScopeOptions]
+): ScopeReturn<ScopeOf<T>> & ScopeSetupReturnFromArg<typeof args[0]>;
 export function scope(
   definition: any,
   setupOrOptions?: ((self: any, scope: any) => ScopeSetupResult) | ScopeOptions,

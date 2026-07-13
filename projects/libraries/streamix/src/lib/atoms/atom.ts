@@ -51,28 +51,73 @@ const FLUSH = Symbol("engine.flush");
 export const ANALOG = Symbol("engine.analog");
 export const NO_INITIAL_VALUE = Symbol("streamix.noInitialValue");
 
+/**
+ * Runtime options shared by writable atoms, derived atoms, and scope-created
+ * atoms.
+ */
 export interface AtomOptions {
+  /**
+   * Forces this atom to notify subscribers synchronously even when it is created
+   * inside an analog scope.
+   */
   discrete?: boolean;
+  /**
+   * Soft subscriber limit used to detect likely leaks. The atom still works
+   * after the limit, but the runtime may warn.
+   */
   maxSubscribers?: number;
+  /**
+   * Handles errors raised by the atom source or subscribers.
+   */
   onError?: (error: any) => void;
+  /**
+   * Disposes the atom after an error instead of keeping it recoverable.
+   */
   terminateOnError?: boolean;
+  /**
+   * Controls whether subscriber/source errors are rethrown after error handlers
+   * run.
+   */
   propagateErrors?: boolean;
 }
 
-/** Public API Contract */
+/**
+ * Readable reactive value.
+ *
+ * Atoms expose the current value synchronously through {@link value}, can be
+ * subscribed to, and are also async iterable for `for await...of` consumers.
+ */
 export interface Atom<T = any> {
+  /** Runtime discriminator for atom-like values. */
   readonly type: "atom";
+  /** Optional human-readable name used by integrations and diagnostics. */
   readonly name?: string;
+  /** Current value. Throws if the atom is currently in an error state. */
   readonly value: T;
+  /** Current value, returning the last safe value when the atom has errored. */
   readonly safeValue: T;
+  /** Previously emitted value. */
   readonly previous: T;
+  /** True after the atom has been disposed. */
   readonly disposed: boolean;
+  /** True when an analog update is queued but not flushed yet. */
   readonly dirty: boolean;
+  /** Last error captured by this atom, if any. */
   readonly error?: any;
+  /** Number of active subscribers, when exposed by the implementation. */
   readonly subscriberCount?: number;
+  /**
+   * Subscribes to value changes.
+   *
+   * The callback receives `(current, previous)`. The returned subscription must
+   * be disposed when the listener is no longer needed.
+   */
   subscribe(callback?: (current: T, previous: T) => MaybePromise): Subscription;
+  /** Subscribes to atom errors. */
   onError(handler: (error: any) => void): Subscription;
+  /** Stops the atom and releases all subscribers/resources. */
   dispose(): void;
+  /** Iterates emitted values until the atom is disposed or iteration is closed. */
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
@@ -89,11 +134,19 @@ export interface Atom<T = any> {
  */
 export type AtomValue<A> = A extends Atom<infer T> ? T : never;
 
+/**
+ * Writable atom returned by {@link atom}.
+ */
 export interface Writable<T = any> extends Atom<T> {
+  /** Emits a new value. */
   next(value: T): void;
+  /** Alias for {@link next}. */
   set(value: T): void;
+  /** Puts the atom into an error state and notifies error handlers. */
   fail(err: any, options?: { terminate?: boolean }): void;
+  /** Clears a recoverable error state, when supported. */
   recover?(): void;
+  /** Clears the stored error without emitting a value, when supported. */
   clearError?(): void;
 }
 
@@ -582,9 +635,16 @@ function notifyDirtyHandlers(atom: Atom<any>, dirty: boolean): void {
  * ───────────────────────────────────────────────────────────────────────────*/
 
 export interface AtomFromIteratorOptions<T> extends AtomOptions {
+  /** Value exposed before the source async iterable emits for the first time. */
   initialValue?: T;
 }
 
+/**
+ * Creates a readable atom backed by an async iterable.
+ *
+ * The source starts when the first subscriber attaches and is closed when the
+ * atom is disposed. Values yielded by the iterable become atom emissions.
+ */
 export function atomFromIterator<T>(
   source: AsyncIterable<T>,
   options?: AtomFromIteratorOptions<T>
@@ -936,8 +996,28 @@ export function flow<T>(
  * atom() - Mutable State Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
+/**
+ * Creates a writable atom without an initial value.
+ *
+ * The value type should usually be provided explicitly:
+ *
+ * ```ts
+ * const user = atom<User>();
+ * ```
+ */
 export function atom<T = any>(): Writable<T>;
+/**
+ * Creates a writable atom that intentionally starts without an initial value.
+ */
 export function atom<T = any>(noInitialValue: typeof NO_INITIAL_VALUE, options?: AtomOptions): Writable<T>;
+/**
+ * Creates a writable atom with an initial value.
+ *
+ * ```ts
+ * const count = atom(0);
+ * count.set(count.value + 1);
+ * ```
+ */
 export function atom<T = any>(initialValue: T, options?: AtomOptions): Writable<T>;
 export function atom<T = any>(
   initialValue?: T | typeof NO_INITIAL_VALUE,
@@ -1263,12 +1343,27 @@ function wrapFunctionInClass(fn: AnyFn): new () => ComputableInstance {
 export type SyncOnly<T> = T extends Promise<any> ? never : T;
 
 /**
- * Async derived callbacks only track atoms read before the first `await`.
- * Capture dependencies up front with `self.use(...)` / `self.read(...)`, or
- * use `flow()` when the computation is primarily async and cancellation-aware.
+ * Creates a readonly atom computed from other atoms.
+ *
+ * Dependencies are tracked when the callback reads atoms through `self.read`,
+ * `self.use`, or the callable shorthand `self(atom)`.
+ *
+ * Async callbacks only track atoms read before the first `await`. Capture
+ * dependencies up front with `self.use(...)` / `self.read(...)`, or use
+ * `flow()` when the computation is primarily async and cancellation-aware.
  */
 export function derived<T>(fn: (self: DerivedScope) => SyncOnly<T>, options?: AtomOptions): Atom<T>;
+/**
+ * Creates a readonly atom from an async computation.
+ *
+ * Dependencies must be read before the first `await` to be tracked.
+ */
 export function derived<T>(fn: (self: DerivedScope) => Promise<T>, options?: AtomOptions): Atom<T>;
+/**
+ * Creates a readonly atom from a generator-based computation.
+ *
+ * The generator may yield atoms or promises before returning the computed value.
+ */
 export function derived<T>(fn: (self: DerivedScope) => Generator<Atom<any> | Promise<any>, T, any>, options?: AtomOptions): Atom<T>;
 export function derived<T>(...args: any[]): Atom<T> {
   let computableFactory: () => ComputableInstance;
