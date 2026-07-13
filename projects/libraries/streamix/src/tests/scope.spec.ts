@@ -1367,9 +1367,9 @@ describe('Scope System', () => {
 
     it('should run setup callback side effects when it returns void', () => {
       let initialCount = -1;
-      const s = scope({ count: 3 }, (self) => {
+      const s = scope({ count: 3 }, (self, scope) => {
         initialCount = self.count;
-        self.cleanups.add(() => { initialCount = 0; });
+        scope.cleanups.add(() => { initialCount = 0; });
       });
 
       expect(initialCount).toBe(3);

@@ -216,6 +216,12 @@ type UnwrapSnapshotValues<T> = {
  * Widens literal primitives and readonly arrays into the mutable public value shape
  * exposed by scope proxies and atoms.
  */
+export type Simplify<T> = { [K in keyof T]: T[K] } & {};
+
+/**
+ * Widens literal primitives and readonly arrays into the mutable public value shape
+ * exposed by scope proxies and atoms.
+ */
 export type WidenValue<T> =
   T extends string ? string
   : T extends number ? number
@@ -324,6 +330,14 @@ export type ScopeSetupResult = Record<string | symbol, any> | void;
  */
 export type ScopeSetupReturn<T> = T extends void ? {} : T;
 /**
+ * Value-only surface exposed as the first `self` parameter in setup callbacks.
+ */
+export type ScopeSetupSelf<T extends Record<string, any>> = Simplify<UnwrapScopeValues<T>>;
+/**
+ * Value-only surface exposed as the first `self` parameter in config-form setup callbacks.
+ */
+export type ScopeSetupSelfFromConfig<T extends Record<string, any>> = Simplify<UnwrapScopeValuesFromConfig<T>>;
+/**
  * Options that control how a scope batches and emits updates.
  */
 export type ScopeOptions = { mode?: "discrete" | "analog" };
@@ -379,18 +393,18 @@ export type ScopeAtoms<T> = T extends Record<string, any>
 /**
  * Runtime proxy type returned from `scope()` when the state shape is already normalized.
  */
-export type ScopeReturn<T extends Record<string, any>> = Scope<T> & UnwrapScopeValues<T> & {
+export type ScopeReturn<T extends Record<string, any>> = Simplify<Scope<T> & UnwrapScopeValues<T> & {
   at: AtomAccessor<T & ScopeReservedAtoms>;
   subscribeTo<K extends keyof (T & ScopeReservedAtoms)>(key: K, callback: (value: AtomValueOf<(T & ScopeReservedAtoms)[K]>) => void): Subscription;
-};
+}>;
 
 /**
  * Runtime proxy type returned from `scope()` when using config-form shorthand definitions.
  */
-export type ScopeReturnFromConfig<T extends Record<string, any>> = Scope<ScopeOfConfig<T>> & UnwrapScopeValuesFromConfig<T> & {
+export type ScopeReturnFromConfig<T extends Record<string, any>> = Simplify<Scope<ScopeOfConfig<T>> & UnwrapScopeValuesFromConfig<T> & {
   at: AtomAccessor<ScopeOfConfig<T> & ScopeReservedAtoms>;
   subscribeTo<K extends keyof (ScopeOfConfig<T> & ScopeReservedAtoms)>(key: K, callback: (value: AtomValueOf<(ScopeOfConfig<T> & ScopeReservedAtoms)[K]>) => void): Subscription;
-};
+}>;
 
 export interface Scope<T extends Record<string, any> = Record<string, any>> {
   type: "scope";
@@ -660,7 +674,7 @@ function defineScopeExtensionProperties(scopeRef: Scope, extensions: Record<stri
 
 function createScopeInternal<T extends Record<string, any>>(
   factory: (this: any, self: any) => any,
-  setup?: (self: any) => ScopeSetupResult,
+  setup?: (self: any, scope: any) => ScopeSetupResult,
   options?: ScopeOptions,
 ): ScopeReturn<T> {
   const parent = currentScope ?? getGlobalScope();
@@ -794,7 +808,7 @@ function createScopeInternal<T extends Record<string, any>>(
       }
     }
 
-    const extensions = setup?.(newScope as any);
+    const extensions = setup?.(newScope as any, newScope as any);
     if (extensions != null) {
       if (typeof extensions !== "object") {
         throw new TypeError("scope() setup callback must return an object or void.");
@@ -821,36 +835,36 @@ function createScopeInternal<T extends Record<string, any>>(
 }
 
 export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
-  definition: (this: ScopeReturnFromConfig<TConfig>) => TConfig,
-  setup?: (self: ScopeReturnFromConfig<TConfig>) => TSetup,
+  definition: (this: Simplify<ScopeReturnFromConfig<TConfig>>) => TConfig,
+  setup?: (self: ScopeSetupSelfFromConfig<TConfig>, scope: ScopeReturnFromConfig<TConfig>) => TSetup,
   options?: ScopeOptions,
 ): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
 export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: TConfig,
-  setup?: (self: ScopeReturnFromConfig<TConfig>) => TSetup,
+  setup?: (self: ScopeSetupSelfFromConfig<TConfig>, scope: ScopeReturnFromConfig<TConfig>) => TSetup,
   options?: ScopeOptions,
 ): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
-export function scope<TConfig extends Record<string, any>>(definition: (this: ScopeReturnFromConfig<TConfig>) => TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
+export function scope<TConfig extends Record<string, any>>(definition: (this: Simplify<ScopeReturnFromConfig<TConfig>>) => TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
 export function scope<TConfig extends Record<string, any>>(definition: TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
 export function scope<T extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>,
-  setup?: (self: ScopeReturn<ScopeOf<T>>) => TSetup,
+  setup?: (self: ScopeSetupSelf<ScopeOf<T>>, scope: ScopeReturn<ScopeOf<T>>) => TSetup,
   options?: ScopeOptions,
 ): ScopeReturn<ScopeOf<T>> & ScopeSetupReturn<TSetup>;
 export function scope<T extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: ScopeConfig<T>,
-  setup?: (self: ScopeReturn<ScopeOf<T>>) => TSetup,
+  setup?: (self: ScopeSetupSelf<ScopeOf<T>>, scope: ScopeReturn<ScopeOf<T>>) => TSetup,
   options?: ScopeOptions,
 ): ScopeReturn<ScopeOf<T>> & ScopeSetupReturn<TSetup>;
 export function scope<T extends Record<string, any>>(definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>, options?: ScopeOptions): ScopeReturn<ScopeOf<T>>;
 export function scope<T extends Record<string, any>>(definition: ScopeConfig<T>, options?: ScopeOptions): ScopeReturn<ScopeOf<T>>;
 export function scope(
   definition: any,
-  setupOrOptions?: ((self: any) => ScopeSetupResult) | ScopeOptions,
+  setupOrOptions?: ((self: any, scope: any) => ScopeSetupResult) | ScopeOptions,
   options?: ScopeOptions,
 ): any {
   const isFactory = typeof definition === "function";
-  let setup: ((self: any) => ScopeSetupResult) | undefined;
+  let setup: ((self: any, scope: any) => ScopeSetupResult) | undefined;
   let resolvedOptions: ScopeOptions | undefined;
 
   if (typeof setupOrOptions === "function") {
