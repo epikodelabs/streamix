@@ -95,17 +95,16 @@ Scopes turn plain objects into reactive trees:
 const cart = scope({
   items: [],
   subtotal: self => self.items.reduce((sum, i) => sum + i.price, 0),
-}, self => ({
-  addItem(item) {
+  addItem: method((self, item) => {
     self.items = [...self.items, item];
-  },
-}));
+  }),
+});
 ```
 
 - Primitives/arrays → writable atoms
 - Functions → derived values
 - Nested objects → nested scopes
-- Use the setup callback for imperative actions that need typed `self`
+- Use `method(...)` for imperative actions
 - Use `scope.at.items` when you need the raw atom
 
 **Handy features:**
@@ -173,11 +172,10 @@ const form = scope({
   email: "",
   password: "",
   valid: self => self.email.includes("@") && self.password.length >= 8,
-}, self => ({
-  submit() {
+  submit: method((self) => {
     /* ... */
-  }
-}));
+  }),
+});
 ```
 
 **Async data:**

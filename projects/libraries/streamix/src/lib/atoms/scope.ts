@@ -33,7 +33,10 @@ interface DynamicExpr<T = any, Self = any> {
   fn: (self: Self, atoms?: any) => Atom<T> | T;
 }
 
-interface Method<T extends (...args: any[]) => any = (...args: any[]) => any> {
+type MethodCallback<TSelf = any, TArgs extends any[] = any[], TResult = any> = (self: TSelf, ...args: TArgs) => TResult;
+type MethodReturn<T> = T extends (self: any, ...args: infer TArgs) => infer TResult ? (...args: TArgs) => TResult : never;
+
+interface Method<T extends MethodCallback = MethodCallback> {
   [METHOD]: true;
   fn: T;
 }
@@ -50,7 +53,7 @@ function isMethod(value: any): value is Method {
   return value != null && typeof value === "object" && value[METHOD] === true;
 }
 
-export function method<T extends (...args: any[]) => any>(fn: T): Method<T> {
+export function method<TSelf, TArgs extends any[], TResult>(fn: (self: TSelf, ...args: TArgs) => TResult): Method<(self: TSelf, ...args: TArgs) => TResult> {
   return { [METHOD]: true, fn };
 }
 
@@ -246,7 +249,7 @@ type DefinedAtomAccessor<Shape extends Record<string, any>> = { [K in keyof Shap
 
 type DefinedValue<Top extends Record<string, any>, T> =
   | T
-  | Method<T extends (...args: any[]) => any ? T : never>
+  | Method<T extends (...args: any[]) => infer TResult ? (self: any, ...args: Parameters<T>) => TResult : never>
   | AtomExpr<T>
   | DerivedExpr<T, Top>
   | PipeExpr<T, Top>
@@ -260,6 +263,7 @@ export type ScopeValue<T> =
   | T extends ScopeReturn<any> ? T
   : T extends Atom<any> ? T
   : T extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
+  : T extends Method<infer TFn> ? MethodReturn<TFn>
   : T extends (...args: any[]) => any ? T
   : T extends readonly any[] ? Writable<T>
   : T extends DerivedExpr<infer U, any> ? Atom<U>
@@ -290,7 +294,7 @@ export type ScopeResolvedFunctionValue<TResult> =
 export type ScopeResolvedValue<T> =
   T extends ScopeReturn<any> ? T
   : T extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
-  : T extends Method<infer TFn> ? TFn
+  : T extends Method<infer TFn> ? MethodReturn<TFn>
   : T extends Writable<any> ? T
   : T extends Atom<any> ? T
   : T extends AtomExpr<infer U> ? Writable<WidenValue<U>>
@@ -490,7 +494,7 @@ function materializeState(
     if (isExprMarkerOrDynamic(item)) {
       rawState[key] = item;
     } else if (isMethod(item)) {
-      rawState[key] = item.fn.bind(scopeProxy);
+      rawState[key] = (...args: any[]) => item.fn(scopeProxy, ...args);
     } else if (typeof item === "function") {
       rawState[key] = dynamicExpr(item);
     } else if (isAtomLike(item) || isScope(item)) {

@@ -84,11 +84,10 @@ app.dispose();
 const counter = scope({
   count: 0,
   doubled: self => self.count * 2,
-}, self => ({
-  increment() {
+  increment: method((self) => {
     self.count += 1;
-  },
-}));
+  }),
+});
 ```
 
 **Form**
@@ -97,12 +96,11 @@ const form = scope({
   email: "",
   password: "",
   isValid: self => self.email.includes("@") && self.password.length >= 8,
-}, self => ({
-  submit() {
+  submit: method((self) => {
     if (!self.isValid) return;
     // submit form
-  },
-}));
+  }),
+});
 ```
 
 **Async Data**

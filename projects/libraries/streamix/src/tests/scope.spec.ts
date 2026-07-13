@@ -6,8 +6,8 @@ import {
   flow,
   flowExpr,
   getCurrentScope,
-  hasAtomEmitted,
   globalScope,
+  hasAtomEmitted,
   map,
   method,
   pipe,
@@ -235,7 +235,7 @@ describe('Scope System', () => {
 
       const s = scope<Shape>({
         count: 0,
-        increment: (self: any) => () => { self.count = self.count + 1; },
+        increment: method((self: any) => { self.count = self.count + 1; }),
       });
 
       expect(s.count).toBe(0);
@@ -946,15 +946,15 @@ describe('Scope System', () => {
       s.dispose();
     });
 
-    it('should pass functions through unchanged', () => {
+    it('should pass method wrappers through unchanged', () => {
       const s = scope({
         value: 0,
-        increment: (self: any) => () => { self.value = self.value + 1; }
+        increment: method((self: any) => { self.value = self.value + 1; })
       });
 
-      expect(typeof (s as any).increment).toBe('function');
-      (s as any).increment();
-      expect((s as any).value).toBe(1);
+      expect(typeof s.increment).toBe('function');
+      s.increment();
+      expect(s.value).toBe(1);
       s.dispose();
     });
 
@@ -1287,7 +1287,7 @@ describe('Scope System', () => {
 
       const s = scope<Shape>({
         count: 0,
-        increment: (self: any) => () => { self.count++; },
+        increment: method((self: Shape) => { self.count++; }),
       });
 
       expect(s.count).toBe(0);
@@ -1306,7 +1306,7 @@ describe('Scope System', () => {
 
       const s = scope<Shape>({
         count: 0,
-        increment: method(() => { s.count++; }),
+        increment: method((self: any) => { self.count++; }),
       });
 
       expect(s.count).toBe(0);
