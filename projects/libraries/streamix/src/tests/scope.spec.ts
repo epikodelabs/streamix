@@ -18,6 +18,8 @@ import {
 } from '@epikodelabs/streamix';
 
 const delay = (ms = 10) => new Promise<void>(resolve => setTimeout(resolve, ms));
+type IsAny<T> = 0 extends (1 & T) ? true : false;
+type ExpectNotAny<T> = IsAny<T> extends true ? ['expected non-any type'] : true;
 
 describe('Scope System', () => {
   afterEach(() => {
@@ -1301,19 +1303,40 @@ describe('Scope System', () => {
     it('should support method marker for side-effect actions', () => {
       interface Shape {
         count: number;
-        increment: () => void;
       }
 
-      const s = scope<Shape>({
+      const definition = {
         count: 0,
-        increment: method((self: any) => { self.count++; }),
-      });
+      } satisfies Shape;
 
+      const s = scope(definition, self => ({
+        increment: () => { self.count++; },
+      }));
+      const sIsNotAny: ExpectNotAny<typeof s> = true;
+
+      expect(sIsNotAny).toBe(true);
       expect(s.count).toBe(0);
       s.increment();
       expect(s.count).toBe(1);
       s.increment();
       expect(s.count).toBe(2);
+      s.dispose();
+    });
+
+    it('should support setup callback extensions with explicit base and dynamic shapes', () => {
+      interface Shape {
+        count: number;
+      }
+
+      const definition = { count: 0 } satisfies Shape;
+
+      const s = scope(definition, self => ({
+        increment: () => { self.count++; },
+      }));
+
+      expect(s.count).toBe(0);
+      s.increment();
+      expect(s.count).toBe(1);
       s.dispose();
     });
 

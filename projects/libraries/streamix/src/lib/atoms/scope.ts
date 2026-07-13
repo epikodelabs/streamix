@@ -330,13 +330,14 @@ export type ScopeSetupResult = Record<string | symbol, any> | void;
  */
 export type ScopeSetupReturn<T> = T extends void ? {} : T;
 /**
- * Value-only surface exposed as the first `self` parameter in setup callbacks.
+ * Wrapped scope surface exposed as the first `self` parameter in setup callbacks.
  */
-export type ScopeSetupSelf<T extends Record<string, any>> = Simplify<UnwrapScopeValues<T>>;
+export type ScopeSetupSelf<T extends Record<string, any>> = T & Scope;
 /**
- * Value-only surface exposed as the first `self` parameter in config-form setup callbacks.
+ * Wrapped scope surface exposed as the first `self` parameter in config-form setup callbacks.
  */
-export type ScopeSetupSelfFromConfig<T extends Record<string, any>> = Simplify<UnwrapScopeValuesFromConfig<T>>;
+export type ScopeSetupSelfFromConfig<T extends Record<string, any>> = T & Scope;
+type ScopeSetupCallback<TSelf, TScope, TResult extends ScopeSetupResult> = (self: TSelf, scope: TScope) => TResult;
 /**
  * Options that control how a scope batches and emits updates.
  */
@@ -836,24 +837,24 @@ function createScopeInternal<T extends Record<string, any>>(
 
 export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: (this: Simplify<ScopeReturnFromConfig<TConfig>>) => TConfig,
-  setup?: (self: ScopeSetupSelfFromConfig<TConfig>, scope: ScopeReturnFromConfig<TConfig>) => TSetup,
+  setup: ScopeSetupCallback<ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>, ScopeReturnFromConfig<TConfig>, TSetup>,
   options?: ScopeOptions,
 ): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
 export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: TConfig,
-  setup?: (self: ScopeSetupSelfFromConfig<TConfig>, scope: ScopeReturnFromConfig<TConfig>) => TSetup,
+  setup: ScopeSetupCallback<ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>, ScopeReturnFromConfig<TConfig>, TSetup>,
   options?: ScopeOptions,
 ): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
 export function scope<TConfig extends Record<string, any>>(definition: (this: Simplify<ScopeReturnFromConfig<TConfig>>) => TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
 export function scope<TConfig extends Record<string, any>>(definition: TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
 export function scope<T extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>,
-  setup?: (self: ScopeSetupSelf<ScopeOf<T>>, scope: ScopeReturn<ScopeOf<T>>) => TSetup,
+  setup: ScopeSetupCallback<ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, ScopeReturn<ScopeOf<T>>, TSetup>,
   options?: ScopeOptions,
 ): ScopeReturn<ScopeOf<T>> & ScopeSetupReturn<TSetup>;
 export function scope<T extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: ScopeConfig<T>,
-  setup?: (self: ScopeSetupSelf<ScopeOf<T>>, scope: ScopeReturn<ScopeOf<T>>) => TSetup,
+  setup: ScopeSetupCallback<ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, ScopeReturn<ScopeOf<T>>, TSetup>,
   options?: ScopeOptions,
 ): ScopeReturn<ScopeOf<T>> & ScopeSetupReturn<TSetup>;
 export function scope<T extends Record<string, any>>(definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>, options?: ScopeOptions): ScopeReturn<ScopeOf<T>>;

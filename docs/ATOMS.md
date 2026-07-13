@@ -107,6 +107,47 @@ const cart = scope({
 - Use `method(...)` for imperative actions
 - Use `scope.at.items` when you need the raw atom
 
+### Typed setup extensions
+
+When a scope needs a declared base shape plus extra methods created in setup,
+prefer validating the definition with TypeScript's `satisfies` operator:
+
+```ts
+interface Shape {
+  count: number;
+}
+
+const definition = { count: 0 } satisfies Shape;
+
+const counter = scope(definition, self => ({
+  increment: () => {
+    self.count++;
+  },
+}));
+
+counter.increment();
+console.log(counter.count); // 1
+```
+
+This keeps the definition checked against `Shape`, while still allowing
+TypeScript to infer the dynamic part returned from setup. Avoid
+`scope<Shape>(definition, setup)` for this pattern: once the first generic is
+provided explicitly, TypeScript cannot infer the setup extension as a later
+generic without losing precision.
+
+If both parts must be explicit, provide both generic arguments:
+
+```ts
+const counter = scope<Shape, { increment: () => void }>(
+  { count: 0 },
+  self => ({
+    increment: () => {
+      self.count++;
+    },
+  }),
+);
+```
+
 **Handy features:**
 - `cart.loading` — true until all atoms have emitted at least once
 - `cart.snapshot()` — plain JS object of current values
