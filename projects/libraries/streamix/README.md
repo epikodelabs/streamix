@@ -4,15 +4,9 @@ Reactive streams built on async generators.
 
 Small bundle. Pull-based execution. Familiar operator API. Hot subjects when a producer needs to push.
 
-## Project status
-
-streamix v2 has reached a stable and complete milestone. This release represents the final planned version of the project.
-
-While no further development or active maintenance is currently planned, the package remains available as a compact async-iterable streaming toolkit for TypeScript and JavaScript.
-
 ## What is streamix?
 
-streamix is a reactive streams runtime built around async iterables. Consumers pull values when they are ready, operators transform those values, and subjects provide hot multicast sources for events and shared producer output.
+**streamix** is essentially a lightweight, modern alternative to RxJS that feels much closer to native JavaScript. It’s a great fit if you're building highly concurrent apps, web-based dashboards, or complex UI tools where you want reactive state but hate the debugging nightmares of push-based subscriber chains.
 
 The core package focuses on:
 
