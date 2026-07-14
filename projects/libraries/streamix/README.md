@@ -268,17 +268,6 @@ projects/libraries/streamix/
 `-- networking/    # HTTP client, WebSocket, JSONP
 ```
 
----
-
-## 🚀 What's New?
-
-### v2.0.47 - Atoms Evolution
-
-The atoms API is the primary state primitive:
-
-* **`atom()`** - hot atom without initial value
-* **`iterate(atom)`** - convert any atom to async iterable
-
 ### Coroutines
 
 The coroutine layer is one of the strongest parts of the library:
@@ -291,18 +280,10 @@ If you are evaluating streamix for browser-side concurrency, start with `@epikod
 
 ---
 
-## 🎬 Live Demos
-
-* [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
-* [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
-* [Travel Blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w)
-
----
-
 ## 📚 Documentation
 
 * [Full Documentation](https://epikodelabs.github.io/streamix)
-* [Migration Guide: v2 to v3](./MIGRATION.md)
+* [Migration Guide: v2 to v3](./MIGRATION)
 * [Medium: A Generator-Driven, Pull-Based Reactive Core](https://medium.com/p/a1eb9e7ce1d7)
 * [Medium: streamix vs redux-saga](https://medium.com/p/0bfc206ad41c)
 
