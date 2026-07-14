@@ -23,197 +23,210 @@
 
 <br>
 
-Streamix is a reactive streams library built on async generators. Values are computed on demand — consumers pull, producers don't push blindly. The result is natural backpressure, predictable memory use, and a `for await...of`-first API that composes well with modern TypeScript.
+## What is streamix?
+
+**streamix** is essentially a lightweight, modern alternative to RxJS that feels much closer to native JavaScript. It’s a great fit if you're building highly concurrent apps, web-based dashboards, or complex UI tools where you want reactive state but hate the debugging nightmares of push-based subscriber chains.
+
+The core package focuses on:
+
+- Pull-based streams for lazy asynchronous composition
+- Subjects for hot multicast event sources
+- Familiar operators such as `map`, `filter`, `switchMap`, `debounce`, and `scan`
+- Async iterator first consumption with `for await...of`
+- `query()` for awaiting the next stream value with automatic cleanup
+- Optional companion packages for coroutines, DOM observers, networking, and aggregate operators
+
+## Installation
 
 ```bash
 npm install @epikodelabs/streamix
 ```
 
-## Core concepts
+```bash
+yarn add @epikodelabs/streamix
+```
 
-### Streams
+```bash
+pnpm add @epikodelabs/streamix
+```
 
-A stream is an async iterable sequence. You can iterate it directly or pipe it through operators.
+## Quick start
 
 ```ts
 import { range, map, filter, take } from '@epikodelabs/streamix';
 
-const evens = range(1, 20).pipe(
+const values = range(1, 20).pipe(
   filter(n => n % 2 === 0),
   map(n => n * 10),
   take(5)
 );
 
-for await (const value of evens) {
+for await (const value of values) {
   console.log(value); // 20, 40, 60, 80, 100
 }
 ```
 
-### Operators
+## Streams
 
-Operators transform streams. Sync and async callbacks are both supported.
+A stream is an async iterable sequence. You can iterate it directly, subscribe to it, or pass it through an operator pipeline.
 
 ```ts
-stream.pipe(
-  map(async x => await enrich(x)),
-  filter(x => x.valid),
-  debounce(200),
-  take(10)
-)
+import { createStream, debounce, filter, map } from '@epikodelabs/streamix';
+
+async function* searchTerms() {
+  yield 'str';
+  yield 'stream';
+  yield 'streamix';
+}
+
+const normalized = createStream('searchTerms', searchTerms).pipe(
+  debounce(100),
+  map(term => term.trim().toLowerCase()),
+  filter(term => term.length >= 3)
+);
+
+for await (const term of normalized) {
+  console.log(term);
+}
 ```
 
-Full catalog: `audit`, `buffer`, `bufferCount`, `bufferUntil`, `bufferWhile`, `catchError`, `concatMap`, `debounce`, `defaultIfEmpty`, `delay`, `delayUntil`, `distinctUntilChanged`, `distinctUntilKeyChanged`, `endWith`, `exhaustMap`, `expand`, `filter`, `finalize`, `first`, `fork`, `groupBy`, `ignoreElements`, `last`, `map`, `mergeMap`, `observeOn`, `partition`, `reduce`, `sample`, `scan`, `select`, `shareReplay`, `skip`, `skipUntil`, `skipWhile`, `slidingPair`, `startWith`, `switchMap`, `take`, `takeUntil`, `takeWhile`, `tap`, `throttle`, `throwError`, `toArray`, `withLatestFrom`.
+Streams are pull-based by default. Work is performed only when values are consumed, which gives predictable cancellation and natural backpressure.
 
-### Stream factories
+## Subjects
+
+Subjects are hot streams. They are useful when the producer is imperative or event-driven and multiple consumers need to observe the same emissions.
+
+```ts
+import {
+  createSubject,
+  createBehaviorSubject,
+  createReplaySubject,
+} from '@epikodelabs/streamix';
+
+const events = createSubject<{ type: string }>();
+
+events.subscribe(event => {
+  console.log('event:', event.type);
+});
+
+events.next({ type: 'ready' });
+```
+
+Use the subject variants according to subscriber needs:
+
+| Factory | Use case |
+|---------|----------|
+| `createSubject<T>()` | Live event stream with no retained value |
+| `createBehaviorSubject<T>(initial)` | Live stream with a current value for new subscribers |
+| `createReplaySubject<T>(capacity)` | Live stream that replays recent emissions to late subscribers |
+
+Subjects also support async iteration:
+
+```ts
+for await (const event of events) {
+  console.log(event);
+}
+```
+
+## Operators
+
+Operators transform streams while preserving async-iterable semantics.
+
+```ts
+import { from, map, filter, scan, take } from '@epikodelabs/streamix';
+
+const totals = from([1, 2, 3, 4, 5]).pipe(
+  filter(n => n % 2 === 1),
+  scan((sum, n) => sum + n, 0),
+  take(3)
+);
+```
+
+Common operators include `map`, `filter`, `scan`, `tap`, `debounce`, `throttle`, `switchMap`, `mergeMap`, `concatMap`, `exhaustMap`, `take`, `skip`, `buffer`, `retry`, `catchError`, `share`, `shareReplay`, `combineLatest`, `zip`, and `forkJoin`.
+
+## Stream factories
+
+The package includes stream factories for common sources:
 
 | Factory | Description |
 |---------|-------------|
-| `combineLatest(...sources)` | Latest value from each source, combined |
-| `concat(...sources)` | Sources run sequentially |
-| `defer(factory)` | Fresh stream per subscriber |
-| `EMPTY()` | Completes immediately |
-| `forkJoin(...sources)` | Emits once when all complete |
-| `from(source)` | Arrays, iterables, generators, promises |
-| `fromEvent(target, event)` | DOM / Node events |
-| `fromPromise(p)` | Promise as a single-emission stream |
-| `interval(ms)` | Counter every `ms` milliseconds |
-| `merge(...sources)` | Interleaved concurrent emissions |
-| `of(...values)` | Fixed sequence, then complete |
-| `race(...sources)` | First source to emit wins |
+| `of(...values)` | Fixed sequence |
+| `from(source)` | Arrays, iterables, async iterables, promises |
 | `range(start, count)` | Sequential integers |
-| `retry(source, n)` | Retry on error, up to `n` times |
-| `timer(delay, period?)` | Delayed, optionally repeating |
+| `interval(ms)` | Repeating counter |
+| `timer(delay, period?)` | Delayed, optionally repeating counter |
+| `defer(factory)` | Fresh stream per subscriber |
+| `merge(...sources)` | Interleaved concurrent emissions |
+| `concat(...sources)` | Sources run sequentially |
+| `combineLatest(...sources)` | Latest value from each source |
 | `zip(...sources)` | Pair emissions by index |
+| `race(...sources)` | First source to emit wins |
+| `forkJoin(...sources)` | Emit once when all sources complete |
 
-### Subjects
+## Querying a stream
 
-Subjects are hot streams for push-based producers. Use them when an event source is naturally imperative, when several consumers need the same live emissions, or when late subscribers need a current value or replayed history.
+`query()` awaits the next emitted value and then cleans up the subscription.
 
 ```ts
-import { createSubject, createBehaviorSubject, createReplaySubject } from '@epikodelabs/streamix';
+import { interval, take } from '@epikodelabs/streamix';
 
-const events = createSubject<{ type: string }>();
-events.subscribe(event => console.log(event.type));
-events.next({ type: 'ready' });
-
-const current = createBehaviorSubject(0);
-current.next(1);
-
-const recent = createReplaySubject<string>(3);
-recent.next('connected');
+const firstTick = await interval(1000).pipe(take(1)).query();
 ```
 
-### Custom operators
+## Coroutines and actors
+
+Use `@epikodelabs/streamix/coroutines` for worker-backed execution.
 
 ```ts
-import { createOperator, DONE, NEXT } from '@epikodelabs/streamix';
+import { compute } from '@epikodelabs/streamix/coroutines';
 
-const onlyPrime = () =>
-  createOperator<number, number>('onlyPrime', source => ({
-    async next() {
-      while (true) {
-        const result = await source.next();
-        if (result.done) return DONE;
-        if (isPrime(result.value)) return NEXT(result.value);
-      }
-    }
-  }));
-```
+const primes = compute(async function* () {
+  let n = 2;
 
-### `query()` — promise from a stream
-
-```ts
-const first = await interval(1000).pipe(take(1)).query();
-```
-
-Resolves to the first emitted value and unsubscribes automatically.
-
----
-
-## Coroutines
-
-Offload heavy work to Web Workers without losing stream composability.
-
-```ts
-import { compute, compose, actor } from '@epikodelabs/streamix';
-
-// Run a function in a worker pool
-const result = await compute(() => heavyCalculation());
-
-// Run a whole pipeline in the background
-const background = compose(source.pipe(map(expensiveTransform)));
-
-// Long-lived stateful worker
-const counter = actor({ count: 0 }, (state, msg) => {
-  if (msg === 'increment') return { count: state.count + 1 };
-  return state;
+  while (true) {
+    while (!isPrime(n)) n++;
+    yield n++;
+  }
 });
 ```
 
----
+The coroutines package provides:
 
-## HTTP client
+- `compute()` for worker-backed async generators
+- `compose()` for worker-side pipeline fusion
+- `actor()` for long-lived stateful workers
 
-```ts
-import { createHttpClient, readJson, useBase, useTimeout } from '@epikodelabs/streamix/networking';
+## Companion packages
 
-const api = createHttpClient().withDefaults(
-  useBase('https://api.example.com'),
-  useTimeout(5000)
-);
+| Package | Description |
+|---------|-------------|
+| `@epikodelabs/streamix` | Core streams, subjects, operators, factories |
+| `@epikodelabs/streamix/aggregates` | Aggregate operators such as average, min, max, sum |
+| `@epikodelabs/streamix/coroutines` | Web Worker utilities, coroutines, actors |
+| `@epikodelabs/streamix/dom` | DOM observation utilities |
+| `@epikodelabs/streamix/networking` | HTTP client, WebSocket, JSONP |
 
-for await (const data of api.get('/items', readJson)) {
-  console.log(data);
-}
+## Monorepo structure
+
+```text
+projects/libraries/streamix/
+├── src/           # Core runtime: streams, subjects, operators, factories
+├── aggregates/    # Aggregate operators
+├── coroutines/    # Coroutines and actors
+├── dom/           # DOM observation utilities
+└── networking/    # HTTP client, WebSocket, JSONP
 ```
 
----
+## Documentation
 
-## Why pull-based?
+- [Full Documentation](https://epikodelabs.github.io/streamix)
+- [Medium: A Generator-Driven, Pull-Based Reactive Core](https://medium.com/p/a1eb9e7ce1d7)
+- [Medium: streamix vs redux-saga](https://medium.com/p/0bfc206ad41c)
 
-Most reactive libraries push values eagerly. Streamix pulls — the consumer asks for the next value, and only then is it computed.
+## Community
 
-```ts
-async function* primes() {
-  let n = 2;
-  while (true) {
-    if (isPrime(n)) yield n;
-    n++;
-  }
-}
-
-// Only 5 primes are ever computed
-for await (const p of createStream('primes', primes).pipe(take(5))) {
-  console.log(p);
-}
-```
-
-This gives you on-demand computation, bounded memory, and consumer-driven backpressure without manual coordination.
-
----
-
-## Streamix vs RxJS
-
-| | Streamix | RxJS |
-|--|----------|------|
-| Execution model | Pull-based (lazy) | Push-based (eager) |
-| Backpressure | Consumer-driven | Manual patterns required |
-| Async/await | Native | Limited |
-| Bundle size | Small | Larger |
-| Hot producers | Subjects + async iteration | Subjects + observable subscriptions |
-
----
-
-## Resources
-
-- [Documentation](https://epikodelabs.github.io/streamix)
-- [npm](https://www.npmjs.com/package/@epikodelabs/streamix)
-- [GitHub](https://github.com/epikodelabs/streamix)
-- [Give feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
-
-**Live demos:** [Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk) · [Heavy computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz) · [Travel blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w)
-
----
+- Join [GitHub Discussions](https://github.com/orgs/epikodelabs/discussions) for questions and ideas.
+- [Share your feedback](https://forms.gle/CDLvoXZqMMyp4VKu9)
 
 ## License
 
