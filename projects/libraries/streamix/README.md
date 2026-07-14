@@ -198,12 +198,6 @@ projects/libraries/streamix/
 └── networking/    # HTTP client, WebSocket, JSONP
 ```
 
-## Live demos
-
-- [Simple Animation](https://stackblitz.com/edit/stackblitz-starters-pkzdzmuk)
-- [Heavy Computation](https://stackblitz.com/edit/stackblitz-starters-73vspfzz)
-- [Travel Blog](https://stackblitz.com/edit/stackblitz-starters-873uh85w)
-
 ## Documentation
 
 - [Full Documentation](https://epikodelabs.github.io/streamix)
