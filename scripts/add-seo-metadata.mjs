@@ -230,19 +230,15 @@ function createFrontmatter(filename, content, pageTitle, pageDescription, pageKe
 
   // Build YAML frontmatter
   let yaml = '---\n';
-  yaml += `title: ${escapeYaml(pageTitle)}\n`;
-  yaml += `description: ${escapeYaml(pageDescription)}\n`;
+  yaml += `title: ${yamlString(pageTitle)}\n`;
+  yaml += `description: ${yamlString(pageDescription)}\n`;
   yaml += `keywords:\n`;
   for (const keyword of pageKeywords) {
-    yaml += `  - ${escapeYaml(keyword)}\n`;
+    yaml += `  - ${yamlString(keyword)}\n`;
   }
   yaml += 'head:\n';
   for (const [tag, attrs] of metadata.head) {
-    yaml += `  - [${tag}`;
-    for (const [key, value] of Object.entries(attrs)) {
-      yaml += `, { ${key}: "${escapeYaml(value)}" }`;
-    }
-    yaml += ']\n';
+    yaml += `  - [${tag}, ${yamlObject(attrs)}]\n`;
   }
   yaml += '---\n\n';
 
@@ -250,13 +246,22 @@ function createFrontmatter(filename, content, pageTitle, pageDescription, pageKe
 }
 
 /**
- * Escape YAML string values
+ * Render a YAML-safe double-quoted string scalar.
  */
-function escapeYaml(str) {
-  return String(str)
+function yamlString(value) {
+  return `"${String(value)
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n');
+    .replace(/\n/g, '\\n')}"`;
+}
+
+/**
+ * Render a small flow-style YAML object.
+ */
+function yamlObject(obj) {
+  return `{ ${Object.entries(obj)
+    .map(([key, value]) => `${key}: ${yamlString(value)}`)
+    .join(', ')} }`;
 }
 
 /**
