@@ -392,6 +392,34 @@ describe('Scope System', () => {
       expect((s as any)._pendingCount).toBe(0);
       s.dispose();
     });
+
+    it('should treat passed-through uninitialized writables as loading until first emission', async () => {
+      const pending = atom<string>();
+      const s = scope({ pending });
+
+      expect(s.loading).toBe(true);
+
+      pending.next('ready');
+      await delay();
+
+      expect(s.loading).toBe(false);
+      s.dispose();
+      pending.dispose();
+    });
+
+    it('should clear loading when a passed-through uninitialized writable is disposed before first emission', async () => {
+      const pending = atom<string>();
+      const s = scope({ pending });
+
+      expect(s.loading).toBe(true);
+
+      pending.dispose();
+      await delay();
+
+      expect(s.loading).toBe(false);
+      expect((s as any)._pendingCount).toBe(0);
+      s.dispose();
+    });
   });
 
   describe('dirty state', () => {

@@ -840,6 +840,8 @@ function createScopeInternal<T extends Record<string, any>>(
       }
     }
 
+    trackReferencedWritableLoading(newScope);
+
     const extensions = setup?.(newScope as any, newScope as any);
     if (extensions != null) {
       if (typeof extensions !== "object") {
@@ -1051,6 +1053,44 @@ export function markAtomAsEmitted(atomInstance: Atom<any>): void {
 
 export function hasAtomEmitted(atomInstance: Atom<any>): boolean {
   return emittedAtomsRegistry.has(atomInstance);
+}
+
+function trackReferencedWritableLoading(scopeRef: Scope): void {
+  const tracked = new Set<Atom<any>>();
+
+  for (const item of Object.values(scopeRef._rawState)) {
+    if (!isAtom(item) || typeof (item as Writable<any>).next !== "function") continue;
+    if (atomScopeRegistry.get(item) === scopeRef) continue;
+    if (tracked.has(item) || hasAtomEmitted(item)) continue;
+
+    tracked.add(item);
+    updatePendingHierarchy(scopeRef, 1);
+
+    let settled = false;
+    const disposeHandlers = (item as any)._onDispose;
+    let unsubscribe: Subscription | undefined;
+
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+
+      unsubscribe?.();
+      if (disposeHandlers instanceof Set) {
+        disposeHandlers.delete(settle);
+      }
+
+      if (!scopeRef._disposed) {
+        updatePendingHierarchy(scopeRef, -1);
+      }
+    };
+
+    unsubscribe = item.subscribe(() => settle());
+    if (disposeHandlers instanceof Set) {
+      disposeHandlers.add(settle);
+      scopeRef.cleanups.add(() => disposeHandlers.delete(settle));
+    }
+    scopeRef.cleanups.add(() => unsubscribe?.());
+  }
 }
 
 /* ── Hierarchical Structural Loading State Engine ─────────────────────────── */
