@@ -28,7 +28,7 @@
 
 ## ✨ What is streamix?
 
-**streamix** is a reactive runtime for TypeScript and JavaScript that unifies reactive state, lifecycle management, asynchronous workflows, and browser-side concurrency under a single async-iterable execution model.
+**streamix** is essentially a lightweight, modern alternative to RxJS that feels much closer to native JavaScript. It’s a great fit if you're building highly concurrent apps, web-based dashboards, or complex UI tools where you want reactive state but hate the debugging nightmares of push-based subscriber chains.
 
 Built on top of async generators, streamix combines:
 
@@ -37,8 +37,6 @@ Built on top of async generators, streamix combines:
 * 🧵 **Coroutines** for background computation
 * 🎭 **Actors** for isolated stateful workers
 * 🔄 **Flows** for asynchronous composition
-
-Whether you are building a dashboard, CLI tool, browser application, or computation-heavy workflow, streamix provides a consistent model for managing values, events, state, and concurrency.
 
 ### Highlights
 
