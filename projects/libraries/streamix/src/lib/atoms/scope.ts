@@ -42,7 +42,7 @@ interface Method<T extends MethodCallback = MethodCallback> {
 }
 
 function isDynamicExpr(value: any): value is DynamicExpr {
-  return value != null && typeof value === "object" && value[DYNAMIC_EXPR] === true;
+  return value?. [DYNAMIC_EXPR] === true;
 }
 
 function dynamicExpr<T, Self = any>(fn: (self: Self, atoms?: any) => Atom<T> | T): DynamicExpr<T, Self> {
@@ -50,10 +50,15 @@ function dynamicExpr<T, Self = any>(fn: (self: Self, atoms?: any) => Atom<T> | T
 }
 
 function isMethod(value: any): value is Method {
-  return value != null && typeof value === "object" && value[METHOD] === true;
+  return value?. [METHOD] === true;
 }
 
-export function method<TSelf, TArgs extends any[], TResult>(fn: (self: TSelf, ...args: TArgs) => TResult): Method<(self: TSelf, ...args: TArgs) => TResult> {
+/**
+ * Marks a scope member as an imperative method instead of a derived value.
+ */
+export function method<TSelf, TArgs extends any[], TResult>(
+  fn: (self: TSelf, ...args: TArgs) => TResult
+): Method<(self: TSelf, ...args: TArgs) => TResult> {
   return { [METHOD]: true, fn };
 }
 
@@ -62,19 +67,9 @@ function isExprMarkerOrDynamic(value: any): value is AtomExpr | DerivedExpr | Pi
 }
 
 function unwrapDynamicValue<T>(value: T | Atom<T>): T {
-  return value && typeof value === "object" && (value as any).type === "atom"
-    ? (value as Atom<T>).value
-    : value as T;
+  return isAtom(value) ? value.value : value as T;
 }
 
-
-/**
- * A mutable holder for the "read" function a tracked-self Proxy should call.
- * Kept as a ref (rather than baking the function into the Proxy's closure)
- * so a single Proxy instance can be reused across multiple recomputations of
- * a derived atom -- each recomputation just swaps out `current` instead of
- * allocating a brand-new Proxy. See recommendation 7.
- */
 type ReaderRef = { current: <T>(atom: Atom<T>) => T };
 
 function createTrackedScopeSelf(
@@ -112,8 +107,6 @@ function evaluateExprMarker(
     return atom(marker.initialValue === undefined ? NO_INITIAL_VALUE : marker.initialValue, marker.options);
   }
   if (isDerivedExpr(marker)) {
-    // One Proxy for the lifetime of this derived atom; only the active reader
-    // changes between recomputations (recommendation 7).
     const readerRef: ReaderRef = {
       current: () => {
         throw new Error("streamix: derived reader accessed outside of an active evaluation");
@@ -128,12 +121,6 @@ function evaluateExprMarker(
   if (isPipeExpr(marker)) return marker.fn(self, atoms);
   if (isFlowExpr(marker)) return marker.fn(self, atoms);
   if (isDynamicExpr(marker)) {
-    // Probe fn() exactly once to determine its shape (atom / expr marker /
-    // plain value) and to discover which atoms it reads. This same `value`
-    // is reused as the first emission below -- fn is never called twice for
-    // the same logical evaluation. It's only re-invoked later when a
-    // dependency actually changes, which is normal derived recomputation,
-    // not double evaluation.
     const initialDependencies = new Set<Atom<any>>();
     const initialReaderRef: ReaderRef = {
       current: <T>(dep: Atom<T>) => {
@@ -153,7 +140,6 @@ function evaluateExprMarker(
     }
 
     let seeded = true;
-    // Same reuse trick as the DerivedExpr branch: one Proxy, swapped reader.
     const readerRef: ReaderRef = {
       current: () => {
         throw new Error("streamix: derived reader accessed outside of an active evaluation");
@@ -216,12 +202,6 @@ type UnwrapSnapshotValues<T> = {
  * Widens literal primitives and readonly arrays into the mutable public value shape
  * exposed by scope proxies and atoms.
  */
-export type Simplify<T> = { [K in keyof T]: T[K] } & {};
-
-/**
- * Widens literal primitives and readonly arrays into the mutable public value shape
- * exposed by scope proxies and atoms.
- */
 export type WidenValue<T> =
   T extends string ? string
   : T extends number ? number
@@ -262,10 +242,7 @@ type DefinedValue<Top extends Record<string, any>, T> =
   | FlowExpr<T, Top>
   | ((self: Top, atoms: DefinedAtomAccessor<Top>) => T | Promise<T> | Atom<T>);
 
-/**
- * Normalizes shorthand scope member definitions into their owned runtime node shape.
- */
-export type ScopeValue<T> =
+type ScopeValue<T> =
   | T extends ScopeReturn<any> ? T
   : T extends Atom<any> ? T
   : T extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
@@ -276,14 +253,12 @@ export type ScopeValue<T> =
   : T extends PipeExpr<infer U, any> ? Atom<U>
   : T extends FlowExpr<infer U, any> ? Atom<U>
   : T extends AtomExpr<infer U> ? Writable<U>
-  : T extends Record<string, any> ? ScopeReturn<ScopeOf<T>> : Writable<T>;
+  : T extends Record<string, any> ? ScopeReturn<ScopeOf<T>>
+  : Writable<T>;
 
 type ScopeOf<T extends Record<string, any>> = { [K in keyof T]: ScopeValue<T[K]>; };
 
-/**
- * Resolves the public runtime type of a function-valued scope member.
- */
-export type ScopeResolvedFunctionValue<TResult> =
+type ScopeResolvedFunctionValue<TResult> =
   Awaited<TResult> extends ScopeReturn<any> ? Awaited<TResult>
   : Awaited<TResult> extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
   : Awaited<TResult> extends Writable<any> ? Awaited<TResult>
@@ -294,10 +269,7 @@ export type ScopeResolvedFunctionValue<TResult> =
   : Awaited<TResult> extends FlowExpr<infer U, any> ? Atom<U>
   : Atom<WidenValue<Awaited<TResult>>>;
 
-/**
- * Resolves config-form scope member definitions into their public runtime type.
- */
-export type ScopeResolvedValue<T> =
+type ScopeResolvedValue<T> =
   T extends ScopeReturn<any> ? T
   : T extends Scope<infer U> ? ScopeReturn<ScopeOf<U>>
   : T extends Method<infer TFn> ? MethodReturn<TFn>
@@ -316,7 +288,6 @@ export type ScopeResolvedValue<T> =
  * Applies {@link ScopeResolvedValue} across a config object.
  */
 export type ScopeOfConfig<T extends Record<string, any>> = { [K in keyof T]: ScopeResolvedValue<T[K]>; };
-
 /**
  * Converts an atom-backed member into the value shape exposed on the scope proxy.
  */
@@ -325,10 +296,7 @@ export type ScopePublicValue<T> = T extends Atom<infer U> ? WidenValue<U> : T;
  * Return type allowed from the optional `scope(..., setup)` callback.
  */
 export type ScopeSetupResult = Record<string | symbol, any> | void;
-/**
- * Maps a setup callback return value into the extension surface added to the scope.
- */
-export type ScopeSetupReturn<T> = T extends void ? {} : T;
+type ScopeSetupReturn<T> = T extends void ? {} : T;
 type ScopeSetupReturnFromArg<T> = T extends (...args: any[]) => infer TResult ? ScopeSetupReturn<TResult> : {};
 /**
  * Wrapped scope surface exposed as the first `self` parameter in setup callbacks.
@@ -339,6 +307,7 @@ export type ScopeSetupSelf<T extends Record<string, any>> = T & Scope;
  */
 export type ScopeSetupSelfFromConfig<T extends Record<string, any>> = T & Scope;
 type ScopeSetupCallback<TSelf, TScope> = (self: TSelf, scope: TScope) => ScopeSetupResult;
+
 /**
  * Options that control how a scope batches and emits updates.
  */
@@ -351,6 +320,7 @@ export type ScopeOptions = {
    */
   mode?: "discrete" | "analog";
 };
+
 /**
  * Built-in atoms that every scope owns in addition to user-defined state.
  */
@@ -359,10 +329,7 @@ export type ScopeReservedAtoms = {
   dirty: Writable<boolean>;
 };
 
-/**
- * Predicate used to determine whether a config-form scope member becomes readonly.
- */
-export type IsReadonlyScopeConfigValue<T> =
+type IsReadonlyScopeConfigValue<T> =
   T extends DerivedExpr<any, any> ? true
   : T extends PipeExpr<any, any> ? true
   : T extends FlowExpr<any, any> ? true
@@ -372,26 +339,20 @@ export type IsReadonlyScopeConfigValue<T> =
   : T extends Atom<any> ? true
   : false;
 
-/**
- * Keys of a config-form scope definition that become readonly on the public proxy.
- */
-export type ReadonlyScopeConfigKeys<T extends Record<string, any>> = {
+type ReadonlyScopeConfigKeys<T extends Record<string, any>> = {
   [K in keyof T]-?: IsReadonlyScopeConfigValue<T[K]> extends true ? K : never;
 }[keyof T];
 
-/**
- * Keys of a config-form scope definition that remain writable on the public proxy.
- */
-export type WritableScopeConfigKeys<T extends Record<string, any>> = Exclude<keyof T, ReadonlyScopeConfigKeys<T>>;
+type WritableScopeConfigKeys<T extends Record<string, any>> = Exclude<keyof T, ReadonlyScopeConfigKeys<T>>;
 
 /**
  * Public proxy shape produced from config-form scope definitions.
  */
-export type UnwrapScopeValuesFromConfig<T extends Record<string, any>> = {
+export type UnwrapScopeValuesFromConfig<T extends Record<string, any>> = Simplify<{
   readonly [K in ReadonlyScopeConfigKeys<T>]: ScopePublicValue<ScopeResolvedValue<T[K]>>;
 } & {
   -readonly [K in WritableScopeConfigKeys<T>]: ScopePublicValue<ScopeResolvedValue<T[K]>>;
-};
+}>;
 
 /**
  * Maps a scope state shape to the raw atom graph used by expression helpers.
@@ -403,18 +364,24 @@ export type ScopeAtoms<T> = T extends Record<string, any>
 /**
  * Runtime proxy type returned from `scope()` when the state shape is already normalized.
  */
-export type ScopeReturn<T extends Record<string, any>> = Simplify<Scope<T> & UnwrapScopeValues<T> & {
+export type ScopeReturn<T extends Record<string, any>> = Scope<T> & UnwrapScopeValues<T> & {
   at: AtomAccessor<T & ScopeReservedAtoms>;
-  subscribeTo<K extends keyof (T & ScopeReservedAtoms)>(key: K, callback: (value: AtomValueOf<(T & ScopeReservedAtoms)[K]>) => void): Subscription;
-}>;
+  subscribeTo<K extends keyof (T & ScopeReservedAtoms)>(
+    key: K,
+    callback: (value: AtomValueOf<(T & ScopeReservedAtoms)[K]>) => void
+  ): Subscription;
+};
 
 /**
  * Runtime proxy type returned from `scope()` when using config-form shorthand definitions.
  */
-export type ScopeReturnFromConfig<T extends Record<string, any>> = Simplify<Scope<ScopeOfConfig<T>> & UnwrapScopeValuesFromConfig<T> & {
+export type ScopeReturnFromConfig<T extends Record<string, any>> = Scope<ScopeOfConfig<T>> & UnwrapScopeValuesFromConfig<T> & {
   at: AtomAccessor<ScopeOfConfig<T> & ScopeReservedAtoms>;
-  subscribeTo<K extends keyof (ScopeOfConfig<T> & ScopeReservedAtoms)>(key: K, callback: (value: AtomValueOf<(ScopeOfConfig<T> & ScopeReservedAtoms)[K]>) => void): Subscription;
-}>;
+  subscribeTo<K extends keyof (ScopeOfConfig<T> & ScopeReservedAtoms)>(
+    key: K,
+    callback: (value: AtomValueOf<(ScopeOfConfig<T> & ScopeReservedAtoms)[K]>) => void
+  ): Subscription;
+};
 
 /**
  * Runtime scope instance.
@@ -423,42 +390,25 @@ export type ScopeReturnFromConfig<T extends Record<string, any>> = Simplify<Scop
  * values as properties, and provides lifecycle cleanup through {@link dispose}.
  */
 export interface Scope<T extends Record<string, any> = Record<string, any>> {
-  /** Runtime discriminator for scope-like values. */
   type: "scope";
-  /** Owned atoms and nested scopes. */
   atoms: Set<Atom<any> | Scope>;
-  /** Cleanup callbacks that run when the scope is disposed. */
   cleanups: Set<() => void>;
-  /** Current notification mode. */
   mode: "discrete" | "analog";
-  /** Parent scope or root scope, if this scope was created inside another scope. */
   parent: Scope | RootScope | null;
-  /** Dependency-injection container associated with this scope. */
   container: Container;
-  /** True until all owned atoms have emitted at least once. */
   readonly loading: boolean;
-  /** True when an owned analog atom has a queued update. */
   readonly dirty: boolean;
-  /** Returns a plain object snapshot of the current scope values. */
   snapshot(): UnwrapSnapshotValues<T>;
-  /** Disposes owned atoms/scopes and runs registered cleanups. */
   dispose(): void;
-  /** @internal */ _pendingCount: number;
-  /** @internal */ _dirtyCount: number;
-  /** @internal */ _exports: Set<string | symbol>;
-  /** @internal */ _disposed: boolean;
-  /** @internal */ _rawState: Record<string | symbol, any>;
+  _pendingCount: number;
+  _dirtyCount: number;
+  _exports: Set<string | symbol>;
+  _disposed: boolean;
+  _rawState: Record<string | symbol, any>;
 }
 
-/**
- * Accepted normalized definition shape for `scope<T>(...)`.
- *
- * Values become writable atoms, function values become derived values, nested
- * objects become nested scopes, and `method(...)` marks imperative actions.
- */
-export type ScopeConfig<T extends Record<string, any>> = DefinedInput<T> & ThisType<ScopeReturn<ScopeOf<T>>>;
-
-export type DefinedInput<Top extends Record<string, any>, Shape extends Record<string, any> = Top> = {
+type Simplify<T> = { [K in keyof T]: T[K] } & {};
+type DefinedInput<Top extends Record<string, any>, Shape extends Record<string, any> = Top> = {
   [K in keyof Shape]: Shape[K] extends Scope<any>
     ? Shape[K]
     : Shape[K] extends readonly any[]
@@ -468,12 +418,29 @@ export type DefinedInput<Top extends Record<string, any>, Shape extends Record<s
         : DefinedValue<Top, Shape[K]>;
 };
 
+/**
+ * Accepted normalized definition shape for `scope<T>(...)`.
+ *
+ * Values become writable atoms, function values become derived values, nested
+ * objects become nested scopes, and `method(...)` marks imperative actions.
+ */
+export type ScopeConfig<T extends Record<string, any>> = DefinedInput<T> & ThisType<ScopeReturn<ScopeOf<T>>>;
+
 let currentScope: Scope | null = null;
 const atomScopeRegistry = new WeakMap<Atom<any>, Scope>();
 const emittedAtomsRegistry = new WeakSet<Atom<any>>();
 
+/**
+ * Returns the scope currently being constructed or evaluated.
+ */
 export const getCurrentScope = (): Scope | null => currentScope;
+/**
+ * Returns the effective notification mode of a scope.
+ */
 export const getScopeMode = (scope: Scope): "discrete" | "analog" => scope.mode ?? "discrete";
+/**
+ * Replaces the active scope and returns the previous one.
+ */
 export const setCurrentScope = (scope: Scope | null): Scope | null => {
   const previous = currentScope;
   currentScope = scope;
@@ -482,15 +449,24 @@ export const setCurrentScope = (scope: Scope | null): Scope | null => {
 
 /* ── IoC Helpers ──────────────────────────────────────────────────────────── */
 
+/**
+ * Registers a dependency-injection provider on the current scope container.
+ */
 export function provide<T>(token: Token<T>, factory: Factory<T>, options?: RegistrationOptions<T>): void {
   const container = currentScope?.container ?? globalContainer;
   container.register(token, factory, options);
 }
 
+/**
+ * Resolves a dependency from the current scope container, falling back to the global container.
+ */
 export function inject<T>(token: Token<T>): T {
   return (currentScope?.container ?? globalContainer).resolve(token, currentScope);
 }
 
+/**
+ * Resolves a dependency if it exists, returning `undefined` when it is not registered.
+ */
 export function injectOptional<T>(token: Token<T>): T | undefined {
   return (currentScope?.container ?? globalContainer).resolveOptional(token, currentScope);
 }
@@ -560,7 +536,7 @@ function materializeState(
 
   const self: any = function (targetAtom: any) {
     if (isAtom(targetAtom)) {
-      return targetAtom.value; // Let targetAtom.value handle dependency tracking intrinsically
+      return targetAtom.value;
     }
   };
 
@@ -596,14 +572,14 @@ function materializeState(
       get() {
         const current = resolveRawItem(key);
         if (isAtom(current)) {
-          return current.value; // Prevent redundant context dependencies appends
+          return current.value;
         }
         return current;
       },
       set(nextVal: any) {
         const current = rawState[key];
-        if (isAtomLike(current) && typeof (current as any).next === "function") {
-          (current as any).next(nextVal);
+        if (isAtomLike(current) && typeof (current as Writable<any>).next === "function") {
+          (current as Writable<any>).next(nextVal);
         } else {
           rawState[key] = nextVal;
         }
@@ -613,7 +589,6 @@ function materializeState(
     });
   }
 
-  // Materialize dependencies safely
   for (const key of Reflect.ownKeys(rawState)) {
     if (isExprMarkerOrDynamic(rawState[key])) {
       void self[key];
@@ -630,7 +605,6 @@ function defineScopeStateProperty(
 ): void {
   const currentItem = scopeRef._rawState[key];
   const readonly = isReadonlyScopeStateKey(key, currentItem);
-
   // An unresolved marker's readonly-ness can only change once it resolves
   // into its real underlying atom/value on first read. Once that's already
   // happened (currentItem isn't a marker), the readonly status is settled
@@ -712,8 +686,8 @@ function createScopeInternal<T extends Record<string, any>>(
   const parent = currentScope ?? getGlobalScope();
   const mode = resolveMode(options, parent);
   let resolvedSelf: any;
-
   const parentContainer = isScope(parent) ? parent.container : globalContainer;
+
   const newScope: Scope = {
     type: "scope",
     atoms: new Set(),
@@ -777,16 +751,11 @@ function createScopeInternal<T extends Record<string, any>>(
     };
 
     Object.defineProperties(newScope, {
-      at: {
-        value: atAccessor,
-        enumerable: false,
-        configurable: true,
-        writable: false,
-      },
+      at: { value: atAccessor, enumerable: false, configurable: true, writable: false },
       subscribeTo: {
         value: (key: string | symbol, callback: Function) => {
           const node = getScopeItem(key);
-          if (!node || typeof node.subscribe !== "function") {
+          if (!node?.subscribe) {
             throw new Error(`Cannot subscribe to non-atom structure at key: ${String(key)}`);
           }
           if (emittedAtomsRegistry.has(node)) {
@@ -806,8 +775,8 @@ function createScopeInternal<T extends Record<string, any>>(
     defineAccessorKey("dirty");
 
     const output = factory.call(newScope, newScope);
-    const dataState = (output && output.rawState) ? output.rawState : output;
-    resolvedSelf = (output && output.self) ? output.self : newScope;
+    const dataState = output?.rawState ?? output;
+    resolvedSelf = output?.self ?? newScope;
 
     if (dataState && typeof dataState === "object") {
       if ("loading" in dataState) {
@@ -870,73 +839,57 @@ function createScopeInternal<T extends Record<string, any>>(
 
 /**
  * Creates a scope from a config factory and optional setup extension.
- *
- * Config-form scopes infer shorthand members directly: values become atoms,
- * functions become readonly derived values, nested objects become nested scopes,
- * and `method(...)` values become callable actions.
  */
 export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: (this: Simplify<ScopeReturnFromConfig<TConfig>>) => TConfig,
   setup?: (self: ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>, scope: ScopeReturnFromConfig<TConfig>) => TSetup,
   options?: ScopeOptions,
 ): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
+
 /**
  * Creates a scope from a plain object definition and optional setup extension.
- *
- * Use this form for the best inference:
- *
- * ```ts
- * const counter = scope({ count: 0 }, self => ({
- *   increment: () => {
- *     self.count++;
- *   },
- * }));
- * ```
  */
 export function scope<TConfig extends Record<string, any>, TSetup extends ScopeSetupResult>(
   definition: TConfig,
   setup?: (self: ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>, scope: ScopeReturnFromConfig<TConfig>) => TSetup,
   options?: ScopeOptions,
 ): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
+
 /**
  * Creates a scope from a config factory.
  */
-export function scope<TConfig extends Record<string, any>>(definition: (this: Simplify<ScopeReturnFromConfig<TConfig>>) => TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
+export function scope<TConfig extends Record<string, any>>(
+  definition: (this: Simplify<ScopeReturnFromConfig<TConfig>>) => TConfig,
+  options?: ScopeOptions
+): ScopeReturnFromConfig<TConfig>;
+
 /**
  * Creates a scope from a plain object definition.
  */
-export function scope<TConfig extends Record<string, any>>(definition: TConfig, options?: ScopeOptions): ScopeReturnFromConfig<TConfig>;
+export function scope<TConfig extends Record<string, any>>(
+  definition: TConfig,
+  options?: ScopeOptions
+): ScopeReturnFromConfig<TConfig>;
+
 /**
  * Creates a scope with an explicit normalized state shape.
- *
- * Use when the public state shape is known up front. If setup adds dynamic
- * methods and you also want a declared base interface, prefer:
- *
- * ```ts
- * interface Shape {
- *   count: number;
- * }
- *
- * const definition = { count: 0 } satisfies Shape;
- * const counter = scope(definition, self => ({
- *   increment: () => {
- *     self.count++;
- *   },
- * }));
- * ```
  */
 export function scope<T extends Record<string, any>>(
   definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>,
   ...args: [setup: ScopeSetupCallback<ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, ScopeReturn<ScopeOf<T>>>, options?: ScopeOptions] | [options?: ScopeOptions]
 ): ScopeReturn<ScopeOf<T>> & ScopeSetupReturnFromArg<typeof args[0]>;
+
 /**
- * Creates a scope with an explicit normalized state shape from an object
- * definition.
+ * Creates a scope with an explicit normalized state shape from an object definition.
  */
 export function scope<T extends Record<string, any>>(
   definition: ScopeConfig<T>,
   ...args: [setup: ScopeSetupCallback<ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, ScopeReturn<ScopeOf<T>>>, options?: ScopeOptions] | [options?: ScopeOptions]
 ): ScopeReturn<ScopeOf<T>> & ScopeSetupReturnFromArg<typeof args[0]>;
+
+/**
+ * Creates a scope from either a config object or config factory.
+ */
 export function scope(
   definition: any,
   setupOrOptions?: ((self: any, scope: any) => ScopeSetupResult) | ScopeOptions,
@@ -965,6 +918,45 @@ export function scope(
 
 /* ── Scope Disposal ───────────────────────────────────────────────────────── */
 
+function updatePendingHierarchy(startNode: Scope | RootScope | null, dynamicDelta: number): void {
+  if (dynamicDelta === 0) return;
+  let current: Scope | RootScope | null = startNode;
+
+  while (isScope(current) && !current._disposed) {
+    current._pendingCount = Math.max(0, current._pendingCount + dynamicDelta);
+    const loadingAtom = current._rawState["loading"] as Writable<boolean> | undefined;
+
+    if (loadingAtom) {
+      const isCurrentlyLoading = current._pendingCount > 0;
+      if (loadingAtom.value !== isCurrentlyLoading) {
+        loadingAtom.next(isCurrentlyLoading);
+      }
+    }
+    current = current.parent;
+  }
+}
+
+function updateDirtyHierarchy(startNode: Scope | RootScope | null, dynamicDelta: number): void {
+  if (dynamicDelta === 0) return;
+  let current: Scope | RootScope | null = startNode;
+
+  while (isScope(current) && !current._disposed) {
+    current._dirtyCount = Math.max(0, current._dirtyCount + dynamicDelta);
+    const dirtyAtom = current._rawState["dirty"] as Writable<boolean> | undefined;
+
+    if (dirtyAtom) {
+      const isCurrentlyDirty = current._dirtyCount > 0;
+      if (dirtyAtom.value !== isCurrentlyDirty) {
+        dirtyAtom.next(isCurrentlyDirty);
+      }
+    }
+    current = current.parent;
+  }
+}
+
+/**
+ * Disposes a scope, its owned atoms, and all registered cleanup hooks.
+ */
 export function disposeScope(sc: Scope): void {
   if (sc._disposed) return;
   sc._disposed = true;
@@ -989,12 +981,13 @@ export function disposeScope(sc: Scope): void {
 
   for (const activeItem of sc.atoms) {
     try {
-      if (!(activeItem as any).disposed) (activeItem as any).dispose();
+      (activeItem as any).dispose();
     } catch (err) {
       console.error("[streamix] atom disposal threw during scope disposal:", err);
     }
   }
   sc.atoms.clear();
+
   sc.container.dispose().catch((err) => {
     console.error("[streamix] container disposal failed during scope disposal:", err);
   });
@@ -1002,6 +995,9 @@ export function disposeScope(sc: Scope): void {
 
 /* ── Registry Linkage Handlers ───────────────────────────────────────────── */
 
+/**
+ * Attaches a newly created atom to the current scope for lifecycle and state tracking.
+ */
 export function registerWithCurrentScope(atomInstance: Atom<any>): void {
   if (!currentScope) return;
 
@@ -1043,6 +1039,9 @@ export function registerWithCurrentScope(atomInstance: Atom<any>): void {
   targetContext.cleanups.add(() => stopDirtyTracking());
 }
 
+/**
+ * Marks an atom as having produced its first value for scope loading bookkeeping.
+ */
 export function markAtomAsEmitted(atomInstance: Atom<any>): void {
   if (emittedAtomsRegistry.has(atomInstance)) return;
   emittedAtomsRegistry.add(atomInstance);
@@ -1051,6 +1050,9 @@ export function markAtomAsEmitted(atomInstance: Atom<any>): void {
   if (contextRef) updatePendingHierarchy(contextRef, -1);
 }
 
+/**
+ * Returns whether an atom has emitted at least once.
+ */
 export function hasAtomEmitted(atomInstance: Atom<any>): boolean {
   return emittedAtomsRegistry.has(atomInstance);
 }
@@ -1090,44 +1092,6 @@ function trackReferencedWritableLoading(scopeRef: Scope): void {
       scopeRef.cleanups.add(() => disposeHandlers.delete(settle));
     }
     scopeRef.cleanups.add(() => unsubscribe?.());
-  }
-}
-
-/* ── Hierarchical Structural Loading State Engine ─────────────────────────── */
-
-function updatePendingHierarchy(startNode: Scope | RootScope | null, dynamicDelta: number): void {
-  if (dynamicDelta === 0) return;
-  let current: Scope | RootScope | null = startNode;
-
-  while (isScope(current) && !current._disposed) {
-    current._pendingCount = Math.max(0, current._pendingCount + dynamicDelta);
-    const loadingAtom = current._rawState["loading"] as Writable<boolean> | undefined;
-
-    if (loadingAtom) {
-      const isCurrentlyLoading = current._pendingCount > 0;
-      if (loadingAtom.value !== isCurrentlyLoading) {
-        loadingAtom.next(isCurrentlyLoading);
-      }
-    }
-    current = current.parent;
-  }
-}
-
-function updateDirtyHierarchy(startNode: Scope | RootScope | null, dynamicDelta: number): void {
-  if (dynamicDelta === 0) return;
-  let current: Scope | RootScope | null = startNode;
-
-  while (isScope(current) && !current._disposed) {
-    current._dirtyCount = Math.max(0, current._dirtyCount + dynamicDelta);
-    const dirtyAtom = current._rawState["dirty"] as Writable<boolean> | undefined;
-
-    if (dirtyAtom) {
-      const isCurrentlyDirty = current._dirtyCount > 0;
-      if (dirtyAtom.value !== isCurrentlyDirty) {
-        dirtyAtom.next(isCurrentlyDirty);
-      }
-    }
-    current = current.parent;
   }
 }
 
