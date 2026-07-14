@@ -361,27 +361,35 @@ export type ScopeAtoms<T> = T extends Record<string, any>
   ? { [K in keyof T]: T[K] extends Scope<infer U> ? ScopeAtoms<U> : AtomOf<ScopeValue<T[K]>> }
   : any;
 
-/**
- * Runtime proxy type returned from `scope()` when the state shape is already normalized.
- */
-export type ScopeReturn<T extends Record<string, any>> = Scope<T> & UnwrapScopeValues<T> & {
+type ScopeRuntimeShape<T extends Record<string, any>> = Scope<T>;
+type ScopeValueShape<T extends Record<string, any>> = UnwrapScopeValues<T>;
+type ScopeResolvedConfig<T extends Record<string, any>> = ScopeOfConfig<T>;
+type ScopeConfigValueShape<T extends Record<string, any>> = UnwrapScopeValuesFromConfig<T>;
+type ScopeProxy<TRuntime extends Record<string, any>, TValues extends Record<string, any>> =
+  ScopeRuntimeShape<TRuntime> &
+  TValues &
+  ScopeApi<TRuntime>;
+type NormalizedScope<T extends Record<string, any>> = ScopeProxy<T, ScopeValueShape<T>>;
+type ConfiguredScope<T extends Record<string, any>> = ScopeProxy<ScopeResolvedConfig<T>, ScopeConfigValueShape<T>>;
+type ScopeWithSetup<TScope, TSetup extends ScopeSetupResult> = TScope & ScopeSetupReturn<TSetup>;
+
+interface ScopeApi<T extends Record<string, any>> {
   at: AtomAccessor<T & ScopeReservedAtoms>;
   subscribeTo<K extends keyof (T & ScopeReservedAtoms)>(
     key: K,
     callback: (value: AtomValueOf<(T & ScopeReservedAtoms)[K]>) => void
   ): Subscription;
-};
+}
+
+/**
+ * Runtime proxy type returned from `scope()` when the state shape is already normalized.
+ */
+export type ScopeReturn<T extends Record<string, any>> = NormalizedScope<T>;
 
 /**
  * Runtime proxy type returned from `scope()` when using config-form shorthand definitions.
  */
-export type ScopeReturnFromConfig<T extends Record<string, any>> = Scope<ScopeOfConfig<T>> & UnwrapScopeValuesFromConfig<T> & {
-  at: AtomAccessor<ScopeOfConfig<T> & ScopeReservedAtoms>;
-  subscribeTo<K extends keyof (ScopeOfConfig<T> & ScopeReservedAtoms)>(
-    key: K,
-    callback: (value: AtomValueOf<(ScopeOfConfig<T> & ScopeReservedAtoms)[K]>) => void
-  ): Subscription;
-};
+export type ScopeReturnFromConfig<T extends Record<string, any>> = ConfiguredScope<T>;
 
 /**
  * Runtime scope instance.
@@ -844,7 +852,7 @@ export function scope<TConfig extends Record<string, any>, TSetup extends ScopeS
   definition: (this: Simplify<ScopeReturnFromConfig<TConfig>>) => TConfig,
   setup?: (self: ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>, scope: ScopeReturnFromConfig<TConfig>) => TSetup,
   options?: ScopeOptions,
-): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
+): ScopeWithSetup<ScopeReturnFromConfig<TConfig>, TSetup>;
 
 /**
  * Creates a scope from a plain object definition and optional setup extension.
@@ -853,7 +861,7 @@ export function scope<TConfig extends Record<string, any>, TSetup extends ScopeS
   definition: TConfig,
   setup?: (self: ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>, scope: ScopeReturnFromConfig<TConfig>) => TSetup,
   options?: ScopeOptions,
-): ScopeReturnFromConfig<TConfig> & ScopeSetupReturn<TSetup>;
+): ScopeWithSetup<ScopeReturnFromConfig<TConfig>, TSetup>;
 
 /**
  * Creates a scope from a config factory.
@@ -877,7 +885,7 @@ export function scope<TConfig extends Record<string, any>>(
 export function scope<T extends Record<string, any>>(
   definition: (this: ScopeReturn<ScopeOf<T>>) => ScopeConfig<T>,
   ...args: [setup: ScopeSetupCallback<ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, ScopeReturn<ScopeOf<T>>>, options?: ScopeOptions] | [options?: ScopeOptions]
-): ScopeReturn<ScopeOf<T>> & ScopeSetupReturnFromArg<typeof args[0]>;
+): ScopeWithSetup<ScopeReturn<ScopeOf<T>>, ScopeSetupReturnFromArg<typeof args[0]>>;
 
 /**
  * Creates a scope with an explicit normalized state shape from an object definition.
@@ -885,7 +893,7 @@ export function scope<T extends Record<string, any>>(
 export function scope<T extends Record<string, any>>(
   definition: ScopeConfig<T>,
   ...args: [setup: ScopeSetupCallback<ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, ScopeReturn<ScopeOf<T>>>, options?: ScopeOptions] | [options?: ScopeOptions]
-): ScopeReturn<ScopeOf<T>> & ScopeSetupReturnFromArg<typeof args[0]>;
+): ScopeWithSetup<ScopeReturn<ScopeOf<T>>, ScopeSetupReturnFromArg<typeof args[0]>>;
 
 /**
  * Creates a scope from either a config object or config factory.
