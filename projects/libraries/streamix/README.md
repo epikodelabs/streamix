@@ -78,10 +78,10 @@ console.log(doubled.value); // 10
 For async computed values, capture dependencies before the first `await`:
 
 ```typescript
-const total = derived(async ($) => {
-  void $.price, $.tax;
+const total = derived(async (self) => {
+  const [priceAtom, taxAtom] = self.use(price, tax);
   await loadRates();
-  return $.price + $.tax;
+  return priceAtom.value + taxAtom.value;
 });
 ```
 
@@ -90,16 +90,29 @@ If the computation is primarily async or needs cancellation and restart semantic
 ### Scope-Based Lifecycle
 
 ```typescript
-import { scope } from '@epikodelabs/streamix';
+import { method, scope } from '@epikodelabs/streamix';
 
-const app = scope<{ count: number }>({
+const app = scope<{
+  count: number;
+  doubled: number;
+  increment: () => void;
+}>({
   count: 0,
+  doubled: (self) => self.count * 2,
+  increment: method((self) => {
+    self.count += 1;
+  }),
 });
 
-app.count = 10;
+app.increment();
+
+console.log(app.count);   // 1
+console.log(app.doubled); // 2
 
 app.dispose();
 ```
+
+Scopes are where individual atoms become a coherent state model. They let you group writable state, derived values, imperative methods, and cleanup under one lifecycle boundary, then dispose the whole graph when the feature or component goes away.
 
 ### Browser-Side Concurrency
 
