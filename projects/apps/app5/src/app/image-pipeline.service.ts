@@ -6,11 +6,9 @@ import {
     filter,
     fromPromise,
     map,
-    mergeMap,
+    switchMap,
     tap,
 } from '@epikodelabs/streamix';
-
-import { zipSync } from 'fflate';
 
 import { actor, ActorBusMessage, main } from '@epikodelabs/streamix/coroutines';
 import {
@@ -86,7 +84,7 @@ export class ImagePipelineService {
 
     this.fileStream.pipe(
       filter((task) => task.file.type.startsWith('image/')),
-      mergeMap((task) =>
+      switchMap((task) =>
         fromPromise(this.readFile(task.file)).pipe(
           map(({ arrayBuffer }) => {
             const s = this.settings();
@@ -115,7 +113,7 @@ export class ImagePipelineService {
           })
         )
       ),
-      mergeMap((input) =>
+      switchMap((input) =>
         fromPromise(this.runPipeline(input)).pipe(
           map((output) => ({ input, output })),
           tap(({ input, output }) => {
@@ -198,47 +196,6 @@ export class ImagePipelineService {
 
   updateSettings(patch: Partial<ProcessingSettings>) {
     this.settings.update(s => ({ ...s, ...patch }));
-  }
-
-  async downloadAll() {
-    const doneJobs = this.jobs().filter(j => j.state === 'done' && j.resultUrl);
-    if (!doneJobs.length) return;
-
-    const files: Record<string, Uint8Array> = {};
-    const seen = new Set<string>();
-
-    for (const job of doneJobs) {
-      const ext =
-        job.result?.format === 'image/png'
-          ? 'png'
-          : job.result?.format === 'image/webp'
-            ? 'webp'
-            : 'jpg';
-      const base = job.fileName.replace(/\.[^.]+$/, '') || 'image';
-      let finalName = `${base}.${ext}`;
-      let counter = 1;
-      while (seen.has(finalName)) {
-        finalName = `${base}-${counter}.${ext}`;
-        counter++;
-      }
-      seen.add(finalName);
-
-      const res = await fetch(job.resultUrl!);
-      const buf = await res.arrayBuffer();
-      files[finalName] = new Uint8Array(buf);
-    }
-
-    const zipped = zipSync(files, { level: 0 });
-    const blob = new Blob([zipped], { type: 'application/zip' });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `processed-images-${new Date().toISOString().slice(0, 10)}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   }
 
   private async readFile(file: File): Promise<{ arrayBuffer: ArrayBuffer; url: string }> {

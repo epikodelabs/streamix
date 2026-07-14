@@ -1,105 +1,13 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HTTP Client Demo — Streamix Networking</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <meta charset="utf-8">
+  <title>Smart Image Processor — Streamix</title>
+  <base href="/">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
 </head>
 <body>
-  <div class="app">
-    <header class="header">
-      <h1>🌐 HTTP Client Demo</h1>
-      <p class="subtitle">Streamix networking operators with real public APIs</p>
-    </header>
-
-    <main class="grid">
-      <section class="card">
-        <div class="card-header">
-          <h2>GET /posts</h2>
-          <span class="badge">readJson</span>
-        </div>
-        <p class="tooltip">Parses JSON response from JSONPlaceholder into structured objects.</p>
-        <button data-action="fetch-posts">Run Request</button>
-        <pre class="output" data-output="posts"></pre>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
-          <h2>POST /posts</h2>
-          <span class="badge">readJson</span>
-        </div>
-        <p class="tooltip">Creates a post with a JSON body and parses the JSON response.</p>
-        <button data-action="create-post">Run Request</button>
-        <pre class="output" data-output="create"></pre>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
-          <h2>GET /users</h2>
-          <span class="badge">readText</span>
-        </div>
-        <p class="tooltip">Reads the raw response body as plain text instead of parsing JSON.</p>
-        <button data-action="fetch-users">Run Request</button>
-        <pre class="output" data-output="users"></pre>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
-          <h2>GET /pokemon</h2>
-          <span class="badge">readJson</span>
-        </div>
-        <p class="tooltip">Queries PokeAPI and parses the structured Pokémon data as JSON.</p>
-        <button data-action="fetch-pokemon">Run Request</button>
-        <pre class="output" data-output="pokemon"></pre>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
-          <h2>GET /random dog</h2>
-          <span class="badge">readJson → readBlob</span>
-        </div>
-        <p class="tooltip">Fetches a JSON URL from Dog CEO, then streams the actual image as a Blob.</p>
-        <button data-action="fetch-dog">Run Request</button>
-        <div class="image-output" data-output="dog"></div>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
-          <h2>404 Not Found</h2>
-          <span class="badge">readText + catchError</span>
-        </div>
-        <p class="tooltip">Requests a missing endpoint and catches the HTTP error gracefully.</p>
-        <button data-action="test-404">Run Request</button>
-        <pre class="output" data-output="404"></pre>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
-          <h2>Redirects</h2>
-          <span class="badge">useRedirect + readStatus</span>
-        </div>
-        <p class="tooltip">Follows 3 redirects then reads the final HTTP status and headers metadata.</p>
-        <button data-action="test-redirect">Run Request</button>
-        <pre class="output" data-output="redirect"></pre>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
-          <h2>Timeout</h2>
-          <span class="badge">useTimeout + readArrayBuffer</span>
-        </div>
-        <p class="tooltip">Sets a 1 ms timeout and requests an ArrayBuffer response to trigger abort.</p>
-        <button data-action="test-timeout">Run Request</button>
-        <pre class="output" data-output="timeout"></pre>
-      </section>
-    </main>
-
-    <footer class="footer">
-      <p>Powered by <strong>Streamix</strong> · HTTP networking for TypeScript</p>
-    </footer>
-  </div>
+  <app-root></app-root>
 </body>
 </html>

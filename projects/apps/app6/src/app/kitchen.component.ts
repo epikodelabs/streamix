@@ -1,4 +1,5 @@
-import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { Subscription } from 'rxjs';
 import {
   KitchenService,
@@ -10,7 +11,7 @@ import {
 @Component({
   selector: 'app-kitchen',
   standalone: true,
-  imports: [],
+  imports: [CommonModule],
   template: `
     <div class="kitchen">
       <div class="controls">
@@ -45,55 +46,45 @@ import {
       </div>
 
       <div class="ovens">
-        @for (oven of ovens; track oven.id) {
-          <div class="oven" [class.active]="oven.order">
-            <div class="oven-header">{{ oven.id }}</div>
+        <div class="oven" *ngFor="let oven of ovens" [class.active]="oven.order">
+          <div class="oven-header">{{ oven.id }}</div>
 
-            <div class="oven-body">
-              <div class="pizza-icon">{{ oven.order ? '🍕' : '❄️' }}</div>
+          <div class="oven-body">
+            <div class="pizza-icon">{{ oven.order ? '🍕' : '❄️' }}</div>
 
-              @if (oven.order) {
-                <div class="oven-order">
-                  <strong>{{ oven.order.item }}</strong>
-                  <span>{{ oven.order.customer }}</span>
-                </div>
-              }
-
-              @if (oven.stage) {
-                <div class="oven-stage">{{ oven.stage }}</div>
-              }
-              @if (!oven.order) {
-                <div class="oven-idle">Idle</div>
-              }
+            <div class="oven-order" *ngIf="oven.order">
+              <strong>{{ oven.order.item }}</strong>
+              <span>{{ oven.order.customer }}</span>
             </div>
+
+            <div class="oven-stage" *ngIf="oven.stage">{{ oven.stage }}</div>
+            <div class="oven-idle" *ngIf="!oven.order">Idle</div>
           </div>
-        }
+        </div>
       </div>
 
-      @if (isRunning && cancellableOrders.length > 0) {
-        <div class="cancel-panel">
-          <span>Cancel order:</span>
+      <div class="cancel-panel" *ngIf="isRunning && cancellableOrders.length > 0">
+        <span>Cancel order:</span>
 
-          @for (order of cancellableOrders; track order.id) {
-            <button (click)="cancelOrder(order.id)">
-              Cancel {{ order.customer }}'s {{ order.item }}
-            </button>
-          }
-        </div>
-      }
+        <button
+          *ngFor="let order of cancellableOrders"
+          (click)="cancelOrder(order.id)"
+        >
+          Cancel {{ order.customer }}'s {{ order.item }}
+        </button>
+      </div>
 
       <div class="log-panel">
         <div class="log-header">Event Log</div>
 
         <div class="log-entries">
-          @for (entry of logEntries; track $index) {
-            <div
-              class="log-entry"
-              [class]="entryClass(entry)"
-            >
-              {{ entry }}
-            </div>
-          }
+          <div
+            class="log-entry"
+            *ngFor="let entry of logEntries"
+            [class]="entryClass(entry)"
+          >
+            {{ entry }}
+          </div>
         </div>
       </div>
     </div>
@@ -395,27 +386,24 @@ export class KitchenComponent implements OnInit, OnDestroy {
   private subs = new Subscription();
   private runningInterval: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private kitchen: KitchenService, private cdr: ChangeDetectorRef) {}
+  constructor(private kitchen: KitchenService) {}
 
   ngOnInit() {
     this.subs.add(
       this.kitchen.ovens$.subscribe((ovens: OvenState[]) => {
         this.ovens = ovens;
-        this.cdr.detectChanges();
       })
     );
 
     this.subs.add(
       this.kitchen.cancellableOrders$.subscribe((orders: Order[]) => {
         this.cancellableOrders = orders;
-        this.cdr.detectChanges();
       })
     );
 
     this.subs.add(
       this.kitchen.stats$.subscribe((stats: KitchenStats) => {
         this.stats = stats;
-        this.cdr.detectChanges();
       })
     );
 
@@ -426,7 +414,6 @@ export class KitchenComponent implements OnInit, OnDestroy {
         if (this.logEntries.length > 200) {
           this.logEntries.shift();
         }
-        this.cdr.detectChanges();
       })
     );
 
@@ -434,7 +421,6 @@ export class KitchenComponent implements OnInit, OnDestroy {
 
     this.runningInterval = setInterval(() => {
       this.updateRunningState();
-      this.cdr.detectChanges();
     }, 250);
   }
 
@@ -452,33 +438,27 @@ export class KitchenComponent implements OnInit, OnDestroy {
   async runShift(orders: Order[]) {
     this.kitchen.resetState();
     this.logEntries = [];
-    this.cdr.detectChanges();
 
     await this.kitchen.runShift(orders);
 
     this.updateRunningState();
-    this.cdr.detectChanges();
   }
 
   async runFullDay() {
     this.kitchen.resetState();
     this.logEntries = [];
-    this.cdr.detectChanges();
 
     await this.kitchen.runFullDay();
 
     this.updateRunningState();
-    this.cdr.detectChanges();
   }
 
   cancelOrder(orderId: string) {
     this.kitchen.cancelOrder(orderId);
-    this.cdr.detectChanges();
   }
 
   closeKitchen() {
     this.kitchen.closeKitchen();
-    this.cdr.detectChanges();
   }
 
   private updateRunningState() {

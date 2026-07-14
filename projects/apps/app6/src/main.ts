@@ -1,6 +1,9 @@
-import { bootstrapApplication } from '@angular/platform-browser';
-import { appConfig } from './app/app.config';
-import { ImageProcessorComponent } from './app/image-processor.component';
+import 'zone.js';
 
-bootstrapApplication(ImageProcessorComponent, appConfig)
-  .catch((err) => console.error(err));
+import { bootstrapApplication } from '@angular/platform-browser';
+
+import { appConfig } from './app/app.config';
+import { ContainerComponent } from './app/app.container';
+
+bootstrapApplication(ContainerComponent, appConfig)
+  .catch((err) => console.warn(err));

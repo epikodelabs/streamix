@@ -1,19 +1,6 @@
-/* Global resets for dark theme */
-*, *::before, *::after {
-  box-sizing: border-box;
-}
-
-html, body {
+body {
   margin: 0;
-  padding: 0;
-  background: #0f1117;
-  color: #e2e5ec;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: #1a1a2e;
+  color: #eee;
 }
-
-input, select, button {
-  font-family: inherit;
-}
-
-a { color: inherit; }
