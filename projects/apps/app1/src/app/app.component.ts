@@ -1,6 +1,6 @@
 import { DecimalPipe } from '@angular/common';
 import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import { atomExpr, bufferCount, debounce, dispose, filter, interval, listen, map, merge, pipe, range, scan, scope, tap, throttle } from '@epikodelabs/streamix';
+import { atomExpr, bufferCount, debounce, filter, finalize, fromEvent, interval, map, merge, pipe, range, scan, scope, tap, throttle } from '@epikodelabs/streamix';
 interface Metric {
     name: string;
     value: number;
@@ -596,7 +596,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
             ctx.putImageData(imageData, 0, 0);
             this.cdr.detectChanges();
             await new Promise<void>((r) => requestAnimationFrame(() => r()));
-        }), dispose(() => {
+        }), finalize(() => {
             this.juliaElapsed = performance.now() - startTime;
             this.juliaGenerating = false;
             this.cdr.detectChanges();
@@ -634,7 +634,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         const input = this.searchInput?.nativeElement;
         if (!input)
             return;
-        const value$ = pipe(listen(input, 'input'), map(() => input.value as string));
+        const value$ = pipe(fromEvent(input, 'input'), map(() => input.value as string));
         // Raw counter
         const rawUnsubscribe = pipe(value$, tap(() => { this.rawSearchCount++; this.cdr.detectChanges(); })).subscribe(() => { });
         this.appScope.cleanups.add(() => rawUnsubscribe());

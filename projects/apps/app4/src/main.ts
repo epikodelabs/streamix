@@ -1,9 +1,9 @@
-import { filter, listen, map, merge, pipe, tap } from '@epikodelabs/streamix';
+import { filter, fromEvent, map, merge, pipe, tap } from '@epikodelabs/streamix';
 import { on } from '@epikodelabs/streamix/dom';
 /* ─── 1. Header scroll shadow ─── */
 const header = document.querySelector('.site-header') as HTMLElement;
 if (header) {
-    pipe(listen(window, 'scroll'), map(() => window.scrollY > 20), filter((scrolled) => scrolled !== header.classList.contains('scrolled')), tap((scrolled) => header.classList.toggle('scrolled', scrolled)))
+    pipe(fromEvent(window, 'scroll'), map(() => window.scrollY > 20), filter((scrolled) => scrolled !== header.classList.contains('scrolled')), tap((scrolled) => header.classList.toggle('scrolled', scrolled)))
         .subscribe(() => { });
 }
 /* ─── 2. Hero parallax + text reveal ─── */
@@ -57,7 +57,7 @@ const startAutoAdvance = () => {
 };
 const stopAutoAdvance = () => clearInterval(autoAdvance);
 dots.forEach((dot, i) => {
-    pipe(listen(dot, 'click'), tap(() => {
+    pipe(fromEvent(dot, 'click'), tap(() => {
         stopAutoAdvance();
         goToSlide(i);
         startAutoAdvance();
@@ -69,7 +69,7 @@ startAutoAdvance();
 const postCards = document.querySelectorAll('.post-card');
 postCards.forEach((card) => {
     const el = card as HTMLElement;
-    pipe(listen(el, 'mousemove'), map((e: Event) => {
+    pipe(fromEvent(el, 'mousemove'), map((e: Event) => {
         const ev = e as MouseEvent;
         const rect = el.getBoundingClientRect();
         const x = (ev.clientX - rect.left) / rect.width - 0.5;
@@ -79,7 +79,7 @@ postCards.forEach((card) => {
         el.style.transform = `translateY(-6px) perspective(800px) rotateX(${-y * 4}deg) rotateY(${x * 4}deg)`;
     }))
         .subscribe(() => { });
-    pipe(listen(el, 'mouseleave'), tap(() => {
+    pipe(fromEvent(el, 'mouseleave'), tap(() => {
         el.style.transform = '';
     }))
         .subscribe(() => { });
@@ -88,21 +88,21 @@ postCards.forEach((card) => {
 const newsletterInput = document.querySelector('.newsletter-form input') as HTMLInputElement;
 const newsletterBtn = document.querySelector('.newsletter-form button') as HTMLButtonElement;
 if (newsletterInput) {
-    merge(pipe(listen(newsletterInput, 'focus'), tap(() => {
+    merge(pipe(fromEvent(newsletterInput, 'focus'), tap(() => {
         newsletterInput.style.borderColor = 'var(--accent)';
-    })), pipe(listen(newsletterInput, 'blur'), tap(() => {
+    })), pipe(fromEvent(newsletterInput, 'blur'), tap(() => {
         newsletterInput.style.borderColor = '';
     }))).subscribe(() => { });
 }
 if (newsletterBtn) {
-    pipe(listen(newsletterBtn, 'mouseenter'), tap(() => newsletterBtn.style.transform = 'translateY(-2px)'))
+    pipe(fromEvent(newsletterBtn, 'mouseenter'), tap(() => newsletterBtn.style.transform = 'translateY(-2px)'))
         .subscribe(() => { });
-    pipe(listen(newsletterBtn, 'mouseleave'), tap(() => newsletterBtn.style.transform = ''))
+    pipe(fromEvent(newsletterBtn, 'mouseleave'), tap(() => newsletterBtn.style.transform = ''))
         .subscribe(() => { });
 }
 /* ─── 7. Smooth anchor scroll offset for fixed header ─── */
 document.querySelectorAll('a[href^="#"]').forEach((link) => {
-    pipe(listen(link, 'click'), tap((e) => {
+    pipe(fromEvent(link, 'click'), tap((e) => {
         e.preventDefault();
         const href = (link as HTMLAnchorElement).getAttribute('href');
         const target = document.querySelector(href!);
