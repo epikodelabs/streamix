@@ -59,100 +59,6 @@ pnpm add @epikodelabs/streamix
 
 ---
 
-## ⚡ Quick Start
-
-### Reactive State with Atoms
-
-```typescript
-import { atom, derived } from '@epikodelabs/streamix';
-
-const count = atom(0);
-
-const doubled = derived(() => count.value * 2);
-
-count.set(5);
-
-console.log(doubled.value); // 10
-```
-
-For async computed values, capture dependencies before the first `await`:
-
-```typescript
-const total = derived(async (self) => {
-  const [priceAtom, taxAtom] = self.use(price, tax);
-  await loadRates();
-  return priceAtom.value + taxAtom.value;
-});
-```
-
-If the computation is primarily async or needs cancellation and restart semantics, prefer `flow()`.
-
-### Scope-Based Lifecycle
-
-```typescript
-import { method, scope } from '@epikodelabs/streamix';
-
-const app = scope<{
-  count: number;
-  doubled: number;
-  increment: () => void;
-}>({
-  count: 0,
-  doubled: (self) => self.count * 2,
-  increment: method((self) => {
-    self.count += 1;
-  }),
-});
-
-app.increment();
-
-console.log(app.count);   // 1
-console.log(app.doubled); // 2
-
-app.dispose();
-```
-
-Scopes are where individual atoms become a coherent state model. They let you group writable state, derived values, imperative methods, and cleanup under one lifecycle boundary, then dispose the whole graph when the feature or component goes away.
-
-### Browser-Side Concurrency
-
-```typescript
-import { compute } from '@epikodelabs/streamix/coroutines';
-
-const primes = compute(async function* () {
-  let n = 2;
-
-  while (true) {
-    while (!isPrime(n)) n++;
-    yield n++;
-  }
-});
-```
-
-### Flow Processing
-
-```typescript
-import { range, map, filter, take, pipe } from '@epikodelabs/streamix';
-
-const potionRecipe = pipe(
-  range(1, 20),
-  map(i => ({
-    name: ['Dragon Scale', 'Phoenix Tear', 'Unicorn Hair', 'Mermaid Kelp'][i % 4],
-    power: i * 10,
-    rarity: i % 3 === 0 ? 'legendary' : 'common',
-  })),
-  filter(item => item.rarity === 'legendary'),
-  map(item => `✨ ${item.name} (${item.power} power)`),
-  take(5)
-);
-
-for await (const ingredient of potionRecipe) {
-  console.log('Adding to cauldron:', ingredient);
-}
-```
-
----
-
 ## 🧠 Core Concepts
 
 ### ⚛️ Atoms and Scopes
@@ -167,7 +73,7 @@ If a value arrives later, omit the initial value from `atom<T>()`.
 
 Async `derived()` callbacks only track atoms read before the first `await`. Use `self.use(...)` or `self.read(...)` up front, or switch to `flow()` for async resources.
 
-Scopes provide lifecycle management and automatic disposal.
+Scopes group related atoms under a disposable lifecycle boundary.
 
 ```typescript
 import { scope } from '@epikodelabs/streamix';
@@ -190,7 +96,7 @@ console.log(app.doubled);
 app.dispose();
 ```
 
-**Async iteration with `iterate()`:**
+**🔁 Async iteration with `iterate()`:**
 
 ```typescript
 import { atom, iterate } from '@epikodelabs/streamix';
@@ -202,7 +108,7 @@ for await (const value of iterate(a)) {
 }
 ```
 
-**Writable and initialized atoms:**
+**🧱 Writable and initialized atoms:**
 
 | Need | API |
 | ---- | --- |
@@ -213,24 +119,26 @@ for await (const value of iterate(a)) {
 
 ### 🧵 Coroutines and Actors
 
-Run computations away from the main thread using a worker pool.
+Use `coroutine()` when you want a dedicated reusable worker for a task, and `compute()` when you want pooled throughput across many independent jobs.
 
 ```typescript
-import { compute } from '@epikodelabs/streamix/coroutines';
+import { coroutine } from '@epikodelabs/streamix/coroutines';
 
-const primes = compute(async function* () {
-  let n = 2;
+const hashScore = coroutine((text: string) => text.length * 100);
 
-  while (true) {
-    while (!isPrime(n)) n++;
-    yield n++;
-  }
-});
+async function main() {
+  const score = await hashScore.run('streamix');
+  console.log(score); // 800
+  await hashScore.dispose();
+}
+
+void main();
 ```
 
 Coroutines support:
 
-* `compute()` for worker-backed async generators
+* `coroutine()` for a dedicated reusable worker
+* `compute()` for pooled, high-throughput worker execution
 * `compose()` for worker-side pipeline fusion
 * `actor()` for long-lived stateful workers
 
