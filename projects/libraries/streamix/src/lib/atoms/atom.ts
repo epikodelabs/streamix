@@ -182,7 +182,9 @@ type DisposeHandler = () => MaybePromise<void>;
 interface AtomRuntimeMeta {
   changeHandlers: Set<() => void>;
   dirtyHandlers: Set<(dirty: boolean) => void>;
+  emitHandlers: Set<() => void>;
   disposeHandlers: Set<DisposeHandler>;
+  startOnEmitObserve?: () => void;
 }
 
 /** Engine Interface */
@@ -485,6 +487,7 @@ function createAtomRuntimeMeta(): AtomRuntimeMeta {
   return {
     changeHandlers: new Set(),
     dirtyHandlers: new Set(),
+    emitHandlers: new Set(),
     disposeHandlers: new Set(),
   };
 }
@@ -664,6 +667,21 @@ function notifyDirtyHandlers(atom: Atom<any>, dirty: boolean): void {
   }
 }
 
+export function onAtomEmit(atom: Atom<any>, handler: () => void): () => void {
+  const meta = getAtomRuntimeMeta(atom);
+  meta.startOnEmitObserve?.();
+  const handlers = meta.emitHandlers;
+  handlers.add(handler);
+  return () => handlers.delete(handler);
+}
+
+function notifyEmitHandlers(atom: Atom<any>): void {
+  const handlers = getAtomRuntimeMeta(atom).emitHandlers;
+  for (const h of Array.from(handlers)) {
+    try { h(); } catch { /* suppress emit observers */ }
+  }
+}
+
 type AtomSubscriber<T> = (current: T, previous: T) => MaybePromise;
 
 interface AtomBaseConfig<T> {
@@ -821,6 +839,7 @@ export function atomFromIterator<T>(
   const cleanupRuntime = () => {
     instance[META].changeHandlers.clear();
     instance[META].dirtyHandlers.clear();
+    instance[META].emitHandlers.clear();
   };
 
   const broadcast = (val: T) => subs.broadcast(val, previous);
@@ -873,6 +892,7 @@ export function atomFromIterator<T>(
           isErrorState = false;
           errorValue = undefined;
           markAtomAsEmitted(instance as any);
+          notifyEmitHandlers(instance as any);
           notifyChangeHandlers(instance);
 
           if (analog) {
@@ -947,6 +967,15 @@ export function atomFromIterator<T>(
 
   const { instance: baseInstance, errorHandlers, subs } = base;
   instance = baseInstance as typeof instance;
+  instance[META].startOnEmitObserve = () => {
+    if (!started) {
+      started = true;
+      run().catch(() => {});
+    }
+  };
+  if (instance[META].emitHandlers.size > 0) {
+    instance[META].startOnEmitObserve();
+  }
 
   Object.assign(instance, {
     fail(err: any, errorOptions?: { terminate?: boolean }) {
@@ -1201,6 +1230,7 @@ export function atom<T = any>(
   const cleanupRuntime = () => {
     instance[META].changeHandlers.clear();
     instance[META].dirtyHandlers.clear();
+    instance[META].emitHandlers.clear();
   };
 
   const flushInternal = () => {
@@ -1275,6 +1305,8 @@ export function atom<T = any>(
 
       previous = current;
       current = value;
+      markAtomAsEmitted(instance as any);
+      notifyEmitHandlers(instance as any);
 
       // Notify dependents immediately so derived atoms stay dirty-tracked
       // regardless of whether public broadcasts are discrete or analog-batched.
@@ -1330,7 +1362,10 @@ export function atom<T = any>(
     },
     clearError() { this.recover?.(); },
   });
-  if (hasInitialValue) markAtomAsEmitted(instance as any);
+  if (hasInitialValue) {
+    markAtomAsEmitted(instance as any);
+    notifyEmitHandlers(instance as any);
+  }
   return instance;
 }
 
@@ -1527,6 +1562,7 @@ export function derived<T>(...args: any[]): Atom<T> {
   const cleanupRuntime = () => {
     instance[META].changeHandlers.clear();
     instance[META].dirtyHandlers.clear();
+    instance[META].emitHandlers.clear();
   };
 
   const broadcast = () => subs.broadcast(current, previous);
@@ -1619,6 +1655,7 @@ export function derived<T>(...args: any[]): Atom<T> {
             isErrorState = false;
             errorValue = undefined;
             markAtomAsEmitted(instance as any);
+            notifyEmitHandlers(instance as any);
             commitValue(event.value);
             continue;
           }
@@ -1755,6 +1792,7 @@ export function derived<T>(...args: any[]): Atom<T> {
             current = result;
             previous = current;
             markAtomAsEmitted(instance as any);
+            notifyEmitHandlers(instance as any);
           }
         } catch (err) {
           initialized = true;

@@ -7,7 +7,7 @@ import {
   type Token,
 } from "../ioc/container";
 import { isAtom, isAtomLike } from "../utils/helpers";
-import { atom, derived, NO_INITIAL_VALUE, normalizeError, onAtomDirtyChange, Writable, type Atom } from "./atom";
+import { atom, derived, NO_INITIAL_VALUE, normalizeError, onAtomDirtyChange, onAtomEmit, Writable, type Atom } from "./atom";
 import {
   isAtomExpr,
   isDerivedExpr,
@@ -19,7 +19,6 @@ import {
   type FlowExpr,
   type PipeExpr,
 } from "./expr";
-import { isPromiseLike } from "./operator";
 import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
 import type { Subscription } from "./subscription";
 
@@ -27,6 +26,7 @@ import type { Subscription } from "./subscription";
 
 const DYNAMIC_EXPR = Symbol("streamix.dynamicExpr");
 const METHOD = Symbol("streamix.method");
+const SELF_READER = Symbol("streamix.scopeSelfReader");
 
 interface DynamicExpr<T = any, Self = any> {
   [DYNAMIC_EXPR]: true;
@@ -70,36 +70,35 @@ function unwrapDynamicValue<T>(value: T | Atom<T>): T {
   return isAtom(value) ? value.value : value as T;
 }
 
-type ReaderRef = { current: <T>(atom: Atom<T>) => T };
+type ScopeSelfReader = { current: (<T>(atom: Atom<T>) => T) | null };
 
-function createTrackedScopeSelf(
-  scopeSelf: any,
-  atoms: ((key: string | symbol) => any) | undefined,
-  readerRef: ReaderRef,
-): any {
-  return new Proxy(function (targetAtom: any) {
+function createCallableScopeSelf(scopeRef: Scope, readerRef?: ScopeSelfReader): any {
+  const self: any = function (targetAtom: any) {
     if (isAtom(targetAtom)) {
-      return readerRef.current(targetAtom);
+      return readerRef?.current ? readerRef.current(targetAtom) : targetAtom.value;
     }
-    return scopeSelf?.(targetAtom);
-  }, {
-    get(_target, prop, receiver) {
-      if (atoms && (typeof prop === "string" || typeof prop === "symbol")) {
-        const value = atoms(prop);
-        return isAtom(value) ? readerRef.current(value) : value;
-      }
-      const result = Reflect.get(scopeSelf, prop, receiver);
-      return isAtom(result) ? readerRef.current(result) : result;
-    },
-    set(_target, prop, value) {
-      Reflect.set(scopeSelf, prop, value);
-      return true;
-    },
+    return targetAtom;
+  };
+
+  Object.defineProperty(self, SELF_READER, {
+    value: readerRef ?? { current: null },
+    enumerable: false,
+    configurable: false,
+    writable: false,
   });
+
+  Object.defineProperty(self, "at", {
+    get: () => (scopeRef as any).at,
+    enumerable: false,
+    configurable: true,
+  });
+
+  return self;
 }
 
 function evaluateExprMarker(
   marker: AtomExpr | DerivedExpr | PipeExpr | FlowExpr | DynamicExpr,
+  scopeRef: Scope,
   self: any,
   atoms?: any,
 ): Atom<any> {
@@ -107,12 +106,11 @@ function evaluateExprMarker(
     return atom(marker.initialValue === undefined ? NO_INITIAL_VALUE : marker.initialValue, marker.options);
   }
   if (isDerivedExpr(marker)) {
-    const readerRef: ReaderRef = {
-      current: () => {
-        throw new Error("streamix: derived reader accessed outside of an active evaluation");
-      },
-    };
-    const trackedSelf = createTrackedScopeSelf(self, atoms, readerRef);
+    const readerRef: ScopeSelfReader = { current: null };
+    const trackedSelf = createCallableScopeSelf(scopeRef, readerRef);
+    for (const key of Reflect.ownKeys(scopeRef._rawState)) {
+      defineScopeSelfProperty(trackedSelf, scopeRef, key);
+    }
     return derived((derivedSelf) => {
       readerRef.current = derivedSelf.read.bind(derivedSelf);
       return marker.fn(trackedSelf);
@@ -122,13 +120,16 @@ function evaluateExprMarker(
   if (isFlowExpr(marker)) return marker.fn(self, atoms);
   if (isDynamicExpr(marker)) {
     const initialDependencies = new Set<Atom<any>>();
-    const initialReaderRef: ReaderRef = {
+    const initialReaderRef: ScopeSelfReader = {
       current: <T>(dep: Atom<T>) => {
         initialDependencies.add(dep as Atom<any>);
         return dep.value;
       },
     };
-    const initialSelf = createTrackedScopeSelf(self, atoms, initialReaderRef);
+    const initialSelf = createCallableScopeSelf(scopeRef, initialReaderRef);
+    for (const key of Reflect.ownKeys(scopeRef._rawState)) {
+      defineScopeSelfProperty(initialSelf, scopeRef, key);
+    }
     const value = marker.fn(initialSelf, atoms);
 
     if (isAtomLike(value)) {
@@ -136,17 +137,14 @@ function evaluateExprMarker(
     }
 
     if (isExprMarkerBase(value)) {
-      return evaluateExprMarker(value, self, atoms);
+      return evaluateExprMarker(value, scopeRef, self, atoms);
     }
-
     let seeded = true;
-    const readerRef: ReaderRef = {
-      current: () => {
-        throw new Error("streamix: derived reader accessed outside of an active evaluation");
-      },
-    };
-    const trackedSelf = createTrackedScopeSelf(self, atoms, readerRef);
-
+    const readerRef: ScopeSelfReader = { current: null };
+    const trackedSelf = createCallableScopeSelf(scopeRef, readerRef);
+    for (const key of Reflect.ownKeys(scopeRef._rawState)) {
+      defineScopeSelfProperty(trackedSelf, scopeRef, key);
+    }
     return derived((derivedSelf) => {
       readerRef.current = derivedSelf.read.bind(derivedSelf);
 
@@ -158,8 +156,7 @@ function evaluateExprMarker(
 
       if (seeded) {
         seeded = false;
-
-        if (isPromiseLike(value)) {
+        if (value && typeof (value as Promise<any>).then === "function") {
           return Promise.resolve(value).then(
             (resolvedValue) => {
               attachInitialDependencies();
@@ -171,16 +168,15 @@ function evaluateExprMarker(
             },
           );
         }
-
         attachInitialDependencies();
-        return value;
+        return unwrapDynamicValue(value as any);
       }
 
       const inner = marker.fn(trackedSelf, atoms);
-      if (isPromiseLike(inner)) {
+      if (inner && typeof (inner as Promise<any>).then === "function") {
         return Promise.resolve(inner).then((resolvedValue) => unwrapDynamicValue(resolvedValue));
       }
-      return unwrapDynamicValue(inner);
+      return unwrapDynamicValue(inner as any);
     });
   }
   throw new Error("Unknown expression marker");
@@ -198,17 +194,16 @@ type UnwrapSnapshotValues<T> = {
         : T[K];
 };
 
-/**
- * Widens literal primitives and readonly arrays into the mutable public value shape
- * exposed by scope proxies and atoms.
- */
-export type WidenValue<T> =
-  T extends string ? string
-  : T extends number ? number
-  : T extends boolean ? boolean
-  : T extends bigint ? bigint
-  : T extends symbol ? symbol
-  : T extends readonly (infer U)[] ? WidenValue<U>[]
+export type WidenValue<T> = T;
+
+export type ScopeInstance<T> = T extends Record<string, any>
+  ? Simplify<{
+      [K in keyof T]:
+        T[K] extends Scope<infer U> ? ScopeInstance<U>
+        : T[K] extends Atom<infer U> ? U
+        : T[K] extends Writable<infer U> ? U
+        : T[K];
+    }>
   : T;
 
 /**
@@ -530,20 +525,43 @@ function isReadonlyScopeStateKey(key: string | symbol, item: any): boolean {
   return false;
 }
 
+function defineScopeSelfProperty(
+  target: Record<string | symbol, any>,
+  scopeRef: Scope,
+  key: string | symbol,
+): void {
+  if (Object.prototype.hasOwnProperty.call(target, key)) return;
+
+  Object.defineProperty(target, key, {
+    get: () => {
+      const current = (scopeRef as any).at?.(key) ?? scopeRef._rawState[key];
+      const reader = (target as any)[SELF_READER] as ScopeSelfReader | undefined;
+      if (isAtom(current)) {
+        return reader?.current ? reader.current(current) : current.value;
+      }
+      return current;
+    },
+    set: (value: any) => {
+      (scopeRef as any)[key] = value;
+    },
+    enumerable: true,
+    configurable: true,
+  });
+}
+
 function materializeState(
+  scopeRef: Scope,
   input: any,
   visited: WeakMap<object, boolean>,
-  scopeProxy: any
-): { rawState: Record<string | symbol, any>; self: any } {
+  scopeSelf: any,
+): Record<string | symbol, any> {
   const rawState: Record<string | symbol, any> = {};
-  const evaluating = new Set<string | symbol>();
-
   for (const key of Reflect.ownKeys(input)) {
     const item = input[key];
     if (isExprMarkerOrDynamic(item)) {
       rawState[key] = item;
     } else if (isMethod(item)) {
-      rawState[key] = (...args: any[]) => item.fn(scopeProxy, ...args);
+      rawState[key] = (...args: any[]) => item.fn(scopeRef as any, ...args);
     } else if (typeof item === "function") {
       rawState[key] = dynamicExpr(item);
     } else if (isAtomLike(item) || isScope(item)) {
@@ -552,7 +570,10 @@ function materializeState(
       if (visited.has(item)) throw new Error(`Circular reference detected at key: ${String(key)}`);
       visited.set(item, true);
       try {
-        rawState[key] = createScopeInternal(() => materializeState(item, visited, scopeProxy));
+        rawState[key] = createScopeInternal((nestedSelf: any) => {
+          const childScope = getCurrentScope() as Scope;
+          return materializeState(childScope, item, visited, nestedSelf);
+        });
       } finally {
         visited.delete(item);
       }
@@ -561,68 +582,11 @@ function materializeState(
     }
   }
 
-  const self: any = function (targetAtom: any) {
-    if (isAtom(targetAtom)) {
-      return targetAtom.value;
-    }
-  };
-
-  let atomsAccessor: any;
-
-  const resolveRawItem = (key: string | symbol): any => {
-    let current = rawState[key];
-    if (isExprMarkerOrDynamic(current)) {
-      if (evaluating.has(key)) throw new Error(`Circular dependency loop encountered on: ${String(key)}`);
-      evaluating.add(key);
-      try {
-        current = evaluateExprMarker(current, self, atomsAccessor);
-        rawState[key] = current;
-      } finally {
-        evaluating.delete(key);
-      }
-    }
-    return current;
-  };
-
-  const getRawAtom = (key: string | symbol): any => {
-    return resolveRawItem(key);
-  };
-
-  atomsAccessor = (key: string | symbol) => getRawAtom(key);
-
   for (const key of Reflect.ownKeys(rawState)) {
-    defineCallableAccessorProperty(atomsAccessor, key, getRawAtom);
+    defineScopeSelfProperty(scopeSelf, scopeRef, key);
   }
 
-  for (const key of Reflect.ownKeys(rawState)) {
-    Object.defineProperty(self, key, {
-      get() {
-        const current = resolveRawItem(key);
-        if (isAtom(current)) {
-          return current.value;
-        }
-        return current;
-      },
-      set(nextVal: any) {
-        const current = rawState[key];
-        if (isAtomLike(current) && typeof (current as Writable<any>).next === "function") {
-          (current as Writable<any>).next(nextVal);
-        } else {
-          rawState[key] = nextVal;
-        }
-      },
-      enumerable: true,
-      configurable: true
-    });
-  }
-
-  for (const key of Reflect.ownKeys(rawState)) {
-    if (isExprMarkerOrDynamic(rawState[key])) {
-      void self[key];
-    }
-  }
-
-  return { rawState, self };
+  return rawState;
 }
 
 function defineScopeStateProperty(
@@ -630,27 +594,9 @@ function defineScopeStateProperty(
   key: string | symbol,
   read: (key: string | symbol) => any,
 ): void {
-  const currentItem = scopeRef._rawState[key];
-  const readonly = isReadonlyScopeStateKey(key, currentItem);
-  // An unresolved marker's readonly-ness can only change once it resolves
-  // into its real underlying atom/value on first read. Once that's already
-  // happened (currentItem isn't a marker), the readonly status is settled
-  // for the life of this descriptor, so we never need to re-check it again.
-  let settled = !isExprMarkerOrDynamic(currentItem);
-
   const descriptor: PropertyDescriptor = {
     get() {
       const activeItem = read(key);
-      if (!settled) {
-        const updatedItem = scopeRef._rawState[key];
-        if (!isExprMarkerOrDynamic(updatedItem)) {
-          settled = true;
-          if (isReadonlyScopeStateKey(key, updatedItem) !== readonly) {
-            defineScopeStateProperty(scopeRef, key, read);
-            return (scopeRef as any)[key];
-          }
-        }
-      }
       if (activeItem && typeof activeItem === "object") {
         if (activeItem.type === "atom") {
           return activeItem.value;
@@ -663,20 +609,23 @@ function defineScopeStateProperty(
     configurable: true,
   };
 
-  if (!readonly) {
-    descriptor.set = (value: any) => {
-      const activeItem = read(key);
-      if (activeItem && typeof activeItem === "object" && activeItem.type === "atom") {
-        if (typeof activeItem.next !== "function") {
-          defineScopeStateProperty(scopeRef, key, read);
-          throw new TypeError(`Cannot assign to read-only scope property: ${String(key)}`);
-        }
-        activeItem.next(value);
-        return;
+  descriptor.set = (value: any) => {
+    const activeItem = read(key);
+    if (activeItem && typeof activeItem === "object" && activeItem.type === "atom") {
+      if (typeof activeItem.next !== "function") {
+        throw new TypeError(`Cannot assign to read-only scope property: ${String(key)}`);
       }
-      scopeRef._rawState[key] = value;
-      defineScopeStateProperty(scopeRef, key, read);
-    };
+      activeItem.next(value);
+      return;
+    }
+    if (isReadonlyScopeStateKey(key, scopeRef._rawState[key])) {
+      throw new TypeError(`Cannot assign to read-only scope property: ${String(key)}`);
+    }
+    scopeRef._rawState[key] = value;
+  };
+
+  if (isReadonlyScopeStateKey(key, scopeRef._rawState[key])) {
+    delete descriptor.set;
   }
 
   Object.defineProperty(scopeRef, key, descriptor);
@@ -712,8 +661,8 @@ function createScopeInternal<T extends Record<string, any>>(
 ): ScopeReturn<T> {
   const parent = currentScope ?? getGlobalScope();
   const mode = resolveMode(options, parent);
-  let resolvedSelf: any;
   const parentContainer = isScope(parent) ? parent.container : globalContainer;
+  const evaluating = new Set<string | symbol>();
 
   const newScope: Scope = {
     type: "scope",
@@ -760,13 +709,20 @@ function createScopeInternal<T extends Record<string, any>>(
 
     newScope._rawState["loading"] = loadingAtom;
     newScope._rawState["dirty"] = dirtyAtom;
+    const scopeSelf = createCallableScopeSelf(newScope);
 
     const getScopeItem = (key: string | symbol): any => {
       let current = newScope._rawState[key];
       if (isExprMarkerOrDynamic(current)) {
-        const selfRef = resolvedSelf ?? newScope;
-        void selfRef[key];
-        current = newScope._rawState[key];
+        if (evaluating.has(key)) throw new Error(`Circular dependency loop encountered on: ${String(key)}`);
+        evaluating.add(key);
+        try {
+          current = evaluateExprMarker(current, newScope, scopeSelf, atAccessor);
+          newScope._rawState[key] = current;
+          defineScopeStateProperty(newScope, key, getScopeItem);
+        } finally {
+          evaluating.delete(key);
+        }
       }
       return current;
     };
@@ -798,12 +754,13 @@ function createScopeInternal<T extends Record<string, any>>(
 
     defineScopeStateProperty(newScope, "loading", getScopeItem);
     defineAccessorKey("loading");
+    defineScopeSelfProperty(scopeSelf, newScope, "loading");
     defineScopeStateProperty(newScope, "dirty", getScopeItem);
     defineAccessorKey("dirty");
+    defineScopeSelfProperty(scopeSelf, newScope, "dirty");
 
-    const output = factory.call(newScope, newScope);
+    const output = factory.call(newScope, scopeSelf);
     const dataState = output?.rawState ?? output;
-    resolvedSelf = output?.self ?? newScope;
 
     if (dataState && typeof dataState === "object") {
       if ("loading" in dataState) {
@@ -813,12 +770,13 @@ function createScopeInternal<T extends Record<string, any>>(
         console.warn("[streamix] scope(): 'dirty' key is reserved and was overwritten.");
       }
 
-      newScope._rawState = dataState;
+      newScope._rawState = { ...dataState };
 
       for (const key of Reflect.ownKeys(dataState)) {
         if (key === "dirty") continue;
         newScope._exports.add(key);
         defineAccessorKey(key);
+        defineScopeSelfProperty(scopeSelf, newScope, key);
         defineScopeStateProperty(newScope, key, getScopeItem);
       }
     }
@@ -827,8 +785,16 @@ function createScopeInternal<T extends Record<string, any>>(
     newScope._rawState["dirty"] = dirtyAtom;
     defineAccessorKey("loading");
     defineScopeStateProperty(newScope, "loading", getScopeItem);
+    defineScopeSelfProperty(scopeSelf, newScope, "loading");
     defineAccessorKey("dirty");
     defineScopeStateProperty(newScope, "dirty", getScopeItem);
+    defineScopeSelfProperty(scopeSelf, newScope, "dirty");
+
+    for (const key of Reflect.ownKeys(newScope._rawState)) {
+      if (isExprMarkerOrDynamic(newScope._rawState[key])) {
+        void (newScope as any)[key];
+      }
+    }
 
     for (const item of Object.values(newScope._rawState)) {
       if (item && typeof item === "object" && (item as any).type === "scope") {
@@ -966,9 +932,10 @@ export function scope(
   }
 
   return createScopeInternal(
-    function (this: any, scopeRef: any) {
+    function (this: any, scopeSelf: any) {
       const source = isFactory ? definition.call(this) : definition;
-      return materializeState(source, new WeakMap(), scopeRef);
+      const current = getCurrentScope() as Scope;
+      return materializeState(current, source, new WeakMap(), scopeSelf);
     },
     setup,
     resolvedOptions
@@ -1084,12 +1051,8 @@ export function registerWithCurrentScope(atomInstance: Atom<any>): void {
     targetContext.cleanups.add(() => disposers.delete(earlyDetachmentHook));
   }
 
-  try {
-    const unsub = atomInstance.subscribe(() => markAtomAsEmitted(atomInstance));
-    targetContext.cleanups.add(() => {
-      if (!(atomInstance as any).disposed) unsub();
-    });
-  } catch {}
+  const stopEmitTracking = onAtomEmit(atomInstance, () => markAtomAsEmitted(atomInstance));
+  targetContext.cleanups.add(() => stopEmitTracking());
 
   const stopDirtyTracking = onAtomDirtyChange(atomInstance, (dirty) => {
     if (targetContext._disposed) return;
@@ -1129,13 +1092,12 @@ function trackReferencedWritableLoading(scopeRef: Scope): void {
 
     let settled = false;
     const disposeHandlers = (item as any)._onDispose;
-    let unsubscribe: Subscription | undefined;
 
     const settle = () => {
       if (settled) return;
       settled = true;
 
-      unsubscribe?.();
+      stopEmitTracking();
       if (disposeHandlers instanceof Set) {
         disposeHandlers.delete(settle);
       }
@@ -1145,12 +1107,12 @@ function trackReferencedWritableLoading(scopeRef: Scope): void {
       }
     };
 
-    unsubscribe = item.subscribe(() => settle());
+    const stopEmitTracking = onAtomEmit(item, settle);
     if (disposeHandlers instanceof Set) {
       disposeHandlers.add(settle);
       scopeRef.cleanups.add(() => disposeHandlers.delete(settle));
     }
-    scopeRef.cleanups.add(() => unsubscribe?.());
+    scopeRef.cleanups.add(() => stopEmitTracking());
   }
 }
 
