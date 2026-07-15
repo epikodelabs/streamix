@@ -15,6 +15,7 @@ import {
   normalizeError,
   onAtomDirtyChange,
   onAtomEmit,
+  trackDependencies,
   Writable,
   type Atom,
 } from "./atom";
@@ -122,7 +123,10 @@ function evaluateExprMarker(
       return atomInstance.value;
     });
     const evaluateDynamic = (self: any) => marker.fn(self, atoms);
-    const value = evaluateDynamic(initialScope);
+    const { result: value, dependencies: trackedDependencies } = trackDependencies(() => evaluateDynamic(initialScope));
+    for (const dependency of trackedDependencies) {
+      initialDependencies.add(dependency);
+    }
 
     if (isAtomLike(value)) {
       return value;

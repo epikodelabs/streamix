@@ -1298,6 +1298,43 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should seed shorthand dynamic dependencies from closure scope reads during initialization', async () => {
+      const personal = scope({
+        name: '',
+        email: '',
+      });
+
+      const address = scope({
+        street: '',
+        country: '',
+      });
+
+      const ui = scope({
+        completeness: () => {
+          let score = 0;
+          if (personal.name) score++;
+          if (personal.email) score++;
+          if (address.street) score++;
+          if (address.country) score++;
+          return (score / 4) * 100;
+        },
+      });
+
+      expect(ui.completeness).toBe(0);
+
+      personal.name = 'Ada';
+      await delay();
+      expect(ui.completeness).toBe(25);
+
+      address.country = 'UK';
+      await delay();
+      expect(ui.completeness).toBe(50);
+
+      ui.dispose();
+      personal.dispose();
+      address.dispose();
+    });
+
     it('should expose function-derived properties as readonly and atomExpr properties as writable', () => {
       const s = scope({
         count: atomExpr(0),
