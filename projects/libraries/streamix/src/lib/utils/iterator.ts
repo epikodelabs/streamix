@@ -137,6 +137,8 @@ export function createAsyncIterator<T>(opts: {
         ensureSubscribed();
         const error = normalizeError(err);
         state.completed = true;
+        state.pendingError = null;
+        state.queue.length = 0;
         const unsubscribe$ = unsubscribe?.();
         unsubscribe = null;
         if (state.pullReject) {

@@ -1,11 +1,13 @@
 import {
+  atom,
   isPromiseLike,
+  NO_INITIAL_VALUE,
   type MaybePromise,
   type Subscription,
 } from "../atoms";
-import { ANALOG, normalizeError, type Atom } from "../atoms/atom";
+import { ANALOG, normalizeError, type Atom, type Writable } from "../atoms/atom";
 import { DONE } from "../atoms/operator";
-import { getCurrentScope, getScopeMode, registerWithCurrentScope } from "../atoms/scope";
+import { getCurrentScope, getScopeMode } from "../atoms/scope";
 import { createSubscription } from "../atoms/subscription";
 import { cyclicBuffer, type CyclicBuffer, type CyclicBufferMode } from "../primitives/cyclicBuffer";
 
@@ -33,16 +35,20 @@ export function createSharedSource<T>(
   options: SharedSourceOptions = {}
 ): Atom<T> {
   const scope = getCurrentScope();
-  const mode: CyclicBufferMode =
-    options.mode ?? (scope !== null ? getScopeMode(scope) : "discrete");
+  const inheritedMode = scope !== null ? getScopeMode(scope) : "discrete";
+  const mode: CyclicBufferMode = options.mode ?? inheritedMode;
   const analog = mode === "analog";
   const capacity = options.capacity ?? (analog ? 1 : 16);
+  const stateAtom = atom<T>(
+    NO_INITIAL_VALUE,
+    mode === "discrete" && inheritedMode === "analog" ? { discrete: true } : undefined,
+  ) as Writable<T>;
+  const baseDispose = stateAtom.dispose.bind(stateAtom);
 
   let buffer: CyclicBuffer<T> | null = null;
   let cleanup: (() => MaybePromise<void>) | null = null;
   let connected = false;
   let completed = false;
-  let terminalError: any;
   let readerRunning = false;
   let pendingDistributions = 0;
 
@@ -103,7 +109,6 @@ export function createSharedSource<T>(
   const complete = (err?: Error): void => {
     if (completed) return;
     completed = true;
-    terminalError = err;
     releaseDistributionWaiters();
     if (iterator !== null && !iterator.closed) {
       const it = iterator;
@@ -122,6 +127,7 @@ export function createSharedSource<T>(
 
   const failAll = (err: Error): void => {
     if (completed) return;
+    stateAtom.fail(err, { terminate: false });
     complete(err);
     if (buffer !== null) {
       buffer.close();
@@ -131,6 +137,9 @@ export function createSharedSource<T>(
   };
 
   const distribute = async (value: T): Promise<void> => {
+    stateAtom.next(value);
+    const current = stateAtom.value;
+
     if (iterator !== null && !iterator.closed) {
       if (iterator.waiters.length > 0) {
         iterator.waiters.shift()!.resolve({ value, done: false });
@@ -141,7 +150,7 @@ export function createSharedSource<T>(
     callbackPromises.length = 0;
     for (const cb of callbacks) {
       try {
-        callbackPromises.push(Promise.resolve(cb(value, value)).catch(() => {}));
+        callbackPromises.push(Promise.resolve(cb(current, current)).catch(() => {}));
       } catch {
         // ignore subscriber callback errors
       }
@@ -231,19 +240,26 @@ export function createSharedSource<T>(
     });
   };
 
-  const instance: any = {
-    type: "atom",
-    name: options.name,
-    get disposed() {
-      return completed && callbacks.size === 0 && iterator === null;
+  const instance = stateAtom as Writable<T> & {
+    name?: string;
+    subscriberCount?: number;
+  };
+
+  Object.defineProperties(instance, {
+    name: {
+      value: options.name,
+      configurable: true,
+      enumerable: true,
+      writable: true,
     },
-    get subscriberCount() {
-      return callbacks.size;
+    subscriberCount: {
+      get: () => callbacks.size,
+      configurable: true,
+      enumerable: true,
     },
-    get error() {
-      return terminalError;
-    },
-    subscribe(callback?: (current: T, previous: T) => MaybePromise): Subscription {
+  });
+
+  instance.subscribe = (callback?: (current: T, previous: T) => MaybePromise): Subscription => {
       if (completed) return createSubscription(() => {});
 
       const cb = callback ?? (() => {});
@@ -254,8 +270,9 @@ export function createSharedSource<T>(
         callbacks.delete(cb);
         endSessionIfIdle();
       });
-    },
-    [Symbol.asyncIterator](): AsyncIterator<T> {
+  };
+
+  instance[Symbol.asyncIterator] = (): AsyncIterator<T> => {
       if (completed) {
         return {
           next: async () => DONE,
@@ -299,8 +316,9 @@ export function createSharedSource<T>(
         },
         throw: async (err?: any) => Promise.reject(normalizeError(err)),
       };
-    },
-    dispose() {
+  };
+
+  instance.dispose = () => {
       completed = true;
       callbacks.clear();
       if (iterator !== null) {
@@ -316,11 +334,10 @@ export function createSharedSource<T>(
       }
       resetPendingDistributions();
       void doCleanup();
-    },
+      baseDispose();
   };
 
   (instance as any)[ANALOG] = analog;
-  registerWithCurrentScope(instance as Atom<T>);
 
   return instance as Atom<T>;
 }

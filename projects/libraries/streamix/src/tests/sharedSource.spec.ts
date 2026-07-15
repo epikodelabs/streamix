@@ -65,6 +65,31 @@ describe('createSharedSource', () => {
     await sub();
   });
 
+  it('exposes the latest atom state while keeping event-style subscriber callbacks', async () => {
+    let push!: Push<number>;
+    const previouses: number[] = [];
+
+    const source = createSharedSource<number>((p) => {
+      push = p;
+      return () => {};
+    });
+
+    const sub = source.subscribe((_current, previous) => {
+      previouses.push(previous);
+    });
+
+    await push(1);
+    await push(2);
+    await flush();
+
+    expect(previouses).toEqual([1, 2]);
+    expect(source.value).toBe(2);
+    expect(source.safeValue).toBe(2);
+    expect(source.previous).toBe(1);
+
+    await sub();
+  });
+
   it('shares one producer between multiple subscribers', async () => {
     let connectCount = 0;
     let push!: Push<number>;
@@ -258,6 +283,25 @@ describe('createSharedSource', () => {
 
     expect(source.error).toEqual(jasmine.any(Error));
     expect(source.disposed).toBeFalse();
+
+    source.dispose();
+  });
+
+  it('reports connection errors through onError', async () => {
+    const source = createSharedSource<number>(() => {
+      throw new Error('connect boom');
+    });
+
+    const errors: Error[] = [];
+    source.onError(err => {
+      errors.push(err);
+    });
+
+    source.subscribe(() => {});
+    await flush();
+
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toBe('connect boom');
 
     source.dispose();
   });

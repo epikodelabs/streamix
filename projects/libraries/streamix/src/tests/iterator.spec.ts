@@ -142,6 +142,28 @@ describe('createAsyncIterator', () => {
     expect(unsubscribe).toHaveBeenCalled();
   });
 
+  it("drops buffered values after return", async () => {
+    const capture = createRegisterCapture();
+
+    const iterator = createAsyncIterator<number>({
+      register: capture.fn
+    })();
+
+    const first = iterator.next();
+    capture.receiver!.next(1);
+    expect(await first).toEqual(NEXT(1));
+
+    capture.receiver!.next(2);
+    await flush();
+
+    expect((iterator as any).__hasBufferedValues?.()).toBeTrue();
+
+    await iterator.return?.();
+
+    expect(await iterator.next()).toEqual(DONE);
+    expect((iterator as any).__tryNext?.()).toEqual(DONE);
+  });
+
   it("calls unsubscribe on throw", async () => {
     const unsubscribe = jasmine.createSpy();
 
@@ -169,6 +191,25 @@ describe('createAsyncIterator', () => {
 
     await expectAsync(pending)
       .toBeRejectedWithError("fail");
+  });
+
+  it("drops buffered values after throw", async () => {
+    const capture = createRegisterCapture();
+
+    const iterator = createAsyncIterator<number>({
+      register: capture.fn
+    })();
+
+    const first = iterator.next();
+    capture.receiver!.next(1);
+    expect(await first).toEqual(NEXT(1));
+
+    capture.receiver!.next(2);
+    await flush();
+
+    await iterator.throw?.(new Error("fail")).catch(() => {});
+
+    expect(await iterator.next()).toEqual(DONE);
   });
 
   it("preserves buffered order", async () => {

@@ -107,6 +107,20 @@ describe('createAsyncPushable', () => {
     expect(await pushable.next()).toEqual(DONE);
   });
 
+  it('return() drops buffered values', async () => {
+    const pushable = createAsyncPushable<number>();
+
+    pushable.push(1);
+    pushable.push(2);
+
+    expect(await pushable.next()).toEqual(NEXT(1));
+
+    await pushable.return?.();
+
+    expect(await pushable.next()).toEqual(DONE);
+    expect((pushable as any).__tryNext()).toEqual(DONE);
+  });
+
   it('throw() rejects and terminates', async () => {
     const pushable = createAsyncPushable<number>();
 
@@ -115,6 +129,19 @@ describe('createAsyncPushable', () => {
     ).toBeRejectedWithError('boom');
 
     expect(pushable.disposed).toBeTrue();
+  });
+
+  it('throw() drops buffered values', async () => {
+    const pushable = createAsyncPushable<number>();
+
+    pushable.push(1);
+    pushable.push(2);
+
+    expect(await pushable.next()).toEqual(NEXT(1));
+
+    await pushable.throw?.(new Error('boom')).catch(() => {});
+
+    expect(await pushable.next()).toEqual(DONE);
   });
 
   it('rejects pending next after throw()', async () => {

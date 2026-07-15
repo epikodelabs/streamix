@@ -55,6 +55,8 @@ export class AsyncIteratorState<T> {
    */
   markCompleted(): void {
     this.completed = true;
+    this.pendingError = null;
+    this.queue.length = 0;
     this.clear();
   }
 
