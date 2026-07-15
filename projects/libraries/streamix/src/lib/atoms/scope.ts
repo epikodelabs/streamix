@@ -92,6 +92,12 @@ function createTrackedScope(scopeRef: Scope, reader: ScopeAtomReader): any {
 
       return Reflect.get(target, prop, receiver);
     },
+    set(_target, prop, _value, _receiver) {
+      throw new TypeError(
+        `Cannot assign to "${String(prop)}" inside a derived/formula callback. ` +
+        `Formulas must be pure functions of their inputs — use method(...) for imperative writes.`
+      );
+    },
     apply(_target, _thisArg, argArray) {
       if (argArray.length > 1) {
         return argArray.map((item) => (isAtom(item) ? reader(item) : item));
