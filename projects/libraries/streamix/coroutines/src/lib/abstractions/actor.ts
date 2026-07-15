@@ -1316,6 +1316,7 @@ function registerActorBusTarget(
 function clearActorBusListeners() {
   actorBusDirectListeners.clear();
   actorBusListeners.clear();
+  actorRequestHandlers.clear();
 }
 
 function dispatchActorBusMessage<T = any>(
