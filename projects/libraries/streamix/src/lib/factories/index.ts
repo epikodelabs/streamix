@@ -1,4 +1,4 @@
-export * from '../utils/sharedSource';
+export * from './addListener';
 export * from './combineLatest';
 export * from './commit';
 export * from './concat';
@@ -7,7 +7,6 @@ export * from './EMPTY';
 export * from './firstValueFrom';
 export * from './forkJoin';
 export * from './from';
-export * from './fromEvent';
 export * from './iif';
 export * from './interval';
 export * from './lastValueFrom';

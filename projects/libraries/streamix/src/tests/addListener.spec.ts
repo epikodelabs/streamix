@@ -1,4 +1,4 @@
-import { fromEvent } from '@epikodelabs/streamix';
+import { addListener } from '@epikodelabs/streamix';
 import { idescribe } from './env.spec';
 
 const flushMicrotasks = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -8,7 +8,7 @@ idescribe('fromEvent', () => {
 
   it('should call the overridden subscribe method', async () => {
     const element = document.createElement('button');
-    const atom = fromEvent(element, 'click');
+    const atom = addListener(element, 'click');
 
     let received: Event | undefined;
     const unsubscribe = atom.subscribe(ev => { received = ev; });
@@ -22,7 +22,7 @@ idescribe('fromEvent', () => {
 
   it('should emit multiple events correctly', async () => {
     const element = document.createElement('button');
-    const atom = fromEvent(element, 'click');
+    const atom = addListener(element, 'click');
 
     const emitted: Event[] = [];
     const unsubscribe = atom.subscribe(ev => { if (ev !== undefined) emitted.push(ev); });
@@ -37,7 +37,7 @@ idescribe('fromEvent', () => {
 
   it('should remove event listener and unsubscribe on unsubscribe', async () => {
     const element = document.createElement('button');
-    const atom = fromEvent(element, 'click');
+    const atom = addListener(element, 'click');
 
     let listenerRemoved = false;
 
@@ -57,7 +57,7 @@ idescribe('fromEvent', () => {
 
   it('should not emit events after unsubscribe', async () => {
     const element = document.createElement('button');
-    const atom = fromEvent(element, 'click');
+    const atom = addListener(element, 'click');
 
     let count = 0;
     const unsubscribe = atom.subscribe(() => count++);
@@ -76,7 +76,7 @@ idescribe('fromEvent', () => {
     const target$ = Promise.resolve(element);
     const event$ = new Promise<string>((resolve) => setTimeout(() => resolve('click'), 0));
 
-    const atom = fromEvent(target$, event$);
+    const atom = addListener(target$, event$);
     let received: Event | undefined;
     const unsubscribe = atom.subscribe(ev => { received = ev; });
 
@@ -90,7 +90,7 @@ idescribe('fromEvent', () => {
 
   it('should emit to multiple subscribers', async () => {
     const element = document.createElement('button');
-    const atom = fromEvent(element, 'click');
+    const atom = addListener(element, 'click');
 
     const received1: Event[] = [];
     const received2: Event[] = [];
@@ -112,7 +112,7 @@ idescribe('fromEvent', () => {
 
   it('should support async subscribers', async () => {
     const element = document.createElement('button');
-    const atom = fromEvent(element, 'click');
+    const atom = addListener(element, 'click');
 
     const received: Event[] = [];
     const unsubscribe = atom.subscribe(async (ev) => {
@@ -131,7 +131,7 @@ idescribe('fromEvent', () => {
 
   it('should await async subscribers before reading next value', async () => {
     const element = document.createElement('button');
-    const atom = fromEvent(element, 'click');
+    const atom = addListener(element, 'click');
 
     let active = 0;
     let maxActive = 0;
@@ -169,7 +169,7 @@ idescribe('fromEvent', () => {
       setTimeout(() => resolve(element), 20);
     });
 
-    const atom = fromEvent(target$, Promise.resolve('click'));
+    const atom = addListener(target$, Promise.resolve('click'));
     const unsubscribe = atom.subscribe(() => listenerAdded = true);
 
     unsubscribe();
