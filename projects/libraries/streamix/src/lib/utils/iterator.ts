@@ -78,8 +78,9 @@ export function createAsyncIterator<T>(opts: {
           }
         };
 
+        const nextSub = register(_receiver);
         receiver = _receiver;
-        sub = register(_receiver);
+        sub = nextSub;
 
         for (const push of pendingPushes) {
           if (push.type === 'next') {
@@ -113,7 +114,11 @@ export function createAsyncIterator<T>(opts: {
       __pushError?: (err: any) => void;
     } = {
       next(): Promise<AsyncIteratorResult<T>> {
-        ensureSubscribed();
+        try {
+          ensureSubscribed();
+        } catch (err) {
+          return Promise.reject(normalizeError(err));
+        }
         return asyncPull(state, iterator, handleDone) as Promise<AsyncIteratorResult<T>>;
       },
 
@@ -130,8 +135,11 @@ export function createAsyncIterator<T>(opts: {
       async throw(err) {
         const error = normalizeError(err);
         state.completed = true;
+        state.pendingError = null;
+        state.queue.length = 0;
         const unsubscribePromise = sub?.unsubscribe();
         sub = null;
+        receiver = null;
         if (state.pullReject) {
           const r = state.pullReject;
           state.pullResolve = state.pullReject = null;
@@ -156,7 +164,11 @@ export function createAsyncIterator<T>(opts: {
     iterator.__pushNext = (value: T) => {
       if (receiver) {
         receiver.next(value);
-      } else if (conflate && pendingPushes.length > 0) {
+      } else if (
+        conflate &&
+        pendingPushes.length > 0 &&
+        pendingPushes[pendingPushes.length - 1].type === 'next'
+      ) {
         pendingPushes[pendingPushes.length - 1] = { type: 'next', value };
       } else {
         pendingPushes.push({ type: 'next', value });

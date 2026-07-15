@@ -71,6 +71,8 @@ export function createAsyncPushable<R>(): AsyncPushable<R> {
     async throw(err) {
       const error = normalizeError(err);
       state.completed = true;
+      state.pendingError = null;
+      state.queue.length = 0;
       if (state.pullReject) {
         const r = state.pullReject;
         state.pullResolve = state.pullReject = null;

@@ -57,4 +57,24 @@ describe('createAsyncPushable', () => {
     expect(pushable.completed()).toBeTrue();
   });
 
+  it('return() drops buffered values', async () => {
+    const pushable = createAsyncPushable<number>();
+
+    pushable.push(1);
+    await pushable.return?.();
+
+    expect(await pushable.next()).toEqual(DONE);
+    expect((pushable as any).__tryNext?.()).toEqual(DONE);
+  });
+
+  it('throw() drops buffered values', async () => {
+    const pushable = createAsyncPushable<number>();
+
+    pushable.push(1);
+    await expectAsync(pushable.throw?.(new Error('stop'))).toBeRejectedWithError('stop');
+
+    expect(await pushable.next()).toEqual(DONE);
+    expect((pushable as any).__tryNext?.()).toEqual(DONE);
+  });
+
 });

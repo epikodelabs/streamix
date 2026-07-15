@@ -56,6 +56,74 @@ describe('createAsyncIterator', () => {
       expect(buffered).toEqual(NEXT(2));
       expect((iterator as any).__hasBufferedValues?.()).toBeFalse();
     });
+
+    it('drops buffered values after return', async () => {
+      const registerCapture = createRegisterCapture();
+      const iterator = createAsyncIterator<number>({ register: registerCapture.fn })();
+
+      iterator.next();
+      registerCapture.receiver!.next(1);
+      await flush();
+
+      registerCapture.receiver!.next(2);
+      await iterator.return?.();
+
+      expect(await iterator.next()).toEqual(DONE);
+      expect((iterator as any).__tryNext?.()).toEqual(DONE);
+    });
+
+    it('drops buffered values after throw', async () => {
+      const registerCapture = createRegisterCapture();
+      const iterator = createAsyncIterator<number>({ register: registerCapture.fn })();
+
+      iterator.next();
+      registerCapture.receiver!.next(1);
+      await flush();
+
+      registerCapture.receiver!.next(2);
+      await expectAsync(iterator.throw?.(new Error('stop'))).toBeRejectedWithError('stop');
+
+      expect(await iterator.next()).toEqual(DONE);
+      expect((iterator as any).__tryNext?.()).toEqual(DONE);
+    });
+
+    it('retries registration after a synchronous register failure', async () => {
+      let attempts = 0;
+      let receiver: StrictReceiver<number> | null = null;
+
+      const iterator = createAsyncIterator<number>({
+        register: (r: Receiver<number>) => {
+          attempts++;
+          if (attempts === 1) {
+            throw new Error('boom');
+          }
+          receiver = r as StrictReceiver<number>;
+          return createSubscription();
+        }
+      })();
+
+      await expectAsync(iterator.next()).toBeRejectedWithError('boom');
+
+      const pending = iterator.next();
+      receiver!.next(5);
+
+      expect(await pending).toEqual(NEXT(5));
+      expect(attempts).toBe(2);
+    });
+
+    it('does not conflate over queued completion before first pull', async () => {
+      const iterator: any = createAsyncIterator<number>({
+        register: () => createSubscription(),
+        conflate: true
+      })();
+
+      iterator.__pushNext?.(1);
+      iterator.__pushComplete?.();
+      iterator.__pushNext?.(2);
+
+      expect(await iterator.next()).toEqual(NEXT(1));
+      expect(await iterator.next()).toEqual(DONE);
+    });
 });
 
 
