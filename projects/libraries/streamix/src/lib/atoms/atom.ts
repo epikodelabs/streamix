@@ -45,6 +45,7 @@ function promiseSource<T>(
  * ───────────────────────────────────────────────────────────────────────────*/
 
 const NODE = Symbol("engine.node");
+const META = Symbol("engine.meta");
 const MARK_DIRTY = Symbol("engine.markDirty");
 const FLUSH = Symbol("engine.flush");
 
@@ -176,11 +177,21 @@ interface AtomNode {
   flushing?: boolean;
 }
 
+type DisposeHandler = () => MaybePromise<void>;
+
+interface AtomRuntimeMeta {
+  changeHandlers: Set<() => void>;
+  dirtyHandlers: Set<(dirty: boolean) => void>;
+  disposeHandlers: Set<DisposeHandler>;
+}
+
 /** Engine Interface */
 interface InternalAtomContainer {
   [NODE]: AtomNode;
+  [META]: AtomRuntimeMeta;
   [MARK_DIRTY](): void;
   [FLUSH](): void;
+  _onDispose?: Set<DisposeHandler>;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -198,8 +209,7 @@ export interface Scheduler {
 class DefaultScheduler implements Scheduler {
   private isBatchScheduled = false;
   private isFlushing = false;
-  private queuedNodes = new Set<AtomNode>();
-  private flushingNodes = new Set<AtomNode>();
+  private queuedCount = 0;
 
   // Min-heap of queued nodes ordered by depth (shallow first).
   // A node may appear multiple times if it was re-queued; stale entries are
@@ -263,23 +273,14 @@ class DefaultScheduler implements Scheduler {
     this.isFlushing = true;
 
     try {
-      while (this.queuedNodes.size > 0) {
-        let node = this.heapPop();
-        while (node !== undefined) {
-          if (this.queuedNodes.has(node) && !this.flushingNodes.has(node)) {
-            this.queuedNodes.delete(node);
-            if (node.queued) {
-              this.flushingNodes.add(node);
-              try {
-                node.flush();
-                node.queued = false;
-              } finally {
-                this.flushingNodes.delete(node);
-              }
-            }
-          }
-          node = this.heapPop();
+      let node = this.heapPop();
+      while (node !== undefined) {
+        if (node.queued && !node.flushing) {
+          node.queued = false;
+          this.queuedCount--;
+          node.flush();
         }
+        node = this.heapPop();
       }
     } finally {
       this.isFlushing = false;
@@ -294,20 +295,16 @@ class DefaultScheduler implements Scheduler {
       return;
     }
 
-    if (node.queued && !this.flushingNodes.has(node)) {
-      this.flushingNodes.add(node);
-      try {
-        node.flush();
-        node.queued = false;
-      } finally {
-        this.flushingNodes.delete(node);
-      }
-    }
+    if (!node.queued || node.flushing) return;
+    node.queued = false;
+    this.queuedCount--;
+    node.flush();
   }
 
   queueFlush(node: AtomNode): void {
+    if (node.queued) return;
     node.queued = true;
-    this.queuedNodes.add(node);
+    this.queuedCount++;
     this.heapPush(node);
     if (this.isBatchScheduled) return;
 
@@ -318,12 +315,12 @@ class DefaultScheduler implements Scheduler {
   }
 
   remove(node: AtomNode): void {
+    if (!node.queued) return;
     node.queued = false;
-    this.queuedNodes.delete(node);
-    this.flushingNodes.delete(node);
+    this.queuedCount = Math.max(0, this.queuedCount - 1);
   }
 
-  get isDirty(): boolean { return this.queuedNodes.size > 0; }
+  get isDirty(): boolean { return this.queuedCount > 0; }
 }
 
 let currentScheduler: Scheduler = new DefaultScheduler();
@@ -379,7 +376,7 @@ export function trackDependencies<T>(fn: () => T): { result: T; dependencies: Se
 class EvaluationOwner {
   private ctx: FormulaContext | null = null;
   private generation = 0;
-  private atomProxies = new WeakMap<Atom<any>, any>();
+  private atomViews = new WeakMap<Atom<any>, Atom<any>>();
 
   /** Read an atom and record it as a dependency of the active evaluation. */
   read<A>(atom: Atom<A>): A {
@@ -396,22 +393,14 @@ class EvaluationOwner {
     return (atoms.length === 1 ? atoms[0] : atoms) as any;
   }
 
-  /** Return a cached proxy for an atom that intercepts `.value` reads. */
-  wrapAtom(atom: Atom<any>): any {
-    let proxy = this.atomProxies.get(atom);
-    if (!proxy) {
-      const owner = this;
-      proxy = new Proxy(atom, {
-        get(target, prop, receiver) {
-          if (prop === "value") {
-            return owner.read(target);
-          }
-          return Reflect.get(target, prop, receiver);
-        }
-      });
-      this.atomProxies.set(atom, proxy);
+  /** Return a cached atom facade that tracks `.value` reads without a Proxy. */
+  wrapAtom<A>(atom: Atom<A>): Atom<A> {
+    let view = this.atomViews.get(atom) as Atom<A> | undefined;
+    if (!view) {
+      view = createTrackedAtomView(this, atom);
+      this.atomViews.set(atom, view);
     }
-    return proxy;
+    return view;
   }
 
   /** Begin a new evaluation generation and return its context. */
@@ -439,8 +428,7 @@ class EvaluationOwner {
 
 /**
  * The callable API surface of a derived scope. Kept as a real class so methods
- * are normal functions and the scope remains debuggable, while a Proxy wraps
- * the computable instance to expose atom properties.
+ * are normal functions and the scope remains debuggable.
  */
 class DerivedScopeFacade {
   constructor(private owner: EvaluationOwner) {}
@@ -493,10 +481,70 @@ function createSelf(instance: ComputableInstance, owner: EvaluationOwner): Deriv
  * Shared Internals
  * ───────────────────────────────────────────────────────────────────────────*/
 
-const disposedWeakMap = new WeakMap<object, boolean>();
+function createAtomRuntimeMeta(): AtomRuntimeMeta {
+  return {
+    changeHandlers: new Set(),
+    dirtyHandlers: new Set(),
+    disposeHandlers: new Set(),
+  };
+}
 
-function isDisposed(obj: object): boolean { return disposedWeakMap.get(obj) === true; }
-function markDisposed(obj: object): void { disposedWeakMap.set(obj, true); }
+function getAtomRuntimeMeta(atom: Atom<any>): AtomRuntimeMeta {
+  return (atom as unknown as InternalAtomContainer)[META];
+}
+
+function createTrackedAtomView<A>(owner: EvaluationOwner, atom: Atom<A>): Atom<A> {
+  const view = {} as Record<PropertyKey, unknown>;
+
+  for (const key of Object.getOwnPropertyNames(atom)) {
+    const descriptor = Object.getOwnPropertyDescriptor(atom, key);
+    if (!descriptor) continue;
+
+    if (key === "value") {
+      Object.defineProperty(view, key, {
+        get: () => owner.read(atom),
+        enumerable: descriptor.enumerable ?? true,
+        configurable: true,
+      });
+      continue;
+    }
+
+    if (typeof descriptor.value === "function") {
+      Object.defineProperty(view, key, {
+        value: descriptor.value.bind(atom),
+        enumerable: descriptor.enumerable ?? true,
+        configurable: true,
+        writable: false,
+      });
+      continue;
+    }
+
+    Object.defineProperty(view, key, {
+      get: descriptor.get ? () => Reflect.get(atom as object, key, atom) : () => Reflect.get(atom as object, key, atom),
+      set: descriptor.set ? (value) => Reflect.set(atom as object, key, value, atom) : undefined,
+      enumerable: descriptor.enumerable ?? true,
+      configurable: true,
+    });
+  }
+
+  Object.defineProperty(view, Symbol.asyncIterator, {
+    value: atom[Symbol.asyncIterator].bind(atom),
+    enumerable: false,
+    configurable: true,
+  });
+
+  return view as unknown as Atom<A>;
+}
+
+function finalizeAtomInstance<T extends Atom<any> & InternalAtomContainer>(instance: T, analog: boolean): T {
+  Object.defineProperty(instance, "_onDispose", {
+    get: () => instance[META].disposeHandlers,
+    enumerable: false,
+  });
+  (instance as any)[ANALOG] = analog;
+  registerWithCurrentScope(instance as any);
+  return instance;
+}
 
 export function normalizeError(err: any): Error {
   return err instanceof Error ? err : new Error(String(err));
@@ -588,46 +636,142 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
 // Dependency invalidation channel: separate from public subscriber broadcast.
 // Dependent atoms register here so they are marked dirty immediately when a
 // dependency changes, even in analog mode where public broadcasts are batched.
-const atomChangeHandlers = new WeakMap<Atom<any>, Set<() => void>>();
-const atomDirtyHandlers = new WeakMap<Atom<any>, Set<(dirty: boolean) => void>>();
-
 function addAtomChangeHandler(atom: Atom<any>, handler: () => void): void {
-  let handlers = atomChangeHandlers.get(atom);
-  if (!handlers) {
-    handlers = new Set();
-    atomChangeHandlers.set(atom, handlers);
-  }
-  handlers.add(handler);
+  getAtomRuntimeMeta(atom).changeHandlers.add(handler);
 }
 
 function removeAtomChangeHandler(atom: Atom<any>, handler: () => void): void {
-  atomChangeHandlers.get(atom)?.delete(handler);
+  getAtomRuntimeMeta(atom).changeHandlers.delete(handler);
 }
 
 function notifyChangeHandlers(atom: Atom<any>): void {
-  const handlers = atomChangeHandlers.get(atom);
-  if (!handlers) return;
+  const handlers = getAtomRuntimeMeta(atom).changeHandlers;
   for (const h of Array.from(handlers)) {
     try { h(); } catch { /* suppress dependent errors */ }
   }
 }
 
 export function onAtomDirtyChange(atom: Atom<any>, handler: (dirty: boolean) => void): () => void {
-  let handlers = atomDirtyHandlers.get(atom);
-  if (!handlers) {
-    handlers = new Set();
-    atomDirtyHandlers.set(atom, handlers);
-  }
+  const handlers = getAtomRuntimeMeta(atom).dirtyHandlers;
   handlers.add(handler);
   return () => handlers?.delete(handler);
 }
 
 function notifyDirtyHandlers(atom: Atom<any>, dirty: boolean): void {
-  const handlers = atomDirtyHandlers.get(atom);
-  if (!handlers) return;
+  const handlers = getAtomRuntimeMeta(atom).dirtyHandlers;
   for (const h of Array.from(handlers)) {
     try { h(dirty); } catch { /* suppress dirty observers */ }
   }
+}
+
+type AtomSubscriber<T> = (current: T, previous: T) => MaybePromise;
+
+interface AtomBaseConfig<T> {
+  analog: boolean;
+  maxSubscribers: number;
+  node: AtomNode;
+  getDisposed: () => boolean;
+  getDirty: () => boolean;
+  getError: () => any;
+  getValue: (instance: Atom<T> & InternalAtomContainer) => T;
+  getSafeValue?: (instance: Atom<T> & InternalAtomContainer) => T;
+  getPrevious: (instance: Atom<T> & InternalAtomContainer) => T;
+  markDirty: (instance: Atom<T> & InternalAtomContainer) => void;
+  beforeSubscribe?: (instance: Atom<T> & InternalAtomContainer) => void;
+  onSubscribed?: (
+    callback: AtomSubscriber<T> | undefined,
+    unsubscribe: Subscription,
+    instance: Atom<T> & InternalAtomContainer,
+  ) => void;
+  onUnsubscribe?: (
+    callback: AtomSubscriber<T> | undefined,
+    unsubscribe: Subscription,
+    instance: Atom<T> & InternalAtomContainer,
+  ) => MaybePromise<void>;
+  onDispose: (instance: Atom<T> & InternalAtomContainer) => MaybePromise<void>;
+}
+
+interface AtomBaseResult<T> {
+  instance: Atom<T> & InternalAtomContainer;
+  meta: AtomRuntimeMeta;
+  errorHandlers: Set<(error: any) => void>;
+  subs: ReturnType<typeof createSubscriberSet<T>>;
+}
+
+function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
+  const meta = createAtomRuntimeMeta();
+  const errorHandlers = new Set<(error: any) => void>();
+  const subs = createSubscriberSet<T>(errorHandlers, config.analog);
+
+  const instance: Atom<T> & InternalAtomContainer = {
+    type: "atom",
+    [META]: meta,
+
+    get disposed() { return config.getDisposed(); },
+    get dirty() { return config.getDirty(); },
+    get error() { return config.getError(); },
+    get subscriberCount() { return subs.size; },
+
+    get value() {
+      const value = config.getValue(instance);
+      const ctx = getCurrentFormulaContext();
+      if (ctx) ctx.dependencies.add(instance);
+      return value;
+    },
+
+    get safeValue() {
+      if (config.getSafeValue) {
+        return config.getSafeValue(instance);
+      }
+      try {
+        return instance.value;
+      } catch {
+        return config.getPrevious(instance);
+      }
+    },
+
+    get previous() {
+      return config.getPrevious(instance);
+    },
+
+    [NODE]: config.node,
+    [MARK_DIRTY]() { config.markDirty(instance); },
+    [FLUSH]() { config.node.flush(); },
+
+    subscribe(callback) {
+      config.beforeSubscribe?.(instance);
+      if (config.getDisposed()) return createSubscription(() => {});
+      if (subs.size >= config.maxSubscribers) {
+        throw new Error(`Maximum subscriber limit (${config.maxSubscribers}) reached`);
+      }
+      if (callback) subs.add(callback);
+
+      const unsubscribe = createSubscription(async () => {
+        if (callback) subs.delete(callback);
+        await config.onUnsubscribe?.(callback, unsubscribe, instance);
+      });
+      config.onSubscribed?.(callback, unsubscribe, instance);
+      return unsubscribe;
+    },
+
+    onError(handler: (error: any) => void): Subscription {
+      if (config.getDisposed()) return createSubscription(() => {});
+      errorHandlers.add(handler);
+      const error = config.getError();
+      if (error !== undefined) try { handler(error); } catch {}
+      return createSubscription(() => { errorHandlers.delete(handler); });
+    },
+
+    [Symbol.asyncIterator]() { return iterate(this); },
+    dispose() { void config.onDispose(instance); },
+  };
+
+  return {
+    instance: finalizeAtomInstance(instance, config.analog),
+    meta,
+    errorHandlers,
+    subs,
+  };
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -663,11 +807,8 @@ export function atomFromIterator<T>(
   let hasNewValue = false;
   let dirty = false;
 
-  const disposeHandlers = new Set<() => void>();
-  const errorHandlers = new Set<(error: any) => void>();
-  const subs = createSubscriberSet<T>(errorHandlers, analog);
+  let instance!: Atom<T> & InternalAtomContainer & { fail(err: any, options?: { terminate?: boolean }): void };
   const subscriptions = new Set<Subscription>();
-
   let iterator: AsyncIterator<T> | undefined;
   let runPromise: Promise<void> | null = null;
 
@@ -675,6 +816,11 @@ export function atomFromIterator<T>(
     if (dirty === next) return;
     dirty = next;
     notifyDirtyHandlers(instance, next);
+  };
+
+  const cleanupRuntime = () => {
+    instance[META].changeHandlers.clear();
+    instance[META].dirtyHandlers.clear();
   };
 
   const broadcast = (val: T) => subs.broadcast(val, previous);
@@ -696,20 +842,20 @@ export function atomFromIterator<T>(
     if (disposed) return;
     disposed = true;
     setDirty(false);
-    markDisposed(instance);
     node.version++;
     subs.clear();
     activeSubCount = 0;
 
     await stopIterator();
 
-    for (const handler of disposeHandlers) await Promise.resolve(handler()).catch(() => {});
-    disposeHandlers.clear();
+    for (const handler of instance[META].disposeHandlers) await Promise.resolve(handler()).catch(() => {});
+    instance[META].disposeHandlers.clear();
 
     for (const sub of subscriptions) await sub().catch(() => {});
     subscriptions.clear();
 
     getScheduler().remove(node);
+    cleanupRuntime();
   };
 
   const run = async () => {
@@ -765,61 +911,45 @@ export function atomFromIterator<T>(
     },
   };
 
-  const instance: Atom<T> & InternalAtomContainer & { fail(err: any, options?: { terminate?: boolean }): void } = {
-    type: "atom",
-
-    get disposed() { return disposed || isDisposed(this); },
-    get dirty() { return dirty; },
-    get error() { return errorValue; },
-    get subscriberCount() { return subs.size; },
-
-    get value() {
+  const base = createAtomBase<T>({
+    analog,
+    maxSubscribers,
+    node,
+    getDisposed: () => disposed,
+    getDirty: () => dirty,
+    getError: () => errorValue,
+    getValue: () => {
       if (disposed) throw new Error("Atom has been disposed");
       if (isErrorState && errorValue) throw errorValue;
-      const ctx = getCurrentFormulaContext();
-      if (ctx) ctx.dependencies.add(instance);
       return current;
     },
-    get safeValue() { return current; },
-    get previous() { return previous; },
-
-    [NODE]: node,
-    [MARK_DIRTY]() {
+    getSafeValue: () => current,
+    getPrevious: () => previous,
+    markDirty: () => {
       if (disposed || dirty) return;
       setDirty(true);
       getScheduler().queueFlush(node);
     },
-    [FLUSH]() { node.flush(); },
-
-    subscribe(callback) {
-      if (disposed) return createSubscription(() => {});
-      if (subs.size >= maxSubscribers) throw new Error(`Maximum subscriber limit (${maxSubscribers}) reached`);
-
+    onSubscribed: (_callback, unsubscribe) => {
       if (!started) {
         started = true;
         run().catch(() => {});
       }
-
-      if (callback) subs.add(callback);
-      activeSubCount++;
-
-      const unsubscribe = createSubscription(async () => {
-        if (callback) subs.delete(callback);
-        subscriptions.delete(unsubscribe);
-        if (--activeSubCount <= 0) await disposeInstance();
-      });
       subscriptions.add(unsubscribe);
-      return unsubscribe;
+      activeSubCount++;
     },
-
-    onError(handler) {
-      if (disposed) return createSubscription(() => {});
-      errorHandlers.add(handler);
-      if (errorValue !== undefined) try { handler(errorValue); } catch {}
-      return createSubscription(() => { errorHandlers.delete(handler); });
+    onUnsubscribe: async (_callback, unsubscribe) => {
+      subscriptions.delete(unsubscribe);
+      if (--activeSubCount <= 0) await disposeInstance();
     },
+    onDispose: () => disposeInstance(),
+  });
 
-    fail(err, errorOptions?) {
+  const { instance: baseInstance, errorHandlers, subs } = base;
+  instance = baseInstance as typeof instance;
+
+  Object.assign(instance, {
+    fail(err: any, errorOptions?: { terminate?: boolean }) {
       if (disposed) return;
       errorValue = normalizeError(err);
       isErrorState = true;
@@ -829,15 +959,8 @@ export function atomFromIterator<T>(
       if (errorOptions?.terminate ?? false) {
         void disposeInstance();
       }
-    },
-
-    [Symbol.asyncIterator]() { return iterate(this); },
-    dispose() { void disposeInstance(); },
-  };
-
-  Object.defineProperty(instance, "_onDispose", { get: () => disposeHandlers, enumerable: false });
-  (instance as any)[ANALOG] = analog;
-  registerWithCurrentScope(instance as any);
+    }
+  });
 
   return instance;
 }
@@ -864,6 +987,45 @@ function watchDependencies(
   return cleanup;
 }
 
+function createLatestAsyncCoordinator<T>() {
+  let generation = 0;
+  let coordinator: AsyncCoordinator<T> | undefined;
+  const sourceGeneration = new Map<number, number>();
+
+  return {
+    addLatestSource(source: AsyncIterator<T>): number {
+      generation++;
+      if (!coordinator) {
+        coordinator = createAsyncCoordinator<T>([source], { syncDrain: true });
+        sourceGeneration.set(0, generation);
+      } else {
+        const index = coordinator.addSource(source);
+        sourceGeneration.set(index, generation);
+      }
+      return generation;
+    },
+
+    async next() {
+      if (!coordinator) return DONE;
+
+      while (true) {
+        const result = await coordinator.next();
+        if (result.done) return DONE;
+        if (sourceGeneration.get(result.value.sourceIndex) !== generation) {
+          continue;
+        }
+        return result;
+      }
+    },
+
+    async return() {
+      sourceGeneration.clear();
+      await coordinator?.return?.();
+      coordinator = undefined;
+    }
+  };
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
  * flow() - Async Resource Node
  * ───────────────────────────────────────────────────────────────────────────*/
@@ -884,10 +1046,8 @@ export function flow<T>(
 
   const iterable: AsyncIterable<T> = {
     [Symbol.asyncIterator]() {
-      let generation = 0;
       let controller: AbortController | undefined;
-      let coordinator: AsyncCoordinator<T>;
-      const sourceGeneration = new Map<number, number>();
+      const latest = createLatestAsyncCoordinator<T>();
       let stopped = false;
 
       const makeSource = (): AsyncIterator<T> => {
@@ -912,12 +1072,8 @@ export function flow<T>(
           cleanupDeps = watchDependencies(context.dependencies, () => {
             if (stopped) return;
 
-            generation++;
             controller?.abort();
-
-            const nextSource = makeSource();
-            const nextIndex = coordinator.addSource(nextSource);
-            sourceGeneration.set(nextIndex, generation);
+            latest.addLatestSource(makeSource());
           });
 
           signal.addEventListener("abort", () => cleanupDeps?.(), { once: true });
@@ -939,23 +1095,15 @@ export function flow<T>(
         return run()[Symbol.asyncIterator]();
       };
 
-      const firstSource = makeSource();
-      coordinator = createAsyncCoordinator<T>([firstSource], { syncDrain: true });
-      sourceGeneration.set(0, generation);
+      latest.addLatestSource(makeSource());
 
       const iterator: AsyncIterator<T> = {
         async next() {
           while (!stopped) {
-            const event = await coordinator.next();
-
+            const event = await latest.next();
             if (event.done) return DONE;
 
             const item = event.value;
-            const itemGeneration = sourceGeneration.get(item.sourceIndex);
-
-            if (itemGeneration !== generation) {
-              continue;
-            }
 
             if (item.type === "value") {
               return NEXT(item.value);
@@ -976,8 +1124,7 @@ export function flow<T>(
         async return() {
           stopped = true;
           controller?.abort();
-          await coordinator.return?.();
-          sourceGeneration.clear();
+          await latest.return();
           return DONE;
         }
       };
@@ -1046,16 +1193,18 @@ export function atom<T = any>(
   let errorValue: any = undefined;
   let isErrorState = false;
 
-  const disposeHandlers = new Set<() => void>();
-  const errorHandlers = new Set<(error: any) => void>();
-  const subs = createSubscriberSet<T>(errorHandlers, analog);
+  let instance!: Writable<T> & InternalAtomContainer;
   const subscriptions = new Set<Subscription>();
 
   const broadcast = () => subs.broadcast(current, previous);
 
+  const cleanupRuntime = () => {
+    instance[META].changeHandlers.clear();
+    instance[META].dirtyHandlers.clear();
+  };
+
   const flushInternal = () => {
-    if (!node.queued || disposed) return;
-    node.queued = false;
+    if (disposed) return;
     if (Object.is(lastNotified, current)) return;
     
     lastNotified = current;
@@ -1067,7 +1216,7 @@ export function atom<T = any>(
     depth: 0, version: 0, queued: false, flushing: false,
     isResource: false, isAnalog: analog,
     flush() {
-      if (disposed || !node.queued || node.flushing) return;
+      if (disposed || node.flushing) return;
       
       node.flushing = true;
       try {
@@ -1078,54 +1227,48 @@ export function atom<T = any>(
     },
   };
 
-  const instance: Writable<T> & InternalAtomContainer = {
-    type: "atom",
-
-    get disposed() { return disposed || isDisposed(this); },
-    get dirty() { return false; },
-    get error() { return errorValue; },
-    get subscriberCount() { return subs.size; },
-    
-    get value() {
+  const base = createAtomBase<T>({
+    analog,
+    maxSubscribers,
+    node,
+    getDisposed: () => disposed,
+    getDirty: () => false,
+    getError: () => errorValue,
+    getValue: () => {
       if (disposed) throw new Error("Atom has been disposed");
       if (isErrorState && errorValue) throw errorValue;
-      const ctx = getCurrentFormulaContext();
-      if (ctx) ctx.dependencies.add(instance);
       return current;
     },
-
-    get safeValue() { return current; },
-    get previous() { return previous; },
-
-    [NODE]: node,
-    [MARK_DIRTY]() {
+    getSafeValue: () => current,
+    getPrevious: () => previous,
+    markDirty: () => {
       if (disposed || node.queued) return;
       getScheduler().queueFlush(node);
     },
-    [FLUSH]() { node.flush(); },
-
-    subscribe(callback) {
-      if (disposed) return createSubscription(() => {});
-      if (subs.size >= maxSubscribers) throw new Error(`Maximum subscriber limit (${maxSubscribers}) reached`);
-      if (callback) subs.add(callback);
-
-      const unsubscribe = createSubscription(() => {
-        if (callback) subs.delete(callback);
-        subscriptions.delete(unsubscribe);
-      });
+    onSubscribed: (_callback, unsubscribe) => {
       subscriptions.add(unsubscribe);
-      return unsubscribe;
     },
-
-    onError(handler: (error: any) => void): Subscription {
-      if (disposed) return createSubscription(() => {});
-      errorHandlers.add(handler);
-      if (errorValue !== undefined) try { handler(errorValue); } catch {}
-      return createSubscription(() => { errorHandlers.delete(handler); });
+    onUnsubscribe: (_callback, unsubscribe) => {
+      subscriptions.delete(unsubscribe);
     },
+    onDispose: () => {
+      if (disposed) return;
+      disposed = true;
+      getScheduler().remove(node);
+      for (const h of instance[META].disposeHandlers) Promise.resolve(h()).catch(() => {});
+      instance[META].disposeHandlers.clear();
+      for (const s of subscriptions) s();
+      subscriptions.clear();
+      subs.clear();
+      errorHandlers.clear();
+      cleanupRuntime();
+    },
+  });
 
-    [Symbol.asyncIterator]() { return iterate(this); },
+  const { instance: baseInstance, errorHandlers, subs } = base;
+  instance = baseInstance as Writable<T> & InternalAtomContainer;
 
+  Object.assign(instance, {
     next(value: T) {
       if (disposed) return;
       if (isErrorState) { isErrorState = false; errorValue = undefined; }
@@ -1154,9 +1297,7 @@ export function atom<T = any>(
         broadcast();
       }
     },
-
     set(value: T) { this.next(value); },
-
     fail(err: any, errorOptions?: { terminate?: boolean }) {
       if (disposed) return;
       errorValue = normalizeError(err);
@@ -1168,20 +1309,19 @@ export function atom<T = any>(
 
       if (shouldTerminate) {
         disposed = true;
-        markDisposed(instance);
         getScheduler().remove(node);
         
-        for (const h of disposeHandlers) Promise.resolve(h()).catch(() => {});
-        disposeHandlers.clear();
+        for (const h of instance[META].disposeHandlers) Promise.resolve(h()).catch(() => {});
+        instance[META].disposeHandlers.clear();
         for (const s of subscriptions) s();
         subscriptions.clear();
         subs.clear();
         errorHandlers.clear();
+        cleanupRuntime();
       } else if (propagateErrors) {
         instance[MARK_DIRTY]();
       }
     },
-
     recover() {
       if (disposed || !isErrorState) return;
       isErrorState = false;
@@ -1189,24 +1329,7 @@ export function atom<T = any>(
       instance[MARK_DIRTY]();
     },
     clearError() { this.recover?.(); },
-
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      markDisposed(instance);
-      getScheduler().remove(node);
-      for (const h of disposeHandlers) Promise.resolve(h()).catch(() => {});
-      disposeHandlers.clear();
-      for (const s of subscriptions) s();
-      subscriptions.clear();
-      subs.clear();
-      errorHandlers.clear();
-    },
-  };
-
-  Object.defineProperty(instance, "_onDispose", { get: () => disposeHandlers, enumerable: false });
-  (instance as any)[ANALOG] = analog;
-  registerWithCurrentScope(instance as any);
+  });
   if (hasInitialValue) markAtomAsEmitted(instance as any);
   return instance;
 }
@@ -1227,120 +1350,92 @@ function isGeneratorFunction(fn: AnyFn): boolean {
   return fn.constructor?.name === "GeneratorFunction";
 }
 
-function isAsyncFunction(fn: AnyFn): boolean {
-  return fn.constructor?.name === "AsyncFunction";
+function bindComputableMembers(target: Record<string, unknown>, fn: AnyFn): void {
+  const excluded = new Set([
+    "length",
+    "name",
+    "prototype",
+    "arguments",
+    "caller",
+    "compute",
+    "onConstruct",
+    "onInit",
+    "onDispose",
+  ]);
+
+  for (const source of [fn, fn.prototype]) {
+    if (!source) continue;
+    for (const name of Object.getOwnPropertyNames(source)) {
+      if (name === "constructor" || excluded.has(name) || name in target) continue;
+      const value = (source as any)[name];
+      target[name] = typeof value === "function" ? value.bind(target) : value;
+    }
+  }
 }
 
-function extractAllMembers(fn: AnyFn): Record<string, unknown> {
-  const members: Record<string, unknown> = {};
+function runGenerator(gen: Generator<unknown, unknown, unknown>, self: DerivedScope): unknown {
+  const step = (value?: unknown): unknown => {
+    const result = value === undefined ? gen.next() : gen.next(value);
 
-  const excluded = new Set(["length", "name", "prototype", "arguments", "caller"]);
+    if (result.done) return result.value;
 
-  for (const name of Object.getOwnPropertyNames(fn)) {
-    if (excluded.has(name)) continue;
-    members[name] = (fn as any)[name];
-  }
+    const yielded = result.value;
 
-  if (fn.prototype) {
-    for (const name of Object.getOwnPropertyNames(fn.prototype)) {
-      if (name === "constructor" || members[name] !== undefined) continue;
-      members[name] = (fn.prototype as any)[name];
+    if (isPromiseLike(yielded)) {
+      return Promise.resolve(yielded).then(step);
     }
-  }
 
-  return members;
+    if (isAtom(yielded)) {
+      return step(self.read(yielded));
+    }
+
+    return step(yielded);
+  };
+
+  return step();
 }
 
-function wrapFunctionInClass(fn: AnyFn): new () => ComputableInstance {
-  const isGenerator = isGeneratorFunction(fn);
-  const isAsync = isAsyncFunction(fn);
-  const members = extractAllMembers(fn);
+function createFunctionComputable(fn: AnyFn): ComputableInstance {
+  const state = Object.create(fn.prototype ?? Object.prototype) as ComputableInstance & Record<string, unknown>;
+  const bound = fn.bind(state);
 
-  class FunctionWrapper implements ComputableInstance {
-    private _fn!: AnyFn;
-    private _isGenerator!: boolean;
-    private _isAsync!: boolean;
-    [key: string]: unknown;
+  bindComputableMembers(state, fn);
 
-    constructor() {
-      this._fn = fn.bind(this);
-      this._isGenerator = isGenerator;
-      this._isAsync = isAsync;
+  const onConstruct = (fn as any).onConstruct;
+  const onInit = (fn as any).onInit;
+  const onDispose = (fn as any).onDispose;
 
-      for (const [name, value] of Object.entries(members)) {
-        Object.defineProperty(this, name, {
-          value: typeof value === "function" ? (value as AnyFn).bind(this) : value,
-          writable: true,
-          configurable: true
-        });
-      }
-
-      const onConstruct = (this._fn as any).onConstruct;
-      if (typeof onConstruct === "function") {
-        onConstruct.apply(this);
-      }
-    }
-
-    compute(self: DerivedScope): unknown {
-      if (this._isGenerator) return this.runGenerator(self);
-      if (this._isAsync) return this.runAsync(self);
-      return this.runSync(self);
-    }
-
-    private runSync(self: DerivedScope): unknown {
-      return this._fn(self);
-    }
-
-    private runAsync(self: DerivedScope): unknown {
-      return this._fn(self);
-    }
-
-    private runGenerator(self: DerivedScope): unknown {
-      const gen = this._fn(self);
-      return this.iterateGenerator(gen as Generator<unknown, unknown, unknown>, self);
-    }
-
-    private iterateGenerator(gen: Generator<unknown, unknown, unknown>, self: DerivedScope): unknown {
-      const step = (value?: unknown): unknown => {
-        const result = value === undefined ? gen.next() : gen.next(value);
-
-        if (result.done) return result.value;
-
-        const yielded = result.value;
-
-        if (yielded && typeof yielded === "object" && "then" in yielded) {
-          return Promise.resolve(yielded).then(step);
-        }
-
-        if (yielded && typeof yielded === "object" && (yielded as Atom<any>).type === "atom") {
-          return step(self.read(yielded as Atom<any>));
-        }
-
-        return step(yielded);
-      };
-
-      return step();
-    }
-
-    onInit(self: DerivedScope) {
-      const hook = (this._fn as any).onInit;
-      if (typeof hook === "function") hook.call(this, self);
-    }
-
-    onDispose() {
-      const hook = (this._fn as any).onDispose;
-      if (typeof hook === "function") hook.call(this);
-    }
+  if (typeof onConstruct === "function") {
+    onConstruct.call(state);
   }
 
-  return FunctionWrapper as unknown as new () => ComputableInstance;
+  state.compute = (self?: DerivedScope) => {
+    const result = bound(self);
+    return isGeneratorFunction(fn)
+      ? runGenerator(result as Generator<unknown, unknown, unknown>, self as DerivedScope)
+      : result;
+  };
+
+  state.onInit = (self?: DerivedScope) => {
+    if (typeof onInit === "function") {
+      onInit.call(state, self);
+    }
+  };
+
+  state.onDispose = () => {
+    if (typeof onDispose === "function") {
+      onDispose.call(state);
+    }
+  };
+
+  return state;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * derived() - Computed Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
-export type SyncOnly<T> = T extends Promise<any> ? never : T;
+export type SyncOnly<T> = T extends PromiseLike<any> ? never : Awaited<T>;
 
 /**
  * Creates a readonly atom computed from other atoms.
@@ -1382,7 +1477,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       computableFactory = () => new Class();
     } else {
       // Regular function
-      computableFactory = () => new (wrapFunctionInClass(first))();
+      computableFactory = () => createFunctionComputable(first);
     }
     options = second as AtomOptions | undefined;
   } else {
@@ -1415,21 +1510,23 @@ export function derived<T>(...args: any[]): Atom<T> {
   let isAsyncFormula = false;
   let dirty = false;
 
-  const errorHandlers = new Set<(error: any) => void>();
-  const subs = createSubscriberSet<T>(errorHandlers, analog);
+  let instance!: Atom<T> & InternalAtomContainer;
   const dependencies = new Set<InternalAtomContainer>();
   const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
 
-  let asyncCoordinator: AsyncCoordinator<T> | undefined;
+  const latestAsync = createLatestAsyncCoordinator<T>();
   let asyncController: AbortController | undefined;
-  let asyncGeneration = 0;
-  const asyncSourceGeneration = new Map<number, number>();
   let asyncReaderStarted = false;
 
   const setDirty = (next: boolean) => {
     if (dirty === next) return;
     dirty = next;
     notifyDirtyHandlers(instance, next);
+  };
+
+  const cleanupRuntime = () => {
+    instance[META].changeHandlers.clear();
+    instance[META].dirtyHandlers.clear();
   };
 
   const broadcast = () => subs.broadcast(current, previous);
@@ -1507,21 +1604,16 @@ export function derived<T>(...args: any[]): Atom<T> {
   };
 
   const startAsyncReader = () => {
-    if (asyncReaderStarted || !asyncCoordinator) return;
+    if (asyncReaderStarted) return;
     asyncReaderStarted = true;
 
     void (async () => {
       try {
-        while (!disposed && asyncCoordinator) {
-          const result = await asyncCoordinator.next();
+        while (!disposed) {
+          const result = await latestAsync.next();
           if (disposed || result.done) break;
 
           const event = result.value;
-          const eventGeneration = asyncSourceGeneration.get(event.sourceIndex);
-
-          if (eventGeneration !== asyncGeneration) {
-            continue;
-          }
 
           if (event.type === "value") {
             isErrorState = false;
@@ -1556,16 +1648,8 @@ export function derived<T>(...args: any[]): Atom<T> {
     asyncController?.abort();
     asyncController = new AbortController();
 
-    const sourceGeneration = ++asyncGeneration;
     const source = promiseSource(promise, asyncController.signal);
-
-    if (!asyncCoordinator) {
-      asyncCoordinator = createAsyncCoordinator<T>([source], { syncDrain: true });
-      asyncSourceGeneration.set(0, sourceGeneration);
-    } else {
-      const index = asyncCoordinator.addSource(source);
-      asyncSourceGeneration.set(index, sourceGeneration);
-    }
+    latestAsync.addLatestSource(source);
 
     promise
       .finally(() => {
@@ -1651,20 +1735,16 @@ export function derived<T>(...args: any[]): Atom<T> {
     },
   };
 
-  const instance: Atom<T> & InternalAtomContainer = {
-    type: "atom",
-
-    get disposed() { return disposed || isDisposed(this); },
-    get dirty() { return dirty; },
-    get error() { return errorValue; },
-    get subscriberCount() { return subs.size; },
-
-    get value() {
+  const base = createAtomBase<T>({
+    analog,
+    maxSubscribers,
+    node,
+    getDisposed: () => disposed,
+    getDirty: () => dirty,
+    getError: () => errorValue,
+    getValue: () => {
       if (disposed) throw new Error("Atom has been disposed");
       if (running) throw new Error("Circular dependency detected in derived()");
-
-      const ctx = getCurrentFormulaContext();
-      if (ctx) ctx.dependencies.add(instance);
 
       if (!initialized) {
         try {
@@ -1702,69 +1782,54 @@ export function derived<T>(...args: any[]): Atom<T> {
       if (isErrorState && errorValue) throw errorValue;
       return current;
     },
-
-    get safeValue() {
-      try { return this.value; } catch (err) {
+    getSafeValue: () => {
+      try {
+        return instance.value;
+      } catch {
         return current;
       }
     },
-    get previous() {
-      try { this.value; } catch {}
+    getPrevious: () => {
+      try { instance.value; } catch {}
       return previous;
     },
-
-    [NODE]: node,
-    [MARK_DIRTY]() {
+    markDirty: () => {
       if (disposed || dirty) return;
       setDirty(true);
       getScheduler().queueFlush(node);
     },
-    [FLUSH]() { node.flush(); },
-
-    subscribe(callback) {
-      try { this.value; } catch {}
-      if (disposed) return createSubscription(() => {});
-      if (subs.size >= maxSubscribers) throw new Error(`Maximum subscriber limit (${maxSubscribers}) reached`);
-      if (callback) subs.add(callback);
-      return createSubscription(() => { if (callback) subs.delete(callback); });
+    beforeSubscribe: () => {
+      try { instance.value; } catch {}
     },
-
-    onError(handler: (error: any) => void): Subscription {
-      if (disposed) return createSubscription(() => {});
-      errorHandlers.add(handler);
-      if (errorValue !== undefined) try { handler(errorValue); } catch {}
-      return createSubscription(() => { errorHandlers.delete(handler); });
-    },
-
-    [Symbol.asyncIterator]() { return iterate(this); },
-
-    dispose() {
+    onDispose: () => {
       if (disposed) return;
       disposed = true;
       setDirty(false);
-      markDisposed(instance);
       getScheduler().remove(node);
       notifyPending = false;
 
       asyncController?.abort();
-      void asyncCoordinator?.return?.();
-      asyncCoordinator = undefined;
-      asyncSourceGeneration.clear();
+      void latestAsync.return();
 
       for (const sub of depSubscriptions.values()) sub();
       depSubscriptions.clear();
       dependencies.clear();
       subs.clear();
       errorHandlers.clear();
+      for (const handler of instance[META].disposeHandlers) {
+        Promise.resolve(handler()).catch(() => {});
+      }
+      instance[META].disposeHandlers.clear();
+      cleanupRuntime();
 
       if (typeof computable.onDispose === "function") {
         computable.onDispose();
       }
     },
-  };
+  });
 
-  (instance as any)[ANALOG] = analog;
-  registerWithCurrentScope(instance as any);
+  const { instance: baseInstance, errorHandlers, subs } = base;
+  instance = baseInstance;
 
   return instance;
 }
