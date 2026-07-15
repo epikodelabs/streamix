@@ -15,7 +15,6 @@ import {
   normalizeError,
   onAtomDirtyChange,
   onAtomEmit,
-  trackDependencies,
   Writable,
   type Atom,
 } from "./atom";
@@ -85,22 +84,14 @@ type ScopeAtomReader = <T>(atom: Atom<T>) => T;
 function createTrackedScope(scopeRef: Scope, reader: ScopeAtomReader): any {
   return new Proxy(scopeRef as any, {
     get(target, prop, receiver) {
-      if (getCurrentFormulaContext()) {
-        return Reflect.get(target, prop, receiver);
-      }
-
-      const current = target._rawState[prop as string | symbol];
-      if (isAtom(current)) {
-        return reader(current);
+      const resolved = target.at?.(prop);
+      if (isAtom(resolved)) {
+        return reader(resolved);
       }
 
       return Reflect.get(target, prop, receiver);
     },
-    apply(target, thisArg, argArray) {
-      if (getCurrentFormulaContext()) {
-        return Reflect.apply(target, thisArg, argArray);
-      }
-
+    apply(_target, _thisArg, argArray) {
       if (argArray.length > 1) {
         return argArray.map((item) => (isAtom(item) ? reader(item) : item));
       }
@@ -109,16 +100,6 @@ function createTrackedScope(scopeRef: Scope, reader: ScopeAtomReader): any {
       return isAtom(first) ? reader(first) : first;
     },
   });
-}
-
-function collectScopeDependencies<T>(run: () => T): { result: T; dependencies: Set<Atom<any>> } {
-  const dependencies = new Set<Atom<any>>();
-  const tracked = trackDependencies(run);
-  for (const dependency of tracked.dependencies) {
-    dependencies.add(dependency);
-  }
-
-  return { result: tracked.result, dependencies };
 }
 
 function evaluateExprMarker(
@@ -141,10 +122,7 @@ function evaluateExprMarker(
       return atomInstance.value;
     });
     const evaluateDynamic = (self: any) => marker.fn(self, atoms);
-    const { result: value, dependencies: trackedDependencies } = collectScopeDependencies(() => evaluateDynamic(initialScope));
-    for (const dependency of trackedDependencies) {
-      initialDependencies.add(dependency);
-    }
+    const value = evaluateDynamic(initialScope);
 
     if (isAtomLike(value)) {
       return value;
@@ -605,9 +583,6 @@ function defineScopeStateProperty(
       activeItem.next(value);
       return;
     }
-    if (isReadonlyScopeStateKey(key, scopeRef._rawState[key])) {
-      throw new TypeError(`Cannot assign to read-only scope property: ${String(key)}`);
-    }
     scopeRef._rawState[key] = value;
   };
 
@@ -754,27 +729,18 @@ function createScopeInternal<T extends Record<string, any>>(
     const dataState = output?.rawState ?? output;
 
     if (dataState && typeof dataState === "object") {
-      if ("loading" in dataState) {
-        console.warn("[streamix] scope(): 'loading' key is reserved and was overwritten.");
-      }
-      if ("dirty" in dataState) {
-        console.warn("[streamix] scope(): 'dirty' key is reserved and was overwritten.");
-      }
-
-      newScope._rawState = { ...dataState };
-
       for (const key of Reflect.ownKeys(dataState)) {
-        if (key === "dirty") continue;
+        if (key === "loading" || key === "dirty") {
+          console.warn(`[streamix] scope(): '${String(key)}' key is reserved and was overwritten.`);
+          continue;
+        }
+
+        newScope._rawState[key] = dataState[key];
         newScope._exports.add(key);
         defineAccessorKey(key);
         defineScopeStateProperty(newScope, key, getScopeItem);
       }
     }
-
-    newScope._rawState["loading"] = loadingAtom;
-    newScope._rawState["dirty"] = dirtyAtom;
-    defineAccessorKey("loading");
-    defineAccessorKey("dirty");
 
     for (const key of Reflect.ownKeys(newScope._rawState)) {
       if (isExprMarkerOrDynamic(newScope._rawState[key])) {
@@ -1084,10 +1050,10 @@ function trackReferencedWritableLoading(scopeRef: Scope): void {
     updatePendingHierarchy(scopeRef, 1);
 
     let settled = false;
-    const stopEmitTracking = onAtomEmit(item, settle);
+    let stopEmitTracking: () => void;
     const disposeHandlers = (item as any)._onDispose;
 
-    function settle(): void {
+    const settle = () => {
       if (settled) return;
       settled = true;
 
@@ -1099,7 +1065,9 @@ function trackReferencedWritableLoading(scopeRef: Scope): void {
       if (!scopeRef._disposed) {
         updatePendingHierarchy(scopeRef, -1);
       }
-    }
+    };
+
+    stopEmitTracking = onAtomEmit(item, settle);
 
     if (disposeHandlers instanceof Set) {
       disposeHandlers.add(settle);
