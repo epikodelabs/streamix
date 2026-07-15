@@ -1,11 +1,30 @@
 # Atoms and Scopes
 
-Atoms and scopes form the reactive state layer in streamix. They build on flows and give you simple primitives for live values, computed values, async workflows, and clean lifecycle management.
+Atoms are streamix's primitive for live reactive values. `atom()`, `derived()`, and `flow()` all produce atoms; scopes organize those atoms into disposable reactive object graphs with computed fields, methods, and lifecycle boundaries.
 
 ### Mental Model
 
 - **Atom**: A reactive value you can read synchronously, subscribe to, consume as an async iterable, or pipe through operators.
-- **Scope**: A reactive object that owns a tree of atoms. It turns properties into atoms, functions into derived values, and cleans everything up when disposed.
+- **Scope**: A reactive object that owns a tree of atoms. A scope definition is expression-based shorthand: plain values become writable atoms, expression callbacks become derived atoms, and methods stay imperative actions.
+
+Inside a scope, this:
+
+```ts
+const app = scope({
+  count: 0,
+  doubled: self => self.count * 2,
+});
+```
+
+is the scoped equivalent of this standalone atom graph:
+
+```ts
+const count = atom(0);
+const doubled = derived($ => $(count) * 2);
+```
+
+The scope exposes resolved values as plain properties (`app.count`, `app.doubled`).
+Use `app.at.count` or `app.at.doubled` when you need the underlying atom object.
 
 ```ts
 const app = scope({
@@ -89,7 +108,7 @@ Flows respect disposal via `AbortSignal` and integrate cleanly with the atom API
 
 ### Scopes in Depth
 
-Scopes turn plain objects into reactive trees:
+Scopes turn expression objects into reactive trees:
 
 ```ts
 const cart = scope({
@@ -101,8 +120,8 @@ const cart = scope({
 });
 ```
 
-- Primitives/arrays → writable atoms
-- Functions → derived values
+- Plain values and arrays → writable atoms
+- Expression callbacks → derived values
 - Nested objects → nested scopes
 - Use `method(...)` for imperative actions
 - Use `scope.at.items` when you need the raw atom
