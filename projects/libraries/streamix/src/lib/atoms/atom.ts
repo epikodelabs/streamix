@@ -123,6 +123,25 @@ export interface Atom<T = any> {
 }
 
 /**
+ * Read-only atom projection that preserves observation APIs while hiding
+ * mutation and disposal controls.
+ */
+export interface Readable<T = any> {
+  readonly type: "atom";
+  readonly name?: string;
+  readonly value: T;
+  readonly safeValue: T;
+  readonly previous: T;
+  readonly disposed: boolean;
+  readonly dirty: boolean;
+  readonly error?: any;
+  readonly subscriberCount?: number;
+  subscribe(callback?: (current: T, previous: T) => MaybePromise): Subscription;
+  onError(handler: (error: any) => void): Subscription;
+  [Symbol.asyncIterator](): AsyncIterator<T>;
+}
+
+/**
  * Extracts the value type of an {@link Atom}.
  *
  * Useful when you want to name the type produced by a piped atom without
@@ -185,6 +204,7 @@ interface AtomRuntimeMeta {
   emitHandlers: Set<() => void>;
   disposeHandlers: Set<DisposeHandler>;
   startOnEmitObserve?: () => void;
+  readableView?: Readable<any>;
 }
 
 /** Engine Interface */
@@ -494,6 +514,30 @@ function createAtomRuntimeMeta(): AtomRuntimeMeta {
 
 function getAtomRuntimeMeta(atom: Atom<any>): AtomRuntimeMeta {
   return (atom as unknown as InternalAtomContainer)[META];
+}
+
+export function asReadable<A>(atom: Atom<A>): Readable<A> {
+  const meta = getAtomRuntimeMeta(atom);
+  const existing = meta.readableView as Readable<A> | undefined;
+  if (existing) return existing;
+
+  const view: Readable<A> = {
+    get type() { return atom.type; },
+    get name() { return atom.name; },
+    get value() { return atom.value; },
+    get safeValue() { return atom.safeValue; },
+    get previous() { return atom.previous; },
+    get disposed() { return atom.disposed; },
+    get dirty() { return atom.dirty; },
+    get error() { return atom.error; },
+    get subscriberCount() { return atom.subscriberCount; },
+    subscribe: atom.subscribe.bind(atom),
+    onError: atom.onError.bind(atom),
+    [Symbol.asyncIterator]: atom[Symbol.asyncIterator].bind(atom),
+  };
+
+  meta.readableView = view;
+  return view;
 }
 
 function createTrackedAtomView<A>(owner: EvaluationOwner, atom: Atom<A>): Atom<A> {

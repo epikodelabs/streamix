@@ -8,6 +8,7 @@ import {
 } from "../ioc/container";
 import { isAtom, isAtomLike } from "../utils/helpers";
 import {
+  asReadable,
   atom,
   derived,
   getCurrentFormulaContext,
@@ -18,6 +19,7 @@ import {
   trackDependencies,
   Writable,
   type Atom,
+  type Readable,
 } from "./atom";
 import {
   isAtomExpr,
@@ -216,12 +218,18 @@ export type AtomOf<T> = T extends Writable<infer U> ? Writable<U> : T extends At
 /**
  * Extracts the runtime value type from an atom.
  */
-export type AtomValueOf<T> = T extends Atom<infer U> ? U : never;
+export type AtomValueOf<T> = T extends Atom<infer U> ? U : T extends Readable<infer U> ? U : never;
+
+type AccessorAtomOf<T> =
+  T extends Writable<infer U> ? Writable<U>
+  : T extends Atom<infer U> ? Atom<U>
+  : T extends Readable<infer U> ? Readable<U>
+  : never;
 
 /**
  * Accessor surface used by `scope.at`, exposing raw atoms by property or key lookup.
  */
-export type AtomAccessor<T> = { [K in keyof T]: AtomOf<T[K]> } & (<K extends keyof T>(key: K) => AtomOf<T[K]>);
+export type AtomAccessor<T> = { [K in keyof T]: AccessorAtomOf<T[K]> } & (<K extends keyof T>(key: K) => AccessorAtomOf<T[K]>);
 type DefinedAtomAccessor<Shape extends Record<string, any>> = { [K in keyof Shape]: Atom<Shape[K]> } & (<K extends keyof Shape>(key: K) => Atom<Shape[K]>);
 
 type DefinedValue<Top extends Record<string, any>, T> =
@@ -316,8 +324,8 @@ export type ScopeOptions = {
  * Built-in atoms that every scope owns in addition to user-defined state.
  */
 export type ScopeReservedAtoms = {
-  loading: Writable<boolean>;
-  dirty: Writable<boolean>;
+  loading: Readable<boolean>;
+  dirty: Readable<boolean>;
 };
 
 type IsReadonlyScopeConfigValue<T> =
@@ -705,10 +713,18 @@ function createScopeInternal<T extends Record<string, any>>(
       return current;
     };
 
-    const atAccessor: any = (key: string | symbol) => getScopeItem(key);
+    const getAccessorItem = (key: string | symbol) => {
+      const item = getScopeItem(key);
+      if ((key === "loading" || key === "dirty") && isAtomLike(item)) {
+        return asReadable(item as Atom<any>);
+      }
+      return item;
+    };
+
+    const atAccessor: any = (key: string | symbol) => getAccessorItem(key);
 
     const defineAccessorKey = (key: string | symbol) => {
-      defineCallableAccessorProperty(atAccessor, key, getScopeItem);
+      defineCallableAccessorProperty(atAccessor, key, getAccessorItem);
     };
 
     Object.defineProperties(newScope, {

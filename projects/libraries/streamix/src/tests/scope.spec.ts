@@ -462,9 +462,14 @@ describe('Scope System', () => {
 
       const values: boolean[] = [];
       const unsubscribe = s.subscribeTo('dirty', (value: boolean) => values.push(value));
+      const notifications: boolean[] = [];
+      const dirtySubscription = s.at.dirty.subscribe((value: boolean) => notifications.push(value));
 
       await delay(10);
       expect(s.at.dirty.value).toBe(false);
+      expect(s.at.dirty.safeValue).toBe(false);
+      expect(typeof (s.at.dirty as any).next).toBe('undefined');
+      expect(typeof (s.at.dirty as any).dispose).toBe('undefined');
 
       s.count = 3;
       expect(s.dirty).toBe(true);
@@ -474,8 +479,10 @@ describe('Scope System', () => {
       expect(s.dirty).toBe(false);
       expect(s.at.dirty.value).toBe(false);
       expect(values).toEqual([false, true, false]);
+      expect(notifications).toEqual([true, false]);
 
       unsubscribe();
+      dirtySubscription();
       s.dispose();
     });
 
