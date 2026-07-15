@@ -1,99 +1,76 @@
 # Atoms and Scopes
 
-Atoms are streamix's primitive for live reactive values. `atom()`, `derived()`, and `flow()` all produce atoms; scopes organize those atoms into disposable reactive object graphs with computed fields, methods, and lifecycle boundaries.
+Atoms are **streamix**'s primitive for live, reactive values. The `atom()`, `derived()`, and `flow()` functions all produce individual atoms. **Scopes** organize these atoms into disposable, reactive object graphs with computed fields, methods, and lifecycle boundaries.
 
-### Mental Model
+---
 
-- **Atom**: A reactive value you can read synchronously, subscribe to, consume as an async iterable, or pipe through operators.
-- **Scope**: A reactive object that owns a tree of atoms. A scope definition is expression-based shorthand: plain values become writable atoms, expression callbacks become derived atoms, and methods stay imperative actions.
+## 1. Atoms in Depth
 
-Inside a scope, this:
+An atom is a reactive value that you can read from synchronously, subscribe to for updates, consume as an async iterable, or pipe through operators.
 
-```ts
-const app = scope({
-  count: 0,
-  doubled: self => self.count * 2,
-});
-```
+### The Core Atom Interface
 
-is the scoped equivalent of this standalone atom graph:
-
-```ts
-const count = atom(0);
-const doubled = derived($ => $(count) * 2);
-```
-
-The scope exposes resolved values as plain properties (`app.count`, `app.doubled`).
-Use `app.at.count` or `app.at.doubled` when you need the underlying atom object.
-
-```ts
-const app = scope({
-  firstName: "Ada",
-  lastName: "Lovelace",
-  fullName: self => `${self.firstName} ${self.lastName}`,
-});
-
-console.log(app.fullName); // "Ada Lovelace"
-app.firstName = "Grace";
-console.log(app.fullName); // "Grace Lovelace"
-app.dispose();
-```
-
-### Core Atom API
-
-Every atom (from `atom`, `derived`, `flow`, or `pipe`) shares this interface:
+Every atom—whether created via `atom`, `derived`, `flow`, or `pipe`—implements this base interface:
 
 ```ts
 interface Atom<T> {
-  readonly value: T;        // current value (throws on error/disposed)
-  readonly safeValue: T;    // last good value (never throws)
-  readonly previous: T;
+  readonly value: T;         // Current value (throws on pending error/disposal)
+  readonly safeValue: T;     // Last successful value (never throws)
+  readonly previous: T | undefined;
   readonly disposed: boolean;
   readonly error?: any;
-  subscribe(callback): Subscription;
+  subscribe(callback: (value: T) => void): Subscription;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
+
 ```
 
-Writable atoms add `.next(value)`, `.set(value)`, `.fail(error)`, etc.
+> **Note:** Writable atoms extend this base interface with mutation methods like `.next(value)`, `.set(value)`, and `.fail(error)`.
 
-### Writable Atoms
+---
+
+### Three Core Atom Types
+
+#### A. Writable Atoms (`atom`)
+
+These are your primary state sources, holding a single piece of mutable state.
 
 ```ts
 const count = atom(0);
 count.next(42);
 console.log(count.value); // 42
+
 ```
 
-Use `discrete: true` when every update (even duplicates) should notify subscribers — great for events.
+* **Tip:** Pass `{ discrete: true }` in the options if you need every update (even duplicate values) to fire notifications to subscribers. This is perfect for event streams.
 
-### Derived Atoms
+#### B. Derived Atoms (`derived`)
 
-Computed values that automatically update:
+These represent computed values that automatically recalculate when their dependencies update:
 
 ```ts
-const fullName = derived($ => 
-  `${$(firstName)} ${$(lastName)}`
-);
+const fullName = derived($ => `${$(firstName)} ${$(lastName)}`);
+
 ```
 
-The `$` helper tracks dependencies. You can also use async functions — the atom keeps the last good value while pending.
+The `$` helper tracks dependencies dynamically. You can also use async functions—while a new promise is pending, the derived atom safely retains its last known `safeValue`.
 
-Async `derived()` callbacks only track atoms read before the first `await`. Capture dependencies up front with `$.use(...)` or `$.read(...)`, or by explicitly touching them in a void expression:
+> ⚠️ **The Async Tracking Gotcha:** Async derived callbacks can only automatically track atoms read *before* the first `await` statement. To register late-stage dependencies, reference them up front using `$.use(...)`, `$.read(...)`, or a `void` expression:
+> ```ts
+> const total = derived(async $ => {
+>   void $.price, $.tax; // Forces synchronous dependency tracking up front
+>   await loadRates();
+>   return $.price + $.tax;
+> });
+> 
+> ```
+> 
+> 
+> *If your computation involves complex async work, cancellation, or restarts, prefer `flow()` instead.*
 
-```ts
-const total = derived(async $ => {
-  void $.price, $.tax;
-  await loadRates();
-  return $.price + $.tax;
-});
-```
+#### C. Flow Atoms (`flow`)
 
-If the computation is mostly async work or needs cancellation/restart behavior, prefer `flow()`.
-
-### Flow Atoms
-
-For async/generators, iterables, or factories:
+Designed for async generators, standard iterables, or stream factories. Flows respect cooperative cancellation via an `AbortSignal` and tie their cleanup directly to atom disposal.
 
 ```ts
 const ticks = flow(async function* (signal) {
@@ -102,151 +79,170 @@ const ticks = flow(async function* (signal) {
     await sleep(1000);
   }
 });
+
 ```
+---
 
-Flows respect disposal via `AbortSignal` and integrate cleanly with the atom API.
+## 1. The Standard Scope Blueprint
 
-### Scopes in Depth
-
-Scopes turn expression objects into reactive trees:
+In everyday development, almost every scope you build will follow this standard structural layout:
 
 ```ts
-const cart = scope({
-  items: [],
-  subtotal: self => self.items.reduce((sum, i) => sum + i.price, 0),
-  addItem: method((self, item) => {
-    self.items = [...self.items, item];
-  }),
-});
-```
+import { scope, method } from "@epikodelabs/streamix";
 
-- Plain values and arrays → writable atoms
-- Expression callbacks → derived values
-- Nested objects → nested scopes
-- Use `method(...)` for imperative actions
-- Use `scope.at.items` when you need the raw atom
+const taskManager = scope({
+  // 1. Core State (Writable Atoms)
+  filter: "all" as "all" | "completed" | "active",
+  tasks: [
+    { id: 1, text: "Buy milk", done: false },
+    { id: 2, text: "Write docs", done: true },
+  ],
 
-### Typed setup extensions
-
-When a scope needs a declared base shape plus extra methods created in setup,
-prefer validating the definition with TypeScript's `satisfies` operator:
-
-```ts
-interface Shape {
-  count: number;
-}
-
-const definition = { count: 0 } satisfies Shape;
-
-const counter = scope(definition, self => ({
-  increment: () => {
-    self.count++;
+  // 2. Computed State (Derived Atoms)
+  // Standard computed values receive 'self' as their first argument.
+  visibleTasks: (self) => {
+    if (self.filter === "completed") return self.tasks.filter(t => t.done);
+    if (self.filter === "active") return self.tasks.filter(t => !t.done);
+    return self.tasks;
   },
-}));
 
-counter.increment();
-console.log(counter.count); // 1
-```
+  stats: (self) => {
+    const total = self.tasks.length;
+    const completed = self.tasks.filter(t => t.done).length;
+    return { total, completed, remaining: total - completed };
+  },
 
-This keeps the definition checked against `Shape`, while still allowing
-TypeScript to infer the dynamic part returned from setup. Avoid
-`scope<Shape>(definition, setup)` for this pattern: once the first generic is
-provided explicitly, TypeScript cannot infer the setup extension as a later
-generic without losing precision.
-
-If both parts must be explicit, provide both generic arguments:
-
-```ts
-const counter = scope<Shape, { increment: () => void }>(
-  { count: 0 },
-  self => ({
-    increment: () => {
-      self.count++;
-    },
+  // 3. Actions / Mutations (Imperative Methods)
+  // Always wrap functions that mutate state in `method()` to keep them non-reactive.
+  toggleTask: method((self, id: number) => {
+    self.tasks = self.tasks.map(t => 
+      t.id === id ? { ...t, done: !t.done } : t
+    );
   }),
-);
+
+  addTask: method((self, text: string) => {
+    const newId = self.tasks.length + 1;
+    self.tasks = [...self.tasks, { id: newId, text, done: false }];
+  })
+});
+
 ```
 
-**Handy features:**
-- `cart.loading` — true until all atoms have emitted at least once
-- `cart.snapshot()` — plain JS object of current values
-- Built-in dependency injection with `provide` / `inject`
-- Automatic cleanup on `dispose()`
+### Understanding the Compiled Output:
 
-### Pitfalls: The Standard `this` Shorthand (Loss of Reactivity)
+* **Direct Read/Write (`taskManager.filter`)**: Accessing a property retrieves the current value. Assigning a new value (e.g., `taskManager.filter = "active"`) automatically pushes the update through the reactive system.
+* **Dependency Tracking (`taskManager.visibleTasks`)**: Whenever `taskManager.filter` or `taskManager.tasks` is updated, `visibleTasks` automatically recalculates. You read it like a plain property: `console.log(taskManager.visibleTasks)`.
+* **Action Execution (`taskManager.addTask("...")`)**: Methods are called as standard imperative functions to safely execute side effects and mutations.
 
-A common mistake when designing nested scopes is attempting to use standard JavaScript `this` shorthand syntax inside nested methods to calculate derived (computed) properties.
+---
+
+## 2. Crucial Best Practices for Daily Development
+
+To keep your scopes predictable, highly performant, and bug-free, follow these core guidelines:
+
+### Rule A: Treat All State as Immutable
+
+When updating arrays or objects inside a scope's methods, **always reassign the property** instead of mutating the existing reference.
 
 ```ts
-// ❌ WRONG: Bypasses dependency-tracking context!
-const app = scope({
+// ❌ WRONG: Mutating the array directly avoids the setter proxy. 
+// Subscriptions and computed dependencies will NOT trigger!
+taskManager.tasks.push({ id: 3, text: "New Task", done: false }); 
+
+// ✅ CORRECT: Always assign a new reference
+taskManager.tasks = [...taskManager.tasks, { id: 3, text: "New Task", done: false }];
+
+```
+
+### Rule B: Only Mutate State Inside Methods
+
+Never mutate writable state inside a derived property (the computed formulas). Formulas must remain **pure, side-effect-free functions** that only read and compute data.
+
+```ts
+// ❌ WRONG: Writing to state inside a computed formula causes infinite update loops!
+const badScope = scope({
+  count: 0,
+  doubled: (self) => {
+    self.count = self.count + 1; // Pure chaos
+    return self.count * 2;
+  }
+});
+
+```
+
+### Rule C: Use `.at` Only When You Need streamix Stream APIs
+
+For standard data access in UI templates or basic business logic, read and write values directly. Only use the `.at` namespace when you need access to the underlying streamix `Atom` instance (e.g., to manually subscribe or pipe operators).
+
+```ts
+// Reading the resolved value (Standard)
+console.log(taskManager.visibleTasks); 
+
+// Accessing the underlying reactive Atom (For subscribing / stream operations)
+const subscription = taskManager.at.visibleTasks.subscribe(tasks => {
+  console.log("Tasks updated:", tasks);
+});
+
+```
+
+---
+
+## 3. Common Pitfalls & Traps
+
+Beyond losing the execution context with the standard `this` keyword, watch out for these typical scoping mistakes:
+
+### Trap #1: Defining "Dead" Non-Reactive Properties
+
+If you write a standard function in your blueprint without wrapping it in `method()`, or if you don't accept `self` as the first argument, streamix won't know how to compile it. It will treat it as a static property.
+
+```ts
+// ❌ WRONG: Compiled as a static action on load. This will NOT reactively track 'query'.
+const searchScope = scope({
   query: "",
-  count(this) {
-    return this.query.length;
-  },
-  user: {
-    firstName: "",
-    lastName: "",
-    fullName(this) {
-      return `${this.firstName} ${this.lastName}`.trim();
-    },
-  },
+  results() {
+    return runSearch(this.query); 
+  }
 });
+
 ```
 
-**Why this is wrong:**
-1. **Bypasses Formula Tracking:** streamix monitors property reads using reactive formula context layers (such as `derived` or `flow`). Standard methods using `this` execute outside this tracking system.
-2. **No Dependency Registration:** Since streamix cannot track that `fullName` read `firstName` and `lastName`, updates to those properties will not trigger recalculations.
-3. **Actions vs. Computeds:** Plain function properties are materialized as side-effect methods (actions) rather than reactive computations.
-
-**The Correct Approach (Maintaining Reactivity):**
-Declare computed properties using formula callbacks with the local `self` parameter:
-
 ```ts
-// ✅ CORRECT: Registers reactive dependencies!
-const app = scope({
+// ✅ CORRECT: Compiled as a reactive, derived computed atom.
+const searchScope = scope({
   query: "",
-  count: (self) => self.query.length,
-  user: {
-    firstName: "",
-    lastName: "",
-    fullName: (self) => `${self.firstName} ${self.lastName}`.trim(),
-  },
+  results: (self) => runSearch(self.query) 
 });
+
 ```
 
-### Modes
+### Trap #2: Forgetting to Clean Up (Memory Leaks)
 
-- **Discrete**: Immediate synchronous notifications (default for events/tests)
-- **Analog**: Batched + coalesced updates (ideal for UI)
+Scopes manage and cache active subscriptions to build their reactive trees. If you instantiate scopes dynamically (for example, inside a UI component or a short-lived request handler), you must dispose of them.
 
 ```ts
-const ui = scope({ ... }, { mode: "analog" });
+// In your component unmount or cleanup function:
+taskManager.dispose();
+
 ```
 
-### Common Patterns
+---
 
-**Form state:**
+## 4. Standard UI Optimization: Analog Mode
+
+By default, streamix operates in **Discrete Mode**, meaning every state change immediately and synchronously triggers updates. This is excellent for services, events, and testing, but can cause laggy performance or "screen flickering" in UI components due to rapid, consecutive rendering cycles.
+
+Always switch your UI-facing scopes to **Analog Mode** to automatically batch and coalesce changes on a microtask queue:
+
 ```ts
-const form = scope({
-  email: "",
-  password: "",
-  valid: self => self.email.includes("@") && self.password.length >= 8,
-  submit: method((self) => {
-    /* ... */
-  }),
-});
+// Ideal for React, Vue, or vanilla UI rendering
+const uiState = scope({
+  firstName: "Jane",
+  lastName: "Doe",
+  fullName: self => `${self.firstName} ${self.lastName}`
+}, { mode: "analog" });
+
+// Modifying both properties only triggers exactly ONE UI update cycle at the end of the microtask:
+uiState.firstName = "John";
+uiState.lastName = "Smith";
+
 ```
-
-**Async data:**
-Use `flow()` + `userId` atom for loading states that integrate with the scope’s `loading` flag.
-
-### Best Practices
-
-- Write to sources, not derived values
-- Use `scope.at.xxx` when you need `.subscribe()`, `.next()`, or raw atom features
-- Always dispose scopes when done
-- Prefer `safeValue` in UI code
-- Use analog mode for UI, discrete for events
-
-Atoms give you a unified, composable way to handle state — synchronous when you need the current value, reactive when things change, and automatically cleaned up by scopes. Simple, predictable, and powerful.
