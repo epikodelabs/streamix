@@ -718,7 +718,9 @@ declare const expand: <T = any>(project: (value: T) => MaybePromise<Stream<T> | 
  * @param predicateOrValue The filtering criterion. Can be a predicate function, a single value, or an array of values.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-declare const filter: <T = any>(predicateOrValue: ((value: T, index: number) => MaybePromise<boolean>) | T | T[]) => Operator<T, T>;
+declare function filter<T>(predicate: (value: T, index: number) => MaybePromise<boolean>): Operator<T, T>;
+declare function filter<T>(value: T): Operator<T, T>;
+declare function filter<T>(values: T[]): Operator<T, T>;
 
 /**
  * Creates a stream operator that invokes a finalizer callback upon stream termination.
