@@ -18,6 +18,15 @@
     "tslib": "^2.8.1"
   },
   "main": "fesm2022/epikodelabs-streamix.mjs",
+  "files": [
+    "fesm2022/",
+    "types/",
+    "aggregates/",
+    "coroutines/",
+    "dom/",
+    "networking/",
+    "CHANGELOG.md"
+  ],
   "type": "module",
   "sideEffects": false,
   "homepage": "https://epikodelabs.github.io/streamix",
