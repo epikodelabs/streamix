@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.50
+
+Fixed iterator lifecycle, async coordination, and transport behavior across the v2 line.
+
 ## 2.0.49
 
 Normalized all catch/rejection errors to Error instances
