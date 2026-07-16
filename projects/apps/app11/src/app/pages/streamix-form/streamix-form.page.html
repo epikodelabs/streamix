@@ -24,7 +24,7 @@
             <p class="section-kicker">Profile</p>
             <h3>Native inputs bound to scope state</h3>
           </div>
-          <span class="badge badge-strong">{{ draftStatus }}</span>
+          <span class="badge badge-strong">{{ uiState.draftStatus }}</span>
         </div>
 
         <div class="grid two">
@@ -262,11 +262,11 @@
       <div class="card metrics">
         <div>
           <span class="metric-label">Draft status</span>
-          <strong>{{ draftStatus }}</strong>
+          <strong>{{ uiState.draftStatus }}</strong>
         </div>
         <div>
           <span class="metric-label">Last autosave</span>
-          <strong>{{ lastSavedAt }}</strong>
+          <strong>{{ uiState.lastSavedAt }}</strong>
         </div>
         <div>
           <span class="metric-label">Contact route</span>
@@ -280,15 +280,15 @@
 
       <div class="card success">
         <h3>Scope derivation</h3>
-        <p>Primary skills: {{ primarySkills }}</p>
-        <p>Ready to submit: {{ readyToSubmit ? 'Yes' : 'No' }}</p>
+        <p>Primary skills: {{ uiState.primarySkills }}</p>
+        <p>Ready to submit: {{ uiState.readyToSubmit ? 'Yes' : 'No' }}</p>
       </div>
 
-      @if (validationSummary.length > 0) {
+      @if (uiState.errors.summary.length > 0) {
         <div class="card warning">
           <h3>Validation summary</h3>
           <ul>
-            @for (item of validationSummary; track item) {
+            @for (item of uiState.errors.summary; track item) {
               <li>{{ item }}</li>
             }
           </ul>
@@ -297,7 +297,7 @@
 
       <div class="card">
         <h3>Latest snapshot</h3>
-        <pre>{{ preview }}</pre>
+        <pre>{{ uiState.preview }}</pre>
       </div>
 
       @if (submittedPayload) {

@@ -9,11 +9,11 @@ export const routes: Routes = [
   {
     path: 'angular',
     loadComponent: () =>
-      import('./angular-form.page').then((m) => m.AngularFormPageComponent),
+      import('./pages/angular-form/angular-form.page').then((m) => m.AngularFormPageComponent),
   },
   {
     path: 'streamix',
     loadComponent: () =>
-      import('./streamix-form.page').then((m) => m.StreamixFormPageComponent),
+      import('./pages/streamix-form/streamix-form.page').then((m) => m.StreamixFormPageComponent),
   },
 ];

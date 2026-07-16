@@ -10,7 +10,7 @@ import {
   createSkillGroup,
   formatProfileJson,
   getInitialProfileValue,
-} from './form-model';
+} from '../../shared/form-model';
 
 @Component({
   standalone: true,
