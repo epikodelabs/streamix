@@ -4,17 +4,15 @@
       <p class="section-kicker">Page 2</p>
       <h2>Streamix-native form</h2>
       <p>
-        This route drops Angular reactive forms entirely. Native inputs feed a
-        `streamix` scope, and the scope owns validation, touched state,
-        autosave, and derived metrics.
+        Native inputs write into a `streamix` scope. The scope handles
+        validation, autosave, and derived state without Angular form APIs.
       </p>
     </div>
 
     <div class="chips">
-      <span>`scope()` state</span>
-      <span>No `ReactiveFormsModule`</span>
-      <span>`debounce(650)` autosave</span>
-      <span>Scope-driven validation</span>
+      <span>Scope state</span>
+      <span>No Angular forms</span>
+      <span>Debounced autosave</span>
     </div>
   </div>
 
@@ -30,109 +28,58 @@
         </div>
 
         <div class="grid two">
-          <label class="field">
-            <span>First name</span>
-            <input
-              type="text"
-              [value]="profile.firstName"
-              (input)="updateProfileField('firstName', $any($event.target).value)"
-              (blur)="touchField('profile.firstName')"
-            />
-            @if (fieldError('profile.firstName'); as error) {
-              <small class="error">{{ error }}</small>
-            }
-          </label>
-
-          <label class="field">
-            <span>Last name</span>
-            <input
-              type="text"
-              [value]="profile.lastName"
-              (input)="updateProfileField('lastName', $any($event.target).value)"
-              (blur)="touchField('profile.lastName')"
-            />
-            @if (fieldError('profile.lastName'); as error) {
-              <small class="error">{{ error }}</small>
-            }
-          </label>
-
-          <label class="field">
-            <span>Email</span>
-            <input
-              type="email"
-              [value]="profile.email"
-              (input)="updateProfileField('email', $any($event.target).value)"
-              (blur)="touchField('profile.email')"
-            />
-            @if (fieldError('profile.email'); as error) {
-              <small class="error">{{ error }}</small>
-            }
-          </label>
-
-          <label class="field">
-            <span>Username</span>
-            <input
-              type="text"
-              [value]="profile.username"
-              (input)="updateProfileField('username', $any($event.target).value)"
-              (blur)="touchField('profile.username')"
-            />
-            @if (usernamePending) {
-              <small class="hint">Checking username availability...</small>
-            } @else if (fieldError('profile.username'); as error) {
-              <small class="error">{{ error }}</small>
-            }
-          </label>
-        </div>
-
-        <label class="field">
-          <span>Bio</span>
-          <textarea
-            rows="4"
-            [value]="profile.bio"
-            (input)="updateProfileField('bio', $any($event.target).value)"
-            (blur)="touchField('profile.bio')"
-          ></textarea>
-          @if (fieldError('profile.bio'); as error) {
-            <small class="error">{{ error }}</small>
+          @for (field of profileFields; track field.path) {
+            <label class="field" [class.field-wide]="field.type === 'textarea'">
+              <span>{{ field.label }}</span>
+              @if (field.type === 'textarea') {
+                <textarea
+                  [rows]="field.rows ?? 4"
+                  [value]="read(field.path)"
+                  (input)="updateFromEvent(field.path, $event, field.kind ?? 'text')"
+                  (blur)="touchField(field.path)"
+                ></textarea>
+              } @else {
+                <input
+                  [type]="field.type"
+                  [value]="read(field.path)"
+                  (input)="updateFromEvent(field.path, $event, field.kind ?? 'text')"
+                  (blur)="touchField(field.path)"
+                />
+              }
+              @if (fieldHint(field.path); as hint) {
+                <small class="hint">{{ hint }}</small>
+              }
+              @if (fieldError(field.path); as error) {
+                <small class="error">{{ error }}</small>
+              }
+            </label>
           }
-        </label>
+        </div>
       </section>
 
       <section class="section">
         <div class="section-head">
           <div>
             <p class="section-kicker">Security</p>
-            <h3>Validation comes from Streamix</h3>
+            <h3>Validation lives in the scope</h3>
           </div>
         </div>
 
         <div class="grid two">
-          <label class="field">
-            <span>Password</span>
-            <input
-              type="password"
-              [value]="security.password"
-              (input)="updateSecurityField('password', $any($event.target).value)"
-              (blur)="touchField('security.password')"
-            />
-            @if (fieldError('security.password'); as error) {
-              <small class="error">{{ error }}</small>
-            }
-          </label>
-
-          <label class="field">
-            <span>Confirm password</span>
-            <input
-              type="password"
-              [value]="security.confirmPassword"
-              (input)="updateSecurityField('confirmPassword', $any($event.target).value)"
-              (blur)="touchField('security.confirmPassword')"
-            />
-            @if (fieldError('security.confirmPassword'); as error) {
-              <small class="error">{{ error }}</small>
-            }
-          </label>
+          @for (field of securityFields; track field.path) {
+            <label class="field">
+              <span>{{ field.label }}</span>
+              <input
+                [type]="field.type"
+                [value]="read(field.path)"
+                (input)="updateFromEvent(field.path, $event, field.kind ?? 'text')"
+                (blur)="touchField(field.path)"
+              />
+              @if (fieldError(field.path); as error) {
+                <small class="error">{{ error }}</small>
+              }
+            </label>
+          }
         </div>
 
         @if (passwordError(); as error) {
@@ -144,49 +91,25 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Address</p>
-            <h3>Same schema without Angular form controls</h3>
+            <h3>Same schema without Angular controls</h3>
           </div>
         </div>
 
         <div class="grid three">
-          <label class="field">
-            <span>Country</span>
-            <input
-              type="text"
-              [value]="address.country"
-              (input)="updateAddressField('country', $any($event.target).value)"
-              (blur)="touchField('address.country')"
-            />
-            @if (fieldError('address.country'); as error) {
-              <small class="error">{{ error }}</small>
-            }
-          </label>
-
-          <label class="field">
-            <span>City</span>
-            <input
-              type="text"
-              [value]="address.city"
-              (input)="updateAddressField('city', $any($event.target).value)"
-              (blur)="touchField('address.city')"
-            />
-            @if (fieldError('address.city'); as error) {
-              <small class="error">{{ error }}</small>
-            }
-          </label>
-
-          <label class="field">
-            <span>Postal code</span>
-            <input
-              type="text"
-              [value]="address.postalCode"
-              (input)="updateAddressField('postalCode', $any($event.target).value)"
-              (blur)="touchField('address.postalCode')"
-            />
-            @if (fieldError('address.postalCode'); as error) {
-              <small class="error">{{ error }}</small>
-            }
-          </label>
+          @for (field of addressFields; track field.path) {
+            <label class="field">
+              <span>{{ field.label }}</span>
+              <input
+                [type]="field.type"
+                [value]="read(field.path)"
+                (input)="updateFromEvent(field.path, $event, field.kind ?? 'text')"
+                (blur)="touchField(field.path)"
+              />
+              @if (fieldError(field.path); as error) {
+                <small class="error">{{ error }}</small>
+              }
+            </label>
+          }
         </div>
       </section>
 
@@ -194,54 +117,36 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Preferences</p>
-            <h3>Plain HTML bindings</h3>
+            <h3>Plain HTML inputs</h3>
           </div>
         </div>
 
         <div class="grid two">
           <fieldset class="field fieldset">
             <legend>Preferred contact</legend>
-            <label>
-              <input
-                type="radio"
-                name="contactMethod"
-                value="email"
-                [checked]="preferences.contactMethod === 'email'"
-                (change)="updatePreferenceField('contactMethod', 'email')"
-              />
-              Email
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="contactMethod"
-                value="phone"
-                [checked]="preferences.contactMethod === 'phone'"
-                (change)="updatePreferenceField('contactMethod', 'phone')"
-              />
-              Phone
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="contactMethod"
-                value="slack"
-                [checked]="preferences.contactMethod === 'slack'"
-                (change)="updatePreferenceField('contactMethod', 'slack')"
-              />
-              Slack
-            </label>
+            @for (option of contactOptions; track option.value) {
+              <label>
+                <input
+                  type="radio"
+                  name="contactMethod"
+                  [value]="option.value"
+                  [checked]="read('preferences.contactMethod') === option.value"
+                  (change)="update('preferences.contactMethod', option.value)"
+                />
+                {{ option.label }}
+              </label>
+            }
           </fieldset>
 
           <label class="field">
             <span>Theme</span>
             <select
-              [value]="preferences.theme"
-              (change)="updatePreferenceField('theme', $any($event.target).value)"
+              [value]="read('preferences.theme')"
+              (change)="updateFromEvent('preferences.theme', $event)"
             >
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
+              @for (option of themeOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
             </select>
           </label>
         </div>
@@ -249,8 +154,8 @@
         <label class="checkbox">
           <input
             type="checkbox"
-            [checked]="preferences.newsletter"
-            (change)="updatePreferenceField('newsletter', $any($event.target).checked)"
+            [checked]="read('preferences.newsletter')"
+            (change)="updateFromEvent('preferences.newsletter', $event, 'boolean')"
           />
           <span>Send release notes and onboarding emails</span>
         </label>
@@ -260,46 +165,37 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Availability</p>
-            <h3>Scope state drives range, date, and boolean fields</h3>
+            <h3>Date, range, and boolean fields</h3>
           </div>
         </div>
 
         <div class="grid two">
-          <label class="field">
-            <span>Start date</span>
-            <input
-              type="date"
-              [value]="availability.startDate"
-              (input)="updateAvailabilityField('startDate', $any($event.target).value)"
-              (blur)="touchField('availability.startDate')"
-            />
-            @if (fieldError('availability.startDate'); as error) {
-              <small class="error">{{ error }}</small>
-            }
-          </label>
-
-          <label class="field range-field">
-            <span>Hours per week</span>
-            <input
-              type="range"
-              min="10"
-              max="60"
-              [value]="availability.hoursPerWeek"
-              (input)="updateAvailabilityField('hoursPerWeek', toNumber($any($event.target).value))"
-              (blur)="touchField('availability.hoursPerWeek')"
-            />
-            <strong>{{ availability.hoursPerWeek }} hrs/week</strong>
-            @if (fieldError('availability.hoursPerWeek'); as error) {
-              <small class="error">{{ error }}</small>
-            }
-          </label>
+          @for (field of availabilityFields; track field.path) {
+            <label class="field" [class.range-field]="field.type === 'range'">
+              <span>{{ field.label }}</span>
+              <input
+                [type]="field.type"
+                [min]="field.min ?? null"
+                [max]="field.max ?? null"
+                [value]="read(field.path)"
+                (input)="updateFromEvent(field.path, $event, field.kind ?? 'text')"
+                (blur)="touchField(field.path)"
+              />
+              @if (fieldHint(field.path); as hint) {
+                <small class="hint">{{ hint }}</small>
+              }
+              @if (fieldError(field.path); as error) {
+                <small class="error">{{ error }}</small>
+              }
+            </label>
+          }
         </div>
 
         <label class="checkbox">
           <input
             type="checkbox"
-            [checked]="availability.remote"
-            (change)="updateAvailabilityField('remote', $any($event.target).checked)"
+            [checked]="read('availability.remote')"
+            (change)="updateFromEvent('availability.remote', $event, 'boolean')"
           />
           <span>Open to remote collaboration</span>
         </label>
@@ -309,7 +205,7 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Skills</p>
-            <h3>Dynamic rows managed through scope arrays</h3>
+            <h3>Dynamic rows managed by scope arrays</h3>
           </div>
           <button type="button" class="secondary" (click)="addSkill()">Add skill</button>
         </div>
@@ -317,39 +213,28 @@
         <div class="stack">
           @for (skill of skills; track $index) {
             <div class="skill-row">
-              <label class="field">
-                <span>Skill</span>
-                <input
-                  type="text"
-                  [value]="skill.name"
-                  (input)="updateSkillField($index, 'name', $any($event.target).value)"
-                  (blur)="touchField('skills.' + $index + '.name')"
-                />
-                @if (fieldError('skills.' + $index + '.name'); as error) {
-                  <small class="error">{{ error }}</small>
-                }
-              </label>
-
-              <label class="field compact">
-                <span>Years</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  [value]="skill.years"
-                  (input)="updateSkillField($index, 'years', toNumber($any($event.target).value))"
-                  (blur)="touchField('skills.' + $index + '.years')"
-                />
-                @if (fieldError('skills.' + $index + '.years'); as error) {
-                  <small class="error">{{ error }}</small>
-                }
-              </label>
+              @for (field of skillFields; track field.key) {
+                <label class="field" [class.compact]="field.compact">
+                  <span>{{ field.label }}</span>
+                  <input
+                    [type]="field.type"
+                    [min]="field.min ?? null"
+                    [max]="field.max ?? null"
+                    [value]="read(skillPath($index, field.key))"
+                    (input)="updateFromEvent(skillPath($index, field.key), $event, field.kind ?? 'text')"
+                    (blur)="touchField(skillPath($index, field.key))"
+                  />
+                  @if (fieldError(skillPath($index, field.key)); as error) {
+                    <small class="error">{{ error }}</small>
+                  }
+                </label>
+              }
 
               <label class="checkbox compact-checkbox">
                 <input
                   type="checkbox"
-                  [checked]="skill.primary"
-                  (change)="updateSkillField($index, 'primary', $any($event.target).checked)"
+                  [checked]="read(skillPath($index, 'primary'))"
+                  (change)="updateFromEvent(skillPath($index, 'primary'), $event, 'boolean')"
                 />
                 <span>Primary</span>
               </label>
@@ -384,23 +269,19 @@
           <strong>{{ lastSavedAt }}</strong>
         </div>
         <div>
-          <span class="metric-label">Queued changes</span>
-          <strong>{{ changeCount }}</strong>
+          <span class="metric-label">Contact route</span>
+          <strong>{{ read('preferences.contactMethod') }}</strong>
         </div>
         <div>
-          <span class="metric-label">Completion</span>
-          <strong>{{ completion }}%</strong>
+          <span class="metric-label">Remote</span>
+          <strong>{{ read('availability.remote') ? 'Yes' : 'No' }}</strong>
         </div>
       </div>
 
-      <div class="card">
-        <h3>Streamix pipeline</h3>
-        <ol>
-          <li>Native inputs write directly into a `streamix` scope.</li>
-          <li>`debounce(650)` compresses rapid edits into one autosave event.</li>
-          <li>`scope()` computes validation, preview JSON, and derived metrics.</li>
-          <li>No Angular reactive-form directives are involved on this route.</li>
-        </ol>
+      <div class="card success">
+        <h3>Scope derivation</h3>
+        <p>Primary skills: {{ primarySkills }}</p>
+        <p>Ready to submit: {{ readyToSubmit ? 'Yes' : 'No' }}</p>
       </div>
 
       @if (validationSummary.length > 0) {
@@ -413,21 +294,6 @@
           </ul>
         </div>
       }
-
-      <div class="card success">
-        <h3>Derived state</h3>
-        <p>Primary skills: {{ primarySkills }}</p>
-        <p>Ready to submit: {{ readyToSubmit ? 'Yes' : 'No' }}</p>
-      </div>
-
-      <div class="card">
-        <h3>Activity log</h3>
-        <div class="log">
-          @for (entry of activityLog; track entry) {
-            <p>{{ entry }}</p>
-          }
-        </div>
-      </div>
 
       <div class="card">
         <h3>Latest snapshot</h3>

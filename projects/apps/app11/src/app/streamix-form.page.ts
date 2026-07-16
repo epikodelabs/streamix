@@ -4,8 +4,8 @@ import { debounce, filter, method, pipe, scope, tap } from '@epikodelabs/streami
 import {
   calculateCompletion,
   formatProfileJson,
-  type ContactMethod,
   getInitialProfileValue,
+  type ContactMethod,
   type ProfileFormValue,
   type SkillValue,
   type ThemePreference,
@@ -13,6 +13,7 @@ import {
 
 type DraftStatus = 'idle' | 'editing' | 'saving' | 'saved';
 type TouchedPath = string;
+type ValueKind = 'text' | 'number' | 'boolean';
 
 interface StreamixErrors {
   profile: {
@@ -42,17 +43,6 @@ interface StreamixErrors {
   }>;
   summary: string[];
 }
-
-type ProfileSection = ProfileFormValue['profile'];
-type SecuritySection = ProfileFormValue['security'];
-type AddressSection = ProfileFormValue['address'];
-type PreferencesSection = {
-  contactMethod: ContactMethod;
-  theme: ThemePreference;
-  newsletter: boolean;
-};
-type AvailabilitySection = ProfileFormValue['availability'];
-
 interface StreamixUiShape {
   touchedFields: TouchedPath[];
   usernamePending: boolean;
@@ -60,22 +50,39 @@ interface StreamixUiShape {
   attemptedSubmit: boolean;
   draftStatus: DraftStatus;
   lastSavedAt: string;
-  changeCount: number;
   saveRequest: ProfileFormValue | null;
-  activityLog: string[];
   errors: StreamixErrors;
   valid: boolean;
   completion: number;
   primarySkills: string;
   readyToSubmit: boolean;
   preview: string;
-  appendLog: (message: string) => void;
   touchField: (path: TouchedPath) => void;
   queueChange: () => void;
   markSaving: () => void;
   markSaved: (timestamp: string) => void;
   setAttemptedSubmit: (value: boolean) => void;
   resetAll: () => void;
+}
+
+interface FieldConfig {
+  path: TouchedPath;
+  label: string;
+  type: 'text' | 'email' | 'password' | 'date' | 'textarea' | 'number' | 'range';
+  kind?: ValueKind;
+  rows?: number;
+  min?: number;
+  max?: number;
+}
+
+interface SkillFieldConfig extends Omit<FieldConfig, 'path'> {
+  key: Extract<keyof SkillValue, 'name' | 'years'>;
+  compact?: boolean;
+}
+
+interface OptionConfig<T extends string> {
+  label: string;
+  value: T;
 }
 
 const RESERVED_USERNAMES = new Set(['admin', 'angular', 'root', 'streamix']);
@@ -93,6 +100,62 @@ export class StreamixFormPageComponent implements OnDestroy {
 
   submittedPayload = '';
 
+  readonly profileFields: FieldConfig[] = [
+    { path: 'profile.firstName', label: 'First name', type: 'text' },
+    { path: 'profile.lastName', label: 'Last name', type: 'text' },
+    { path: 'profile.email', label: 'Email', type: 'email' },
+    { path: 'profile.username', label: 'Username', type: 'text' },
+    { path: 'profile.bio', label: 'Bio', type: 'textarea', rows: 4 },
+  ];
+
+  readonly securityFields: FieldConfig[] = [
+    { path: 'security.password', label: 'Password', type: 'password' },
+    { path: 'security.confirmPassword', label: 'Confirm password', type: 'password' },
+  ];
+
+  readonly addressFields: FieldConfig[] = [
+    { path: 'address.country', label: 'Country', type: 'text' },
+    { path: 'address.city', label: 'City', type: 'text' },
+    { path: 'address.postalCode', label: 'Postal code', type: 'text' },
+  ];
+
+  readonly availabilityFields: FieldConfig[] = [
+    { path: 'availability.startDate', label: 'Start date', type: 'date' },
+    {
+      path: 'availability.hoursPerWeek',
+      label: 'Hours per week',
+      type: 'range',
+      kind: 'number',
+      min: 10,
+      max: 60,
+    },
+  ];
+
+  readonly skillFields: SkillFieldConfig[] = [
+    { key: 'name', label: 'Skill', type: 'text' },
+    {
+      key: 'years',
+      label: 'Years',
+      type: 'number',
+      kind: 'number',
+      min: 1,
+      max: 20,
+      compact: true,
+    },
+  ];
+
+  readonly contactOptions: OptionConfig<ContactMethod>[] = [
+    { label: 'Email', value: 'email' },
+    { label: 'Phone', value: 'phone' },
+    { label: 'Slack', value: 'slack' },
+  ];
+
+  readonly themeOptions: OptionConfig<ThemePreference>[] = [
+    { label: 'System', value: 'system' },
+    { label: 'Light', value: 'light' },
+    { label: 'Dark', value: 'dark' },
+  ];
+
   private readonly formState = scope<ProfileFormValue>(structuredClone(getInitialProfileValue()));
 
   private readonly uiState = scope<StreamixUiShape>(() => ({
@@ -102,9 +165,7 @@ export class StreamixFormPageComponent implements OnDestroy {
     attemptedSubmit: false,
     draftStatus: 'idle',
     lastSavedAt: 'Not saved yet',
-    changeCount: 0,
     saveRequest: null,
-    activityLog: ['Streamix scope connected.'],
     errors: (self: any): StreamixErrors =>
       validateSnapshot(this.formState.snapshot(), self.usernameTaken),
     valid: (self: any) =>
@@ -121,15 +182,6 @@ export class StreamixFormPageComponent implements OnDestroy {
       self.completion >= 85 &&
       this.formState.snapshot().skills.length > 0,
     preview: () => formatProfileJson(this.formState.snapshot()),
-    appendLog: method((self: any, message: string) => {
-      const time = new Date().toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      });
-
-      self.activityLog = [`${time} ${message}`, ...self.activityLog].slice(0, 8);
-    }),
     touchField: method((self: any, path: TouchedPath) => {
       if (self.touchedFields.includes(path)) {
         return;
@@ -139,18 +191,14 @@ export class StreamixFormPageComponent implements OnDestroy {
     }),
     queueChange: method((self: any) => {
       self.draftStatus = 'editing';
-      self.changeCount = self.changeCount + 1;
-      self.appendLog(`Queued change ${self.changeCount} for autosave.`);
       self.saveRequest = structuredClone(this.formState.snapshot());
     }),
     markSaving: method((self: any) => {
       self.draftStatus = 'saving';
-      self.appendLog('Debounced autosave started.');
     }),
     markSaved: method((self: any, timestamp: string) => {
       self.lastSavedAt = timestamp;
       self.draftStatus = 'saved';
-      self.appendLog('Draft persisted through streamix.');
     }),
     setAttemptedSubmit: method((self: any, value: boolean) => {
       self.attemptedSubmit = value;
@@ -187,35 +235,12 @@ export class StreamixFormPageComponent implements OnDestroy {
       self.attemptedSubmit = false;
       self.draftStatus = 'idle';
       self.lastSavedAt = 'Not saved yet';
-      self.changeCount = 0;
       self.saveRequest = null;
-      self.activityLog = [];
-      self.appendLog('Reset form and streamix scope.');
     }),
   }));
 
   constructor() {
     this.startAutosave();
-  }
-
-  get profile(): ProfileSection {
-    return this.formState.profile as ProfileSection;
-  }
-
-  get security(): SecuritySection {
-    return this.formState.security as SecuritySection;
-  }
-
-  get address(): AddressSection {
-    return this.formState.address as AddressSection;
-  }
-
-  get preferences(): PreferencesSection {
-    return this.formState.preferences as PreferencesSection;
-  }
-
-  get availability(): AvailabilitySection {
-    return this.formState.availability as AvailabilitySection;
   }
 
   get skills(): SkillValue[] {
@@ -230,10 +255,6 @@ export class StreamixFormPageComponent implements OnDestroy {
     return this.uiState.lastSavedAt;
   }
 
-  get changeCount(): number {
-    return this.uiState.changeCount;
-  }
-
   get completion(): number {
     return this.uiState.completion;
   }
@@ -244,10 +265,6 @@ export class StreamixFormPageComponent implements OnDestroy {
 
   get readyToSubmit(): boolean {
     return this.uiState.readyToSubmit;
-  }
-
-  get activityLog(): string[] {
-    return this.uiState.activityLog;
   }
 
   get usernamePending(): boolean {
@@ -271,69 +288,6 @@ export class StreamixFormPageComponent implements OnDestroy {
     this.formState.dispose();
   }
 
-  updateProfileField(
-    key: keyof ProfileFormValue['profile'],
-    value: string,
-  ): void {
-    (this.formState.profile as any)[key] = value;
-
-    if (key === 'username') {
-      this.uiState.usernameTaken = false;
-      this.uiState.usernamePending = false;
-    }
-
-    this.uiState.queueChange();
-    this.cdr.detectChanges();
-  }
-
-  updateSecurityField(
-    key: keyof ProfileFormValue['security'],
-    value: string,
-  ): void {
-    (this.formState.security as any)[key] = value;
-    this.uiState.queueChange();
-    this.cdr.detectChanges();
-  }
-
-  updateAddressField(
-    key: keyof ProfileFormValue['address'],
-    value: string,
-  ): void {
-    (this.formState.address as any)[key] = value;
-    this.uiState.queueChange();
-    this.cdr.detectChanges();
-  }
-
-  updatePreferenceField(
-    key: keyof ProfileFormValue['preferences'],
-    value: string | boolean,
-  ): void {
-    (this.formState.preferences as any)[key] = value;
-    this.uiState.queueChange();
-    this.cdr.detectChanges();
-  }
-
-  updateAvailabilityField(
-    key: keyof ProfileFormValue['availability'],
-    value: string | number | boolean,
-  ): void {
-    (this.formState.availability as any)[key] = value;
-    this.uiState.queueChange();
-    this.cdr.detectChanges();
-  }
-
-  updateSkillField(
-    index: number,
-    key: keyof SkillValue,
-    value: string | number | boolean,
-  ): void {
-    const nextSkills = structuredClone(this.formState.skills);
-    (nextSkills[index] as any)[key] = value;
-    this.formState.skills = nextSkills;
-    this.uiState.queueChange();
-    this.cdr.detectChanges();
-  }
-
   touchField(path: TouchedPath): void {
     this.uiState.touchField(path);
 
@@ -349,7 +303,6 @@ export class StreamixFormPageComponent implements OnDestroy {
       ...this.formState.skills,
       { name: '', years: 1, primary: false },
     ];
-    this.uiState.appendLog('Added a skill row.');
     this.uiState.queueChange();
     this.cdr.detectChanges();
   }
@@ -366,7 +319,6 @@ export class StreamixFormPageComponent implements OnDestroy {
       this.uiState.touchedFields,
       index,
     );
-    this.uiState.appendLog(`Removed skill row ${index + 1}.`);
     this.uiState.queueChange();
     this.cdr.detectChanges();
   }
@@ -376,20 +328,13 @@ export class StreamixFormPageComponent implements OnDestroy {
     this.uiState.setAttemptedSubmit(true);
 
     if (!this.uiState.valid) {
-      this.uiState.appendLog('Submit blocked because the form is invalid.');
       this.cdr.detectChanges();
       return;
     }
 
     this.submittedPayload = formatProfileJson(this.formState.snapshot());
     this.uiState.draftStatus = 'saved';
-    this.uiState.appendLog('Submitted a valid payload.');
     this.cdr.detectChanges();
-  }
-
-  toNumber(value: string): number {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   resetForm(): void {
@@ -405,11 +350,71 @@ export class StreamixFormPageComponent implements OnDestroy {
   }
 
   fieldError(path: TouchedPath): string | null {
+    if (path === 'profile.username' && this.usernamePending) {
+      return null;
+    }
+
     if (!this.shouldShowError(path)) {
       return null;
     }
 
     return readErrorAtPath(this.uiState.errors, path);
+  }
+
+  read(path: TouchedPath): string | number | boolean {
+    return readPath(this.formState, path) as string | number | boolean;
+  }
+
+  update(path: TouchedPath, value: string | number | boolean): void {
+    writePath(this.formState, path, value);
+
+    if (path === 'profile.username') {
+      this.uiState.usernameTaken = false;
+      this.uiState.usernamePending = false;
+    }
+
+    this.uiState.queueChange();
+    this.cdr.detectChanges();
+  }
+
+  updateFromEvent(
+    path: TouchedPath,
+    event: Event,
+    kind: ValueKind = 'text',
+  ): void {
+    if (kind === 'boolean') {
+      const target = event.target as HTMLInputElement;
+      this.update(path, target.checked);
+      return;
+    }
+
+    const target = event.target as
+      | HTMLInputElement
+      | HTMLTextAreaElement
+      | HTMLSelectElement;
+
+    if (kind === 'number') {
+      this.update(path, toNumber(target.value));
+      return;
+    }
+
+    this.update(path, target.value);
+  }
+
+  skillPath(index: number, key: keyof SkillValue): TouchedPath {
+    return `skills.${index}.${key}`;
+  }
+
+  fieldHint(path: TouchedPath): string | null {
+    if (path === 'profile.username' && this.usernamePending) {
+      return 'Checking username availability...';
+    }
+
+    if (path === 'availability.hoursPerWeek') {
+      return `${this.read(path)} hrs/week`;
+    }
+
+    return null;
   }
 
   passwordError(): string | null {
@@ -702,4 +707,34 @@ function remapTouchedFieldsAfterSkillRemoval(
 
     return [field];
   });
+}
+
+function readPath(source: any, path: string): unknown {
+  return path.split('.').reduce((current, key) => current?.[key], source);
+}
+
+function writePath(
+  source: any,
+  path: string,
+  value: string | number | boolean,
+): void {
+  const parts = path.split('.');
+
+  if (parts[0] === 'skills') {
+    const index = Number(parts[1]);
+    const key = parts[2] as keyof SkillValue;
+    const nextSkills = structuredClone(source.skills as SkillValue[]);
+    (nextSkills[index] as any)[key] = value;
+    source.skills = nextSkills;
+    return;
+  }
+
+  const last = parts.pop()!;
+  const target = parts.reduce((current, key) => current[key], source);
+  target[last] = value;
+}
+
+function toNumber(value: string): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }

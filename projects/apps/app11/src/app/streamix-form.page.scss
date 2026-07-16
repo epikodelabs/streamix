@@ -187,6 +187,10 @@ textarea {
   max-width: 150px;
 }
 
+.field-wide {
+  grid-column: 1 / -1;
+}
+
 .compact-checkbox {
   align-self: end;
   min-height: 48px;
@@ -230,6 +234,10 @@ button:disabled {
   margin-top: 6px;
   font-size: 1.2rem;
   color: var(--text);
+}
+
+.warning {
+  border-color: rgba(177, 106, 16, 0.25);
 }
 
 .success {
