@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.51
+
+Fixed package publishing by removing the generated `dist/streamix/.npmignore` file that excluded secondary entry point `package.json` files from the npm tarball.
+
 ## 2.0.50
 
 Fixed iterator lifecycle, async coordination, and transport behavior across the v2 line.
