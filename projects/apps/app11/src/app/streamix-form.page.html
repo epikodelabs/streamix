@@ -2,28 +2,29 @@
   <div class="card intro">
     <div>
       <p class="section-kicker">Page 2</p>
-      <h2>Angular form with Streamix orchestration</h2>
+      <h2>Streamix-native form</h2>
       <p>
-        The UI is still Angular reactive forms, but `streamix` owns derived
-        metrics, the activity log, and debounced autosave behavior.
+        This route drops Angular reactive forms entirely. Native inputs feed a
+        `streamix` scope, and the scope owns validation, touched state,
+        autosave, and derived metrics.
       </p>
     </div>
 
     <div class="chips">
       <span>`scope()` state</span>
+      <span>No `ReactiveFormsModule`</span>
       <span>`debounce(650)` autosave</span>
-      <span>`derived()` metrics</span>
-      <span>`scope()` lifecycle</span>
+      <span>Scope-driven validation</span>
     </div>
   </div>
 
   <div class="layout">
-    <form class="card form-card" [formGroup]="form" (ngSubmit)="submit()">
-      <section class="section" formGroupName="profile">
+    <form class="card form-card" (submit)="submit($event)">
+      <section class="section">
         <div class="section-head">
           <div>
             <p class="section-kicker">Profile</p>
-            <h3>Angular still renders the form</h3>
+            <h3>Native inputs bound to scope state</h3>
           </div>
           <span class="badge badge-strong">{{ draftStatus }}</span>
         </div>
@@ -31,34 +32,54 @@
         <div class="grid two">
           <label class="field">
             <span>First name</span>
-            <input type="text" formControlName="firstName" />
-            @if (fieldError(profile.firstName); as error) {
+            <input
+              type="text"
+              [value]="profile.firstName"
+              (input)="updateProfileField('firstName', $any($event.target).value)"
+              (blur)="touchField('profile.firstName')"
+            />
+            @if (fieldError('profile.firstName'); as error) {
               <small class="error">{{ error }}</small>
             }
           </label>
 
           <label class="field">
             <span>Last name</span>
-            <input type="text" formControlName="lastName" />
-            @if (fieldError(profile.lastName); as error) {
+            <input
+              type="text"
+              [value]="profile.lastName"
+              (input)="updateProfileField('lastName', $any($event.target).value)"
+              (blur)="touchField('profile.lastName')"
+            />
+            @if (fieldError('profile.lastName'); as error) {
               <small class="error">{{ error }}</small>
             }
           </label>
 
           <label class="field">
             <span>Email</span>
-            <input type="email" formControlName="email" />
-            @if (fieldError(profile.email); as error) {
+            <input
+              type="email"
+              [value]="profile.email"
+              (input)="updateProfileField('email', $any($event.target).value)"
+              (blur)="touchField('profile.email')"
+            />
+            @if (fieldError('profile.email'); as error) {
               <small class="error">{{ error }}</small>
             }
           </label>
 
           <label class="field">
             <span>Username</span>
-            <input type="text" formControlName="username" />
-            @if (profile.username.pending) {
+            <input
+              type="text"
+              [value]="profile.username"
+              (input)="updateProfileField('username', $any($event.target).value)"
+              (blur)="touchField('profile.username')"
+            />
+            @if (usernamePending) {
               <small class="hint">Checking username availability...</small>
-            } @else if (fieldError(profile.username); as error) {
+            } @else if (fieldError('profile.username'); as error) {
               <small class="error">{{ error }}</small>
             }
           </label>
@@ -66,34 +87,49 @@
 
         <label class="field">
           <span>Bio</span>
-          <textarea rows="4" formControlName="bio"></textarea>
-          @if (fieldError(profile.bio); as error) {
+          <textarea
+            rows="4"
+            [value]="profile.bio"
+            (input)="updateProfileField('bio', $any($event.target).value)"
+            (blur)="touchField('profile.bio')"
+          ></textarea>
+          @if (fieldError('profile.bio'); as error) {
             <small class="error">{{ error }}</small>
           }
         </label>
       </section>
 
-      <section class="section" formGroupName="security">
+      <section class="section">
         <div class="section-head">
           <div>
             <p class="section-kicker">Security</p>
-            <h3>Validation still belongs to Angular</h3>
+            <h3>Validation comes from Streamix</h3>
           </div>
         </div>
 
         <div class="grid two">
           <label class="field">
             <span>Password</span>
-            <input type="password" formControlName="password" />
-            @if (fieldError(security.password); as error) {
+            <input
+              type="password"
+              [value]="security.password"
+              (input)="updateSecurityField('password', $any($event.target).value)"
+              (blur)="touchField('security.password')"
+            />
+            @if (fieldError('security.password'); as error) {
               <small class="error">{{ error }}</small>
             }
           </label>
 
           <label class="field">
             <span>Confirm password</span>
-            <input type="password" formControlName="confirmPassword" />
-            @if (fieldError(security.confirmPassword); as error) {
+            <input
+              type="password"
+              [value]="security.confirmPassword"
+              (input)="updateSecurityField('confirmPassword', $any($event.target).value)"
+              (blur)="touchField('security.confirmPassword')"
+            />
+            @if (fieldError('security.confirmPassword'); as error) {
               <small class="error">{{ error }}</small>
             }
           </label>
@@ -104,60 +140,105 @@
         }
       </section>
 
-      <section class="section" formGroupName="address">
+      <section class="section">
         <div class="section-head">
           <div>
             <p class="section-kicker">Address</p>
-            <h3>Same schema, different reactive layer</h3>
+            <h3>Same schema without Angular form controls</h3>
           </div>
         </div>
 
         <div class="grid three">
           <label class="field">
             <span>Country</span>
-            <input type="text" formControlName="country" />
-            @if (fieldError(address.country); as error) {
+            <input
+              type="text"
+              [value]="address.country"
+              (input)="updateAddressField('country', $any($event.target).value)"
+              (blur)="touchField('address.country')"
+            />
+            @if (fieldError('address.country'); as error) {
               <small class="error">{{ error }}</small>
             }
           </label>
 
           <label class="field">
             <span>City</span>
-            <input type="text" formControlName="city" />
-            @if (fieldError(address.city); as error) {
+            <input
+              type="text"
+              [value]="address.city"
+              (input)="updateAddressField('city', $any($event.target).value)"
+              (blur)="touchField('address.city')"
+            />
+            @if (fieldError('address.city'); as error) {
               <small class="error">{{ error }}</small>
             }
           </label>
 
           <label class="field">
             <span>Postal code</span>
-            <input type="text" formControlName="postalCode" />
-            @if (fieldError(address.postalCode); as error) {
+            <input
+              type="text"
+              [value]="address.postalCode"
+              (input)="updateAddressField('postalCode', $any($event.target).value)"
+              (blur)="touchField('address.postalCode')"
+            />
+            @if (fieldError('address.postalCode'); as error) {
               <small class="error">{{ error }}</small>
             }
           </label>
         </div>
       </section>
 
-      <section class="section" formGroupName="preferences">
+      <section class="section">
         <div class="section-head">
           <div>
             <p class="section-kicker">Preferences</p>
-            <h3>Angular inputs, Streamix summaries</h3>
+            <h3>Plain HTML bindings</h3>
           </div>
         </div>
 
         <div class="grid two">
           <fieldset class="field fieldset">
             <legend>Preferred contact</legend>
-            <label><input type="radio" value="email" formControlName="contactMethod" /> Email</label>
-            <label><input type="radio" value="phone" formControlName="contactMethod" /> Phone</label>
-            <label><input type="radio" value="slack" formControlName="contactMethod" /> Slack</label>
+            <label>
+              <input
+                type="radio"
+                name="contactMethod"
+                value="email"
+                [checked]="preferences.contactMethod === 'email'"
+                (change)="updatePreferenceField('contactMethod', 'email')"
+              />
+              Email
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="contactMethod"
+                value="phone"
+                [checked]="preferences.contactMethod === 'phone'"
+                (change)="updatePreferenceField('contactMethod', 'phone')"
+              />
+              Phone
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="contactMethod"
+                value="slack"
+                [checked]="preferences.contactMethod === 'slack'"
+                (change)="updatePreferenceField('contactMethod', 'slack')"
+              />
+              Slack
+            </label>
           </fieldset>
 
           <label class="field">
             <span>Theme</span>
-            <select formControlName="theme">
+            <select
+              [value]="preferences.theme"
+              (change)="updatePreferenceField('theme', $any($event.target).value)"
+            >
               <option value="system">System</option>
               <option value="light">Light</option>
               <option value="dark">Dark</option>
@@ -166,74 +247,110 @@
         </div>
 
         <label class="checkbox">
-          <input type="checkbox" formControlName="newsletter" />
+          <input
+            type="checkbox"
+            [checked]="preferences.newsletter"
+            (change)="updatePreferenceField('newsletter', $any($event.target).checked)"
+          />
           <span>Send release notes and onboarding emails</span>
         </label>
       </section>
 
-      <section class="section" formGroupName="availability">
+      <section class="section">
         <div class="section-head">
           <div>
             <p class="section-kicker">Availability</p>
-            <h3>Autosave watches these changes too</h3>
+            <h3>Scope state drives range, date, and boolean fields</h3>
           </div>
         </div>
 
         <div class="grid two">
           <label class="field">
             <span>Start date</span>
-            <input type="date" formControlName="startDate" />
-            @if (fieldError(availability.startDate); as error) {
+            <input
+              type="date"
+              [value]="availability.startDate"
+              (input)="updateAvailabilityField('startDate', $any($event.target).value)"
+              (blur)="touchField('availability.startDate')"
+            />
+            @if (fieldError('availability.startDate'); as error) {
               <small class="error">{{ error }}</small>
             }
           </label>
 
           <label class="field range-field">
             <span>Hours per week</span>
-            <input type="range" min="10" max="60" formControlName="hoursPerWeek" />
-            <strong>{{ availability.hoursPerWeek.value }} hrs/week</strong>
-            @if (fieldError(availability.hoursPerWeek); as error) {
+            <input
+              type="range"
+              min="10"
+              max="60"
+              [value]="availability.hoursPerWeek"
+              (input)="updateAvailabilityField('hoursPerWeek', toNumber($any($event.target).value))"
+              (blur)="touchField('availability.hoursPerWeek')"
+            />
+            <strong>{{ availability.hoursPerWeek }} hrs/week</strong>
+            @if (fieldError('availability.hoursPerWeek'); as error) {
               <small class="error">{{ error }}</small>
             }
           </label>
         </div>
 
         <label class="checkbox">
-          <input type="checkbox" formControlName="remote" />
+          <input
+            type="checkbox"
+            [checked]="availability.remote"
+            (change)="updateAvailabilityField('remote', $any($event.target).checked)"
+          />
           <span>Open to remote collaboration</span>
         </label>
       </section>
 
-      <section class="section" formArrayName="skills">
+      <section class="section">
         <div class="section-head">
           <div>
             <p class="section-kicker">Skills</p>
-            <h3>Derived metrics read from the same form array</h3>
+            <h3>Dynamic rows managed through scope arrays</h3>
           </div>
           <button type="button" class="secondary" (click)="addSkill()">Add skill</button>
         </div>
 
         <div class="stack">
           @for (skill of skills; track $index) {
-            <div class="skill-row" [formGroupName]="$index">
+            <div class="skill-row">
               <label class="field">
                 <span>Skill</span>
-                <input type="text" formControlName="name" />
-                @if (fieldError(skill.controls.name); as error) {
+                <input
+                  type="text"
+                  [value]="skill.name"
+                  (input)="updateSkillField($index, 'name', $any($event.target).value)"
+                  (blur)="touchField('skills.' + $index + '.name')"
+                />
+                @if (fieldError('skills.' + $index + '.name'); as error) {
                   <small class="error">{{ error }}</small>
                 }
               </label>
 
               <label class="field compact">
                 <span>Years</span>
-                <input type="number" min="1" max="20" formControlName="years" />
-                @if (fieldError(skill.controls.years); as error) {
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  [value]="skill.years"
+                  (input)="updateSkillField($index, 'years', toNumber($any($event.target).value))"
+                  (blur)="touchField('skills.' + $index + '.years')"
+                />
+                @if (fieldError('skills.' + $index + '.years'); as error) {
                   <small class="error">{{ error }}</small>
                 }
               </label>
 
               <label class="checkbox compact-checkbox">
-                <input type="checkbox" formControlName="primary" />
+                <input
+                  type="checkbox"
+                  [checked]="skill.primary"
+                  (change)="updateSkillField($index, 'primary', $any($event.target).checked)"
+                />
                 <span>Primary</span>
               </label>
 
@@ -279,12 +396,23 @@
       <div class="card">
         <h3>Streamix pipeline</h3>
         <ol>
-          <li>Angular `valueChanges` copies a snapshot into the `streamix` scope.</li>
+          <li>Native inputs write directly into a `streamix` scope.</li>
           <li>`debounce(650)` compresses rapid edits into one autosave event.</li>
-          <li>`derived()` computes completion, readiness, and primary skills.</li>
-          <li>`scope()` owns the activity log and cleanup lifecycle.</li>
+          <li>`scope()` computes validation, preview JSON, and derived metrics.</li>
+          <li>No Angular reactive-form directives are involved on this route.</li>
         </ol>
       </div>
+
+      @if (validationSummary.length > 0) {
+        <div class="card warning">
+          <h3>Validation summary</h3>
+          <ul>
+            @for (item of validationSummary; track item) {
+              <li>{{ item }}</li>
+            }
+          </ul>
+        </div>
+      }
 
       <div class="card success">
         <h3>Derived state</h3>
