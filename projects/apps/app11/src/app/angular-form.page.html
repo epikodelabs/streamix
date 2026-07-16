@@ -1,0 +1,308 @@
+<section class="page">
+  <div class="card intro">
+    <div>
+      <p class="section-kicker">Page 1</p>
+      <h2>Reactive form using Angular only</h2>
+      <p>
+        This version sticks to Angular’s native form model, validators,
+        `toSignal`, and `computed` state. No `streamix` is involved on this page.
+      </p>
+    </div>
+
+    <div class="chips">
+      <span>Typed reactive form</span>
+      <span>Async validator</span>
+      <span>Nested groups</span>
+      <span>Dynamic arrays</span>
+    </div>
+  </div>
+
+  <div class="layout">
+    <form class="card form-card" [formGroup]="form" (ngSubmit)="submit()">
+      <section class="section" formGroupName="profile">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Profile</p>
+            <h3>Identity and account basics</h3>
+          </div>
+          <span class="badge">{{ completion() }}% complete</span>
+        </div>
+
+        <div class="grid two">
+          <label class="field">
+            <span>First name</span>
+            <input type="text" formControlName="firstName" />
+            @if (fieldError(profile.firstName); as error) {
+              <small class="error">{{ error }}</small>
+            }
+          </label>
+
+          <label class="field">
+            <span>Last name</span>
+            <input type="text" formControlName="lastName" />
+            @if (fieldError(profile.lastName); as error) {
+              <small class="error">{{ error }}</small>
+            }
+          </label>
+
+          <label class="field">
+            <span>Email</span>
+            <input type="email" formControlName="email" />
+            @if (fieldError(profile.email); as error) {
+              <small class="error">{{ error }}</small>
+            }
+          </label>
+
+          <label class="field">
+            <span>Username</span>
+            <input type="text" formControlName="username" />
+            @if (profile.username.pending) {
+              <small class="hint">Checking username availability...</small>
+            } @else if (fieldError(profile.username); as error) {
+              <small class="error">{{ error }}</small>
+            }
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Bio</span>
+          <textarea rows="4" formControlName="bio"></textarea>
+          <small class="hint">{{ remainingBio() }} characters remaining</small>
+          @if (fieldError(profile.bio); as error) {
+            <small class="error">{{ error }}</small>
+          }
+        </label>
+      </section>
+
+      <section class="section" formGroupName="security">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Security</p>
+            <h3>Cross-field validation</h3>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <label class="field">
+            <span>Password</span>
+            <input type="password" formControlName="password" />
+            @if (fieldError(security.password); as error) {
+              <small class="error">{{ error }}</small>
+            }
+          </label>
+
+          <label class="field">
+            <span>Confirm password</span>
+            <input type="password" formControlName="confirmPassword" />
+            @if (fieldError(security.confirmPassword); as error) {
+              <small class="error">{{ error }}</small>
+            }
+          </label>
+        </div>
+
+        @if (passwordError(); as error) {
+          <small class="error">{{ error }}</small>
+        }
+      </section>
+
+      <section class="section" formGroupName="address">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Address</p>
+            <h3>Nested group example</h3>
+          </div>
+        </div>
+
+        <div class="grid three">
+          <label class="field">
+            <span>Country</span>
+            <input type="text" formControlName="country" />
+            @if (fieldError(address.country); as error) {
+              <small class="error">{{ error }}</small>
+            }
+          </label>
+
+          <label class="field">
+            <span>City</span>
+            <input type="text" formControlName="city" />
+            @if (fieldError(address.city); as error) {
+              <small class="error">{{ error }}</small>
+            }
+          </label>
+
+          <label class="field">
+            <span>Postal code</span>
+            <input type="text" formControlName="postalCode" />
+            @if (fieldError(address.postalCode); as error) {
+              <small class="error">{{ error }}</small>
+            }
+          </label>
+        </div>
+      </section>
+
+      <section class="section" formGroupName="preferences">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Preferences</p>
+            <h3>Mixed control types</h3>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <fieldset class="field fieldset">
+            <legend>Preferred contact</legend>
+            <label><input type="radio" value="email" formControlName="contactMethod" /> Email</label>
+            <label><input type="radio" value="phone" formControlName="contactMethod" /> Phone</label>
+            <label><input type="radio" value="slack" formControlName="contactMethod" /> Slack</label>
+          </fieldset>
+
+          <label class="field">
+            <span>Theme</span>
+            <select formControlName="theme">
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="checkbox">
+          <input type="checkbox" formControlName="newsletter" />
+          <span>Send release notes and onboarding emails</span>
+        </label>
+      </section>
+
+      <section class="section" formGroupName="availability">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Availability</p>
+            <h3>Date, range, and boolean controls</h3>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <label class="field">
+            <span>Start date</span>
+            <input type="date" formControlName="startDate" />
+            @if (fieldError(availability.startDate); as error) {
+              <small class="error">{{ error }}</small>
+            }
+          </label>
+
+          <label class="field range-field">
+            <span>Hours per week</span>
+            <input type="range" min="10" max="60" formControlName="hoursPerWeek" />
+            <strong>{{ availability.hoursPerWeek.value }} hrs/week</strong>
+            @if (fieldError(availability.hoursPerWeek); as error) {
+              <small class="error">{{ error }}</small>
+            }
+          </label>
+        </div>
+
+        <label class="checkbox">
+          <input type="checkbox" formControlName="remote" />
+          <span>Open to remote collaboration</span>
+        </label>
+      </section>
+
+      <section class="section" formArrayName="skills">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Skills</p>
+            <h3>Dynamic form array</h3>
+          </div>
+          <button type="button" class="secondary" (click)="addSkill()">Add skill</button>
+        </div>
+
+        <div class="stack">
+          @for (skill of skills; track $index) {
+            <div class="skill-row" [formGroupName]="$index">
+              <label class="field">
+                <span>Skill</span>
+                <input type="text" formControlName="name" />
+                @if (fieldError(skill.controls.name); as error) {
+                  <small class="error">{{ error }}</small>
+                }
+              </label>
+
+              <label class="field compact">
+                <span>Years</span>
+                <input type="number" min="1" max="20" formControlName="years" />
+                @if (fieldError(skill.controls.years); as error) {
+                  <small class="error">{{ error }}</small>
+                }
+              </label>
+
+              <label class="checkbox compact-checkbox">
+                <input type="checkbox" formControlName="primary" />
+                <span>Primary</span>
+              </label>
+
+              <button
+                type="button"
+                class="ghost"
+                [disabled]="skills.length === 1"
+                (click)="removeSkill($index)"
+              >
+                Remove
+              </button>
+            </div>
+          }
+        </div>
+      </section>
+
+      <div class="actions">
+        <button type="button" class="secondary" (click)="resetForm()">Reset</button>
+        <button type="submit">Submit Angular Form</button>
+      </div>
+    </form>
+
+    <aside class="side">
+      <div class="card metrics">
+        <div>
+          <span class="metric-label">Form status</span>
+          <strong>{{ status() }}</strong>
+        </div>
+        <div>
+          <span class="metric-label">Contact route</span>
+          <strong>{{ snapshot().preferences.contactMethod }}</strong>
+        </div>
+        <div>
+          <span class="metric-label">Remote</span>
+          <strong>{{ snapshot().availability.remote ? 'Yes' : 'No' }}</strong>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Angular-only derivation</h3>
+        <p>
+          The sidebar state is computed from the form using Angular signals and
+          validators only.
+        </p>
+      </div>
+
+      @if (validationSummary().length > 0) {
+        <div class="card warning">
+          <h3>Validation summary</h3>
+          <ul>
+            @for (item of validationSummary(); track item) {
+              <li>{{ item }}</li>
+            }
+          </ul>
+        </div>
+      }
+
+      <div class="card">
+        <h3>Live payload preview</h3>
+        <pre>{{ preview() }}</pre>
+      </div>
+
+      @if (submittedPayload()) {
+        <div class="card success">
+          <h3>Submitted payload</h3>
+          <pre>{{ submittedPayload() }}</pre>
+        </div>
+      }
+    </aside>
+  </div>
+</section>
