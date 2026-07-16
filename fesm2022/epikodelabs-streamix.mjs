@@ -35,6 +35,8 @@ class AsyncIteratorState {
      */
     markCompleted() {
         this.completed = true;
+        this.pendingError = null;
+        this.queue.length = 0;
         this.clear();
     }
     /**
@@ -214,6 +216,8 @@ function createAsyncPushable() {
         async throw(err) {
             const error = normalizeError(err);
             state.completed = true;
+            state.pendingError = null;
+            state.queue.length = 0;
             if (state.pullReject) {
                 const r = state.pullReject;
                 state.pullResolve = state.pullReject = null;
@@ -681,9 +685,8 @@ function fromAny(value) {
         // Await promise if needed
         const resolved = isPromiseLike(value) ? await value : value;
         const candidate = resolved;
-        // Handle arrays, iterables, and async iterables - emit each element
-        if (Array.isArray(resolved)) {
-            for (const item of resolved) {
+        if (isStreamLike(resolved)) {
+            for await (const item of resolved) {
                 yield item;
             }
         }
@@ -773,7 +776,7 @@ function lastValueFrom(stream) {
  *
  * @example
  * ```ts
- * const coordinator = createAsyncCoordinator([stream1, stream2]);
+ * const coordinator = createAsyncCoordinator<number>([stream1, stream2]);
  * for await (const event of coordinator) {
  *   if (event.type === 'value') {
  *     // event.value from event.sourceIndex
@@ -781,25 +784,110 @@ function lastValueFrom(stream) {
  * }
  * ```
  */
-function createAsyncCoordinator(sources = []) {
+function createAsyncCoordinator(sources = [], options) {
     const queue = [];
     // Use sparse arrays to support dynamic indices
     const sourceList = [...sources];
     const completed = sources.map(() => false);
     const pulling = sources.map(() => false);
     const pendingPulls = sources.map(() => false);
+    const originalPushHandlers = [];
+    const wiredPushHandlers = [];
     let waitingResolve = null;
     let isDraining = false;
     let iteratorReturned = false;
     let activeCount = sources.length;
+    let batchDepth = 0;
+    // Optional key -> source iterator mapping for reference-based removal.
+    const keyToSource = new Map();
+    /** Checks if all sources are completed. */
     const allDone = () => activeCount === 0;
+    /**
+     * Pushes a runner event to the coordinator's queue.
+     * @param event The event to push.
+     * @param sourceIndex The index of the source that generated the event.
+     */
     function pushEvent(event, sourceIndex) {
         queue.push({
             result: NEXT(event),
             sourceIndex
         });
     }
+    /**
+     * Removes all queued events from a specific source.
+     * @param sourceIndex The index of the source whose events should be removed.
+     */
+    function removeQueuedEvents(sourceIndex) {
+        for (let i = queue.length - 1; i >= 0; i--) {
+            if (queue[i].sourceIndex === sourceIndex) {
+                queue.splice(i, 1);
+            }
+        }
+    }
+    /**
+     * Marks a source as complete and decrements the active count.
+     * @param index The index of the source to mark as complete.
+     */
+    function markSourceComplete(index) {
+        if (!completed[index]) {
+            completed[index] = true;
+            activeCount--;
+        }
+    }
+    /**
+     * Removes the key associated with a source iterator.
+     * @param source The source iterator to remove from the key map.
+     */
+    function removeSourceKey(source) {
+        for (const [key, mappedSource] of keyToSource.entries()) {
+            if (mappedSource === source) {
+                keyToSource.delete(key);
+            }
+        }
+    }
+    /**
+     * Detaches a source from the coordinator, cleaning up its state.
+     * @param index The index of the source to detach.
+     * @returns The detached source iterator, or null if not found.
+     */
+    function detachSource(index) {
+        if (index < 0 || index >= sourceList.length)
+            return null;
+        const source = sourceList[index];
+        if (!source)
+            return null;
+        removeSourceKey(source);
+        markSourceComplete(index);
+        pulling[index] = false;
+        pendingPulls[index] = false;
+        sourceList[index] = null;
+        removeQueuedEvents(index);
+        restoreSource(source, index);
+        return source;
+    }
+    /**
+     * Safely calls the `return()` method on a source iterator, ignoring errors.
+     * @param source The source iterator to return.
+     * @returns A promise that resolves when the source has been returned.
+     */
+    function safeReturnSource(source) {
+        if (!source.return)
+            return Promise.resolve();
+        try {
+            return Promise.resolve(source.return()).then(() => undefined, () => undefined);
+        }
+        catch {
+            return Promise.resolve();
+        }
+    }
+    /**
+     * Notifies a waiting consumer that a new event is available or all sources
+     * are complete.
+     */
     function notify() {
+        if (batchDepth > 0) {
+            return;
+        }
         if (!waitingResolve)
             return;
         if (queue.length > 0) {
@@ -814,6 +902,10 @@ function createAsyncCoordinator(sources = []) {
             res(DONE);
         }
     }
+    /**
+     * Asynchronously pulls the next value from a source.
+     * @param i The index of the source to pull from.
+     */
     function pullAsync(i) {
         // CRITICAL: Don't start a new pull if already pulling, completed, removed, or returned
         if (!sourceList[i] || completed[i] || pulling[i] || iteratorReturned)
@@ -824,13 +916,10 @@ function createAsyncCoordinator(sources = []) {
         src.next().then((r) => {
             pulling[i] = false;
             // Don't process if source was completed/removed during the async wait
-            if (!sourceList[i] || completed[i] || iteratorReturned)
+            if (sourceList[i] !== src || completed[i] || iteratorReturned)
                 return;
             if (r.done) {
-                if (!completed[i]) {
-                    completed[i] = true;
-                    activeCount--;
-                }
+                markSourceComplete(i);
                 pushEvent({ type: "complete", sourceIndex: i }, i);
             }
             else {
@@ -845,16 +934,17 @@ function createAsyncCoordinator(sources = []) {
             }
         }, (err) => {
             pulling[i] = false;
-            if (!sourceList[i] || completed[i] || iteratorReturned)
+            if (sourceList[i] !== src || completed[i] || iteratorReturned)
                 return;
-            if (!completed[i]) {
-                completed[i] = true;
-                activeCount--;
-            }
+            markSourceComplete(i);
             pushEvent({ type: "error", error: normalizeError(err), sourceIndex: i }, i);
             notify();
         });
     }
+    /**
+     * Drains a single event from one source, using `__tryNext` if available.
+     * @param i The index of the source to drain.
+     */
     function drainOneSource(i) {
         if (!sourceList[i] || completed[i] || iteratorReturned)
             return;
@@ -865,10 +955,7 @@ function createAsyncCoordinator(sources = []) {
                 if (!r)
                     return;
                 if (r.done) {
-                    if (!completed[i]) {
-                        completed[i] = true;
-                        activeCount--;
-                    }
+                    markSourceComplete(i);
                     pushEvent({ type: "complete", sourceIndex: i }, i);
                 }
                 else {
@@ -876,10 +963,7 @@ function createAsyncCoordinator(sources = []) {
                 }
             }
             catch (err) {
-                if (!completed[i]) {
-                    completed[i] = true;
-                    activeCount--;
-                }
+                markSourceComplete(i);
                 pushEvent({ type: "error", error: normalizeError(err), sourceIndex: i }, i);
             }
             return;
@@ -890,6 +974,9 @@ function createAsyncCoordinator(sources = []) {
             pullAsync(i);
         }
     }
+    /**
+     * Drains one event from all active sources.
+     */
     function drainSources() {
         // CRITICAL: Prevent recursive drains
         if (isDraining || iteratorReturned)
@@ -910,15 +997,42 @@ function createAsyncCoordinator(sources = []) {
         }
         notify();
     }
-    // Wire up push notifications for a source
+    /**
+     * Wires up a source's `__onPush` handler to trigger a drain.
+     * @param src The source iterator.
+     * @param index The index of the source.
+     */
     function wireSource(src, index) {
         const orig = src.__onPush;
-        src.__onPush = () => {
-            orig?.();
+        const wired = () => {
+            try {
+                orig?.();
+            }
+            catch {
+                // Preserve draining even if the source's push hook throws.
+            }
+            if (sourceList[index] !== src)
+                return;
             // Drain this source immediately on push to preserve push-time ordering.
             drainOneSource(index);
             notify();
         };
+        originalPushHandlers[index] = orig;
+        wiredPushHandlers[index] = wired;
+        src.__onPush = wired;
+    }
+    /**
+     * Restores the original `__onPush` handler for a source.
+     * @param src The source iterator.
+     * @param index The index of the source.
+     */
+    function restoreSource(src, index) {
+        const source = src;
+        if (source.__onPush === wiredPushHandlers[index]) {
+            source.__onPush = originalPushHandlers[index];
+        }
+        originalPushHandlers[index] = undefined;
+        wiredPushHandlers[index] = undefined;
     }
     // Wire up initial sources
     for (let i = 0; i < sources.length; i++) {
@@ -964,21 +1078,15 @@ function createAsyncCoordinator(sources = []) {
                 completed[i] = true;
                 pulling[i] = false;
                 pendingPulls[i] = false;
+                const source = sourceList[i];
+                if (source) {
+                    restoreSource(source, i);
+                }
             }
-            const safe = (s) => {
-                if (!s?.return)
-                    return Promise.resolve();
-                try {
-                    return Promise.resolve(s.return()).catch((err) => {
-                        console.log('Coordinator source return error', err);
-                    });
-                }
-                catch (err) {
-                    console.log('Coordinator source return error', err);
-                    return Promise.resolve();
-                }
-            };
-            await Promise.all(sourceList.filter(s => s !== null).map(safe));
+            keyToSource.clear();
+            await Promise.all(sourceList
+                .filter((source) => source !== null)
+                .map(source => safeReturnSource(source)));
             if (waitingResolve) {
                 waitingResolve(DONE);
                 waitingResolve = null;
@@ -993,9 +1101,10 @@ function createAsyncCoordinator(sources = []) {
          * The source will be immediately wired for push notifications and drained.
          *
          * @param source AsyncIterator to add
+         * @param key Optional key for reference-based removal
          * @returns The index assigned to this source (for tracking)
          */
-        addSource(source) {
+        addSource(source, key) {
             if (iteratorReturned) {
                 throw new Error('Cannot add source to returned coordinator');
             }
@@ -1015,6 +1124,9 @@ function createAsyncCoordinator(sources = []) {
                 pendingPulls.push(false);
             }
             activeCount++;
+            if (key !== undefined) {
+                keyToSource.set(key, source);
+            }
             // Wire up push notification
             wireSource(source, index);
             // Trigger immediate drain for new source
@@ -1028,28 +1140,49 @@ function createAsyncCoordinator(sources = []) {
          * @param index Index of the source to remove
          */
         async removeSource(index) {
-            if (index < 0 || index >= sourceList.length)
-                return;
-            const source = sourceList[index];
+            const source = detachSource(index);
             if (!source)
                 return;
-            // Mark as completed and clear the slot
-            if (!completed[index]) {
-                activeCount--;
-            }
-            completed[index] = true;
-            pulling[index] = false;
-            pendingPulls[index] = false;
-            sourceList[index] = null;
-            // Call return on the source
-            try {
-                await source.return?.();
-            }
-            catch (err) {
-                console.log('Coordinator removeSource error', err);
-            }
+            await safeReturnSource(source);
             // Notify in case we're waiting and all sources are now done
             notify();
+        },
+        /**
+         * Remove a source by the key passed to {@link addSource}.
+         *
+         * @param key Key of the source to remove
+         */
+        async removeSourceByKey(key) {
+            const source = keyToSource.get(key);
+            if (!source)
+                return;
+            const index = sourceList.indexOf(source);
+            if (index >= 0) {
+                await iterator.removeSource(index);
+            }
+            else {
+                keyToSource.delete(key);
+            }
+        },
+        /**
+         * Batch multiple source additions/removals and emit a single notification
+         * after the batch completes.
+         *
+         * @param callback Function that performs source changes
+         */
+        batch(callback) {
+            batchDepth++;
+            try {
+                callback();
+            }
+            finally {
+                batchDepth--;
+                if (batchDepth === 0) {
+                    // drainSources flushes buffered events and triggers notify() now that
+                    // the batch has ended.
+                    drainSources();
+                }
+            }
         },
         /**
          * Get the count of currently active (non-completed, non-removed) sources.
@@ -1071,18 +1204,61 @@ function createAsyncCoordinator(sources = []) {
             return sourceList[index] === null || completed[index];
         }
     };
-    // Initial drain - schedule to prevent blocking
+    // Initial drain - sync or microtask based on options
     if (sources.length > 0) {
-        Promise.resolve().then(() => drainSources());
+        if (options?.syncDrain) {
+            drainSources();
+        }
+        else {
+            Promise.resolve().then(() => drainSources());
+        }
     }
     return iterator;
+}
+/**
+ * Gets an iterator from an iterable object.
+ * Supports both synchronous and asynchronous iterables.
+ *
+ * @param iterable The iterable to get an iterator from.
+ * @returns An `AsyncIterator` or `Iterator`.
+ * @throws If the provided object is not iterable.
+ */
+function getIterator(iterable) {
+    const asyncIter = iterable[Symbol.asyncIterator];
+    if (asyncIter)
+        return asyncIter.call(iterable);
+    const syncIter = iterable[Symbol.iterator];
+    if (syncIter)
+        return syncIter.call(iterable);
+    throw new Error("Source is not iterable");
+}
+/**
+ * Races an iterator's `next()` call against an `AbortSignal`.
+ * If the signal is aborted, the promise resolves with a `done: true` result.
+ */
+function raceNext(iterator, signal) {
+    if (signal.aborted) {
+        return Promise.resolve({ done: true, value: undefined });
+    }
+    const pending = Promise.resolve(iterator.next());
+    return new Promise((resolve, reject) => {
+        const onAbort = () => resolve({ done: true, value: undefined });
+        signal.addEventListener("abort", onAbort, { once: true });
+        pending.then((result) => {
+            signal.removeEventListener("abort", onAbort);
+            resolve(result);
+        }, (err) => {
+            signal.removeEventListener("abort", onAbort);
+            reject(err);
+        });
+    });
 }
 
 /**
  * Creates a factory that produces fresh `AsyncIterator` instances backed by
  * an internal queue with producer-backpressure.
  *
- * The `register` callback receives a `Receiver<T>` whose `next()`/`complete()`/
+ * The `register` callback receives an `Observer<T>` whose `next()`/`complete()`/
  * `error()` methods push into the iterator's queue. `next()` returns a
  * `Promise<void>` (or `void`) — the promise acts as a backpressure signal
  * from the consumer: it resolves only when the consumer pulls the value with
@@ -1104,6 +1280,7 @@ function createAsyncCoordinator(sources = []) {
  */
 function createAsyncIterator(opts) {
     const { register } = opts;
+    const conflate = opts.conflate ?? false;
     return () => {
         const state = new AsyncIteratorState();
         let sub = null;
@@ -1127,8 +1304,9 @@ function createAsyncIterator(opts) {
                         return state.completed;
                     }
                 };
+                const nextSub = register(_receiver);
                 receiver = _receiver;
-                sub = register(_receiver);
+                sub = nextSub;
                 for (const push of pendingPushes) {
                     if (push.type === 'next') {
                         _receiver.next(push.value);
@@ -1148,14 +1326,17 @@ function createAsyncIterator(opts) {
             const unsubscribePromise = sub?.unsubscribe();
             sub = null;
             if (unsubscribePromise && isPromiseLike(unsubscribePromise)) {
-                unsubscribePromise.catch((err) => {
-                    console.log('AsyncIterator handleDone error', err);
-                });
+                unsubscribePromise.catch(() => { });
             }
         };
         const iterator = {
             next() {
-                ensureSubscribed();
+                try {
+                    ensureSubscribed();
+                }
+                catch (err) {
+                    return Promise.reject(normalizeError(err));
+                }
                 return asyncPull(state, iterator, handleDone);
             },
             async return() {
@@ -1165,16 +1346,17 @@ function createAsyncIterator(opts) {
                 try {
                     await unsubscribePromise;
                 }
-                catch (err) {
-                    console.log('AsyncIterator return error', err);
-                }
+                catch { }
                 return Promise.resolve(DONE);
             },
             async throw(err) {
                 const error = normalizeError(err);
                 state.completed = true;
+                state.pendingError = null;
+                state.queue.length = 0;
                 const unsubscribePromise = sub?.unsubscribe();
                 sub = null;
+                receiver = null;
                 if (state.pullReject) {
                     const r = state.pullReject;
                     state.pullResolve = state.pullReject = null;
@@ -1184,9 +1366,7 @@ function createAsyncIterator(opts) {
                 try {
                     await unsubscribePromise;
                 }
-                catch (e) {
-                    console.log('AsyncIterator throw error', e);
-                }
+                catch { }
                 return Promise.reject(error);
             }
         };
@@ -1198,6 +1378,11 @@ function createAsyncIterator(opts) {
         iterator.__pushNext = (value) => {
             if (receiver) {
                 receiver.next(value);
+            }
+            else if (conflate &&
+                pendingPushes.length > 0 &&
+                pendingPushes[pendingPushes.length - 1].type === 'next') {
+                pendingPushes[pendingPushes.length - 1] = { type: 'next', value };
             }
             else {
                 pendingPushes.push({ type: 'next', value });
@@ -1770,7 +1955,7 @@ function createSubscription(teardown) {
          * This method:
          * 1. Marks the subscription as unsubscribed
          * 2. Executes the `teardown` callback (if present)
-         * 3. Suppresses and logs any errors thrown during cleanup
+         * 3. Suppresses any errors thrown during cleanup
          */
         unsubscribe: async function () {
             if (!_unsubscribed) {
@@ -1778,9 +1963,7 @@ function createSubscription(teardown) {
                 try {
                     await this.teardown?.();
                 }
-                catch (err) {
-                    console.error("Error during unsubscribe callback:", err);
-                }
+                catch { }
             }
         },
         /**
@@ -1844,14 +2027,12 @@ async function drainIterator(iterator, getReceivers, signal) {
                     if (isPromiseLike(ret)) {
                         ret.catch((err) => {
                             const error = err instanceof Error ? err : new Error(String(err));
-                            console.log('Subscriber callback error', error);
                             receiver.error?.(error);
                         });
                     }
                 }
                 catch (err) {
                     const error = err instanceof Error ? err : new Error(String(err));
-                    console.log('Subscriber callback error', error);
                     receiver.error?.(error);
                 }
             }
@@ -2225,6 +2406,9 @@ function combineLatest(...sources) {
                         }
                         break;
                     case "complete":
+                        if (!hasEmitted.has(event.sourceIndex)) {
+                            return;
+                        }
                         completedCount++;
                         break;
                     case "error":
@@ -2848,63 +3032,27 @@ function merge(...sources) {
     const gen = async function* () {
         if (sources.length === 0)
             return;
-        const iterators = sources.map((source) => {
-            const resolved = fromAny(source);
-            return resolved[Symbol.asyncIterator]();
-        });
-        // Track coordinator so the outer finally can clean it up even if it was
-        // created before an early return/throw.
-        let coordinator = null;
+        const iterators = sources.map((source) => fromAny(source)[Symbol.asyncIterator]());
+        const coordinator = createAsyncCoordinator(iterators);
         try {
-            const initialResults = await Promise.allSettled(iterators.map((iterator) => iterator.next()));
-            const activeIterators = [];
-            for (let i = 0; i < initialResults.length; i++) {
-                const settled = initialResults[i];
-                if (settled.status === 'rejected') {
-                    throw normalizeError(settled.reason);
-                }
-                const result = settled.value;
-                if (result.done) {
-                    continue;
-                }
-                yield result.value;
-                activeIterators.push(iterators[i]);
-            }
-            coordinator = createAsyncCoordinator(activeIterators);
             while (true) {
                 const result = await coordinator.next();
                 if (result.done)
                     break;
                 const event = result.value;
-                if (event.type === 'error') {
+                if (event.type === "error") {
                     throw normalizeError(event.error);
                 }
-                if (event.type === 'value') {
+                if (event.type === "value") {
                     yield event.value;
                 }
             }
         }
         finally {
-            // coordinator.return() cleans up iterators that were handed to it.
-            // For iterators that never made it into activeIterators (completed on
-            // first pull), call return() directly so no iterator leaks.
-            if (coordinator) {
-                await coordinator.return?.();
-            }
-            else {
-                // Early exit before coordinator was created — clean up all iterators.
-                await Promise.all(iterators.map((it) => {
-                    try {
-                        return Promise.resolve(it.return?.()).catch(() => { });
-                    }
-                    catch {
-                        return Promise.resolve();
-                    }
-                }));
-            }
+            await coordinator.return?.();
         }
     };
-    return createStream('merge', gen);
+    return createStream("merge", gen);
 }
 
 /**
@@ -3130,35 +3278,41 @@ function zip(...sources) {
             const resolved = fromAny(source);
             return resolved[Symbol.asyncIterator]();
         });
+        const runner = createAsyncCoordinator(iterators);
+        const queues = sources.map(() => []);
+        const completed = new Set();
+        const canEmitTuple = () => queues.every(queue => queue.length > 0);
+        const cannotEmitMore = () => queues.some((queue, index) => completed.has(index) && queue.length === 0);
         try {
             while (true) {
-                // Pull from all iterators; if any completes, cancel the rest immediately
-                const results = await Promise.allSettled(iterators.map(it => it.next()));
-                let completed = false;
-                const values = [];
-                for (let i = 0; i < results.length; i++) {
-                    const r = results[i];
-                    if (r.status === 'rejected') {
-                        // Propagate first rejection, cancel others first
-                        await Promise.all(iterators.map((it, j) => j !== i ? it.return?.(undefined).catch(() => { }) : Promise.resolve()));
-                        throw normalizeError(r.reason);
-                    }
-                    if (r.value.done) {
-                        completed = true;
+                if (cannotEmitMore())
+                    break;
+                const result = await runner.next();
+                if (result.done)
+                    break;
+                const event = result.value;
+                if (event.type === 'error') {
+                    throw normalizeError(event.error);
+                }
+                if (event.type === 'complete') {
+                    completed.add(event.sourceIndex);
+                }
+                else {
+                    queues[event.sourceIndex].push(event.value);
+                }
+                while (canEmitTuple()) {
+                    yield queues.map(queue => queue.shift());
+                    if (cannotEmitMore()) {
                         break;
                     }
-                    values.push(r.value.value);
                 }
-                if (completed) {
-                    // Cancel any pending iterators that haven't resolved yet
-                    await Promise.all(iterators.map(it => it.return?.(undefined).catch(() => { })));
+                if (cannotEmitMore()) {
                     break;
                 }
-                yield values;
             }
         }
         finally {
-            await Promise.all(iterators.map(it => (typeof it.return === 'function' ? it.return(undefined).catch(() => { }) : Promise.resolve())));
+            await runner.return?.();
         }
     };
     return createStream('zip', gen);
@@ -5364,11 +5518,11 @@ function share() {
  *
  * This operator multicasts the source stream, ensuring that multiple downstream
  * consumers can receive values from a single source connection. It uses an internal
- * `ReplaySubject` to cache the most recent values. When a new consumer subscribes,
- * it immediately receives these cached values before receiving new ones.
+ * subscriber queue and a bounded replay buffer so that late subscribers receive the
+ * most recent values before continuing with live emissions.
  *
  * This is useful for:
- * - Preventing redundant execution of a source stream (e.g., a network request).
+ * - Preventing redundant execution of a source stream (e.g. a network request).
  * - Providing a "state history" to late subscribers.
  *
  * @template T The type of the values in the stream.
@@ -5378,88 +5532,184 @@ function share() {
  */
 function shareReplay(bufferSize = Infinity) {
     let isConnected = false;
-    let output;
     let resolvedSize;
     let sourceIterator = null;
-    let subscriberCount = 0;
+    let activeConnection = null;
+    const replay = [];
+    let replayHead = 0;
+    let completed = false;
+    let errorValue;
+    const subscribers = new Set();
+    const pushReplay = (value) => {
+        if (resolvedSize === undefined || resolvedSize === Infinity) {
+            replay.push(value);
+            return;
+        }
+        if (resolvedSize <= 0)
+            return;
+        if (replay.length < resolvedSize) {
+            replay.push(value);
+        }
+        else {
+            replay[replayHead] = value;
+            replayHead = (replayHead + 1) % resolvedSize;
+        }
+    };
+    const snapshotReplay = () => {
+        if (resolvedSize === undefined || resolvedSize === Infinity) {
+            return [...replay];
+        }
+        if (resolvedSize <= 0 || replay.length === 0) {
+            return [];
+        }
+        if (replay.length < resolvedSize) {
+            return [...replay];
+        }
+        return [...replay.slice(replayHead), ...replay.slice(0, replayHead)];
+    };
+    const broadcastValue = (value) => {
+        for (const subscriber of subscribers) {
+            if (subscriber.done)
+                continue;
+            if (subscriber.pendingResolve) {
+                const resolve = subscriber.pendingResolve;
+                subscriber.pendingResolve = subscriber.pendingReject = null;
+                resolve({ value, done: false });
+            }
+            else {
+                subscriber.queue.push(value);
+            }
+        }
+    };
+    const broadcastCompletion = () => {
+        for (const subscriber of subscribers) {
+            if (subscriber.done || subscriber.queue.length > 0 || !subscriber.pendingResolve) {
+                continue;
+            }
+            const resolve = subscriber.pendingResolve;
+            subscriber.pendingResolve = subscriber.pendingReject = null;
+            resolve(DONE);
+        }
+    };
+    const broadcastError = (error) => {
+        for (const subscriber of subscribers) {
+            if (subscriber.done || !subscriber.pendingReject) {
+                continue;
+            }
+            const reject = subscriber.pendingReject;
+            subscriber.pendingResolve = subscriber.pendingReject = null;
+            reject(error);
+        }
+    };
     const disconnect = () => {
         if (sourceIterator) {
             const it = sourceIterator;
             sourceIterator = null;
             isConnected = false;
+            activeConnection = null;
             void it.return?.().catch(() => { });
         }
     };
     const connectSource = (source) => {
+        const connection = Symbol("shareReplayConnection");
         sourceIterator = source;
         isConnected = true;
+        activeConnection = connection;
         void (async () => {
             try {
                 while (true) {
                     const result = await source.next();
                     if (result.done)
                         break;
-                    output.next(result.value);
+                    pushReplay(result.value);
+                    broadcastValue(result.value);
                 }
             }
             catch (err) {
-                output.error(normalizeError(err));
+                errorValue = normalizeError(err);
+                broadcastError(errorValue);
+                return;
             }
             finally {
+                if (activeConnection !== connection) {
+                    return;
+                }
                 sourceIterator = null;
-                if (output && !output.completed())
-                    output.complete();
+                completed = true;
+                isConnected = false;
+                activeConnection = null;
+                broadcastCompletion();
             }
         })();
     };
     return createOperator('shareReplay', function (source) {
         let initialized = false;
-        let outputIterator = null;
-        const ensureOutputIterator = async () => {
-            if (initialized && outputIterator) {
-                return outputIterator;
-            }
+        const subscriber = {
+            done: false,
+            queue: [],
+            pendingResolve: null,
+            pendingReject: null,
+        };
+        const ensureConnected = async () => {
+            if (initialized)
+                return;
             initialized = true;
             if (resolvedSize === undefined) {
                 resolvedSize = isPromiseLike(bufferSize) ? await bufferSize : bufferSize;
             }
-            if (!output)
-                output = createReplaySubject(resolvedSize);
-            if (!isConnected)
+            subscriber.queue.push(...snapshotReplay());
+            subscribers.add(subscriber);
+            if (!completed && errorValue === undefined && !isConnected) {
                 connectSource(source);
-            else if (typeof source.return === "function") {
+            }
+            else if (typeof source.return === 'function') {
                 await Promise.resolve(source.return()).catch(() => { });
             }
-            if (!outputIterator) {
-                outputIterator = output[Symbol.asyncIterator]();
-            }
-            return outputIterator;
         };
-        subscriberCount++;
-        void ensureOutputIterator();
+        const cleanup = () => {
+            if (subscriber.done)
+                return;
+            subscriber.done = true;
+            subscribers.delete(subscriber);
+            if (subscribers.size === 0 && isConnected) {
+                disconnect();
+            }
+            if (subscriber.pendingResolve) {
+                subscriber.pendingResolve(DONE);
+                subscriber.pendingResolve = subscriber.pendingReject = null;
+            }
+        };
         const iterator = {
             async next() {
-                const it = await ensureOutputIterator();
-                return it.next();
+                if (subscriber.done)
+                    return DONE;
+                await ensureConnected();
+                if (subscriber.queue.length > 0) {
+                    return { value: subscriber.queue.shift(), done: false };
+                }
+                if (errorValue !== undefined) {
+                    cleanup();
+                    throw errorValue;
+                }
+                if (completed) {
+                    cleanup();
+                    return DONE;
+                }
+                return new Promise((resolve, reject) => {
+                    subscriber.pendingResolve = resolve;
+                    subscriber.pendingReject = reject;
+                });
             },
             async return(value) {
-                subscriberCount--;
-                if (subscriberCount === 0 && isConnected) {
-                    disconnect();
-                }
-                const it = await ensureOutputIterator();
-                return it.return ? it.return(value) : DONE;
+                cleanup();
+                return { value, done: true };
             },
             async throw(err) {
-                const error = normalizeError(err);
-                const it = await ensureOutputIterator();
-                if (output && !output.completed())
-                    output.error(error);
-                if (it.throw)
-                    return it.throw(error);
-                throw error;
+                cleanup();
+                throw normalizeError(err);
             }
         };
+        void ensureConnected();
         return iterator;
     });
 }
@@ -5822,7 +6072,16 @@ function switchMap(project) {
                 subscribeToInner(fromAny(projected), token);
             }
         };
-        const tryNext = source.__tryNext;
+        const sourceWithPush = source;
+        const tryNext = sourceWithPush.__tryNext;
+        const originalOnPush = sourceWithPush.__onPush;
+        let wiredOnPush;
+        const restoreSourcePush = () => {
+            if (wiredOnPush && sourceWithPush.__onPush === wiredOnPush) {
+                sourceWithPush.__onPush = originalOnPush;
+            }
+            wiredOnPush = undefined;
+        };
         if (typeof tryNext === "function") {
             const drain = () => {
                 while (!stopped) {
@@ -5831,6 +6090,7 @@ function switchMap(project) {
                         result = tryNext.call(source);
                     }
                     catch (err) {
+                        restoreSourcePush();
                         output.error(normalizeError(err));
                         return;
                     }
@@ -5838,13 +6098,15 @@ function switchMap(project) {
                         return;
                     if (result.done) {
                         inputCompleted = true;
+                        restoreSourcePush();
                         checkComplete();
                         return;
                     }
                     processOuterValue(result.value);
                 }
             };
-            source.__onPush = drain;
+            wiredOnPush = drain;
+            sourceWithPush.__onPush = wiredOnPush;
             drain();
         }
         else {
@@ -5868,6 +6130,7 @@ function switchMap(project) {
         const baseThrow = outputIterator.throw?.bind(outputIterator);
         outputIterator.return = async () => {
             stopped = true;
+            restoreSourcePush();
             try {
                 try {
                     await currentInner?.it.return?.();
@@ -5886,6 +6149,7 @@ function switchMap(project) {
         outputIterator.throw = async (err) => {
             const error = normalizeError(err);
             stopped = true;
+            restoreSourcePush();
             try {
                 try {
                     await currentInner?.it.return?.();
@@ -6328,7 +6592,6 @@ const toArray = () => createOperator("toArray", function (source) {
  * ```
  */
 function withLatestFrom(...args) {
-    // Normalize parameters immediately and synchronously to prevent execution pipeline lag
     const normalizedInputs = (args.length === 1 && Array.isArray(args[0]))
         ? args[0]
         : args;
@@ -6336,109 +6599,70 @@ function withLatestFrom(...args) {
         const abortController = new AbortController();
         let runner = null;
         let isSettled = false;
+        const completeOutput = () => {
+            if (!isSettled && !output.completed()) {
+                isSettled = true;
+                output.complete();
+            }
+        };
+        const errorOutput = (err) => {
+            if (!isSettled) {
+                isSettled = true;
+                output.error(normalizeError(err));
+            }
+        };
         void (async () => {
             try {
                 if (abortController.signal.aborted)
                     return;
-                // 1. Concurrently resolve promises or pass streams down to standard token format
-                const resolvedAux = [];
+                const resolvedInputs = [];
                 for (const input of normalizedInputs) {
-                    resolvedAux.push(isPromiseLike(input) ? await Promise.resolve(input) : input);
+                    resolvedInputs.push(isPromiseLike(input) ? await Promise.resolve(input) : input);
                 }
-                // Post-await safety guard
                 if (abortController.signal.aborted)
                     return;
-                // 2. Initialize iterators and track baseline structural dimensions
-                const auxIterators = resolvedAux.map((input) => eachValueFrom(fromAny(input)));
+                const auxIterators = resolvedInputs.map((input) => fromAny(input)[Symbol.asyncIterator]());
                 const latestValues = new Array(auxIterators.length).fill(undefined);
                 const hasValue = new Array(auxIterators.length).fill(false);
-                // 3. Pre-warm auxiliary streams to catch any initial synchronous values safely
-                const initialAuxValues = await Promise.all(auxIterators.map((iterator) => iterator.next()));
-                for (let index = 0; index < initialAuxValues.length; index++) {
-                    const result = initialAuxValues[index];
-                    if (!result.done) {
-                        latestValues[index] = result.value;
-                        hasValue[index] = true;
-                    }
-                }
-                // Post-warming check to ensure downstream didn't unsubscribe during the initialization microtasks
-                if (abortController.signal.aborted)
-                    return;
-                // 4. Drain any buffered source values silently (they arrived before auxiliaries had values)
-                const sourceWithSyncPull = source;
-                if (sourceWithSyncPull.__tryNext) {
-                    while (true) {
-                        let buffered;
-                        try {
-                            buffered = sourceWithSyncPull.__tryNext();
-                        }
-                        catch (err) {
-                            if (!isSettled) {
-                                isSettled = true;
-                                output.error(err instanceof Error ? err : new Error(String(err)));
-                            }
-                            return;
-                        }
-                        if (!buffered || buffered.done)
-                            break;
-                    }
-                }
-                if (abortController.signal.aborted)
-                    return;
-                // 5. Build coordinate multiplexer mapping across source and side channels
-                runner = createAsyncCoordinator([...auxIterators, source]);
                 const sourceIndex = auxIterators.length;
-                // 6. Core Coordinator Event Processing Loop
+                runner = createAsyncCoordinator([
+                    ...auxIterators,
+                    source
+                ]);
                 while (!abortController.signal.aborted) {
                     const nextEvent = await runner.next();
                     if (nextEvent.done || abortController.signal.aborted)
                         break;
-                    const ev = nextEvent.value;
-                    // Handle inner or stream propagation errors cleanly
-                    if (ev.type === 'error') {
-                        if (!isSettled) {
-                            isSettled = true;
-                            output.error(ev.error instanceof Error ? ev.error : new Error(String(ev.error)));
-                        }
+                    const event = nextEvent.value;
+                    if (event.type === "error") {
+                        errorOutput(event.error);
                         return;
                     }
-                    // Disregard control signals
-                    if (ev.type !== 'value') {
-                        continue;
-                    }
-                    // Case A: Event originates from the primary source stream
-                    if (ev.sourceIndex === sourceIndex) {
-                        // Only emit if all auxiliary streams have recorded at least one historical value
+                    if (event.sourceIndex === sourceIndex) {
+                        if (event.type === "complete") {
+                            completeOutput();
+                            return;
+                        }
                         if (hasValue.length > 0 && hasValue.every(Boolean)) {
-                            output.push([ev.value, ...latestValues]);
+                            output.push([event.value, ...latestValues]);
                         }
                         continue;
                     }
-                    // Case B: Event originates from an auxiliary/side channel stream
-                    latestValues[ev.sourceIndex] = ev.value;
-                    hasValue[ev.sourceIndex] = true;
+                    if (event.type === "value") {
+                        latestValues[event.sourceIndex] = event.value;
+                        hasValue[event.sourceIndex] = true;
+                    }
                 }
-                // 7. Loop closed cleanly without error triggers -> Complete pipeline execution
-                if (!isSettled && !output.completed()) {
-                    isSettled = true;
-                    output.complete();
-                }
+                completeOutput();
             }
             catch (err) {
-                // Safe lock catchment blocks for out-of-band exceptions during async scheduling phases
-                if (!isSettled) {
-                    isSettled = true;
-                    output.error(err instanceof Error ? err : new Error(String(err)));
-                }
+                errorOutput(err);
             }
             finally {
                 abortController.abort();
                 void runner?.return?.();
             }
         })();
-        /**
-         * Synchronous pipeline teardown handler returned to the engine infrastructure.
-         */
         return () => {
             abortController.abort();
             void runner?.return?.();
@@ -6566,12 +6790,12 @@ const createSemaphore = (initialCount) => {
 };
 
 /*
- * Public API Surface of generator
+ * Public API Surface of streamix
  */
 
 /**
  * Generated bundle index. Do not edit.
  */
 
-export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isOperator, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, normalizeError, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
+export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, getIterator, groupBy, ignoreElements, iif, interval, isOperator, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, normalizeError, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, raceNext, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
 //# sourceMappingURL=epikodelabs-streamix.mjs.map

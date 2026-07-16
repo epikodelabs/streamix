@@ -73,7 +73,7 @@ type Subscription = {
      * - Executes cleanup logic (if provided) exactly once
      * - Stream receivers may still get `complete()` as a cleanup signal
      *
-     * Errors thrown by cleanup logic are caught and logged.
+     * Errors thrown by cleanup logic are caught and suppressed.
      *
      * @returns A `MaybePromise<void>` that resolves when cleanup completes
      */
@@ -1045,11 +1045,11 @@ declare function share<T = any>(): Operator<T, T>;
  *
  * This operator multicasts the source stream, ensuring that multiple downstream
  * consumers can receive values from a single source connection. It uses an internal
- * `ReplaySubject` to cache the most recent values. When a new consumer subscribes,
- * it immediately receives these cached values before receiving new ones.
+ * subscriber queue and a bounded replay buffer so that late subscribers receive the
+ * most recent values before continuing with live emissions.
  *
  * This is useful for:
- * - Preventing redundant execution of a source stream (e.g., a network request).
+ * - Preventing redundant execution of a source stream (e.g. a network request).
  * - Providing a "state history" to late subscribers.
  *
  * @template T The type of the values in the stream.
@@ -1843,6 +1843,15 @@ type RunnerEvent<T> = {
     sourceIndex: number;
 };
 /**
+ * Options for {@link createAsyncCoordinator}.
+ */
+interface AsyncCoordinatorOptions {
+    /**
+     * If true, drain initial sources synchronously instead of deferring to a microtask.
+     */
+    syncDrain?: boolean;
+}
+/**
  * An async iterator that coordinates multiple sources.
  *
  * Supports dynamic source management and both sync and async draining.
@@ -1862,14 +1871,26 @@ interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
     /**
      * Dynamically add a new source to the coordinator.
      * @param source - The async iterator to add.
+     * @param key - Optional key used to remove the source by reference later.
      * @returns The index assigned to the new source.
      */
-    addSource(source: AsyncIterator<T>): number;
+    addSource(source: AsyncIterator<T>, key?: any): number;
     /**
      * Remove a source from the coordinator and clean it up.
      * @param index - The index of the source to remove.
      */
     removeSource(index: number): Promise<void>;
+    /**
+     * Remove a source by the key passed to {@link addSource}.
+     * @param key - The key of the source to remove.
+     */
+    removeSourceByKey(key: any): Promise<void>;
+    /**
+     * Batch multiple source additions/removals and emit a single notification
+     * after the batch completes.
+     * @param callback - Function that performs source changes.
+     */
+    batch(callback: () => void): void;
     /**
      * Get the number of currently active (non-completed, non-removed) sources.
      * @returns The count of active sources.
@@ -1902,7 +1923,7 @@ interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
  *
  * @example
  * ```ts
- * const coordinator = createAsyncCoordinator([stream1, stream2]);
+ * const coordinator = createAsyncCoordinator<number>([stream1, stream2]);
  * for await (const event of coordinator) {
  *   if (event.type === 'value') {
  *     // event.value from event.sourceIndex
@@ -1910,7 +1931,21 @@ interface AsyncCoordinator<T> extends AsyncIterator<RunnerEvent<T>> {
  * }
  * ```
  */
-declare function createAsyncCoordinator(sources?: AsyncIterator<any>[]): AsyncCoordinator<any>;
+declare function createAsyncCoordinator<T = any>(sources?: AsyncIterator<T>[], options?: AsyncCoordinatorOptions): AsyncCoordinator<T>;
+/**
+ * Gets an iterator from an iterable object.
+ * Supports both synchronous and asynchronous iterables.
+ *
+ * @param iterable The iterable to get an iterator from.
+ * @returns An `AsyncIterator` or `Iterator`.
+ * @throws If the provided object is not iterable.
+ */
+declare function getIterator<T>(iterable: AsyncIterable<T> | Iterable<T>): AsyncIterator<T> | Iterator<T>;
+/**
+ * Races an iterator's `next()` call against an `AbortSignal`.
+ * If the signal is aborted, the promise resolves with a `done: true` result.
+ */
+declare function raceNext<T>(iterator: AsyncIterator<T> | Iterator<T>, signal: AbortSignal): Promise<IteratorResult<T>>;
 
 /**
  * Shared queue item structure used across all async iterator implementations
@@ -1994,7 +2029,7 @@ type AsyncIteratorResult<T> = AsyncIteratorYieldResult<T> | {
  * Creates a factory that produces fresh `AsyncIterator` instances backed by
  * an internal queue with producer-backpressure.
  *
- * The `register` callback receives a `Receiver<T>` whose `next()`/`complete()`/
+ * The `register` callback receives an `Observer<T>` whose `next()`/`complete()`/
  * `error()` methods push into the iterator's queue. `next()` returns a
  * `Promise<void>` (or `void`) — the promise acts as a backpressure signal
  * from the consumer: it resolves only when the consumer pulls the value with
@@ -2016,6 +2051,7 @@ type AsyncIteratorResult<T> = AsyncIteratorYieldResult<T> | {
  */
 declare function createAsyncIterator<T>(opts: {
     register: (receiver: Receiver<T>) => Subscription;
+    conflate?: boolean;
 }): () => AsyncIterator<T, undefined, undefined> & {
     __tryNext?: () => AsyncIteratorResult<T> | null;
     __hasBufferedValues?: () => boolean;
@@ -2025,5 +2061,5 @@ declare function createAsyncIterator<T>(opts: {
     __pushError?: (err: any) => void;
 };
 
-export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, groupBy, ignoreElements, iif, interval, isOperator, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, normalizeError, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
-export type { AsyncCoordinator, AsyncIteratorResult, AsyncIteratorYieldResult, AsyncPushable, BehaviorSubject, ExpandOptions, ForkOption, GroupItem, MaybePromise, Operator, OperatorChain, PendingError, PipeResult, QueueItem, Receiver, ReleaseFn, ReplaySubject, RunnerEvent, Semaphore, SimpleLock, Stream, StrictReceiver, Subject, Subscription, ValidateChain };
+export { AsyncIteratorState, DONE, EMPTY, NEXT, asyncPull, audit, buffer, bufferCount, bufferUntil, bufferWhile, catchError, combineLatest, commit, concat, concatMap, createAsyncCoordinator, createAsyncIterator, createAsyncPushable, createBehaviorSubject, createLock, createOperator, createPushOperator, createQueue, createReceiver, createReplaySubject, createSemaphore, createStream, createSubject, createSubscription, debounce, defaultIfEmpty, defer, delay, delayUntil, delayWhile, distinctUntilChanged, distinctUntilKeyChanged, eachValueFrom, empty, endWith, exhaustMap, expand, filter, finalize, first, firstValueFrom, fork, forkJoin, from, fromAny, fromEvent, fromPromise, getIterator, groupBy, ignoreElements, iif, interval, isOperator, isPromiseLike, isStreamLike, last, lastValueFrom, loop, map, merge, mergeMap, normalizeError, observeOn, of, partition, pipeSourceThrough, pushComplete, pushError, pushValue, race, raceNext, range, reduce, retry, sample, scan, select, share, shareReplay, skip, skipUntil, skipWhile, slidingPair, startWith, streamToArray, switchMap, syncPull, take, takeUntil, takeWhile, tap, throttle, throwError, timer, toArray, withLatestFrom, zip };
+export type { AsyncCoordinator, AsyncCoordinatorOptions, AsyncIteratorResult, AsyncIteratorYieldResult, AsyncPushable, BehaviorSubject, ExpandOptions, ForkOption, GroupItem, MaybePromise, Operator, OperatorChain, PendingError, PipeResult, QueueItem, Receiver, ReleaseFn, ReplaySubject, RunnerEvent, Semaphore, SimpleLock, Stream, StrictReceiver, Subject, Subscription, ValidateChain };

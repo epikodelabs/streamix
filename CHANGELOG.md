@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.50
+
+Fixed iterator lifecycle, async coordination, and transport behavior across the v2 line.
+
 ## 2.0.49
 
 Normalized all catch/rejection errors to Error instances
@@ -7,7 +11,7 @@ Normalized all catch/rejection errors to Error instances
 - Apply err instanceof Error ? err : new Error(String(err)) across
   abstractions, operators, streams, subjects, utils, converters, and primitives.
 - Add normalizeError helper in utils/helpers.ts and use it where imports allow.
-- Remove dead streams/fromAtom.ts (imported missing ../atoms/atom, not exported).
+- Remove a dead, unexported stream adapter with a broken import.
 
 ## 2.0.48
 

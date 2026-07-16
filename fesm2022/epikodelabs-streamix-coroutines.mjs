@@ -2165,6 +2165,7 @@ function registerActorBusTarget(name, actor) {
 function clearActorBusListeners() {
     actorBusDirectListeners.clear();
     actorBusListeners.clear();
+    actorRequestHandlers.clear();
 }
 function dispatchActorBusMessage(message, options) {
     const from = message.from ??

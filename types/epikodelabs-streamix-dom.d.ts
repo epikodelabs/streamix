@@ -122,7 +122,7 @@ declare function onIntersection(element: MaybePromise<Element>, options?: MaybeP
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @param mediaQueryString A CSS media query string (or promise).
+ * @param query A CSS media query string (or promise).
  * @returns {Stream<boolean>} A stream emitting match state.
  */
 declare function onMediaQuery(query: MaybePromise<string>): Stream<boolean>;

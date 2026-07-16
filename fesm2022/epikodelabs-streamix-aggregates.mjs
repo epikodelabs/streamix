@@ -412,7 +412,7 @@ const unique = (keySelector) => createOperator("unique", function (source) {
 });
 
 /*
- * Public API Surface of actionstack
+ * Public API Surface of streamix aggregates
  */
 
 /**

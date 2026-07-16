@@ -551,7 +551,7 @@ function onIntersection(element, options) {
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @param mediaQueryString A CSS media query string (or promise).
+ * @param query A CSS media query string (or promise).
  * @returns {Stream<boolean>} A stream emitting match state.
  */
 function onMediaQuery(query) {
@@ -1266,7 +1266,7 @@ function onVisibilityChange() {
 }
 
 /*
- * Public API Surface of actionstack
+ * Public API Surface of streamix DOM
  */
 
 /**

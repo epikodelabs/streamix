@@ -1,20 +1,16 @@
 import { Stream, MaybePromise } from '@epikodelabs/streamix';
 
 /**
- * Represents a stream of HTTP responses.
+ * A {@link Stream} that represents a stream of HTTP responses.
  *
- * This is a special type of stream that includes a method to abort the
- * underlying HTTP request, providing control over long-running or cancellable
- * operations.
+ * The stream yields values produced by a response parser and exposes an
+ * `abort()` method that cancels the underlying request.
  */
 type HttpStream<T = any> = Stream<T> & {
     abort: () => void;
 };
 /**
- * HTTP request options.
- *
- * This object defines the configuration for an HTTP request, including
- * headers, URL parameters, body content, and credentials.
+ * Options for configuring an HTTP request.
  */
 type HttpOptions = {
     headers?: Record<string, string>;
@@ -23,10 +19,11 @@ type HttpOptions = {
     body?: any;
 };
 /**
- * Represents the HTTP request context.
+ * The request/response context that flows through the middleware chain.
  *
- * This object is passed through the middleware chain and contains all
- * relevant information about the request and response lifecycle.
+ * Middleware can read and mutate this object. After the final middleware runs,
+ * `response` contains the raw {@link Response} and `parser` is used to turn it
+ * into a stream of values.
  */
 type Context = {
     url: string;
@@ -40,89 +37,44 @@ type Context = {
     status?: number;
     statusText?: string;
     redirectTo?: string;
-    data?: Stream;
+    response?: Response;
+    data?: AsyncIterable<any>;
     [key: string]: any;
 };
 /**
- * A middleware function for modifying the HTTP request context.
- *
- * Middleware functions are composed in a chain, where each middleware
- * can process the `Context` object before passing it to the next function
- * via the `next` parameter.
+ * A middleware function that transforms a {@link Context} before the request
+ * is sent or after the response is received.
  */
 type Middleware = (next: (context: Context) => Promise<Context>) => (context: Context) => Promise<Context>;
 /**
- * A function to parse the HTTP response body into a stream of values.
- *
- * A parser takes a `Response` object and returns an `AsyncIterable` that
- * yields the parsed data. This allows for streaming responses and handling
- * various data formats.
+ * Parses a {@link Response} into an async iterable of values.
  */
 type ParserFunction<T = any> = (response: Response) => AsyncIterable<T>;
 /**
- * HTTP Client for making requests with middleware support.
- *
- * This object provides methods for standard HTTP verbs (`get`, `post`, etc.)
- * and a `withDefaults` method to configure the client with a set of middleware
- * functions that will be applied to every request.
+ * An HTTP client built from a chain of middleware.
  */
 type HttpClient = {
-    /**
-     * Adds middleware functions to the HTTP client.
-     *
-     * This method configures the client with default middleware that will be
-     * applied to all subsequent requests.
-     */
     withDefaults(this: HttpClient, ...middlewares: Middleware[]): HttpClient;
-    /**
-     * Performs an HTTP GET request.
-     */
     get<T = any>(url: string, options?: HttpOptions | ParserFunction<T>, parser?: ParserFunction<T>): HttpStream<T>;
-    /**
-     * Performs an HTTP POST request.
-     */
     post<T = any>(url: string, options?: HttpOptions | ParserFunction<T>, parser?: ParserFunction<T>): HttpStream<T>;
-    /**
-     * Performs an HTTP PUT request.
-     */
     put<T = any>(url: string, options?: HttpOptions | ParserFunction<T>, parser?: ParserFunction<T>): HttpStream<T>;
-    /**
-     * Performs an HTTP PATCH request.
-     */
     patch<T = any>(url: string, options?: HttpOptions | ParserFunction<T>, parser?: ParserFunction<T>): HttpStream<T>;
-    /**
-     * Performs an HTTP DELETE request.
-     */
     delete<T = any>(url: string, options?: HttpOptions | ParserFunction<T>, parser?: ParserFunction<T>): HttpStream<T>;
 };
 /**
- * Creates a middleware function that sets a custom fetch function within a context object.
- *
- * This is useful for mocking HTTP requests in tests or for using a different
- * fetch implementation, such as `node-fetch` in a server environment.
+ * Middleware that installs a custom `fetch` implementation on the context.
  */
 declare const useCustom: (customFetch: Function) => Middleware;
 /**
- * Resolves relative URLs against a base URL.
- *
- * This middleware is useful for making API requests without repeating the
- * base URL for every call. It will resolve relative paths like `/users/1`
- * against the provided `baseUrl`.
+ * Middleware that resolves relative URLs against a base URL.
  */
 declare const useBase: (baseUrl: string) => Middleware;
 /**
- * Sets the `Accept` header for the request.
- *
- * This middleware ensures that the request specifies the desired content
- * type for the response, such as `application/json`.
+ * Middleware that sets the `Accept` request header.
  */
 declare const useAccept: (contentType: string) => Middleware;
 /**
- * Handles OAuth 2.0 authentication and token refresh.
- *
- * This middleware automatically adds an `Authorization` header to the request
- * with a bearer token. If a 401 Unauthorized response is received, it attempts
- * to refresh the token and retry the request.
+ * Middleware that adds an OAuth2 bearer token and refreshes it on 401 responses.
  */
 declare const useOauth: ({ getToken, refreshToken, shouldRetry, }: {
     getToken: () => Promise<string>;
@@ -130,119 +82,47 @@ declare const useOauth: ({ getToken, refreshToken, shouldRetry, }: {
     shouldRetry?: (context: Context) => boolean;
 }) => Middleware;
 /**
- * Retry middleware for handling transient errors.
- *
- * This middleware automatically retries a failed request, with an exponential
- * backoff delay between attempts. This is useful for handling temporary network
- * failures or flaky API services.
+ * Middleware that retries failed requests with exponential backoff.
  */
 declare const useRetry: (maxRetries?: number, backoffBase?: number, shouldRetry?: (error: any, context: Context) => boolean) => Middleware;
 /**
- * Handles HTTP redirects.
- *
- * This middleware automatically follows 3xx redirect responses up to a
- * specified maximum number of times. It updates the URL in the context and
- * handles the change in HTTP method for a 303 See Other redirect.
+ * Middleware that follows HTTP redirect responses up to a maximum number of hops.
  */
 declare const useRedirect: (maxRedirects?: number) => Middleware;
 /**
- * Sets a custom header for the request.
+ * Middleware that sets a custom request header.
  */
 declare const useHeader: (name: string, value: string) => Middleware;
 /**
- * Removes headers from the request context by name.
- *
- * This is useful for stripping default headers (like `Content-Type`) that
- * would otherwise trigger a CORS preflight on simple GET requests.
+ * Middleware that removes the named headers from the request context.
  */
 declare const useStripHeaders: (...names: string[]) => Middleware;
 /**
- * Appends query parameters to the request URL.
+ * Middleware that appends query parameters to the request URL.
  */
 declare const useParams: (data: Record<string, any>) => Middleware;
 /**
- * Handles errors thrown by the next middleware in the chain.
- *
- * This middleware provides a way to gracefully handle errors without
- * breaking the entire chain. It catches errors and allows you to
- * define a custom fallback behavior.
+ * Middleware that catches errors and returns a fallback context instead of throwing.
  */
 declare const useFallback: (handler: (error: any, context: Context) => Context) => Middleware;
 /**
- * Logs request and response information.
+ * Middleware that logs the request method/URL and response status.
  */
 declare const useLogger: (logger?: (message: string) => void) => Middleware;
 /**
- * Sets a timeout for the request.
- *
- * This middleware adds a timeout to the request, automatically aborting it
- * if it takes longer than the specified number of milliseconds.
+ * Middleware that aborts the request if it does not complete within the given
+ * number of milliseconds.
  */
 declare const useTimeout: (ms: number) => Middleware;
 /**
- * Creates an HTTP client with middleware support and streaming capabilities.
+ * Creates an {@link HttpClient} instance.
  *
- * The client is a factory for creating request streams. Middleware can be
- * configured globally for the client using `withDefaults`.
- *
- * @returns {HttpClient} An instance of the HTTP client.
- *
- * @example
- * ```typescript
- * async function fetchData() {
- *   const client = createHttpClient().withDefaults(
- *     useBase("https://api.example.com"),
- *     useAccept("application/json"),
- *     useLogger(),
- *     useTimeout(5000),
- *     useFallback((error, context) => {
- *       console.error("Request failed:", error);
- *       return context;
- *     })
- *   );
- *
- *   const responseStream = client.get("/data", readJson);
- *
- *   try {
- *     for await (const value of responseStream) {
- *       console.log("Received data:", value);
- *     }
- *   } catch (error) {
- *     console.error("Unexpected error:", error);
- *   }
- * }
- *
- * fetchData();
- *
- * async function postData() {
- *   const client = createHttpClient().use(
- *     useBase("https://api.example.com"),
- *     useLogger(),
- *     useFallback((error, context) => {
- *       console.error("Post request failed:", error);
- *       return context;
- *     })
- *   );
- *
- *   const responseStream = client.post("/items");
- *
- *   try {
- *     for await (const value of responseStream) {
- *       console.log("Post response:", value);
- *     }
- *   } catch (error) {
- *     console.error("Post request error:", error);
- *   }
- * }
- *
- * postData();
- * ```
+ * Use `withDefaults()` to register middleware that will be applied to every
+ * request made through the client.
  */
 declare const createHttpClient: () => HttpClient;
 /**
- * Yields the response status and status text as a single object.
- *
- * This parser ignores the response body and emits the HTTP status metadata only.
+ * Parser that yields the response status, status text, and headers.
  */
 declare const readStatus: ParserFunction<{
     status: number;
@@ -250,39 +130,23 @@ declare const readStatus: ParserFunction<{
     headers: Record<string, string>;
 }>;
 /**
- * Parses a Response object as JSON.
- *
- * This is a standard parser function that reads the entire response body,
- * parses it as a JSON object, and then emits that single object.
+ * Parser that reads the response body and yields the parsed JSON value.
  */
 declare const readJson: ParserFunction;
 /**
- **
- * Parses a Response object as text.
- *
- * This parser reads the entire response body as a text string and emits
- * that string as a single value.
+ * Parser that yields the response body as a string.
  */
 declare const readText: ParserFunction<string>;
 /**
- * Parses a Response object as an ArrayBuffer.
- *
- * This parser reads the entire response body into an `ArrayBuffer` and
- * emits it as a single value. This is useful for handling binary data.
+ * Parser that yields the response body as an {@link ArrayBuffer}.
  */
 declare const readArrayBuffer: ParserFunction<ArrayBuffer>;
 /**
- * Parses a Response object as a Blob.
- *
- * This parser reads the entire response body into a `Blob` object and
- * emits it as a single value. This is useful for working with files or images.
+ * Parser that yields the response body as a {@link Blob}.
  */
 declare const readBlob: ParserFunction<Blob>;
 /**
- * Type for the chunks emitted by the readChunks function.
- *
- * This object contains a parsed chunk of data, the current progress of the
- * download, and a `done` flag indicating completion.
+ * Metadata emitted by {@link readChunks} for each chunk of the response body.
  */
 type ChunkData<T> = {
     chunk: T;
@@ -290,43 +154,37 @@ type ChunkData<T> = {
     done: boolean;
 };
 /**
- * Reads and processes streamed response chunks based on Content-Type.
- *
- * This is a versatile parser that can handle a variety of streaming formats,
- * including binary data and line-delimited JSON (NDJSON). It emits chunks
- * as they arrive, along with progress information.
+ * Parser that streams response chunks and yields each chunk together with
+ * download progress metadata.
  */
 declare const readChunks: <T = Uint8Array>(chunkParser?: (chunk: any) => T) => ParserFunction<ChunkData<T>>;
 /**
- * Parses raw binary chunks (returns Uint8Array as-is).
+ * Chunk parser that returns a {@link Uint8Array} unchanged.
  */
 declare const readBinaryChunk: (chunk: Uint8Array) => Uint8Array;
 /**
- * Decodes a binary chunk into a text string.
+ * Chunk parser that decodes a binary chunk into a UTF-8 string.
  */
 declare function readTextChunk(chunk: any, encoding?: string): string;
 /**
- * Parses a binary chunk as JSON.
+ * Chunk parser that parses a string chunk as JSON.
  */
 declare const readJsonChunk: (chunk: string) => any;
 /**
- * Parses a single NDJSON line.
+ * Chunk parser that parses a single NDJSON line as JSON.
  */
 declare const readNdjsonChunk: (line: string) => any;
 /**
- * Converts a binary chunk to a Base64 string.
+ * Chunk parser that encodes a binary chunk as a Base64 string.
  */
 declare const readBase64Chunk: (chunk: Uint8Array) => string;
 /**
- * Parses a text chunk as CSV data.
+ * Chunk parser that splits a CSV text chunk into rows and columns.
  */
 declare const readCsvChunk: (chunk: string) => string[][];
 /**
- * Reads and collects the entire response body from a `ReadableStream`.
- *
- * This function returns a stream that yields the full data as it's read.
- * It's useful for scenarios where you need the complete response body
- * before processing the data, such as for images or complete files.
+ * Parser that reads the entire response body and yields it as a single
+ * concatenated {@link Uint8Array}.
  */
 declare const readFull: ParserFunction<Uint8Array>;
 
