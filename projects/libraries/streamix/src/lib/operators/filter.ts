@@ -19,10 +19,15 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
  * @param predicateOrValue The filtering criterion. Can be a predicate function, a single value, or an array of values.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const filter = <T = any>(
+export function filter<T>(
+  predicate: (value: T, index: number) => MaybePromise<boolean>
+): Operator<T, T>;
+export function filter<T>(value: T): Operator<T, T>;
+export function filter<T>(values: T[]): Operator<T, T>;
+export function filter<T = any>(
   predicateOrValue: ((value: T, index: number) => MaybePromise<boolean>) | T | T[]
-) =>
-  createOperator<T, T>('filter', function (this: Operator, source) {
+) {
+  return createOperator<T, T>('filter', function (this: Operator, source) {
     let index = 0;
 
     return {
@@ -53,3 +58,4 @@ export const filter = <T = any>(
       }
     };
   });
+}

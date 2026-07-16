@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.52
+
+Fixed `filter(...)` TypeScript inference by adding overloads so predicate callbacks are no longer misread as literal function values, and updated the React infinite-scroll example to use an explicit event parameter.
+
 ## 2.0.51
 
 Fixed package publishing by removing the generated `dist/streamix/.npmignore` file that excluded secondary entry point `package.json` files from the npm tarball.
