@@ -2,7 +2,13 @@
 
 `@epikodelabs/streamix/coroutines` runs CPU-heavy work in Web Workers without blocking the main thread.
 
-A `coroutine(...)` is a background task runner created from your function. It generates a worker script, starts one dedicated worker for that script on demand, and exposes a direct task API through `processTask(...)`.
+A `coroutine(...)` is a background task runner created from your function. It turns your task function and helpers into worker-side JavaScript source, starts one dedicated worker from that generated source on demand, and exposes a direct task API through `processTask(...)`.
+
+> **Important**: 
+> Streamix is not injected into the Web Worker internals for inline use inside your worker code.
+> When you call `coroutine(...)`, Streamix takes the task function and helpers you pass, turns them into plain worker-side JavaScript source, wraps that source with its worker runner, and starts the worker from that generated code.
+> Inside the worker, only that self-contained task and helper code runs.
+> Streamix stays outside the worker and handles task dispatch, queueing, result delivery, and worker lifecycle management.
 
 Use `coroutine(...)` when you need:
 - background computation
