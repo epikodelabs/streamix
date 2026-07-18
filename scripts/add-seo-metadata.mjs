@@ -9,6 +9,7 @@ const SITE_URL = 'https://epikodelabs.github.io/streamix';
 const SITE_NAME = 'streamix';
 const SITE_DESCRIPTION = 'Reactive streams built on async generators. Small bundle, pull-based execution, and a familiar operator API.';
 const DEFAULT_IMAGE = `${SITE_URL}/LOGO.png`;
+const COMPANY_NAME_VARIANTS = ['Epikode', 'EpikodeLabs', 'Epikode Labs'];
 
 // Page-specific metadata
 const PAGE_METADATA = {
@@ -54,6 +55,12 @@ const PAGE_METADATA = {
     keywords: ['subjects', 'event emitters', 'multicast', 'subscriptions', 'reactivity', 'event handling']
   },
 
+  'ATOMS.md': {
+    title: 'Atoms - Reactive State Primitives | streamix',
+    description: 'Meet atom, the tiny reactive state primitive behind streamix. Learn how to create, update, and subscribe to reactive values.',
+    keywords: ['atom', 'reactive state', 'state management', 'observable', 'subscription', 'reactivity', 'typescript']
+  },
+
   // =================================================================
   // FRAMEWORK INTEGRATIONS
   // =================================================================
@@ -69,6 +76,12 @@ const PAGE_METADATA = {
     keywords: ['react', 'hooks', 'integration', 'state management', 'reactivity', 'useEffect']
   },
 
+  'PRESENTATION.md': {
+    title: 'Presentation - Visual Introduction to streamix',
+    description: 'A visual introduction to streamix: pull-based reactive streams built on async generators, with links to the full documentation.',
+    keywords: ['presentation', 'showcase', 'visual introduction', 'reactive streams', 'async generators', 'streamix']
+  },
+
   // =================================================================
   // PROJECT INFORMATION
   // =================================================================
@@ -80,8 +93,8 @@ const PAGE_METADATA = {
 
   'PRICING.md': {
     title: 'Pricing & Licensing | streamix',
-    description: 'Explore streamix pricing options, licensing plans, and commercial support.',
-    keywords: ['pricing', 'license', 'licensing', 'commercial', 'support', 'open source', 'agpl', 'enterprise']
+    description: 'Explore streamix pricing. Free AGPL-3.0 open-source and $25/$30 one-time commercial licenses for individuals and teams.',
+    keywords: ['pricing', 'license', 'licensing', 'commercial', 'one-time payment', 'open source', 'agpl', 'enterprise', 'individual', 'team']
   },
 
   // =================================================================
@@ -89,20 +102,20 @@ const PAGE_METADATA = {
   // =================================================================
   'TERMS-OF-SERVICE.md': {
     title: 'Terms of Service | streamix',
-    description: 'Read the complete terms and conditions for using streamix library and services.',
-    keywords: ['terms', 'terms of service', 'legal', 'conditions', 'agreement', 'tos']
+    description: 'Read the terms and conditions for using the streamix library, documentation, and commercial licenses.',
+    keywords: ['terms', 'terms of service', 'legal', 'conditions', 'agreement', 'tos', 'commercial license']
   },
 
   'PRIVACY-POLICY.md': {
     title: 'Privacy Policy | streamix',
-    description: 'Learn about how streamix and epikodelabs handle your data, privacy, and comply with regulations like GDPR.',
-    keywords: ['privacy', 'privacy policy', 'data protection', 'gdpr', 'security', 'compliance', 'legal']
+    description: 'Learn how epikodelabs handles data for the streamix documentation site, open-source project, and commercial license purchases.',
+    keywords: ['privacy', 'privacy policy', 'data protection', 'gdpr', 'ccpa', 'security', 'compliance', 'legal', 'github']
   },
 
   'REFUND-POLICY.md': {
     title: 'Refund Policy | streamix',
-    description: 'Review the refund policy for streamix licensing, commercial support, and money-back guarantee.',
-    keywords: ['refund', 'refund policy', 'money-back', 'guarantee', 'support', 'satisfaction']
+    description: 'Review the refund policy for streamix commercial licenses and paid services.',
+    keywords: ['refund', 'refund policy', 'commercial license', 'paid services', 'non-refundable', 'support']
   }
 };
 
@@ -166,7 +179,7 @@ function extractFirstParagraph(content) {
  */
 function generateKeywords(content, title, customKeywords = []) {
   if (customKeywords && customKeywords.length > 0) {
-    return customKeywords;
+    return includeCompanyNameVariants(customKeywords);
   }
 
   const keywords = new Set();
@@ -191,7 +204,24 @@ function generateKeywords(content, title, customKeywords = []) {
   keywords.add('streamix');
   keywords.add('reactive library');
 
-  return Array.from(keywords).slice(0, 8);
+  return includeCompanyNameVariants(Array.from(keywords).slice(0, 8));
+}
+
+/**
+ * Ensure all supported company name variants are represented equally in SEO keywords
+ */
+function includeCompanyNameVariants(keywords = []) {
+  const mergedKeywords = new Map();
+
+  for (const keyword of keywords) {
+    mergedKeywords.set(String(keyword).toLowerCase(), keyword);
+  }
+
+  for (const companyName of COMPANY_NAME_VARIANTS) {
+    mergedKeywords.set(companyName.toLowerCase(), companyName);
+  }
+
+  return Array.from(mergedKeywords.values());
 }
 
 /**
@@ -230,15 +260,19 @@ function createFrontmatter(filename, content, pageTitle, pageDescription, pageKe
 
   // Build YAML frontmatter
   let yaml = '---\n';
-  yaml += `title: ${yamlString(pageTitle)}\n`;
-  yaml += `description: ${yamlString(pageDescription)}\n`;
+  yaml += `title: "${escapeYaml(pageTitle)}"\n`;
+  yaml += `description: "${escapeYaml(pageDescription)}"\n`;
   yaml += `keywords:\n`;
   for (const keyword of pageKeywords) {
-    yaml += `  - ${yamlString(keyword)}\n`;
+    yaml += `  - ${escapeYaml(keyword)}\n`;
   }
   yaml += 'head:\n';
   for (const [tag, attrs] of metadata.head) {
-    yaml += `  - [${tag}, ${yamlObject(attrs)}]\n`;
+    yaml += `  - [${tag}`;
+    for (const [key, value] of Object.entries(attrs)) {
+      yaml += `, { ${key}: "${escapeYaml(value)}" }`;
+    }
+    yaml += ']\n';
   }
   yaml += '---\n\n';
 
@@ -246,22 +280,13 @@ function createFrontmatter(filename, content, pageTitle, pageDescription, pageKe
 }
 
 /**
- * Render a YAML-safe double-quoted string scalar.
+ * Escape YAML string values
  */
-function yamlString(value) {
-  return `"${String(value)
+function escapeYaml(str) {
+  return String(str)
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n')}"`;
-}
-
-/**
- * Render a small flow-style YAML object.
- */
-function yamlObject(obj) {
-  return `{ ${Object.entries(obj)
-    .map(([key, value]) => `${key}: ${yamlString(value)}`)
-    .join(', ')} }`;
+    .replace(/\n/g, '\\n');
 }
 
 /**
@@ -309,7 +334,7 @@ function processMarkdownFile(filePath, filename) {
 
     const title = metadata.title || extractMainHeading(content) || filename.replace(/\.md$/, '');
     const description = metadata.description || extractFirstParagraph(content);
-    const keywords = metadata.keywords || generateKeywords(content, title);
+    const keywords = generateKeywords(content, title, metadata.keywords);
 
     // Create and prepend frontmatter
     const frontmatter = createFrontmatter(filename, content, title, description, keywords);
