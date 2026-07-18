@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "types": []
+  },
+  "include": [
+    "projects/libraries/streamix/src/**/*.ts",
+    "projects/libraries/streamix/aggregates/src/**/*.ts",
+    "projects/libraries/streamix/coroutines/src/**/*.ts",
+    "projects/libraries/streamix/dom/src/**/*.ts",
+    "projects/libraries/streamix/networking/src/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.spec.ts"
+  ]
+}
