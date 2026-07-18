@@ -9,6 +9,7 @@ const SITE_URL = 'https://epikodelabs.github.io/streamix';
 const SITE_NAME = 'streamix';
 const SITE_DESCRIPTION = 'Reactive streams built on async generators. Small bundle, pull-based execution, and a familiar operator API.';
 const DEFAULT_IMAGE = `${SITE_URL}/LOGO.png`;
+const COMPANY_NAME_VARIANTS = ['Epikode', 'EpikodeLabs', 'Epikode Labs'];
 
 // Page-specific metadata
 const PAGE_METADATA = {
@@ -178,7 +179,7 @@ function extractFirstParagraph(content) {
  */
 function generateKeywords(content, title, customKeywords = []) {
   if (customKeywords && customKeywords.length > 0) {
-    return customKeywords;
+    return includeCompanyNameVariants(customKeywords);
   }
 
   const keywords = new Set();
@@ -203,7 +204,24 @@ function generateKeywords(content, title, customKeywords = []) {
   keywords.add('streamix');
   keywords.add('reactive library');
 
-  return Array.from(keywords).slice(0, 8);
+  return includeCompanyNameVariants(Array.from(keywords).slice(0, 8));
+}
+
+/**
+ * Ensure all supported company name variants are represented equally in SEO keywords
+ */
+function includeCompanyNameVariants(keywords = []) {
+  const mergedKeywords = new Map();
+
+  for (const keyword of keywords) {
+    mergedKeywords.set(String(keyword).toLowerCase(), keyword);
+  }
+
+  for (const companyName of COMPANY_NAME_VARIANTS) {
+    mergedKeywords.set(companyName.toLowerCase(), companyName);
+  }
+
+  return Array.from(mergedKeywords.values());
 }
 
 /**
@@ -316,7 +334,7 @@ function processMarkdownFile(filePath, filename) {
 
     const title = metadata.title || extractMainHeading(content) || filename.replace(/\.md$/, '');
     const description = metadata.description || extractFirstParagraph(content);
-    const keywords = metadata.keywords || generateKeywords(content, title);
+    const keywords = generateKeywords(content, title, metadata.keywords);
 
     // Create and prepend frontmatter
     const frontmatter = createFrontmatter(filename, content, title, description, keywords);
