@@ -230,6 +230,7 @@ function includeCompanyNameVariants(keywords = []) {
 function createFrontmatter(filename, content, pageTitle, pageDescription, pageKeywords) {
   const slug = filename.replace(/\.md$/, '').toLowerCase();
   const url = slug === 'index' ? SITE_URL : `${SITE_URL}/${slug}`;
+  const keywordsContent = pageKeywords.join(', ');
 
   const metadata = {
     title: pageTitle,
@@ -254,6 +255,7 @@ function createFrontmatter(filename, content, pageTitle, pageDescription, pageKe
       ['meta', { name: 'twitter:image', content: DEFAULT_IMAGE }],
 
       // Additional SEO
+      ['meta', { name: 'keywords', content: keywordsContent }],
       ['meta', { name: 'viewport', content: 'width=device-width, initial-scale=1.0' }],
     ]
   };
@@ -268,11 +270,11 @@ function createFrontmatter(filename, content, pageTitle, pageDescription, pageKe
   }
   yaml += 'head:\n';
   for (const [tag, attrs] of metadata.head) {
-    yaml += `  - [${tag}`;
-    for (const [key, value] of Object.entries(attrs)) {
-      yaml += `, { ${key}: "${escapeYaml(value)}" }`;
-    }
-    yaml += ']\n';
+    const serializedAttrs = Object.entries(attrs)
+      .map(([key, value]) => `${key}: "${escapeYaml(value)}"`)
+      .join(', ');
+
+    yaml += `  - [${tag}, { ${serializedAttrs} }]\n`;
   }
   yaml += '---\n\n';
 
