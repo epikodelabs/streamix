@@ -20,10 +20,10 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export function filter<T>(
-  predicate: (value: T, index: number) => MaybePromise<boolean>
+  predicateOrValue: (value: T, index: number) => MaybePromise<boolean>
 ): Operator<T, T>;
-export function filter<T>(value: T): Operator<T, T>;
-export function filter<T>(values: T[]): Operator<T, T>;
+export function filter<T>(predicateOrValue: T): Operator<T, T>;
+export function filter<T>(predicateOrValue: T[]): Operator<T, T>;
 export function filter<T = any>(
   predicateOrValue: ((value: T, index: number) => MaybePromise<boolean>) | T | T[]
 ) {

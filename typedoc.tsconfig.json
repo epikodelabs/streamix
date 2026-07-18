@@ -1,17 +1,13 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "rootDir": ".",
     "types": []
   },
-  "include": [
-    "projects/libraries/streamix/src/**/*.ts",
-    "projects/libraries/streamix/aggregates/src/**/*.ts",
-    "projects/libraries/streamix/coroutines/src/**/*.ts",
-    "projects/libraries/streamix/dom/src/**/*.ts",
-    "projects/libraries/streamix/networking/src/**/*.ts"
-  ],
-  "exclude": [
-    "**/*.spec.ts"
+  "files": [
+    "projects/libraries/streamix/src/public-api.ts",
+    "projects/libraries/streamix/aggregates/src/public-api.ts",
+    "projects/libraries/streamix/coroutines/src/public-api.ts",
+    "projects/libraries/streamix/dom/src/public-api.ts",
+    "projects/libraries/streamix/networking/src/public-api.ts"
   ]
 }
