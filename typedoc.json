@@ -7,7 +7,7 @@
     "projects/libraries/streamix/networking/src/public-api.ts"
   ],
   "tsconfig": "typedoc.tsconfig.json",
-  "out": "docs/api",
+  "out": "dist/api",
   "gitRemote": "origin",
   "gitRevision": "main",
   "sourceLinkTemplate": "https://github.com/epikodelabs/streamix/blob/{gitRevision}/{path}#L{line}", 
