@@ -277,6 +277,14 @@ function subscribeToNode(node: FormNode<any, any>, callback: () => void): () => 
   return () => teardown(subscription);
 }
 
+/** Subscribe once to any public state change produced by a form node. */
+export function watchNode(
+  node: FormNode<any, any>,
+  callback: () => void,
+): () => void {
+  return subscribeToNode(node, callback);
+}
+
 function attachRevision(
   revision: Writable<number>,
   sources: readonly Atom<unknown>[],
