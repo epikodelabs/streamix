@@ -4,13 +4,14 @@
       <p class="section-kicker">Page 2</p>
       <h2>Streamix-native form</h2>
       <p>
-        Native inputs write into a `streamix` scope. The scope handles
-        validation, autosave, and derived state without Angular form APIs.
+        Native inputs bind to a local copy of `streamix-forms.ts`. The form
+        tree handles validation, autosave, and derived state without Angular
+        form APIs.
       </p>
     </div>
 
     <div class="chips">
-      <span>Scope state</span>
+      <span>Local forms file</span>
       <span>No Angular forms</span>
       <span>Debounced autosave</span>
     </div>
@@ -22,9 +23,12 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Profile</p>
-            <h3>Native inputs bound to scope state</h3>
+            <h3>Native inputs bound to local form nodes</h3>
           </div>
-          <span class="badge badge-strong">{{ uiState.draftStatus }}</span>
+          <div class="chips">
+            <span class="badge">{{ uiState.completion }}% complete</span>
+            <span class="badge badge-strong">{{ uiState.draftStatus }}</span>
+          </div>
         </div>
 
         <div class="grid two">
@@ -61,7 +65,7 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Security</p>
-            <h3>Validation lives in the scope</h3>
+            <h3>Validation lives in the local form tree</h3>
           </div>
         </div>
 
@@ -205,13 +209,13 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Skills</p>
-            <h3>Dynamic rows managed by scope arrays</h3>
+            <h3>Dynamic rows managed by local list nodes</h3>
           </div>
           <button type="button" class="secondary" (click)="addSkill()">Add skill</button>
         </div>
 
         <div class="stack">
-          @for (skill of skills; track $index) {
+          @for (skill of skills; track skill) {
             <div class="skill-row">
               @for (field of skillFields; track field.key) {
                 <label class="field" [class.compact]="field.compact">
@@ -220,11 +224,11 @@
                     [type]="field.type"
                     [min]="field.min ?? null"
                     [max]="field.max ?? null"
-                    [value]="read(skillPath($index, field.key))"
-                    (input)="updateFromEvent(skillPath($index, field.key), $event, field.kind ?? 'text')"
-                    (blur)="touchField(skillPath($index, field.key))"
+                    [value]="readSkillField(skill, field.key)"
+                    (input)="updateSkillFromEvent(skill, field.key, $event, field.kind ?? 'text')"
+                    (blur)="touchSkillField(skill, field.key)"
                   />
-                  @if (fieldError(skillPath($index, field.key)); as error) {
+                  @if (skillFieldError(skill, field.key); as error) {
                     <small class="error">{{ error }}</small>
                   }
                 </label>
@@ -233,8 +237,8 @@
               <label class="checkbox compact-checkbox">
                 <input
                   type="checkbox"
-                  [checked]="read(skillPath($index, 'primary'))"
-                  (change)="updateFromEvent(skillPath($index, 'primary'), $event, 'boolean')"
+                  [checked]="readSkillField(skill, 'primary')"
+                  (change)="updateSkillFromEvent(skill, 'primary', $event, 'boolean')"
                 />
                 <span>Primary</span>
               </label>
@@ -254,8 +258,15 @@
 
       <div class="actions">
         <button type="button" class="secondary" (click)="resetForm()">Reset</button>
-        <button type="submit">Submit Streamix Form</button>
+        <button type="submit" [disabled]="!uiState.readyToSubmit">Submit Streamix Form</button>
       </div>
+
+      @if (!uiState.readyToSubmit) {
+        <small class="hint">
+          Submission stays disabled until all required fields are valid. In the
+          sample data, the password and confirm-password fields start empty.
+        </small>
+      }
     </form>
 
     <aside class="side">
@@ -263,6 +274,10 @@
         <div>
           <span class="metric-label">Draft status</span>
           <strong>{{ uiState.draftStatus }}</strong>
+        </div>
+        <div>
+          <span class="metric-label">Completion</span>
+          <strong>{{ uiState.completion }}%</strong>
         </div>
         <div>
           <span class="metric-label">Last autosave</span>
@@ -279,7 +294,7 @@
       </div>
 
       <div class="card success">
-        <h3>Scope derivation</h3>
+        <h3>Form derivation</h3>
         <p>Primary skills: {{ uiState.primarySkills }}</p>
         <p>Ready to submit: {{ uiState.readyToSubmit ? 'Yes' : 'No' }}</p>
       </div>
@@ -297,13 +312,13 @@
 
       <div class="card">
         <h3>Latest snapshot</h3>
-        <pre>{{ uiState.preview }}</pre>
+        <pre class="json-block" [textContent]="uiState.preview"></pre>
       </div>
 
       @if (submittedPayload) {
         <div class="card success">
           <h3>Submitted payload</h3>
-          <pre>{{ submittedPayload }}</pre>
+          <pre class="json-block" [textContent]="submittedPayload"></pre>
         </div>
       }
     </aside>

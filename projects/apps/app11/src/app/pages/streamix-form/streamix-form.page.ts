@@ -1,7 +1,8 @@
 import { ChangeDetectorRef, Component, OnDestroy, inject } from '@angular/core';
-import { debounce, filter, pipe, scope, tap } from '@epikodelabs/streamix';
+import { atom, type Subscription } from '@epikodelabs/streamix';
 
 import {
+  calculateCompletion,
   formatProfileJson,
   type ProfileFormValue,
   type SkillValue,
@@ -13,25 +14,29 @@ import {
   cloneInitialProfileValue,
   contactOptions,
   createEmptySkill,
-  createStreamixUiState,
+  createProfileStreamixForm,
+  createSkillFormNode,
   getFieldError,
   getFieldHint,
+  getNodeError,
   getPasswordError,
-  isReservedUsername,
-  isUsernamePath,
+  getPrimarySkills,
+  getSummary,
+  isFormValid,
   parseEventValue,
   profileFields,
   readPath,
   removeSkill,
+  resetProfileForm,
   securityFields,
   skillFields,
-  skillPath,
+  touchPath,
   themeOptions,
+  type DraftStatus,
   type PrimitiveValue,
-  type StreamixUiShape,
+  type SkillFormNode,
   type TouchedPath,
   type ValueKind,
-  validateUsernameSync,
 } from '../../shared/streamix-form.helpers';
 
 @Component({
@@ -41,12 +46,25 @@ import {
 })
 export class StreamixFormPageComponent implements OnDestroy {
   private readonly cdr = inject(ChangeDetectorRef);
-  private usernameValidationTimer: ReturnType<typeof setTimeout> | null = null;
-  private usernameValidationToken = 0;
-  private readonly formState = scope<ProfileFormValue>(cloneInitialProfileValue());
-  private readonly uiStateScope = scope(() => createStreamixUiState(this.formState));
+  private readonly formState = createProfileStreamixForm(cloneInitialProfileValue());
+  private readonly attemptedSubmitState = atom(false);
+  private readonly draftStatusState = atom<DraftStatus>('idle');
+  private readonly lastSavedAtState = atom('Not saved yet');
+  private readonly submittedPayloadState = atom('');
+  private readonly subscriptions: Subscription[] = [
+    this.formState.completeValue.subscribe(() => this.syncView()),
+    this.formState.issues.subscribe(() => this.syncView()),
+    this.formState.pending.subscribe(() => this.syncView()),
+    this.formState.status.subscribe(() => this.syncView()),
+    this.attemptedSubmitState.subscribe(() => this.syncView()),
+    this.draftStatusState.subscribe(() => this.syncView()),
+    this.lastSavedAtState.subscribe(() => this.syncView()),
+    this.submittedPayloadState.subscribe(() => this.syncView()),
+  ];
 
-  submittedPayload = '';
+  private autosaveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private autosaveCommitTimer: ReturnType<typeof setTimeout> | null = null;
+  private autosaveToken = 0;
 
   readonly profileFields = profileFields;
   readonly securityFields = securityFields;
@@ -55,83 +73,101 @@ export class StreamixFormPageComponent implements OnDestroy {
   readonly skillFields = skillFields;
   readonly contactOptions = contactOptions;
   readonly themeOptions = themeOptions;
-  readonly uiState = this.uiStateScope as unknown as StreamixUiShape;
 
-  constructor() {
-    this.startAutosave();
+  get skills(): readonly SkillFormNode[] {
+    return this.formState.fields.skills.items;
   }
 
-  get skills(): SkillValue[] {
-    return this.formState.skills;
+  get submittedPayload(): string {
+    return this.submittedPayloadState.value;
+  }
+
+  get uiState(): {
+      attemptedSubmit: boolean;
+      draftStatus: DraftStatus;
+      lastSavedAt: string;
+    errors: { summary: string[] };
+    valid: boolean;
+    completion: number;
+    primarySkills: string;
+    readyToSubmit: boolean;
+    preview: string;
+  } {
+    const valid = isFormValid(this.formState);
+    const completion = calculateCompletion(this.snapshot);
+
+    return {
+      attemptedSubmit: this.attemptedSubmitState.value,
+      draftStatus: this.draftStatusState.value,
+      lastSavedAt: this.lastSavedAtState.value,
+      errors: getSummary(this.formState),
+      valid,
+      completion,
+      primarySkills: getPrimarySkills(this.formState),
+      readyToSubmit: valid && completion >= 85 && this.skills.length > 0,
+      preview: formatProfileJson(this.snapshot),
+    };
+  }
+
+  private get snapshot(): ProfileFormValue {
+    return this.formState.completeValue.value;
   }
 
   ngOnDestroy(): void {
-    this.clearUsernameValidationTimer();
-    this.uiStateScope.dispose();
+    this.clearAutosaveTimer();
+    this.subscriptions.forEach((unsubscribe) => unsubscribe());
     this.formState.dispose();
   }
 
   touchField(path: TouchedPath): void {
-    this.uiState.touchField(path);
-
-    if (isUsernamePath(path)) {
-      this.runUsernameValidation();
-    }
-
+    touchPath(this.formState, path);
     this.syncView();
   }
 
   addSkill(): void {
-    this.formState.skills = [...this.formState.skills, createEmptySkill()];
-    this.uiState.queueChange();
+    this.formState.fields.skills.push(createSkillFormNode(createEmptySkill()));
+    this.queueAutosave();
     this.syncView();
   }
 
   removeSkill(index: number): void {
-    const nextTouchedFields = removeSkill(
-      this.formState,
-      this.uiState.touchedFields,
-      index,
-    );
-
-    if (nextTouchedFields === this.uiState.touchedFields) {
+    if (this.skills.length === 1) {
       return;
     }
 
-    this.uiState.touchedFields = nextTouchedFields;
-    this.uiState.queueChange();
+    removeSkill(this.formState, index);
+    this.queueAutosave();
     this.syncView();
   }
 
   submit(event: Event): void {
     event.preventDefault();
-    this.uiState.setAttemptedSubmit(true);
+    this.attemptedSubmitState.set(true);
 
-    if (!this.uiState.valid) {
+    if (!isFormValid(this.formState)) {
       this.syncView();
       return;
     }
 
-    this.submittedPayload = formatProfileJson(this.formState.snapshot());
-    this.uiState.draftStatus = 'saved';
+    this.submittedPayloadState.set(
+      formatProfileJson(structuredClone(this.snapshot)),
+    );
+    this.draftStatusState.set('saved');
     this.syncView();
   }
 
   resetForm(): void {
-    this.uiState.resetAll();
-    this.submittedPayload = '';
-    this.clearUsernameValidationTimer();
+    resetProfileForm(this.formState, cloneInitialProfileValue());
+    this.attemptedSubmitState.set(false);
+    this.draftStatusState.set('idle');
+    this.lastSavedAtState.set('Not saved yet');
+    this.submittedPayloadState.set('');
+    this.clearAutosaveTimer();
     this.syncView();
   }
 
   fieldError(path: TouchedPath): string | null {
-    return getFieldError(
-      this.uiState.errors,
-      path,
-      this.uiState.attemptedSubmit,
-      this.uiState.touchedFields,
-      this.uiState.usernamePending,
-    );
+    return getFieldError(this.formState, path, this.attemptedSubmitState.value);
   }
 
   read(path: TouchedPath): PrimitiveValue {
@@ -139,7 +175,8 @@ export class StreamixFormPageComponent implements OnDestroy {
   }
 
   update(path: TouchedPath, value: PrimitiveValue): void {
-    applyStreamixUpdate(this.formState, this.uiState, path, value);
+    applyStreamixUpdate(this.formState, path, value);
+    this.queueAutosave();
     this.syncView();
   }
 
@@ -151,85 +188,94 @@ export class StreamixFormPageComponent implements OnDestroy {
     this.update(path, parseEventValue(event, kind));
   }
 
-  skillPath(index: number, key: keyof SkillValue): TouchedPath {
-    return skillPath(index, key);
+  readSkillField(
+    skill: SkillFormNode,
+    key: keyof SkillValue,
+  ): PrimitiveValue {
+    return skill.fields[key].completeValue.value as PrimitiveValue;
+  }
+
+  touchSkillField(
+    skill: SkillFormNode,
+    key: keyof SkillValue,
+  ): void {
+    skill.fields[key].touch();
+    this.syncView();
+  }
+
+  updateSkillField(
+    skill: SkillFormNode,
+    key: keyof SkillValue,
+    value: PrimitiveValue,
+  ): void {
+    skill.fields[key].set(value as never);
+    this.queueAutosave();
+    this.syncView();
+  }
+
+  updateSkillFromEvent(
+    skill: SkillFormNode,
+    key: keyof SkillValue,
+    event: Event,
+    kind: ValueKind = 'text',
+  ): void {
+    this.updateSkillField(skill, key, parseEventValue(event, kind));
+  }
+
+  skillFieldError(
+    skill: SkillFormNode,
+    key: Extract<keyof SkillValue, 'name' | 'years'>,
+  ): string | null {
+    return getNodeError(skill.fields[key], this.attemptedSubmitState.value);
   }
 
   fieldHint(path: TouchedPath): string | null {
-    return getFieldHint(path, this.uiState.usernamePending, this.read(path));
+    return getFieldHint(this.formState, path);
   }
 
   passwordError(): string | null {
-    return getPasswordError(this.uiState);
+    return getPasswordError(this.formState, this.attemptedSubmitState.value);
   }
 
-  private runUsernameValidation(): void {
-    this.clearUsernameValidationTimer();
+  private queueAutosave(): void {
+    const token = ++this.autosaveToken;
 
-    const username = String(this.read('profile.username')).trim().toLowerCase();
-    const syncError = validateUsernameSync(username);
+    this.draftStatusState.set('editing');
+    this.clearAutosaveTimer();
 
-    this.uiState.usernameTaken = false;
-    this.uiState.usernamePending = false;
-
-    if (syncError !== null || username.length === 0) {
-      this.syncView();
-      return;
-    }
-
-    const token = ++this.usernameValidationToken;
-    this.uiState.usernamePending = true;
-    this.syncView();
-
-    this.usernameValidationTimer = setTimeout(() => {
-      if (token !== this.usernameValidationToken) {
+    this.autosaveDebounceTimer = setTimeout(() => {
+      if (token !== this.autosaveToken) {
         return;
       }
 
-      this.uiState.usernamePending = false;
-      this.uiState.usernameTaken = isReservedUsername(username);
+      this.draftStatusState.set('saving');
       this.syncView();
-    }, 300);
-  }
 
-  private startAutosave(): void {
-    const autosave = pipe(
-      this.uiStateScope.at('saveRequest'),
-      filter((snapshot) => snapshot !== null),
-      debounce(650),
-      tap(async (snapshot: ProfileFormValue | null) => {
-        if (!snapshot) {
+      this.autosaveCommitTimer = setTimeout(() => {
+        if (token !== this.autosaveToken) {
           return;
         }
 
-        this.uiState.markSaving();
+        this.lastSavedAtState.set(new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }));
+        this.draftStatusState.set('saved');
         this.syncView();
-
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, 260);
-        });
-
-        this.uiState.markSaved(
-          new Date().toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-          }),
-        );
-        this.syncView();
-      }),
-    ).subscribe(() => {});
-
-    this.uiStateScope.cleanups.add(() => autosave());
+      }, 260);
+    }, 650);
   }
 
-  private clearUsernameValidationTimer(): void {
-    if (!this.usernameValidationTimer) {
-      return;
+  private clearAutosaveTimer(): void {
+    if (this.autosaveDebounceTimer) {
+      clearTimeout(this.autosaveDebounceTimer);
+      this.autosaveDebounceTimer = null;
     }
-
-    clearTimeout(this.usernameValidationTimer);
-    this.usernameValidationTimer = null;
+    if (this.autosaveCommitTimer) {
+      clearTimeout(this.autosaveCommitTimer);
+      this.autosaveCommitTimer = null;
+    }
   }
 
   private syncView(): void {
