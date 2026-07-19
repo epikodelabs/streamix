@@ -72,7 +72,7 @@ type DemoUiState = {
 
 type FormNodes = ProfileFormNode['fields'];
 
-class StreamixFormDemoController {
+export class StreamixFormDemoController {
   private readonly form = createProfileFormNode();
   private readonly attemptedSubmit = atom(false);
   private readonly draftStatus = atom<DraftStatus>('idle');
