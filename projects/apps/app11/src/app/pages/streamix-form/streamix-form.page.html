@@ -18,7 +18,7 @@
   </div>
 
   <div class="layout">
-    <form class="card form-card" (submit)="submit($event)">
+    <form class="card form-card" (submit)="demo.submit($event)">
       <section class="section">
         <div class="section-head">
           <div>
@@ -26,34 +26,34 @@
             <h3>Native inputs bound to local form nodes</h3>
           </div>
           <div class="chips">
-            <span class="badge">{{ uiState.completion }}% complete</span>
-            <span class="badge badge-strong">{{ uiState.draftStatus }}</span>
+            <span class="badge">{{ demo.uiState.completion }}% complete</span>
+            <span class="badge badge-strong">{{ demo.uiState.draftStatus }}</span>
           </div>
         </div>
 
         <div class="grid two">
-          @for (field of profileFields; track field.path) {
+          @for (field of demo.profileFields; track field.path) {
             <label class="field" [class.field-wide]="field.type === 'textarea'">
               <span>{{ field.label }}</span>
               @if (field.type === 'textarea') {
                 <textarea
                   [rows]="field.rows ?? 4"
-                  [value]="read(field.path)"
-                  (input)="updateFromEvent(field.path, $event, field.kind ?? 'text')"
-                  (blur)="touchField(field.path)"
+                  [value]="demo.valueOf(field.node)"
+                  (input)="demo.updateNodeFromEvent(field.node, $event, field.kind ?? 'text')"
+                  (blur)="demo.touchNode(field.node)"
                 ></textarea>
               } @else {
                 <input
                   [type]="field.type"
-                  [value]="read(field.path)"
-                  (input)="updateFromEvent(field.path, $event, field.kind ?? 'text')"
-                  (blur)="touchField(field.path)"
+                  [value]="demo.valueOf(field.node)"
+                  (input)="demo.updateNodeFromEvent(field.node, $event, field.kind ?? 'text')"
+                  (blur)="demo.touchNode(field.node)"
                 />
               }
-              @if (fieldHint(field.path); as hint) {
+              @if (demo.fieldHint(field); as hint) {
                 <small class="hint">{{ hint }}</small>
               }
-              @if (fieldError(field.path); as error) {
+              @if (demo.fieldError(field); as error) {
                 <small class="error">{{ error }}</small>
               }
             </label>
@@ -70,23 +70,23 @@
         </div>
 
         <div class="grid two">
-          @for (field of securityFields; track field.path) {
+          @for (field of demo.securityFields; track field.path) {
             <label class="field">
               <span>{{ field.label }}</span>
               <input
                 [type]="field.type"
-                [value]="read(field.path)"
-                (input)="updateFromEvent(field.path, $event, field.kind ?? 'text')"
-                (blur)="touchField(field.path)"
+                [value]="demo.valueOf(field.node)"
+                (input)="demo.updateNodeFromEvent(field.node, $event, field.kind ?? 'text')"
+                (blur)="demo.touchNode(field.node)"
               />
-              @if (fieldError(field.path); as error) {
+              @if (demo.fieldError(field); as error) {
                 <small class="error">{{ error }}</small>
               }
             </label>
           }
         </div>
 
-        @if (passwordError(); as error) {
+        @if (demo.passwordError(); as error) {
           <small class="error">{{ error }}</small>
         }
       </section>
@@ -100,16 +100,16 @@
         </div>
 
         <div class="grid three">
-          @for (field of addressFields; track field.path) {
+          @for (field of demo.addressFields; track field.path) {
             <label class="field">
               <span>{{ field.label }}</span>
               <input
                 [type]="field.type"
-                [value]="read(field.path)"
-                (input)="updateFromEvent(field.path, $event, field.kind ?? 'text')"
-                (blur)="touchField(field.path)"
+                [value]="demo.valueOf(field.node)"
+                (input)="demo.updateNodeFromEvent(field.node, $event, field.kind ?? 'text')"
+                (blur)="demo.touchNode(field.node)"
               />
-              @if (fieldError(field.path); as error) {
+              @if (demo.fieldError(field); as error) {
                 <small class="error">{{ error }}</small>
               }
             </label>
@@ -128,14 +128,14 @@
         <div class="grid two">
           <fieldset class="field fieldset">
             <legend>Preferred contact</legend>
-            @for (option of contactOptions; track option.value) {
+            @for (option of demo.contactOptions; track option.value) {
               <label>
                 <input
                   type="radio"
                   name="contactMethod"
                   [value]="option.value"
-                  [checked]="read('preferences.contactMethod') === option.value"
-                  (change)="update('preferences.contactMethod', option.value)"
+                  [checked]="demo.valueOf(demo.preferences.contactMethod) === option.value"
+                  (change)="demo.updateNode(demo.preferences.contactMethod, option.value)"
                 />
                 {{ option.label }}
               </label>
@@ -145,10 +145,10 @@
           <label class="field">
             <span>Theme</span>
             <select
-              [value]="read('preferences.theme')"
-              (change)="updateFromEvent('preferences.theme', $event)"
+              [value]="demo.valueOf(demo.preferences.theme)"
+              (change)="demo.updateNodeFromEvent(demo.preferences.theme, $event)"
             >
-              @for (option of themeOptions; track option.value) {
+              @for (option of demo.themeOptions; track option.value) {
                 <option [value]="option.value">{{ option.label }}</option>
               }
             </select>
@@ -158,8 +158,8 @@
         <label class="checkbox">
           <input
             type="checkbox"
-            [checked]="read('preferences.newsletter')"
-            (change)="updateFromEvent('preferences.newsletter', $event, 'boolean')"
+            [checked]="demo.valueOf(demo.preferences.newsletter)"
+            (change)="demo.updateNodeFromEvent(demo.preferences.newsletter, $event, 'boolean')"
           />
           <span>Send release notes and onboarding emails</span>
         </label>
@@ -174,21 +174,21 @@
         </div>
 
         <div class="grid two">
-          @for (field of availabilityFields; track field.path) {
+          @for (field of demo.availabilityFields; track field.path) {
             <label class="field" [class.range-field]="field.type === 'range'">
               <span>{{ field.label }}</span>
               <input
                 [type]="field.type"
                 [min]="field.min ?? null"
                 [max]="field.max ?? null"
-                [value]="read(field.path)"
-                (input)="updateFromEvent(field.path, $event, field.kind ?? 'text')"
-                (blur)="touchField(field.path)"
+                [value]="demo.valueOf(field.node)"
+                (input)="demo.updateNodeFromEvent(field.node, $event, field.kind ?? 'text')"
+                (blur)="demo.touchNode(field.node)"
               />
-              @if (fieldHint(field.path); as hint) {
+              @if (demo.fieldHint(field); as hint) {
                 <small class="hint">{{ hint }}</small>
               }
-              @if (fieldError(field.path); as error) {
+              @if (demo.fieldError(field); as error) {
                 <small class="error">{{ error }}</small>
               }
             </label>
@@ -198,8 +198,8 @@
         <label class="checkbox">
           <input
             type="checkbox"
-            [checked]="read('availability.remote')"
-            (change)="updateFromEvent('availability.remote', $event, 'boolean')"
+            [checked]="demo.valueOf(demo.availability.remote)"
+            (change)="demo.updateNodeFromEvent(demo.availability.remote, $event, 'boolean')"
           />
           <span>Open to remote collaboration</span>
         </label>
@@ -211,24 +211,24 @@
             <p class="section-kicker">Skills</p>
             <h3>Dynamic rows managed by local list nodes</h3>
           </div>
-          <button type="button" class="secondary" (click)="addSkill()">Add skill</button>
+          <button type="button" class="secondary" (click)="demo.addSkill()">Add skill</button>
         </div>
 
         <div class="stack">
-          @for (skill of skills; track skill) {
+          @for (skill of demo.skills; track skill) {
             <div class="skill-row">
-              @for (field of skillFields; track field.key) {
+              @for (field of demo.skillFields; track field.key) {
                 <label class="field" [class.compact]="field.compact">
                   <span>{{ field.label }}</span>
                   <input
                     [type]="field.type"
                     [min]="field.min ?? null"
                     [max]="field.max ?? null"
-                    [value]="readSkillField(skill, field.key)"
-                    (input)="updateSkillFromEvent(skill, field.key, $event, field.kind ?? 'text')"
-                    (blur)="touchSkillField(skill, field.key)"
+                    [value]="demo.valueOf(skill.fields[field.key])"
+                    (input)="demo.updateNodeFromEvent(skill.fields[field.key], $event, field.kind ?? 'text')"
+                    (blur)="demo.touchNode(skill.fields[field.key])"
                   />
-                  @if (skillFieldError(skill, field.key); as error) {
+                  @if (demo.nodeError(skill.fields[field.key]); as error) {
                     <small class="error">{{ error }}</small>
                   }
                 </label>
@@ -237,8 +237,8 @@
               <label class="checkbox compact-checkbox">
                 <input
                   type="checkbox"
-                  [checked]="readSkillField(skill, 'primary')"
-                  (change)="updateSkillFromEvent(skill, 'primary', $event, 'boolean')"
+                  [checked]="demo.valueOf(skill.fields.primary)"
+                  (change)="demo.updateNodeFromEvent(skill.fields.primary, $event, 'boolean')"
                 />
                 <span>Primary</span>
               </label>
@@ -246,8 +246,8 @@
               <button
                 type="button"
                 class="ghost"
-                [disabled]="skills.length === 1"
-                (click)="removeSkill($index)"
+                [disabled]="demo.skills.length === 1"
+                (click)="demo.removeSkill($index)"
               >
                 Remove
               </button>
@@ -257,11 +257,11 @@
       </section>
 
       <div class="actions">
-        <button type="button" class="secondary" (click)="resetForm()">Reset</button>
-        <button type="submit" [disabled]="!uiState.readyToSubmit">Submit Streamix Form</button>
+        <button type="button" class="secondary" (click)="demo.resetForm()">Reset</button>
+        <button type="submit" [disabled]="!demo.uiState.readyToSubmit">Submit Streamix Form</button>
       </div>
 
-      @if (!uiState.readyToSubmit) {
+      @if (!demo.uiState.readyToSubmit) {
         <small class="hint">
           Submission stays disabled until all required fields are valid. In the
           sample data, the password and confirm-password fields start empty.
@@ -273,37 +273,37 @@
       <div class="card metrics">
         <div>
           <span class="metric-label">Draft status</span>
-          <strong>{{ uiState.draftStatus }}</strong>
+          <strong>{{ demo.uiState.draftStatus }}</strong>
         </div>
         <div>
           <span class="metric-label">Completion</span>
-          <strong>{{ uiState.completion }}%</strong>
+          <strong>{{ demo.uiState.completion }}%</strong>
         </div>
         <div>
           <span class="metric-label">Last autosave</span>
-          <strong>{{ uiState.lastSavedAt }}</strong>
+          <strong>{{ demo.uiState.lastSavedAt }}</strong>
         </div>
         <div>
           <span class="metric-label">Contact route</span>
-          <strong>{{ read('preferences.contactMethod') }}</strong>
+          <strong>{{ demo.valueOf(demo.preferences.contactMethod) }}</strong>
         </div>
         <div>
           <span class="metric-label">Remote</span>
-          <strong>{{ read('availability.remote') ? 'Yes' : 'No' }}</strong>
+          <strong>{{ demo.valueOf(demo.availability.remote) ? 'Yes' : 'No' }}</strong>
         </div>
       </div>
 
       <div class="card success">
         <h3>Form derivation</h3>
-        <p>Primary skills: {{ uiState.primarySkills }}</p>
-        <p>Ready to submit: {{ uiState.readyToSubmit ? 'Yes' : 'No' }}</p>
+        <p>Primary skills: {{ demo.uiState.primarySkills }}</p>
+        <p>Ready to submit: {{ demo.uiState.readyToSubmit ? 'Yes' : 'No' }}</p>
       </div>
 
-      @if (uiState.errors.summary.length > 0) {
+      @if (demo.uiState.errors.summary.length > 0) {
         <div class="card warning">
           <h3>Validation summary</h3>
           <ul>
-            @for (item of uiState.errors.summary; track item) {
+            @for (item of demo.uiState.errors.summary; track item) {
               <li>{{ item }}</li>
             }
           </ul>
@@ -312,13 +312,13 @@
 
       <div class="card">
         <h3>Latest snapshot</h3>
-        <pre class="json-block" [textContent]="uiState.preview"></pre>
+        <pre class="json-block" [textContent]="demo.uiState.preview"></pre>
       </div>
 
-      @if (submittedPayload) {
+      @if (demo.submittedPayload) {
         <div class="card success">
           <h3>Submitted payload</h3>
-          <pre class="json-block" [textContent]="submittedPayload"></pre>
+          <pre class="json-block" [textContent]="demo.submittedPayload"></pre>
         </div>
       }
     </aside>

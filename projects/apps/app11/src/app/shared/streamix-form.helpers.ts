@@ -1,10 +1,7 @@
-import { createIndexedFieldPath, parseFormValue } from './form-helpers';
+import { atom, type Subscription } from '@epikodelabs/streamix';
+
+import { parseFormValue, type FormValuePrimitive } from './form-helpers';
 import {
-  type ProfileFormValue,
-  type SkillValue,
-  getInitialProfileValue,
-} from './profile-model';
-export {
   addressFields,
   availabilityFields,
   contactOptions,
@@ -14,24 +11,21 @@ export {
   themeOptions,
   type DraftStatus,
   type FieldConfig,
-  type FieldType,
-  type OptionConfig,
   type PrimitiveValue,
-  type SkillFieldConfig,
-  type TouchedPath,
   type ValueKind,
 } from './streamix-form.config';
 import {
-  type PrimitiveValue,
-  type TouchedPath,
-  type ValueKind,
-} from './streamix-form.config';
+  calculateCompletion,
+  formatProfileJson,
+  getInitialProfileValue,
+  type ProfileFormValue,
+  type SkillValue,
+} from './profile-model';
 import {
   checks,
   field,
   form,
   list,
-  type Field,
   type Form,
   type FormNode,
   type List,
@@ -41,79 +35,284 @@ import {
 const POSTAL_CODE_PATTERN = /^[A-Z0-9 -]{4,10}$/i;
 const RESERVED_USERNAMES = new Set(['admin', 'angular', 'root', 'streamix']);
 const USERNAME_PATTERN = /^[a-z0-9-]+$/;
+const SAVE_DELAY_MS = 650;
+const SAVE_COMMIT_MS = 260;
+const LAST_SAVED_LABEL = 'Not saved yet';
 
-type ProfileGroupNode = Form<{
-  firstName: Field<string>;
-  lastName: Field<string>;
-  email: Field<string>;
-  username: Field<string>;
-  bio: Field<string>;
-}>;
+const issueMessages = Object.freeze({
+  required: 'This field is required.',
+  email: 'Use a valid email address.',
+  pattern: 'Format is invalid.',
+  usernameTaken: 'That username is reserved for demos.',
+  invalid: 'Value is invalid.',
+  validationFailed: 'Validation failed.',
+  passwordMismatch: 'Passwords must match.',
+});
 
-type SecurityGroupNode = Form<{
-  password: Field<string>;
-  confirmPassword: Field<string>;
-}>;
+type DemoField = FieldConfig & {
+  readonly node: FormNode<any, any>;
+  readonly pendingHint?: string;
+  readonly valueHint?: (value: PrimitiveValue) => string | null;
+};
 
-type AddressGroupNode = Form<{
-  country: Field<string>;
-  city: Field<string>;
-  postalCode: Field<string>;
-}>;
+type SkillNode = ReturnType<typeof createSkillNode>;
+type ProfileFormNode = ReturnType<typeof createProfileFormNode>;
 
-type PreferencesGroupNode = Form<{
-  contactMethod: Field<ProfileFormValue['preferences']['contactMethod']>;
-  theme: Field<ProfileFormValue['preferences']['theme']>;
-  newsletter: Field<boolean>;
-}>;
+type DemoUiState = {
+  readonly attemptedSubmit: boolean;
+  readonly draftStatus: DraftStatus;
+  readonly lastSavedAt: string;
+  readonly errors: { readonly summary: string[] };
+  readonly valid: boolean;
+  readonly completion: number;
+  readonly primarySkills: string;
+  readonly readyToSubmit: boolean;
+  readonly preview: string;
+};
 
-type AvailabilityGroupNode = Form<{
-  startDate: Field<string>;
-  hoursPerWeek: Field<number>;
-  remote: Field<boolean>;
-}>;
+type FormNodes = ProfileFormNode['fields'];
 
-export type SkillFormNode = Form<{
-  name: Field<string>;
-  years: Field<number>;
-  primary: Field<boolean>;
-}>;
+class StreamixFormDemoController {
+  private readonly form = createProfileFormNode();
+  private readonly attemptedSubmit = atom(false);
+  private readonly draftStatus = atom<DraftStatus>('idle');
+  private readonly lastSavedAt = atom(LAST_SAVED_LABEL);
+  private readonly submittedPayloadState = atom('');
+  private readonly subscriptions: Subscription[];
 
-export type ProfileStreamixForm = Form<{
-  profile: ProfileGroupNode;
-  security: SecurityGroupNode;
-  address: AddressGroupNode;
-  preferences: PreferencesGroupNode;
-  availability: AvailabilityGroupNode;
-  skills: List<SkillFormNode>;
-}>;
+  private autosaveDebounce: ReturnType<typeof setTimeout> | null = null;
+  private autosaveCommit: ReturnType<typeof setTimeout> | null = null;
+  private autosaveToken = 0;
 
-export interface StreamixSummary {
-  readonly summary: string[];
+  readonly profileFields = bindFields(this.form, profileFields, {
+    'profile.username': {
+      pendingHint: 'Checking username availability...',
+    },
+  });
+
+  readonly securityFields = bindFields(this.form, securityFields);
+  readonly addressFields = bindFields(this.form, addressFields);
+  readonly availabilityFields = bindFields(this.form, availabilityFields, {
+    'availability.hoursPerWeek': {
+      valueHint: (value) => `${value} hrs/week`,
+    },
+  });
+
+  readonly skillFields = skillFields;
+  readonly contactOptions = contactOptions;
+  readonly themeOptions = themeOptions;
+  readonly preferences = this.form.fields.preferences.fields;
+  readonly availability = this.form.fields.availability.fields;
+
+  constructor(private readonly onChange: () => void = () => {}) {
+    this.subscriptions = [
+      this.form.completeValue.subscribe(this.onChange),
+      this.form.issues.subscribe(this.onChange),
+      this.form.pending.subscribe(this.onChange),
+      this.form.status.subscribe(this.onChange),
+      this.attemptedSubmit.subscribe(this.onChange),
+      this.draftStatus.subscribe(this.onChange),
+      this.lastSavedAt.subscribe(this.onChange),
+      this.submittedPayloadState.subscribe(this.onChange),
+    ];
+  }
+
+  get skills(): readonly SkillNode[] {
+    return this.form.fields.skills.items;
+  }
+
+  get submittedPayload(): string {
+    return this.submittedPayloadState.value;
+  }
+
+  get uiState(): DemoUiState {
+    const snapshot = this.snapshot;
+    const valid = isFormValid(this.form);
+    const completion = calculateCompletion(snapshot);
+
+    return {
+      attemptedSubmit: this.attemptedSubmit.value,
+      draftStatus: this.draftStatus.value,
+      lastSavedAt: this.lastSavedAt.value,
+      errors: getSummary(this.form),
+      valid,
+      completion,
+      primarySkills: formatPrimarySkills(snapshot.skills),
+      readyToSubmit: valid && completion >= 85 && this.skills.length > 0,
+      preview: formatProfileJson(snapshot),
+    };
+  }
+
+  get valueOf(): (node: FormNode<any, any>) => PrimitiveValue {
+    return valueOfNode;
+  }
+
+  dispose(): void {
+    this.clearAutosave();
+    this.subscriptions.forEach((unsubscribe) => unsubscribe());
+    this.form.dispose();
+  }
+
+  submit(event: Event): void {
+    event.preventDefault();
+    this.attemptedSubmit.set(true);
+
+    if (!isFormValid(this.form)) {
+      this.onChange();
+      return;
+    }
+
+    this.submittedPayloadState.set(formatProfileJson(structuredClone(this.snapshot)));
+    this.draftStatus.set('saved');
+    this.onChange();
+  }
+
+  resetForm(): void {
+    const initial = cloneInitialValue();
+
+    this.form.reset(initial, { updateInitial: true });
+    syncSkillList(this.form.fields.skills, initial.skills);
+    this.attemptedSubmit.set(false);
+    this.draftStatus.set('idle');
+    this.lastSavedAt.set(LAST_SAVED_LABEL);
+    this.submittedPayloadState.set('');
+    this.clearAutosave();
+    this.onChange();
+  }
+
+  addSkill(): void {
+    this.form.fields.skills.push(createSkillNode());
+    this.queueAutosave();
+    this.onChange();
+  }
+
+  removeSkill(index: number): void {
+    if (this.skills.length === 1) {
+      return;
+    }
+
+    this.form.fields.skills.removeAt(index);
+    this.queueAutosave();
+    this.onChange();
+  }
+
+  touchNode(node: FormNode<any, any>): void {
+    node.touch();
+    this.onChange();
+  }
+
+  updateNode(node: FormNode<any, any>, value: PrimitiveValue): void {
+    node.set(value as never);
+    this.queueAutosave();
+    this.onChange();
+  }
+
+  updateNodeFromEvent(
+    node: FormNode<any, any>,
+    event: Event,
+    kind: ValueKind = 'text',
+  ): void {
+    this.updateNode(node, parseFormValue(event, kind));
+  }
+
+  fieldError(field: DemoField): string | null {
+    return getNodeError(
+      field.node,
+      this.attemptedSubmit.value,
+      Boolean(field.pendingHint),
+    );
+  }
+
+  nodeError(node: FormNode<any, any>): string | null {
+    return getNodeError(node, this.attemptedSubmit.value);
+  }
+
+  fieldHint(field: DemoField): string | null {
+    if (field.pendingHint && field.node.pending.value) {
+      return field.pendingHint;
+    }
+
+    return field.valueHint?.(valueOfNode(field.node)) ?? null;
+  }
+
+  passwordError(): string | null {
+    const { password, confirmPassword } = this.form.fields.security.fields;
+
+    if (
+      !this.attemptedSubmit.value
+      && !password.touched.value
+      && !confirmPassword.touched.value
+    ) {
+      return null;
+    }
+
+    return passwordMismatch(this.snapshot);
+  }
+
+  private get snapshot(): ProfileFormValue {
+    return this.form.completeValue.value;
+  }
+
+  private queueAutosave(): void {
+    const token = ++this.autosaveToken;
+
+    this.draftStatus.set('editing');
+    this.clearAutosave();
+
+    this.autosaveDebounce = setTimeout(() => {
+      if (token !== this.autosaveToken) {
+        return;
+      }
+
+      this.draftStatus.set('saving');
+      this.onChange();
+
+      this.autosaveCommit = setTimeout(() => {
+        if (token !== this.autosaveToken) {
+          return;
+        }
+
+        this.lastSavedAt.set(new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }));
+        this.draftStatus.set('saved');
+        this.onChange();
+      }, SAVE_COMMIT_MS);
+    }, SAVE_DELAY_MS);
+  }
+
+  private clearAutosave(): void {
+    if (this.autosaveDebounce) {
+      clearTimeout(this.autosaveDebounce);
+      this.autosaveDebounce = null;
+    }
+    if (this.autosaveCommit) {
+      clearTimeout(this.autosaveCommit);
+      this.autosaveCommit = null;
+    }
+  }
 }
 
-export function cloneInitialProfileValue(): ProfileFormValue {
+export function createStreamixFormDemo(
+  onChange?: () => void,
+): StreamixFormDemoController {
+  return new StreamixFormDemoController(onChange);
+}
+
+function cloneInitialValue(): ProfileFormValue {
   return structuredClone(getInitialProfileValue());
 }
 
-export function createEmptySkill(): SkillValue {
-  return { name: '', years: 1, primary: false };
-}
-
-export function createProfileStreamixForm(
-  value: ProfileFormValue = cloneInitialProfileValue(),
-): ProfileStreamixForm {
+function createProfileFormNode(
+  value: ProfileFormValue = cloneInitialValue(),
+) {
   return form({
     profile: form({
-      firstName: field(value.profile.firstName, {
-        checks: [checks.required, checks.minLength(2)],
-      }),
-      lastName: field(value.profile.lastName, {
-        checks: [checks.required, checks.minLength(2)],
-      }),
-      email: field(value.profile.email, {
-        checks: [checks.required, checks.email],
-      }),
+      firstName: textField(value.profile.firstName, 2),
+      lastName: textField(value.profile.lastName, 2),
+      email: field(value.profile.email, { checks: [checks.required, checks.email] }),
       username: field(value.profile.username, {
         checks: [
           checks.required,
@@ -127,9 +326,7 @@ export function createProfileStreamixForm(
       }),
     }),
     security: form({
-      password: field(value.security.password, {
-        checks: [checks.required, checks.minLength(8)],
-      }),
+      password: textField(value.security.password, 8),
       confirmPassword: field(value.security.confirmPassword, {
         checks: checks.required,
       }),
@@ -148,284 +345,182 @@ export function createProfileStreamixForm(
     }),
     availability: form({
       startDate: field(value.availability.startDate, { checks: checks.required }),
-      hoursPerWeek: field(value.availability.hoursPerWeek, {
-        checks: [checks.min(10), checks.max(60)],
-      }),
+      hoursPerWeek: numberField(value.availability.hoursPerWeek, 10, 60),
       remote: field(value.availability.remote),
     }),
-    skills: list(value.skills.map((skill) => createSkillFormNode(skill))),
+    skills: list(value.skills.map(createSkillNode)),
   });
 }
 
-export function createSkillFormNode(
-  value: SkillValue = createEmptySkill(),
-): SkillFormNode {
+function createSkillNode(
+  value: SkillValue = { name: '', years: 1, primary: false },
+) {
   return form({
-    name: field(value.name, {
-      checks: [checks.required, checks.minLength(2)],
-    }),
-    years: field(value.years, {
-      checks: [checks.min(1), checks.max(20)],
-    }),
+    name: textField(value.name, 2),
+    years: numberField(value.years, 1, 20),
     primary: field(value.primary),
   });
 }
 
-export function readPath(
-  formState: ProfileStreamixForm,
-  path: TouchedPath,
-): PrimitiveValue {
-  return readNode(formState, path).completeValue.value as PrimitiveValue;
+function textField(value: string, minLength = 1) {
+  return field(value, {
+    checks: minLength > 1
+      ? [checks.required, checks.minLength(minLength)]
+      : checks.required,
+  });
 }
 
-export function touchPath(
-  formState: ProfileStreamixForm,
-  path: TouchedPath,
+function numberField(value: number, min: number, max: number) {
+  return field(value, { checks: [checks.min(min), checks.max(max)] });
+}
+
+function bindFields(
+  root: ProfileFormNode,
+  defs: readonly FieldConfig[],
+  extras: Partial<Record<string, Omit<DemoField, keyof FieldConfig | 'node'>>> = {},
+): readonly DemoField[] {
+  return defs.map((def) => ({
+    ...def,
+    node: readNode(root, def.path),
+    ...extras[def.path],
+  }));
+}
+
+function valueOfNode(node: FormNode<any, any>): PrimitiveValue {
+  return node.completeValue.value as FormValuePrimitive;
+}
+
+function syncSkillList(
+  skills: FormNodes['skills'],
+  next: readonly SkillValue[],
 ): void {
-  readNode(formState, path).touch();
-}
-
-export function writePath(
-  formState: ProfileStreamixForm,
-  path: TouchedPath,
-  value: PrimitiveValue,
-): void {
-  readNode(formState, path).set(value as never);
-}
-
-export function applyStreamixUpdate(
-  formState: ProfileStreamixForm,
-  path: TouchedPath,
-  value: PrimitiveValue,
-): void {
-  writePath(formState, path, value);
-}
-
-export function parseEventValue(
-  event: Event,
-  kind: ValueKind = 'text',
-): PrimitiveValue {
-  return parseFormValue(event, kind);
-}
-
-export function skillPath(
-  index: number,
-  key: keyof SkillValue,
-): TouchedPath {
-  return createIndexedFieldPath('skills', index, String(key));
-}
-
-export function removeSkill(
-  formState: ProfileStreamixForm,
-  index: number,
-): void {
-  if (formState.fields.skills.items.length === 1) {
-    return;
+  while (skills.items.length > next.length) {
+    skills.removeAt(skills.items.length - 1);
   }
 
-  formState.fields.skills.removeAt(index);
-}
-
-export function resetProfileForm(
-  formState: ProfileStreamixForm,
-  value: ProfileFormValue = cloneInitialProfileValue(),
-): void {
-  formState.fields.profile.reset(value.profile, { updateInitial: true });
-  formState.fields.security.reset(value.security, { updateInitial: true });
-  formState.fields.address.reset(value.address, { updateInitial: true });
-  formState.fields.preferences.reset(value.preferences, { updateInitial: true });
-  formState.fields.availability.reset(value.availability, { updateInitial: true });
-
-  syncSkills(formState.fields.skills, value.skills);
-}
-
-export function getFieldHint(
-  formState: ProfileStreamixForm,
-  path: TouchedPath,
-): string | null {
-  const node = readNode(formState, path);
-
-  if (path === 'profile.username' && node.pending.value) {
-    return 'Checking username availability...';
+  while (skills.items.length < next.length) {
+    skills.push(createSkillNode(next[skills.items.length]));
   }
 
-  return path === 'availability.hoursPerWeek'
-    ? `${node.completeValue.value} hrs/week`
-    : null;
+  skills.items.forEach((skill, index) => {
+    skill.reset(next[index], { updateInitial: true });
+  });
 }
 
-export function getFieldError(
-  formState: ProfileStreamixForm,
-  path: TouchedPath,
-  attemptedSubmit: boolean,
-): string | null {
-  return getNodeError(readNode(formState, path), attemptedSubmit, path === 'profile.username');
+function readNode(root: ProfileFormNode, path: string): FormNode<any, any> {
+  let current: FormNode<any, any> = root;
+
+  for (const segment of path.split('.')) {
+    if (/^\d+$/.test(segment)) {
+      current = (current as List<FormNode<any, any>>).items[Number(segment)];
+      continue;
+    }
+
+    current = (current as Form<Record<string, FormNode<any, any>>>).fields[segment];
+  }
+
+  return current;
 }
 
-export function getNodeError(
+function getNodeError(
   node: FormNode<any, any>,
   attemptedSubmit: boolean,
   suppressWhilePending = false,
 ): string | null {
-  if ((suppressWhilePending && node.pending.value) || (!attemptedSubmit && !node.touched.value)) {
+  if (
+    (suppressWhilePending && node.pending.value)
+    || (!attemptedSubmit && !node.touched.value)
+  ) {
     return null;
   }
 
-  return (
-    issueToMessage(node.issues.value) ||
-    (node.validationError.value !== null ? 'Validation failed.' : null)
-  );
+  return issueToMessage(node.issues.value)
+    || (node.validationError.value !== null ? issueMessages.validationFailed : null);
 }
 
-export function getPasswordError(
-  formState: ProfileStreamixForm,
-  attemptedSubmit: boolean,
-): string | null {
-  const security = formState.fields.security.fields;
-  const showError = attemptedSubmit
-    || security.password.touched.value
-    || security.confirmPassword.touched.value;
-
-  return showError ? passwordMismatch(formState.completeValue.value) : null;
-}
-
-export function getSummary(
-  formState: ProfileStreamixForm,
-): StreamixSummary {
-  const profile = formState.fields.profile.fields;
-  const security = formState.fields.security.fields;
-  const address = formState.fields.address.fields;
-  const availability = formState.fields.availability.fields;
-  const skills = formState.fields.skills.items;
+function getSummary(formState: ProfileFormNode): { readonly summary: string[] } {
+  const { profile, security, address, availability, skills } = formState.fields;
   const summary: string[] = [];
 
-  pushSummary(
+  summarize(
     summary,
-    hasAnyIssue([
-      profile.firstName,
-      profile.lastName,
-      profile.email,
-      profile.username,
-      profile.bio,
-    ]),
+    hasIssues(
+      profile.fields.firstName,
+      profile.fields.lastName,
+      profile.fields.email,
+      profile.fields.username,
+      profile.fields.bio,
+    ),
     'Profile details need cleanup.',
   );
-  pushSummary(
+  summarize(
     summary,
-    hasAnyIssue([security.password, security.confirmPassword])
-      || passwordMismatch(formState.completeValue.value) !== null,
+    hasIssues(
+      security.fields.password,
+      security.fields.confirmPassword,
+    ) || passwordMismatch(formState.completeValue.value) !== null,
     'Passwords are incomplete or mismatched.',
   );
-  pushSummary(
+  summarize(
     summary,
-    hasAnyIssue([address.country, address.city, address.postalCode]),
+    hasIssues(
+      address.fields.country,
+      address.fields.city,
+      address.fields.postalCode,
+    ),
     'Address information is incomplete.',
   );
-  pushSummary(
+  summarize(
     summary,
-    hasAnyIssue([availability.startDate, availability.hoursPerWeek]),
+    hasIssues(
+      availability.fields.startDate,
+      availability.fields.hoursPerWeek,
+    ),
     'Availability is outside the allowed range.',
   );
-  pushSummary(
+  summarize(
     summary,
-    skills.length === 0
-      || skills.some((skill) => hasAnyIssue([skill.fields.name, skill.fields.years])),
+    skills.items.length === 0
+      || skills.items.some((skill) =>
+        hasIssues(skill.fields.name, skill.fields.years)),
     'At least one valid skill entry is required.',
   );
 
   return { summary };
 }
 
-export function isFormValid(formState: ProfileStreamixForm): boolean {
+function hasIssues(...nodes: readonly FormNode<any, any>[]): boolean {
+  return nodes.some((node) =>
+    node.issues.value !== null || node.validationError.value !== null,
+  );
+}
+
+function isFormValid(formState: ProfileFormNode): boolean {
   return formState.valid.value
     && passwordMismatch(formState.completeValue.value) === null
     && formState.fields.skills.items.length > 0;
 }
 
-export function getPrimarySkills(formState: ProfileStreamixForm): string {
-  return (
-    formState.completeValue.value.skills
-      .filter((skill) => skill.primary)
-      .map((skill) => skill.name.trim())
-      .filter(Boolean)
-      .join(', ') || 'No primary skill selected'
-  );
+function formatPrimarySkills(skills: readonly SkillValue[]): string {
+  return skills
+    .filter((skill) => skill.primary)
+    .map((skill) => skill.name.trim())
+    .filter(Boolean)
+    .join(', ') || 'No primary skill selected';
 }
 
-async function reservedUsernameCheck(
-  value: string,
-  signal: AbortSignal,
-): Promise<ValidationIssues | null> {
-  const normalized = value.trim().toLowerCase();
-
-  if (normalized.length === 0 || !USERNAME_PATTERN.test(normalized) || normalized.length < 3) {
-    return null;
-  }
-
-  await delay(300, signal);
-
-  return RESERVED_USERNAMES.has(normalized) ? { usernameTaken: true } : null;
+function passwordMismatch(value: ProfileFormValue): string | null {
+  return value.security.password.trim().length > 0
+    && value.security.confirmPassword.trim().length > 0
+    && value.security.password !== value.security.confirmPassword
+    ? issueMessages.passwordMismatch
+    : null;
 }
 
-function syncSkills(
-  skillsNode: List<SkillFormNode>,
-  nextSkills: readonly SkillValue[],
-): void {
-  while (skillsNode.items.length > nextSkills.length) {
-    skillsNode.removeAt(skillsNode.items.length - 1);
+function summarize(summary: string[], invalid: boolean, message: string): void {
+  if (invalid) {
+    summary.push(message);
   }
-
-  while (skillsNode.items.length < nextSkills.length) {
-    skillsNode.push(createSkillFormNode(nextSkills[skillsNode.items.length]));
-  }
-
-  skillsNode.items.forEach((skill, index) => {
-    skill.reset(nextSkills[index], { updateInitial: true });
-  });
-}
-
-function readNode(
-  formState: ProfileStreamixForm,
-  path: string,
-): FormNode<any, any> {
-  let current: FormNode<any, any> = formState;
-
-  for (const segment of path.split('.')) {
-    if (/^\d+$/.test(segment)) {
-      if (current.kind !== 'list') {
-        throw new Error(`Expected list segment before index "${segment}".`);
-      }
-
-      const next = (current as List<FormNode<any, any>>).items[Number(segment)];
-
-      if (!next) {
-        throw new Error(`Unknown list index "${segment}" in "${path}".`);
-      }
-
-      current = next;
-      continue;
-    }
-
-    if (current.kind !== 'form') {
-      throw new Error(`Expected object segment "${segment}" in "${path}".`);
-    }
-
-    const next = (current as Form<Record<string, FormNode<any, any>>>).fields[segment];
-
-    if (!next) {
-      throw new Error(`Unknown field "${segment}" in "${path}".`);
-    }
-
-    current = next;
-  }
-
-  return current;
-}
-
-function hasAnyIssue(nodes: readonly FormNode<any, any>[]): boolean {
-  return nodes.some((node) =>
-    node.issues.value !== null || node.validationError.value !== null,
-  );
 }
 
 function issueToMessage(issues: ValidationIssues | null): string | null {
@@ -437,44 +532,43 @@ function issueToMessage(issues: ValidationIssues | null): string | null {
 
   switch (name) {
     case 'required':
-      return 'This field is required.';
     case 'email':
-      return 'Use a valid email address.';
-    case 'minLength':
-      return `Minimum length is ${readConstraint(payload, 'required')}.`;
-    case 'maxLength':
-      return `Maximum length is ${readConstraint(payload, 'required')}.`;
-    case 'min':
-      return `Minimum value is ${readConstraint(payload, 'required')}.`;
-    case 'max':
-      return `Maximum value is ${readConstraint(payload, 'required')}.`;
     case 'pattern':
-      return 'Format is invalid.';
     case 'usernameTaken':
-      return 'That username is reserved for demos.';
+      return issueMessages[name];
+    case 'minLength':
+    case 'maxLength':
+    case 'min':
+    case 'max':
+      return `${name.startsWith('max') ? 'Maximum' : 'Minimum'} ${
+        name.endsWith('Length') ? 'length' : 'value'
+      } is ${readRequired(payload)}.`;
     default:
-      return 'Value is invalid.';
+      return issueMessages.invalid;
   }
 }
 
-function readConstraint(payload: unknown, key: 'required'): number | string {
-  return typeof payload === 'object' && payload !== null && key in payload
-    ? (payload as Record<'required', number | string>).required
+function readRequired(payload: unknown): number | string {
+  return typeof payload === 'object' && payload !== null && 'required' in payload
+    ? (payload as { required: number | string }).required
     : '0';
 }
 
-function passwordMismatch(value: ProfileFormValue): string | null {
-  return value.security.password.trim().length > 0
-    && value.security.confirmPassword.trim().length > 0
-    && value.security.password !== value.security.confirmPassword
-    ? 'Passwords must match.'
-    : null;
-}
+async function reservedUsernameCheck(
+  value: string,
+  signal: AbortSignal,
+): Promise<ValidationIssues | null> {
+  const normalized = value.trim().toLowerCase();
 
-function pushSummary(summary: string[], invalid: boolean, message: string): void {
-  if (invalid) {
-    summary.push(message);
+  if (
+    normalized.length < 3
+    || !USERNAME_PATTERN.test(normalized)
+  ) {
+    return null;
   }
+
+  await delay(SAVE_COMMIT_MS + 40, signal);
+  return RESERVED_USERNAMES.has(normalized) ? { usernameTaken: true } : null;
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {
@@ -484,16 +578,16 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      signal.removeEventListener('abort', abort);
+      signal.removeEventListener('abort', cancel);
       resolve();
     }, ms);
 
-    const abort = () => {
+    const cancel = () => {
       clearTimeout(timer);
-      signal.removeEventListener('abort', abort);
+      signal.removeEventListener('abort', cancel);
       resolve();
     };
 
-    signal.addEventListener('abort', abort, { once: true });
+    signal.addEventListener('abort', cancel, { once: true });
   });
 }

@@ -18,14 +18,6 @@ export function parseFormValue(
   return kind === 'number' ? toNumber(target.value) : target.value;
 }
 
-export function createIndexedFieldPath(
-  collectionPath: string,
-  index: number,
-  key: string,
-): FieldPath {
-  return `${collectionPath}.${index}.${key}`;
-}
-
 function toNumber(value: string): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
