@@ -1,7 +1,6 @@
-import { AbstractControl } from '@angular/forms';
 import { Component, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { AbstractControl, NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { map } from 'rxjs';
 
 import {
@@ -16,7 +15,7 @@ import {
   standalone: true,
   imports: [ReactiveFormsModule],
   templateUrl: './angular-form.page.html',
-  styleUrl: './angular-form.page.scss',
+  styleUrls: ['./angular-form.page.scss'],
 })
 export class AngularFormPageComponent {
   private readonly fb = inject(NonNullableFormBuilder);

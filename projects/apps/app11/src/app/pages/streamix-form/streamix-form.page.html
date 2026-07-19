@@ -1,62 +1,79 @@
 <section class="page">
+  @let ui = uiState;
+  @let preferences = form.fields.preferences.fields;
+  @let availability = form.fields.availability.fields;
+  @let skills = form.fields.skills.items;
+
+  <ng-template #field let-view>
+    <label
+      class="field"
+      [class.field-wide]="view.type === 'textarea'"
+      [class.range-field]="view.type === 'range'"
+      [class.compact]="view.compact"
+    >
+      <span>{{ view.label }}</span>
+
+      @if (view.type === 'textarea') {
+        <textarea
+          [rows]="view.rows ?? 4"
+          [sxField]="view.node"
+        ></textarea>
+      } @else {
+        <input
+          [type]="view.type ?? 'text'"
+          [min]="view.min ?? null"
+          [max]="view.max ?? null"
+          [sxField]="view.node"
+        />
+      }
+
+      @if (fieldHint(view); as text) {
+        <small class="hint">{{ text }}</small>
+      }
+
+      @if (fieldError(view); as text) {
+        <small class="error">{{ text }}</small>
+      }
+    </label>
+  </ng-template>
+
   <div class="card intro">
     <div>
       <p class="section-kicker">Page 2</p>
       <h2>Streamix-native form</h2>
       <p>
-        Native inputs bind to a local copy of `streamix-forms.ts`. The form
-        tree handles validation, autosave, and derived state without Angular
-        form APIs.
+        Native inputs bind directly to Streamix fields. There are no Angular
+        form controls, path adapters, or manual input parsers.
       </p>
     </div>
 
     <div class="chips">
-      <span>Local forms file</span>
+      <span>Direct field binding</span>
       <span>No Angular forms</span>
       <span>Debounced autosave</span>
     </div>
   </div>
 
   <div class="layout">
-    <form class="card form-card" (submit)="demo.submit($event)">
+    <form class="card form-card" (submit)="submit($event)">
       <section class="section">
         <div class="section-head">
           <div>
             <p class="section-kicker">Profile</p>
-            <h3>Native inputs bound to local form nodes</h3>
+            <h3>Native inputs bound directly to fields</h3>
           </div>
           <div class="chips">
-            <span class="badge">{{ demo.uiState.completion }}% complete</span>
-            <span class="badge badge-strong">{{ demo.uiState.draftStatus }}</span>
+            <span class="badge">{{ ui.completion }}% complete</span>
+            <span class="badge badge-strong">{{ ui.draftStatus }}</span>
           </div>
         </div>
 
         <div class="grid two">
-          @for (field of demo.profileFields; track field.path) {
-            <label class="field" [class.field-wide]="field.type === 'textarea'">
-              <span>{{ field.label }}</span>
-              @if (field.type === 'textarea') {
-                <textarea
-                  [rows]="field.rows ?? 4"
-                  [value]="demo.valueOf(field.node)"
-                  (input)="demo.updateNodeFromEvent(field.node, $event, field.kind ?? 'text')"
-                  (blur)="demo.touchNode(field.node)"
-                ></textarea>
-              } @else {
-                <input
-                  [type]="field.type"
-                  [value]="demo.valueOf(field.node)"
-                  (input)="demo.updateNodeFromEvent(field.node, $event, field.kind ?? 'text')"
-                  (blur)="demo.touchNode(field.node)"
-                />
-              }
-              @if (demo.fieldHint(field); as hint) {
-                <small class="hint">{{ hint }}</small>
-              }
-              @if (demo.fieldError(field); as error) {
-                <small class="error">{{ error }}</small>
-              }
-            </label>
+          @for (view of views.profile; track view.label) {
+            <ng-container
+              [ngTemplateOutlet]="field"
+              [ngTemplateOutletContext]="{ $implicit: view }"
+            />
           }
         </div>
       </section>
@@ -65,28 +82,20 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Security</p>
-            <h3>Validation lives in the local form tree</h3>
+            <h3>Validation remains in the Streamix graph</h3>
           </div>
         </div>
 
         <div class="grid two">
-          @for (field of demo.securityFields; track field.path) {
-            <label class="field">
-              <span>{{ field.label }}</span>
-              <input
-                [type]="field.type"
-                [value]="demo.valueOf(field.node)"
-                (input)="demo.updateNodeFromEvent(field.node, $event, field.kind ?? 'text')"
-                (blur)="demo.touchNode(field.node)"
-              />
-              @if (demo.fieldError(field); as error) {
-                <small class="error">{{ error }}</small>
-              }
-            </label>
+          @for (view of views.security; track view.label) {
+            <ng-container
+              [ngTemplateOutlet]="field"
+              [ngTemplateOutletContext]="{ $implicit: view }"
+            />
           }
         </div>
 
-        @if (demo.passwordError(); as error) {
+        @if (ui.passwordError; as error) {
           <small class="error">{{ error }}</small>
         }
       </section>
@@ -95,24 +104,16 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Address</p>
-            <h3>Same schema without Angular controls</h3>
+            <h3>No string paths or node lookup helpers</h3>
           </div>
         </div>
 
         <div class="grid three">
-          @for (field of demo.addressFields; track field.path) {
-            <label class="field">
-              <span>{{ field.label }}</span>
-              <input
-                [type]="field.type"
-                [value]="demo.valueOf(field.node)"
-                (input)="demo.updateNodeFromEvent(field.node, $event, field.kind ?? 'text')"
-                (blur)="demo.touchNode(field.node)"
-              />
-              @if (demo.fieldError(field); as error) {
-                <small class="error">{{ error }}</small>
-              }
-            </label>
+          @for (view of views.address; track view.label) {
+            <ng-container
+              [ngTemplateOutlet]="field"
+              [ngTemplateOutletContext]="{ $implicit: view }"
+            />
           }
         </div>
       </section>
@@ -121,21 +122,21 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Preferences</p>
-            <h3>Plain HTML inputs</h3>
+            <h3>The directive infers native value types</h3>
           </div>
         </div>
 
         <div class="grid two">
           <fieldset class="field fieldset">
             <legend>Preferred contact</legend>
-            @for (option of demo.contactOptions; track option.value) {
+
+            @for (option of contactOptions; track option.value) {
               <label>
                 <input
                   type="radio"
                   name="contactMethod"
                   [value]="option.value"
-                  [checked]="demo.valueOf(demo.preferences.contactMethod) === option.value"
-                  (change)="demo.updateNode(demo.preferences.contactMethod, option.value)"
+                  [sxField]="preferences.contactMethod"
                 />
                 {{ option.label }}
               </label>
@@ -144,12 +145,11 @@
 
           <label class="field">
             <span>Theme</span>
-            <select
-              [value]="demo.valueOf(demo.preferences.theme)"
-              (change)="demo.updateNodeFromEvent(demo.preferences.theme, $event)"
-            >
-              @for (option of demo.themeOptions; track option.value) {
-                <option [value]="option.value">{{ option.label }}</option>
+            <select [sxField]="preferences.theme">
+              @for (option of themeOptions; track option.value) {
+                <option [value]="option.value">
+                  {{ option.label }}
+                </option>
               }
             </select>
           </label>
@@ -158,8 +158,7 @@
         <label class="checkbox">
           <input
             type="checkbox"
-            [checked]="demo.valueOf(demo.preferences.newsletter)"
-            (change)="demo.updateNodeFromEvent(demo.preferences.newsletter, $event, 'boolean')"
+            [sxField]="preferences.newsletter"
           />
           <span>Send release notes and onboarding emails</span>
         </label>
@@ -169,37 +168,23 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Availability</p>
-            <h3>Date, range, and boolean fields</h3>
+            <h3>Number and boolean parsing is automatic</h3>
           </div>
         </div>
 
         <div class="grid two">
-          @for (field of demo.availabilityFields; track field.path) {
-            <label class="field" [class.range-field]="field.type === 'range'">
-              <span>{{ field.label }}</span>
-              <input
-                [type]="field.type"
-                [min]="field.min ?? null"
-                [max]="field.max ?? null"
-                [value]="demo.valueOf(field.node)"
-                (input)="demo.updateNodeFromEvent(field.node, $event, field.kind ?? 'text')"
-                (blur)="demo.touchNode(field.node)"
-              />
-              @if (demo.fieldHint(field); as hint) {
-                <small class="hint">{{ hint }}</small>
-              }
-              @if (demo.fieldError(field); as error) {
-                <small class="error">{{ error }}</small>
-              }
-            </label>
+          @for (view of views.availability; track view.label) {
+            <ng-container
+              [ngTemplateOutlet]="field"
+              [ngTemplateOutletContext]="{ $implicit: view }"
+            />
           }
         </div>
 
         <label class="checkbox">
           <input
             type="checkbox"
-            [checked]="demo.valueOf(demo.availability.remote)"
-            (change)="demo.updateNodeFromEvent(demo.availability.remote, $event, 'boolean')"
+            [sxField]="availability.remote"
           />
           <span>Open to remote collaboration</span>
         </label>
@@ -209,36 +194,37 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Skills</p>
-            <h3>Dynamic rows managed by local list nodes</h3>
+            <h3>Dynamic rows use the same field directive</h3>
           </div>
-          <button type="button" class="secondary" (click)="demo.addSkill()">Add skill</button>
+
+          <button
+            type="button"
+            class="secondary"
+            (click)="addSkill()"
+          >
+            Add skill
+          </button>
         </div>
 
         <div class="stack">
-          @for (skill of demo.skills; track skill) {
+          @for (skill of skills; track skill) {
+            @let nameView = skillNameView(skill);
+            @let yearsView = skillYearsView(skill);
             <div class="skill-row">
-              @for (field of demo.skillFields; track field.key) {
-                <label class="field" [class.compact]="field.compact">
-                  <span>{{ field.label }}</span>
-                  <input
-                    [type]="field.type"
-                    [min]="field.min ?? null"
-                    [max]="field.max ?? null"
-                    [value]="demo.valueOf(skill.fields[field.key])"
-                    (input)="demo.updateNodeFromEvent(skill.fields[field.key], $event, field.kind ?? 'text')"
-                    (blur)="demo.touchNode(skill.fields[field.key])"
-                  />
-                  @if (demo.nodeError(skill.fields[field.key]); as error) {
-                    <small class="error">{{ error }}</small>
-                  }
-                </label>
-              }
+              <ng-container
+                [ngTemplateOutlet]="field"
+                [ngTemplateOutletContext]="{ $implicit: nameView }"
+              />
+
+              <ng-container
+                [ngTemplateOutlet]="field"
+                [ngTemplateOutletContext]="{ $implicit: yearsView }"
+              />
 
               <label class="checkbox compact-checkbox">
                 <input
                   type="checkbox"
-                  [checked]="demo.valueOf(skill.fields.primary)"
-                  (change)="demo.updateNodeFromEvent(skill.fields.primary, $event, 'boolean')"
+                  [sxField]="skill.fields.primary"
                 />
                 <span>Primary</span>
               </label>
@@ -246,8 +232,8 @@
               <button
                 type="button"
                 class="ghost"
-                [disabled]="demo.skills.length === 1"
-                (click)="demo.removeSkill($index)"
+                [disabled]="skills.length === 1"
+                (click)="removeSkill($index)"
               >
                 Remove
               </button>
@@ -257,68 +243,73 @@
       </section>
 
       <div class="actions">
-        <button type="button" class="secondary" (click)="demo.resetForm()">Reset</button>
-        <button type="submit" [disabled]="!demo.uiState.readyToSubmit">Submit Streamix Form</button>
-      </div>
+        <button
+          type="button"
+          class="secondary"
+          (click)="reset()"
+        >
+          Reset
+        </button>
 
-      @if (!demo.uiState.readyToSubmit) {
-        <small class="hint">
-          Submission stays disabled until all required fields are valid. In the
-          sample data, the password and confirm-password fields start empty.
-        </small>
-      }
+        <button
+          type="submit"
+          [disabled]="!ui.readyToSubmit"
+        >
+          Submit Streamix Form
+        </button>
+      </div>
     </form>
 
     <aside class="side">
       <div class="card metrics">
         <div>
           <span class="metric-label">Draft status</span>
-          <strong>{{ demo.uiState.draftStatus }}</strong>
+          <strong>{{ ui.draftStatus }}</strong>
         </div>
         <div>
           <span class="metric-label">Completion</span>
-          <strong>{{ demo.uiState.completion }}%</strong>
+          <strong>{{ ui.completion }}%</strong>
         </div>
         <div>
           <span class="metric-label">Last autosave</span>
-          <strong>{{ demo.uiState.lastSavedAt }}</strong>
+          <strong>{{ ui.lastSavedAt }}</strong>
         </div>
         <div>
           <span class="metric-label">Contact route</span>
-          <strong>{{ demo.valueOf(demo.preferences.contactMethod) }}</strong>
+          <strong>{{ preferences.contactMethod.completeValue.value }}</strong>
         </div>
         <div>
           <span class="metric-label">Remote</span>
-          <strong>{{ demo.valueOf(demo.availability.remote) ? 'Yes' : 'No' }}</strong>
+          <strong>
+            {{ availability.remote.completeValue.value ? 'Yes' : 'No' }}
+          </strong>
         </div>
       </div>
 
       <div class="card success">
         <h3>Form derivation</h3>
-        <p>Primary skills: {{ demo.uiState.primarySkills }}</p>
-        <p>Ready to submit: {{ demo.uiState.readyToSubmit ? 'Yes' : 'No' }}</p>
+        <p>Primary skills: {{ ui.primarySkills }}</p>
+        <p>
+          Ready to submit:
+          {{ ui.readyToSubmit ? 'Yes' : 'No' }}
+        </p>
       </div>
-
-      @if (demo.uiState.errors.summary.length > 0) {
-        <div class="card warning">
-          <h3>Validation summary</h3>
-          <ul>
-            @for (item of demo.uiState.errors.summary; track item) {
-              <li>{{ item }}</li>
-            }
-          </ul>
-        </div>
-      }
 
       <div class="card">
         <h3>Latest snapshot</h3>
-        <pre class="json-block" [textContent]="demo.uiState.preview"></pre>
+        <pre
+          class="json-block"
+          [textContent]="ui.preview"
+        ></pre>
       </div>
 
-      @if (demo.submittedPayload) {
+      @if (submittedPayload.value) {
         <div class="card success">
           <h3>Submitted payload</h3>
-          <pre class="json-block" [textContent]="demo.submittedPayload"></pre>
+          <pre
+            class="json-block"
+            [textContent]="submittedPayload.value"
+          ></pre>
         </div>
       }
     </aside>
