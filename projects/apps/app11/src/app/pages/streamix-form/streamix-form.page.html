@@ -77,8 +77,14 @@
         <div class="grid two">
           <label class="field">
             <span>Password</span>
-            <input #v="sxField" [sxField]="security.password" type="password" />
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <input
+              #v="sxField"
+              [sxField]="security.password"
+              [sxHint]="passwordHint"
+              type="password"
+            />
+            <small class="hint" *ngIf="v.hint">{{ v.hint }}</small>
+            <small class="error" *ngIf="v.error && !v.hint">{{ v.error }}</small>
           </label>
 
           <label class="field">
@@ -139,7 +145,14 @@
 
           <label class="field range-field">
             <span>Hours per week</span>
-            <input #v="sxField" [sxField]="availability.hoursPerWeek" type="range" min="10" max="60" />
+            <input
+              #v="sxField"
+              [sxField]="availability.hoursPerWeek"
+              [sxHint]="hoursHint"
+              type="range"
+              min="10"
+              max="60"
+            />
             <small class="hint" *ngIf="v.hint">{{ v.hint }}</small>
           </label>
         </div>

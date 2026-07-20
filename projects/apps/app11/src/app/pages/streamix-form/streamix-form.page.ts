@@ -50,10 +50,12 @@ export class StreamixFormPageComponent implements OnDestroy {
 
   constructor() {
     const refresh = () => this.cdr.detectChanges();
+
     this.subs.push(
-      this.form.completeValue.subscribe(() => { this.queueAutosave(); refresh(); }),
-      this.form.status.subscribe(refresh),
-      this.form.touched.subscribe(refresh),
+      this.form.state.subscribe(() => {
+        this.queueAutosave();
+        refresh();
+      }),
       this.draftStatus.subscribe(refresh),
       this.lastSavedAt.subscribe(refresh),
       this.submittedPayload.subscribe(refresh),
@@ -61,12 +63,29 @@ export class StreamixFormPageComponent implements OnDestroy {
   }
 
   // Expose field groups directly to template
-  get profile() { return this.form.fields.profile.fields; }
-  get security() { return this.form.fields.security.fields; }
-  get address() { return this.form.fields.address.fields; }
-  get preferences() { return this.form.fields.preferences.fields; }
-  get availability() { return this.form.fields.availability.fields; }
-  get skills() { return this.form.fields.skills; }
+  get profile() {
+    return this.form.fields.profile.fields;
+  }
+
+  get security() {
+    return this.form.fields.security.fields;
+  }
+
+  get address() {
+    return this.form.fields.address.fields;
+  }
+
+  get preferences() {
+    return this.form.fields.preferences.fields;
+  }
+
+  get availability() {
+    return this.form.fields.availability.fields;
+  }
+
+  get skills() {
+    return this.form.fields.skills;
+  }
 
   get uiState(): StreamixFormUiState {
     return {
@@ -82,11 +101,35 @@ export class StreamixFormPageComponent implements OnDestroy {
   readonly contactOptions = contactOptions;
   readonly themeOptions = themeOptions;
 
+  readonly passwordHint = (value: unknown): string | null => {
+    const length = String(value ?? "").length;
+
+    return length > 0 && length < 8
+      ? "Minimum length is 8."
+      : null;
+  };
+
+  readonly hoursHint = (value: unknown) => `${value} hrs/week`;
+
   get passwordError(): string | null {
-    const { password, confirmPassword } = this.form.fields.security.fields;
-    if (!password.touched.value && !confirmPassword.touched.value) return null;
-    const mismatch = this.form.fields.security.issues.value?.["passwordMismatch"];
-    return mismatch ? "Passwords must match." : null;
+    const security = this.form.fields.security;
+
+    if (
+      !security.fields.password.touched.value &&
+      !security.fields.confirmPassword.touched.value
+    ) {
+      return null;
+    }
+
+    const formIssues = security.issues.value?.["$form"];
+
+    return (
+      typeof formIssues === "object" &&
+      formIssues !== null &&
+      "passwordMismatch" in formIssues
+    )
+      ? "Passwords must match."
+      : null;
   }
 
   submit(event: Event): void {

@@ -8,12 +8,10 @@ import {
 import {
   abortableDelay,
   checks,
-  defineField,
   field,
   form,
   list,
   syncList,
-  type FieldView,
   type ValidationIssues
 } from "./streamix-forms";
 
@@ -101,46 +99,6 @@ export function createProfileForm(initial: ProfileFormValue = cloneInitialProfil
     }),
     skills: list(initial.skills.map(createSkill)),
   });
-}
-
-export function createFieldViews(formState: ProfileForm) {
-  const { profile, security, address, availability } = formState.fields;
-  return {
-    profile: [
-      defineField(profile.fields.firstName, "First name"),
-      defineField(profile.fields.lastName, "Last name"),
-      defineField(profile.fields.email, "Email", "email"),
-      defineField(profile.fields.username, "Username", "text", {
-        pendingHint: "Checking username availability...",
-      }),
-      defineField(profile.fields.bio, "Bio", "textarea", { rows: 4 }),
-    ],
-    security: [
-      defineField(security.fields.password, "Password", "password"),
-      defineField(security.fields.confirmPassword, "Confirm password", "password"),
-    ],
-    address: [
-      defineField(address.fields.country, "Country"),
-      defineField(address.fields.city, "City"),
-      defineField(address.fields.postalCode, "Postal code"),
-    ],
-    availability: [
-      defineField(availability.fields.startDate, "Start date", "date"),
-      defineField(availability.fields.hoursPerWeek, "Hours per week", "range", {
-        min: 10,
-        max: 60,
-        hint: value => `${value} hrs/week`,
-      }),
-    ],
-  };
-}
-
-export function skillNameView(skill: SkillForm): FieldView<string> {
-  return defineField(skill.fields.name, "Skill", "text");
-}
-
-export function skillYearsView(skill: SkillForm): FieldView<number> {
-  return defineField(skill.fields.years, "Years", "number", { min: 1, max: 20, compact: true });
 }
 
 export function profileSnapshot(formState: ProfileForm): ProfileFormValue {
