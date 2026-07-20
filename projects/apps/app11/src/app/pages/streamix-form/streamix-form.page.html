@@ -139,8 +139,7 @@
 
           <label class="field range-field">
             <span>Hours per week</span>
-            <input #v="sxField" [sxField]="availability.hoursPerWeek" type="range" min="10" max="60"
-              [sxHint]="val => `${val} hrs/week`" />
+            <input #v="sxField" [sxField]="availability.hoursPerWeek" type="range" min="10" max="60" />
             <small class="hint" *ngIf="v.hint">{{ v.hint }}</small>
           </label>
         </div>
