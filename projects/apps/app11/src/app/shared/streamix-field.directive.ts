@@ -1,141 +1,79 @@
 import {
-  Directive,
-  ElementRef,
-  HostListener,
-  Input,
-  OnChanges,
-  OnDestroy,
-  inject,
+  Directive, ElementRef, HostListener, Input, OnChanges, OnDestroy, inject,
 } from '@angular/core';
+import { type Field, watchNode } from './streamix-forms';
 
-import {
-  type Field,
-  watchNode,
-} from './streamix-forms';
+type NativeFieldElement = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+type ElementKind = 'checkbox' | 'radio' | 'number' | 'select' | 'text';
 
-type NativeFieldElement =
-  | HTMLInputElement
-  | HTMLTextAreaElement
-  | HTMLSelectElement;
+function detectKind(el: NativeFieldElement): ElementKind {
+  if (el instanceof HTMLSelectElement) return 'select';
+  if (el instanceof HTMLInputElement) {
+    if (el.type === 'checkbox') return 'checkbox';
+    if (el.type === 'radio') return 'radio';
+    if (el.type === 'number' || el.type === 'range') return 'number';
+  }
+  return 'text';
+}
 
-/**
- * Binds a native input directly to a Streamix field.
- *
- * Usage:
- *   <input [sxField]="profile.firstName">
- *   <input type="number" [sxField]="skill.years">
- *   <input type="checkbox" [sxField]="preferences.newsletter">
- */
 @Directive({
   selector: 'input[sxField], textarea[sxField], select[sxField]',
   standalone: true,
 })
 export class StreamixFieldDirective implements OnChanges, OnDestroy {
-  private readonly element =
-    inject<ElementRef<NativeFieldElement>>(ElementRef);
-
+  private readonly element = inject<ElementRef<NativeFieldElement>>(ElementRef);
   private stopWatching: (() => void) | undefined;
+  private kind: ElementKind = 'text';
 
-  @Input({ required: true })
-  sxField!: Field<unknown>;
+  @Input({ required: true }) sxField!: Field<unknown>;
 
   ngOnChanges(): void {
     this.stopWatching?.();
-    this.stopWatching = this.sxField
-      ? watchNode(this.sxField, () => this.render())
-      : undefined;
-
+    this.kind = detectKind(this.element.nativeElement);
+    this.stopWatching = this.sxField ? watchNode(this.sxField, () => this.render()) : undefined;
     this.render();
   }
 
-  ngOnDestroy(): void {
-    this.stopWatching?.();
-  }
+  ngOnDestroy(): void { this.stopWatching?.(); }
 
-  @HostListener('input')
-  onInput(): void {
-    if (this.usesChangeEvent()) return;
-    this.write();
-  }
+  @HostListener('input') onInput(): void { if (this.usesInputEvent()) this.write(); }
+  @HostListener('change') onChange(): void { if (!this.usesInputEvent()) this.write(); }
+  @HostListener('blur') onBlur(): void { this.sxField.touch(); }
 
-  @HostListener('change')
-  onChange(): void {
-    if (!this.usesChangeEvent()) return;
-    this.write();
-  }
-
-  @HostListener('blur')
-  onBlur(): void {
-    this.sxField.touch();
+  private usesInputEvent(): boolean {
+    return this.kind !== 'select' && this.kind !== 'checkbox' && this.kind !== 'radio';
   }
 
   private write(): void {
-    const element = this.element.nativeElement;
-
-    if (
-      element instanceof HTMLInputElement
-      && element.type === 'radio'
-      && !element.checked
-    ) {
-      return;
-    }
-
+    const el = this.element.nativeElement;
+    if (this.kind === 'radio' && el instanceof HTMLInputElement && !el.checked) return;
     this.sxField.set(this.readValue());
   }
 
   private readValue(): unknown {
-    const element = this.element.nativeElement;
-
-    if (element instanceof HTMLInputElement) {
-      switch (element.type) {
-        case 'checkbox':
-          return element.checked;
-
-        case 'number':
-        case 'range':
-          return element.value === '' ? null : element.valueAsNumber;
-
-        case 'radio':
-          return element.value;
+    const el = this.element.nativeElement;
+    if (el instanceof HTMLInputElement) {
+      switch (this.kind) {
+        case 'checkbox': return el.checked;
+        case 'number': return el.value === '' ? null : el.valueAsNumber;
+        case 'radio': return el.value;
       }
     }
-
-    return element.value;
+    return el.value;
   }
 
   private render(): void {
     if (!this.sxField) return;
-
-    const element = this.element.nativeElement;
+    const el = this.element.nativeElement;
     const value = this.sxField.completeValue.value;
+    el.disabled = this.sxField.disabled.value;
 
-    element.disabled = this.sxField.disabled.value;
-
-    if (element instanceof HTMLInputElement) {
-      if (element.type === 'checkbox') {
-        element.checked = Boolean(value);
-        return;
-      }
-
-      if (element.type === 'radio') {
-        element.checked = String(value ?? '') === element.value;
-        return;
-      }
+    if (el instanceof HTMLInputElement) {
+      if (this.kind === 'checkbox') { el.checked = Boolean(value); return; }
+      if (this.kind === 'radio') { el.checked = String(value ?? '') === el.value; return; }
     }
 
     const rendered = value == null ? '' : String(value);
-    if (element.value !== rendered) {
-      element.value = rendered;
-    }
-  }
-
-  private usesChangeEvent(): boolean {
-    const element = this.element.nativeElement;
-
-    return element instanceof HTMLSelectElement
-      || (
-        element instanceof HTMLInputElement
-        && (element.type === 'checkbox' || element.type === 'radio')
-      );
+    if (el.value !== rendered) el.value = rendered;
   }
 }

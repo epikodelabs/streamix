@@ -1,16 +1,6 @@
 import { NgTemplateOutlet } from '@angular/common';
-import {
-  ChangeDetectorRef,
-  Component,
-  OnDestroy,
-  inject,
-} from '@angular/core';
-
-import type { Subscription } from '@epikodelabs/streamix';
-import { atom } from '@epikodelabs/streamix';
-
-import { StreamixFieldDirective } from '../../shared/streamix-field.directive';
-
+import { ChangeDetectorRef, Component, OnDestroy, inject } from '@angular/core';
+import { atom, type Subscription } from '@epikodelabs/streamix';
 import {
   cloneInitialProfile,
   completion,
@@ -30,27 +20,25 @@ import {
   themeOptions,
   type DraftStatus,
 } from '../../shared/profile-form';
+import { StreamixFieldDirective } from '../../shared/streamix-field.directive';
 
 const SAVE_DELAY = 650;
 const SAVE_DURATION = 260;
 const NOT_SAVED = 'Not saved yet';
 
 type StreamixFormUiState = {
-  readonly completion: number;
-  readonly draftStatus: DraftStatus;
-  readonly lastSavedAt: string;
-  readonly passwordError: string | null;
-  readonly primarySkills: string;
-  readonly readyToSubmit: boolean;
-  readonly preview: string;
+  completion: number;
+  draftStatus: DraftStatus;
+  lastSavedAt: string;
+  passwordError: string | null;
+  primarySkills: string;
+  readyToSubmit: boolean;
+  preview: string;
 };
 
 @Component({
   standalone: true,
-  imports: [
-    NgTemplateOutlet,
-    StreamixFieldDirective,
-  ],
+  imports: [NgTemplateOutlet, StreamixFieldDirective],
   templateUrl: './streamix-form.page.html',
   styleUrl: './streamix-form.page.scss',
 })
@@ -67,26 +55,24 @@ export class StreamixFormPageComponent implements OnDestroy {
   readonly skillYearsView = skillYearsView;
 
   readonly draftStatus = atom<DraftStatus>('idle');
-  readonly lastSavedAt = atom(NOT_SAVED);
-  readonly submittedPayload = atom('');
+  readonly lastSavedAt = atom<string>(NOT_SAVED);
+  readonly submittedPayload = atom<string>('');
 
-  private readonly subscriptions: Subscription[];
-  private saveTimer: ReturnType<typeof setTimeout> | undefined;
-  private commitTimer: ReturnType<typeof setTimeout> | undefined;
+  private saveTimer?: ReturnType<typeof setTimeout>;
+  private commitTimer?: ReturnType<typeof setTimeout>;
   private previousSnapshot = profilePreview(this.form);
+  private readonly subs: Subscription[] = [];
 
   constructor() {
-    this.subscriptions = [
-      this.form.completeValue.subscribe(() => {
-        this.queueAutosave();
-        this.refresh();
-      }),
-      this.form.status.subscribe(() => this.refresh()),
-      this.form.touched.subscribe(() => this.refresh()),
-      this.draftStatus.subscribe(() => this.refresh()),
-      this.lastSavedAt.subscribe(() => this.refresh()),
-      this.submittedPayload.subscribe(() => this.refresh()),
-    ];
+    const refresh = () => this.cdr.detectChanges();
+    this.subs.push(
+      this.form.completeValue.subscribe(() => { this.queueAutosave(); refresh(); }),
+      this.form.status.subscribe(refresh),
+      this.form.touched.subscribe(refresh),
+      this.draftStatus.subscribe(refresh),
+      this.lastSavedAt.subscribe(refresh),
+      this.submittedPayload.subscribe(refresh),
+    );
   }
 
   get uiState(): StreamixFormUiState {
@@ -102,30 +88,16 @@ export class StreamixFormPageComponent implements OnDestroy {
   }
 
   get passwordError(): string | null {
-    const { password, confirmPassword } =
-      this.form.fields.security.fields;
-
-    if (
-      !password.touched.value
-      && !confirmPassword.touched.value
-    ) {
-      return null;
-    }
-
-    return passwordMismatch(this.form)
-      ? 'Passwords must match.'
-      : null;
+    const { password, confirmPassword } = this.form.fields.security.fields;
+    if (!password.touched.value && !confirmPassword.touched.value) return null;
+    return passwordMismatch(this.form) ? 'Passwords must match.' : null;
   }
 
   submit(event: Event): void {
     event.preventDefault();
     this.form.touch();
-
-    if (!profileReady(this.form)) {
-      this.refresh();
-      return;
-    }
-
+    if (!profileReady(this.form)) { this.cdr.detectChanges(); return; }
+    
     this.submittedPayload.set(profilePreview(this.form));
     this.draftStatus.set('saved');
   }
@@ -139,19 +111,14 @@ export class StreamixFormPageComponent implements OnDestroy {
     this.submittedPayload.set('');
   }
 
-  addSkill(): void {
-    this.form.fields.skills.push(createSkill());
-  }
-
+  addSkill(): void { this.form.fields.skills.push(createSkill()); }
   removeSkill(index: number): void {
-    if (this.form.fields.skills.items.length > 1) {
-      this.form.fields.skills.removeAt(index);
-    }
+    if (this.form.fields.skills.items.length > 1) this.form.fields.skills.removeAt(index);
   }
 
   ngOnDestroy(): void {
     this.cancelAutosave();
-    this.subscriptions.forEach(unsubscribe => unsubscribe());
+    this.subs.forEach(unsub => unsub());
     this.form.dispose();
     this.draftStatus.dispose();
     this.lastSavedAt.dispose();
@@ -160,40 +127,26 @@ export class StreamixFormPageComponent implements OnDestroy {
 
   private queueAutosave(): void {
     const snapshot = profilePreview(this.form);
-
     if (snapshot === this.previousSnapshot) return;
     this.previousSnapshot = snapshot;
 
-    this.cancelAutosave();
+    clearTimeout(this.saveTimer);
+    clearTimeout(this.commitTimer);
     this.draftStatus.set('editing');
 
     this.saveTimer = setTimeout(() => {
       this.draftStatus.set('saving');
-
       this.commitTimer = setTimeout(() => {
-        this.lastSavedAt.set(new Date().toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        }));
+        this.lastSavedAt.set(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
         this.draftStatus.set('saved');
       }, SAVE_DURATION);
     }, SAVE_DELAY);
   }
 
   private cancelAutosave(): void {
-    if (this.saveTimer !== undefined) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = undefined;
-    }
-
-    if (this.commitTimer !== undefined) {
-      clearTimeout(this.commitTimer);
-      this.commitTimer = undefined;
-    }
-  }
-
-  private refresh(): void {
-    this.cdr.detectChanges();
+    clearTimeout(this.saveTimer);
+    clearTimeout(this.commitTimer);
+    this.saveTimer = undefined;
+    this.commitTimer = undefined;
   }
 }
