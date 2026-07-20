@@ -1,34 +1,25 @@
-import { NgTemplateOutlet } from "@angular/common";
+import { CommonModule } from "@angular/common";
 import { ChangeDetectorRef, Component, OnDestroy, inject } from "@angular/core";
 import { atom, type Subscription } from "@epikodelabs/streamix";
 import {
   cloneInitialProfile,
-  completion,
   contactOptions,
-  createFieldViews,
   createProfileForm,
   createSkill,
   primarySkills,
   profilePreview,
   profileReady,
   resetProfile,
-  skillNameView,
-  skillYearsView,
   themeOptions,
   type DraftStatus,
 } from "../../shared/profile-form";
 import { StreamixFieldDirective } from "../../shared/streamix-field.directive";
-import {
-  fieldError,
-  fieldHint,
-} from "../../shared/streamix-forms";
 
 const SAVE_DELAY = 650;
 const SAVE_DURATION = 260;
 const NOT_SAVED = "Not saved yet";
 
 type StreamixFormUiState = {
-  completion: number;
   draftStatus: DraftStatus;
   lastSavedAt: string;
   passwordError: string | null;
@@ -39,7 +30,7 @@ type StreamixFormUiState = {
 
 @Component({
   standalone: true,
-  imports: [NgTemplateOutlet, StreamixFieldDirective],
+  imports: [CommonModule, StreamixFieldDirective],
   templateUrl: "./streamix-form.page.html",
   styleUrl: "./streamix-form.page.scss",
 })
@@ -47,13 +38,6 @@ export class StreamixFormPageComponent implements OnDestroy {
   private readonly cdr = inject(ChangeDetectorRef);
 
   readonly form = createProfileForm();
-  readonly views = createFieldViews(this.form);
-  readonly contactOptions = contactOptions;
-  readonly themeOptions = themeOptions;
-  readonly fieldHint = fieldHint;
-  readonly fieldError = fieldError;
-  readonly skillNameView = skillNameView;
-  readonly skillYearsView = skillYearsView;
 
   readonly draftStatus = atom<DraftStatus>("idle");
   readonly lastSavedAt = atom<string>(NOT_SAVED);
@@ -76,9 +60,16 @@ export class StreamixFormPageComponent implements OnDestroy {
     );
   }
 
+  // Expose field groups directly to template
+  get profile() { return this.form.fields.profile.fields; }
+  get security() { return this.form.fields.security.fields; }
+  get address() { return this.form.fields.address.fields; }
+  get preferences() { return this.form.fields.preferences.fields; }
+  get availability() { return this.form.fields.availability.fields; }
+  get skills() { return this.form.fields.skills; }
+
   get uiState(): StreamixFormUiState {
     return {
-      completion: completion(this.form),
       draftStatus: this.draftStatus.value,
       lastSavedAt: this.lastSavedAt.value,
       passwordError: this.passwordError,
@@ -87,6 +78,9 @@ export class StreamixFormPageComponent implements OnDestroy {
       preview: profilePreview(this.form),
     };
   }
+
+  readonly contactOptions = contactOptions;
+  readonly themeOptions = themeOptions;
 
   get passwordError(): string | null {
     const { password, confirmPassword } = this.form.fields.security.fields;

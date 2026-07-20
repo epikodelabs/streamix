@@ -1,7 +1,7 @@
 import {
   Directive, ElementRef, HostListener, Input, OnChanges, OnDestroy, inject,
 } from '@angular/core';
-import { type Field, watchNode } from './streamix-forms';
+import { type Field, formatFieldError, watchNode } from './streamix-forms';
 
 type NativeFieldElement = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 type ElementKind = 'checkbox' | 'radio' | 'number' | 'select' | 'text';
@@ -19,6 +19,7 @@ function detectKind(el: NativeFieldElement): ElementKind {
 @Directive({
   selector: 'input[sxField], textarea[sxField], select[sxField]',
   standalone: true,
+  exportAs: 'sxField' // <-- Allows using #v="sxField" in template
 })
 export class StreamixFieldDirective implements OnChanges, OnDestroy {
   private readonly element = inject<ElementRef<NativeFieldElement>>(ElementRef);
@@ -26,6 +27,20 @@ export class StreamixFieldDirective implements OnChanges, OnDestroy {
   private kind: ElementKind = 'text';
 
   @Input({ required: true }) sxField!: Field<unknown>;
+  
+  // Optional hint inputs directly on the directive
+  @Input() sxHint?: (value: any) => string | null;
+  @Input() sxPendingHint?: string;
+
+  get error(): string | null {
+    return this.sxField ? formatFieldError(this.sxField) : null;
+  }
+
+  get hint(): string | null {
+    if (!this.sxField) return null;
+    if (this.sxPendingHint && this.sxField.pending.value) return this.sxPendingHint;
+    return this.sxHint?.(this.sxField.completeValue.value) ?? null;
+  }
 
   ngOnChanges(): void {
     this.stopWatching?.();
@@ -67,13 +82,20 @@ export class StreamixFieldDirective implements OnChanges, OnDestroy {
     const el = this.element.nativeElement;
     const value = this.sxField.completeValue.value;
     el.disabled = this.sxField.disabled.value;
-
+    
     if (el instanceof HTMLInputElement) {
-      if (this.kind === 'checkbox') { el.checked = Boolean(value); return; }
-      if (this.kind === 'radio') { el.checked = String(value ?? '') === el.value; return; }
+      if (this.kind === 'checkbox') { el.checked = Boolean(value); }
+      else if (this.kind === 'radio') { el.checked = String(value ?? '') === el.value; }
+      else {
+        const rendered = value == null ? '' : String(value);
+        if (el.value !== rendered) el.value = rendered;
+      }
+    } else {
+      const rendered = value == null ? '' : String(value);
+      if (el.value !== rendered) el.value = rendered;
     }
-
-    const rendered = value == null ? '' : String(value);
-    if (el.value !== rendered) el.value = rendered;
+    const isInvalid = this.sxField.invalid.value && this.sxField.touched.value;
+    el.classList.toggle('is-invalid', isInvalid);
+    el.classList.toggle('is-pending', this.sxField.pending.value);
   }
 }

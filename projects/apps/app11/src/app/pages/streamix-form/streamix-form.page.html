@@ -1,55 +1,20 @@
 <section class="page">
   @let ui = uiState;
-  @let preferences = form.fields.preferences.fields;
-  @let availability = form.fields.availability.fields;
-  @let skills = form.fields.skills.items;
-
-  <ng-template #field let-view>
-    <label
-      class="field"
-      [class.field-wide]="view.type === 'textarea'"
-      [class.range-field]="view.type === 'range'"
-      [class.compact]="view.compact"
-    >
-      <span>{{ view.label }}</span>
-
-      @if (view.type === 'textarea') {
-        <textarea
-          [rows]="view.rows ?? 4"
-          [sxField]="view.node"
-        ></textarea>
-      } @else {
-        <input
-          [type]="view.type ?? 'text'"
-          [min]="view.min ?? null"
-          [max]="view.max ?? null"
-          [sxField]="view.node"
-        />
-      }
-
-      @if (fieldHint(view); as text) {
-        <small class="hint">{{ text }}</small>
-      }
-
-      @if (fieldError(view); as text) {
-        <small class="error">{{ text }}</small>
-      }
-    </label>
-  </ng-template>
 
   <div class="card intro">
     <div>
       <p class="section-kicker">Page 2</p>
       <h2>Streamix-native form</h2>
       <p>
-        Native inputs bind directly to Streamix fields. There are no Angular
-        form controls, path adapters, or manual input parsers.
+        Native inputs bind directly to Streamix fields. This version uses a directive
+        with `exportAs` to achieve highly concise and readable
+        template code.
       </p>
     </div>
 
     <div class="chips">
-      <span>Direct field binding</span>
-      <span>No Angular forms</span>
+      <span>Concise inline templates</span>
+      <span>`exportAs` directive pattern</span>
       <span>Debounced autosave</span>
     </div>
   </div>
@@ -63,19 +28,42 @@
             <h3>Native inputs bound directly to fields</h3>
           </div>
           <div class="chips">
-            <span class="badge">{{ ui.completion }}% complete</span>
             <span class="badge badge-strong">{{ ui.draftStatus }}</span>
           </div>
         </div>
 
         <div class="grid two">
-          @for (view of views.profile; track view.label) {
-            <ng-container
-              [ngTemplateOutlet]="field"
-              [ngTemplateOutletContext]="{ $implicit: view }"
-            />
-          }
+          <label class="field">
+            <span>First name</span>
+            <input #v="sxField" [sxField]="profile.firstName" type="text" />
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+          </label>
+
+          <label class="field">
+            <span>Last name</span>
+            <input #v="sxField" [sxField]="profile.lastName" type="text" />
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+          </label>
+
+          <label class="field">
+            <span>Email</span>
+            <input #v="sxField" [sxField]="profile.email" type="email" />
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+          </label>
+
+          <label class="field">
+            <span>Username</span>
+            <input #v="sxField" [sxField]="profile.username" type="text" [sxPendingHint]="'Checking...'" />
+            <small class="hint" *ngIf="v.hint">{{ v.hint }}</small>
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+          </label>
         </div>
+
+        <label class="field field-wide">
+          <span>Bio</span>
+          <textarea #v="sxField" [sxField]="profile.bio" rows="4"></textarea>
+          <small class="error" *ngIf="v.error">{{ v.error }}</small>
+        </label>
       </section>
 
       <section class="section">
@@ -87,16 +75,21 @@
         </div>
 
         <div class="grid two">
-          @for (view of views.security; track view.label) {
-            <ng-container
-              [ngTemplateOutlet]="field"
-              [ngTemplateOutletContext]="{ $implicit: view }"
-            />
-          }
+          <label class="field">
+            <span>Password</span>
+            <input #v="sxField" [sxField]="security.password" type="password" />
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+          </label>
+
+          <label class="field">
+            <span>Confirm password</span>
+            <input #v="sxField" [sxField]="security.confirmPassword" type="password" />
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+          </label>
         </div>
 
-        @if (ui.passwordError; as error) {
-          <small class="error">{{ error }}</small>
+        @if (passwordError) {
+        <small class="error">{{ passwordError }}</small>
         }
       </section>
 
@@ -109,59 +102,24 @@
         </div>
 
         <div class="grid three">
-          @for (view of views.address; track view.label) {
-            <ng-container
-              [ngTemplateOutlet]="field"
-              [ngTemplateOutletContext]="{ $implicit: view }"
-            />
-          }
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="section-head">
-          <div>
-            <p class="section-kicker">Preferences</p>
-            <h3>The directive infers native value types</h3>
-          </div>
-        </div>
-
-        <div class="grid two">
-          <fieldset class="field fieldset">
-            <legend>Preferred contact</legend>
-
-            @for (option of contactOptions; track option.value) {
-              <label>
-                <input
-                  type="radio"
-                  name="contactMethod"
-                  [value]="option.value"
-                  [sxField]="preferences.contactMethod"
-                />
-                {{ option.label }}
-              </label>
-            }
-          </fieldset>
+          <label class="field">
+            <span>Country</span>
+            <input #v="sxField" [sxField]="address.country" type="text" />
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+          </label>
 
           <label class="field">
-            <span>Theme</span>
-            <select [sxField]="preferences.theme">
-              @for (option of themeOptions; track option.value) {
-                <option [value]="option.value">
-                  {{ option.label }}
-                </option>
-              }
-            </select>
+            <span>City</span>
+            <input #v="sxField" [sxField]="address.city" type="text" />
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+          </label>
+
+          <label class="field">
+            <span>Postal code</span>
+            <input #v="sxField" [sxField]="address.postalCode" type="text" />
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
           </label>
         </div>
-
-        <label class="checkbox">
-          <input
-            type="checkbox"
-            [sxField]="preferences.newsletter"
-          />
-          <span>Send release notes and onboarding emails</span>
-        </label>
       </section>
 
       <section class="section">
@@ -173,21 +131,19 @@
         </div>
 
         <div class="grid two">
-          @for (view of views.availability; track view.label) {
-            <ng-container
-              [ngTemplateOutlet]="field"
-              [ngTemplateOutletContext]="{ $implicit: view }"
-            />
-          }
-        </div>
+          <label class="field">
+            <span>Start date</span>
+            <input #v="sxField" [sxField]="availability.startDate" type="date" />
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+          </label>
 
-        <label class="checkbox">
-          <input
-            type="checkbox"
-            [sxField]="availability.remote"
-          />
-          <span>Open to remote collaboration</span>
-        </label>
+          <label class="field range-field">
+            <span>Hours per week</span>
+            <input #v="sxField" [sxField]="availability.hoursPerWeek" type="range" min="10" max="60"
+              [sxHint]="val => `${val} hrs/week`" />
+            <small class="hint" *ngIf="v.hint">{{ v.hint }}</small>
+          </label>
+        </div>
       </section>
 
       <section class="section">
@@ -197,64 +153,40 @@
             <h3>Dynamic rows use the same field directive</h3>
           </div>
 
-          <button
-            type="button"
-            class="secondary"
-            (click)="addSkill()"
-          >
+          <button type="button" class="secondary" (click)="addSkill()">
             Add skill
           </button>
         </div>
 
         <div class="stack">
-          @for (skill of skills; track skill) {
-            @let nameView = skillNameView(skill);
-            @let yearsView = skillYearsView(skill);
-            <div class="skill-row">
-              <ng-container
-                [ngTemplateOutlet]="field"
-                [ngTemplateOutletContext]="{ $implicit: nameView }"
-              />
+          @for (skill of skills.items; track skill; let i = $index) {
+          <div class="skill-row">
+            <label class="field">
+              <span>Skill</span>
+              <input #v="sxField" [sxField]="skill.fields.name" type="text" />
+              <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            </label>
 
-              <ng-container
-                [ngTemplateOutlet]="field"
-                [ngTemplateOutletContext]="{ $implicit: yearsView }"
-              />
+            <label class="field compact">
+              <span>Years</span>
+              <input #v="sxField" [sxField]="skill.fields.years" type="number" min="1" max="20" />
+              <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            </label>
 
-              <label class="checkbox compact-checkbox">
-                <input
-                  type="checkbox"
-                  [sxField]="skill.fields.primary"
-                />
-                <span>Primary</span>
-              </label>
-
-              <button
-                type="button"
-                class="ghost"
-                [disabled]="skills.length === 1"
-                (click)="removeSkill($index)"
-              >
-                Remove
-              </button>
-            </div>
+            <button type="button" class="ghost" (click)="removeSkill(i)" [disabled]="skills.items.length === 1">
+              Remove
+            </button>
+          </div>
           }
         </div>
       </section>
 
       <div class="actions">
-        <button
-          type="button"
-          class="secondary"
-          (click)="reset()"
-        >
+        <button type="button" class="secondary" (click)="reset()">
           Reset
         </button>
 
-        <button
-          type="submit"
-          [disabled]="!ui.readyToSubmit"
-        >
+        <button type="submit" [disabled]="!ui.readyToSubmit">
           Submit Streamix Form
         </button>
       </div>
@@ -266,55 +198,24 @@
           <span class="metric-label">Form status</span>
           <strong>{{ form.status.value }}</strong>
         </div>
-        <div>
-          <span class="metric-label">Draft status</span>
-          <strong>{{ ui.draftStatus }}</strong>
-        </div>
-        <div>
-          <span class="metric-label">Completion</span>
-          <strong>{{ ui.completion }}%</strong>
-        </div>
-        <div>
-          <span class="metric-label">Last autosave</span>
-          <strong>{{ ui.lastSavedAt }}</strong>
-        </div>
-        <div>
-          <span class="metric-label">Contact route</span>
-          <strong>{{ preferences.contactMethod.completeValue.value }}</strong>
-        </div>
-        <div>
-          <span class="metric-label">Remote</span>
-          <strong>
-            {{ availability.remote.completeValue.value ? 'Yes' : 'No' }}
-          </strong>
-        </div>
       </div>
 
       <div class="card success">
         <h3>Form derivation</h3>
         <p>Primary skills: {{ ui.primarySkills }}</p>
-        <p>
-          Ready to submit:
-          {{ ui.readyToSubmit ? 'Yes' : 'No' }}
-        </p>
+        <p>Ready to submit: {{ ui.readyToSubmit ? "Yes" : "No" }}</p>
       </div>
 
       <div class="card">
         <h3>Latest snapshot</h3>
-        <pre
-          class="json-block"
-          [textContent]="ui.preview"
-        ></pre>
+        <pre class="json-block" [textContent]="ui.preview"></pre>
       </div>
 
       @if (submittedPayload.value) {
-        <div class="card success">
-          <h3>Submitted payload</h3>
-          <pre
-            class="json-block"
-            [textContent]="submittedPayload.value"
-          ></pre>
-        </div>
+      <div class="card success">
+        <h3>Submitted payload</h3>
+        <pre class="json-block" [textContent]="submittedPayload.value"></pre>
+      </div>
       }
     </aside>
   </div>
