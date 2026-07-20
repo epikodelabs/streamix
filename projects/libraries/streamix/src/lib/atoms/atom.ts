@@ -1104,7 +1104,7 @@ function createLatestAsyncCoordinator<T>() {
  * ───────────────────────────────────────────────────────────────────────────*/
 
 export function flow<T>(
-  source: AsyncIterable<T> | Iterable<T> | ((signal?: AbortSignal) => AsyncIterable<T> | Iterable<T>),
+  source: AsyncIterable<T> | Iterable<T> | ((signal: AbortSignal) => AsyncIterable<T> | Iterable<T>),
   options?: AtomOptions
 ): Atom<T> {
   let initialValue: T | undefined;
