@@ -1,6 +1,6 @@
-import { NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectorRef, Component, OnDestroy, inject } from '@angular/core';
-import { atom, type Subscription } from '@epikodelabs/streamix';
+import { NgTemplateOutlet } from "@angular/common";
+import { ChangeDetectorRef, Component, OnDestroy, inject } from "@angular/core";
+import { atom, type Subscription } from "@epikodelabs/streamix";
 import {
   cloneInitialProfile,
   completion,
@@ -8,9 +8,6 @@ import {
   createFieldViews,
   createProfileForm,
   createSkill,
-  fieldError,
-  fieldHint,
-  passwordMismatch,
   primarySkills,
   profilePreview,
   profileReady,
@@ -19,12 +16,16 @@ import {
   skillYearsView,
   themeOptions,
   type DraftStatus,
-} from '../../shared/profile-form';
-import { StreamixFieldDirective } from '../../shared/streamix-field.directive';
+} from "../../shared/profile-form";
+import { StreamixFieldDirective } from "../../shared/streamix-field.directive";
+import {
+  fieldError,
+  fieldHint,
+} from "../../shared/streamix-forms";
 
 const SAVE_DELAY = 650;
 const SAVE_DURATION = 260;
-const NOT_SAVED = 'Not saved yet';
+const NOT_SAVED = "Not saved yet";
 
 type StreamixFormUiState = {
   completion: number;
@@ -39,8 +40,8 @@ type StreamixFormUiState = {
 @Component({
   standalone: true,
   imports: [NgTemplateOutlet, StreamixFieldDirective],
-  templateUrl: './streamix-form.page.html',
-  styleUrl: './streamix-form.page.scss',
+  templateUrl: "./streamix-form.page.html",
+  styleUrl: "./streamix-form.page.scss",
 })
 export class StreamixFormPageComponent implements OnDestroy {
   private readonly cdr = inject(ChangeDetectorRef);
@@ -54,9 +55,9 @@ export class StreamixFormPageComponent implements OnDestroy {
   readonly skillNameView = skillNameView;
   readonly skillYearsView = skillYearsView;
 
-  readonly draftStatus = atom<DraftStatus>('idle');
+  readonly draftStatus = atom<DraftStatus>("idle");
   readonly lastSavedAt = atom<string>(NOT_SAVED);
-  readonly submittedPayload = atom<string>('');
+  readonly submittedPayload = atom<string>("");
 
   private saveTimer?: ReturnType<typeof setTimeout>;
   private commitTimer?: ReturnType<typeof setTimeout>;
@@ -90,30 +91,39 @@ export class StreamixFormPageComponent implements OnDestroy {
   get passwordError(): string | null {
     const { password, confirmPassword } = this.form.fields.security.fields;
     if (!password.touched.value && !confirmPassword.touched.value) return null;
-    return passwordMismatch(this.form) ? 'Passwords must match.' : null;
+    const mismatch = this.form.fields.security.issues.value?.["passwordMismatch"];
+    return mismatch ? "Passwords must match." : null;
   }
 
   submit(event: Event): void {
     event.preventDefault();
     this.form.touch();
-    if (!profileReady(this.form)) { this.cdr.detectChanges(); return; }
-    
+    if (!profileReady(this.form)) {
+      this.cdr.detectChanges();
+      return;
+    }
+
     this.submittedPayload.set(profilePreview(this.form));
-    this.draftStatus.set('saved');
+    this.draftStatus.set("saved");
   }
 
   reset(): void {
     resetProfile(this.form, cloneInitialProfile());
     this.previousSnapshot = profilePreview(this.form);
     this.cancelAutosave();
-    this.draftStatus.set('idle');
+    this.draftStatus.set("idle");
     this.lastSavedAt.set(NOT_SAVED);
-    this.submittedPayload.set('');
+    this.submittedPayload.set("");
   }
 
-  addSkill(): void { this.form.fields.skills.push(createSkill()); }
+  addSkill(): void {
+    this.form.fields.skills.push(createSkill());
+  }
+
   removeSkill(index: number): void {
-    if (this.form.fields.skills.items.length > 1) this.form.fields.skills.removeAt(index);
+    if (this.form.fields.skills.items.length > 1) {
+      this.form.fields.skills.removeAt(index);
+    }
   }
 
   ngOnDestroy(): void {
@@ -132,13 +142,19 @@ export class StreamixFormPageComponent implements OnDestroy {
 
     clearTimeout(this.saveTimer);
     clearTimeout(this.commitTimer);
-    this.draftStatus.set('editing');
+    this.draftStatus.set("editing");
 
     this.saveTimer = setTimeout(() => {
-      this.draftStatus.set('saving');
+      this.draftStatus.set("saving");
       this.commitTimer = setTimeout(() => {
-        this.lastSavedAt.set(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-        this.draftStatus.set('saved');
+        this.lastSavedAt.set(
+          new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })
+        );
+        this.draftStatus.set("saved");
       }, SAVE_DURATION);
     }, SAVE_DELAY);
   }

@@ -1,7 +1,7 @@
 // streamix-forms.ts — functional, atom-native forms for Streamix
+// Refactored: Single state atom per node, zero standalone writables, unified helpers.
 
-import type { Subscription } from "@epikodelabs/streamix";
-import { atom, derived, scope, type Atom, type Writable } from "@epikodelabs/streamix";
+import { atom, derived, type Atom, type Writable } from "@epikodelabs/streamix";
 
 /* ── Public model ─────────────────────────────────────── */
 
@@ -24,12 +24,12 @@ export interface FieldOptions<T> {
   asyncFailureToIssues?: (error: unknown) => ValidationIssues | null;
 }
 
-const FORM_REVISION = Symbol("streamix.formRevision");
-const ARRAY_MUTATORS = new Set<PropertyKey>([
-  "push", "pop", "shift", "unshift", "splice", "sort", "reverse", "copyWithin", "fill",
-]);
+export interface FormOptions<T extends NodeMap> extends GroupOptions {
+  checks?: Check<FormCompleteValue<T>> | readonly Check<FormCompleteValue<T>>[];
+}
 
-type InternalNode = { readonly [FORM_REVISION]: Atom<number> };
+const FORM_SIGNAL = Symbol("streamix.formSignal");
+type SignalNode = { readonly [FORM_SIGNAL]: Atom<unknown> };
 
 export interface FormNode<Value, CompleteValue = Value> {
   readonly kind: "field" | "form" | "list";
@@ -68,11 +68,6 @@ const normalize = <T>(v?: T | readonly T[]): T[] =>
 const isEmpty = (v: unknown): boolean =>
   v == null || v === "" || (Array.isArray(v) && v.length === 0);
 
-const teardown = (s: Subscription | (() => void) | undefined): void => {
-  if (!s) return;
-  try { typeof s === "function" ? s() : (s as () => void)(); } catch {}
-};
-
 function mergeIssues(...sources: readonly (ValidationIssues | null | undefined)[]): ValidationIssues | null {
   let merged: Record<string, unknown> | undefined;
   for (const s of sources) {
@@ -83,29 +78,6 @@ function mergeIssues(...sources: readonly (ValidationIssues | null | undefined)[
   return merged ? Object.freeze(merged) : null;
 }
 
-function shallowEqual(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (left == null || right == null) return false;
-
-  if (Array.isArray(left) && Array.isArray(right)) {
-    return left.length === right.length && left.every((v, i) => Object.is(v, right[i]));
-  }
-
-  if (typeof left === "object" && typeof right === "object") {
-    const lk = Reflect.ownKeys(left as object);
-    const rk = Reflect.ownKeys(right as object);
-    return lk.length === rk.length && lk.every(k => Object.is((left as any)[k], (right as any)[k]));
-  }
-
-  return false;
-}
-
-function setIfChanged<T>(target: Writable<T>, next: T): boolean {
-  if (shallowEqual(target.value, next)) return false;
-  target.set(next);
-  return true;
-}
-
 function statusOf(disabled: boolean, pending: boolean, issues: ValidationIssues | null, error: unknown | null): FormStatus {
   if (disabled) return "disabled";
   if (pending) return "pending";
@@ -114,143 +86,15 @@ function statusOf(disabled: boolean, pending: boolean, issues: ValidationIssues 
   return "valid";
 }
 
-const bump = (r: Writable<number>): void => r.set(r.value + 1);
-
-function attachRevision(revision: Writable<number>, sources: readonly Atom<unknown>[]): () => void {
-  const subs = sources.map(s => s.subscribe(() => bump(revision)));
-  return () => subs.forEach(teardown);
+function makeWritable<T>(source: Atom<T>, apply: (v: T) => void, root: Writable<any>): Writable<T> {
+  const w = source as unknown as Writable<T>;
+  w.next = (v: T) => apply(v);
+  w.set = (v: T) => apply(v);
+  w.fail = (err: any, opts?: any) => root.fail(err, opts);
+  return w;
 }
 
-const subscribeToNode = (node: FormNode<any, any>, cb: () => void): (() => void) =>
-  (node as FormNode<any, any> & InternalNode)[FORM_REVISION].subscribe(cb);
-
-export function watchNode(node: FormNode<any, any>, callback: () => void): () => void {
-  return subscribeToNode(node, callback);
-}
-
-/* ── Aggregate state (shared by form & list) ──────────── */
-
-interface AggregateAtoms {
-  readonly issues: Writable<ValidationIssues | null>;
-  readonly validationError: Writable<unknown | null>;
-  readonly status: Writable<FormStatus>;
-  readonly valid: Writable<boolean>;
-  readonly invalid: Writable<boolean>;
-  readonly pending: Writable<boolean>;
-  readonly dirty: Writable<boolean>;
-  readonly touched: Writable<boolean>;
-  readonly revision: Writable<number>;
-}
-
-function createAggregateAtoms(disabled: boolean): AggregateAtoms {
-  return {
-    issues: atom<ValidationIssues | null>(null),
-    validationError: atom<unknown | null>(null),
-    status: atom<FormStatus>(disabled ? "disabled" : "valid"),
-    valid: atom(disabled),
-    invalid: atom(false),
-    pending: atom(false),
-    dirty: atom(false),
-    touched: atom(false),
-    revision: atom(0),
-  };
-}
-
-function syncAggregate(
-  state: AggregateAtoms,
-  disabled: boolean,
-  issues: ValidationIssues | null,
-  error: unknown | null,
-  pending: boolean,
-  dirty: boolean,
-  touched: boolean,
-  valueChanged: boolean,
-): void {
-  const status = statusOf(disabled, pending, issues, error);
-  let changed = valueChanged;
-  changed = setIfChanged(state.issues, issues) || changed;
-  changed = setIfChanged(state.validationError, error) || changed;
-  changed = setIfChanged(state.pending, pending) || changed;
-  changed = setIfChanged(state.dirty, dirty) || changed;
-  changed = setIfChanged(state.touched, touched) || changed;
-  changed = setIfChanged(state.status, status) || changed;
-  changed = setIfChanged(state.valid, status === "valid" || status === "disabled") || changed;
-  changed = setIfChanged(state.invalid, status === "invalid") || changed;
-  if (changed) bump(state.revision);
-}
-
-interface AggregateInputs {
-  readonly disabled: boolean;
-  readonly issues: ValidationIssues | null;
-  readonly validationError: unknown | null;
-  readonly pending: boolean;
-  readonly dirty: boolean;
-  readonly touched: boolean;
-}
-
-const aggregateArray = <N extends FormNode<any, any>>(children: readonly N[], groupDisabled: boolean) => {
-  const enabled: Array<NodeValue<N>> = [];
-  const complete: Array<NodeCompleteValue<N>> = [];
-  const issuesByIndex: Record<number, unknown> = {};
-  const errorsByIndex: Record<number, unknown> = {};
-  let pending = false, dirty = false, touched = false;
-
-  children.forEach((child, index) => {
-    complete.push(child.completeValue.value);
-    dirty ||= child.dirty.value;
-    touched ||= child.touched.value;
-    if (child.disabled.value) return;
-    enabled.push(child.value.value);
-    pending ||= child.pending.value;
-    if (child.issues.value) issuesByIndex[index] = child.issues.value;
-    if (child.validationError.value !== null) errorsByIndex[index] = child.validationError.value;
-  });
-
-  return {
-    value: groupDisabled ? [] : enabled,
-    completeValue: complete,
-    aggregate: {
-      disabled: groupDisabled,
-      issues: groupDisabled || Object.keys(issuesByIndex).length === 0 ? null : Object.freeze(issuesByIndex),
-      validationError: groupDisabled || Object.keys(errorsByIndex).length === 0 ? null : Object.freeze(errorsByIndex),
-      pending: !groupDisabled && pending,
-      dirty,
-      touched,
-    } as AggregateInputs,
-  };
-};
-
-const aggregateRecord = <T extends NodeMap>(children: Readonly<T>, groupDisabled: boolean) => {
-  const enabled: Record<string, unknown> = {};
-  const complete: Record<string, unknown> = {};
-  const issuesByKey: Record<string, unknown> = {};
-  const errorsByKey: Record<string, unknown> = {};
-  let pending = false, dirty = false, touched = false;
-
-  for (const [key, child] of Object.entries(children)) {
-    complete[key] = child.completeValue.value;
-    dirty ||= child.dirty.value;
-    touched ||= child.touched.value;
-    if (child.disabled.value) continue;
-    enabled[key] = child.value.value;
-    pending ||= child.pending.value;
-    if (child.issues.value) issuesByKey[key] = child.issues.value;
-    if (child.validationError.value !== null) errorsByKey[key] = child.validationError.value;
-  }
-
-  return {
-    value: groupDisabled ? {} : enabled,
-    completeValue: complete,
-    aggregate: {
-      disabled: groupDisabled,
-      issues: groupDisabled || Object.keys(issuesByKey).length === 0 ? null : Object.freeze(issuesByKey),
-      validationError: groupDisabled || Object.keys(errorsByKey).length === 0 ? null : Object.freeze(errorsByKey),
-      pending: !groupDisabled && pending,
-      dirty,
-      touched,
-    } as AggregateInputs,
-  };
-};
+const nullErrorAtom = derived<unknown | null>(() => null);
 
 /* ── Field ────────────────────────────────────────────── */
 
@@ -264,20 +108,13 @@ export interface Field<T> extends FormNode<T> {
 }
 
 interface FieldState<T> {
-  value: Writable<T>;
-  initialValue: Writable<T>;
-  touched: Writable<boolean>;
-  disabled: Writable<boolean>;
-  syncIssues: Atom<ValidationIssues | null>;
-  asyncIssues: Writable<ValidationIssues | null>;
-  validationError: Writable<unknown | null>;
-  pending: Writable<boolean>;
-  dirty: Atom<boolean>;
-  issues: Atom<ValidationIssues | null>;
-  status: Atom<FormStatus>;
-  valid: Atom<boolean>;
-  invalid: Atom<boolean>;
-  revision: Writable<number>;
+  value: T;
+  initialValue: T;
+  touched: boolean;
+  disabled: boolean;
+  asyncIssues: ValidationIssues | null;
+  validationError: unknown | null;
+  pending: boolean;
 }
 
 export function field<T>(initial: T, options: FieldOptions<T> = {}): Field<T> {
@@ -286,48 +123,61 @@ export function field<T>(initial: T, options: FieldOptions<T> = {}): Field<T> {
   const asyncOnlyWhenSyncClean = options.asyncOnlyWhenSyncClean ?? true;
   const asyncDelay = Math.max(0, options.asyncDelay ?? 0);
 
-  const fieldScope = scope(() => {
-    const value = atom<T>(initial);
-    const initialValue = atom<T>(initial);
-    const touched = atom(false);
-    const disabled = atom(options.disabled ?? false);
-    const asyncIssues = atom<ValidationIssues | null>(null);
-    const validationError = atom<unknown | null>(null);
-    const pending = atom(false);
-    const revision = atom(0);
-
-    const dirty = derived<boolean>($ => !Object.is($(value), $(initialValue)));
-    const syncIssues = derived<ValidationIssues | null>($ => {
-      if ($(disabled)) return null;
-      return mergeIssues(...syncChecks.map(check => check($(value))));
-    });
-    const issues = derived<ValidationIssues | null>($ =>
-      $(disabled) ? null : mergeIssues($(syncIssues), $(asyncIssues))
-    );
-    const status = derived<FormStatus>($ =>
-      statusOf($(disabled), $(pending), $(issues), $(validationError))
-    );
-    const valid = derived<boolean>($ => $(status) === "valid" || $(status) === "disabled");
-    const invalid = derived<boolean>($ => $(status) === "invalid");
-
-    return { value, initialValue, touched, disabled, asyncIssues, validationError, pending, revision, dirty, syncIssues, issues, status, valid, invalid };
+  const stateAtom = atom<FieldState<T>>({
+    value: initial,
+    initialValue: initial,
+    touched: false,
+    disabled: options.disabled ?? false,
+    asyncIssues: null,
+    validationError: null,
+    pending: false,
   });
 
-  const at = fieldScope.at as <K extends keyof FieldState<T>>(key: K) => FieldState<T>[K];
-  const value = at('value');
-  const initialValue = at('initialValue');
-  const touched = at('touched');
-  const disabled = at('disabled');
-  const asyncIssues = at('asyncIssues');
-  const validationError = at('validationError');
-  const pending = at('pending');
-  const revision = at('revision');
-  const dirty = at('dirty');
-  const syncIssues = at('syncIssues');
-  const issues = at('issues');
-  const status = at('status');
-  const valid = at('valid');
-  const invalid = at('invalid');
+  const patchState = (patch: Partial<FieldState<T>>) =>
+    stateAtom.set({ ...stateAtom.value, ...patch });
+
+  const valueAtom = derived($ => $(stateAtom).value as unknown) as unknown as Atom<T>;
+  const value = makeWritable(valueAtom, (v: T) => patchState({ value: v }), stateAtom);
+  const completeValue = value;
+  
+  const initialValue = derived($ => $(stateAtom).initialValue as unknown) as unknown as Atom<T>;
+  const touched = derived($ => $(stateAtom).touched) as unknown as Atom<boolean>;
+  const pending = derived($ => $(stateAtom).pending) as unknown as Atom<boolean>;
+  const validationError = derived($ => $(stateAtom).validationError) as unknown as Atom<unknown | null>;
+  const asyncIssues = derived($ => $(stateAtom).asyncIssues) as unknown as Atom<ValidationIssues | null>;
+  
+  const disabledAtom = derived($ => $(stateAtom).disabled) as unknown as Atom<boolean>;
+  const disabled = makeWritable(
+    disabledAtom,
+    (v: boolean) => patchState({ disabled: v }),
+    stateAtom
+  );
+
+  const syncIssues = derived($ => {
+    const s = $(stateAtom);
+    if (s.disabled) return null;
+    return mergeIssues(...syncChecks.map(c => c(s.value)));
+  }) as unknown as Atom<ValidationIssues | null>;
+
+  const issues = derived($ => {
+    const s = $(stateAtom);
+    if (s.disabled) return null;
+    return mergeIssues($(syncIssues), s.asyncIssues);
+  }) as unknown as Atom<ValidationIssues | null>;
+
+  const status = derived($ =>
+    statusOf($(stateAtom).disabled, $(stateAtom).pending, $(issues), $(stateAtom).validationError)
+  ) as unknown as Atom<FormStatus>;
+
+  const valid = derived($ => {
+    const s = $(status);
+    return s === "valid" || s === "disabled";
+  }) as unknown as Atom<boolean>;
+
+  const invalid = derived($ => $(status) === "invalid") as unknown as Atom<boolean>;
+  const dirty = derived($ => !Object.is($(stateAtom).value, $(stateAtom).initialValue)) as unknown as Atom<boolean>;
+
+  const signal = derived($ => [$(stateAtom), $(issues), $(status)]) as unknown as Atom<unknown>;
 
   let disposed = false;
   let runId = 0;
@@ -341,38 +191,46 @@ export function field<T>(initial: T, options: FieldOptions<T> = {}): Field<T> {
     controller = undefined;
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
-    setIfChanged(pending, false);
+    if (stateAtom.value.pending) patchState({ pending: false });
   };
 
   const executeAsync = async (): Promise<void> => {
     if (disposed) return;
     cancelAsync();
-    setIfChanged(validationError, null);
+    if (stateAtom.value.validationError !== null) patchState({ validationError: null });
 
-    if (disabled.value || asyncChecks.length === 0 || (asyncOnlyWhenSyncClean && syncIssues.value !== null)) {
-      setIfChanged(asyncIssues, null);
+    const currentState = stateAtom.value;
+    const currentSyncIssues = syncIssues.value;
+
+    if (
+      currentState.disabled ||
+      asyncChecks.length === 0 ||
+      (asyncOnlyWhenSyncClean && currentSyncIssues !== null)
+    ) {
+      if (currentState.asyncIssues !== null) patchState({ asyncIssues: null });
       return;
     }
 
     const currentRun = runId;
     const currentController = new AbortController();
     controller = currentController;
-    setIfChanged(pending, true);
+    patchState({ pending: true });
 
     try {
       const results = await Promise.all(
-        asyncChecks.map(check => Promise.resolve(check(value.value, currentController.signal))),
+        asyncChecks.map(check => Promise.resolve(check(currentState.value, currentController.signal)))
       );
       if (disposed || currentController.signal.aborted || currentRun !== runId) return;
-      setIfChanged(asyncIssues, mergeIssues(...results));
+      const merged = mergeIssues(...results);
+      if (!Object.is(stateAtom.value.asyncIssues, merged)) patchState({ asyncIssues: merged });
     } catch (error) {
       if (disposed || currentController.signal.aborted || currentRun !== runId) return;
-      setIfChanged(validationError, error);
-      setIfChanged(asyncIssues, options.asyncFailureToIssues?.(error) ?? null);
+      const fallback = options.asyncFailureToIssues?.(error) ?? null;
+      patchState({ validationError: error, asyncIssues: fallback });
     } finally {
       if (!disposed && currentRun === runId) {
         controller = undefined;
-        setIfChanged(pending, false);
+        if (stateAtom.value.pending) patchState({ pending: false });
       }
     }
   };
@@ -383,146 +241,164 @@ export function field<T>(initial: T, options: FieldOptions<T> = {}): Field<T> {
     queueMicrotask(() => {
       queued = false;
       if (disposed) return;
-      if (asyncDelay === 0) { void executeAsync(); return; }
+      if (asyncDelay === 0) {
+        void executeAsync();
+        return;
+      }
       cancelAsync();
-      timer = setTimeout(() => { timer = undefined; void executeAsync(); }, asyncDelay);
+      timer = setTimeout(() => {
+        timer = undefined;
+        void executeAsync();
+      }, asyncDelay);
     });
   };
 
-  const valueSub = value.subscribe(scheduleAsync);
-  const disabledSub = disabled.subscribe(scheduleAsync);
-  const syncIssuesSub = syncIssues.subscribe(scheduleAsync);
+  const asyncTrigger = derived($ => [$(stateAtom).value, $(stateAtom).disabled, $(syncIssues)]) as unknown as Atom<unknown>;
+  const triggerSub = asyncTrigger.subscribe(scheduleAsync);
   scheduleAsync();
 
-  const stopRevision = attachRevision(revision, [value, issues, validationError, status, dirty, touched]);
+  const ownedAtoms: Atom<unknown>[] = [
+    stateAtom, syncIssues, issues, status, valid, invalid, dirty,
+    signal, asyncTrigger, value, completeValue, initialValue,
+    touched, pending, validationError, asyncIssues, disabled,
+  ];
 
-  fieldScope.cleanups.add(() => {
+  const dispose = (): void => {
     if (disposed) return;
     disposed = true;
     cancelAsync();
-    teardown(valueSub);
-    teardown(disabledSub);
-    teardown(syncIssuesSub);
-    stopRevision();
-  });
+    try { triggerSub(); } catch {}
+    ownedAtoms.forEach(a => { try { a.dispose(); } catch {} });
+  };
 
   const set = (next: T, writeOptions: WriteOptions = {}): void => {
-    value.set(next);
-    if (writeOptions.touch) touched.set(true);
+    patchState({
+      value: next,
+      touched: writeOptions.touch ? true : stateAtom.value.touched
+    });
   };
 
   function reset(): void;
   function reset(next: T, resetOptions?: ResetOptions): void;
   function reset(next?: T, resetOptions: ResetOptions = {}): void {
-    const supplied = arguments.length > 0;
-    const target = supplied ? (next as T) : initialValue.value;
-    if (supplied && resetOptions.updateInitial) initialValue.set(target);
-    value.set(target);
-    touched.set(false);
+    if (arguments.length > 0) {
+      const target = next as T;
+      const newInitial = resetOptions.updateInitial ? target : stateAtom.value.initialValue;
+      patchState({ value: target, initialValue: newInitial, touched: false });
+    } else {
+      patchState({ value: stateAtom.value.initialValue, touched: false });
+    }
   }
 
   return {
     kind: "field",
-    value, completeValue: value, initialValue, syncIssues, asyncIssues,
+    value, completeValue, initialValue, syncIssues, asyncIssues,
     issues, validationError, status, valid, invalid, pending, dirty, touched, disabled,
     set, reset,
-    touch: () => touched.set(true),
-    untouch: () => touched.set(false),
-    enable: () => disabled.set(false),
-    disable: () => disabled.set(true),
-    dispose: () => fieldScope.dispose(),
-    [FORM_REVISION]: revision,
-  } as Field<T> & InternalNode;
+    touch: () => patchState({ touched: true }),
+    untouch: () => patchState({ touched: false }),
+    enable: () => patchState({ disabled: false }),
+    disable: () => patchState({ disabled: true }),
+    dispose,
+    [FORM_SIGNAL]: signal,
+  } as Field<T> & SignalNode;
 }
 
 /* ── Form ─────────────────────────────────────────────── */
 
 export interface Form<T extends NodeMap> extends FormNode<FormValue<T>, FormCompleteValue<T>> {
   readonly kind: "form";
-  readonly value: Atom<FormValue<T>>;
-  readonly completeValue: Atom<FormCompleteValue<T>>;
   readonly fields: Readonly<T>;
   patch(value: Partial<FormCompleteValue<T>>, options?: WriteOptions): void;
 }
 
-interface FormState<T extends NodeMap> extends AggregateAtoms {
-  disabled: Writable<boolean>;
-  valueState: Writable<FormValue<T>>;
-  completeValueState: Writable<FormCompleteValue<T>>;
-}
-
-export function form<T extends NodeMap>(fields: T, options: GroupOptions = {}): Form<T> {
+export function form<T extends NodeMap>(fields: T, options: FormOptions<T> = {}): Form<T> {
   const ownsChildren = options.ownsChildren ?? true;
+  const formChecks = normalize(options.checks);
   const children = Object.freeze({ ...fields }) as Readonly<T>;
 
-  const formScope = scope(() => {
-    const disabled = atom(options.disabled ?? false);
-    const valueState = atom<FormValue<T>>({});
-    const completeValueState = atom<FormCompleteValue<T>>({} as FormCompleteValue<T>);
-    const agg = createAggregateAtoms(disabled.value);
-    return { disabled, valueState, completeValueState, ...agg };
-  });
+  const stateAtom = atom<{ disabled: boolean }>({ disabled: options.disabled ?? false });
+  const patchState = (patch: Partial<{ disabled: boolean }>) =>
+    stateAtom.set({ ...stateAtom.value, ...patch });
 
-  const at = formScope.at as <K extends keyof FormState<T>>(key: K) => FormState<T>[K];
-  const disabled = at('disabled');
-  const valueState = at('valueState');
-  const completeValueState = at('completeValueState');
-  const agg: AggregateAtoms = {
-    issues: at('issues'),
-    validationError: at('validationError'),
-    status: at('status'),
-    valid: at('valid'),
-    invalid: at('invalid'),
-    pending: at('pending'),
-    dirty: at('dirty'),
-    touched: at('touched'),
-    revision: at('revision'),
+  const value = derived($ => {
+    const s = $(stateAtom);
+    if (s.disabled) return {};
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(children)) out[key] = $(child.value);
+    return out;
+  }) as unknown as Atom<FormValue<T>>;
+
+  const completeValue = derived($ => {
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(children)) out[key] = $(child.completeValue);
+    return out;
+  }) as unknown as Atom<FormCompleteValue<T>>;
+
+  const issues = derived($ => {
+    const s = $(stateAtom);
+    if (s.disabled) return null;
+    const byKey: Record<string, unknown> = {};
+    let hasAny = false;
+    for (const [key, child] of Object.entries(children)) {
+      const ci = $(child.issues);
+      if (ci) { byKey[key] = ci; hasAny = true; }
+    }
+    if (formChecks.length > 0) {
+      const cv = $(completeValue);
+      const formIssues = mergeIssues(...formChecks.map(c => c(cv)));
+      if (formIssues) { Object.assign(byKey, formIssues); hasAny = true; }
+    }
+    return hasAny ? Object.freeze(byKey) : null;
+  }) as unknown as Atom<ValidationIssues | null>;
+
+  const pending = derived($ => {
+    const s = $(stateAtom);
+    if (s.disabled) return false;
+    for (const child of Object.values(children)) if ($(child.pending)) return true;
+    return false;
+  }) as unknown as Atom<boolean>;
+
+  const dirty = derived($ => {
+    for (const child of Object.values(children)) if ($(child.dirty)) return true;
+    return false;
+  }) as unknown as Atom<boolean>;
+
+  const touched = derived($ => {
+    for (const child of Object.values(children)) if ($(child.touched)) return true;
+    return false;
+  }) as unknown as Atom<boolean>;
+
+  const status = derived($ =>
+    statusOf($(stateAtom).disabled, $(pending), $(issues), null)
+  ) as unknown as Atom<FormStatus>;
+
+  const valid = derived($ => {
+    const s = $(status);
+    return s === "valid" || s === "disabled";
+  }) as unknown as Atom<boolean>;
+
+  const invalid = derived($ => $(status) === "invalid") as unknown as Atom<boolean>;
+  const signal = derived($ => [$(completeValue), $(status), $(touched), $(stateAtom)]) as unknown as Atom<unknown>;
+
+  const disabledAtom = derived($ => $(stateAtom).disabled) as unknown as Atom<boolean>;
+  const disabled = makeWritable(
+    disabledAtom,
+    (v: boolean) => patchState({ disabled: v }),
+    stateAtom
+  );
+
+  const ownedAtoms: Atom<unknown>[] = [
+    stateAtom, value, completeValue, issues, pending, dirty, touched, status, valid, invalid, signal, disabled,
+  ];
+
+  const dispose = (): void => {
+    ownedAtoms.forEach(a => { try { a.dispose(); } catch {} });
+    if (ownsChildren) Object.values(children).forEach(c => c.dispose());
   };
-
-  let disposed = false;
-  let queued = false;
-
-  const recompute = (): void => {
-    queued = false;
-    if (disposed) return;
-    const groupDisabled = disabled.value;
-    const result = aggregateRecord(children, groupDisabled);
-    let valueChanged = setIfChanged(valueState, result.value as FormValue<T>);
-    valueChanged = setIfChanged(completeValueState, result.completeValue as FormCompleteValue<T>) || valueChanged;
-    syncAggregate(
-      agg, 
-      result.aggregate.disabled, 
-      result.aggregate.issues, 
-      result.aggregate.validationError, 
-      result.aggregate.pending, 
-      result.aggregate.dirty, 
-      result.aggregate.touched,
-      valueChanged
-    );
-  };
-
-  const queueRecompute = (): void => {
-    if (disposed || queued) return;
-    queued = true;
-    queueMicrotask(recompute);
-  };
-
-  const childTeardowns = Object.values(children).map(child => subscribeToNode(child, queueRecompute));
-  const disabledSub = disabled.subscribe(queueRecompute);
-  recompute();
-
-  formScope.cleanups.add(() => {
-    if (disposed) return;
-    disposed = true;
-    teardown(disabledSub);
-    childTeardowns.forEach(stop => stop());
-    if (ownsChildren) Object.values(children).forEach(child => child.dispose());
-  });
 
   const set = (next: FormCompleteValue<T>, writeOptions: WriteOptions = {}): void => {
-    for (const key of Object.keys(children) as Array<keyof T>) {
-      children[key].set(next[key], writeOptions);
-    }
+    for (const key of Object.keys(children) as Array<keyof T>) children[key].set(next[key], writeOptions);
   };
 
   const patch = (next: Partial<FormCompleteValue<T>>, writeOptions: WriteOptions = {}): void => {
@@ -536,25 +412,26 @@ export function form<T extends NodeMap>(fields: T, options: GroupOptions = {}): 
   function reset(next?: FormCompleteValue<T>, resetOptions: ResetOptions = {}): void {
     const supplied = arguments.length > 0;
     for (const key of Object.keys(children) as Array<keyof T>) {
-      supplied ? children[key].reset(next![key], resetOptions) : children[key].reset();
+      if (supplied) {
+        children[key].reset((next as FormCompleteValue<T>)[key], resetOptions);
+      } else {
+        children[key].reset();
+      }
     }
   }
 
   return {
     kind: "form",
-    value: valueState, completeValue: completeValueState,
-    issues: agg.issues, validationError: agg.validationError,
-    status: agg.status, valid: agg.valid, invalid: agg.invalid,
-    pending: agg.pending, dirty: agg.dirty, touched: agg.touched, disabled,
-    fields: children,
-    set, patch, reset,
+    value, completeValue, issues, validationError: nullErrorAtom,
+    status, valid, invalid, pending, dirty, touched, disabled,
+    fields: children, set, patch, reset,
     touch: () => Object.values(children).forEach(c => c.touch()),
     untouch: () => Object.values(children).forEach(c => c.untouch()),
-    enable: () => disabled.set(false),
-    disable: () => disabled.set(true),
-    dispose: () => formScope.dispose(),
-    [FORM_REVISION]: agg.revision,
-  } as Form<T> & InternalNode;
+    enable: () => patchState({ disabled: false }),
+    disable: () => patchState({ disabled: true }),
+    dispose,
+    [FORM_SIGNAL]: signal,
+  } as Form<T> & SignalNode;
 }
 
 /* ── List ─────────────────────────────────────────────── */
@@ -562,8 +439,6 @@ export function form<T extends NodeMap>(fields: T, options: GroupOptions = {}): 
 export interface List<N extends FormNode<any, any>>
   extends FormNode<Array<NodeValue<N>>, Array<NodeCompleteValue<N>>> {
   readonly kind: "list";
-  readonly value: Atom<Array<NodeValue<N>>>;
-  readonly completeValue: Atom<Array<NodeCompleteValue<N>>>;
   readonly items: readonly N[];
   push(item: N): void;
   insert(index: number, item: N): void;
@@ -572,11 +447,9 @@ export interface List<N extends FormNode<any, any>>
   clear(): void;
 }
 
-interface ListState<N extends FormNode<any, any>> extends AggregateAtoms {
-  disabled: Writable<boolean>;
-  valueState: Writable<Array<NodeValue<N>>>;
-  completeValueState: Writable<Array<NodeCompleteValue<N>>>;
-}
+const ARRAY_MUTATORS = new Set<PropertyKey>([
+  "push", "pop", "shift", "unshift", "splice", "sort", "reverse", "copyWithin", "fill",
+]);
 
 export function list<N extends FormNode<any, any>>(
   initial: readonly N[] = [],
@@ -585,80 +458,85 @@ export function list<N extends FormNode<any, any>>(
   const ownsChildren = options.ownsChildren ?? true;
   const children: N[] = [...initial];
 
-  const listScope = scope(() => {
-    const disabled = atom(options.disabled ?? false);
-    const valueState = atom<Array<NodeValue<N>>>([]);
-    const completeValueState = atom<Array<NodeCompleteValue<N>>>([]);
-    const agg = createAggregateAtoms(disabled.value);
-    return { disabled, valueState, completeValueState, ...agg };
+  const stateAtom = atom<{ disabled: boolean; version: number }>({
+    disabled: options.disabled ?? false,
+    version: 0,
   });
+  const patchState = (patch: Partial<{ disabled: boolean; version: number }>) =>
+    stateAtom.set({ ...stateAtom.value, ...patch });
 
-  const at = listScope.at as <K extends keyof ListState<N>>(key: K) => ListState<N>[K];
-  const disabled = at('disabled');
-  const valueState = at('valueState');
-  const completeValueState = at('completeValueState');
-  const agg: AggregateAtoms = {
-    issues: at('issues'),
-    validationError: at('validationError'),
-    status: at('status'),
-    valid: at('valid'),
-    invalid: at('invalid'),
-    pending: at('pending'),
-    dirty: at('dirty'),
-    touched: at('touched'),
-    revision: at('revision'),
-  };
+  const value = derived($ => {
+    const s = $(stateAtom);
+    void s.version;
+    if (s.disabled) return [];
+    return children.map(c => $(c.value));
+  }) as unknown as Atom<Array<NodeValue<N>>>;
 
-  const subscriptions = new Map<N, () => void>();
-  let disposed = false;
-  let queued = false;
+  const completeValue = derived($ => {
+    void $(stateAtom).version;
+    return children.map(c => $(c.completeValue));
+  }) as unknown as Atom<Array<NodeCompleteValue<N>>>;
 
-  const recompute = (): void => {
-    queued = false;
-    if (disposed) return;
-    const groupDisabled = disabled.value;
-    const result = aggregateArray(children, groupDisabled);
-    let valueChanged = setIfChanged(valueState, result.value as Array<NodeValue<N>>);
-    valueChanged = setIfChanged(completeValueState, result.completeValue as Array<NodeCompleteValue<N>>) || valueChanged;
-    syncAggregate(
-      agg, 
-      result.aggregate.disabled, 
-      result.aggregate.issues, 
-      result.aggregate.validationError, 
-      result.aggregate.pending, 
-      result.aggregate.dirty, 
-      result.aggregate.touched,
-      valueChanged
-    );
-  };
+  const issues = derived($ => {
+    const s = $(stateAtom);
+    void s.version;
+    if (s.disabled) return null;
+    const byIndex: Record<number, unknown> = {};
+    let hasAny = false;
+    children.forEach((child, index) => {
+      const ci = $(child.issues);
+      if (ci) { byIndex[index] = ci; hasAny = true; }
+    });
+    return hasAny ? Object.freeze(byIndex) : null;
+  }) as unknown as Atom<ValidationIssues | null>;
 
-  const queueRecompute = (): void => {
-    if (disposed || queued) return;
-    queued = true;
-    queueMicrotask(recompute);
-  };
+  const pending = derived($ => {
+    const s = $(stateAtom);
+    void s.version;
+    if (s.disabled) return false;
+    return children.some(c => $(c.pending));
+  }) as unknown as Atom<boolean>;
 
-  const attach = (child: N): void => {
-    if (subscriptions.has(child)) throw new Error("The same form node cannot be attached to a list twice.");
-    subscriptions.set(child, subscribeToNode(child, queueRecompute));
-  };
+  const dirty = derived($ => {
+    void $(stateAtom).version;
+    return children.some(c => $(c.dirty));
+  }) as unknown as Atom<boolean>;
 
-  const detach = (child: N): void => {
-    subscriptions.get(child)?.();
-    subscriptions.delete(child);
-  };
+  const touched = derived($ => {
+    void $(stateAtom).version;
+    return children.some(c => $(c.touched));
+  }) as unknown as Atom<boolean>;
 
-  initial.forEach(attach);
-  const disabledSub = disabled.subscribe(queueRecompute);
-  recompute();
+  const status = derived($ =>
+    statusOf($(stateAtom).disabled, $(pending), $(issues), null)
+  ) as unknown as Atom<FormStatus>;
 
-  listScope.cleanups.add(() => {
-    if (disposed) return;
-    disposed = true;
-    teardown(disabledSub);
-    [...children].forEach(child => { detach(child); if (ownsChildren) child.dispose(); });
+  const valid = derived($ => {
+    const s = $(status);
+    return s === "valid" || s === "disabled";
+  }) as unknown as Atom<boolean>;
+
+  const invalid = derived($ => $(status) === "invalid") as unknown as Atom<boolean>;
+  const signal = derived($ => [$(completeValue), $(status), $(touched), $(stateAtom)]) as unknown as Atom<unknown>;
+
+  const disabledAtom = derived($ => $(stateAtom).disabled) as unknown as Atom<boolean>;
+  const disabled = makeWritable(
+    disabledAtom,
+    (v: boolean) => patchState({ disabled: v }),
+    stateAtom
+  );
+
+  const ownedAtoms: Atom<unknown>[] = [
+    stateAtom, value, completeValue, issues, pending, dirty, touched, status, valid, invalid, signal, disabled,
+  ];
+
+  const bump = (): void => patchState({ version: stateAtom.value.version + 1 });
+
+  const dispose = (): void => {
+    ownedAtoms.forEach(a => { try { a.dispose(); } catch {} });
+    [...children].forEach(child => { if (ownsChildren) child.dispose(); });
     children.length = 0;
-  });
+  };
 
   const items = new Proxy(children as readonly N[], {
     get(target, property, receiver) {
@@ -679,18 +557,16 @@ export function list<N extends FormNode<any, any>>(
     children.forEach((child, index) => child.set(next[index], writeOptions));
   };
 
-  const push = (child: N): void => { attach(child); children.push(child); queueRecompute(); };
+  const push = (child: N): void => { children.push(child); bump(); };
   const insert = (index: number, child: N): void => {
-    attach(child);
     children.splice(Math.max(0, Math.min(index, children.length)), 0, child);
-    queueRecompute();
+    bump();
   };
 
   const detachAt = (index: number): N | undefined => {
     if (index < 0 || index >= children.length) return undefined;
     const [child] = children.splice(index, 1);
-    detach(child);
-    queueRecompute();
+    bump();
     return child;
   };
 
@@ -701,39 +577,156 @@ export function list<N extends FormNode<any, any>>(
 
   const clear = (): void => {
     const removed = children.splice(0, children.length);
-    removed.forEach(child => { detach(child); if (ownsChildren) child.dispose(); });
-    queueRecompute();
+    removed.forEach(child => { if (ownsChildren) child.dispose(); });
+    bump();
   };
 
   function reset(): void;
   function reset(next: Array<NodeCompleteValue<N>>, resetOptions?: ResetOptions): void;
   function reset(next?: Array<NodeCompleteValue<N>>, resetOptions: ResetOptions = {}): void {
     const supplied = arguments.length > 0;
-    if (supplied && next!.length !== children.length) {
-      throw new RangeError(`Expected ${children.length} values, received ${next!.length}.`);
+    if (supplied) {
+      if (next!.length !== children.length) {
+        throw new RangeError(`Expected ${children.length} values, received ${next!.length}.`);
+      }
+      children.forEach((child, index) => child.reset(next![index], resetOptions));
+    } else {
+      children.forEach(child => child.reset());
     }
-    children.forEach((child, index) => supplied ? child.reset(next![index], resetOptions) : child.reset());
   }
 
   return {
     kind: "list",
-    value: valueState, completeValue: completeValueState,
-    issues: agg.issues, validationError: agg.validationError,
-    status: agg.status, valid: agg.valid, invalid: agg.invalid,
-    pending: agg.pending, dirty: agg.dirty, touched: agg.touched, disabled,
+    value, completeValue, issues, validationError: nullErrorAtom,
+    status, valid, invalid, pending, dirty, touched, disabled,
     items, set, push, insert, removeAt, detachAt, clear, reset,
     touch: () => children.forEach(c => c.touch()),
     untouch: () => children.forEach(c => c.untouch()),
-    enable: () => disabled.set(false),
-    disable: () => disabled.set(true),
-    dispose: () => listScope.dispose(),
-    [FORM_REVISION]: agg.revision,
-  } as List<N> & InternalNode;
+    enable: () => patchState({ disabled: false }),
+    disable: () => patchState({ disabled: true }),
+    dispose,
+    [FORM_SIGNAL]: signal,
+  } as List<N> & SignalNode;
 }
 
-/* ── Checks ───────────────────────────────────────────── */
+/* ── Unified Helpers (Moved from profile-form) ────────── */
 
-export const checks = Object.freeze({
+export function watchNode(node: FormNode<any, any>, callback: () => void): () => void {
+  const sub = (node as unknown as SignalNode)[FORM_SIGNAL].subscribe(callback);
+  return () => { try { sub(); } catch {} };
+}
+
+export function formSnapshot<N extends FormNode<any, any>>(node: N): NodeCompleteValue<N> {
+  return node.completeValue.value as NodeCompleteValue<N>;
+}
+
+export function syncList<N extends FormNode<any, any>>(
+  listNode: List<N>,
+  next: readonly NodeCompleteValue<N>[],
+  create: (value: NodeCompleteValue<N>) => N,
+): void {
+  const target = next.length;
+  while (listNode.items.length > target) listNode.removeAt(listNode.items.length - 1);
+  while (listNode.items.length < target) listNode.push(create(next[listNode.items.length]));
+}
+
+export function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise(resolve => {
+    const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
+    const timer = setTimeout(done, milliseconds);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
+export type FieldInputType = "text" | "email" | "password" | "date" | "textarea" | "number" | "range";
+
+export interface FieldView<T = unknown> {
+  readonly node: Field<T>;
+  readonly label: string;
+  readonly type?: FieldInputType;
+  readonly rows?: number;
+  readonly min?: number;
+  readonly max?: number;
+  readonly compact?: boolean;
+  readonly pendingHint?: string;
+  readonly hint?: (value: T) => string | null;
+}
+
+export function defineField<T>(
+  node: Field<T>,
+  label: string,
+  type: FieldInputType = "text",
+  extras: Omit<FieldView<T>, "node" | "label" | "type"> = {},
+): FieldView<T> {
+  return { node, label, type, ...extras };
+}
+
+export const defaultFieldMessages: Readonly<Record<string, string>> = Object.freeze({
+  required: "This field is required.",
+  email: "Use a valid email address.",
+  pattern: "Format is invalid.",
+  usernameTaken: "That username is reserved for demos.",
+  passwordMismatch: "Passwords must match.",
+});
+
+const RANGE_KEYS = new Set(["minLength", "maxLength", "min", "max"]);
+
+export function formatFieldError(
+  node: Field<any>,
+  messages: Readonly<Record<string, string>> = defaultFieldMessages,
+  pendingHint?: string,
+): string | null {
+  if ((pendingHint && node.pending.value) || !node.touched.value) return null;
+  if (node.validationError.value !== null) return "Validation failed.";
+
+  const issues = node.issues.value;
+  if (!issues) return null;
+
+  const [name, payload] = Object.entries(issues)[0] ?? [];
+  if (!name) return null;
+  if (messages[name]) return messages[name];
+
+  if (RANGE_KEYS.has(name)) {
+    const required =
+      typeof payload === "object" && payload !== null && "required" in payload
+        ? String((payload as { required: unknown }).required)
+        : "";
+    return `${name.startsWith("max") ? "Maximum" : "Minimum"} ${
+      name.endsWith("Length") ? "length" : "value"
+    } is ${required}.`;
+  }
+
+  return "Value is invalid.";
+}
+
+export function fieldHint(view: FieldView<any>): string | null {
+  if (view.pendingHint && view.node.pending.value) return view.pendingHint;
+  return view.hint?.(view.node.completeValue.value) ?? null;
+}
+
+export function fieldError(
+  view: FieldView<any>,
+  messages: Readonly<Record<string, string>> = defaultFieldMessages,
+): string | null {
+  return formatFieldError(view.node, messages, view.pendingHint);
+}
+
+export interface Checks {
+  required<T>(value: T): ValidationIssues | null;
+  requiredTrue(value: unknown): ValidationIssues | null;
+  minLength(minimum: number): Check<unknown>;
+  maxLength(maximum: number): Check<unknown>;
+  number(value: unknown): ValidationIssues | null;
+  min(minimum: number): Check<unknown>;
+  max(maximum: number): Check<unknown>;
+  pattern(pattern: string | RegExp): Check<unknown>;
+  email(value: unknown): ValidationIssues | null;
+  compose<T>(...items: readonly Check<T>[]): Check<T>;
+  composeAsync<T>(...items: readonly AsyncCheck<T>[]): AsyncCheck<T>;
+}
+
+export const checks: Checks = Object.freeze({
   required<T>(value: T): ValidationIssues | null {
     return isEmpty(value) ? { required: true } : null;
   },
@@ -745,7 +738,8 @@ export const checks = Object.freeze({
       if (isEmpty(value)) return null;
       const length = (value as { length?: unknown }).length;
       return typeof length === "number" && length < minimum
-        ? { minLength: { required: minimum, actual: length } } : null;
+        ? { minLength: { required: minimum, actual: length } }
+        : null;
     };
   },
   maxLength(maximum: number): Check<unknown> {
@@ -753,7 +747,8 @@ export const checks = Object.freeze({
       if (isEmpty(value)) return null;
       const length = (value as { length?: unknown }).length;
       return typeof length === "number" && length > maximum
-        ? { maxLength: { required: maximum, actual: length } } : null;
+        ? { maxLength: { required: maximum, actual: length } }
+        : null;
     };
   },
   number(value: unknown): ValidationIssues | null {
@@ -779,13 +774,23 @@ export const checks = Object.freeze({
     };
   },
   pattern(pattern: string | RegExp): Check<unknown> {
-    const expression = typeof pattern === "string"
-      ? new RegExp(`^(?:${pattern})$`)
-      : new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ""));
-    return value => isEmpty(value) ? null : (expression.test(String(value)) ? null : { pattern: { required: pattern.toString(), actual: value } });
+    const expression =
+      typeof pattern === "string"
+        ? new RegExp(`^(?:${pattern})$`)
+        : new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ""));
+    return value =>
+      isEmpty(value)
+        ? null
+        : expression.test(String(value))
+          ? null
+          : { pattern: { required: pattern.toString(), actual: value } };
   },
   email(value: unknown): ValidationIssues | null {
-    return isEmpty(value) ? null : (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value)) ? null : { email: true });
+    return isEmpty(value)
+      ? null
+      : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))
+        ? null
+        : { email: true };
   },
   compose<T>(...items: readonly Check<T>[]): Check<T> {
     return value => mergeIssues(...items.map(check => check(value)));
