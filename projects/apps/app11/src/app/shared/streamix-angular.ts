@@ -53,7 +53,7 @@ export function formatFieldError(
 ): string | null {
   if (
     (pendingHint && node.pending.value) ||
-    !node.touched.value
+    (!node.dirty.value && !node.touched.value)
   ) {
     return null;
   }

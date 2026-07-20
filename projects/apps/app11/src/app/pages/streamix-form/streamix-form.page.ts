@@ -101,15 +101,29 @@ export class StreamixFormPageComponent implements OnDestroy {
   readonly contactOptions = contactOptions;
   readonly themeOptions = themeOptions;
 
-  readonly passwordHint = (value: unknown): string | null => {
-    const length = String(value ?? "").length;
-
-    return length > 0 && length < 8
-      ? "Minimum length is 8."
-      : null;
-  };
-
   readonly hoursHint = (value: unknown) => `${value} hrs/week`;
+
+  get passwordLengthError(): string | null {
+    const value = this.security.password.value.value ?? '';
+    if (value.length === 0) {
+      return null;
+    }
+    if (value.length < 8) {
+      return 'Minimum length is 8.';
+    }
+    return null;
+  }
+
+  get confirmPasswordLengthError(): string | null {
+    const value = this.security.confirmPassword.value.value ?? '';
+    if (value.length === 0) {
+      return null;
+    }
+    if (value.length < 8) {
+      return 'Minimum length is 8.';
+    }
+    return null;
+  }
 
   get passwordError(): string | null {
     const security = this.form.fields.security;

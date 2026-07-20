@@ -76,7 +76,7 @@ export function createProfileForm(initial: ProfileFormValue = cloneInitialProfil
     security: form(
       {
         password: text(initial.security.password, 8),
-        confirmPassword: field(initial.security.confirmPassword, { checks: checks.required }),
+        confirmPassword: text(initial.security.confirmPassword, 8),
       },
       { checks: passwordMatchCheck },
     ),

@@ -80,17 +80,19 @@
             <input
               #v="sxField"
               [sxField]="security.password"
-              [sxHint]="passwordHint"
               type="password"
             />
-            <small class="hint" *ngIf="v.hint">{{ v.hint }}</small>
-            <small class="error" *ngIf="v.error && !v.hint">{{ v.error }}</small>
+            <small class="error" *ngIf="passwordLengthError">{{ passwordLengthError }}</small>
           </label>
 
           <label class="field">
             <span>Confirm password</span>
-            <input #v="sxField" [sxField]="security.confirmPassword" type="password" />
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <input
+              #v="sxField"
+              [sxField]="security.confirmPassword"
+              type="password"
+            />
+            <small class="error" *ngIf="confirmPasswordLengthError">{{ confirmPasswordLengthError }}</small>
           </label>
         </div>
 

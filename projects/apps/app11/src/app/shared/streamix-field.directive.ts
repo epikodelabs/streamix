@@ -1,9 +1,11 @@
 import {
+  ChangeDetectorRef,
   Directive,
   ElementRef,
   HostListener,
   Input,
   OnChanges,
+  NgZone,
   OnDestroy,
   inject,
 } from "@angular/core";
@@ -55,6 +57,9 @@ export class StreamixFieldDirective
   private readonly element =
     inject<ElementRef<NativeFieldElement>>(ElementRef);
 
+  private readonly cdr = inject(ChangeDetectorRef);
+  private readonly zone = inject(NgZone);
+
   private stopWatching?: () => void;
   private kind: ElementKind = "text";
 
@@ -102,7 +107,12 @@ export class StreamixFieldDirective
     this.stopWatching = this.sxField
       ? watchNode(
           this.sxField,
-          () => this.render(),
+          () => {
+            this.zone.run(() => {
+              this.render();
+              this.cdr.detectChanges();
+            });
+          },
         )
       : undefined;
 
