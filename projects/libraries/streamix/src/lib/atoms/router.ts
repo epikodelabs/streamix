@@ -263,6 +263,7 @@ function defaultRender(outlet: HTMLElement, node: Node): void {
 function defaultRenderNotFound(outlet: HTMLElement): void {
   const heading = document.createElement('h1');
   heading.textContent = '404 вЂ” Page Not Found';
+  heading.textContent = '404 \u2014 Page Not Found';
   outlet.replaceChildren(heading);
 }
 
@@ -277,6 +278,7 @@ function findNestedOutlet(node: Node): HTMLElement | null {
     return node;
   }
   if (node instanceof Element || node instanceof DocumentFragment) {
+    // Nested outlets must be present in the rendered light DOM tree.
     const candidate = node.querySelector('[data-router-outlet]');
     return candidate instanceof HTMLElement ? candidate : null;
   }
@@ -349,12 +351,10 @@ export function createRouter(config: RouterConfig): Router {
   }
 
   function relativeBaseUrl(): string {
-    if (baseHref !== '/' && isInsideBase(window.location.pathname)) {
+    if (baseHref === '/' || isInsideBase(window.location.pathname)) {
       return window.location.href;
     }
-    return baseHref === '/'
-      ? `${window.location.origin}/`
-      : `${window.location.origin}${baseHref}/`;
+    return `${window.location.origin}${baseHref}/`;
   }
 
   function resolveAppUrl(target: string | URL, mode: 'navigate' | 'href'): URL {
@@ -449,9 +449,9 @@ export function createRouter(config: RouterConfig): Router {
   async function runCanDeactivateGuards(
     nextUrl: URL,
     signal: AbortSignal
-  ): Promise<GuardResult | null> {
+  ): Promise<GuardResult> {
     const activeRoute = currentState.value;
-    if (!activeRoute) return null;
+    if (!activeRoute) return true;
 
     for (let index = activeRoute.routeStates.length - 1; index >= 0; index--) {
       const routeState = activeRoute.routeStates[index];
@@ -476,7 +476,7 @@ export function createRouter(config: RouterConfig): Router {
       }
     }
 
-    return null;
+    return true;
   }
 
   async function renderRouteChain(

@@ -1637,6 +1637,20 @@ idescribe('Router', () => {
       expect(router.href('child')).toBe('/app/section/child');
     });
 
+    it('should resolve relative hrefs from the current location at the root baseHref', () => {
+      window.history.replaceState(null, '', '/dashboard/profile');
+
+      const config: RouterConfig = {
+        routes: [routeWithComponent('', 'Home')],
+        baseHref: '/',
+        outlet,
+      };
+
+      router = createRouter(config);
+
+      expect(router.href('settings')).toBe('/dashboard/settings');
+    });
+
     it('should create links with correct href', () => {
       const config: RouterConfig = {
         routes: [routeWithComponent('', 'Home')],
@@ -2008,6 +2022,30 @@ idescribe('Router', () => {
       expect(outlet.textContent).toBe('About');
     });
 
+    it('should navigate relative URLs from the current location at the root baseHref', async () => {
+      window.history.replaceState(null, '', '/dashboard/profile');
+
+      const config: RouterConfig = {
+        routes: [
+          routeWithComponent('dashboard/profile', 'Profile'),
+          routeWithComponent('dashboard/settings', 'Settings'),
+        ],
+        baseHref: '/',
+        outlet,
+      };
+
+      router = createRouter(config);
+      router.start();
+      await delay(50);
+
+      router.navigate('settings');
+      await delay(50);
+
+      expect(router.state.current?.path).toBe('/dashboard/settings');
+      expect(router.state.current?.url.pathname).toBe('/dashboard/settings');
+      expect(outlet.textContent).toBe('Settings');
+    });
+
     it('should handle absolute URLs within baseHref', () => {
       const config: RouterConfig = {
         routes: [routeWithComponent('', 'Home')],
@@ -2088,7 +2126,7 @@ idescribe('Router', () => {
       router.navigate('/non-existent');
       await delay(50);
 
-      expect(outlet.textContent).toContain('404');
+      expect(outlet.textContent).toBe('404 — Page Not Found');
     });
 
     it('should clear the current route when rendering not found', async () => {
