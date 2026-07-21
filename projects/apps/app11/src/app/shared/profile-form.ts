@@ -94,7 +94,9 @@ export function createProfileForm(initial: ProfileFormValue = cloneInitialProfil
     }),
     availability: form({
       startDate: field(initial.availability.startDate, { checks: checks.required }),
-      hoursPerWeek: field(initial.availability.hoursPerWeek, { checks: [checks.min(10), checks.max(60)] }),
+      hoursPerWeek: field(initial.availability.hoursPerWeek, {
+        checks: [checks.required, checks.min(10), checks.max(60)],
+      }),
       remote: field(initial.availability.remote),
     }),
     skills: list(initial.skills.map(createSkill)),
@@ -108,6 +110,7 @@ export function profileSnapshot(formState: ProfileForm): ProfileFormValue {
 export function profileReady(formState: ProfileForm): boolean {
   const value = profileSnapshot(formState);
   return (
+    !formState.disabled.value &&
     formState.valid.value &&
     value.skills.length > 0 &&
     calculateCompletion(value) >= 85

@@ -142,7 +142,7 @@ export function createProfileForm(
         validators: [Validators.required],
       }),
       hoursPerWeek: fb.control(value.availability.hoursPerWeek, {
-        validators: [Validators.min(10), Validators.max(60)],
+        validators: [Validators.required, Validators.min(10), Validators.max(60)],
       }),
       remote: fb.control(value.availability.remote),
     }),

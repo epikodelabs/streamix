@@ -14,9 +14,9 @@
 - [`src/app/shared/form-model.ts`](./src/app/shared/form-model.ts): Angular form builders and validators
 - [`src/app/shared/profile-model.ts`](./src/app/shared/profile-model.ts): shared data model and sample payload
 - [`src/app/shared/form-helpers.ts`](./src/app/shared/form-helpers.ts): local event and indexed-path helpers
-- [`src/app/shared/streamix-form.config.ts`](./src/app/shared/streamix-form.config.ts): streamix page field metadata
 - [`src/app/shared/streamix-forms.ts`](./src/app/shared/streamix-forms.ts): local copy of the Streamix forms runtime
-- [`src/app/shared/streamix-form.helpers.ts`](./src/app/shared/streamix-form.helpers.ts): local form tree creation, path access, reset logic, and error mapping
+- [`src/app/shared/profile-form.ts`](./src/app/shared/profile-form.ts): Streamix form tree creation, validation, reset logic, and derived state
+- [`src/app/shared/streamix-field.directive.ts`](./src/app/shared/streamix-field.directive.ts): native input bindings and field feedback
 
 ## What it shows
 

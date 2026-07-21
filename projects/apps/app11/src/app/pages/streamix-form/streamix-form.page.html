@@ -82,7 +82,7 @@
               [sxField]="security.password"
               type="password"
             />
-            <small class="error" *ngIf="passwordLengthError">{{ passwordLengthError }}</small>
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
           </label>
 
           <label class="field">
@@ -92,13 +92,53 @@
               [sxField]="security.confirmPassword"
               type="password"
             />
-            <small class="error" *ngIf="confirmPasswordLengthError">{{ confirmPasswordLengthError }}</small>
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
           </label>
         </div>
 
         @if (passwordError) {
         <small class="error">{{ passwordError }}</small>
         }
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Preferences</p>
+            <h3>Radio, select, and checkbox bindings</h3>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <fieldset class="field fieldset">
+            <legend>Preferred contact</legend>
+            @for (option of contactOptions; track option.value) {
+            <label>
+              <input
+                [sxField]="preferences.contactMethod"
+                type="radio"
+                name="contact-method"
+                [value]="option.value"
+              />
+              {{ option.label }}
+            </label>
+            }
+          </fieldset>
+
+          <label class="field">
+            <span>Theme</span>
+            <select [sxField]="preferences.theme">
+              @for (option of themeOptions; track option.value) {
+              <option [value]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          </label>
+        </div>
+
+        <label class="checkbox">
+          <input [sxField]="preferences.newsletter" type="checkbox" />
+          <span>Send release notes and onboarding emails</span>
+        </label>
       </section>
 
       <section class="section">
@@ -156,8 +196,14 @@
               max="60"
             />
             <small class="hint" *ngIf="v.hint">{{ v.hint }}</small>
+            <small class="error" *ngIf="v.error">{{ v.error }}</small>
           </label>
         </div>
+
+        <label class="checkbox">
+          <input [sxField]="availability.remote" type="checkbox" />
+          <span>Open to remote collaboration</span>
+        </label>
       </section>
 
       <section class="section">
@@ -187,6 +233,11 @@
               <small class="error" *ngIf="v.error">{{ v.error }}</small>
             </label>
 
+            <label class="checkbox compact-checkbox">
+              <input [sxField]="skill.fields.primary" type="checkbox" />
+              <span>Primary</span>
+            </label>
+
             <button type="button" class="ghost" (click)="removeSkill(i)" [disabled]="skills.items.length === 1">
               Remove
             </button>
@@ -200,7 +251,7 @@
           Reset
         </button>
 
-        <button type="submit" [disabled]="!ui.readyToSubmit">
+        <button type="submit">
           Submit Streamix Form
         </button>
       </div>

@@ -640,6 +640,8 @@ function aggregateChildren<
   },
   ownIssues: ValidationIssues | null = null,
   ownError: unknown | null = null,
+  keyForChild: (child: FormNode<any, any>, index: number) => PropertyKey =
+    (_, index) => index,
 ): GroupAggregate<Value, CompleteValue> {
   const issueEntries: Array<readonly [PropertyKey, unknown]> = [];
   const errorEntries: Array<readonly [PropertyKey, unknown]> = [];
@@ -649,12 +651,14 @@ function aggregateChildren<
   let touched = false;
 
   children.forEach((child, index) => {
+    const key = keyForChild(child, index);
+
     if (child.issues.value !== null) {
-      issueEntries.push([index, child.issues.value]);
+      issueEntries.push([key, child.issues.value]);
     }
 
     if (child.validationError.value !== null) {
-      errorEntries.push([index, child.validationError.value]);
+      errorEntries.push([key, child.validationError.value]);
     }
 
     pending ||= child.pending.value;
@@ -757,6 +761,7 @@ export function form<T extends NodeMap>(
       },
       ownIssues,
       ownError,
+      (_, index) => childEntries[index][0],
     );
   };
 
