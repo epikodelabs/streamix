@@ -1,4 +1,4 @@
-import { createRouter, type Route, type Router, type RouterConfig } from '@epikodelabs/streamix';
+import { createRouter, type Route, type Router, type RouterConfig } from '@epikodelabs/streamix/router';
 import { idescribe } from './env.spec';
 
 // Helper function for async testing

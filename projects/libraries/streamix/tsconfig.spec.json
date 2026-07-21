@@ -9,7 +9,9 @@
     "aggregates/src/tests/**/*.spec.ts",
     "coroutines/src/tests/**/*.spec.ts",
     "dom/src/tests/**/*.spec.ts",
+    "forms/src/tests/**/*.spec.ts",
     "networking/src/tests/**/*.spec.ts",
+    "router/src/tests/**/*.spec.ts",
     "src/**/*.d.ts"
   ]
 }

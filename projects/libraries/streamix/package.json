@@ -24,7 +24,9 @@
     "aggregates/",
     "coroutines/",
     "dom/",
+    "forms/",
     "networking/",
+    "router/",
     "CHANGELOG.md"
   ],
   "type": "module",

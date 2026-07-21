@@ -13,7 +13,7 @@ import {
   list,
   syncList,
   type ValidationIssues
-} from "./streamix-forms";
+} from "@epikodelabs/streamix/forms";
 
 const RESERVED_USERNAMES = new Set(["admin", "angular", "root", "streamix"]);
 const USERNAME_PATTERN = /^[a-z0-9-]+$/;

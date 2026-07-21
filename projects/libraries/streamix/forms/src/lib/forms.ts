@@ -17,6 +17,11 @@ export interface WriteOptions {
   touch?: boolean;
 }
 
+export interface DisableOptions {
+  /** Change only this group or list, leaving its descendants unchanged. */
+  onlySelf?: boolean;
+}
+
 export interface GroupOptions {
   ownsChildren?: boolean;
   disabled?: boolean;
@@ -94,8 +99,8 @@ export interface FormNode<Value, CompleteValue = Value> {
 
   touch(): void;
   untouch(): void;
-  enable(): void;
-  disable(): void;
+  enable(options?: DisableOptions): void;
+  disable(options?: DisableOptions): void;
   dispose(): void;
 }
 
@@ -301,6 +306,12 @@ export function field<T>(
   let controller: AbortController | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
+  const assertActive = (): void => {
+    if (disposed) {
+      throw new Error("Cannot mutate a disposed field.");
+    }
+  };
+
   const runSync = (
     value: T,
     disabled: boolean,
@@ -484,6 +495,7 @@ export function field<T>(
     value: T,
     writeOptions: WriteOptions = {},
   ): void => {
+    assertActive();
     const current = state.value;
     const sync = runSync(value, current.disabled);
 
@@ -500,6 +512,7 @@ export function field<T>(
   };
 
   const setDisabled = (disabled: boolean): void => {
+    assertActive();
     if (state.value.disabled === disabled) return;
 
     const sync = runSync(state.value.value, disabled);
@@ -547,6 +560,7 @@ export function field<T>(
     next?: T,
     resetOptions: ResetOptions = {},
   ): void {
+    assertActive();
     const supplied = arguments.length > 0;
     const current = state.value;
     const value = supplied ? (next as T) : current.initialValue;
@@ -597,10 +611,12 @@ export function field<T>(
     reset,
 
     touch(): void {
+      assertActive();
       if (!state.value.touched) publish({ touched: true });
     },
 
     untouch(): void {
+      assertActive();
       if (state.value.touched) publish({ touched: false });
     },
 
@@ -720,6 +736,12 @@ export function form<T extends NodeMap>(
 
   let disposed = false;
 
+  const assertActive = (): void => {
+    if (disposed) {
+      throw new Error("Cannot mutate a disposed form.");
+    }
+  };
+
   const calculate = (
     disabled: boolean,
   ): NodeState<FormValue<T>, FormCompleteValue<T>> => {
@@ -788,8 +810,26 @@ export function form<T extends NodeMap>(
   const subscriptions = childNodes.map(child =>
     child.state.subscribe(() => scheduler.request()),
   );
+  const disabledByParent = new Set<FormNode<any, any>>();
+
+  const disableChildren = (): void => {
+    childNodes.forEach(child => {
+      if (!child.disabled.value) {
+        disabledByParent.add(child);
+        child.disable();
+      }
+    });
+  };
+
+  const enableChildren = (): void => {
+    disabledByParent.forEach(child => {
+      if (child.disabled.value) child.enable();
+    });
+    disabledByParent.clear();
+  };
 
   const setDisabled = (disabled: boolean): void => {
+    assertActive();
     if (state.value.disabled === disabled) return;
     refreshNow(disabled);
   };
@@ -810,13 +850,17 @@ export function form<T extends NodeMap>(
   const disabled = createWritableView(
     state,
     current => current.disabled,
-    setDisabled,
+    next => {
+      if (next) disable();
+      else enable();
+    },
   );
 
   const set = (
     next: FormCompleteValue<T>,
     writeOptions: WriteOptions = {},
   ): void => {
+    assertActive();
     scheduler.batch(() => {
       for (const key of Object.keys(children) as Array<keyof T>) {
         children[key].set(next[key], writeOptions);
@@ -828,6 +872,7 @@ export function form<T extends NodeMap>(
     next: Partial<FormCompleteValue<T>>,
     writeOptions: WriteOptions = {},
   ): void => {
+    assertActive();
     scheduler.batch(() => {
       for (const key of Object.keys(next) as Array<keyof T>) {
         if (key in children) {
@@ -846,6 +891,7 @@ export function form<T extends NodeMap>(
     next?: FormCompleteValue<T>,
     resetOptions: ResetOptions = {},
   ): void {
+    assertActive();
     const supplied = arguments.length > 0;
 
     scheduler.batch(() => {
@@ -861,6 +907,24 @@ export function form<T extends NodeMap>(
       }
     });
   }
+
+  const enable = (disableOptions: DisableOptions = {}): void => {
+    assertActive();
+    scheduler.batch(() => {
+      setDisabled(false);
+      if (!disableOptions.onlySelf) enableChildren();
+    });
+  };
+
+  const disable = (disableOptions: DisableOptions = {}): void => {
+    assertActive();
+    scheduler.batch(() => {
+      if (!disableOptions.onlySelf) disableChildren();
+      setDisabled(true);
+    });
+  };
+
+  if (options.disabled) disableChildren();
 
   return {
     kind: "form",
@@ -884,24 +948,21 @@ export function form<T extends NodeMap>(
     reset,
 
     touch(): void {
+      assertActive();
       scheduler.batch(() => {
         childNodes.forEach(child => child.touch());
       });
     },
 
     untouch(): void {
+      assertActive();
       scheduler.batch(() => {
         childNodes.forEach(child => child.untouch());
       });
     },
 
-    enable(): void {
-      setDisabled(false);
-    },
-
-    disable(): void {
-      setDisabled(true);
-    },
+    enable,
+    disable,
 
     dispose(): void {
       if (disposed) return;
@@ -917,6 +978,8 @@ export function form<T extends NodeMap>(
 
       if (ownsChildren) {
         childNodes.forEach(child => child.dispose());
+      } else {
+        enableChildren();
       }
     },
   };
@@ -960,6 +1023,22 @@ export function list<N extends FormNode<any, any>>(
   const childSubscriptions = new Map<N, Subscription>();
 
   let disposed = false;
+
+  if (new Set(children).size !== children.length) {
+    throw new Error("A form node cannot appear in the same list twice.");
+  }
+
+  const assertActive = (): void => {
+    if (disposed) {
+      throw new Error("Cannot mutate a disposed list.");
+    }
+  };
+
+  const assertUniqueChild = (child: N): void => {
+    if (children.includes(child)) {
+      throw new Error("A form node cannot appear in the same list twice.");
+    }
+  };
 
   const calculate = (
     disabled: boolean,
@@ -1008,6 +1087,28 @@ export function list<N extends FormNode<any, any>>(
   };
 
   const scheduler = createRefreshScheduler(() => refreshNow());
+  const disabledByParent = new Set<N>();
+
+  const disableChildIfNeeded = (child: N): void => {
+    if (!child.disabled.value) {
+      disabledByParent.add(child);
+      child.disable();
+    }
+  };
+
+  const disableChildren = (): void => {
+    children.forEach(disableChildIfNeeded);
+  };
+
+  const enableChildIfNeeded = (child: N): void => {
+    if (disabledByParent.delete(child) && child.disabled.value) {
+      child.enable();
+    }
+  };
+
+  const enableChildren = (): void => {
+    [...disabledByParent].forEach(enableChildIfNeeded);
+  };
 
   const observe = (child: N): void => {
     childSubscriptions.set(
@@ -1028,6 +1129,7 @@ export function list<N extends FormNode<any, any>>(
   children.forEach(observe);
 
   const setDisabled = (disabled: boolean): void => {
+    assertActive();
     if (state.value.disabled === disabled) return;
     refreshNow(disabled);
   };
@@ -1048,7 +1150,10 @@ export function list<N extends FormNode<any, any>>(
   const disabled = createWritableView(
     state,
     current => current.disabled,
-    setDisabled,
+    next => {
+      if (next) disable();
+      else enable();
+    },
   );
 
   const items = new Proxy(children as readonly N[], {
@@ -1087,6 +1192,7 @@ export function list<N extends FormNode<any, any>>(
     next: Array<NodeCompleteValue<N>>,
     writeOptions: WriteOptions = {},
   ): void => {
+    assertActive();
     if (next.length !== children.length) {
       throw new RangeError(
         `Expected ${children.length} values, received ${next.length}.`,
@@ -1101,12 +1207,17 @@ export function list<N extends FormNode<any, any>>(
   };
 
   const push = (child: N): void => {
+    assertActive();
+    assertUniqueChild(child);
     children.push(child);
     observe(child);
+    if (state.value.disabled) disableChildIfNeeded(child);
     refreshNow();
   };
 
   const insert = (index: number, child: N): void => {
+    assertActive();
+    assertUniqueChild(child);
     children.splice(
       Math.max(0, Math.min(index, children.length)),
       0,
@@ -1114,14 +1225,17 @@ export function list<N extends FormNode<any, any>>(
     );
 
     observe(child);
+    if (state.value.disabled) disableChildIfNeeded(child);
     refreshNow();
   };
 
   const detachAt = (index: number): N | undefined => {
+    assertActive();
     if (index < 0 || index >= children.length) return undefined;
 
     const [child] = children.splice(index, 1);
     unobserve(child);
+    enableChildIfNeeded(child);
     refreshNow();
 
     return child;
@@ -1136,6 +1250,7 @@ export function list<N extends FormNode<any, any>>(
   };
 
   const clear = (): void => {
+    assertActive();
     const removed = children.splice(0, children.length);
 
     removed.forEach(child => {
@@ -1143,6 +1258,8 @@ export function list<N extends FormNode<any, any>>(
 
       if (ownsChildren) {
         child.dispose();
+      } else {
+        enableChildIfNeeded(child);
       }
     });
 
@@ -1158,6 +1275,7 @@ export function list<N extends FormNode<any, any>>(
     next?: Array<NodeCompleteValue<N>>,
     resetOptions: ResetOptions = {},
   ): void {
+    assertActive();
     const supplied = arguments.length > 0;
 
     if (supplied && next!.length !== children.length) {
@@ -1176,6 +1294,24 @@ export function list<N extends FormNode<any, any>>(
       });
     });
   }
+
+  const enable = (disableOptions: DisableOptions = {}): void => {
+    assertActive();
+    scheduler.batch(() => {
+      setDisabled(false);
+      if (!disableOptions.onlySelf) enableChildren();
+    });
+  };
+
+  const disable = (disableOptions: DisableOptions = {}): void => {
+    assertActive();
+    scheduler.batch(() => {
+      if (!disableOptions.onlySelf) disableChildren();
+      setDisabled(true);
+    });
+  };
+
+  if (options.disabled) disableChildren();
 
   return {
     kind: "list",
@@ -1203,24 +1339,21 @@ export function list<N extends FormNode<any, any>>(
     reset,
 
     touch(): void {
+      assertActive();
       scheduler.batch(() => {
         children.forEach(child => child.touch());
       });
     },
 
     untouch(): void {
+      assertActive();
       scheduler.batch(() => {
         children.forEach(child => child.untouch());
       });
     },
 
-    enable(): void {
-      setDisabled(false);
-    },
-
-    disable(): void {
-      setDisabled(true);
-    },
+    enable,
+    disable,
 
     dispose(): void {
       if (disposed) return;
@@ -1231,6 +1364,8 @@ export function list<N extends FormNode<any, any>>(
 
       if (ownsChildren) {
         children.forEach(child => child.dispose());
+      } else {
+        enableChildren();
       }
 
       children.length = 0;

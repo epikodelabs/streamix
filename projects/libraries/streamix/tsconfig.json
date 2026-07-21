@@ -12,7 +12,9 @@
     "aggregates/**/*.ts",
     "coroutines/**/*.ts",
     "dom/**/*.ts",
+    "forms/**/*.ts",
     "networking/**/*.ts",
+    "router/**/*.ts",
     "tests/**src/**/*.ts"
   ]
 }

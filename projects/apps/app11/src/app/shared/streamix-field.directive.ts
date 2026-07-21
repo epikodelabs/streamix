@@ -10,7 +10,7 @@ import {
   inject,
 } from "@angular/core";
 import { formatFieldError } from "./streamix-angular";
-import { type Field, watchNode } from "./streamix-forms";
+import { type Field, watchNode } from "@epikodelabs/streamix/forms";
 
 type NativeFieldElement =
   | HTMLInputElement

@@ -39,6 +39,12 @@
       "@epikodelabs/streamix/networking": [
         "./projects/libraries/streamix/networking/src/lib/index.ts"
       ],
+      "@epikodelabs/streamix/forms": [
+        "./projects/libraries/streamix/forms/src/lib/index.ts"
+      ],
+      "@epikodelabs/streamix/router": [
+        "./projects/libraries/streamix/router/src/lib/index.ts"
+      ],
       "@epikodelabs/streamix": [
         "./projects/libraries/streamix/src/lib/index.ts"
       ]
