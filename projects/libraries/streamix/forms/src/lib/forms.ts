@@ -1,5 +1,11 @@
 import { atom, type Atom, type Subscription, type Writable } from "@epikodelabs/streamix";
 
+/**
+ * A keyed validation-result dictionary.
+ *
+ * Library-created issue dictionaries have a null prototype; use
+ * `Object.hasOwn()` rather than instance methods such as `hasOwnProperty()`.
+ */
 export type ValidationIssues = Readonly<Record<string, unknown>>;
 export type MaybePromise<T> = T | PromiseLike<T>;
 export type Check<T> = (value: T) => ValidationIssues | null;
@@ -23,6 +29,12 @@ export interface DisableOptions {
 }
 
 export interface GroupOptions {
+  /**
+   * Disposes children when this container is disposed or removes them.
+   *
+   * Children remain exclusively attached to this container while present,
+   * even when this option is `false`.
+   */
   ownsChildren?: boolean;
   disabled?: boolean;
 }
@@ -468,9 +480,10 @@ function createField<T>(
 
     const current = state.value;
     const candidate = { ...current, ...patch };
-    const issues = candidate.disabled
+    const calculatedIssues = candidate.disabled
       ? null
       : mergeIssues(candidate.syncIssues, candidate.asyncIssues);
+    const issues = reuseNullableRecord(current.issues, calculatedIssues);
 
     const status = statusOf(
       candidate.disabled,
@@ -591,9 +604,19 @@ function createField<T>(
   const scheduleAsync = (): void => {
     if (disposed) return;
 
-    cancelAsync();
+    cancelAsync(false);
 
-    if (asyncChecks.length === 0) return;
+    const current = state.value;
+
+    if (
+      asyncChecks.length === 0 ||
+      current.disabled ||
+      current.validationError !== null ||
+      (asyncOnlyWhenSyncClean && current.syncIssues !== null)
+    ) {
+      if (current.pending) publish({ pending: false });
+      return;
+    }
 
     if (asyncDelay === 0) {
       void executeAsync();
@@ -620,7 +643,7 @@ function createField<T>(
       syncIssues: sync.issues,
       asyncIssues: null,
       validationError: sync.error,
-      pending: false,
+      pending: current.pending,
     });
 
     scheduleAsync();
@@ -714,7 +737,7 @@ function createField<T>(
       value,
       initialValue,
       touched: false,
-      pending: false,
+      pending: current.pending,
       syncIssues: sync.issues,
       asyncIssues: null,
       validationError: sync.error,
@@ -898,6 +921,10 @@ export function form<T extends NodeMap>(
 
   claimChildren(childNodes, container);
 
+  const subscriptions: Subscription[] = [];
+  let disposeState: (() => void) | undefined;
+  let restoreChildren: (() => void) | undefined;
+
   try {
   const ownsChildren = options.ownsChildren ?? true;
   const formChecks = normalize(options.checks);
@@ -958,6 +985,7 @@ export function form<T extends NodeMap>(
   };
 
   const state = atom(calculate(options.disabled ?? false));
+  disposeState = () => state.dispose();
 
   const refreshNow = (disabled = state.value.disabled): void => {
     if (disposed) return;
@@ -997,9 +1025,6 @@ export function form<T extends NodeMap>(
   };
 
   const scheduler = createRefreshScheduler(() => refreshNow());
-  const subscriptions = childNodes.map(child =>
-    child.state.subscribe(() => scheduler.request()),
-  );
   const disabledByParent = new Set<FormNode<any, any>>();
 
   const disableChildren = (): void => {
@@ -1017,6 +1042,11 @@ export function form<T extends NodeMap>(
     });
     disabledByParent.clear();
   };
+  restoreChildren = enableChildren;
+
+  childNodes.forEach(child => {
+    subscriptions.push(child.state.subscribe(() => scheduler.request()));
+  });
 
   const setDisabled = (disabled: boolean): void => {
     assertActive();
@@ -1063,7 +1093,9 @@ export function form<T extends NodeMap>(
     assertActive();
     scheduler.batch(() => {
       for (const key of Object.keys(children) as Array<keyof T>) {
-        children[key].set(next[key], writeOptions);
+        if (Object.hasOwn(next, key)) {
+          children[key].set(next[key], writeOptions);
+        }
       }
     });
   };
@@ -1099,7 +1131,7 @@ export function form<T extends NodeMap>(
       selfTouched = false;
 
       for (const key of Object.keys(children) as Array<keyof T>) {
-        if (supplied) {
+        if (supplied && Object.hasOwn(next!, key)) {
           children[key].reset(
             (next as FormCompleteValue<T>)[key],
             resetOptions,
@@ -1116,8 +1148,8 @@ export function form<T extends NodeMap>(
   const enable = (disableOptions: DisableOptions = {}): void => {
     assertActive();
     scheduler.batch(() => {
-      setDisabled(false);
       if (!disableOptions.onlySelf) enableChildren();
+      setDisabled(false);
     });
   };
 
@@ -1196,6 +1228,17 @@ export function form<T extends NodeMap>(
     },
   };
   } catch (error) {
+    subscriptions.forEach(unsubscribe => {
+      try {
+        void unsubscribe();
+      } catch {}
+    });
+    try {
+      restoreChildren?.();
+    } catch {}
+    try {
+      disposeState?.();
+    } catch {}
     childNodes.forEach(child => releaseChild(child, container));
     throw error;
   }
@@ -1247,6 +1290,8 @@ export function list<N extends FormNode<any, any>>(
 
   let disposed = false;
   let selfTouched = false;
+  let disposeState: (() => void) | undefined;
+  let restoreChildren: (() => void) | undefined;
 
   if (new Set(children).size !== children.length) {
     throw new Error("A form node cannot appear in the same list twice.");
@@ -1298,6 +1343,7 @@ export function list<N extends FormNode<any, any>>(
     );
 
   const state = atom(calculate(options.disabled ?? false));
+  disposeState = () => state.dispose();
 
   const refreshNow = (disabled = state.value.disabled): void => {
     if (disposed) return;
@@ -1356,6 +1402,7 @@ export function list<N extends FormNode<any, any>>(
   const enableChildren = (): void => {
     [...disabledByParent].forEach(enableChildIfNeeded);
   };
+  restoreChildren = enableChildren;
 
   const observe = (child: N): void => {
     childSubscriptions.set(
@@ -1476,13 +1523,16 @@ export function list<N extends FormNode<any, any>>(
         scheduler.request();
       });
     } catch (error) {
-      const index = children.indexOf(child);
-      if (index >= 0) children.splice(index, 1);
-      unobserve(child);
-      enableChildIfNeeded(child);
-      releaseChild(child, container);
-      scheduler.request();
-      throw error;
+      try {
+        const index = children.indexOf(child);
+        if (index >= 0) children.splice(index, 1);
+        unobserve(child);
+        enableChildIfNeeded(child);
+        releaseChild(child, container);
+        scheduler.request();
+      } finally {
+        throw error;
+      }
     }
   };
 
@@ -1504,13 +1554,16 @@ export function list<N extends FormNode<any, any>>(
         scheduler.request();
       });
     } catch (error) {
-      const childIndex = children.indexOf(child);
-      if (childIndex >= 0) children.splice(childIndex, 1);
-      unobserve(child);
-      enableChildIfNeeded(child);
-      releaseChild(child, container);
-      scheduler.request();
-      throw error;
+      try {
+        const childIndex = children.indexOf(child);
+        if (childIndex >= 0) children.splice(childIndex, 1);
+        unobserve(child);
+        enableChildIfNeeded(child);
+        releaseChild(child, container);
+        scheduler.request();
+      } finally {
+        throw error;
+      }
     }
   };
 
@@ -1602,8 +1655,8 @@ export function list<N extends FormNode<any, any>>(
   const enable = (disableOptions: DisableOptions = {}): void => {
     assertActive();
     scheduler.batch(() => {
-      setDisabled(false);
       if (!disableOptions.onlySelf) enableChildren();
+      setDisabled(false);
     });
   };
 
@@ -1684,6 +1737,18 @@ export function list<N extends FormNode<any, any>>(
     },
   };
   } catch (error) {
+    childSubscriptions.forEach(subscription => {
+      try {
+        void subscription();
+      } catch {}
+    });
+    childSubscriptions.clear();
+    try {
+      restoreChildren?.();
+    } catch {}
+    try {
+      disposeState?.();
+    } catch {}
     children.forEach(child => releaseChild(child, container));
     throw error;
   }

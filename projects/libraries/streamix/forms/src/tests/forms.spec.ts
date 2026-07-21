@@ -68,6 +68,89 @@ describe('Forms', () => {
     name.dispose();
   });
 
+  it('keeps pending true while a debounced async validation is replaced', async () => {
+    const resolvers: Array<(value: null) => void> = [];
+    const name = field('', {
+      validateInitial: false,
+      asyncDelay: 5,
+      asyncChecks: () => new Promise<null>(resolve => {
+        resolvers.push(resolve);
+      }),
+    });
+    const pendingValues: boolean[] = [];
+    const unsubscribe = name.pending.subscribe(value => {
+      pendingValues.push(value);
+    });
+
+    name.set('first');
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+    expect(name.pending.value).toBeTrue();
+
+    name.set('second');
+    expect(name.pending.value).toBeTrue();
+    expect(pendingValues).toEqual([true]);
+
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+    resolvers[1](null);
+    await new Promise<void>(resolve => setTimeout(resolve));
+
+    expect(pendingValues).toEqual([true, false]);
+    unsubscribe();
+    name.dispose();
+  });
+
+  it('enables containers without emitting an intermediate partial value', () => {
+    const name = field('Ada');
+    const profile = form({ name }, { ownsChildren: false });
+    profile.disable();
+    const formValues: unknown[] = [];
+    const unsubscribeForm = profile.value.subscribe(value => {
+      formValues.push(value);
+    });
+
+    profile.enable();
+
+    expect(formValues).toEqual([{ name: 'Ada' }]);
+
+    const skill = field('TypeScript');
+    const skills = list([skill], { ownsChildren: false });
+    skills.disable();
+    const listValues: unknown[] = [];
+    const unsubscribeList = skills.value.subscribe(value => {
+      listValues.push(value);
+    });
+
+    skills.enable();
+
+    expect(listValues).toEqual([['TypeScript']]);
+
+    unsubscribeForm();
+    unsubscribeList();
+    profile.dispose();
+    name.dispose();
+    skills.dispose();
+    skill.dispose();
+  });
+
+  it('ignores missing keys in full form writes and resets them independently', () => {
+    const name = field('Ada');
+    const age = field(1);
+    const profile = form({ name, age }, { ownsChildren: false });
+
+    profile.set({ name: 'Grace' } as any);
+    expect(name.value.value).toBe('Grace');
+    expect(age.value.value).toBe(1);
+
+    age.set(2);
+    profile.reset({ name: 'Lin' } as any);
+    expect(name.value.value).toBe('Lin');
+    expect(age.value.value).toBe(1);
+
+    profile.dispose();
+    name.dispose();
+    age.dispose();
+  });
+
   it('releases containment claims when aggregate initialization throws', () => {
     const name = field('Ada');
     const completeValue = name.completeValue;
@@ -96,6 +179,33 @@ describe('Forms', () => {
     const profile = form({ name }, { ownsChildren: false });
     profile.dispose();
     name.dispose();
+  });
+
+  it('cleans partial child subscriptions when form setup fails', () => {
+    const first = field('Ada');
+    const second = field('Grace');
+    let firstUnsubscribed = false;
+    const firstSubscribe = spyOn(first.state, 'subscribe').and.callFake(() =>
+      (() => {
+        firstUnsubscribed = true;
+      }) as any,
+    );
+    const secondSubscribe = spyOn(second.state, 'subscribe').and.throwError(
+      'subscribe failure',
+    );
+
+    expect(() => form({ first, second }, { ownsChildren: false })).toThrowError(
+      'subscribe failure',
+    );
+    expect(firstUnsubscribed).toBeTrue();
+
+    firstSubscribe.and.callThrough();
+    secondSubscribe.and.callThrough();
+
+    const profile = form({ first, second }, { ownsChildren: false });
+    profile.dispose();
+    first.dispose();
+    second.dispose();
   });
 
   it('synchronizes a bound field with its caller-owned source', () => {
@@ -160,13 +270,30 @@ describe('Forms', () => {
     expect(skills.completeValue.value).toBe(listCompleteValue);
     expect(listValueUpdates).toBe(0);
 
+    const required = field('', {
+      checks: current => current === '' ? { required: true } : null,
+    });
+    const requiredIssues = required.issues.value;
+    let requiredIssueUpdates = 0;
+    const unsubscribeRequiredIssues = required.issues.subscribe(() => {
+      requiredIssueUpdates++;
+    });
+
+    required.touch();
+    required.set('');
+
+    expect(required.issues.value).toBe(requiredIssues);
+    expect(requiredIssueUpdates).toBe(0);
+
     unsubscribeProfileValue();
     unsubscribeProfileCompleteValue();
     unsubscribeListValue();
+    unsubscribeRequiredIssues();
     profile.dispose();
     name.dispose();
     skills.dispose();
     skill.dispose();
+    required.dispose();
   });
 
   it('enforces exclusive container membership and releases detached nodes', () => {
