@@ -34,7 +34,15 @@ export interface FieldOptions<T> {
   asyncOnlyWhenSyncClean?: boolean;
   asyncDelay?: number;
   validateInitial?: boolean;
-  asyncFailureToIssues?: (error: unknown) => ValidationIssues | null;
+  /**
+   * Optionally converts an asynchronous validator failure.
+   *
+   * Return issues to report an invalid field, `null` to suppress the failure,
+   * or `undefined` to preserve it as a validation error.
+   */
+  asyncFailureToIssues?: (
+    error: unknown,
+  ) => ValidationIssues | null | undefined;
 }
 
 export interface FormOptions<T extends NodeMap> extends GroupOptions {
@@ -65,6 +73,7 @@ export interface NodeState<Value, CompleteValue = Value> {
   readonly issues: ValidationIssues | null;
   readonly validationError: unknown | null;
   readonly status: FormStatus;
+  /** True for both `valid` and `disabled` statuses. */
   readonly valid: boolean;
   readonly invalid: boolean;
   readonly pending: boolean;
@@ -260,6 +269,56 @@ function shallowEqualState(
   if (leftKeys.length !== rightKeys.length) return false;
 
   return leftKeys.every(key => Object.is(left[key], right[key]));
+}
+
+function shallowEqualArray<T>(
+  left: readonly T[],
+  right: readonly T[],
+): boolean {
+  return left.length === right.length &&
+    left.every((value, index) => Object.is(value, right[index]));
+}
+
+function reuseRecord<T extends Record<string, unknown>>(
+  previous: T,
+  next: T,
+): T {
+  return shallowEqualState(previous, next) ? previous : next;
+}
+
+function reuseNullableRecord<T extends Record<string, unknown>>(
+  previous: T | null,
+  next: T | null,
+): T | null {
+  if (previous === null || next === null) return previous === next ? previous : next;
+  return reuseRecord(previous, next);
+}
+
+function reuseArray<T>(previous: readonly T[], next: T[]): T[] {
+  return shallowEqualArray(previous, next) ? previous as T[] : next;
+}
+
+const nodeContainers = new WeakMap<FormNode<any, any>, object>();
+
+function claimChildren(
+  children: readonly FormNode<any, any>[],
+  container: object,
+): void {
+  for (const child of children) {
+    if (nodeContainers.has(child)) {
+      throw new Error(
+        "A form node cannot belong to more than one form container.",
+      );
+    }
+  }
+
+  children.forEach(child => nodeContainers.set(child, container));
+}
+
+function releaseChild(child: FormNode<any, any>, container: object): void {
+  if (nodeContainers.get(child) === container) {
+    nodeContainers.delete(child);
+  }
 }
 
 function createRefreshScheduler(refresh: () => void) {
@@ -504,10 +563,20 @@ function createField<T>(
         return;
       }
 
-      publish({
-        validationError: error,
-        asyncIssues: options.asyncFailureToIssues?.(error) ?? null,
-      });
+      let converted: ValidationIssues | null | undefined;
+
+      try {
+        converted = options.asyncFailureToIssues?.(error);
+      } catch (conversionError) {
+        publish({ validationError: conversionError, asyncIssues: null });
+        return;
+      }
+
+      publish(
+        converted === undefined
+          ? { validationError: error, asyncIssues: null }
+          : { validationError: null, asyncIssues: converted },
+      );
     } finally {
       if (!disposed && currentRun === run) {
         controller = undefined;
@@ -708,9 +777,13 @@ function createField<T>(
       if (disposed) return;
       disposed = true;
       cancelAsync(false);
-      void sourceSubscription?.();
-      sourceSubscription = undefined;
-      state.dispose();
+
+      try {
+        void sourceSubscription?.();
+      } finally {
+        sourceSubscription = undefined;
+        state.dispose();
+      }
     },
   };
 }
@@ -734,6 +807,7 @@ function aggregateChildren<
   },
   ownIssues: ValidationIssues | null = null,
   ownError: unknown | null = null,
+  selfTouched = false,
   keyForChild: (child: FormNode<any, any>, index: number) => PropertyKey =
     (_, index) => index,
 ): GroupAggregate<Value, CompleteValue> {
@@ -742,7 +816,7 @@ function aggregateChildren<
 
   let pending = false;
   let dirty = false;
-  let touched = false;
+  let touched = selfTouched;
 
   children.forEach((child, index) => {
     const key = keyForChild(child, index);
@@ -809,15 +883,23 @@ export function form<T extends NodeMap>(
   const children = Object.freeze({ ...fields }) as Readonly<T>;
   const childEntries = Object.entries(children);
   const childNodes = childEntries.map(([, child]) => child);
+  const container = {};
 
   if (new Set(childNodes).size !== childNodes.length) {
     throw new Error("A form node cannot appear in the same form twice.");
   }
 
+  if (Object.hasOwn(children, "$form")) {
+    throw new Error('"$form" is reserved for form-level validation issues.');
+  }
+
+  claimChildren(childNodes, container);
+
   const ownsChildren = options.ownsChildren ?? true;
   const formChecks = normalize(options.checks);
 
   let disposed = false;
+  let selfTouched = false;
 
   const assertActive = (): void => {
     if (disposed) {
@@ -866,6 +948,7 @@ export function form<T extends NodeMap>(
       },
       ownIssues,
       ownError,
+      selfTouched,
       (_, index) => childEntries[index][0],
     );
   };
@@ -875,11 +958,31 @@ export function form<T extends NodeMap>(
   const refreshNow = (disabled = state.value.disabled): void => {
     if (disposed) return;
 
-    const next = calculate(disabled);
+    const current = state.value;
+    const calculated = calculate(disabled);
+    const next: NodeState<FormValue<T>, FormCompleteValue<T>> = {
+      ...calculated,
+      value: reuseRecord(
+        current.value as Record<string, unknown>,
+        calculated.value as Record<string, unknown>,
+      ) as FormValue<T>,
+      completeValue: reuseRecord(
+        current.completeValue as Record<string, unknown>,
+        calculated.completeValue as Record<string, unknown>,
+      ) as FormCompleteValue<T>,
+      issues: reuseNullableRecord(
+        current.issues,
+        calculated.issues,
+      ),
+      validationError: reuseNullableRecord(
+        current.validationError as Record<string, unknown> | null,
+        calculated.validationError as Record<string, unknown> | null,
+      ),
+    };
 
     if (
       shallowEqualState(
-        state.value as unknown as Record<string, unknown>,
+        current as unknown as Record<string, unknown>,
         next as unknown as Record<string, unknown>,
       )
     ) {
@@ -968,7 +1071,7 @@ export function form<T extends NodeMap>(
     assertActive();
     scheduler.batch(() => {
       for (const key of Object.keys(next) as Array<keyof T>) {
-        if (key in children) {
+        if (Object.hasOwn(children, key)) {
           children[key].set(next[key]!, writeOptions);
         }
       }
@@ -988,6 +1091,9 @@ export function form<T extends NodeMap>(
     const supplied = arguments.length > 0;
 
     scheduler.batch(() => {
+      const wasTouched = selfTouched;
+      selfTouched = false;
+
       for (const key of Object.keys(children) as Array<keyof T>) {
         if (supplied) {
           children[key].reset(
@@ -998,6 +1104,8 @@ export function form<T extends NodeMap>(
           children[key].reset();
         }
       }
+
+      if (wasTouched) scheduler.request();
     });
   }
 
@@ -1043,14 +1151,20 @@ export function form<T extends NodeMap>(
     touch(): void {
       assertActive();
       scheduler.batch(() => {
+        const wasTouched = selfTouched;
+        selfTouched = true;
         childNodes.forEach(child => child.touch());
+        if (!wasTouched) scheduler.request();
       });
     },
 
     untouch(): void {
       assertActive();
       scheduler.batch(() => {
+        const wasTouched = selfTouched;
+        selfTouched = false;
         childNodes.forEach(child => child.untouch());
+        if (wasTouched) scheduler.request();
       });
     },
 
@@ -1067,6 +1181,7 @@ export function form<T extends NodeMap>(
         } catch {}
       });
 
+      childNodes.forEach(child => releaseChild(child, container));
       state.dispose();
 
       if (ownsChildren) {
@@ -1080,6 +1195,11 @@ export function form<T extends NodeMap>(
 
 /* ── List ─────────────────────────────────────────────── */
 
+/**
+ * Index-preserving list value projection.
+ *
+ * Disabled children are represented by `undefined` instead of being removed.
+ */
 export type ListValue<N extends FormNode<any, any>> =
   Array<NodeValue<N> | undefined>;
 
@@ -1113,14 +1233,18 @@ export function list<N extends FormNode<any, any>>(
   options: GroupOptions = {},
 ): List<N> {
   const children = [...initial];
+  const container = {};
   const ownsChildren = options.ownsChildren ?? true;
   const childSubscriptions = new Map<N, Subscription>();
 
   let disposed = false;
+  let selfTouched = false;
 
   if (new Set(children).size !== children.length) {
     throw new Error("A form node cannot appear in the same list twice.");
   }
+
+  claimChildren(children, container);
 
   const assertActive = (): void => {
     if (disposed) {
@@ -1159,6 +1283,9 @@ export function list<N extends FormNode<any, any>>(
           completeValue,
         };
       },
+      null,
+      null,
+      selfTouched,
     );
 
   const state = atom(calculate(options.disabled ?? false));
@@ -1166,11 +1293,28 @@ export function list<N extends FormNode<any, any>>(
   const refreshNow = (disabled = state.value.disabled): void => {
     if (disposed) return;
 
-    const next = calculate(disabled);
+    const current = state.value;
+    const calculated = calculate(disabled);
+    const next: NodeState<ListValue<N>, Array<NodeCompleteValue<N>>> = {
+      ...calculated,
+      value: reuseArray(current.value, calculated.value),
+      completeValue: reuseArray(
+        current.completeValue,
+        calculated.completeValue,
+      ),
+      issues: reuseNullableRecord(
+        current.issues,
+        calculated.issues,
+      ),
+      validationError: reuseNullableRecord(
+        current.validationError as Record<string, unknown> | null,
+        calculated.validationError as Record<string, unknown> | null,
+      ),
+    };
 
     if (
       shallowEqualState(
-        state.value as unknown as Record<string, unknown>,
+        current as unknown as Record<string, unknown>,
         next as unknown as Record<string, unknown>,
       )
     ) {
@@ -1313,6 +1457,7 @@ export function list<N extends FormNode<any, any>>(
   const push = (child: N): void => {
     assertActive();
     assertUniqueChild(child);
+    claimChildren([child], container);
 
     scheduler.batch(() => {
       children.push(child);
@@ -1325,6 +1470,7 @@ export function list<N extends FormNode<any, any>>(
   const insert = (index: number, child: N): void => {
     assertActive();
     assertUniqueChild(child);
+    claimChildren([child], container);
 
     scheduler.batch(() => {
       children.splice(
@@ -1348,6 +1494,7 @@ export function list<N extends FormNode<any, any>>(
     scheduler.batch(() => {
       [child] = children.splice(index, 1);
       unobserve(child);
+      releaseChild(child, container);
       enableChildIfNeeded(child);
       scheduler.request();
     });
@@ -1370,6 +1517,7 @@ export function list<N extends FormNode<any, any>>(
 
       removed.forEach(child => {
         unobserve(child);
+        releaseChild(child, container);
 
         if (ownsChildren) {
           disabledByParent.delete(child);
@@ -1407,6 +1555,9 @@ export function list<N extends FormNode<any, any>>(
     }
 
     scheduler.batch(() => {
+      const wasTouched = selfTouched;
+      selfTouched = false;
+
       children.forEach((child, index) => {
         if (supplied) {
           child.reset(next![index], resetOptions);
@@ -1414,6 +1565,8 @@ export function list<N extends FormNode<any, any>>(
           child.reset();
         }
       });
+
+      if (wasTouched) scheduler.request();
     });
   }
 
@@ -1464,14 +1617,20 @@ export function list<N extends FormNode<any, any>>(
     touch(): void {
       assertActive();
       scheduler.batch(() => {
+        const wasTouched = selfTouched;
+        selfTouched = true;
         children.forEach(child => child.touch());
+        if (!wasTouched) scheduler.request();
       });
     },
 
     untouch(): void {
       assertActive();
       scheduler.batch(() => {
+        const wasTouched = selfTouched;
+        selfTouched = false;
         children.forEach(child => child.untouch());
+        if (wasTouched) scheduler.request();
       });
     },
 
@@ -1483,6 +1642,7 @@ export function list<N extends FormNode<any, any>>(
       disposed = true;
 
       children.forEach(unobserve);
+      children.forEach(child => releaseChild(child, container));
       state.dispose();
 
       if (ownsChildren) {
