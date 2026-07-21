@@ -1265,11 +1265,18 @@ export function atom<T = any>(
   let lastNotified = current;
   let errorValue: any = undefined;
   let isErrorState = false;
+  let dirty = false;
 
   let instance!: Writable<T> & InternalAtomContainer;
   const subscriptions = new Set<Subscription>();
 
   const broadcast = () => subs.broadcast(current, previous);
+
+  const setDirty = (next: boolean): void => {
+    if (dirty === next) return;
+    dirty = next;
+    notifyDirtyHandlers(instance, next);
+  };
 
   const cleanupRuntime = () => {
     instance[META].changeHandlers.clear();
@@ -1294,6 +1301,9 @@ export function atom<T = any>(
       
       node.flushing = true;
       try {
+        // Clear before broadcasting so a write from a subscriber can queue a
+        // subsequent analog flush.
+        setDirty(false);
         flushInternal();
       } finally {
         node.flushing = false;
@@ -1306,7 +1316,7 @@ export function atom<T = any>(
     maxSubscribers,
     node,
     getDisposed: () => disposed,
-    getDirty: () => false,
+    getDirty: () => dirty,
     getError: () => errorValue,
     getValue: () => {
       if (disposed) throw new Error("Atom has been disposed");
@@ -1317,6 +1327,7 @@ export function atom<T = any>(
     getPrevious: () => previous,
     markDirty: () => {
       if (disposed || node.queued) return;
+      if (node.isAnalog) setDirty(true);
       getScheduler().queueFlush(node);
     },
     onSubscribed: (_callback, unsubscribe) => {
@@ -1328,6 +1339,7 @@ export function atom<T = any>(
     onDispose: () => {
       if (disposed) return;
       disposed = true;
+      setDirty(false);
       getScheduler().remove(node);
       for (const h of instance[META].disposeHandlers) Promise.resolve(h()).catch(() => {});
       instance[META].disposeHandlers.clear();
@@ -1384,6 +1396,7 @@ export function atom<T = any>(
       if (resolvedOptions?.onError) try { resolvedOptions.onError(errorValue); } catch {}
 
       if (shouldTerminate) {
+        setDirty(false);
         disposed = true;
         getScheduler().remove(node);
         

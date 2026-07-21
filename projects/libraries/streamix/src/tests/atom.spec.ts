@@ -167,8 +167,8 @@ describe('Atom System', () => {
       a.dispose();
     });
 
-    it('should always expose dirty as false for writable atoms', async () => {
-      const a = atom(0);
+    it('should keep discrete writable atoms clean, including error propagation', async () => {
+      const a = atom(0, { discrete: true });
 
       expect(a.dirty).toBe(false);
       a.next(1);
@@ -180,6 +180,37 @@ describe('Atom System', () => {
       a.recover?.();
       expect(a.dirty).toBe(false);
       a.dispose();
+    });
+
+    it('should report queued analog writable updates through atom and scope dirty state', () => {
+      const env = createTestEnvironment();
+
+      env.run(() => {
+        const app = scope(() => {
+          const count = atom(0);
+          count.subscribe(() => {});
+          return { count };
+        }, { mode: 'analog' });
+
+        const count = app.at.count;
+
+        expect(count.dirty).toBe(false);
+        expect(app.dirty).toBe(false);
+
+        count.next(1);
+
+        expect(count.dirty).toBe(true);
+        expect(app.dirty).toBe(true);
+
+        env.flush();
+
+        expect(count.dirty).toBe(false);
+        expect(app.dirty).toBe(false);
+
+        app.dispose();
+      });
+
+      env.reset();
     });
 
     it('should not schedule error broadcasts when propagateErrors is false', () => {
