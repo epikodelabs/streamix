@@ -4,18 +4,17 @@
   <div class="card intro">
     <div>
       <p class="section-kicker">Page 2</p>
-      <h2>Streamix-native form</h2>
+      <h2>Reactive form using Streamix</h2>
       <p>
-        Native inputs bind directly to Streamix fields. This version uses a directive
-        with `exportAs` to achieve highly concise and readable
-        template code.
+        This version uses the same form behavior and validation rules as the
+        Angular page, with Streamix fields and native input bindings.
       </p>
     </div>
 
     <div class="chips">
-      <span>Concise inline templates</span>
-      <span>`exportAs` directive pattern</span>
-      <span>Debounced autosave</span>
+      <span>Async validator</span>
+      <span>Nested groups</span>
+      <span>Dynamic arrays</span>
     </div>
   </div>
 
@@ -25,11 +24,9 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Profile</p>
-            <h3>Native inputs bound directly to fields</h3>
+            <h3>Identity and account basics</h3>
           </div>
-          <div class="chips">
-            <span class="badge badge-strong">{{ ui.draftStatus }}</span>
-          </div>
+          <span class="badge">{{ ui.completion }}% complete</span>
         </div>
 
         <div class="grid two">
@@ -53,15 +50,21 @@
 
           <label class="field">
             <span>Username</span>
-            <input #v="sxField" [sxField]="profile.username" type="text" [sxPendingHint]="'Checking...'" />
+            <input
+              #v="sxField"
+              [sxField]="profile.username"
+              [sxPendingHint]="'Checking username availability...'"
+              type="text"
+            />
             <small class="hint" *ngIf="v.hint" [id]="v.hintId">{{ v.hint }}</small>
             <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
         </div>
 
-        <label class="field field-wide">
+        <label class="field">
           <span>Bio</span>
           <textarea #v="sxField" [sxField]="profile.bio" rows="4"></textarea>
+          <small class="hint">{{ ui.remainingBio }} characters remaining</small>
           <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
         </label>
       </section>
@@ -70,82 +73,34 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Security</p>
-            <h3>Validation remains in the Streamix graph</h3>
+            <h3>Cross-field validation</h3>
           </div>
         </div>
 
         <div class="grid two">
           <label class="field">
             <span>Password</span>
-            <input
-              #v="sxField"
-              [sxField]="security.password"
-              type="password"
-            />
-            <small class="error" *ngIf="ui.passwordLengthError" [id]="v.errorId">{{ ui.passwordLengthError }}</small>
+            <input #v="sxField" [sxField]="security.password" type="password" />
+            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
 
           <label class="field">
             <span>Confirm password</span>
-            <input
-              #v="sxField"
-              [sxField]="security.confirmPassword"
-              type="password"
-            />
-            <small class="error" *ngIf="ui.confirmPasswordLengthError" [id]="v.errorId">{{ ui.confirmPasswordLengthError }}</small>
+            <input #v="sxField" [sxField]="security.confirmPassword" type="password" />
+            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
         </div>
 
         @if (ui.passwordError) {
-        <small class="error">{{ ui.passwordError }}</small>
+          <small class="error">{{ ui.passwordError }}</small>
         }
       </section>
 
       <section class="section">
         <div class="section-head">
           <div>
-            <p class="section-kicker">Preferences</p>
-            <h3>Radio, select, and checkbox bindings</h3>
-          </div>
-        </div>
-
-        <div class="grid two">
-          <fieldset class="field fieldset">
-            <legend>Preferred contact</legend>
-            @for (option of contactOptions; track option.value) {
-            <label>
-              <input
-                [sxField]="preferences.contactMethod"
-                type="radio"
-                name="contact-method"
-                [value]="option.value"
-              />
-              {{ option.label }}
-            </label>
-            }
-          </fieldset>
-
-          <label class="field">
-            <span>Theme</span>
-            <select [sxField]="preferences.theme">
-              @for (option of themeOptions; track option.value) {
-              <option [value]="option.value">{{ option.label }}</option>
-              }
-            </select>
-          </label>
-        </div>
-
-        <label class="checkbox">
-          <input [sxField]="preferences.newsletter" type="checkbox" />
-          <span>Send release notes and onboarding emails</span>
-        </label>
-      </section>
-
-      <section class="section">
-        <div class="section-head">
-          <div>
             <p class="section-kicker">Address</p>
-            <h3>No string paths or node lookup helpers</h3>
+            <h3>Nested group example</h3>
           </div>
         </div>
 
@@ -173,8 +128,48 @@
       <section class="section">
         <div class="section-head">
           <div>
+            <p class="section-kicker">Preferences</p>
+            <h3>Mixed control types</h3>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <fieldset class="field fieldset">
+            <legend>Preferred contact</legend>
+            @for (option of contactOptions; track option.value) {
+              <label>
+                <input
+                  [sxField]="preferences.contactMethod"
+                  type="radio"
+                  name="contact-method"
+                  [value]="option.value"
+                />
+                {{ option.label }}
+              </label>
+            }
+          </fieldset>
+
+          <label class="field">
+            <span>Theme</span>
+            <select [sxField]="preferences.theme">
+              @for (option of themeOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          </label>
+        </div>
+
+        <label class="checkbox">
+          <input [sxField]="preferences.newsletter" type="checkbox" />
+          <span>Send release notes and onboarding emails</span>
+        </label>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
             <p class="section-kicker">Availability</p>
-            <h3>Number and boolean parsing is automatic</h3>
+            <h3>Date, range, and boolean controls</h3>
           </div>
         </div>
 
@@ -190,12 +185,11 @@
             <input
               #v="sxField"
               [sxField]="availability.hoursPerWeek"
-              [sxHint]="hoursHint"
               type="range"
               min="10"
               max="60"
             />
-            <small class="hint" *ngIf="v.hint" [id]="v.hintId">{{ v.hint }}</small>
+            <strong>{{ availability.hoursPerWeek.value.value }} hrs/week</strong>
             <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
         </div>
@@ -210,50 +204,47 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">Skills</p>
-            <h3>Dynamic rows use the same field directive</h3>
+            <h3>Dynamic form array</h3>
           </div>
-
-          <button type="button" class="secondary" (click)="addSkill()">
-            Add skill
-          </button>
+          <button type="button" class="secondary" (click)="addSkill()">Add skill</button>
         </div>
 
         <div class="stack">
           @for (skill of skills.items; track skill; let i = $index) {
-          <div class="skill-row">
-            <label class="field">
-              <span>Skill</span>
-              <input #v="sxField" [sxField]="skill.fields.name" type="text" />
-              <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
-            </label>
+            <div class="skill-row">
+              <label class="field">
+                <span>Skill</span>
+                <input #v="sxField" [sxField]="skill.fields.name" type="text" />
+                <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+              </label>
 
-            <label class="field compact">
-              <span>Years</span>
-              <input #v="sxField" [sxField]="skill.fields.years" type="number" min="1" max="20" />
-              <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
-            </label>
+              <label class="field compact">
+                <span>Years</span>
+                <input #v="sxField" [sxField]="skill.fields.years" type="number" min="1" max="20" />
+                <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+              </label>
 
-            <label class="checkbox compact-checkbox">
-              <input [sxField]="skill.fields.primary" type="checkbox" />
-              <span>Primary</span>
-            </label>
+              <label class="checkbox compact-checkbox">
+                <input [sxField]="skill.fields.primary" type="checkbox" />
+                <span>Primary</span>
+              </label>
 
-            <button type="button" class="ghost" (click)="removeSkill(i)" [disabled]="skills.items.length === 1">
-              Remove
-            </button>
-          </div>
+              <button
+                type="button"
+                class="ghost"
+                [disabled]="skills.items.length === 1"
+                (click)="removeSkill(i)"
+              >
+                Remove
+              </button>
+            </div>
           }
         </div>
       </section>
 
       <div class="actions">
-        <button type="button" class="secondary" (click)="reset()">
-          Reset
-        </button>
-
-        <button type="submit">
-          Submit Streamix Form
-        </button>
+        <button type="button" class="secondary" (click)="reset()">Reset</button>
+        <button type="submit">Submit Streamix Form</button>
       </div>
     </form>
 
@@ -263,24 +254,44 @@
           <span class="metric-label">Form status</span>
           <strong>{{ form.status.value }}</strong>
         </div>
-      </div>
-
-      <div class="card success">
-        <h3>Form derivation</h3>
-        <p>Primary skills: {{ ui.primarySkills }}</p>
-        <p>Ready to submit: {{ ui.readyToSubmit ? "Yes" : "No" }}</p>
+        <div>
+          <span class="metric-label">Contact route</span>
+          <strong>{{ ui.contactMethod }}</strong>
+        </div>
+        <div>
+          <span class="metric-label">Remote</span>
+          <strong>{{ ui.remote ? 'Yes' : 'No' }}</strong>
+        </div>
       </div>
 
       <div class="card">
-        <h3>Latest snapshot</h3>
-        <pre class="json-block" [textContent]="ui.preview"></pre>
+        <h3>Streamix derivation</h3>
+        <p>
+          The sidebar state is derived from the same form graph and validators.
+        </p>
+      </div>
+
+      @if (ui.validationSummary.length > 0) {
+        <div class="card warning">
+          <h3>Validation summary</h3>
+          <ul>
+            @for (item of ui.validationSummary; track item) {
+              <li>{{ item }}</li>
+            }
+          </ul>
+        </div>
+      }
+
+      <div class="card">
+        <h3>Live payload preview</h3>
+        <pre>{{ ui.preview }}</pre>
       </div>
 
       @if (ui.submittedPayload) {
-      <div class="card success">
-        <h3>Submitted payload</h3>
-        <pre class="json-block" [textContent]="ui.submittedPayload"></pre>
-      </div>
+        <div class="card success">
+          <h3>Submitted payload</h3>
+          <pre>{{ ui.submittedPayload }}</pre>
+        </div>
       }
     </aside>
   </div>

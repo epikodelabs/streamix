@@ -19,8 +19,6 @@ const RESERVED_USERNAMES = new Set(["admin", "angular", "root", "streamix"]);
 const USERNAME_PATTERN = /^[a-z0-9-]+$/;
 const POSTAL_CODE_PATTERN = /^[A-Z0-9 -]{4,10}$/i;
 
-export type DraftStatus = "idle" | "editing" | "saving" | "saved";
-
 export const contactOptions = [
   { label: "Email", value: "email" },
   { label: "Phone", value: "phone" },
@@ -107,28 +105,8 @@ export function profileSnapshot(formState: ProfileForm): ProfileFormValue {
   return formState.completeValue.value;
 }
 
-export function profileReady(formState: ProfileForm): boolean {
-  const value = profileSnapshot(formState);
-  return (
-    !formState.disabled.value &&
-    formState.valid.value &&
-    value.skills.length > 0 &&
-    calculateCompletion(value) >= 85
-  );
-}
-
 export function profilePreview(formState: ProfileForm): string {
   return formatProfileJson(profileSnapshot(formState));
-}
-
-export function primarySkills(formState: ProfileForm): string {
-  return (
-    profileSnapshot(formState).skills
-      .filter(s => s.primary)
-      .map(s => s.name.trim())
-      .filter(Boolean)
-      .join(", ") || "No primary skill selected"
-  );
 }
 
 export function completion(formState: ProfileForm): number {

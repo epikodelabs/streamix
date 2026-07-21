@@ -55,11 +55,6 @@
   font-size: 0.85rem;
 }
 
-.badge-strong {
-  background: rgba(42, 122, 83, 0.14);
-  color: var(--success);
-}
-
 .form-card,
 .side {
   display: grid;
@@ -103,8 +98,8 @@ h3 {
   margin: 0;
 }
 
-p,
-li {
+p {
+  margin: 0;
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
@@ -187,10 +182,6 @@ textarea {
   max-width: 150px;
 }
 
-.field-wide {
-  grid-column: 1 / -1;
-}
-
 .compact-checkbox {
   align-self: end;
   min-height: 48px;
@@ -233,7 +224,6 @@ button:disabled {
   display: block;
   margin-top: 6px;
   font-size: 1.2rem;
-  color: var(--text);
 }
 
 .warning {
@@ -257,23 +247,9 @@ button:disabled {
   color: var(--danger);
 }
 
-ol,
-.log {
+ul {
   margin: 0;
   padding-left: 18px;
-}
-
-.log {
-  display: grid;
-  gap: 10px;
-  padding-left: 0;
-}
-
-.log p {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.54);
   color: var(--text);
 }
 

@@ -9,43 +9,26 @@ import {
 import { atom, type Subscription } from "@epikodelabs/streamix";
 import {
   cloneInitialProfile,
+  completion,
   contactOptions,
   createProfileForm,
   createSkill,
-  primarySkills,
   profilePreview,
-  profileReady,
   resetProfile,
   themeOptions,
-  type DraftStatus,
 } from "../../shared/profile-form";
 import { StreamixFieldDirective } from "../../shared/streamix-field.directive";
 
-const SAVE_DELAY = 650;
-const SAVE_DURATION = 260;
-const NOT_SAVED = "Not saved yet";
-
 type StreamixFormUiState = {
-  draftStatus: DraftStatus;
-  lastSavedAt: string;
-  submittedPayload: string;
-  passwordLengthError: string | null;
-  confirmPasswordLengthError: string | null;
+  completion: number;
+  contactMethod: string;
   passwordError: string | null;
-  primarySkills: string;
-  readyToSubmit: boolean;
   preview: string;
+  remainingBio: number;
+  remote: boolean;
+  submittedPayload: string;
+  validationSummary: readonly string[];
 };
-
-type FormUiProjection = Pick<
-  StreamixFormUiState,
-  | "passwordLengthError"
-  | "confirmPasswordLengthError"
-  | "passwordError"
-  | "primarySkills"
-  | "readyToSubmit"
-  | "preview"
->;
 
 @Component({
   standalone: true,
@@ -58,34 +41,20 @@ export class StreamixFormPageComponent implements OnDestroy {
   private readonly cdr = inject(ChangeDetectorRef);
 
   readonly form = createProfileForm();
-
-  readonly draftStatus = atom<DraftStatus>("idle");
-  readonly lastSavedAt = atom<string>(NOT_SAVED);
-
-  private saveTimer?: ReturnType<typeof setTimeout>;
-  private commitTimer?: ReturnType<typeof setTimeout>;
-  private submittedPayload = "";
-  private synchronizingForm = false;
+  readonly contactOptions = contactOptions;
+  readonly themeOptions = themeOptions;
   readonly uiState = atom<StreamixFormUiState>(this.createUiState());
-  private previousSnapshot = this.uiState.value.preview;
+
+  private submittedPayload = "";
   private readonly subs: Subscription[] = [];
 
   constructor() {
-    const refresh = () => this.cdr.detectChanges();
-
     this.subs.push(
-      this.form.state.subscribe(() => {
-        this.refreshFromForm();
-      }),
-      this.draftStatus.subscribe(() => {
-        if (!this.synchronizingForm) this.refreshUiState();
-      }),
-      this.lastSavedAt.subscribe(() => this.refreshUiState()),
-      this.uiState.subscribe(refresh),
+      this.form.state.subscribe(() => this.refreshUiState()),
+      this.uiState.subscribe(() => this.cdr.detectChanges()),
     );
   }
 
-  // Expose field groups directly to template
   get profile() {
     return this.form.fields.profile.fields;
   }
@@ -110,177 +79,107 @@ export class StreamixFormPageComponent implements OnDestroy {
     return this.form.fields.skills;
   }
 
-  readonly contactOptions = contactOptions;
-  readonly themeOptions = themeOptions;
-
-  readonly hoursHint = (value: unknown) => `${value} hrs/week`;
-
-  private passwordLengthError(): string | null {
-    const value = this.security.password.value.value ?? "";
-
-    return value.length > 0 && value.length < 8
-      ? "Minimum length is 8."
-      : null;
-  }
-
-  private confirmPasswordLengthError(): string | null {
-    const value = this.security.confirmPassword.value.value ?? "";
-
-    return value.length > 0 && value.length < 8
-      ? "Minimum length is 8."
-      : null;
-  }
-
-  private passwordError(): string | null {
-    const security = this.form.fields.security;
-
-    if (
-      !security.fields.password.touched.value &&
-      !security.fields.confirmPassword.touched.value
-    ) {
-      return null;
-    }
-
-    const formIssues = security.issues.value?.["$form"];
-
-    return (
-      typeof formIssues === "object" &&
-      formIssues !== null &&
-      "passwordMismatch" in formIssues
-    )
-      ? "Passwords must match."
-      : null;
-  }
-
   submit(event: Event): void {
     event.preventDefault();
     this.form.touch();
-    if (!profileReady(this.form)) {
+
+    if (this.form.invalid.value) {
       this.cdr.detectChanges();
       return;
     }
 
     this.submittedPayload = profilePreview(this.form);
-    this.draftStatus.set("saved");
     this.refreshUiState();
   }
 
   reset(): void {
     this.submittedPayload = "";
     resetProfile(this.form, cloneInitialProfile());
-    this.previousSnapshot = profilePreview(this.form);
-    this.cancelAutosave();
-    this.draftStatus.set("idle");
-    this.lastSavedAt.set(NOT_SAVED);
     this.refreshUiState();
   }
 
   addSkill(): void {
-    this.form.fields.skills.push(createSkill());
+    this.skills.push(createSkill());
   }
 
   removeSkill(index: number): void {
-    if (this.form.fields.skills.items.length > 1) {
-      this.form.fields.skills.removeAt(index);
+    if (this.skills.items.length > 1) {
+      this.skills.removeAt(index);
     }
   }
 
   ngOnDestroy(): void {
-    this.cancelAutosave();
-    this.subs.forEach(unsub => unsub());
+    this.subs.forEach(unsubscribe => unsubscribe());
+    this.uiState.dispose();
     this.form.dispose();
-    this.draftStatus.dispose();
-    this.lastSavedAt.dispose();
-  }
-
-  private refreshFromForm(): void {
-    const projection = this.createFormProjection();
-
-    this.synchronizingForm = true;
-    try {
-      this.queueAutosave(projection.preview);
-      this.refreshUiState(projection);
-    } finally {
-      this.synchronizingForm = false;
-    }
-  }
-
-  private queueAutosave(snapshot: string): void {
-    if (snapshot === this.previousSnapshot) return;
-    this.previousSnapshot = snapshot;
-
-    clearTimeout(this.saveTimer);
-    clearTimeout(this.commitTimer);
-    this.draftStatus.set("editing");
-
-    this.saveTimer = setTimeout(() => {
-      this.draftStatus.set("saving");
-      this.commitTimer = setTimeout(() => {
-        this.lastSavedAt.set(
-          new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          })
-        );
-        this.draftStatus.set("saved");
-      }, SAVE_DURATION);
-    }, SAVE_DELAY);
-  }
-
-  private cancelAutosave(): void {
-    clearTimeout(this.saveTimer);
-    clearTimeout(this.commitTimer);
-    this.saveTimer = undefined;
-    this.commitTimer = undefined;
   }
 
   private createUiState(): StreamixFormUiState {
-    return {
-      draftStatus: this.draftStatus.value,
-      lastSavedAt: this.lastSavedAt.value,
-      submittedPayload: this.submittedPayload,
-      ...this.createFormProjection(),
-    };
-  }
+    const snapshot = this.form.completeValue.value;
+    const security = this.form.fields.security;
 
-  private createFormProjection(): FormUiProjection {
     return {
-      passwordLengthError: this.passwordLengthError(),
-      confirmPasswordLengthError: this.confirmPasswordLengthError(),
-      passwordError: this.passwordError(),
-      primarySkills: primarySkills(this.form),
-      readyToSubmit: profileReady(this.form),
+      completion: completion(this.form),
+      contactMethod: snapshot.preferences.contactMethod,
+      passwordError: this.passwordError(security.touched.value),
       preview: profilePreview(this.form),
+      remainingBio: 240 - snapshot.profile.bio.length,
+      remote: snapshot.availability.remote,
+      submittedPayload: this.submittedPayload,
+      validationSummary: this.validationSummary(),
     };
   }
 
-  private refreshUiState(projection?: FormUiProjection): void {
+  private passwordError(touched: boolean): string | null {
+    if (!touched) return null;
+
+    const formIssues = this.form.fields.security.issues.value?.["$form"];
+    return typeof formIssues === "object" &&
+      formIssues !== null &&
+      "passwordMismatch" in formIssues
+      ? "Passwords are incomplete or mismatched."
+      : null;
+  }
+
+  private validationSummary(): readonly string[] {
+    const { fields } = this.form;
+    const items: string[] = [];
+
+    if (fields.profile.invalid.value) {
+      items.push("Profile details need cleanup.");
+    }
+    if (fields.security.invalid.value) {
+      items.push("Passwords are incomplete or mismatched.");
+    }
+    if (fields.address.invalid.value) {
+      items.push("Address information is incomplete.");
+    }
+    if (fields.availability.invalid.value) {
+      items.push("Availability is outside the allowed range.");
+    }
+    if (fields.skills.invalid.value) {
+      items.push("At least one valid skill entry is required.");
+    }
+
+    return items;
+  }
+
+  private refreshUiState(): void {
     const current = this.uiState.value;
-    const next: StreamixFormUiState = {
-      draftStatus: this.draftStatus.value,
-      lastSavedAt: this.lastSavedAt.value,
-      submittedPayload: this.submittedPayload,
-      ...(projection ?? {
-        passwordLengthError: current.passwordLengthError,
-        confirmPasswordLengthError: current.confirmPasswordLengthError,
-        passwordError: current.passwordError,
-        primarySkills: current.primarySkills,
-        readyToSubmit: current.readyToSubmit,
-        preview: current.preview,
-      }),
-    };
+    const next = this.createUiState();
 
     if (
-      next.draftStatus === current.draftStatus &&
-      next.lastSavedAt === current.lastSavedAt &&
-      next.submittedPayload === current.submittedPayload &&
-      next.passwordLengthError === current.passwordLengthError &&
-      next.confirmPasswordLengthError === current.confirmPasswordLengthError &&
+      next.completion === current.completion &&
+      next.contactMethod === current.contactMethod &&
       next.passwordError === current.passwordError &&
-      next.primarySkills === current.primarySkills &&
-      next.readyToSubmit === current.readyToSubmit &&
-      next.preview === current.preview
+      next.preview === current.preview &&
+      next.remainingBio === current.remainingBio &&
+      next.remote === current.remote &&
+      next.submittedPayload === current.submittedPayload &&
+      next.validationSummary.length === current.validationSummary.length &&
+      next.validationSummary.every(
+        (item, index) => item === current.validationSummary[index],
+      )
     ) {
       return;
     }
