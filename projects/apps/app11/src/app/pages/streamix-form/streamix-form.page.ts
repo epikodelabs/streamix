@@ -1,5 +1,11 @@
 import { CommonModule } from "@angular/common";
-import { ChangeDetectorRef, Component, OnDestroy, inject } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  OnDestroy,
+  inject,
+} from "@angular/core";
 import { atom, type Subscription } from "@epikodelabs/streamix";
 import {
   cloneInitialProfile,
@@ -22,17 +28,31 @@ const NOT_SAVED = "Not saved yet";
 type StreamixFormUiState = {
   draftStatus: DraftStatus;
   lastSavedAt: string;
+  submittedPayload: string;
+  passwordLengthError: string | null;
+  confirmPasswordLengthError: string | null;
   passwordError: string | null;
   primarySkills: string;
   readyToSubmit: boolean;
   preview: string;
 };
 
+type FormUiProjection = Pick<
+  StreamixFormUiState,
+  | "passwordLengthError"
+  | "confirmPasswordLengthError"
+  | "passwordError"
+  | "primarySkills"
+  | "readyToSubmit"
+  | "preview"
+>;
+
 @Component({
   standalone: true,
   imports: [CommonModule, StreamixFieldDirective],
   templateUrl: "./streamix-form.page.html",
   styleUrl: "./streamix-form.page.scss",
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class StreamixFormPageComponent implements OnDestroy {
   private readonly cdr = inject(ChangeDetectorRef);
@@ -41,11 +61,13 @@ export class StreamixFormPageComponent implements OnDestroy {
 
   readonly draftStatus = atom<DraftStatus>("idle");
   readonly lastSavedAt = atom<string>(NOT_SAVED);
-  readonly submittedPayload = atom<string>("");
 
   private saveTimer?: ReturnType<typeof setTimeout>;
   private commitTimer?: ReturnType<typeof setTimeout>;
-  private previousSnapshot = profilePreview(this.form);
+  private submittedPayload = "";
+  private synchronizingForm = false;
+  readonly uiState = atom<StreamixFormUiState>(this.createUiState());
+  private previousSnapshot = this.uiState.value.preview;
   private readonly subs: Subscription[] = [];
 
   constructor() {
@@ -53,12 +75,13 @@ export class StreamixFormPageComponent implements OnDestroy {
 
     this.subs.push(
       this.form.state.subscribe(() => {
-        this.queueAutosave();
-        refresh();
+        this.refreshFromForm();
       }),
-      this.draftStatus.subscribe(refresh),
-      this.lastSavedAt.subscribe(refresh),
-      this.submittedPayload.subscribe(refresh),
+      this.draftStatus.subscribe(() => {
+        if (!this.synchronizingForm) this.refreshUiState();
+      }),
+      this.lastSavedAt.subscribe(() => this.refreshUiState()),
+      this.uiState.subscribe(refresh),
     );
   }
 
@@ -87,23 +110,12 @@ export class StreamixFormPageComponent implements OnDestroy {
     return this.form.fields.skills;
   }
 
-  get uiState(): StreamixFormUiState {
-    return {
-      draftStatus: this.draftStatus.value,
-      lastSavedAt: this.lastSavedAt.value,
-      passwordError: this.passwordError,
-      primarySkills: primarySkills(this.form),
-      readyToSubmit: profileReady(this.form),
-      preview: profilePreview(this.form),
-    };
-  }
-
   readonly contactOptions = contactOptions;
   readonly themeOptions = themeOptions;
 
   readonly hoursHint = (value: unknown) => `${value} hrs/week`;
 
-  get passwordLengthError(): string | null {
+  private passwordLengthError(): string | null {
     const value = this.security.password.value.value ?? "";
 
     return value.length > 0 && value.length < 8
@@ -111,7 +123,7 @@ export class StreamixFormPageComponent implements OnDestroy {
       : null;
   }
 
-  get confirmPasswordLengthError(): string | null {
+  private confirmPasswordLengthError(): string | null {
     const value = this.security.confirmPassword.value.value ?? "";
 
     return value.length > 0 && value.length < 8
@@ -119,7 +131,7 @@ export class StreamixFormPageComponent implements OnDestroy {
       : null;
   }
 
-  get passwordError(): string | null {
+  private passwordError(): string | null {
     const security = this.form.fields.security;
 
     if (
@@ -148,17 +160,19 @@ export class StreamixFormPageComponent implements OnDestroy {
       return;
     }
 
-    this.submittedPayload.set(profilePreview(this.form));
+    this.submittedPayload = profilePreview(this.form);
     this.draftStatus.set("saved");
+    this.refreshUiState();
   }
 
   reset(): void {
+    this.submittedPayload = "";
     resetProfile(this.form, cloneInitialProfile());
     this.previousSnapshot = profilePreview(this.form);
     this.cancelAutosave();
     this.draftStatus.set("idle");
     this.lastSavedAt.set(NOT_SAVED);
-    this.submittedPayload.set("");
+    this.refreshUiState();
   }
 
   addSkill(): void {
@@ -177,11 +191,21 @@ export class StreamixFormPageComponent implements OnDestroy {
     this.form.dispose();
     this.draftStatus.dispose();
     this.lastSavedAt.dispose();
-    this.submittedPayload.dispose();
   }
 
-  private queueAutosave(): void {
-    const snapshot = profilePreview(this.form);
+  private refreshFromForm(): void {
+    const projection = this.createFormProjection();
+
+    this.synchronizingForm = true;
+    try {
+      this.queueAutosave(projection.preview);
+      this.refreshUiState(projection);
+    } finally {
+      this.synchronizingForm = false;
+    }
+  }
+
+  private queueAutosave(snapshot: string): void {
     if (snapshot === this.previousSnapshot) return;
     this.previousSnapshot = snapshot;
 
@@ -209,5 +233,58 @@ export class StreamixFormPageComponent implements OnDestroy {
     clearTimeout(this.commitTimer);
     this.saveTimer = undefined;
     this.commitTimer = undefined;
+  }
+
+  private createUiState(): StreamixFormUiState {
+    return {
+      draftStatus: this.draftStatus.value,
+      lastSavedAt: this.lastSavedAt.value,
+      submittedPayload: this.submittedPayload,
+      ...this.createFormProjection(),
+    };
+  }
+
+  private createFormProjection(): FormUiProjection {
+    return {
+      passwordLengthError: this.passwordLengthError(),
+      confirmPasswordLengthError: this.confirmPasswordLengthError(),
+      passwordError: this.passwordError(),
+      primarySkills: primarySkills(this.form),
+      readyToSubmit: profileReady(this.form),
+      preview: profilePreview(this.form),
+    };
+  }
+
+  private refreshUiState(projection?: FormUiProjection): void {
+    const current = this.uiState.value;
+    const next: StreamixFormUiState = {
+      draftStatus: this.draftStatus.value,
+      lastSavedAt: this.lastSavedAt.value,
+      submittedPayload: this.submittedPayload,
+      ...(projection ?? {
+        passwordLengthError: current.passwordLengthError,
+        confirmPasswordLengthError: current.confirmPasswordLengthError,
+        passwordError: current.passwordError,
+        primarySkills: current.primarySkills,
+        readyToSubmit: current.readyToSubmit,
+        preview: current.preview,
+      }),
+    };
+
+    if (
+      next.draftStatus === current.draftStatus &&
+      next.lastSavedAt === current.lastSavedAt &&
+      next.submittedPayload === current.submittedPayload &&
+      next.passwordLengthError === current.passwordLengthError &&
+      next.confirmPasswordLengthError === current.confirmPasswordLengthError &&
+      next.passwordError === current.passwordError &&
+      next.primarySkills === current.primarySkills &&
+      next.readyToSubmit === current.readyToSubmit &&
+      next.preview === current.preview
+    ) {
+      return;
+    }
+
+    this.uiState.set(next);
   }
 }

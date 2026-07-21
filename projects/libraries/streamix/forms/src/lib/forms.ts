@@ -1005,6 +1005,7 @@ export interface List<N extends FormNode<any, any>>
   removeAt(index: number): void;
   detachAt(index: number): N | undefined;
   clear(): void;
+  batch(work: () => void): void;
 }
 
 const MUTATORS = new Set<PropertyKey>([
@@ -1214,34 +1215,44 @@ export function list<N extends FormNode<any, any>>(
   const push = (child: N): void => {
     assertActive();
     assertUniqueChild(child);
-    children.push(child);
-    observe(child);
-    if (state.value.disabled) disableChildIfNeeded(child);
-    refreshNow();
+
+    scheduler.batch(() => {
+      children.push(child);
+      observe(child);
+      if (state.value.disabled) disableChildIfNeeded(child);
+      scheduler.request();
+    });
   };
 
   const insert = (index: number, child: N): void => {
     assertActive();
     assertUniqueChild(child);
-    children.splice(
-      Math.max(0, Math.min(index, children.length)),
-      0,
-      child,
-    );
 
-    observe(child);
-    if (state.value.disabled) disableChildIfNeeded(child);
-    refreshNow();
+    scheduler.batch(() => {
+      children.splice(
+        Math.max(0, Math.min(index, children.length)),
+        0,
+        child,
+      );
+
+      observe(child);
+      if (state.value.disabled) disableChildIfNeeded(child);
+      scheduler.request();
+    });
   };
 
   const detachAt = (index: number): N | undefined => {
     assertActive();
     if (index < 0 || index >= children.length) return undefined;
 
-    const [child] = children.splice(index, 1);
-    unobserve(child);
-    enableChildIfNeeded(child);
-    refreshNow();
+    let child!: N;
+
+    scheduler.batch(() => {
+      [child] = children.splice(index, 1);
+      unobserve(child);
+      enableChildIfNeeded(child);
+      scheduler.request();
+    });
 
     return child;
   };
@@ -1256,20 +1267,27 @@ export function list<N extends FormNode<any, any>>(
 
   const clear = (): void => {
     assertActive();
-    const removed = children.splice(0, children.length);
+    scheduler.batch(() => {
+      const removed = children.splice(0, children.length);
 
-    removed.forEach(child => {
-      unobserve(child);
+      removed.forEach(child => {
+        unobserve(child);
 
-      if (ownsChildren) {
-        disabledByParent.delete(child);
-        child.dispose();
-      } else {
-        enableChildIfNeeded(child);
-      }
+        if (ownsChildren) {
+          disabledByParent.delete(child);
+          child.dispose();
+        } else {
+          enableChildIfNeeded(child);
+        }
+      });
+
+      scheduler.request();
     });
+  };
 
-    refreshNow();
+  const batch = (work: () => void): void => {
+    assertActive();
+    scheduler.batch(work);
   };
 
   function reset(): void;
@@ -1342,6 +1360,7 @@ export function list<N extends FormNode<any, any>>(
     removeAt,
     detachAt,
     clear,
+    batch,
     reset,
 
     touch(): void {
@@ -1405,16 +1424,18 @@ export function syncList<N extends FormNode<any, any>>(
   next: readonly NodeCompleteValue<N>[],
   create: (value: NodeCompleteValue<N>) => N,
 ): void {
-  while (listNode.items.length > next.length) {
-    listNode.removeAt(listNode.items.length - 1);
-  }
+  listNode.batch(() => {
+    while (listNode.items.length > next.length) {
+      listNode.removeAt(listNode.items.length - 1);
+    }
 
-  while (listNode.items.length < next.length) {
-    listNode.push(create(next[listNode.items.length]));
-  }
+    while (listNode.items.length < next.length) {
+      listNode.push(create(next[listNode.items.length]));
+    }
 
-  listNode.items.forEach((child, index) => {
-    child.reset(next[index], { updateInitial: true });
+    listNode.items.forEach((child, index) => {
+      child.reset(next[index], { updateInitial: true });
+    });
   });
 }
 

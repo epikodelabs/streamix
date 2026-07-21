@@ -57,6 +57,8 @@ function detectKind(
 })
 export class StreamixFieldDirective
   implements OnChanges, OnDestroy {
+  private static nextDescriptionId = 0;
+
   private readonly element =
     inject<ElementRef<NativeFieldElement>>(ElementRef);
 
@@ -65,6 +67,10 @@ export class StreamixFieldDirective
 
   private stopWatching?: () => void;
   private kind: ElementKind = "text";
+  private readonly descriptionId = ++StreamixFieldDirective.nextDescriptionId;
+
+  readonly hintId = `sx-field-${this.descriptionId}-hint`;
+  readonly errorId = `sx-field-${this.descriptionId}-error`;
 
   @Input({ required: true })
   sxField!: Field<unknown>;
@@ -142,6 +148,7 @@ export class StreamixFieldDirective
 
   @HostListener("blur")
   onBlur(): void {
+    if (!this.isActiveField()) return;
     this.sxField.touch();
   }
 
@@ -154,6 +161,8 @@ export class StreamixFieldDirective
   }
 
   private write(): void {
+    if (!this.isActiveField()) return;
+
     const element = this.element.nativeElement;
 
     if (
@@ -165,6 +174,10 @@ export class StreamixFieldDirective
     }
 
     this.sxField.set(this.readValue());
+  }
+
+  private isActiveField(): boolean {
+    return Boolean(this.sxField && !this.sxField.state.disposed);
   }
 
   private readValue(): unknown {
@@ -221,7 +234,7 @@ export class StreamixFieldDirective
 
     const invalid =
       this.sxField.invalid.value &&
-      this.sxField.touched.value;
+      (this.sxField.dirty.value || this.sxField.touched.value);
 
     element.classList.toggle(
       "is-invalid",
@@ -237,5 +250,28 @@ export class StreamixFieldDirective
       "aria-invalid",
       String(invalid),
     );
+
+    this.renderDescriptions(element);
+  }
+
+  private renderDescriptions(element: NativeFieldElement): void {
+    const error = this.error;
+    const hint = this.hint;
+    const describedBy = [
+      hint ? this.hintId : null,
+      error ? this.errorId : null,
+    ].filter((id): id is string => id !== null);
+
+    if (describedBy.length > 0) {
+      element.setAttribute("aria-describedby", describedBy.join(" "));
+    } else {
+      element.removeAttribute("aria-describedby");
+    }
+
+    if (error) {
+      element.setAttribute("aria-errormessage", this.errorId);
+    } else {
+      element.removeAttribute("aria-errormessage");
+    }
   }
 }

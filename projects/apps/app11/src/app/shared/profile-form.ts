@@ -55,8 +55,8 @@ export function createSkill(value: SkillValue = { name: "", years: 1, primary: f
 
 /** Cross-field check: passwords must match when both are non-empty. */
 function passwordMatchCheck(value: { password: string; confirmPassword: string }): ValidationIssues | null {
-  const left = value.password.trim();
-  const right = value.confirmPassword.trim();
+  const left = value.password;
+  const right = value.confirmPassword;
   return left && right && left !== right ? { passwordMismatch: true } : null;
 }
 
@@ -145,5 +145,7 @@ async function reservedUsername(value: string, signal: AbortSignal): Promise<Val
   if (normalized.length < 3 || !USERNAME_PATTERN.test(normalized)) return null;
 
   await abortableDelay(300, signal);
+  if (signal.aborted) return null;
+
   return RESERVED_USERNAMES.has(normalized) ? { usernameTaken: true } : null;
 }

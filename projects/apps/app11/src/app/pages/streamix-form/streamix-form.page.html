@@ -1,5 +1,5 @@
 <section class="page">
-  @let ui = uiState;
+  @let ui = uiState.value;
 
   <div class="card intro">
     <div>
@@ -36,33 +36,33 @@
           <label class="field">
             <span>First name</span>
             <input #v="sxField" [sxField]="profile.firstName" type="text" />
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
 
           <label class="field">
             <span>Last name</span>
             <input #v="sxField" [sxField]="profile.lastName" type="text" />
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
 
           <label class="field">
             <span>Email</span>
             <input #v="sxField" [sxField]="profile.email" type="email" />
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
 
           <label class="field">
             <span>Username</span>
             <input #v="sxField" [sxField]="profile.username" type="text" [sxPendingHint]="'Checking...'" />
-            <small class="hint" *ngIf="v.hint">{{ v.hint }}</small>
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <small class="hint" *ngIf="v.hint" [id]="v.hintId">{{ v.hint }}</small>
+            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
         </div>
 
         <label class="field field-wide">
           <span>Bio</span>
           <textarea #v="sxField" [sxField]="profile.bio" rows="4"></textarea>
-          <small class="error" *ngIf="v.error">{{ v.error }}</small>
+          <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
         </label>
       </section>
 
@@ -82,7 +82,7 @@
               [sxField]="security.password"
               type="password"
             />
-            <small class="error" *ngIf="passwordLengthError">{{ passwordLengthError }}</small>
+            <small class="error" *ngIf="ui.passwordLengthError" [id]="v.errorId">{{ ui.passwordLengthError }}</small>
           </label>
 
           <label class="field">
@@ -92,12 +92,12 @@
               [sxField]="security.confirmPassword"
               type="password"
             />
-            <small class="error" *ngIf="confirmPasswordLengthError">{{ confirmPasswordLengthError }}</small>
+            <small class="error" *ngIf="ui.confirmPasswordLengthError" [id]="v.errorId">{{ ui.confirmPasswordLengthError }}</small>
           </label>
         </div>
 
-        @if (passwordError) {
-        <small class="error">{{ passwordError }}</small>
+        @if (ui.passwordError) {
+        <small class="error">{{ ui.passwordError }}</small>
         }
       </section>
 
@@ -153,19 +153,19 @@
           <label class="field">
             <span>Country</span>
             <input #v="sxField" [sxField]="address.country" type="text" />
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
 
           <label class="field">
             <span>City</span>
             <input #v="sxField" [sxField]="address.city" type="text" />
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
 
           <label class="field">
             <span>Postal code</span>
             <input #v="sxField" [sxField]="address.postalCode" type="text" />
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
         </div>
       </section>
@@ -182,7 +182,7 @@
           <label class="field">
             <span>Start date</span>
             <input #v="sxField" [sxField]="availability.startDate" type="date" />
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
 
           <label class="field range-field">
@@ -195,8 +195,8 @@
               min="10"
               max="60"
             />
-            <small class="hint" *ngIf="v.hint">{{ v.hint }}</small>
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <small class="hint" *ngIf="v.hint" [id]="v.hintId">{{ v.hint }}</small>
+            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
           </label>
         </div>
 
@@ -224,13 +224,13 @@
             <label class="field">
               <span>Skill</span>
               <input #v="sxField" [sxField]="skill.fields.name" type="text" />
-              <small class="error" *ngIf="v.error">{{ v.error }}</small>
+              <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
             </label>
 
             <label class="field compact">
               <span>Years</span>
               <input #v="sxField" [sxField]="skill.fields.years" type="number" min="1" max="20" />
-              <small class="error" *ngIf="v.error">{{ v.error }}</small>
+              <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
             </label>
 
             <label class="checkbox compact-checkbox">
@@ -276,10 +276,10 @@
         <pre class="json-block" [textContent]="ui.preview"></pre>
       </div>
 
-      @if (submittedPayload.value) {
+      @if (ui.submittedPayload) {
       <div class="card success">
         <h3>Submitted payload</h3>
-        <pre class="json-block" [textContent]="submittedPayload.value"></pre>
+        <pre class="json-block" [textContent]="ui.submittedPayload"></pre>
       </div>
       }
     </aside>

@@ -1,4 +1,4 @@
-import { field, form, list } from '@epikodelabs/streamix/forms';
+import { field, form, list, syncList } from '@epikodelabs/streamix/forms';
 
 describe('Forms', () => {
   it('cascades disabled state without re-enabling independently disabled fields', () => {
@@ -120,5 +120,27 @@ describe('Forms', () => {
 
     expect(activeSignal!.aborted).toBeTrue();
     expect(calls).toBe(1);
+  });
+
+  it('batches list synchronization into one aggregate state update', () => {
+    const first = field('TypeScript');
+    const skills = list([first], { ownsChildren: false });
+    const created: typeof first[] = [];
+    let updates = 0;
+    const unsubscribe = skills.state.subscribe(() => updates++);
+
+    syncList(skills, ['Angular', 'RxJS', 'Signals'], value => {
+      const skill = field(value);
+      created.push(skill);
+      return skill;
+    });
+
+    expect(skills.completeValue.value).toEqual(['Angular', 'RxJS', 'Signals']);
+    expect(updates).toBe(1);
+
+    unsubscribe();
+    skills.dispose();
+    first.dispose();
+    created.forEach(skill => skill.dispose());
   });
 });
