@@ -184,6 +184,24 @@ function createWritableView<S, T>(
   });
 }
 
+type StateViews<S, K extends keyof S> = {
+  readonly [P in K]: StateView<S[P]>;
+};
+
+function createStateViews<
+  S,
+  const K extends readonly (keyof S)[],
+>(
+  source: Atom<S>,
+  keys: K,
+): StateViews<S, K[number]> {
+  return Object.freeze(
+    Object.fromEntries(
+      keys.map(key => [key, createView(source, state => state[key])]),
+    ),
+  ) as StateViews<S, K[number]>;
+}
+
 const normalize = <T>(value?: T | readonly T[]): T[] =>
   value == null ? [] : Array.isArray(value) ? [...value] : [value as T];
 
@@ -534,20 +552,31 @@ export function field<T>(
     current => current.completeValue,
     writeValue,
   );
-  const initialValue = createView(state, current => current.initialValue);
-  const syncIssues = createView(state, current => current.syncIssues);
-  const asyncIssues = createView(state, current => current.asyncIssues);
-  const issues = createView(state, current => current.issues);
-  const validationError = createView(
-    state,
-    current => current.validationError,
-  );
-  const status = createView(state, current => current.status);
-  const valid = createView(state, current => current.valid);
-  const invalid = createView(state, current => current.invalid);
-  const pending = createView(state, current => current.pending);
-  const dirty = createView(state, current => current.dirty);
-  const touched = createView(state, current => current.touched);
+  const {
+    initialValue,
+    syncIssues,
+    asyncIssues,
+    issues,
+    validationError,
+    status,
+    valid,
+    invalid,
+    pending,
+    dirty,
+    touched,
+  } = createStateViews(state, [
+    "initialValue",
+    "syncIssues",
+    "asyncIssues",
+    "issues",
+    "validationError",
+    "status",
+    "valid",
+    "invalid",
+    "pending",
+    "dirty",
+    "touched",
+  ]);
   const disabled = createWritableView(
     state,
     current => current.disabled,
@@ -839,19 +868,29 @@ export function form<T extends NodeMap>(
     refreshNow(disabled);
   };
 
-  const value = createView(state, current => current.value);
-  const completeValue = createView(state, current => current.completeValue);
-  const issues = createView(state, current => current.issues);
-  const validationError = createView(
-    state,
-    current => current.validationError,
-  );
-  const status = createView(state, current => current.status);
-  const valid = createView(state, current => current.valid);
-  const invalid = createView(state, current => current.invalid);
-  const pending = createView(state, current => current.pending);
-  const dirty = createView(state, current => current.dirty);
-  const touched = createView(state, current => current.touched);
+  const {
+    value,
+    completeValue,
+    issues,
+    validationError,
+    status,
+    valid,
+    invalid,
+    pending,
+    dirty,
+    touched,
+  } = createStateViews(state, [
+    "value",
+    "completeValue",
+    "issues",
+    "validationError",
+    "status",
+    "valid",
+    "invalid",
+    "pending",
+    "dirty",
+    "touched",
+  ]);
   const disabled = createWritableView(
     state,
     current => current.disabled,
@@ -1140,19 +1179,29 @@ export function list<N extends FormNode<any, any>>(
     refreshNow(disabled);
   };
 
-  const value = createView(state, current => current.value);
-  const completeValue = createView(state, current => current.completeValue);
-  const issues = createView(state, current => current.issues);
-  const validationError = createView(
-    state,
-    current => current.validationError,
-  );
-  const status = createView(state, current => current.status);
-  const valid = createView(state, current => current.valid);
-  const invalid = createView(state, current => current.invalid);
-  const pending = createView(state, current => current.pending);
-  const dirty = createView(state, current => current.dirty);
-  const touched = createView(state, current => current.touched);
+  const {
+    value,
+    completeValue,
+    issues,
+    validationError,
+    status,
+    valid,
+    invalid,
+    pending,
+    dirty,
+    touched,
+  } = createStateViews(state, [
+    "value",
+    "completeValue",
+    "issues",
+    "validationError",
+    "status",
+    "valid",
+    "invalid",
+    "pending",
+    "dirty",
+    "touched",
+  ]);
   const disabled = createWritableView(
     state,
     current => current.disabled,
