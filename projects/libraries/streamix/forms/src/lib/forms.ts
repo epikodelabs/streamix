@@ -228,7 +228,7 @@ function mergeIssues(
 
   for (const source of sources) {
     if (!source) continue;
-    result ??= {};
+    result ??= Object.create(null) as Record<string, unknown>;
     Object.assign(result, source);
   }
 
@@ -253,7 +253,10 @@ function keyed(
 ): ValidationIssues | null {
   if (entries.length === 0) return null;
 
-  const result: Record<PropertyKey, unknown> = {};
+  const result: Record<PropertyKey, unknown> = Object.create(null) as Record<
+    PropertyKey,
+    unknown
+  >;
   for (const [key, value] of entries) result[key] = value;
 
   return Object.freeze(result) as ValidationIssues;
@@ -294,8 +297,8 @@ function reuseNullableRecord<T extends Record<string, unknown>>(
   return reuseRecord(previous, next);
 }
 
-function reuseArray<T>(previous: readonly T[], next: T[]): T[] {
-  return shallowEqualArray(previous, next) ? previous as T[] : next;
+function reuseArray<T>(previous: T[], next: T[]): T[] {
+  return shallowEqualArray(previous, next) ? previous : next;
 }
 
 const nodeContainers = new WeakMap<FormNode<any, any>, object>();
@@ -895,6 +898,7 @@ export function form<T extends NodeMap>(
 
   claimChildren(childNodes, container);
 
+  try {
   const ownsChildren = options.ownsChildren ?? true;
   const formChecks = normalize(options.checks);
 
@@ -1191,6 +1195,10 @@ export function form<T extends NodeMap>(
       }
     },
   };
+  } catch (error) {
+    childNodes.forEach(child => releaseChild(child, container));
+    throw error;
+  }
 }
 
 /* ── List ─────────────────────────────────────────────── */
@@ -1246,6 +1254,7 @@ export function list<N extends FormNode<any, any>>(
 
   claimChildren(children, container);
 
+  try {
   const assertActive = (): void => {
     if (disposed) {
       throw new Error("Cannot mutate a disposed list.");
@@ -1459,12 +1468,22 @@ export function list<N extends FormNode<any, any>>(
     assertUniqueChild(child);
     claimChildren([child], container);
 
-    scheduler.batch(() => {
-      children.push(child);
-      observe(child);
-      if (state.value.disabled) disableChildIfNeeded(child);
+    try {
+      scheduler.batch(() => {
+        children.push(child);
+        observe(child);
+        if (state.value.disabled) disableChildIfNeeded(child);
+        scheduler.request();
+      });
+    } catch (error) {
+      const index = children.indexOf(child);
+      if (index >= 0) children.splice(index, 1);
+      unobserve(child);
+      enableChildIfNeeded(child);
+      releaseChild(child, container);
       scheduler.request();
-    });
+      throw error;
+    }
   };
 
   const insert = (index: number, child: N): void => {
@@ -1472,17 +1491,27 @@ export function list<N extends FormNode<any, any>>(
     assertUniqueChild(child);
     claimChildren([child], container);
 
-    scheduler.batch(() => {
-      children.splice(
-        Math.max(0, Math.min(index, children.length)),
-        0,
-        child,
-      );
+    try {
+      scheduler.batch(() => {
+        children.splice(
+          Math.max(0, Math.min(index, children.length)),
+          0,
+          child,
+        );
 
-      observe(child);
-      if (state.value.disabled) disableChildIfNeeded(child);
+        observe(child);
+        if (state.value.disabled) disableChildIfNeeded(child);
+        scheduler.request();
+      });
+    } catch (error) {
+      const childIndex = children.indexOf(child);
+      if (childIndex >= 0) children.splice(childIndex, 1);
+      unobserve(child);
+      enableChildIfNeeded(child);
+      releaseChild(child, container);
       scheduler.request();
-    });
+      throw error;
+    }
   };
 
   const detachAt = (index: number): N | undefined => {
@@ -1654,6 +1683,10 @@ export function list<N extends FormNode<any, any>>(
       children.length = 0;
     },
   };
+  } catch (error) {
+    children.forEach(child => releaseChild(child, container));
+    throw error;
+  }
 }
 
 /* ── Helpers ──────────────────────────────────────────── */

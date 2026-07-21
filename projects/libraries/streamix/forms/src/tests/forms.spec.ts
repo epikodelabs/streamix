@@ -41,6 +41,63 @@ describe('Forms', () => {
     preserved.dispose();
   });
 
+  it('prioritizes pending validation over synchronous issues', async () => {
+    let resolve!: (value: null) => void;
+    const name = field('', {
+      validateInitial: false,
+      checks: value => value === '' ? { required: true } : null,
+      asyncChecks: () => new Promise<null>(next => {
+        resolve = next;
+      }),
+      asyncOnlyWhenSyncClean: false,
+    });
+
+    name.set('');
+
+    expect(name.issues.value).toEqual({ required: true });
+    expect(name.pending.value).toBeTrue();
+    expect(name.status.value).toBe('pending');
+    expect(name.invalid.value).toBeFalse();
+
+    resolve(null);
+    await new Promise<void>(next => setTimeout(next));
+
+    expect(name.pending.value).toBeFalse();
+    expect(name.status.value).toBe('invalid');
+    expect(name.invalid.value).toBeTrue();
+    name.dispose();
+  });
+
+  it('releases containment claims when aggregate initialization throws', () => {
+    const name = field('Ada');
+    const completeValue = name.completeValue;
+    let throwOnRead = true;
+
+    Object.defineProperty(name, 'completeValue', {
+      get: () => {
+        if (throwOnRead) {
+          throwOnRead = false;
+          throw new Error('read failure');
+        }
+
+        return completeValue;
+      },
+    });
+
+    expect(() => form({ name }, { ownsChildren: false })).toThrowError(
+      'read failure',
+    );
+
+    throwOnRead = true;
+    expect(() => list([name], { ownsChildren: false })).toThrowError(
+      'read failure',
+    );
+
+    const profile = form({ name }, { ownsChildren: false });
+    profile.dispose();
+    name.dispose();
+  });
+
   it('synchronizes a bound field with its caller-owned source', () => {
     const source = atom('Ada', { discrete: true });
     const name = bindField(source);
