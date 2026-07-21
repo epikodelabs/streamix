@@ -1,4 +1,4 @@
-import { type Field } from "@epikodelabs/streamix/forms";
+import { type Field } from "./forms";
 
 export type FieldInputType =
   | "text"
