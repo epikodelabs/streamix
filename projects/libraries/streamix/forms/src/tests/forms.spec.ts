@@ -71,4 +71,54 @@ describe('Forms', () => {
 
     item.dispose();
   });
+
+  it('rejects a field reused under multiple form keys', () => {
+    const name = field('Ada');
+
+    expect(() => form({ first: name, second: name })).toThrowError(
+      'A form node cannot appear in the same form twice.',
+    );
+
+    name.dispose();
+  });
+
+  it('can enable an owning list after clearing parent-disabled items', () => {
+    const skill = field('TypeScript');
+    const skills = list([skill]);
+
+    skills.disable();
+    skills.clear();
+
+    expect(() => skills.enable()).not.toThrow();
+    expect(skills.disabled.value).toBeFalse();
+    expect(skill.state.disposed).toBeTrue();
+
+    skills.dispose();
+  });
+
+  it('runs initial async validation once and aborts it on disposal', async () => {
+    let calls = 0;
+    let activeSignal: AbortSignal | undefined;
+
+    const name = field('Ada', {
+      asyncChecks: (_value, signal) => {
+        calls++;
+        activeSignal = signal;
+
+        return new Promise<null>(resolve => {
+          signal.addEventListener('abort', () => resolve(null), { once: true });
+        });
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(activeSignal).toBeDefined();
+    expect(activeSignal!.aborted).toBeFalse();
+
+    name.dispose();
+    await Promise.resolve();
+
+    expect(activeSignal!.aborted).toBeTrue();
+    expect(calls).toBe(1);
+  });
 });

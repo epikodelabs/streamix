@@ -731,6 +731,11 @@ export function form<T extends NodeMap>(
   const children = Object.freeze({ ...fields }) as Readonly<T>;
   const childEntries = Object.entries(children);
   const childNodes = childEntries.map(([, child]) => child);
+
+  if (new Set(childNodes).size !== childNodes.length) {
+    throw new Error("A form node cannot appear in the same form twice.");
+  }
+
   const ownsChildren = options.ownsChildren ?? true;
   const formChecks = normalize(options.checks);
 
@@ -1257,6 +1262,7 @@ export function list<N extends FormNode<any, any>>(
       unobserve(child);
 
       if (ownsChildren) {
+        disabledByParent.delete(child);
         child.dispose();
       } else {
         enableChildIfNeeded(child);
