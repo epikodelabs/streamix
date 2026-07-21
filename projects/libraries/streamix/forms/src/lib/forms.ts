@@ -41,7 +41,8 @@ export interface FormOptions<T extends NodeMap> extends GroupOptions {
   checks?: Check<FormCompleteValue<T>> | readonly Check<FormCompleteValue<T>>[];
 }
 
-export interface StateView<T> {
+/** Read-only projection of a form-state value. */
+export interface StateProjection<T> {
   readonly value: T;
   readonly previous: T;
   readonly disposed: boolean;
@@ -52,7 +53,8 @@ export interface StateView<T> {
   ): Subscription;
 }
 
-export interface WritableStateView<T> extends StateView<T> {
+/** Writable projection exposed only for field values and disabled state. */
+export interface WritableStateProjection<T> extends StateProjection<T> {
   set(value: T): void;
   next(value: T): void;
 }
@@ -80,17 +82,17 @@ export interface FormNode<Value, CompleteValue = Value> {
    */
   readonly state: Atom<NodeState<Value, CompleteValue>>;
 
-  readonly value: StateView<Value>;
-  readonly completeValue: StateView<CompleteValue>;
-  readonly issues: StateView<ValidationIssues | null>;
-  readonly validationError: StateView<unknown | null>;
-  readonly status: StateView<FormStatus>;
-  readonly valid: StateView<boolean>;
-  readonly invalid: StateView<boolean>;
-  readonly pending: StateView<boolean>;
-  readonly dirty: StateView<boolean>;
-  readonly touched: StateView<boolean>;
-  readonly disabled: WritableStateView<boolean>;
+  readonly value: StateProjection<Value>;
+  readonly completeValue: StateProjection<CompleteValue>;
+  readonly issues: StateProjection<ValidationIssues | null>;
+  readonly validationError: StateProjection<unknown | null>;
+  readonly status: StateProjection<FormStatus>;
+  readonly valid: StateProjection<boolean>;
+  readonly invalid: StateProjection<boolean>;
+  readonly pending: StateProjection<boolean>;
+  readonly dirty: StateProjection<boolean>;
+  readonly touched: StateProjection<boolean>;
+  readonly disabled: WritableStateProjection<boolean>;
 
   set(value: CompleteValue, options?: WriteOptions): void;
 
@@ -119,7 +121,7 @@ type Selector<S, T> = (state: S) => T;
 function createView<S, T>(
   source: Atom<S>,
   select: Selector<S, T>,
-): StateView<T> {
+): StateProjection<T> {
   return Object.freeze({
     get value(): T {
       return select(source.value);
@@ -158,7 +160,7 @@ function createWritableView<S, T>(
   source: Writable<S>,
   select: Selector<S, T>,
   write: (value: T) => void,
-): WritableStateView<T> {
+): WritableStateProjection<T> {
   const projected = createView(source, select);
 
   return Object.freeze({
@@ -184,22 +186,22 @@ function createWritableView<S, T>(
   });
 }
 
-type StateViews<S, K extends keyof S> = {
-  readonly [P in K]: StateView<S[P]>;
+type StateProjections<S, K extends keyof S> = {
+  readonly [P in K]: StateProjection<S[P]>;
 };
 
-function createStateViews<
+function createStateProjections<
   S,
   const K extends readonly (keyof S)[],
 >(
   source: Atom<S>,
   keys: K,
-): StateViews<S, K[number]> {
+): StateProjections<S, K[number]> {
   return Object.freeze(
     Object.fromEntries(
       keys.map(key => [key, createView(source, state => state[key])]),
     ),
-  ) as StateViews<S, K[number]>;
+  ) as StateProjections<S, K[number]>;
 }
 
 const normalize = <T>(value?: T | readonly T[]): T[] =>
@@ -302,16 +304,38 @@ export interface FieldState<T> extends NodeState<T> {
 export interface Field<T> extends FormNode<T> {
   readonly kind: "field";
   readonly state: Atom<FieldState<T>>;
-  readonly value: WritableStateView<T>;
-  readonly completeValue: WritableStateView<T>;
-  readonly initialValue: StateView<T>;
-  readonly syncIssues: StateView<ValidationIssues | null>;
-  readonly asyncIssues: StateView<ValidationIssues | null>;
+  readonly value: WritableStateProjection<T>;
+  readonly completeValue: WritableStateProjection<T>;
+  readonly initialValue: StateProjection<T>;
+  readonly syncIssues: StateProjection<ValidationIssues | null>;
+  readonly asyncIssues: StateProjection<ValidationIssues | null>;
 }
 
 export function field<T>(
   initial: T,
   options: FieldOptions<T> = {},
+): Field<T> {
+  return createField(initial, options);
+}
+
+/**
+ * Creates a field synchronized with a caller-owned writable Streamix atom.
+ *
+ * Field writes are forwarded to `source`, and external source updates are
+ * validated and reflected by the field. Disposing the field never disposes
+ * the source. The initial source value remains the field's reset baseline.
+ */
+export function bindField<T>(
+  source: Writable<T>,
+  options: FieldOptions<T> = {},
+): Field<T> {
+  return createField(source.value, options, source);
+}
+
+function createField<T>(
+  initial: T,
+  options: FieldOptions<T>,
+  source?: Writable<T>,
 ): Field<T> {
   const syncChecks = normalize(options.checks);
   const asyncChecks = normalize(options.asyncChecks);
@@ -323,6 +347,7 @@ export function field<T>(
   let run = 0;
   let controller: AbortController | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let sourceSubscription: Subscription | undefined;
 
   const assertActive = (): void => {
     if (disposed) {
@@ -509,7 +534,7 @@ export function field<T>(
     }, asyncDelay);
   };
 
-  const writeValue = (
+  const applyValue = (
     value: T,
     writeOptions: WriteOptions = {},
   ): void => {
@@ -527,6 +552,17 @@ export function field<T>(
     });
 
     scheduleAsync();
+  };
+
+  const writeValue = (
+    value: T,
+    writeOptions: WriteOptions = {},
+  ): void => {
+    applyValue(value, writeOptions);
+
+    if (source && !Object.is(source.value, value)) {
+      source.set(value);
+    }
   };
 
   const setDisabled = (disabled: boolean): void => {
@@ -564,7 +600,7 @@ export function field<T>(
     pending,
     dirty,
     touched,
-  } = createStateViews(state, [
+  } = createStateProjections(state, [
     "initialValue",
     "syncIssues",
     "asyncIssues",
@@ -613,9 +649,20 @@ export function field<T>(
     });
 
     scheduleAsync();
+
+    if (source && !Object.is(source.value, value)) {
+      source.set(value);
+    }
   }
 
   if (validateInitial) scheduleAsync();
+
+  if (source) {
+    sourceSubscription = source.subscribe(next => {
+      if (disposed || Object.is(state.value.value, next)) return;
+      applyValue(next);
+    });
+  }
 
   return {
     kind: "field",
@@ -661,6 +708,8 @@ export function field<T>(
       if (disposed) return;
       disposed = true;
       cancelAsync(false);
+      void sourceSubscription?.();
+      sourceSubscription = undefined;
       state.dispose();
     },
   };
@@ -879,7 +928,7 @@ export function form<T extends NodeMap>(
     pending,
     dirty,
     touched,
-  } = createStateViews(state, [
+  } = createStateProjections(state, [
     "value",
     "completeValue",
     "issues",
@@ -1190,7 +1239,7 @@ export function list<N extends FormNode<any, any>>(
     pending,
     dirty,
     touched,
-  } = createStateViews(state, [
+  } = createStateProjections(state, [
     "value",
     "completeValue",
     "issues",

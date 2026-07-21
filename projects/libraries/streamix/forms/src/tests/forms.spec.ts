@@ -1,6 +1,31 @@
-import { field, form, list, syncList } from '@epikodelabs/streamix/forms';
+import { atom } from '@epikodelabs/streamix';
+import { bindField, field, form, list, syncList } from '@epikodelabs/streamix/forms';
 
 describe('Forms', () => {
+  it('synchronizes a bound field with its caller-owned source', () => {
+    const source = atom('Ada', { discrete: true });
+    const name = bindField(source);
+
+    name.set('Grace');
+    expect(source.value).toBe('Grace');
+    expect(name.value.value).toBe('Grace');
+
+    source.set('Lin');
+    expect(name.value.value).toBe('Lin');
+    expect(name.dirty.value).toBeTrue();
+
+    name.reset('Ada', { updateInitial: true });
+    expect(source.value).toBe('Ada');
+    expect(name.dirty.value).toBeFalse();
+
+    name.dispose();
+    expect(source.disposed).toBeFalse();
+
+    source.set('Marie');
+    expect(source.value).toBe('Marie');
+    source.dispose();
+  });
+
   it('cascades disabled state without re-enabling independently disabled fields', () => {
     const editable = field('editable');
     const independentlyDisabled = field('locked', { disabled: true });
