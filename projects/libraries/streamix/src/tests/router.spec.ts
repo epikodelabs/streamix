@@ -11,6 +11,18 @@ function createComponent(text: string): () => Node {
   return () => document.createTextNode(text);
 }
 
+function createLayoutComponent(text: string): () => Node {
+  return () => {
+    const wrapper = document.createElement('section');
+    const heading = document.createElement('span');
+    heading.textContent = text;
+    const nestedOutlet = document.createElement('div');
+    nestedOutlet.setAttribute('data-router-outlet', '');
+    wrapper.append(heading, nestedOutlet);
+    return wrapper;
+  };
+}
+
 function dispatchAnchorClick(target: HTMLAnchorElement, init: MouseEventInit = {}): boolean {
   const event = new MouseEvent('click', {
     bubbles: true,
@@ -201,7 +213,7 @@ idescribe('Router', () => {
       );
     });
 
-    it('should handle navigation to external URLs', () => {
+    it('should handle navigation to external URLs', async () => {
       const navigateExternal = jasmine.createSpy('navigateExternal');
       const config: RouterConfig = {
         routes: [routeWithComponent('', 'Home')],
@@ -213,6 +225,7 @@ idescribe('Router', () => {
       router.start();
       
       router.navigate('https://example.com');
+      await delay(10);
       
       expect(navigateExternal).toHaveBeenCalledWith(new URL('https://example.com/'));
     });
@@ -598,6 +611,60 @@ idescribe('Router', () => {
       await delay(50);
 
       expect(router.state.current?.path).toBe('/protected');
+    });
+
+    it('should block navigation when canDeactivate returns false', async () => {
+      const config: RouterConfig = {
+        routes: [
+          {
+            path: 'edit',
+            loadComponent: () => Promise.resolve(createComponent('Edit')),
+            canDeactivate: [() => false],
+          },
+          routeWithComponent('other', 'Other'),
+        ],
+        outlet,
+      };
+
+      router = createRouter(config);
+      router.start();
+
+      router.navigate('/edit');
+      await delay(50);
+
+      router.navigate('/other');
+      await delay(50);
+
+      expect(router.state.current?.path).toBe('/edit');
+      expect(outlet.textContent).toBe('Edit');
+      expect(router.state.error).toBeNull();
+    });
+
+    it('should redirect when canDeactivate returns a redirect', async () => {
+      const config: RouterConfig = {
+        routes: [
+          {
+            path: 'edit',
+            loadComponent: () => Promise.resolve(createComponent('Edit')),
+            canDeactivate: [() => '/confirm'],
+          },
+          routeWithComponent('confirm', 'Confirm'),
+          routeWithComponent('other', 'Other'),
+        ],
+        outlet,
+      };
+
+      router = createRouter(config);
+      router.start();
+
+      router.navigate('/edit');
+      await delay(50);
+
+      router.navigate('/other');
+      await delay(100);
+
+      expect(router.state.current?.path).toBe('/confirm');
+      expect(outlet.textContent).toBe('Confirm');
     });
   });
 
@@ -1487,6 +1554,48 @@ idescribe('Router', () => {
       // The navigation should be cancelled
       expect(router.state.phase).toBeNull();
     });
+
+    it('should dispose the active component when navigating away', async () => {
+      let disposedComponent = false;
+      let abortedSignal = false;
+
+      const config: RouterConfig = {
+        routes: [
+          {
+            path: 'first',
+            loadComponent: () => Promise.resolve((_route, { destroySignal }) => {
+              destroySignal.addEventListener('abort', () => {
+                abortedSignal = true;
+              }, { once: true });
+
+              const node = document.createElement('div');
+              node.textContent = 'First';
+              return {
+                node,
+                dispose: () => {
+                  disposedComponent = true;
+                },
+              };
+            }),
+          },
+          routeWithComponent('second', 'Second'),
+        ],
+        outlet,
+      };
+
+      router = createRouter(config);
+      router.start();
+
+      router.navigate('/first');
+      await delay(50);
+
+      router.navigate('/second');
+      await delay(50);
+
+      expect(disposedComponent).toBeTrue();
+      expect(abortedSignal).toBeTrue();
+      expect(router.state.current?.path).toBe('/second');
+    });
   });
 
   describe('utility methods', () => {
@@ -1611,7 +1720,7 @@ idescribe('Router', () => {
       expect(outlet.textContent).toContain('Custom Error');
     });
 
-    it('should preserve current page on navigation error', async () => {
+    it('should synchronize state and outlet on navigation error', async () => {
       const config: RouterConfig = {
         routes: [
           routeWithComponent('', 'Home'),
@@ -1635,8 +1744,8 @@ idescribe('Router', () => {
       router.navigate('/broken');
       await delay(50);
 
-      // The home page should still be shown
-      expect(outlet.textContent).toBe('Home');
+      expect(outlet.textContent).toContain('Page failed to load');
+      expect(router.state.current).toBeNull();
       expect(router.state.error).toBeDefined();
     });
 
@@ -1655,7 +1764,7 @@ idescribe('Router', () => {
             resolve: {
               data: async ({ signal }) => {
                 markStarted();
-                await new Promise<void>((resolve, reject) => {
+                await new Promise<void>((_resolve, reject) => {
                   signal.addEventListener('abort', () => {
                     const error = new Error('aborted');
                     error.name = 'AbortError';
@@ -1732,6 +1841,30 @@ idescribe('Router', () => {
 
       expect(router.state.error).toBeDefined();
       expect((router.state.error as Error).message).toBe('Resolver failed');
+    });
+
+    it('should render parent and child components through nested outlets', async () => {
+      const config: RouterConfig = {
+        routes: [
+          {
+            path: 'dashboard',
+            loadComponent: () => Promise.resolve(createLayoutComponent('Dashboard')),
+            children: [
+              routeWithComponent('reports', 'Reports'),
+            ],
+          },
+        ],
+        outlet,
+      };
+
+      router = createRouter(config);
+      router.start();
+
+      router.navigate('/dashboard/reports');
+      await delay(50);
+
+      expect(outlet.textContent).toBe('DashboardReports');
+      expect(router.state.current?.path).toBe('/dashboard/reports');
     });
   });
 
