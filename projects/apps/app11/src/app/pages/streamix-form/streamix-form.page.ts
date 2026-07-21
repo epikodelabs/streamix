@@ -6,7 +6,7 @@ import {
   OnDestroy,
   inject,
 } from "@angular/core";
-import { atom, type Subscription } from "@epikodelabs/streamix";
+import { atom, derived } from "@epikodelabs/streamix";
 import {
   cloneInitialProfile,
   completion,
@@ -19,17 +19,6 @@ import {
 } from "../../shared/profile-form";
 import { StreamixFieldDirective } from "../../shared/streamix-field.directive";
 
-type StreamixFormUiState = {
-  completion: number;
-  contactMethod: string;
-  passwordError: string | null;
-  preview: string;
-  remainingBio: number;
-  remote: boolean;
-  submittedPayload: string;
-  validationSummary: readonly string[];
-};
-
 @Component({
   standalone: true,
   imports: [CommonModule, StreamixFieldDirective],
@@ -41,43 +30,22 @@ export class StreamixFormPageComponent implements OnDestroy {
   private readonly cdr = inject(ChangeDetectorRef);
 
   readonly form = createProfileForm();
+  readonly profile = this.form.fields.profile.fields;
+  readonly security = this.form.fields.security.fields;
+  readonly address = this.form.fields.address.fields;
+  readonly preferences = this.form.fields.preferences.fields;
+  readonly availability = this.form.fields.availability.fields;
+  readonly skills = this.form.fields.skills;
   readonly contactOptions = contactOptions;
   readonly themeOptions = themeOptions;
-  readonly uiState = atom<StreamixFormUiState>(this.createUiState());
-
-  private submittedPayload = "";
-  private readonly subs: Subscription[] = [];
-
-  constructor() {
-    this.subs.push(
-      this.form.state.subscribe(() => this.refreshUiState()),
-      this.uiState.subscribe(() => this.cdr.detectChanges()),
-    );
-  }
-
-  get profile() {
-    return this.form.fields.profile.fields;
-  }
-
-  get security() {
-    return this.form.fields.security.fields;
-  }
-
-  get address() {
-    return this.form.fields.address.fields;
-  }
-
-  get preferences() {
-    return this.form.fields.preferences.fields;
-  }
-
-  get availability() {
-    return this.form.fields.availability.fields;
-  }
-
-  get skills() {
-    return this.form.fields.skills;
-  }
+  private readonly submittedPayload = atom("");
+  readonly uiState = derived($ => {
+    $(this.form.state);
+    return this.createUiState($(this.submittedPayload));
+  });
+  private readonly stopUiState = this.uiState.subscribe(() =>
+    this.cdr.detectChanges(),
+  );
 
   submit(event: Event): void {
     event.preventDefault();
@@ -88,14 +56,12 @@ export class StreamixFormPageComponent implements OnDestroy {
       return;
     }
 
-    this.submittedPayload = profilePreview(this.form);
-    this.refreshUiState();
+    this.submittedPayload.set(profilePreview(this.form));
   }
 
   reset(): void {
-    this.submittedPayload = "";
+    this.submittedPayload.set("");
     resetProfile(this.form, cloneInitialProfile());
-    this.refreshUiState();
   }
 
   addSkill(): void {
@@ -109,23 +75,30 @@ export class StreamixFormPageComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.subs.forEach(unsubscribe => unsubscribe());
+    this.stopUiState();
     this.uiState.dispose();
+    this.submittedPayload.dispose();
     this.form.dispose();
   }
 
-  private createUiState(): StreamixFormUiState {
+  private createUiState(submittedPayload: string) {
     const snapshot = this.form.completeValue.value;
     const security = this.form.fields.security;
 
     return {
       completion: completion(this.form),
       contactMethod: snapshot.preferences.contactMethod,
+      confirmPasswordLengthError: this.minimumLengthError(
+        security.fields.confirmPassword.value.value,
+      ),
       passwordError: this.passwordError(security.touched.value),
+      passwordLengthError: this.minimumLengthError(
+        security.fields.password.value.value,
+      ),
       preview: profilePreview(this.form),
       remainingBio: 240 - snapshot.profile.bio.length,
       remote: snapshot.availability.remote,
-      submittedPayload: this.submittedPayload,
+      submittedPayload,
       validationSummary: this.validationSummary(),
     };
   }
@@ -138,6 +111,12 @@ export class StreamixFormPageComponent implements OnDestroy {
       formIssues !== null &&
       "passwordMismatch" in formIssues
       ? "Passwords are incomplete or mismatched."
+      : null;
+  }
+
+  private minimumLengthError(value: string): string | null {
+    return value.length > 0 && value.length < 8
+      ? "Minimum length is 8."
       : null;
   }
 
@@ -164,26 +143,4 @@ export class StreamixFormPageComponent implements OnDestroy {
     return items;
   }
 
-  private refreshUiState(): void {
-    const current = this.uiState.value;
-    const next = this.createUiState();
-
-    if (
-      next.completion === current.completion &&
-      next.contactMethod === current.contactMethod &&
-      next.passwordError === current.passwordError &&
-      next.preview === current.preview &&
-      next.remainingBio === current.remainingBio &&
-      next.remote === current.remote &&
-      next.submittedPayload === current.submittedPayload &&
-      next.validationSummary.length === current.validationSummary.length &&
-      next.validationSummary.every(
-        (item, index) => item === current.validationSummary[index],
-      )
-    ) {
-      return;
-    }
-
-    this.uiState.set(next);
-  }
 }

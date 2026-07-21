@@ -81,13 +81,17 @@
           <label class="field">
             <span>Password</span>
             <input #v="sxField" [sxField]="security.password" type="password" />
-            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+            <small class="error" *ngIf="ui.passwordLengthError ?? v.error" [id]="v.errorId">
+              {{ ui.passwordLengthError ?? v.error }}
+            </small>
           </label>
 
           <label class="field">
             <span>Confirm password</span>
             <input #v="sxField" [sxField]="security.confirmPassword" type="password" />
-            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+            <small class="error" *ngIf="ui.confirmPasswordLengthError ?? v.error" [id]="v.errorId">
+              {{ ui.confirmPasswordLengthError ?? v.error }}
+            </small>
           </label>
         </div>
 
