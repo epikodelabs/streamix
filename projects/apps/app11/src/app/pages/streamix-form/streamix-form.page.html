@@ -82,7 +82,7 @@
               [sxField]="security.password"
               type="password"
             />
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <small class="error" *ngIf="passwordLengthError">{{ passwordLengthError }}</small>
           </label>
 
           <label class="field">
@@ -92,7 +92,7 @@
               [sxField]="security.confirmPassword"
               type="password"
             />
-            <small class="error" *ngIf="v.error">{{ v.error }}</small>
+            <small class="error" *ngIf="confirmPasswordLengthError">{{ confirmPasswordLengthError }}</small>
           </label>
         </div>
 
