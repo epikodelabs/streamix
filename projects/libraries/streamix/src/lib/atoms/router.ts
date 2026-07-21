@@ -185,11 +185,16 @@ function throwIfAborted(signal: AbortSignal): void {
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
+  return typeof error === 'object' && error !== null && 'name' in error && (error as { name?: string }).name === 'AbortError';
 }
 
 function interpolateRedirect(redirectTo: string, params: RouteParams): string {
-  return redirectTo.replace(/:([A-Za-z0-9_]+)/g, (_, key: string) => encodeURIComponent(params[key] ?? ''));
+  return redirectTo.replace(/:([A-Za-z0-9_]+)/g, (_, key: string) => {
+    if (!(key in params)) {
+      throw new Error(`Missing route parameter "${key}" for redirect "${redirectTo}"`);
+    }
+    return encodeURIComponent(params[key]);
+  });
 }
 
 function readRedirect(result: GuardResult): { redirectTo: string; replace: boolean } | null {
@@ -218,7 +223,6 @@ function defaultRenderError(outlet: HTMLElement): void {
 
 // ---- createRouter ----
 export function createRouter(config: RouterConfig): Router {
-  const outlet = config.outlet ?? document.getElementById('app');
   const render = config.render ?? defaultRender;
   const renderNotFound = config.renderNotFound ?? defaultRenderNotFound;
   const renderError = config.renderError ?? defaultRenderError;
@@ -262,6 +266,19 @@ export function createRouter(config: RouterConfig): Router {
     return normalizePath(`${baseHref}/${normalized.slice(1)}`);
   }
 
+  function resolveOutlet(): HTMLElement | null {
+    return config.outlet ?? document.getElementById('app');
+  }
+
+  function relativeBaseUrl(): string {
+    if (baseHref !== '/' && isInsideBase(window.location.pathname)) {
+      return window.location.href;
+    }
+    return baseHref === '/'
+      ? `${window.location.origin}/`
+      : `${window.location.origin}${baseHref}/`;
+  }
+
   function resolveAppUrl(target: string | URL, mode: 'navigate' | 'href'): URL {
     if (target instanceof URL) return target;
     const urlString = target.toString();
@@ -276,10 +293,7 @@ export function createRouter(config: RouterConfig): Router {
       return url;
     }
 
-    const baseUrl = baseHref === '/'
-      ? `${window.location.origin}/`
-      : `${window.location.origin}${baseHref}/`;
-    return new URL(urlString, baseUrl);
+    return new URL(urlString, relativeBaseUrl());
   }
 
   function activeHref(): string | null {
@@ -384,7 +398,7 @@ export function createRouter(config: RouterConfig): Router {
     const staticData = Object.assign({}, ...match.chain.map(route => route.data ?? {}));
     const baseRoute: ActivatedRoute = {
       url: request.url,
-      path: normalizePath(request.url.pathname),
+      path,
       params: Object.freeze({ ...match.params }),
       queryParams: readQuery(request.url),
       data: Object.freeze({ ...staticData }),
@@ -473,6 +487,7 @@ export function createRouter(config: RouterConfig): Router {
 
     switch (result.type) {
       case 'success': {
+        const outlet = resolveOutlet();
         if (outlet) render(outlet, result.node, result.route);
         currentState.next(result.route);
         requestState.next(null);
@@ -501,11 +516,14 @@ export function createRouter(config: RouterConfig): Router {
         restoreActiveUrl();
         requestState.next(null);
         phaseState.next(null);
+        errorState.next(null);
         trace('Navigation blocked');
         return;
       }
       case 'not-found': {
+        const outlet = resolveOutlet();
         if (outlet) renderNotFound(outlet, result.request.url);
+        currentState.next(null);
         requestState.next(null);
         phaseState.next(null);
         errorState.next(null);
@@ -513,6 +531,7 @@ export function createRouter(config: RouterConfig): Router {
         return;
       }
       case 'error': {
+        const outlet = resolveOutlet();
         restoreActiveUrl();
         requestState.next(null);
         phaseState.next(null);

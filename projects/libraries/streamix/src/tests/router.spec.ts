@@ -1080,6 +1080,39 @@ idescribe('Router', () => {
       expect(replaceStateSpy).toHaveBeenCalled();
       expect(router.state.current?.path).toBe('/');
     });
+
+    it('should clear stale error state on blocked navigation', async () => {
+      const config: RouterConfig = {
+        routes: [
+          routeWithComponent('', 'Home'),
+          {
+            path: 'broken',
+          },
+          {
+            path: 'blocked',
+            loadComponent: () => Promise.resolve(createComponent('Blocked')),
+            canActivate: [() => false],
+          },
+        ],
+        outlet,
+      };
+
+      router = createRouter(config);
+      router.start();
+
+      router.navigate('/broken');
+      await delay(50);
+      expect(router.state.error).toBeDefined();
+
+      router.navigate('/');
+      await delay(50);
+
+      router.navigate('/blocked');
+      await delay(50);
+
+      expect(router.state.error).toBeNull();
+      expect(router.state.current?.path).toBe('/');
+    });
   });
 
   describe('click interception', () => {
@@ -1256,6 +1289,27 @@ idescribe('Router', () => {
       expect(router.state.routeConfig).toBeDefined();
       expect(router.state.pending).toBeFalse();
       expect(router.state.phase).toBeNull();
+    });
+
+    it('should expose a base-stripped path when baseHref is configured', async () => {
+      const config: RouterConfig = {
+        routes: [
+          routeWithComponent('', 'Home'),
+          routeWithComponent('about', 'About'),
+        ],
+        baseHref: '/app/',
+        outlet,
+      };
+
+      router = createRouter(config);
+      router.start();
+
+      router.navigate('/app/about');
+      await delay(50);
+
+      expect(router.state.path).toBe('/about');
+      expect(router.state.current?.path).toBe('/about');
+      expect(router.state.current?.url.pathname).toBe('/app/about');
     });
 
     it('should track navigation phase', async () => {
@@ -1460,6 +1514,20 @@ idescribe('Router', () => {
       expect(router.href('/about?foo=bar')).toBe('/about?foo=bar');
     });
 
+    it('should resolve relative hrefs from the current location inside baseHref', () => {
+      window.history.replaceState(null, '', '/app/section/');
+
+      const config: RouterConfig = {
+        routes: [routeWithComponent('', 'Home')],
+        baseHref: '/app/',
+        outlet,
+      };
+
+      router = createRouter(config);
+
+      expect(router.href('child')).toBe('/app/section/child');
+    });
+
     it('should create links with correct href', () => {
       const config: RouterConfig = {
         routes: [routeWithComponent('', 'Home')],
@@ -1570,6 +1638,48 @@ idescribe('Router', () => {
       // The home page should still be shown
       expect(outlet.textContent).toBe('Home');
       expect(router.state.error).toBeDefined();
+    });
+
+    it('should treat named AbortError failures as aborted navigations', async () => {
+      let markStarted!: () => void;
+      const started = new Promise<void>(resolve => {
+        markStarted = resolve;
+      });
+
+      const config: RouterConfig = {
+        routes: [
+          routeWithComponent('', 'Home'),
+          {
+            path: 'slow',
+            loadComponent: () => Promise.resolve(createComponent('Slow')),
+            resolve: {
+              data: async ({ signal }) => {
+                markStarted();
+                await new Promise<void>((resolve, reject) => {
+                  signal.addEventListener('abort', () => {
+                    const error = new Error('aborted');
+                    error.name = 'AbortError';
+                    reject(error);
+                  }, { once: true });
+                });
+                return 'slow';
+              },
+            },
+          },
+        ],
+        outlet,
+      };
+
+      router = createRouter(config);
+      router.start();
+
+      router.navigate('/slow');
+      await started;
+      router.navigate('/');
+      await delay(50);
+
+      expect(router.state.error).toBeNull();
+      expect(router.state.current?.path).toBe('/');
     });
 
     it('should handle guard errors', async () => {
@@ -1725,7 +1835,8 @@ idescribe('Router', () => {
       router.navigate('/app/about');
       await delay(50);
 
-      expect(router.state.current?.path).toBe('/app/about');
+      expect(router.state.current?.path).toBe('/about');
+      expect(router.state.current?.url.pathname).toBe('/app/about');
       expect(outlet.textContent).toBe('About');
     });
 
@@ -1777,6 +1888,29 @@ idescribe('Router', () => {
       expect(router.href('/app/about')).toBe('/app/about');
       expect(router.href('about')).toBe('/app/about');
     });
+
+    it('should navigate relative URLs from the current baseHref location', async () => {
+      window.history.replaceState(null, '', '/app/section/');
+
+      const config: RouterConfig = {
+        routes: [
+          routeWithComponent('section', 'Section'),
+          routeWithComponent('section/child', 'Child'),
+        ],
+        baseHref: '/app/',
+        outlet,
+      };
+
+      router = createRouter(config);
+      router.start();
+
+      router.navigate('child');
+      await delay(50);
+
+      expect(router.state.current?.path).toBe('/section/child');
+      expect(router.state.current?.url.pathname).toBe('/app/section/child');
+      expect(outlet.textContent).toBe('Child');
+    });
   });
 
   describe('renderNotFound', () => {
@@ -1804,6 +1938,7 @@ idescribe('Router', () => {
       expect(outlet.textContent).toBe('Custom 404');
       expect(router.state.phase).toBeNull();
       expect(router.state.error).toBeNull();
+      expect(router.state.current).toBeNull();
     });
 
     it('should use default renderNotFound when not provided', async () => {
@@ -1821,6 +1956,28 @@ idescribe('Router', () => {
       await delay(50);
 
       expect(outlet.textContent).toContain('404');
+    });
+
+    it('should clear the current route when rendering not found', async () => {
+      const config: RouterConfig = {
+        routes: [
+          routeWithComponent('', 'Home'),
+        ],
+        outlet,
+      };
+
+      router = createRouter(config);
+      router.start();
+
+      router.navigate('/');
+      await delay(50);
+      expect(router.state.current?.path).toBe('/');
+
+      router.navigate('/non-existent');
+      await delay(50);
+
+      expect(router.state.current).toBeNull();
+      expect(router.state.path).toBe('');
     });
   });
 });
