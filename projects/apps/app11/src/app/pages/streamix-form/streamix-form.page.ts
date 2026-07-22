@@ -9,14 +9,17 @@ import {
 import { atom, derived } from "@epikodelabs/streamix";
 import {
   cloneInitialProfile,
-  completion,
   contactOptions,
   createProfileForm,
   createSkill,
-  profilePreview,
   resetProfile,
   themeOptions,
 } from "../../shared/profile-form";
+import {
+  calculateCompletion,
+  formatProfileJson,
+  type ProfileFormValue,
+} from "../../shared/profile-model";
 import { StreamixFieldDirective } from "../../shared/streamix-field.directive";
 
 @Component({
@@ -40,8 +43,10 @@ export class StreamixFormPageComponent implements OnDestroy {
   readonly themeOptions = themeOptions;
   private readonly submittedPayload = atom("");
   readonly uiState = derived($ => {
-    $(this.form.state);
-    return this.createUiState($(this.submittedPayload));
+    return this.createUiState(
+      $(this.form.state).completeValue,
+      $(this.submittedPayload),
+    );
   });
   private readonly stopUiState = this.uiState.subscribe(() =>
     this.cdr.detectChanges(),
@@ -56,7 +61,7 @@ export class StreamixFormPageComponent implements OnDestroy {
       return;
     }
 
-    this.submittedPayload.set(profilePreview(this.form));
+    this.submittedPayload.set(this.uiState.value.preview);
   }
 
   reset(): void {
@@ -81,12 +86,14 @@ export class StreamixFormPageComponent implements OnDestroy {
     this.form.dispose();
   }
 
-  private createUiState(submittedPayload: string) {
-    const snapshot = this.form.completeValue.value;
+  private createUiState(
+    snapshot: ProfileFormValue,
+    submittedPayload: string,
+  ) {
     const security = this.form.fields.security;
 
     return {
-      completion: completion(this.form),
+      completion: calculateCompletion(snapshot),
       contactMethod: snapshot.preferences.contactMethod,
       confirmPasswordLengthError: this.minimumLengthError(
         security.fields.confirmPassword.value.value,
@@ -95,7 +102,7 @@ export class StreamixFormPageComponent implements OnDestroy {
       passwordLengthError: this.minimumLengthError(
         security.fields.password.value.value,
       ),
-      preview: profilePreview(this.form),
+      preview: formatProfileJson(snapshot),
       remainingBio: 240 - snapshot.profile.bio.length,
       remote: snapshot.availability.remote,
       submittedPayload,

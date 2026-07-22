@@ -1,6 +1,4 @@
 import {
-  calculateCompletion,
-  formatProfileJson,
   getInitialProfileValue,
   type ProfileFormValue,
   type SkillValue,
@@ -32,7 +30,6 @@ export const themeOptions = [
 ] as const;
 
 export type ProfileForm = ReturnType<typeof createProfileForm>;
-export type SkillForm = ReturnType<typeof createSkill>;
 
 export const cloneInitialProfile = (): ProfileFormValue =>
   structuredClone(getInitialProfileValue());
@@ -99,18 +96,6 @@ export function createProfileForm(initial: ProfileFormValue = cloneInitialProfil
     }),
     skills: list(initial.skills.map(createSkill)),
   });
-}
-
-export function profileSnapshot(formState: ProfileForm): ProfileFormValue {
-  return formState.completeValue.value;
-}
-
-export function profilePreview(formState: ProfileForm): string {
-  return formatProfileJson(profileSnapshot(formState));
-}
-
-export function completion(formState: ProfileForm): number {
-  return calculateCompletion(profileSnapshot(formState));
 }
 
 export function resetProfile(formState: ProfileForm, value = cloneInitialProfile()): void {
