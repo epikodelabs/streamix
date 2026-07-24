@@ -12,11 +12,11 @@ type AnySchema =
 export type SearchSchema<T = unknown> =
   | ScalarSchema
   | ArraySchema
-  | OptionalSchema<SearchSchema<unknown>>;
+  | OptionalSchema<SearchSchema<T>>;
 
 export type ParamSchema<T = unknown> =
   | ScalarSchema
-  | OptionalSchema<ParamSchema<unknown>>;
+  | OptionalSchema<ParamSchema<T>>;
 
 interface StringSchema {
   readonly _type: 'string';

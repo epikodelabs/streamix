@@ -1,10 +1,10 @@
-import type { StreamixRoute, StreamixRoutes } from './streamix-router';
 import {
   type InferParamType,
   type InferSearchType,
   type ParamSchema,
   type SearchSchema,
 } from './search-schema';
+import type { StreamixRoute, StreamixRoutes } from './streamix-router';
 
 type SearchableRoute = StreamixRoute & {
   readonly paramsSchema?: Record<string, ParamSchema<unknown>>;
@@ -58,19 +58,6 @@ type RouteEntry<TRoute, TPrefix extends string> =
               ? RouteEntries<TChildren, JoinPath<TPrefix, TPath>>
               : never)
     : never;
-
-type RoutePath<T extends StreamixRoutes> = RouteEntries<T> extends {
-  path: infer TPath extends string;
-}
-  ? TPath
-  : never;
-
-type FindRoute<T extends StreamixRoutes, TPath extends string> = Extract<
-  RouteEntries<T>,
-  { path: TPath }
-> extends { route: infer TRoute }
-  ? TRoute
-  : never;
 
 type RouteSearch<TRoute> = TRoute extends { searchSchema: infer TSchema }
   ? TSchema extends Record<string, SearchSchema<unknown>>
