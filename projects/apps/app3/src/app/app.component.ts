@@ -1,6 +1,6 @@
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import type { Subscription } from '@epikodelabs/streamix';
-import { fromEvent, map, pipe, scope, tap, throttle } from '@epikodelabs/streamix';
+import { addListener, map, pipe, scope, tap, throttle } from '@epikodelabs/streamix';
 import { on } from '@epikodelabs/streamix/dom';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -299,7 +299,7 @@ export class AppComponent implements OnInit, OnDestroy {
         })).subscribe(() => { });
         this.appScope.cleanups.add(() => this.resizeSub?.());
         // Mouse parallax
-        this.mouseSub = pipe(fromEvent(canvas, 'mousemove'), throttle(50), map((e: Event) => {
+        this.mouseSub = pipe(addListener(canvas, 'mousemove'), throttle(50), map((e: Event) => {
             const me = e as MouseEvent;
             const rect = canvas.getBoundingClientRect();
             const x = (me.clientX - rect.left) / rect.width - 0.5;
