@@ -1,4 +1,4 @@
-import { createRouter, type Route, type Router, type RouterConfig } from '@epikodelabs/streamix/router';
+import { createRouter, type Route, type Router, type RouterConfig } from '../lib/vanilla-router';
 import { idescribe } from './env.spec';
 
 // Helper function for async testing
@@ -150,6 +150,43 @@ idescribe('Router', () => {
       expect(router.state.routeConfig?.path).toBe('about');
     });
 
+    it('should resolve navigation after the route has rendered', async () => {
+      router = createRouter({
+        routes: [routeWithComponent('about', 'About')],
+        outlet,
+      });
+
+      const completed = await router.navigate('/about');
+
+      expect(completed).toBeTrue();
+      expect(router.state.current?.path).toBe('/about');
+      expect(outlet.textContent).toBe('About');
+    });
+
+    it('should notify outlet activation through the config hook', async () => {
+      const onOutletActivate = jasmine.createSpy('onOutletActivate');
+
+      router = createRouter({
+        routes: [{
+          path: 'about',
+          loadComponent: () => Promise.resolve(() => ({
+            node: document.createTextNode('About'),
+            component: { kind: 'about-component' },
+          })),
+        }],
+        outlet,
+        onOutletActivate,
+      });
+
+      await router.navigate('/about');
+
+      expect(onOutletActivate).toHaveBeenCalledTimes(1);
+      expect(onOutletActivate).toHaveBeenCalledWith(
+        outlet,
+        jasmine.objectContaining({ kind: 'about-component' }),
+      );
+    });
+
     it('should navigate to the home route', async () => {
       const config: RouterConfig = {
         routes: [
@@ -211,6 +248,33 @@ idescribe('Router', () => {
         '',
         '/about'
       );
+      expect(router.state.historyState).toEqual({ from: 'test' });
+      expect(router.state.current?.historyState).toEqual({ from: 'test' });
+    });
+
+    it('should update the current history state without navigating', async () => {
+      router = createRouter({
+        routes: [
+          routeWithComponent('', 'Home'),
+          routeWithComponent('about', 'About'),
+        ],
+        outlet,
+      });
+      router.start();
+
+      await router.navigate('/about', { state: { from: 'test' } });
+
+      const replaceStateSpy = spyOn(window.history, 'replaceState').and.callThrough();
+
+      router.updateHistoryState({ from: 'updated', step: 2 });
+
+      expect(replaceStateSpy).toHaveBeenCalledWith(
+        { from: 'updated', step: 2 },
+        '',
+        '/about',
+      );
+      expect(router.state.historyState).toEqual({ from: 'updated', step: 2 });
+      expect(router.state.current?.historyState).toEqual({ from: 'updated', step: 2 });
     });
 
     it('should handle navigation to external URLs', async () => {
@@ -263,9 +327,80 @@ idescribe('Router', () => {
 
       expect(router.state.current?.url.hash).toBe('#section');
     });
+
+    it('should ignore an active URL without touching history when configured', async () => {
+      let guardCalls = 0;
+      let resolverCalls = 0;
+      let componentLoads = 0;
+      const pushStateSpy = spyOn(window.history, 'pushState').and.callThrough();
+      router = createRouter({
+        routes: [{
+          path: 'same',
+          canActivate: [() => {
+            guardCalls++;
+            return true;
+          }],
+          resolve: {
+            value: () => {
+              resolverCalls++;
+              return 'resolved';
+            },
+          },
+          loadComponent: () => {
+            componentLoads++;
+            return Promise.resolve(createComponent('Same'));
+          },
+        }],
+        outlet,
+        onSameUrlNavigation: 'ignore',
+      });
+
+      await router.navigate('/same');
+      pushStateSpy.calls.reset();
+
+      const navigated = await router.navigate('/same');
+
+      expect(navigated).toBeFalse();
+      expect(guardCalls).toBe(1);
+      expect(resolverCalls).toBe(1);
+      expect(componentLoads).toBe(1);
+      expect(pushStateSpy).not.toHaveBeenCalled();
+    });
+
+    it('should reload an active URL by default', async () => {
+      let componentLoads = 0;
+      router = createRouter({
+        routes: [{
+          path: 'same',
+          loadComponent: () => {
+            componentLoads++;
+            return Promise.resolve(createComponent('Same'));
+          },
+        }],
+        outlet,
+      });
+
+      await router.navigate('/same');
+      const navigated = await router.navigate('/same');
+
+      expect(navigated).toBeTrue();
+      expect(componentLoads).toBe(2);
+    });
   });
 
   describe('route matching', () => {
+    it('should refresh a cached route pattern when its path changes', async () => {
+      const route = routeWithComponent('first', 'Route');
+      router = createRouter({ routes: [route], outlet });
+
+      await router.navigate('/first');
+      route.path = 'second';
+      await router.navigate('/second');
+
+      expect(router.state.current?.path).toBe('/second');
+      expect(outlet.textContent).toBe('Route');
+    });
+
     it('should match parameterized routes', async () => {
       const config: RouterConfig = {
         routes: [
@@ -458,6 +593,22 @@ idescribe('Router', () => {
 
       expect(router.state.current).toBeNull();
       expect(router.state.pending).toBeFalse();
+    });
+
+    it('should resolve false when a guard blocks navigation', async () => {
+      router = createRouter({
+        routes: [{
+          path: 'protected',
+          loadComponent: () => Promise.resolve(createComponent('Protected')),
+          canActivate: [() => false],
+        }],
+        outlet,
+      });
+
+      const completed = await router.navigate('/protected');
+
+      expect(completed).toBeFalse();
+      expect(router.state.current).toBeNull();
     });
 
     it('should redirect when guard returns a redirect string', async () => {
@@ -665,6 +816,31 @@ idescribe('Router', () => {
 
       expect(router.state.current?.path).toBe('/confirm');
       expect(outlet.textContent).toBe('Confirm');
+    });
+
+    it('should warn when canDeactivate redirects to the pending URL', async () => {
+      const warnSpy = spyOn(console, 'warn');
+
+      router = createRouter({
+        routes: [
+          {
+            path: 'edit',
+            loadComponent: () => Promise.resolve(createComponent('Edit')),
+            canDeactivate: [() => ({ redirectTo: '/target', replace: true })],
+          },
+          routeWithComponent('target', 'Target'),
+        ],
+        outlet,
+      });
+
+      await router.navigate('/edit');
+      await router.navigate('/target');
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[Router] Ignoring canDeactivate redirect to the pending URL',
+        '/target',
+      );
+      expect(router.state.current?.path).toBe('/target');
     });
   });
 
@@ -1119,6 +1295,68 @@ idescribe('Router', () => {
       expect(router.state.current?.path).toBe('/');
     });
 
+    it('should scroll to the top after programmatic navigation when configured', async () => {
+      let scrollX = 24;
+      let scrollY = 160;
+      spyOnProperty(window, 'scrollX', 'get').and.callFake(() => scrollX);
+      spyOnProperty(window, 'scrollY', 'get').and.callFake(() => scrollY);
+      const scrollToSpy = spyOn(window, 'scrollTo').and.callFake((x?: number | ScrollToOptions, y?: number) => {
+        if (typeof x === 'number') {
+          scrollX = x;
+          scrollY = y ?? 0;
+        }
+      });
+
+      router = createRouter({
+        routes: [
+          routeWithComponent('', 'Home'),
+          routeWithComponent('about', 'About'),
+        ],
+        outlet,
+        scrollRestoration: 'top',
+      });
+      router.start();
+
+      await router.navigate('/about');
+
+      expect(scrollToSpy).toHaveBeenCalledWith(0, 0);
+    });
+
+    it('should restore the saved scroll position on popstate when configured', async () => {
+      let scrollX = 30;
+      let scrollY = 140;
+      spyOnProperty(window, 'scrollX', 'get').and.callFake(() => scrollX);
+      spyOnProperty(window, 'scrollY', 'get').and.callFake(() => scrollY);
+      const scrollToSpy = spyOn(window, 'scrollTo').and.callFake((x?: number | ScrollToOptions, y?: number) => {
+        if (typeof x === 'number') {
+          scrollX = x;
+          scrollY = y ?? 0;
+        }
+      });
+
+      router = createRouter({
+        routes: [
+          routeWithComponent('', 'Home'),
+          routeWithComponent('about', 'About'),
+        ],
+        outlet,
+        scrollRestoration: 'restore',
+      });
+      router.start();
+
+      await router.navigate('/about');
+
+      scrollX = 320;
+      scrollY = 480;
+      window.history.back();
+      const popstateEvent = new PopStateEvent('popstate');
+      window.dispatchEvent(popstateEvent);
+      await delay(50);
+
+      expect(scrollToSpy).toHaveBeenCalledWith(30, 140);
+      expect(router.state.current?.path).toBe('/');
+    });
+
     it('should restore active URL on blocked navigation', async () => {
       const config: RouterConfig = {
         routes: [
@@ -1136,16 +1374,211 @@ idescribe('Router', () => {
       router.start();
 
       // First navigate to home to have a current route
-      router.navigate('/');
-      await delay(50);
+      await router.navigate('/', { state: { page: 'home' } });
 
       const replaceStateSpy = spyOn(window.history, 'replaceState').and.callThrough();
 
-      router.navigate('/blocked');
+      await router.navigate('/blocked', { state: { page: 'blocked' } });
+
+      expect(replaceStateSpy).toHaveBeenCalledWith({ page: 'home' }, '', '/');
+      expect(router.state.current?.path).toBe('/');
+      expect(router.state.historyState).toEqual({ page: 'home' });
+    });
+
+    it('should run view transitions for DOM commits when enabled', async () => {
+      const transitionDocument = document as Document & {
+        startViewTransition?: (
+          callback: () => void | PromiseLike<void>,
+        ) => { finished: Promise<void> };
+      };
+      const original = transitionDocument.startViewTransition;
+      const startViewTransition = jasmine.createSpy('startViewTransition')
+        .and.callFake((callback: () => void | PromiseLike<void>) => {
+          void callback();
+          return { finished: Promise.resolve() };
+        });
+
+      transitionDocument.startViewTransition = startViewTransition;
+
+      try {
+        router = createRouter({
+          routes: [
+            routeWithComponent('', 'Home'),
+            routeWithComponent('about', 'About'),
+          ],
+          outlet,
+          viewTransitions: true,
+        });
+
+        await router.navigate('/about');
+
+        expect(startViewTransition).toHaveBeenCalled();
+      } finally {
+        transitionDocument.startViewTransition = original;
+      }
+    });
+
+    it('should allow a route to opt into view transitions', async () => {
+      const transitionDocument = document as Document & {
+        startViewTransition?: (
+          callback: () => void | PromiseLike<void>,
+        ) => { finished: Promise<void> };
+      };
+      const original = transitionDocument.startViewTransition;
+      const startViewTransition = jasmine.createSpy('startViewTransition')
+        .and.callFake((callback: () => void | PromiseLike<void>) => {
+          void callback();
+          return { finished: Promise.resolve() };
+        });
+
+      transitionDocument.startViewTransition = startViewTransition;
+
+      try {
+        router = createRouter({
+          routes: [
+            routeWithComponent('', 'Home'),
+            {
+              path: 'about',
+              viewTransition: true,
+              loadComponent: () => Promise.resolve(createComponent('About')),
+            },
+          ],
+          outlet,
+        });
+
+        await router.navigate('/about');
+
+        expect(startViewTransition).toHaveBeenCalled();
+      } finally {
+        transitionDocument.startViewTransition = original;
+      }
+    });
+
+    it('should allow a route to opt out of global view transitions', async () => {
+      const transitionDocument = document as Document & {
+        startViewTransition?: (
+          callback: () => void | PromiseLike<void>,
+        ) => { finished: Promise<void> };
+      };
+      const original = transitionDocument.startViewTransition;
+      const startViewTransition = jasmine.createSpy('startViewTransition')
+        .and.callFake((callback: () => void | PromiseLike<void>) => {
+          void callback();
+          return { finished: Promise.resolve() };
+        });
+
+      transitionDocument.startViewTransition = startViewTransition;
+
+      try {
+        router = createRouter({
+          routes: [
+            routeWithComponent('', 'Home'),
+            {
+              path: 'about',
+              viewTransition: false,
+              loadComponent: () => Promise.resolve(createComponent('About')),
+            },
+          ],
+          outlet,
+          viewTransitions: true,
+        });
+
+        await router.navigate('/about');
+
+        expect(startViewTransition).not.toHaveBeenCalled();
+      } finally {
+        transitionDocument.startViewTransition = original;
+      }
+    });
+
+    it('should evaluate the view transition predicate against navigation context', async () => {
+      const transitionDocument = document as Document & {
+        startViewTransition?: (
+          callback: () => void | PromiseLike<void>,
+        ) => { finished: Promise<void> };
+      };
+      const original = transitionDocument.startViewTransition;
+      const startViewTransition = jasmine.createSpy('startViewTransition')
+        .and.callFake((callback: () => void | PromiseLike<void>) => {
+          void callback();
+          return { finished: Promise.resolve() };
+        });
+      const predicate = jasmine.createSpy('predicate')
+        .and.callFake((context: {
+          from: { path: string } | null;
+          to: { path: string } | null;
+          phase: string;
+          url: URL;
+        }) => context.to?.path === '/about' && context.phase === 'success');
+
+      transitionDocument.startViewTransition = startViewTransition;
+
+      try {
+        router = createRouter({
+          routes: [
+            routeWithComponent('', 'Home'),
+            routeWithComponent('about', 'About'),
+            routeWithComponent('settings', 'Settings'),
+          ],
+          outlet,
+          viewTransitions: predicate,
+        });
+
+        await router.navigate('/about');
+        await router.navigate('/settings');
+
+        const [firstCall] = predicate.calls.allArgs();
+        const [firstContext] = firstCall as [{
+          from: { path: string } | null;
+          to: { path: string } | null;
+          phase: string;
+          url: URL;
+        }];
+
+        expect(firstContext.from).toBeNull();
+        expect(firstContext.to?.path).toBe('/about');
+        expect(firstContext.phase).toBe('success');
+        expect(firstContext.url.pathname).toBe('/about');
+        expect(startViewTransition).toHaveBeenCalledTimes(1);
+      } finally {
+        transitionDocument.startViewTransition = original;
+      }
+    });
+
+    it('should preload lazy routes eagerly when configured', async () => {
+      const aboutLoader = jasmine.createSpy('aboutLoader')
+        .and.returnValue(Promise.resolve(createComponent('About')));
+      const childLoader = jasmine.createSpy('childLoader')
+        .and.returnValue(Promise.resolve(createComponent('Admin')));
+      const loadChildren = jasmine.createSpy('loadChildren')
+        .and.returnValue(Promise.resolve([
+          {
+            path: 'child',
+            loadComponent: childLoader,
+          },
+        ] satisfies Route[]));
+
+      router = createRouter({
+        routes: [
+          {
+            path: 'about',
+            loadComponent: aboutLoader,
+          },
+          {
+            path: 'admin',
+            loadChildren,
+          },
+        ],
+        outlet,
+        preloading: 'eager',
+      });
+      router.start();
+
       await delay(50);
 
-      expect(replaceStateSpy).toHaveBeenCalled();
-      expect(router.state.current?.path).toBe('/');
+      expect(aboutLoader).toHaveBeenCalled();
+      expect(loadChildren).toHaveBeenCalled();
+      expect(childLoader).toHaveBeenCalled();
     });
 
     it('should clear stale error state on blocked navigation', async () => {
@@ -1558,6 +1991,7 @@ idescribe('Router', () => {
     it('should dispose the active component when navigating away', async () => {
       let disposedComponent = false;
       let abortedSignal = false;
+      let attachedAtDisposal = false;
 
       const config: RouterConfig = {
         routes: [
@@ -1574,6 +2008,7 @@ idescribe('Router', () => {
                 node,
                 dispose: () => {
                   disposedComponent = true;
+                  attachedAtDisposal = node.parentElement === outlet;
                 },
               };
             }),
@@ -1594,6 +2029,7 @@ idescribe('Router', () => {
 
       expect(disposedComponent).toBeTrue();
       expect(abortedSignal).toBeTrue();
+      expect(attachedAtDisposal).toBeTrue();
       expect(router.state.current?.path).toBe('/second');
     });
   });

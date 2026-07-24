@@ -1,8 +1,10 @@
-// Environment detection
+// Avoid a hard dependency on Node ambient types in browser-focused specs.
+const processLike = (globalThis as { process?: { versions?: { node?: unknown } } }).process;
+
 const isNode =
-  typeof process !== "undefined" &&
-  process.versions != null &&
-  process.versions.node != null;
+  processLike != null &&
+  processLike.versions != null &&
+  processLike.versions.node != null;
 
 const isBrowser =
   typeof window !== "undefined" &&
@@ -40,3 +42,4 @@ export function iit(name: string, fn: jasmine.ImplementationCallback) {
 
 // Export environment flags too
 export { isBrowser, isNode };
+
