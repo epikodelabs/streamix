@@ -34,15 +34,11 @@ export type ProfileForm = ReturnType<typeof createProfileForm>;
 export const cloneInitialProfile = (): ProfileFormValue =>
   structuredClone(getInitialProfileValue());
 
-function text(value: string, minimum = 1) {
-  return field(value, {
-    checks: minimum > 1 ? [checks.required, checks.minLength(minimum)] : checks.required,
-  });
-}
-
 export function createSkill(value: SkillValue = { name: "", years: 1, primary: false }) {
   return form({
-    name: text(value.name, 2),
+    name: field(value.name, {
+      checks: [checks.required, checks.minLength(2)],
+    }),
     years: field(value.years, { checks: [checks.min(1), checks.max(20)] }),
     primary: field(value.primary),
   });
@@ -58,8 +54,12 @@ function passwordMatchCheck(value: { password: string; confirmPassword: string }
 export function createProfileForm(initial: ProfileFormValue = cloneInitialProfile()) {
   return form({
     profile: form({
-      firstName: text(initial.profile.firstName, 2),
-      lastName: text(initial.profile.lastName, 2),
+      firstName: field(initial.profile.firstName, {
+        checks: [checks.required, checks.minLength(2)],
+      }),
+      lastName: field(initial.profile.lastName, {
+        checks: [checks.required, checks.minLength(2)],
+      }),
       email: field(initial.profile.email, { checks: [checks.required, checks.email] }),
       username: field(initial.profile.username, {
         checks: [checks.required, checks.minLength(3), checks.pattern(USERNAME_PATTERN)],
@@ -70,8 +70,12 @@ export function createProfileForm(initial: ProfileFormValue = cloneInitialProfil
     }),
     security: form(
       {
-        password: text(initial.security.password, 8),
-        confirmPassword: text(initial.security.confirmPassword, 8),
+        password: field(initial.security.password, {
+          checks: [checks.required, checks.minLength(8)],
+        }),
+        confirmPassword: field(initial.security.confirmPassword, {
+          checks: [checks.required, checks.minLength(8)],
+        }),
       },
       { checks: passwordMatchCheck },
     ),
