@@ -1,185 +1,136 @@
-import '@angular/compiler';
-import 'zone.js';
-
-import { Component, inject } from '@angular/core';
 import {
-  BrowserDynamicTestingModule,
-  platformBrowserDynamicTesting,
-} from '@angular/platform-browser-dynamic/testing';
-import { TestBed } from '@angular/core/testing';
+  adaptRouteComponent,
+  bindRouteInputs,
+  collectRouteInputValues,
+  type AdaptComponentRoute,
+  type RouteInputBinding,
+} from '../lib/route-adapter';
 
-import {
-  STREAMIX_ROUTE,
-  StreamixLink,
-  StreamixOutlet,
-  StreamixRouter,
-  provideStreamixRouter,
-  type StreamixRoutes,
-} from '../lib/streamix-router';
-import { idescribe } from './env.spec';
-
-TestBed.initTestEnvironment(
-  BrowserDynamicTestingModule,
-  platformBrowserDynamicTesting(),
-);
-
-@Component({ standalone: true, template: 'Streamix page: {{ route.path }}' })
-class StreamixRoutePage {
-  readonly route = inject(STREAMIX_ROUTE);
+function createRoute(overrides: Partial<Parameters<typeof collectRouteInputValues>[0]> = {}) {
+  return {
+    path: '/projects/42',
+    params: {},
+    queryParams: {},
+    data: {},
+    ...overrides,
+  } as Parameters<typeof collectRouteInputValues>[0];
 }
 
-@Component({ standalone: true, template: 'Streamix params: {{ route.data.__params?.projectId }}' })
-class StreamixParamsPage {
-  readonly route = inject(STREAMIX_ROUTE);
-}
-
-@Component({
-  standalone: true,
-  imports: [StreamixLink, StreamixOutlet],
-  template: '<a streamixLink="/page">Page</a><streamix-outlet></streamix-outlet>',
-})
-class StreamixRouterHost {}
-
-@Component({
-  standalone: true,
-  imports: [StreamixLink, StreamixOutlet],
-  template: '<a streamixLink="edit">Edit</a><streamix-outlet></streamix-outlet>',
-})
-class StreamixRelativeLinkHost {}
-
-@Component({
-  standalone: true,
-  imports: [StreamixOutlet],
-  template: '<streamix-outlet (activate)="onActivate($event)" (deactivate)="onDeactivate($event)" />',
-})
-class StreamixParentPage {
-  static activated: unknown[] = [];
-  static deactivated: unknown[] = [];
-
-  onActivate(component: unknown): void {
-    StreamixParentPage.activated.push(component);
-  }
-
-  onDeactivate(component: unknown): void {
-    StreamixParentPage.deactivated.push(component);
-  }
-}
-
-@Component({
-  standalone: true,
-  selector: 'streamix-child-page',
-  template: 'Nested Streamix page',
-})
-class StreamixChildPage {}
-
-@Component({
-  standalone: true,
-  selector: 'streamix-other-page',
-  template: 'Other Streamix page',
-})
-class StreamixOtherPage {}
-
-idescribe('Streamix router adapters', () => {
-  afterEach(() => {
-    TestBed.resetTestingModule();
-    window.history.replaceState(null, '', '/');
-  });
-
-  it('mounts Streamix components and resolves links with its base href', async () => {
-    window.history.replaceState(null, '', '/app/');
-    const routes: StreamixRoutes = [
-      { path: 'page', component: StreamixRoutePage },
-    ];
-    const fixture = TestBed.configureTestingModule({
-      imports: [StreamixRouterHost],
-      providers: [provideStreamixRouter(routes, { baseHref: '/app/' })],
-    }).createComponent(StreamixRouterHost);
-    fixture.detectChanges();
-
-    const link = fixture.nativeElement.querySelector('a') as HTMLAnchorElement;
-    expect(link.getAttribute('href')).toBe('/app/page');
-
-    const router = TestBed.inject(StreamixRouter);
-    await router.navigate('/app/page');
-
-    expect(fixture.nativeElement.textContent).toContain('Streamix page: /page');
-    expect(router.state.current?.config.path).toBe('page');
-  });
-
-  it('parses paramsSchema values for Streamix components', async () => {
-    const routes: StreamixRoutes = [
-      {
-        path: 'projects/:projectId',
-        component: StreamixParamsPage,
-        paramsSchema: {
-          projectId: {
-            _type: 'number',
-            min: 1,
-          },
+describe('Streamix router adapters', () => {
+  it('collects route input values from params, query, schema results, and resolved data', () => {
+    const route = createRoute({
+      params: {
+        projectId: '42',
+        section: 'overview',
+      },
+      queryParams: {
+        tab: 'activity',
+        sort: 'oldest',
+      },
+      data: {
+        __params: {
+          projectId: 42,
         },
+        __search: {
+          tab: 'settings',
+        },
+        sort: 'recent',
+        userName: 'Ada',
       },
-    ];
-    const fixture = TestBed.configureTestingModule({
-      imports: [StreamixRouterHost],
-      providers: [provideStreamixRouter(routes)],
-    }).createComponent(StreamixRouterHost);
-    fixture.detectChanges();
+    });
 
-    const router = TestBed.inject(StreamixRouter);
-    await router.navigate('/projects/42');
-    fixture.detectChanges();
-
-    expect(fixture.nativeElement.textContent).toContain('Streamix params: 42');
-    expect(router.state.current?.data['__params']).toEqual({ projectId: 42 });
+    expect(collectRouteInputValues(route)).toEqual({
+      projectId: 42,
+      section: 'overview',
+      tab: 'settings',
+      sort: 'recent',
+      userName: 'Ada',
+    });
   });
 
-  it('refreshes StreamixLink href when navigation changes the relative base URL', async () => {
-    const routes: StreamixRoutes = [
-      { path: 'users/:id', component: StreamixRoutePage },
-      { path: 'teams/:id', component: StreamixRoutePage },
-    ];
-    const fixture = TestBed.configureTestingModule({
-      imports: [StreamixRelativeLinkHost],
-      providers: [provideStreamixRouter(routes)],
-    }).createComponent(StreamixRelativeLinkHost);
-    fixture.detectChanges();
-
-    const router = TestBed.inject(StreamixRouter);
-    const link = fixture.nativeElement.querySelector('a') as HTMLAnchorElement;
-
-    await router.navigate('/users/123');
-    fixture.detectChanges();
-    expect(link.getAttribute('href')).toBe('/users/edit');
-
-    await router.navigate('/teams/123');
-    fixture.detectChanges();
-    expect(link.getAttribute('href')).toBe('/teams/edit');
-  });
-
-  it('emits lifecycle events from nested Streamix outlets', async () => {
-    StreamixParentPage.activated = [];
-    StreamixParentPage.deactivated = [];
-    const routes: StreamixRoutes = [
+  it('binds component inputs by template name first and falls back to prop name', () => {
+    const target = {
+      setInput: jasmine.createSpy('setInput'),
+    };
+    const inputs: RouteInputBinding[] = [
       {
-        path: 'parent',
-        component: StreamixParentPage,
-        children: [{ path: 'child', component: StreamixChildPage }],
+        templateName: 'project-id',
+        propName: 'projectId',
       },
-      { path: 'other', component: StreamixOtherPage },
+      {
+        templateName: 'userName',
+        propName: 'user',
+      },
+      {
+        templateName: 'missing',
+        propName: 'missing',
+      },
     ];
-    const fixture = TestBed.configureTestingModule({
-      imports: [StreamixRouterHost],
-      providers: [provideStreamixRouter(routes)],
-    }).createComponent(StreamixRouterHost);
-    fixture.detectChanges();
+    const route = createRoute({
+      params: {
+        projectId: '7',
+      },
+      data: {
+        'project-id': 42,
+        user: 'Ada',
+      },
+    });
 
-    const router = TestBed.inject(StreamixRouter);
-    await router.navigate('/parent/child');
-    expect(StreamixParentPage.activated.length).toBe(1);
-    expect(StreamixParentPage.activated[0]).toEqual(jasmine.any(StreamixChildPage));
+    bindRouteInputs(target, inputs, route);
 
-    await router.navigate('/other');
-    expect(StreamixParentPage.deactivated.length).toBe(1);
-    expect(StreamixParentPage.deactivated[0]).toEqual(jasmine.any(StreamixChildPage));
+    expect(target.setInput).toHaveBeenCalledTimes(2);
+    expect(target.setInput).toHaveBeenCalledWith('project-id', 42);
+    expect(target.setInput).toHaveBeenCalledWith('userName', 'Ada');
+  });
+
+  it('passes route providers to the eager component renderer', async () => {
+    const component = {} as AdaptComponentRoute['component'];
+    const providers = [{ provide: 'ROUTE_MESSAGE', useValue: 'scoped' }];
+    const rendered = jasmine.createSpy('rendered');
+    const render = jasmine.createSpy('render').and.returnValue(rendered);
+    const context = {
+      injector: { kind: 'injector' },
+      render,
+    } as any;
+    const route = {
+      path: 'provided',
+      component,
+      providers,
+    } satisfies AdaptComponentRoute<{ provide: string; useValue: string }>;
+
+    const loadComponent = adaptRouteComponent(route, context);
+    const result = await loadComponent?.();
+
+    expect(render).toHaveBeenCalledWith(component, context.injector, providers);
+    expect(result).toBe(rendered);
+  });
+
+  it('passes route providers to the lazy component renderer', async () => {
+    const component = {} as NonNullable<AdaptComponentRoute['component']>;
+    const providers = [{ provide: 'ROUTE_MESSAGE', useValue: 'scoped' }];
+    const rendered = jasmine.createSpy('rendered');
+    const render = jasmine.createSpy('render').and.returnValue(rendered);
+    const context = {
+      injector: { kind: 'injector' },
+      render,
+    } as any;
+    const loadComponentSpy = jasmine
+      .createSpy('loadComponent')
+      .and.resolveTo(component);
+    const route = {
+      path: 'provided',
+      loadComponent: loadComponentSpy,
+      providers,
+    } satisfies AdaptComponentRoute<{ provide: string; useValue: string }>;
+
+    const loadComponent = adaptRouteComponent(route, context);
+    const first = await loadComponent?.();
+    const second = await loadComponent?.();
+
+    expect(loadComponentSpy).toHaveBeenCalledTimes(1);
+    expect(render).toHaveBeenCalledTimes(2);
+    expect(render).toHaveBeenCalledWith(component, context.injector, providers);
+    expect(first).toBe(rendered);
+    expect(second).toBe(rendered);
   });
 });

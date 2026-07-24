@@ -15,8 +15,10 @@ import {
   ModuleWithProviders,
   NgModule,
   Output,
+  Provider,
   Type,
   createComponent,
+  createEnvironmentInjector,
   createNgModule,
   inject,
   makeEnvironmentProviders,
@@ -62,6 +64,7 @@ import {
   type RouterState,
   createRouter,
 } from './vanilla-router';
+import { adaptRouteComponent, bindRouteInputs } from './route-adapter';
 
 export type MaybePromise<T> = T | PromiseLike<T>;
 export type Lazy<T> = () => MaybePromise<T | { default: T }>;
@@ -84,6 +87,7 @@ export type RouteLoader<T = unknown> = (
 ) => MaybePromise<T>;
 
 export type RouteLoaders = Readonly<Record<string, RouteLoader>>;
+export type StreamixRouteProviders = readonly (Provider | EnvironmentProviders)[];
 
 export interface StreamixRoute {
   readonly path: string;
@@ -100,6 +104,7 @@ export interface StreamixRoute {
   readonly beforeEnter?: readonly BeforeEnter[];
   readonly beforeLeave?: readonly BeforeLeave[];
   readonly load?: RouteLoaders;
+  readonly providers?: StreamixRouteProviders;
 }
 
 export type StreamixRoutes = readonly StreamixRoute[];
@@ -133,6 +138,7 @@ interface AdapterContext {
 type RenderComponent = (
   component: Type<unknown>,
   injector: EnvironmentInjector,
+  routeProviders?: StreamixRouteProviders,
 ) => RouteComponent;
 
 const ROUTER_CONFIGURATION =
@@ -168,11 +174,20 @@ function emitOutletEvent(
 }
 
 function createAngularRenderer(appRef: ApplicationRef): RenderComponent {
-  return (component, environmentInjector) =>
+  return (component, environmentInjector, routeProviders) =>
     (route, context) => {
       const host = document.createElement('streamix-view');
+      const scopedInjector =
+        routeProviders && routeProviders.length > 0
+          ? createEnvironmentInjector(
+              Array.from(routeProviders),
+              environmentInjector,
+              `StreamixRoute(${route.path})`,
+            )
+          : null;
+      const activeEnvironmentInjector = scopedInjector ?? environmentInjector;
       const elementInjector = Injector.create({
-        parent: environmentInjector,
+        parent: activeEnvironmentInjector,
         providers: [
           { provide: STREAMIX_ROUTE, useValue: route },
           { provide: STREAMIX_ROUTE_CONTEXT, useValue: context },
@@ -182,13 +197,14 @@ function createAngularRenderer(appRef: ApplicationRef): RenderComponent {
       const ref = createComponent(component, {
         hostElement: host,
         elementInjector,
-        environmentInjector,
+        environmentInjector: activeEnvironmentInjector,
       });
 
       let attached = false;
       let disposed = false;
 
       try {
+        bindRouteInputs(ref, component, route);
         appRef.attachView(ref.hostView);
         attached = true;
         ref.changeDetectorRef.detectChanges();
@@ -199,6 +215,7 @@ function createAngularRenderer(appRef: ApplicationRef): RenderComponent {
           } catch {}
         }
         ref.destroy();
+        scopedInjector?.destroy();
         throw error;
       }
 
@@ -218,8 +235,12 @@ function createAngularRenderer(appRef: ApplicationRef): RenderComponent {
               attached = false;
             }
           } finally {
-            ref.destroy();
-            host.remove();
+            try {
+              ref.destroy();
+            } finally {
+              scopedInjector?.destroy();
+              host.remove();
+            }
           }
         },
       };
@@ -244,7 +265,7 @@ function adaptRoute(route: StreamixRoute, context: AdapterContext): Route {
     canDeactivate: adaptBeforeLeave(route.beforeLeave, context.injector),
     resolve: adaptLoaders(route, context.injector),
     children: route.children ? adaptRoutes(route.children, context) : undefined,
-    loadComponent: adaptComponent(route, context),
+    loadComponent: adaptRouteComponent(route, context),
     loadChildren: adaptChildren(route.loadChildren, context),
   };
 }
@@ -327,33 +348,6 @@ function adaptLoaders(
       (context: NavigationContext) => execute(injector, loader, context),
     ]),
   );
-}
-
-function adaptComponent(
-  route: StreamixRoute,
-  context: AdapterContext,
-): Route['loadComponent'] {
-  if (route.component) {
-    return async () => context.render(route.component!, context.injector);
-  }
-
-  if (!route.loadComponent) {
-    return undefined;
-  }
-
-  const loadComponent = route.loadComponent;
-  let loaded: Promise<Type<unknown>> | undefined;
-
-  return async () => {
-    loaded ??= Promise.resolve(loadComponent())
-      .then(unwrapDefault)
-      .catch((error) => {
-        loaded = undefined;
-        throw error;
-      });
-
-    return context.render(await loaded, context.injector);
-  };
 }
 
 function adaptChildren(

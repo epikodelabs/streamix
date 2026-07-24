@@ -47,6 +47,9 @@
     }
   },
   "htmlOptions": {
-    "title": "Jasmine Tests Runner"
+    "title": "Jasmine Test Runner",
+    "preludeModules": [
+      "@angular/compiler"
+    ]
   }
 }
