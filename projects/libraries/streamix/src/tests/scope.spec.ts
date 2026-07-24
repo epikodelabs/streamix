@@ -1091,7 +1091,7 @@ describe('Scope System', () => {
     it('should support derivedExpr with scope atoms as the second argument', async () => {
       const s = scope({
         count: 0,
-        doubled: derivedExpr((_self, atoms) => atoms.count.value * 2)
+        doubled: derivedExpr((self, atoms) => self(atoms.count) * 2)
       });
 
       expect(s.doubled).toBe(0);
