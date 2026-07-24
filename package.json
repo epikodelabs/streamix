@@ -2,10 +2,6 @@
   "name": "streamix",
   "version": "3.0.1",
   "scripts": {
-    "pretest": "node scripts/prepare-testify-angular.mjs",
-    "pretest:watch": "node scripts/prepare-testify-angular.mjs",
-    "prejasmine": "node scripts/prepare-testify-angular.mjs",
-    "prejasmine:coverage": "node scripts/prepare-testify-angular.mjs",
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
