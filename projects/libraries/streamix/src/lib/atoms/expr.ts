@@ -23,7 +23,7 @@ export interface AtomExpr<T = any> {
  */
 export interface DerivedExpr<T = any, Self = any> {
   [DERIVED_EXPR]: true;
-  fn: (self: Self) => T | Promise<T>;
+  fn: (self: Self, atoms: ScopeAtoms<Self>) => T | Promise<T>;
 }
 
 /**
@@ -80,9 +80,9 @@ export function atomExpr<T>(initialValue?: T, options?: AtomOptions): AtomExpr<T
  * this marker is useful when a more explicit definition is desired.
  */
 export function derivedExpr<TReturn, Self = any>(
-  fn: (self: Self) => TReturn,
+  fn: (self: Self, atoms: ScopeAtoms<Self>) => TReturn,
 ): DerivedExpr<Awaited<TReturn>, Self> {
-  return { [DERIVED_EXPR]: true, fn: fn as (self: Self) => Awaited<TReturn> | Promise<Awaited<TReturn>> };
+  return { [DERIVED_EXPR]: true, fn: fn as (self: Self, atoms: ScopeAtoms<Self>) => Awaited<TReturn> | Promise<Awaited<TReturn>> };
 }
 
 /**

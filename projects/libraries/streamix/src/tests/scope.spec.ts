@@ -1088,6 +1088,20 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should support derivedExpr with scope atoms as the second argument', async () => {
+      const s = scope({
+        count: 0,
+        doubled: derivedExpr((_self, atoms) => atoms.count.value * 2)
+      });
+
+      expect(s.doubled).toBe(0);
+
+      s.count = 5;
+      await delay();
+      expect(s.doubled).toBe(10);
+      s.dispose();
+    });
+
     it('should support derivedExpr with callable scope reading external atoms', async () => {
       const external = atom(2);
       const s = scope({

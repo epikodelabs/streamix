@@ -120,7 +120,7 @@ function evaluateExprMarker(
     return atom(marker.initialValue === undefined ? NO_INITIAL_VALUE : marker.initialValue, marker.options);
   }
   if (isDerivedExpr(marker)) {
-    return derived((derivedSelf) => marker.fn(createTrackedScope(scopeRef, derivedSelf.read.bind(derivedSelf))));
+    return derived((derivedSelf) => marker.fn(createTrackedScope(scopeRef, derivedSelf.read.bind(derivedSelf)), atoms));
   }
   if (isPipeExpr(marker)) return marker.fn(scopeRef as any, atoms);
   if (isFlowExpr(marker)) return marker.fn(scopeRef as any, atoms);
