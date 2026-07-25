@@ -54,11 +54,18 @@ export interface StreamixRoute {
   readonly name?: string;
   readonly redirectTo?: string;
   readonly preload?: boolean;
+  readonly component?: Type<unknown>;
+  readonly children?: StreamixRoutes;
   readonly viewTransition?: boolean;
   readonly paramsSchema?: Readonly<Record<string, ParamSchema<unknown>>>;
   readonly searchSchema?: Readonly<Record<string, SearchSchema<unknown>>>;
   readonly data?: Readonly<Record<string, unknown>>;
-  readonly load?: Lazy<StreamixRouteModule>;
+  readonly loadComponent?: Lazy<Type<unknown>>;
+  readonly loadChildren?: Lazy<StreamixRoutes>;
+  readonly providers?: StreamixRouteProviders;
+  readonly beforeEnter?: readonly BeforeEnter[];
+  readonly beforeLeave?: readonly BeforeLeave[];
+  readonly resolve?: RouteLoaders;
 }
 
 export type StreamixRoutes = readonly StreamixRoute[];

@@ -1,18 +1,16 @@
+console.log(
+  'LOADED STREAMIX ROUTER: route-module API 2026-07-25',
+);
+
 import { APP_BASE_HREF } from '@angular/common';
 import {
   ApplicationRef,
   DestroyRef,
-  Directive,
-  ElementRef,
   EnvironmentInjector,
   EnvironmentProviders,
-  EventEmitter,
   Injectable,
   InjectionToken,
   Injector,
-  ModuleWithProviders,
-  NgModule,
-  Output,
   Type,
   createComponent,
   createEnvironmentInjector,
@@ -39,6 +37,7 @@ import {
 } from './route-types';
 import {
   OUTLET_ACTIVATE_EVENT,
+  OUTLET_ATTRIBUTE,
   OUTLET_DEACTIVATE_EVENT,
   dispatchOutletLifecycleEvent,
 } from './router-events';
@@ -108,11 +107,6 @@ type RenderComponent = (
 
 const ROUTER_CONFIGURATION =
   new InjectionToken<RouterConfiguration>('STREAMIX_ROUTER_CONFIGURATION');
-
-const STREAMIX_MODULE_ROUTES =
-  new InjectionToken<readonly StreamixRoutes[]>('STREAMIX_MODULE_ROUTES');
-
-const OUTLET_ATTRIBUTE = 'data-router-outlet';
 
 function execute<TContext, TResult>(
   injector: EnvironmentInjector,
@@ -213,37 +207,27 @@ function adaptRoute(route: StreamixRoute, context: AdapterContext): Route {
     data: route.data,
     preload: route.preload,
     viewTransition: route.viewTransition,
-    load: route.load
-      ? async () => {
-          const module = unwrapDefault(
-            await route.load!(),
-          ) as StreamixRouteModule;
-
-          return {
-            component: module.component
-              ? adaptRouteComponent(module.component, context, module.providers)
-              : undefined,
-            routes: module.routes ? adaptRoutes(module.routes, context) : undefined,
-            canActivate: adaptBeforeEnter(module.beforeEnter, context.injector),
-            canDeactivate: adaptBeforeLeave(module.beforeLeave, context.injector),
-            resolve: adaptLoaders(
-              module.resolve,
-              route.paramsSchema,
-              route.searchSchema,
-              context.injector,
-            ),
-          };
-        }
-      : route.paramsSchema || route.searchSchema
-        ? async () => ({
-            resolve: adaptLoaders(
-              undefined,
-              route.paramsSchema,
-              route.searchSchema,
-              context.injector,
-            ),
-          })
-        : undefined,
+    load: async () => {
+      const [component, children] = await Promise.all([
+        route.loadComponent ? Promise.resolve(route.loadComponent()).then(unwrapDefault) : Promise.resolve(route.component),
+        route.loadChildren ? Promise.resolve(route.loadChildren()).then(unwrapDefault) : Promise.resolve(route.children),
+      ]);
+      
+      return {
+        component: component
+          ? adaptRouteComponent(component, context, route.providers)
+          : undefined,
+        routes: children ? adaptRoutes(children, context) : undefined,
+        canActivate: adaptBeforeEnter(route.beforeEnter, context.injector),
+        canDeactivate: adaptBeforeLeave(route.beforeLeave, context.injector),
+        resolve: adaptLoaders(
+          route.resolve,
+          route.paramsSchema,
+          route.searchSchema,
+          context.injector,
+        ),
+      };
+    },
   };
 }
 
@@ -311,18 +295,23 @@ function adaptLoaders(
 ): Route['resolve'] {
   if (!loaders && !paramsSchema && !searchSchema) return undefined;
 
-  const mergedLoaders = {
-    ...loaders,
-    ...(paramsSchema ? { __params: createParamsResolver(paramsSchema) } : {}),
-    ...(searchSchema ? { __search: createSearchResolver(searchSchema) } : {}),
-  };
+  const adaptedLoaders = loaders
+    ? Object.fromEntries(
+        Object.entries(loaders).map(([key, loader]) => [
+          key,
+          (context: NavigationContext) => execute(injector, loader, context),
+        ]),
+      )
+    : {};
 
-  return Object.fromEntries(
-    Object.entries(mergedLoaders).map(([key, loader]) => [
-      key,
-      (context: NavigationContext) => execute(injector, loader, context),
-    ]),
-  );
+  if (paramsSchema) {
+    adaptedLoaders['__params'] = (context: NavigationContext) => execute(injector, createParamsResolver(paramsSchema), context);
+  }
+  if (searchSchema) {
+    adaptedLoaders['__search'] = (context: NavigationContext) => execute(injector, createSearchResolver(searchSchema), context);
+  }
+
+  return adaptedLoaders;
 }
 
 
@@ -589,67 +578,11 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
         this.namedRouteMap.set(route.name, { route, fullPath });
       }
 
-    }
-  }
-}
-
-@Directive({
-  selector: 'streamix-outlet',
-  standalone: true,
-  host: {
-    [`[attr.${OUTLET_ATTRIBUTE}]`]: '""',
-  },
-})
-export class StreamixOutlet {
-  private readonly router = inject(StreamixRouter);
-  private readonly element = inject(ElementRef<HTMLElement>).nativeElement;
-  private readonly destroyRef = inject(DestroyRef);
-  private connectedRoot = false;
-
-  @Output() readonly activate = new EventEmitter<unknown>();
-  @Output() readonly deactivate = new EventEmitter<unknown>();
-
-  constructor() {
-    const onActivate = (event: Event) =>
-      this.activate.emit((event as CustomEvent<unknown>).detail);
-    const onDeactivate = (event: Event) =>
-      this.deactivate.emit((event as CustomEvent<unknown>).detail);
-
-    this.element.addEventListener(OUTLET_ACTIVATE_EVENT, onActivate);
-    this.element.addEventListener(OUTLET_DEACTIVATE_EVENT, onDeactivate);
-    if (!this.router.active) {
-      this.router.connect(this.element);
-      this.connectedRoot = true;
-    }
-
-    this.destroyRef.onDestroy(() => {
-      this.element.removeEventListener(OUTLET_ACTIVATE_EVENT, onActivate);
-      this.element.removeEventListener(OUTLET_DEACTIVATE_EVENT, onDeactivate);
-      if (this.connectedRoot) {
-        this.router.disconnect(this.element);
+      if (route.children) {
+        this.collectAndValidateRoutes(route.children, fullPath);
       }
-    });
-  }
-}
 
-@NgModule({
-  imports: [StreamixOutlet],
-  exports: [StreamixOutlet],
-})
-export class StreamixRouterModule {
-  static forChild(
-    routes: StreamixRoutes,
-  ): ModuleWithProviders<StreamixRouterModule> {
-    return {
-      ngModule: StreamixRouterModule,
-      providers: [
-        {
-          provide: STREAMIX_MODULE_ROUTES,
-          useValue: routes,
-          multi: true,
-        },
-      ],
-    };
+    }
   }
 }
 

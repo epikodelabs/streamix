@@ -1,11 +1,14 @@
 import { Component, EnvironmentInjector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import {
-  provideStreamixRouter,
-  StreamixOutlet,
+
+import { StreamixOutlet } from '../lib/outlet';
+import type { StreamixRoutes } from '../lib/route-types';
+import * as routerExports from '../lib/streamix-router';
+
+const {
   StreamixRouter,
-  type StreamixRoutes,
-} from '../lib';
+  provideStreamixRouter,
+} = routerExports;
 
 @Component({
   standalone: true,
@@ -49,7 +52,7 @@ describe('StreamixRouter: Nested Routing', () => {
   }
 
   async function navigate(path: string): Promise<void> {
-    const router = injector.get(StreamixRouter) as StreamixRouter;
+    const router = injector.get(StreamixRouter);
     await router.navigate({ path });
     await new Promise(resolve => setTimeout(resolve, 0));
   }
@@ -62,15 +65,15 @@ describe('StreamixRouter: Nested Routing', () => {
 
   it('should handle eager parent + eager child', async () => {
     const routes: StreamixRoutes = [
-      { path: '', load: () => ({ component: HomeComponent }) },
+      { path: '', component: HomeComponent },
       {
         path: 'parent',
-        load: () => ({
-          component: ParentComponent,
-          routes: [
-            { path: 'child', load: () => ({ component: ChildComponent }) },
-          ],
-        }),
+        component: ParentComponent,
+        children: [
+          {
+            path: 'child', component: ChildComponent
+          }
+        ],
       },
     ];
 
@@ -86,15 +89,13 @@ describe('StreamixRouter: Nested Routing', () => {
     const routes: StreamixRoutes = [
       {
         path: 'parent',
-        load: () => ({
-          component: ParentComponent,
-          routes: [
-            {
-              path: 'lazy-child',
-              load: async () => ({ component: ChildComponent }),
-            },
-          ],
-        }),
+        component: ParentComponent,
+        children: [
+          {
+            path: 'lazy-child',
+            loadComponent: async () => ChildComponent,
+          },
+        ],
       },
     ];
 
@@ -110,12 +111,12 @@ describe('StreamixRouter: Nested Routing', () => {
     const routes: StreamixRoutes = [
       {
         path: 'lazy-parent',
-        load: async () => ({
-          component: ParentComponent,
-          routes: [
-            { path: 'child', load: () => ({ component: ChildComponent }) },
-          ],
-        }),
+        loadComponent: async () => ParentComponent,
+        children: [
+          {
+            path: 'child', component: ChildComponent
+          }
+        ],
       },
     ];
 
@@ -131,15 +132,13 @@ describe('StreamixRouter: Nested Routing', () => {
     const routes: StreamixRoutes = [
       {
         path: 'lazy-parent',
-        load: async () => ({
-          component: ParentComponent,
-          routes: [
-            {
-              path: 'lazy-child',
-              load: async () => ({ component: ChildComponent }),
-            },
-          ],
-        }),
+        loadComponent: async () => ParentComponent,
+        children: [
+          {
+            path: 'lazy-child',
+            loadComponent: async () => ChildComponent,
+          },
+        ],
       },
     ];
 
@@ -155,11 +154,11 @@ describe('StreamixRouter: Nested Routing', () => {
     const routes: StreamixRoutes = [
       {
         path: 'wrapper',
-        load: () => ({
-          routes: [
-            { path: 'child', load: () => ({ component: ChildComponent }) },
-          ],
-        }),
+        children: [
+          {
+            path: 'child', component: ChildComponent
+          }
+        ],
       },
     ];
 

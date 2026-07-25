@@ -1,4 +1,4 @@
-import { dispatchRouterLocationChange } from './router-events';
+import { dispatchRouterLocationChange, OUTLET_ATTRIBUTE } from './router-events';
 import {
   isPathInsideBase,
   normalizeBaseHref,
@@ -340,14 +340,13 @@ function defaultRenderError(outlet: HTMLElement): void {
 }
 
 function findNestedOutlet(node: Node): HTMLElement | null {
-  if (node instanceof HTMLElement && node.matches('[data-router-outlet]')) {
-    return node;
+  if (!(node instanceof Element || node instanceof DocumentFragment)) {
+    return null;
   }
-  if (node instanceof Element || node instanceof DocumentFragment) {
-    const candidate = node.querySelector('[data-router-outlet]');
-    return candidate instanceof HTMLElement ? candidate : null;
+  if (node instanceof HTMLElement && node.hasAttribute(OUTLET_ATTRIBUTE)) {
+    return node as HTMLElement;
   }
-  return null;
+  return node.querySelector<HTMLElement>(`[${OUTLET_ATTRIBUTE}]`);
 }
 
 const routeLoads = new WeakMap<Route, Promise<LoadedRoute>>();

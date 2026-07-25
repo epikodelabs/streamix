@@ -1,10 +1,9 @@
-import { Component } from '@angular/core';
+import { Component, Input } from '@angular/core';
 
 import {
   adaptRouteComponent,
   bindRouteInputs,
   collectRouteInputValues,
-  type RouteInputBinding,
 } from '../lib/route-adapter';
 
 import type { StreamixRouteProviders } from '../lib/route-types';
@@ -66,32 +65,24 @@ describe('Streamix router adapters', () => {
       setInput: jasmine.createSpy('setInput'),
     };
 
-    const inputs: readonly RouteInputBinding[] = [
-      {
-        templateName: 'project-id',
-        propName: 'projectId',
-      },
-      {
-        templateName: 'userName',
-        propName: 'user',
-      },
-      {
-        templateName: 'missing',
-        propName: 'missing',
-      },
-    ];
+    @Component({ template: '' })
+    class TestInputsComponent {
+      @Input('project-id') projectId!: number;
+      @Input() user!: string;
+      @Input() missing!: string;
+    }
 
     const route = createRoute({
       params: {
         projectId: '7',
-      },
+      }, 
       data: {
         'project-id': 42,
         user: 'Ada',
       },
     });
 
-    bindRouteInputs(target, inputs, route);
+    bindRouteInputs(target, TestInputsComponent, route);
 
     expect(target.setInput).toHaveBeenCalledTimes(2);
     expect(target.setInput).toHaveBeenCalledWith(
@@ -99,7 +90,7 @@ describe('Streamix router adapters', () => {
       42,
     );
     expect(target.setInput).toHaveBeenCalledWith(
-      'userName',
+      'user',
       'Ada',
     );
   });
