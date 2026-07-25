@@ -1,16 +1,16 @@
 import {
-  getInitialProfileValue,
-  type ProfileFormValue,
-  type SkillValue,
-} from "./profile-model";
-import {
   abortableDelay,
   field,
   form,
   list,
   syncList,
-  type ValidationIssues
+  type ValidationIssues,
 } from "@epikodelabs/streamix/forms";
+import {
+  getInitialProfileValue,
+  type ProfileFormValue,
+  type SkillValue,
+} from "./profile-model";
 
 const RESERVED_USERNAMES = new Set(["admin", "angular", "root", "streamix"]);
 const USERNAME_PATTERN = /^[a-z0-9-]+$/;
@@ -47,19 +47,48 @@ export function passwordMatchCheck(value: { password: string; confirmPassword: s
   return left && right && left !== right ? { passwordMismatch: true } : null;
 }
 
+export async function reservedUsername(value: string, signal: AbortSignal): Promise<ValidationIssues | null> {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length < 3 || !USERNAME_PATTERN.test(normalized)) return null;
+
+  await abortableDelay(300, signal);
+  if (signal.aborted) return null;
+
+  return RESERVED_USERNAMES.has(normalized) ? { usernameTaken: true } : null;
+}
+
 export function createProfileForm(initial: ProfileFormValue = cloneInitialProfile()) {
+  // --- Enhanced username field with async validation ---
+  const usernameField = field(initial.profile.username);
+  usernameField.useValidation(
+    { asyncReserved: {} },
+    {
+      asyncChecks: (value, signal) =>
+        typeof value === "string" ? reservedUsername(value, signal) : null,
+      asyncDelay: 250,
+    }
+  );
+
+  // --- Security group with cross‑field validation ---
+  const securityGroup = form({
+    password: field(initial.security.password),
+    confirmPassword: field(initial.security.confirmPassword),
+  });
+  securityGroup.useChecks(
+    { passwordMatch: {} },
+    (value) => passwordMatchCheck(value as { password: string; confirmPassword: string })
+  );
+
+  // --- Build the full form ---
   return form({
     profile: form({
       firstName: field(initial.profile.firstName),
       lastName: field(initial.profile.lastName),
       email: field(initial.profile.email),
-      username: field(initial.profile.username),
+      username: usernameField,
       bio: field(initial.profile.bio),
     }),
-    security: form({
-      password: field(initial.security.password),
-      confirmPassword: field(initial.security.confirmPassword),
-    }),
+    security: securityGroup,
     address: form({
       country: field(initial.address.country),
       city: field(initial.address.city),
@@ -82,14 +111,4 @@ export function createProfileForm(initial: ProfileFormValue = cloneInitialProfil
 export function resetProfile(formState: ProfileForm, value = cloneInitialProfile()): void {
   syncList(formState.fields.skills, value.skills, createSkill);
   formState.reset(value, { updateInitial: true });
-}
-
-export async function reservedUsername(value: string, signal: AbortSignal): Promise<ValidationIssues | null> {
-  const normalized = value.trim().toLowerCase();
-  if (normalized.length < 3 || !USERNAME_PATTERN.test(normalized)) return null;
-
-  await abortableDelay(300, signal);
-  if (signal.aborted) return null;
-
-  return RESERVED_USERNAMES.has(normalized) ? { usernameTaken: true } : null;
 }
