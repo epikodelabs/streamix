@@ -57,54 +57,54 @@ export async function reservedUsername(value: string, signal: AbortSignal): Prom
   return RESERVED_USERNAMES.has(normalized) ? { usernameTaken: true } : null;
 }
 
-export function createProfileForm(initial: ProfileFormValue = cloneInitialProfile()) {
-  // --- Enhanced username field with async validation ---
-  const usernameField = field(initial.profile.username);
-  usernameField.useValidation(
-    { asyncReserved: {} },
-    {
-      asyncChecks: (value, signal) =>
-        typeof value === "string" ? reservedUsername(value, signal) : null,
-      asyncDelay: 250,
-    }
-  );
-
-  // --- Security group with cross‑field validation ---
-  const securityGroup = form({
-    password: field(initial.security.password),
-    confirmPassword: field(initial.security.confirmPassword),
-  });
-  securityGroup.useChecks(
-    { passwordMatch: {} },
-    (value) => passwordMatchCheck(value as { password: string; confirmPassword: string })
-  );
-
-  // --- Build the full form ---
+export function createProfileForm(
+  initial: ProfileFormValue = cloneInitialProfile(),
+) {
   return form({
     profile: form({
       firstName: field(initial.profile.firstName),
       lastName: field(initial.profile.lastName),
       email: field(initial.profile.email),
-      username: usernameField,
+      username: field(initial.profile.username),
       bio: field(initial.profile.bio),
     }),
-    security: securityGroup,
+
+    security: form({
+      password: field(initial.security.password),
+      confirmPassword: field(
+        initial.security.confirmPassword,
+      ),
+    }),
+
     address: form({
       country: field(initial.address.country),
       city: field(initial.address.city),
       postalCode: field(initial.address.postalCode),
     }),
+
     preferences: form({
-      contactMethod: field(initial.preferences.contactMethod),
+      contactMethod: field(
+        initial.preferences.contactMethod,
+      ),
       theme: field(initial.preferences.theme),
-      newsletter: field(initial.preferences.newsletter),
+      newsletter: field(
+        initial.preferences.newsletter,
+      ),
     }),
+
     availability: form({
-      startDate: field(initial.availability.startDate),
-      hoursPerWeek: field(initial.availability.hoursPerWeek),
+      startDate: field(
+        initial.availability.startDate,
+      ),
+      hoursPerWeek: field(
+        initial.availability.hoursPerWeek,
+      ),
       remote: field(initial.availability.remote),
     }),
-    skills: list(initial.skills.map(createSkill)),
+
+    skills: list(
+      initial.skills.map(createSkill),
+    ),
   });
 }
 
