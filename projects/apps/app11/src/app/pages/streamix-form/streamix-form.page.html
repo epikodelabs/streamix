@@ -19,7 +19,7 @@
   </div>
 
   <div class="layout">
-    <form #profileForm class="card form-card" (submit)="submit($event)">
+    <form [sxFormBinding]="form" class="card form-card" (submit)="submit($event)" autocomplete="off">
       <section class="section">
         <div class="section-head">
           <div>
