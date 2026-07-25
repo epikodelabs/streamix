@@ -1,19 +1,14 @@
 import {
-  abortableDelay,
   field,
   form,
   list,
   syncList,
-  type ValidationIssues,
 } from "@epikodelabs/streamix/forms";
 import {
   getInitialProfileValue,
   type ProfileFormValue,
   type SkillValue,
 } from "./profile-model";
-
-const RESERVED_USERNAMES = new Set(["admin", "angular", "root", "streamix"]);
-const USERNAME_PATTERN = /^[a-z0-9-]+$/;
 
 export const contactOptions = [
   { label: "Email", value: "email" },
@@ -39,24 +34,6 @@ export function createSkill(value: SkillValue = { name: "", years: 1, primary: f
     primary: field(value.primary),
   });
 }
-
-/** Cross-field check: passwords must match when both are non-empty. */
-export function passwordMatchCheck(value: { password: string; confirmPassword: string }): ValidationIssues | null {
-  const left = value.password;
-  const right = value.confirmPassword;
-  return left && right && left !== right ? { passwordMismatch: true } : null;
-}
-
-export async function reservedUsername(value: string, signal: AbortSignal): Promise<ValidationIssues | null> {
-  const normalized = value.trim().toLowerCase();
-  if (normalized.length < 3 || !USERNAME_PATTERN.test(normalized)) return null;
-
-  await abortableDelay(300, signal);
-  if (signal.aborted) return null;
-
-  return RESERVED_USERNAMES.has(normalized) ? { usernameTaken: true } : null;
-}
-
 export function createProfileForm(
   initial: ProfileFormValue = cloneInitialProfile(),
 ) {
