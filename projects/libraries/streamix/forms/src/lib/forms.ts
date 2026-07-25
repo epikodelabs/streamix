@@ -57,8 +57,19 @@ export interface FieldOptions<T> {
   ) => ValidationIssues | null | undefined;
 }
 
+export interface FieldValidationSource<T> {
+  checks?: Check<T> | readonly Check<T>[];
+  asyncChecks?: AsyncCheck<T> | readonly AsyncCheck<T>[];
+  asyncOnlyWhenSyncClean?: boolean;
+  asyncDelay?: number;
+}
+
 export interface FormOptions<T extends NodeMap> extends GroupOptions {
   checks?: Check<FormCompleteValue<T>> | readonly Check<FormCompleteValue<T>>[];
+}
+
+export interface FormValidationSource<T> {
+  checks?: Check<T> | readonly Check<T>[];
 }
 
 /** Read-only projection of a form-state value. */
@@ -228,6 +239,64 @@ function createStateProjections<
 const normalize = <T>(value?: T | readonly T[]): T[] =>
   value == null ? [] : Array.isArray(value) ? [...value] : [value as T];
 
+function hasFieldValidationSource<T>(
+  source: FieldValidationSource<T>,
+): boolean {
+  return source.checks !== undefined ||
+    source.asyncChecks !== undefined ||
+    source.asyncOnlyWhenSyncClean !== undefined ||
+    source.asyncDelay !== undefined;
+}
+
+function resolveFieldValidation<T>(
+  sources: ReadonlyMap<object, FieldValidationSource<T>>,
+): {
+  syncChecks: Check<T>[];
+  asyncChecks: AsyncCheck<T>[];
+  asyncOnlyWhenSyncClean: boolean;
+  asyncDelay: number;
+} {
+  const syncChecks: Check<T>[] = [];
+  const asyncChecks: AsyncCheck<T>[] = [];
+  let asyncOnlyWhenSyncClean = true;
+  let asyncDelay = 0;
+
+  for (const source of sources.values()) {
+    syncChecks.push(...normalize(source.checks));
+    asyncChecks.push(...normalize(source.asyncChecks));
+
+    if (source.asyncOnlyWhenSyncClean !== undefined) {
+      asyncOnlyWhenSyncClean = source.asyncOnlyWhenSyncClean;
+    }
+
+    if (source.asyncDelay !== undefined) {
+      asyncDelay = Math.max(0, source.asyncDelay);
+    }
+  }
+
+  return {
+    syncChecks,
+    asyncChecks,
+    asyncOnlyWhenSyncClean,
+    asyncDelay,
+  };
+}
+
+function resolveChecks<T>(
+  sources: ReadonlyMap<
+    object,
+    Check<T> | readonly Check<T>[] | undefined
+  >,
+): Check<T>[] {
+  const checks: Check<T>[] = [];
+
+  for (const source of sources.values()) {
+    checks.push(...normalize(source));
+  }
+
+  return checks;
+}
+
 const isEmpty = (value: unknown): boolean =>
   value == null ||
   value === "" ||
@@ -383,6 +452,12 @@ export interface Field<T> extends FormNode<T> {
   readonly initialValue: StateProjection<T>;
   readonly syncIssues: StateProjection<ValidationIssues | null>;
   readonly asyncIssues: StateProjection<ValidationIssues | null>;
+
+  useValidation(
+    source: object,
+    validation: FieldValidationSource<T>,
+  ): void;
+  clearValidation(source: object): void;
 }
 
 export function field<T>(
@@ -411,17 +486,32 @@ function createField<T>(
   options: FieldOptions<T>,
   source?: Writable<T>,
 ): Field<T> {
-  const syncChecks = normalize(options.checks);
-  const asyncChecks = normalize(options.asyncChecks);
-  const asyncOnlyWhenSyncClean = options.asyncOnlyWhenSyncClean ?? true;
-  const asyncDelay = Math.max(0, options.asyncDelay ?? 0);
   const validateInitial = options.validateInitial ?? true;
+  const validationSources = new Map<object, FieldValidationSource<T>>();
+  const builtInValidationSource = {};
 
   let disposed = false;
   let run = 0;
   let controller: AbortController | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let sourceSubscription: Subscription | undefined;
+
+  const builtInValidation: FieldValidationSource<T> = {
+    checks: options.checks,
+    asyncChecks: options.asyncChecks,
+  };
+
+  if (options.asyncOnlyWhenSyncClean !== undefined) {
+    builtInValidation.asyncOnlyWhenSyncClean = options.asyncOnlyWhenSyncClean;
+  }
+
+  if (options.asyncDelay !== undefined) {
+    builtInValidation.asyncDelay = options.asyncDelay;
+  }
+
+  if (hasFieldValidationSource(builtInValidation)) {
+    validationSources.set(builtInValidationSource, builtInValidation);
+  }
 
   const assertActive = (): void => {
     if (disposed) {
@@ -439,8 +529,12 @@ function createField<T>(
     if (disabled) return { issues: null, error: null };
 
     try {
+      const activeValidation = resolveFieldValidation(validationSources);
+
       return {
-        issues: mergeIssues(...syncChecks.map(check => check(value))),
+        issues: mergeIssues(
+          ...activeValidation.syncChecks.map(check => check(value)),
+        ),
         error: null,
       };
     } catch (error) {
@@ -534,12 +628,16 @@ function createField<T>(
 
     cancelAsync(false);
     const snapshot = state.value;
+    const activeValidation = resolveFieldValidation(validationSources);
 
     if (
       snapshot.disabled ||
-      asyncChecks.length === 0 ||
+      activeValidation.asyncChecks.length === 0 ||
       snapshot.validationError !== null ||
-      (asyncOnlyWhenSyncClean && snapshot.syncIssues !== null)
+      (
+        activeValidation.asyncOnlyWhenSyncClean &&
+        snapshot.syncIssues !== null
+      )
     ) {
       publish({ pending: false, asyncIssues: null });
       return;
@@ -553,7 +651,7 @@ function createField<T>(
 
     try {
       const results = await Promise.all(
-        asyncChecks.map(check =>
+        activeValidation.asyncChecks.map(check =>
           Promise.resolve(check(snapshot.value, currentController.signal)),
         ),
       );
@@ -607,18 +705,22 @@ function createField<T>(
     cancelAsync(false);
 
     const current = state.value;
+    const activeValidation = resolveFieldValidation(validationSources);
 
     if (
-      asyncChecks.length === 0 ||
+      activeValidation.asyncChecks.length === 0 ||
       current.disabled ||
       current.validationError !== null ||
-      (asyncOnlyWhenSyncClean && current.syncIssues !== null)
+      (
+        activeValidation.asyncOnlyWhenSyncClean &&
+        current.syncIssues !== null
+      )
     ) {
       if (current.pending) publish({ pending: false });
       return;
     }
 
-    if (asyncDelay === 0) {
+    if (activeValidation.asyncDelay === 0) {
       void executeAsync();
       return;
     }
@@ -626,7 +728,23 @@ function createField<T>(
     timer = setTimeout(() => {
       timer = undefined;
       void executeAsync();
-    }, asyncDelay);
+    }, activeValidation.asyncDelay);
+  };
+
+  const revalidate = (): void => {
+    if (disposed) return;
+
+    const current = state.value;
+    const sync = runSync(current.value, current.disabled);
+
+    publish({
+      syncIssues: sync.issues,
+      asyncIssues: null,
+      validationError: sync.error,
+      pending: current.pending,
+    });
+
+    scheduleAsync();
   };
 
   const applyValue = (
@@ -799,6 +917,21 @@ function createField<T>(
       setDisabled(true);
     },
 
+    useValidation(
+      validationSource: object,
+      validation: FieldValidationSource<T>,
+    ): void {
+      assertActive();
+      validationSources.set(validationSource, validation);
+      revalidate();
+    },
+
+    clearValidation(validationSource: object): void {
+      assertActive();
+      if (!validationSources.delete(validationSource)) return;
+      revalidate();
+    },
+
     dispose(): void {
       if (disposed) return;
       disposed = true;
@@ -900,6 +1033,11 @@ export interface Form<T extends NodeMap>
     value: Partial<FormCompleteValue<T>>,
     options?: WriteOptions,
   ): void;
+  useChecks(
+    source: object,
+    checks?: Check<FormCompleteValue<T>> | readonly Check<FormCompleteValue<T>>[],
+  ): void;
+  clearChecks(source: object): void;
 }
 
 export function form<T extends NodeMap>(
@@ -927,7 +1065,15 @@ export function form<T extends NodeMap>(
 
   try {
   const ownsChildren = options.ownsChildren ?? true;
-  const formChecks = normalize(options.checks);
+  const checkSources = new Map<
+    object,
+    Check<FormCompleteValue<T>> | readonly Check<FormCompleteValue<T>>[] | undefined
+  >();
+  const builtInCheckSource = {};
+
+  if (options.checks !== undefined) {
+    checkSources.set(builtInCheckSource, options.checks);
+  }
 
   let disposed = false;
   let selfTouched = false;
@@ -949,6 +1095,7 @@ export function form<T extends NodeMap>(
 
     let ownIssues: ValidationIssues | null = null;
     let ownError: unknown | null = null;
+    const formChecks = resolveChecks(checkSources);
 
     if (!disabled && formChecks.length > 0) {
       try {
@@ -1206,6 +1353,21 @@ export function form<T extends NodeMap>(
 
     enable,
     disable,
+
+    useChecks(
+      validationSource: object,
+      nextChecks?: Check<FormCompleteValue<T>> | readonly Check<FormCompleteValue<T>>[],
+    ): void {
+      assertActive();
+      checkSources.set(validationSource, nextChecks);
+      refreshNow();
+    },
+
+    clearChecks(validationSource: object): void {
+      assertActive();
+      if (!checkSources.delete(validationSource)) return;
+      refreshNow();
+    },
 
     dispose(): void {
       if (disposed) return;

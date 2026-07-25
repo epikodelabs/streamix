@@ -19,7 +19,7 @@
   </div>
 
   <div class="layout">
-    <form class="card form-card" (submit)="submit($event)">
+    <form #profileForm class="card form-card" (submit)="submit($event)">
       <section class="section">
         <div class="section-head">
           <div>
@@ -32,44 +32,58 @@
         <div class="grid two">
           <label class="field">
             <span>First name</span>
-            <input #v="sxField" [sxField]="profile.firstName" type="text" />
-            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+            <input name="profile.firstName" type="text" required minlength="2" />
+            @if (fieldError("profile.firstName"); as error) {
+              <small class="error">{{ error }}</small>
+            }
           </label>
 
           <label class="field">
             <span>Last name</span>
-            <input #v="sxField" [sxField]="profile.lastName" type="text" />
-            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+            <input name="profile.lastName" type="text" required minlength="2" />
+            @if (fieldError("profile.lastName"); as error) {
+              <small class="error">{{ error }}</small>
+            }
           </label>
 
           <label class="field">
             <span>Email</span>
-            <input #v="sxField" [sxField]="profile.email" type="email" />
-            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+            <input name="profile.email" type="email" required />
+            @if (fieldError("profile.email"); as error) {
+              <small class="error">{{ error }}</small>
+            }
           </label>
 
           <label class="field">
             <span>Username</span>
             <input
-              #v="sxField"
-              [sxField]="profile.username"
-              [sxPendingHint]="'Checking username availability...'"
+              name="profile.username"
+              sxReservedUsername
+              pattern="[a-z0-9-]+"
               type="text"
+              required
+              minlength="3"
             />
-            <small class="hint" *ngIf="v.hint" [id]="v.hintId">{{ v.hint }}</small>
-            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+            @if (fieldHint("profile.username", "Checking username availability..."); as hint) {
+              <small class="hint">{{ hint }}</small>
+            }
+            @if (fieldError("profile.username", "Checking username availability..."); as error) {
+              <small class="error">{{ error }}</small>
+            }
           </label>
         </div>
 
         <label class="field">
           <span>Bio</span>
-          <textarea #v="sxField" [sxField]="profile.bio" rows="4"></textarea>
+          <textarea name="profile.bio" rows="4" required maxlength="240"></textarea>
           <small class="hint">{{ ui.remainingBio }} characters remaining</small>
-          <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+          @if (fieldError("profile.bio"); as error) {
+            <small class="error">{{ error }}</small>
+          }
         </label>
       </section>
 
-      <section class="section">
+      <section class="section" sxPasswordMatch>
         <div class="section-head">
           <div>
             <p class="section-kicker">Security</p>
@@ -80,18 +94,18 @@
         <div class="grid two">
           <label class="field">
             <span>Password</span>
-            <input #v="sxField" [sxField]="security.password" type="password" />
-            <small class="error" *ngIf="ui.passwordLengthError ?? v.error" [id]="v.errorId">
-              {{ ui.passwordLengthError ?? v.error }}
-            </small>
+            <input name="security.password" type="password" required minlength="8" />
+            @if (fieldError("security.password"); as error) {
+              <small class="error">{{ error }}</small>
+            }
           </label>
 
           <label class="field">
             <span>Confirm password</span>
-            <input #v="sxField" [sxField]="security.confirmPassword" type="password" />
-            <small class="error" *ngIf="ui.confirmPasswordLengthError ?? v.error" [id]="v.errorId">
-              {{ ui.confirmPasswordLengthError ?? v.error }}
-            </small>
+            <input name="security.confirmPassword" type="password" required minlength="8" />
+            @if (fieldError("security.confirmPassword"); as error) {
+              <small class="error">{{ error }}</small>
+            }
           </label>
         </div>
 
@@ -111,20 +125,31 @@
         <div class="grid three">
           <label class="field">
             <span>Country</span>
-            <input #v="sxField" [sxField]="address.country" type="text" />
-            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+            <input name="address.country" type="text" required />
+            @if (fieldError("address.country"); as error) {
+              <small class="error">{{ error }}</small>
+            }
           </label>
 
           <label class="field">
             <span>City</span>
-            <input #v="sxField" [sxField]="address.city" type="text" />
-            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+            <input name="address.city" type="text" required />
+            @if (fieldError("address.city"); as error) {
+              <small class="error">{{ error }}</small>
+            }
           </label>
 
           <label class="field">
             <span>Postal code</span>
-            <input #v="sxField" [sxField]="address.postalCode" type="text" />
-            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+            <input
+              name="address.postalCode"
+              type="text"
+              required
+              pattern="[A-Z0-9 -]{4,10}"
+            />
+            @if (fieldError("address.postalCode"); as error) {
+              <small class="error">{{ error }}</small>
+            }
           </label>
         </div>
       </section>
@@ -143,9 +168,8 @@
             @for (option of contactOptions; track option.value) {
               <label>
                 <input
-                  [sxField]="preferences.contactMethod"
+                  name="preferences.contactMethod"
                   type="radio"
-                  name="contact-method"
                   [value]="option.value"
                 />
                 {{ option.label }}
@@ -155,7 +179,7 @@
 
           <label class="field">
             <span>Theme</span>
-            <select [sxField]="preferences.theme">
+            <select name="preferences.theme">
               @for (option of themeOptions; track option.value) {
                 <option [value]="option.value">{{ option.label }}</option>
               }
@@ -164,7 +188,7 @@
         </div>
 
         <label class="checkbox">
-          <input [sxField]="preferences.newsletter" type="checkbox" />
+          <input name="preferences.newsletter" type="checkbox" />
           <span>Send release notes and onboarding emails</span>
         </label>
       </section>
@@ -180,26 +204,30 @@
         <div class="grid two">
           <label class="field">
             <span>Start date</span>
-            <input #v="sxField" [sxField]="availability.startDate" type="date" />
-            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+            <input name="availability.startDate" type="date" required />
+            @if (fieldError("availability.startDate"); as error) {
+              <small class="error">{{ error }}</small>
+            }
           </label>
 
           <label class="field range-field">
             <span>Hours per week</span>
             <input
-              #v="sxField"
-              [sxField]="availability.hoursPerWeek"
+              name="availability.hoursPerWeek"
               type="range"
               min="10"
               max="60"
+              required
             />
-            <strong>{{ availability.hoursPerWeek.value.value }} hrs/week</strong>
-            <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+            <strong>{{ ui.hoursPerWeek }} hrs/week</strong>
+            @if (fieldError("availability.hoursPerWeek"); as error) {
+              <small class="error">{{ error }}</small>
+            }
           </label>
         </div>
 
         <label class="checkbox">
-          <input [sxField]="availability.remote" type="checkbox" />
+          <input name="availability.remote" type="checkbox" />
           <span>Open to remote collaboration</span>
         </label>
       </section>
@@ -218,18 +246,22 @@
             <div class="skill-row">
               <label class="field">
                 <span>Skill</span>
-                <input #v="sxField" [sxField]="skill.fields.name" type="text" />
-                <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+                <input [name]="'skills.' + i + '.name'" type="text" required minlength="2" />
+                @if (fieldError("skills." + i + ".name"); as error) {
+                  <small class="error">{{ error }}</small>
+                }
               </label>
 
               <label class="field compact">
                 <span>Years</span>
-                <input #v="sxField" [sxField]="skill.fields.years" type="number" min="1" max="20" />
-                <small class="error" *ngIf="v.error" [id]="v.errorId">{{ v.error }}</small>
+                <input [name]="'skills.' + i + '.years'" type="number" min="1" max="20" required />
+                @if (fieldError("skills." + i + ".years"); as error) {
+                  <small class="error">{{ error }}</small>
+                }
               </label>
 
               <label class="checkbox compact-checkbox">
-                <input [sxField]="skill.fields.primary" type="checkbox" />
+                <input [name]="'skills.' + i + '.primary'" type="checkbox" />
                 <span>Primary</span>
               </label>
 

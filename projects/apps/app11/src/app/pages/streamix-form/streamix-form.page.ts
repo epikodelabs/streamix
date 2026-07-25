@@ -1,9 +1,12 @@
 import { CommonModule } from "@angular/common";
 import {
+  AfterViewInit,
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  ElementRef,
   OnDestroy,
+  ViewChild,
   inject,
 } from "@angular/core";
 import { atom, derived } from "@epikodelabs/streamix";
@@ -20,24 +23,29 @@ import {
   formatProfileJson,
   type ProfileFormValue,
 } from "../../shared/profile-model";
-import { StreamixFieldDirective } from "../../shared/streamix-field.directive";
+import {
+  bindStreamixForm,
+  fieldError,
+  fieldHint,
+  type StreamixFormBinding,
+} from "../../shared/streamix-form-binding";
 
 @Component({
   standalone: true,
-  imports: [CommonModule, StreamixFieldDirective],
+  imports: [CommonModule],
   templateUrl: "./streamix-form.page.html",
   styleUrl: "./streamix-form.page.scss",
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class StreamixFormPageComponent implements OnDestroy {
+export class StreamixFormPageComponent
+  implements AfterViewInit, OnDestroy {
   private readonly cdr = inject(ChangeDetectorRef);
+  private binding?: StreamixFormBinding;
+
+  @ViewChild("profileForm")
+  private readonly profileFormRef?: ElementRef<HTMLFormElement>;
 
   readonly form = createProfileForm();
-  readonly profile = this.form.fields.profile.fields;
-  readonly security = this.form.fields.security.fields;
-  readonly address = this.form.fields.address.fields;
-  readonly preferences = this.form.fields.preferences.fields;
-  readonly availability = this.form.fields.availability.fields;
   readonly skills = this.form.fields.skills;
   readonly contactOptions = contactOptions;
   readonly themeOptions = themeOptions;
@@ -51,6 +59,13 @@ export class StreamixFormPageComponent implements OnDestroy {
   private readonly stopUiState = this.uiState.subscribe(() =>
     this.cdr.detectChanges(),
   );
+
+  ngAfterViewInit(): void {
+    const element = this.profileFormRef?.nativeElement;
+    if (!element) return;
+
+    this.binding = bindStreamixForm(element, this.form);
+  }
 
   submit(event: Event): void {
     event.preventDefault();
@@ -80,10 +95,19 @@ export class StreamixFormPageComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.binding?.dispose();
     this.stopUiState();
     this.uiState.dispose();
     this.submittedPayload.dispose();
     this.form.dispose();
+  }
+
+  fieldError(path: string, pendingHint?: string): string | null {
+    return fieldError(this.form, path, pendingHint);
+  }
+
+  fieldHint(path: string, pendingHint?: string): string | null {
+    return fieldHint(this.form, path, pendingHint);
   }
 
   private createUiState(
@@ -95,13 +119,8 @@ export class StreamixFormPageComponent implements OnDestroy {
     return {
       completion: calculateCompletion(snapshot),
       contactMethod: snapshot.preferences.contactMethod,
-      confirmPasswordLengthError: this.minimumLengthError(
-        security.fields.confirmPassword.value.value,
-      ),
+      hoursPerWeek: snapshot.availability.hoursPerWeek,
       passwordError: this.passwordError(security.touched.value),
-      passwordLengthError: this.minimumLengthError(
-        security.fields.password.value.value,
-      ),
       preview: formatProfileJson(snapshot),
       remainingBio: 240 - snapshot.profile.bio.length,
       remote: snapshot.availability.remote,
@@ -118,12 +137,6 @@ export class StreamixFormPageComponent implements OnDestroy {
       formIssues !== null &&
       "passwordMismatch" in formIssues
       ? "Passwords are incomplete or mismatched."
-      : null;
-  }
-
-  private minimumLengthError(value: string): string | null {
-    return value.length > 0 && value.length < 8
-      ? "Minimum length is 8."
       : null;
   }
 

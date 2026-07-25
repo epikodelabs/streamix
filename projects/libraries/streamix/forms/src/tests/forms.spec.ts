@@ -99,6 +99,80 @@ describe('Forms', () => {
     name.dispose();
   });
 
+  it('applies and removes field validation sources at runtime', async () => {
+    const name = field('', { validateInitial: false });
+    const syncSource = {};
+    const asyncSource = {};
+
+    name.useValidation(syncSource, {
+      checks: value => value === '' ? { required: true } : null,
+    });
+
+    expect(name.issues.value).toEqual({ required: true });
+    expect(name.invalid.value).toBeTrue();
+
+    name.set('Ada');
+    expect(name.issues.value).toBeNull();
+
+    name.useValidation(asyncSource, {
+      asyncChecks: async value => value === 'taken' ? { usernameTaken: true } : null,
+    });
+
+    name.set('taken');
+    await new Promise<void>(resolve => setTimeout(resolve));
+    expect(name.issues.value).toEqual({ usernameTaken: true });
+
+    name.clearValidation(asyncSource);
+    await new Promise<void>(resolve => setTimeout(resolve));
+    expect(name.issues.value).toBeNull();
+
+    name.clearValidation(syncSource);
+    name.set('');
+    expect(name.issues.value).toBeNull();
+    expect(name.invalid.value).toBeFalse();
+
+    name.dispose();
+  });
+
+  it('applies and removes form-level validation sources at runtime', () => {
+    const password = field('secret');
+    const confirmPassword = field('mismatch');
+    const security = form(
+      { password, confirmPassword },
+      { ownsChildren: false },
+    );
+    const source = {};
+
+    security.useChecks(source, value =>
+      value.password === value.confirmPassword
+        ? null
+        : { passwordMismatch: true },
+    );
+
+    expect(security.invalid.value).toBeTrue();
+    expect(security.issues.value?.['$form']).toEqual({
+      passwordMismatch: true,
+    });
+
+    confirmPassword.set('secret');
+    expect(security.invalid.value).toBeFalse();
+
+    security.useChecks(source, value =>
+      value.password.length >= 8
+        ? null
+        : { passwordTooShort: true },
+    );
+    expect(security.invalid.value).toBeTrue();
+
+    security.clearChecks(source);
+    expect(security.issues.value).toBeNull();
+    expect(security.invalid.value).toBeFalse();
+
+    security.dispose();
+    password.dispose();
+    confirmPassword.dispose();
+  });
+
   it('enables containers without emitting an intermediate partial value', () => {
     const name = field('Ada');
     const profile = form({ name }, { ownsChildren: false });

@@ -4,14 +4,17 @@ import {
   ElementRef,
   HostListener,
   Input,
-  OnChanges,
   NgZone,
+  OnChanges,
   OnDestroy,
   inject,
 } from "@angular/core";
 import {
+  checks,
   formatFieldError,
+  type Check,
   type Field,
+  type FieldValidationSource,
   watchNode,
 } from "@epikodelabs/streamix/forms";
 
@@ -26,6 +29,12 @@ type ElementKind =
   | "number"
   | "select"
   | "text";
+
+export interface ValidationRegistration<TValidation> {
+  update(validation: TValidation): void;
+  revalidate(): void;
+  dispose(): void;
+}
 
 function detectKind(
   element: NativeFieldElement,
@@ -66,8 +75,15 @@ export class StreamixFieldDirective
   private readonly zone = inject(NgZone);
 
   private stopWatching?: () => void;
+  private attachedField?: Field<unknown>;
   private kind: ElementKind = "text";
-  private readonly descriptionId = ++StreamixFieldDirective.nextDescriptionId;
+  private readonly descriptionId =
+    ++StreamixFieldDirective.nextDescriptionId;
+  private readonly nativeValidationSource = {};
+  private readonly validationSources = new Map<
+    object,
+    FieldValidationSource<unknown>
+  >();
 
   readonly hintId = `sx-field-${this.descriptionId}-hint`;
   readonly errorId = `sx-field-${this.descriptionId}-error`;
@@ -107,29 +123,58 @@ export class StreamixFieldDirective
   }
 
   ngOnChanges(): void {
-    this.stopWatching?.();
+    this.detachField();
 
     this.kind = detectKind(
       this.element.nativeElement,
     );
 
-    this.stopWatching = this.sxField
-      ? watchNode(
-          this.sxField,
-          () => {
-            this.zone.run(() => {
-              this.render();
-              this.cdr.detectChanges();
-            });
-          },
-        )
-      : undefined;
-
+    this.disableNativeFormValidation();
+    this.updateNativeValidation();
+    this.attachField();
     this.render();
   }
 
   ngOnDestroy(): void {
-    this.stopWatching?.();
+    this.detachField();
+  }
+
+  addValidation(
+    initial: FieldValidationSource<unknown>,
+  ): ValidationRegistration<FieldValidationSource<unknown>> {
+    const source = {};
+    let current = initial;
+    let disposed = false;
+
+    this.validationSources.set(source, current);
+    this.applyValidationSource(source, current);
+
+    return {
+      update: validation => {
+        if (disposed) return;
+        current = validation;
+        this.validationSources.set(source, current);
+        this.applyValidationSource(source, current);
+      },
+
+      revalidate: () => {
+        if (disposed) return;
+        this.applyValidationSource(source, current);
+      },
+
+      dispose: () => {
+        if (disposed) return;
+        disposed = true;
+        this.validationSources.delete(source);
+
+        if (
+          this.attachedField &&
+          !this.attachedField.state.disposed
+        ) {
+          this.attachedField.clearValidation(source);
+        }
+      },
+    };
   }
 
   @HostListener("input")
@@ -150,6 +195,68 @@ export class StreamixFieldDirective
   onBlur(): void {
     if (!this.isActiveField()) return;
     this.sxField.touch();
+  }
+
+  private attachField(): void {
+    if (!this.sxField) return;
+
+    this.attachedField = this.sxField;
+
+    for (const [
+      source,
+      validation,
+    ] of this.validationSources) {
+      this.applyValidationSource(source, validation);
+    }
+
+    this.stopWatching = watchNode(
+      this.sxField,
+      () => {
+        this.zone.run(() => {
+          this.render();
+          this.cdr.detectChanges();
+        });
+      },
+    );
+  }
+
+  private detachField(): void {
+    this.stopWatching?.();
+    this.stopWatching = undefined;
+
+    if (
+      this.attachedField &&
+      !this.attachedField.state.disposed
+    ) {
+      for (const source of this.validationSources.keys()) {
+        this.attachedField.clearValidation(source);
+      }
+    }
+
+    this.attachedField = undefined;
+  }
+
+  private updateNativeValidation(): void {
+    this.validationSources.set(
+      this.nativeValidationSource,
+      {
+        checks: this.collectNativeChecks(),
+      },
+    );
+  }
+
+  private applyValidationSource(
+    source: object,
+    validation: FieldValidationSource<unknown>,
+  ): void {
+    if (!this.attachedField || this.attachedField.state.disposed) {
+      return;
+    }
+
+    this.attachedField.useValidation(
+      source,
+      validation,
+    );
   }
 
   private usesInputEvent(): boolean {
@@ -177,7 +284,89 @@ export class StreamixFieldDirective
   }
 
   private isActiveField(): boolean {
-    return Boolean(this.sxField && !this.sxField.state.disposed);
+    return Boolean(
+      this.sxField && !this.sxField.state.disposed,
+    );
+  }
+
+  private disableNativeFormValidation(): void {
+    const form = this.element.nativeElement.closest("form");
+
+    if (form instanceof HTMLFormElement) {
+      form.noValidate = true;
+    }
+  }
+
+  private collectNativeChecks(): Check<unknown>[] {
+    const element = this.element.nativeElement;
+    const nativeChecks: Check<unknown>[] = [];
+
+    if (
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement
+    ) {
+      if (element.required) {
+        nativeChecks.push(
+          this.kind === "checkbox"
+            ? checks.requiredTrue
+            : checks.required,
+        );
+      }
+
+      if (
+        element.minLength >= 0 &&
+        element.hasAttribute("minlength")
+      ) {
+        nativeChecks.push(
+          checks.minLength(element.minLength),
+        );
+      }
+
+      if (
+        element.maxLength >= 0 &&
+        element.hasAttribute("maxlength")
+      ) {
+        nativeChecks.push(
+          checks.maxLength(element.maxLength),
+        );
+      }
+    }
+
+    if (element instanceof HTMLInputElement) {
+      if (element.type === "email") {
+        nativeChecks.push(checks.email);
+      }
+
+      if (element.pattern) {
+        nativeChecks.push(
+          checks.pattern(element.pattern),
+        );
+      }
+
+      if (
+        this.kind === "number" &&
+        element.min !== ""
+      ) {
+        const minimum = Number(element.min);
+
+        if (Number.isFinite(minimum)) {
+          nativeChecks.push(checks.min(minimum));
+        }
+      }
+
+      if (
+        this.kind === "number" &&
+        element.max !== ""
+      ) {
+        const maximum = Number(element.max);
+
+        if (Number.isFinite(maximum)) {
+          nativeChecks.push(checks.max(maximum));
+        }
+      }
+    }
+
+    return nativeChecks;
   }
 
   private readValue(): unknown {
@@ -234,7 +423,8 @@ export class StreamixFieldDirective
 
     const invalid =
       this.sxField.invalid.value &&
-      (this.sxField.dirty.value || this.sxField.touched.value);
+      (this.sxField.dirty.value ||
+        this.sxField.touched.value);
 
     element.classList.toggle(
       "is-invalid",
@@ -254,7 +444,9 @@ export class StreamixFieldDirective
     this.renderDescriptions(element);
   }
 
-  private renderDescriptions(element: NativeFieldElement): void {
+  private renderDescriptions(
+    element: NativeFieldElement,
+  ): void {
     const error = this.error;
     const hint = this.hint;
     const describedBy = [
@@ -263,15 +455,23 @@ export class StreamixFieldDirective
     ].filter((id): id is string => id !== null);
 
     if (describedBy.length > 0) {
-      element.setAttribute("aria-describedby", describedBy.join(" "));
+      element.setAttribute(
+        "aria-describedby",
+        describedBy.join(" "),
+      );
     } else {
       element.removeAttribute("aria-describedby");
     }
 
     if (error) {
-      element.setAttribute("aria-errormessage", this.errorId);
+      element.setAttribute(
+        "aria-errormessage",
+        this.errorId,
+      );
     } else {
-      element.removeAttribute("aria-errormessage");
+      element.removeAttribute(
+        "aria-errormessage",
+      );
     }
   }
 }
