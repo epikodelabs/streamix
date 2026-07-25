@@ -8,6 +8,7 @@ import {
   SimpleChanges,
   inject,
 } from '@angular/core';
+
 import { bindForm, type FormDomBinding } from './bind-form';
 import type { Form } from './forms';
 
@@ -33,7 +34,13 @@ export class StreamixFormBindingDirective
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (this.initialized && changes['sxFormBinding']) {
+    const change = changes['sxFormBinding'];
+
+    if (
+      this.initialized &&
+      change &&
+      !Object.is(change.previousValue, change.currentValue)
+    ) {
       this.connect();
     }
   }
@@ -45,6 +52,15 @@ export class StreamixFormBindingDirective
 
   private connect(): void {
     this.binding?.dispose();
-    this.binding = bindForm(this.element, this.sxFormBinding);
+    this.binding = undefined;
+
+    if (!this.sxFormBinding) {
+      return;
+    }
+
+    this.binding = bindForm(
+      this.element,
+      this.sxFormBinding,
+    );
   }
 }
