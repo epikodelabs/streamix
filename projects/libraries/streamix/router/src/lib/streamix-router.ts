@@ -23,11 +23,20 @@ import {
 import {
   ModuleRegistry,
   runWithInjector,
-  unwrapDefault,
+  unwrapDefault
 } from './adapter-utils';
-import type { NamedNavigationTarget, NavigationTarget } from './navigation-types';
+import { NamedNavigationTarget, NavigationTarget } from './navigation-types';
 import { adaptRouteComponent, bindRouteInputs } from './route-adapter';
-import type { ComponentSource, RouteView } from './route-branch-types';
+import {
+  BeforeEnter,
+  BeforeLeave,
+  MaybePromise,
+  RouteLoader,
+  StreamixRoute,
+  StreamixRouteModule,
+  StreamixRouteProviders,
+  StreamixRoutes
+} from './route-types';
 import {
   OUTLET_ACTIVATE_EVENT,
   OUTLET_DEACTIVATE_EVENT,
@@ -43,7 +52,6 @@ import {
 import {
   createRouter,
   type ActivatedRoute,
-  type DeactivationContext,
   type NavigationContext,
   type NavigationOptions,
   type PreloadingStrategy,
@@ -53,50 +61,8 @@ import {
   type Router,
   type RouterState,
   type ScrollRestorationMode,
-  type ViewTransitionsOption,
+  type ViewTransitionsOption
 } from './vanilla-router';
-
-export type MaybePromise<T> = T | PromiseLike<T>;
-export type Lazy<T> = () => MaybePromise<T | { default: T }>;
-
-export type RouteRedirect = {
-  readonly redirectTo: string | URL;
-  readonly replace?: boolean;
-};
-
-export type BeforeEnter = (
-  context: NavigationContext,
-) => MaybePromise<boolean | string | URL | RouteRedirect>;
-
-export type BeforeLeave = (
-  context: DeactivationContext,
-) => MaybePromise<boolean | string | URL | RouteRedirect>;
-
-export type RouteLoader<T = unknown> = (
-  context: NavigationContext,
-) => MaybePromise<T>;
-
-export type RouteLoaders = Readonly<Record<string, RouteLoader>>;
-export type StreamixRouteProviders = readonly EnvironmentProviders[];
-
-export interface StreamixRoute {
-  readonly path: string;
-  readonly name?: string;
-  readonly view?: RouteView;
-  readonly loadView?: Lazy<RouteView>;
-  readonly redirectTo?: string;
-  readonly data?: Readonly<Record<string, unknown>>;
-  readonly preload?: boolean;
-  readonly viewTransition?: boolean;
-  readonly paramsSchema?: Record<string, ParamSchema<unknown>>;
-  readonly searchSchema?: Record<string, SearchSchema<unknown>>;
-  readonly beforeEnter?: readonly BeforeEnter[];
-  readonly beforeLeave?: readonly BeforeLeave[];
-  readonly load?: RouteLoaders;
-  readonly providers?: StreamixRouteProviders;
-}
-
-export type StreamixRoutes = readonly StreamixRoute[];
 
 // --- Type-safe proxy types ---
 
@@ -255,37 +221,37 @@ function adaptRoute(route: StreamixRoute, context: AdapterContext): Route {
     data: route.data,
     preload: route.preload,
     viewTransition: route.viewTransition,
-    load: async () => {
-      let componentSource: ComponentSource | undefined;
-      let children: StreamixRoutes | undefined;
+    load: route.load
+      ? async () => {
+          const module = unwrapDefault(
+            await route.load!(),
+          ) as StreamixRouteModule;
 
-      if (route.loadView) {
-        const loadedView = await unwrapDefault(route.loadView());
-        if (typeof loadedView === 'function') {
-          componentSource = loadedView as ComponentSource;
-        } else {
-          componentSource = loadedView.component;
-          children = loadedView.routes;
+          return {
+            component: module.component
+              ? adaptRouteComponent(module.component, context, module.providers)
+              : undefined,
+            routes: module.routes ? adaptRoutes(module.routes, context) : undefined,
+            canActivate: adaptBeforeEnter(module.beforeEnter, context.injector),
+            canDeactivate: adaptBeforeLeave(module.beforeLeave, context.injector),
+            resolve: adaptLoaders(
+              module.resolve,
+              route.paramsSchema,
+              route.searchSchema,
+              context.injector,
+            ),
+          };
         }
-      } else if (route.view) {
-        if (typeof route.view === 'function') {
-          componentSource = route.view as ComponentSource;
-        } else {
-          componentSource = route.view.component;
-          children = route.view.routes;
-        }
-      }
-
-      return {
-        component: componentSource
-          ? adaptRouteComponent(componentSource, context, route.providers)
-          : undefined,
-        routes: children ? adaptRoutes(children, context) : [],
-        canActivate: adaptBeforeEnter(route.beforeEnter, context.injector),
-        canDeactivate: adaptBeforeLeave(route.beforeLeave, context.injector),
-        resolve: adaptLoaders(route, context.injector),
-      };
-    },
+      : route.paramsSchema || route.searchSchema
+        ? async () => ({
+            resolve: adaptLoaders(
+              undefined,
+              route.paramsSchema,
+              route.searchSchema,
+              context.injector,
+            ),
+          })
+        : undefined,
   };
 }
 
@@ -346,13 +312,11 @@ function createParamsResolver(
 }
 
 function adaptLoaders(
-  route: Pick<StreamixRoute, 'load' | 'paramsSchema' | 'searchSchema'>,
+  loaders: StreamixRouteModule['resolve'] | undefined,
+  paramsSchema: StreamixRoute['paramsSchema'],
+  searchSchema: StreamixRoute['searchSchema'],
   injector: EnvironmentInjector,
 ): Route['resolve'] {
-  const loaders = route.load;
-  const paramsSchema = route.paramsSchema;
-  const searchSchema = route.searchSchema;
-
   if (!loaders && !paramsSchema && !searchSchema) return undefined;
 
   const mergedLoaders = {
@@ -411,10 +375,7 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
   private currentState: RouterState = EMPTY_ROUTER_STATE;
   private outlet: HTMLElement | null = null;
   private modules = new ModuleRegistry();
-  private readonly namedRouteMap = new Map<
-    string,
-    { readonly route: StreamixRoute; readonly fullPath: string }
-  >();
+  private readonly namedRouteMap = new Map<string, { route: StreamixRoute; fullPath: string }>();
 
   public readonly navigateTo: TypedNavigate<TRoutes>;
   public readonly hrefTo: TypedHref<TRoutes>;
@@ -422,7 +383,7 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
   constructor() {
     this.destroyRef.onDestroy(() => this.dispose());
     this.collectAndValidateRoutes(this.configuration.routes);
-
+    
     this.navigateTo = this.createNavigateToProxy();
     this.hrefTo = this.createHrefToProxy();
   }
@@ -597,29 +558,20 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
   }
 
   private generateUrlFromNamedRoute(target: NamedNavigationTarget): string | null {
-    const entry = this.namedRouteMap.get(target.name);
-    if (!entry) {
+    const record = this.namedRouteMap.get(target.name);
+    if (!record) {
       console.error(`[StreamixRouter] Route with name "${target.name}" not found.`);
       return null;
     }
 
-    const { route, fullPath } = entry;
-    let path = fullPath;
+    let path = record.fullPath;
     const params = target.params ?? {};
 
     for (const key in params) {
       if (Object.prototype.hasOwnProperty.call(params, key)) {
-        const value = encodeURIComponent(String((params as Record<string, unknown>)[key]));
-        path = path.replace(new RegExp(`:${key}(?=/|$)`), value);
+        const value = String((params as any)[key]);
+        path = path.replace(`:${key}`, encodeURIComponent(value));
       }
-    }
-
-    const missingParam = path.match(/:([A-Za-z0-9_]+)/)?.[1];
-    if (missingParam) {
-      console.error(
-        `[StreamixRouter] Missing parameter "${missingParam}" for route "${target.name}".`,
-      );
-      return null;
     }
 
     if (target.search) {
@@ -632,33 +584,19 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
     return routerHref(resolveRouterUrl(path, this.baseHref, window.location, 'href'));
   }
 
-  private collectAndValidateRoutes(
-    routes: StreamixRoutes,
-    parentPath = '',
-  ): void {
+  private collectAndValidateRoutes(routes: StreamixRoutes, prefix = '') {
     for (const route of routes) {
-      const fullPath = [parentPath, route.path]
-        .filter(Boolean)
-        .join('/')
-        .replace(/\/+/g, '/');
+      const fullPath = [prefix, route.path].filter(Boolean).join('/');
 
       if (route.name) {
         if (this.namedRouteMap.has(route.name)) {
           throw new Error(
-            `Duplicate route name "${route.name}". Route names must be globally unique.`,
+            `Duplicate route name "${route.name}". Route names must be globally unique.`
           );
         }
         this.namedRouteMap.set(route.name, { route, fullPath });
       }
 
-      const children =
-        route.view && typeof route.view !== 'function'
-          ? route.view.routes
-          : undefined;
-
-      if (children) {
-        this.collectAndValidateRoutes(children, fullPath);
-      }
     }
   }
 }
@@ -700,29 +638,6 @@ export class StreamixOutlet {
       }
     });
   }
-}
-
-function shouldNavigate(
-  event: MouseEvent,
-  anchor: HTMLAnchorElement,
-): boolean {
-  return !(
-    event.defaultPrevented ||
-    event.button !== 0 ||
-    event.metaKey ||
-    event.ctrlKey ||
-    event.shiftKey ||
-    event.altKey ||
-    (anchor.target !== '' && anchor.target !== '_self') ||
-    anchor.hasAttribute('download') ||
-    anchor.relList.contains('external')
-  );
-}
-
-function reportNavigationError(error: unknown): void {
-  queueMicrotask(() => {
-    throw error;
-  });
 }
 
 @NgModule({
