@@ -1,18 +1,26 @@
 import {
-    type Form
+  type Check,
+  type Form,
+  type FormCompleteValue,
+  type NodeMap,
 } from './forms';
 import {
-    bindControl,
-    nativeControlSignature,
-    type BoundControl,
-    type NativeFieldElement
+  bindControl,
+  isNativeFieldElement,
+  nativeControlSignature,
+  type BoundControl,
+  type NativeFieldElement,
 } from './native-control';
-import { resolveField } from './path';
+import { resolveField, resolveNode } from './path';
 import {
-    findAttributeName,
-    templateValidators,
-    type BoundTemplateValidator,
-    type TemplateValidatorDefinition
+  findAttributeName,
+  inferContainerPath,
+  normalizePath,
+  templateValidatorSignature,
+  templateValidators,
+  type BoundTemplateValidator,
+  type TemplateValidatorContext,
+  type TemplateValidatorDefinition,
 } from './template-validators';
 
 export interface FormDomBinding {
@@ -187,7 +195,81 @@ export function bindForm(
     definition: TemplateValidatorDefinition,
     existing?: BoundTemplateValidator,
   ): BoundTemplateValidator | undefined {
-    // Implementation will be added in the next steps
-    return undefined;
+    const attributeValue = element.getAttribute(attributeName);
+    const baseContext = {
+      root,
+      element,
+      attribute: definition.attribute,
+      attributeValue,
+    };
+
+    if (definition.kind === 'field') {
+      if (!isNativeFieldElement(element) || !element.name) return undefined;
+
+      const field = resolveField(form, element.name);
+      if (!field) return undefined;
+
+      const targetPath = element.name;
+      const signature = templateValidatorSignature(
+        definition,
+        targetPath,
+        attributeValue,
+      );
+      if (existing?.signature === signature) return existing;
+
+      const source = {};
+      const validation = definition.validation({
+        ...baseContext,
+        targetPath,
+      });
+
+      field.useValidation(source, validation);
+
+      return {
+        definition,
+        signature,
+        dispose: () => {
+          if (!field.state.disposed) field.clearValidation(source);
+        },
+      };
+    }
+
+    // Form-level validator
+    const targetPath =
+      definition.resolvePath?.(baseContext) ??
+      normalizePath(attributeValue) ??
+      inferContainerPath(element);
+
+    if (!targetPath) return undefined;
+
+    const node = resolveNode(form, targetPath);
+    if (!node || node.kind !== 'form') return undefined;
+
+    const target = node as Form<NodeMap>;
+    const signature = templateValidatorSignature(
+      definition,
+      targetPath,
+      attributeValue,
+    );
+    if (existing?.signature === signature) return existing;
+
+    const source = {};
+    const context: TemplateValidatorContext = {
+      ...baseContext,
+      targetPath,
+    };
+
+    target.useChecks(
+      source,
+      definition.checks(context) as Check<FormCompleteValue<NodeMap>>,
+    );
+
+    return {
+      definition,
+      signature,
+      dispose: () => {
+        if (!target.state.disposed) target.clearChecks(source);
+      },
+    };
   }
 }
