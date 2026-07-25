@@ -281,12 +281,6 @@ function normalizeRenderedRouteNode(value: Node | RenderedRouteNode): RenderedRo
   return isRenderedRouteNode(value) ? value : { node: value };
 }
 
-function unwrapDefault<T>(value: T | { default: T }): T {
-  if (value !== null && typeof value === 'object' && 'default' in value) {
-    return (value as { default: T }).default;
-  }
-  return value as T;
-}
 
 function executeGuard(guard: CanActivate, route: NavigationContext): MaybePromise<GuardResult> {
   return typeof guard === 'function' ? guard(route) : guard.canActivate(route);
@@ -941,17 +935,18 @@ export function createRouter(config: RouterConfig): Router {
     route: Route,
     seen: WeakSet<Route>,
   ): Promise<void> {
-    if (seen.has(route)) {
-      return;
-    }
+    if (seen.has(route)) return;
     seen.add(route);
 
-    if (shouldPreloadRoute(route) && route.loadComponent) {
-      try {
-        await route.loadComponent();
-      } catch (error) {
-        trace('Route component preload failed', route.path, error);
+    if (!shouldPreloadRoute(route)) return;
+
+    try {
+      const loaded = await loadRoute(route);
+      for (const child of loaded.routes ?? []) {
+        await preloadBranch(child, seen);
       }
+    } catch (error) {
+      trace('Route preload failed', route.path, error);
     }
   }
 
@@ -1020,7 +1015,10 @@ export function createRouter(config: RouterConfig): Router {
         signal,
       };
 
-      for (const guard of routeState.config.canDeactivate ?? []) {
+      const loaded = await loadRoute(routeState.config);
+      throwIfAborted(signal);
+
+      for (const guard of loaded.canDeactivate ?? []) {
         const result = await executeDeactivationGuard(guard, context);
         throwIfAborted(signal);
         const redirect = readRedirect(result);
@@ -1074,18 +1072,18 @@ export function createRouter(config: RouterConfig): Router {
         throw new Error('Route render chain is empty');
       }
 
-      if (!routeState.config.loadComponent) {
+      const loaded = await loadRoute(routeState.config);
+      throwIfAborted(signal);
+
+      if (!loaded.component) {
         if (index === routeStates.length - 1) {
           throw new Error(`Matched route "${routeState.config.path}" has no component`);
         }
         return renderAt(index + 1);
       }
 
-      const loaded = await routeState.config.loadComponent();
-      throwIfAborted(signal);
-      const component = unwrapDefault(loaded);
       const output = normalizeRenderedRouteNode(
-        await component(routeState, {
+        await loaded.component(routeState, {
           signal,
           destroySignal: destroyController.signal,
         })
@@ -1275,7 +1273,6 @@ export function createRouter(config: RouterConfig): Router {
     setPhase(request, 'resolving');
     const resolvedData: Record<string, unknown> = {};
     for (let i = 0; i < match.chain.length; i++) {
-      const route = match.chain[i];
       const context: NavigationContext = {
         ...baseRoute,
         data: Object.freeze({ ...staticData, ...resolvedData }),
@@ -1362,7 +1359,7 @@ export function createRouter(config: RouterConfig): Router {
         const href = url.pathname + url.search + url.hash;
         const historyState = window.history.state;
         const historyUpdate = createHistoryUpdate(href, redirect.replace, historyState);
-        window.historyredirect.replace ? 'replaceState' : 'pushState';
+        window.history[redirect.replace ? 'replaceState' : 'pushState'](historyState, '', href);
         dispatchRouterLocationChange();
         void requestNavigation(url, 0, request.completion, historyUpdate);
         return;

@@ -1,7 +1,7 @@
 import { type EnvironmentInjector, type Type, reflectComponentType } from '@angular/core';
 
 import { unwrapDefault } from './adapter-utils';
-import { ComponentSource } from './route-branch-types';
+import type { ComponentSource } from './route-branch-types';
 import type { ActivatedRoute, RouteComponent } from './vanilla-router';
 
 export type MaybePromise<T> = T | PromiseLike<T>;
@@ -35,6 +35,10 @@ function getRouteInputBindings(
   component: Type<unknown>,
 ): readonly RouteInputBinding[] {
   return reflectComponentType(component)?.inputs ?? [];
+}
+
+function isAngularComponent(value: ComponentSource): value is Type<unknown> {
+  return reflectComponentType(value as Type<unknown>) !== null;
 }
 
 function isRouteInputBindingList(
@@ -94,12 +98,10 @@ export function adaptRouteComponent<TProviders>(
   context: RouteAdapterContext<TProviders>,
   routeProviders?: readonly TProviders[],
 ): RouteComponent {
-  if (typeof componentSource !== 'function') {
-    // Eager component
+  if (isAngularComponent(componentSource)) {
     return context.render(componentSource, context.injector, routeProviders);
   }
 
-  // Lazy component
   const loadComponent = componentSource;
   let loaded: Promise<Type<unknown>> | undefined;
 

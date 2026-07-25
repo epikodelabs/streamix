@@ -1,5 +1,5 @@
-import { Type } from '@angular/core';
-import { Lazy, StreamixRoutes } from './streamix-router';
+import type { Type } from '@angular/core';
+import type { Lazy, StreamixRoutes } from './streamix-router';
 
 /**
  * A source for a component, which can be either a direct reference to the component's class

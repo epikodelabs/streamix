@@ -22,11 +22,12 @@ import {
 
 import {
   ModuleRegistry,
-  runWithInjector
+  runWithInjector,
+  unwrapDefault,
 } from './adapter-utils';
-import { NamedNavigationTarget, NavigationTarget } from './navigation-types';
+import type { NamedNavigationTarget, NavigationTarget } from './navigation-types';
 import { adaptRouteComponent, bindRouteInputs } from './route-adapter';
-import { ComponentSource, RouteView } from './route-branch-types';
+import type { ComponentSource, RouteView } from './route-branch-types';
 import {
   OUTLET_ACTIVATE_EVENT,
   OUTLET_DEACTIVATE_EVENT,
@@ -247,9 +248,6 @@ function adaptRoutes(
 }
 
 function adaptRoute(route: StreamixRoute, context: AdapterContext): Route {
-  const routeView = route.view ?? route.loadView;
-  const isBranch = routeView && typeof routeView !== 'function' && 'component' in routeView;
-
   return {
     name: route.name,
     path: route.path,
@@ -263,14 +261,14 @@ function adaptRoute(route: StreamixRoute, context: AdapterContext): Route {
 
       if (route.loadView) {
         const loadedView = await unwrapDefault(route.loadView());
-        if (typeof loadedView === 'function' || !('component' in loadedView)) {
+        if (typeof loadedView === 'function') {
           componentSource = loadedView as ComponentSource;
         } else {
           componentSource = loadedView.component;
           children = loadedView.routes;
         }
       } else if (route.view) {
-        if (typeof route.view === 'function' || !('component' in route.view)) {
+        if (typeof route.view === 'function') {
           componentSource = route.view as ComponentSource;
         } else {
           componentSource = route.view.component;
@@ -279,7 +277,9 @@ function adaptRoute(route: StreamixRoute, context: AdapterContext): Route {
       }
 
       return {
-        component: componentSource ? adaptRouteComponent(componentSource, context) : undefined,
+        component: componentSource
+          ? adaptRouteComponent(componentSource, context, route.providers)
+          : undefined,
         routes: children ? adaptRoutes(children, context) : [],
         canActivate: adaptBeforeEnter(route.beforeEnter, context.injector),
         canDeactivate: adaptBeforeLeave(route.beforeLeave, context.injector),
@@ -411,7 +411,10 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
   private currentState: RouterState = EMPTY_ROUTER_STATE;
   private outlet: HTMLElement | null = null;
   private modules = new ModuleRegistry();
-  private readonly namedRouteMap = new Map<string, StreamixRoute>();
+  private readonly namedRouteMap = new Map<
+    string,
+    { readonly route: StreamixRoute; readonly fullPath: string }
+  >();
 
   public readonly navigateTo: TypedNavigate<TRoutes>;
   public readonly hrefTo: TypedHref<TRoutes>;
@@ -594,20 +597,29 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
   }
 
   private generateUrlFromNamedRoute(target: NamedNavigationTarget): string | null {
-    const route = this.namedRouteMap.get(target.name);
-    if (!route) {
+    const entry = this.namedRouteMap.get(target.name);
+    if (!entry) {
       console.error(`[StreamixRouter] Route with name "${target.name}" not found.`);
       return null;
     }
 
-    let path = route.path;
+    const { route, fullPath } = entry;
+    let path = fullPath;
     const params = target.params ?? {};
 
     for (const key in params) {
       if (Object.prototype.hasOwnProperty.call(params, key)) {
-        const value = String((params as any)[key]);
-        path = path.replace(`:${key}`, value);
+        const value = encodeURIComponent(String((params as Record<string, unknown>)[key]));
+        path = path.replace(new RegExp(`:${key}(?=/|$)`), value);
       }
+    }
+
+    const missingParam = path.match(/:([A-Za-z0-9_]+)/)?.[1];
+    if (missingParam) {
+      console.error(
+        `[StreamixRouter] Missing parameter "${missingParam}" for route "${target.name}".`,
+      );
+      return null;
     }
 
     if (target.search) {
@@ -620,20 +632,32 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
     return routerHref(resolveRouterUrl(path, this.baseHref, window.location, 'href'));
   }
 
-  private collectAndValidateRoutes(routes: StreamixRoutes) {
+  private collectAndValidateRoutes(
+    routes: StreamixRoutes,
+    parentPath = '',
+  ): void {
     for (const route of routes) {
+      const fullPath = [parentPath, route.path]
+        .filter(Boolean)
+        .join('/')
+        .replace(/\/+/g, '/');
+
       if (route.name) {
         if (this.namedRouteMap.has(route.name)) {
           throw new Error(
-            `Duplicate route name "${route.name}". Route names must be globally unique.`
+            `Duplicate route name "${route.name}". Route names must be globally unique.`,
           );
         }
-        this.namedRouteMap.set(route.name, route);
+        this.namedRouteMap.set(route.name, { route, fullPath });
       }
 
-      const children = (route as any)?.view?.routes ?? (route as any)?.children;
-      if (children && Array.isArray(children)) {
-        this.collectAndValidateRoutes(children);
+      const children =
+        route.view && typeof route.view !== 'function'
+          ? route.view.routes
+          : undefined;
+
+      if (children) {
+        this.collectAndValidateRoutes(children, fullPath);
       }
     }
   }
