@@ -15,13 +15,11 @@ import {
   ModuleWithProviders,
   NgModule,
   Output,
-  Provider,
   Type,
   createComponent,
   createEnvironmentInjector,
-  createNgModule,
   inject,
-  makeEnvironmentProviders,
+  makeEnvironmentProviders
 } from '@angular/core';
 
 import {
@@ -30,41 +28,41 @@ import {
   unwrapDefault,
   watchRouterLocation,
 } from './adapter-utils';
+import { adaptRouteComponent, bindRouteInputs } from './route-adapter';
+import {
+  OUTLET_ACTIVATE_EVENT,
+  OUTLET_DEACTIVATE_EVENT,
+  dispatchOutletLifecycleEvent,
+} from './router-events';
+import { resolveRouterUrl, routerHref } from './router-url';
 import {
   parseParamsRecord,
   parseSearchRecord,
   type ParamSchema,
   type SearchSchema,
 } from './search-schema';
-import { resolveRouterUrl, routerHref } from './router-url';
-import {
-  OUTLET_ACTIVATE_EVENT,
-  OUTLET_DEACTIVATE_EVENT,
-  dispatchOutletLifecycleEvent,
-} from './router-events';
 import {
   createTypedRouter,
   type TypedHref,
+  type TypedHrefOptions,
   type TypedNavigate,
   type TypedNavigateOptions,
-  type TypedHrefOptions,
 } from './typed-routes';
 import {
-  type PreloadingStrategy,
-  type ScrollRestorationMode,
-  type ViewTransitionsOption,
+  createRouter,
   type ActivatedRoute,
   type DeactivationContext,
   type NavigationContext,
   type NavigationOptions,
+  type PreloadingStrategy,
   type Route,
   type RouteComponent,
   type RouteRenderContext,
   type Router,
   type RouterState,
-  createRouter,
+  type ScrollRestorationMode,
+  type ViewTransitionsOption,
 } from './vanilla-router';
-import { adaptRouteComponent, bindRouteInputs } from './route-adapter';
 
 export type MaybePromise<T> = T | PromiseLike<T>;
 export type Lazy<T> = () => MaybePromise<T | { default: T }>;
@@ -87,7 +85,7 @@ export type RouteLoader<T = unknown> = (
 ) => MaybePromise<T>;
 
 export type RouteLoaders = Readonly<Record<string, RouteLoader>>;
-export type StreamixRouteProviders = readonly (Provider | EnvironmentProviders)[];
+export type StreamixRouteProviders = readonly EnvironmentProviders[];
 
 export interface StreamixRoute {
   readonly path: string;
@@ -95,7 +93,7 @@ export interface StreamixRoute {
   readonly component?: Type<unknown>;
   readonly loadComponent?: Lazy<Type<unknown>>;
   readonly children?: StreamixRoutes;
-  readonly loadChildren?: Lazy<StreamixRoutes | Type<unknown>>;
+  readonly loadChildren?: Lazy<StreamixRoutes>;
   readonly data?: Readonly<Record<string, unknown>>;
   readonly preload?: boolean;
   readonly viewTransition?: boolean;
@@ -148,12 +146,6 @@ const STREAMIX_MODULE_ROUTES =
   new InjectionToken<readonly StreamixRoutes[]>('STREAMIX_MODULE_ROUTES');
 
 const OUTLET_ATTRIBUTE = 'data-router-outlet';
-
-function isRouteArray(
-  value: StreamixRoutes | Type<unknown>,
-): value is StreamixRoutes {
-  return Array.isArray(value);
-}
 
 function execute<TContext, TResult>(
   injector: EnvironmentInjector,
@@ -371,43 +363,8 @@ async function loadChildren(
   loader: NonNullable<StreamixRoute['loadChildren']>,
   context: AdapterContext,
 ): Promise<Route[]> {
-  const value = unwrapDefault(await loader());
-
-  if (isRouteArray(value)) {
-    return adaptRoutes(value, context);
-  }
-
-  return loadModuleRoutes(value, context);
-}
-
-function loadModuleRoutes(
-  moduleType: Type<unknown>,
-  parent: AdapterContext,
-): Route[] {
-  const moduleRef = createNgModule(moduleType, parent.injector);
-
-  try {
-    const routeGroups = moduleRef.injector.get(STREAMIX_MODULE_ROUTES, []);
-    const routes = routeGroups.flat();
-
-    if (routes.length === 0) {
-      throw new Error('Lazy Streamix module has no registered routes.');
-    }
-
-    const context: AdapterContext = {
-      injector: moduleRef.injector as EnvironmentInjector,
-      render: parent.render,
-      modules: parent.modules,
-    };
-
-    const adapted = adaptRoutes(routes, context);
-    parent.modules.add(moduleRef);
-
-    return adapted;
-  } catch (error) {
-    moduleRef.destroy();
-    throw error;
-  }
+  const routes = unwrapDefault(await loader());
+  return adaptRoutes(routes, context);
 }
 
 const EMPTY_ROUTER_STATE: RouterState = Object.freeze({
