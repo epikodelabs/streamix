@@ -1,15 +1,10 @@
 import { type EnvironmentInjector, type Type, reflectComponentType } from '@angular/core';
 
 import { unwrapDefault } from './adapter-utils';
-import type { ActivatedRoute, Route, RouteComponent } from './vanilla-router';
+import { ComponentSource } from './route-branch-types';
+import type { ActivatedRoute, RouteComponent } from './vanilla-router';
 
 export type MaybePromise<T> = T | PromiseLike<T>;
-export type LazyComponent<T> = () => MaybePromise<T | { default: T }>;
-
-export interface RouteInputBinding {
-  readonly propName: string;
-  readonly templateName: string;
-}
 
 export interface InputBindingTarget {
   setInput(name: string, value: unknown): void;
@@ -17,8 +12,6 @@ export interface InputBindingTarget {
 
 export interface AdaptComponentRoute<TProviders = unknown> {
   readonly path: string;
-  readonly component?: Type<unknown>;
-  readonly loadComponent?: LazyComponent<Type<unknown>>;
   readonly providers?: readonly TProviders[];
 }
 
@@ -31,6 +24,11 @@ export type RouteComponentRenderer<TProviders = unknown> = (
 export interface RouteAdapterContext<TProviders = unknown> {
   readonly injector: EnvironmentInjector;
   readonly render: RouteComponentRenderer<TProviders>;
+}
+
+export interface RouteInputBinding {
+  readonly propName: string;
+  readonly templateName: string;
 }
 
 function getRouteInputBindings(
@@ -92,19 +90,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function adaptRouteComponent<TProviders>(
-  route: AdaptComponentRoute<TProviders>,
+  componentSource: ComponentSource,
   context: RouteAdapterContext<TProviders>,
-): Route['loadComponent'] {
-  if (route.component) {
-    return async () =>
-      context.render(route.component!, context.injector, route.providers);
+  routeProviders?: readonly TProviders[],
+): RouteComponent {
+  if (typeof componentSource !== 'function') {
+    // Eager component
+    return context.render(componentSource, context.injector, routeProviders);
   }
 
-  if (!route.loadComponent) {
-    return undefined;
-  }
-
-  const loadComponent = route.loadComponent;
+  // Lazy component
+  const loadComponent = componentSource;
   let loaded: Promise<Type<unknown>> | undefined;
 
   return async () => {
@@ -115,6 +111,6 @@ export function adaptRouteComponent<TProviders>(
         throw error;
       });
 
-    return context.render(await loaded, context.injector, route.providers);
+    return context.render(await loaded, context.injector, routeProviders);
   };
 }

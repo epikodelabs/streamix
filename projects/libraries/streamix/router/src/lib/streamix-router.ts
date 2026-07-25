@@ -1,7 +1,6 @@
 import { APP_BASE_HREF } from '@angular/common';
 import {
   ApplicationRef,
-  ChangeDetectorRef,
   DestroyRef,
   Directive,
   ElementRef,
@@ -11,7 +10,6 @@ import {
   Injectable,
   InjectionToken,
   Injector,
-  Input,
   ModuleWithProviders,
   NgModule,
   Output,
@@ -24,10 +22,11 @@ import {
 
 import {
   ModuleRegistry,
-  runWithInjector,
-  watchRouterLocation
+  runWithInjector
 } from './adapter-utils';
+import { NamedNavigationTarget, NavigationTarget } from './navigation-types';
 import { adaptRouteComponent, bindRouteInputs } from './route-adapter';
+import { ComponentSource, RouteView } from './route-branch-types';
 import {
   OUTLET_ACTIVATE_EVENT,
   OUTLET_DEACTIVATE_EVENT,
@@ -40,13 +39,6 @@ import {
   type ParamSchema,
   type SearchSchema,
 } from './search-schema';
-import {
-  createTypedRouter,
-  type TypedHref,
-  type TypedHrefOptions,
-  type TypedNavigate,
-  type TypedNavigateOptions,
-} from './typed-routes';
 import {
   createRouter,
   type ActivatedRoute,
@@ -89,11 +81,9 @@ export type StreamixRouteProviders = readonly EnvironmentProviders[];
 export interface StreamixRoute {
   readonly path: string;
   readonly name?: string;
+  readonly view?: RouteView;
+  readonly loadView?: Lazy<RouteView>;
   readonly redirectTo?: string;
-  readonly component?: Type<unknown>;
-  readonly loadComponent?: Lazy<Type<unknown>>;
-  readonly children?: StreamixRoutes;
-  readonly loadChildren?: Lazy<StreamixRoutes>;
   readonly data?: Readonly<Record<string, unknown>>;
   readonly preload?: boolean;
   readonly viewTransition?: boolean;
@@ -106,6 +96,16 @@ export interface StreamixRoute {
 }
 
 export type StreamixRoutes = readonly StreamixRoute[];
+
+// --- Type-safe proxy types ---
+
+type TypedNavigate<TRoutes extends StreamixRoutes> = {
+  [K in TRoutes[number]['name'] & string]: (options?: { params?: any, search?: any }) => Promise<boolean>;
+};
+
+type TypedHref<TRoutes extends StreamixRoutes> = {
+  [K in TRoutes[number]['name'] & string]: (options?: { params?: any, search?: any }) => string | null;
+};
 
 export interface StreamixRouterOptions {
   readonly baseHref?: string;
@@ -247,6 +247,9 @@ function adaptRoutes(
 }
 
 function adaptRoute(route: StreamixRoute, context: AdapterContext): Route {
+  const routeView = route.view ?? route.loadView;
+  const isBranch = routeView && typeof routeView !== 'function' && 'component' in routeView;
+
   return {
     name: route.name,
     path: route.path,
@@ -254,11 +257,35 @@ function adaptRoute(route: StreamixRoute, context: AdapterContext): Route {
     data: route.data,
     preload: route.preload,
     viewTransition: route.viewTransition,
-    canActivate: adaptBeforeEnter(route.beforeEnter, context.injector),
-    canDeactivate: adaptBeforeLeave(route.beforeLeave, context.injector),
-    resolve: adaptLoaders(route, context.injector),
-    loadComponent: adaptRouteComponent(route, context),
-    // children and loadChildren are no longer supported
+    load: async () => {
+      let componentSource: ComponentSource | undefined;
+      let children: StreamixRoutes | undefined;
+
+      if (route.loadView) {
+        const loadedView = await unwrapDefault(route.loadView());
+        if (typeof loadedView === 'function' || !('component' in loadedView)) {
+          componentSource = loadedView as ComponentSource;
+        } else {
+          componentSource = loadedView.component;
+          children = loadedView.routes;
+        }
+      } else if (route.view) {
+        if (typeof route.view === 'function' || !('component' in route.view)) {
+          componentSource = route.view as ComponentSource;
+        } else {
+          componentSource = route.view.component;
+          children = route.view.routes;
+        }
+      }
+
+      return {
+        component: componentSource ? adaptRouteComponent(componentSource, context) : undefined,
+        routes: children ? adaptRoutes(children, context) : [],
+        canActivate: adaptBeforeEnter(route.beforeEnter, context.injector),
+        canDeactivate: adaptBeforeLeave(route.beforeLeave, context.injector),
+        resolve: adaptLoaders(route, context.injector),
+      };
+    },
   };
 }
 
@@ -382,29 +409,19 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
 
   private engine: Router | null = null;
   private currentState: RouterState = EMPTY_ROUTER_STATE;
-  private typedRouter:
-    | {
-        navigate: (
-          path: string,
-          paramsOrOptions?:
-            | Record<string, string>
-            | TypedNavigateOptions<Record<string, unknown>>,
-          options?: TypedNavigateOptions<Record<string, unknown>>,
-        ) => Promise<boolean>;
-        href: (
-          path: string,
-          paramsOrOptions?:
-            | Record<string, string>
-            | TypedHrefOptions<Record<string, unknown>>,
-          options?: TypedHrefOptions<Record<string, unknown>>,
-        ) => string;
-      }
-    | null = null;
   private outlet: HTMLElement | null = null;
   private modules = new ModuleRegistry();
+  private readonly namedRouteMap = new Map<string, StreamixRoute>();
+
+  public readonly navigateTo: TypedNavigate<TRoutes>;
+  public readonly hrefTo: TypedHref<TRoutes>;
 
   constructor() {
     this.destroyRef.onDestroy(() => this.dispose());
+    this.collectAndValidateRoutes(this.configuration.routes);
+
+    this.navigateTo = this.createNavigateToProxy();
+    this.hrefTo = this.createHrefToProxy();
   }
 
   get active(): boolean {
@@ -420,27 +437,6 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
     return current
       ? `${current.url.pathname}${current.url.search}${current.url.hash}`
       : '';
-  }
-
-  get typed(): { navigate: TypedNavigate<TRoutes>; href: TypedHref<TRoutes> } {
-    return this.runtimeTyped as {
-      navigate: TypedNavigate<TRoutes>;
-      href: TypedHref<TRoutes>;
-    };
-  }
-
-  get rawNavigate(): (
-    target: string | URL,
-    options?: NavigationOptions,
-  ) => Promise<boolean> {
-    return (target, options) => this.requireEngine().navigate(target, options);
-  }
-
-  get rawHref(): (target: string | URL) => string {
-    return (target) =>
-      routerHref(
-        resolveRouterUrl(target, this.baseHref, window.location, 'href'),
-      );
   }
 
   connect(outlet: HTMLElement): void {
@@ -501,10 +497,16 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
   }
 
   navigate(
-    target: string | URL,
+    target: NavigationTarget,
     options?: NavigationOptions,
   ): Promise<boolean> {
-    return this.requireEngine().navigate(target, options);
+    const url = this.href(target);
+    if (url === null) {
+      console.error('[Router] Navigation failed: could not generate a URL for the target.', target);
+      return Promise.resolve(false);
+    }
+
+    return this.requireEngine().navigate(url, options);
   }
 
   updateHistoryState(state: unknown): void {
@@ -515,10 +517,30 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
     return this.requireEngine().preload();
   }
 
-  href(target: string | URL): string {
-    return routerHref(
-      resolveRouterUrl(target, this.baseHref, window.location, 'href'),
-    );
+  href(target: NavigationTarget | null | undefined): string | null {
+    if (target === null || target === undefined) {
+      return null;
+    }
+
+    if (typeof target === 'string') {
+      return routerHref(resolveRouterUrl(target, this.baseHref, window.location, 'href'));
+    }
+    if (target instanceof URL) {
+      return routerHref(resolveRouterUrl(target, this.baseHref, window.location, 'href'));
+    }
+
+    // Handle PathNavigationTarget
+    if ('path' in target) {
+      const pathTarget = target.path instanceof URL ? target.path.href : target.path;
+      return routerHref(resolveRouterUrl(pathTarget, this.baseHref, window.location, 'href'));
+    }
+
+    // Handle NamedNavigationTarget
+    if ('name' in target) {
+      return this.generateUrlFromNamedRoute(target);
+    }
+
+    return null;
   }
 
   dispose(): void {
@@ -543,29 +565,77 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
     return this.configuration.baseHref ?? this.appBaseHref;
   }
 
-  private get runtimeTyped() {
-    if (this.typedRouter) {
-      return this.typedRouter;
-    }
-
-    this.typedRouter = createTypedRouter(
-      this.configuration.routes as TRoutes,
-      (target, options) => this.requireEngine().navigate(target, options),
-      (target) =>
-        routerHref(
-          resolveRouterUrl(target, this.baseHref, window.location, 'href'),
-        ),
-    ) as NonNullable<typeof this.typedRouter>;
-
-    return this.typedRouter;
-  }
-
   private requireEngine(): Router {
     const engine = this.engine;
     if (!engine) {
       throw new Error('StreamixRouter has no active outlet.');
     }
     return engine;
+  }
+
+  private createNavigateToProxy(): TypedNavigate<TRoutes> {
+    return new Proxy({} as any, {
+      get: (_target, prop: string) => {
+        return (options: { params?: any, search?: any } = {}) => {
+          return this.navigate({ name: prop, ...options });
+        };
+      },
+    });
+  }
+
+  private createHrefToProxy(): TypedHref<TRoutes> {
+    return new Proxy({} as any, {
+      get: (_target, prop: string) => {
+        return (options: { params?: any, search?: any } = {}) => {
+          return this.href({ name: prop, ...options });
+        };
+      },
+    });
+  }
+
+  private generateUrlFromNamedRoute(target: NamedNavigationTarget): string | null {
+    const route = this.namedRouteMap.get(target.name);
+    if (!route) {
+      console.error(`[StreamixRouter] Route with name "${target.name}" not found.`);
+      return null;
+    }
+
+    let path = route.path;
+    const params = target.params ?? {};
+
+    for (const key in params) {
+      if (Object.prototype.hasOwnProperty.call(params, key)) {
+        const value = String((params as any)[key]);
+        path = path.replace(`:${key}`, value);
+      }
+    }
+
+    if (target.search) {
+      const search = new URLSearchParams(target.search as Record<string, string>).toString();
+      if (search) {
+        path += `?${search}`;
+      }
+    }
+
+    return routerHref(resolveRouterUrl(path, this.baseHref, window.location, 'href'));
+  }
+
+  private collectAndValidateRoutes(routes: StreamixRoutes) {
+    for (const route of routes) {
+      if (route.name) {
+        if (this.namedRouteMap.has(route.name)) {
+          throw new Error(
+            `Duplicate route name "${route.name}". Route names must be globally unique.`
+          );
+        }
+        this.namedRouteMap.set(route.name, route);
+      }
+
+      const children = (route as any)?.view?.routes ?? (route as any)?.children;
+      if (children && Array.isArray(children)) {
+        this.collectAndValidateRoutes(children);
+      }
+    }
   }
 }
 
@@ -608,52 +678,6 @@ export class StreamixOutlet {
   }
 }
 
-@Directive({
-  selector: 'a[streamixLink]',
-  standalone: true,
-  host: {
-    '[attr.href]': 'href',
-    '(click)': 'onClick($event)',
-  },
-})
-export class StreamixLink {
-  private readonly changeDetectorRef = inject(ChangeDetectorRef);
-  private readonly destroyRef = inject(DestroyRef);
-  private readonly router = inject(StreamixRouter);
-  private target: string | URL = '';
-  href = '';
-
-  constructor() {
-    watchRouterLocation(this.destroyRef, () => this.refreshHref());
-    this.refreshHref();
-  }
-
-  @Input('streamixLink')
-  set streamixLink(value: string | URL | null | undefined) {
-    this.target = value ?? '';
-    this.refreshHref();
-  }
-
-  onClick(event: MouseEvent): void {
-    const anchor = event.currentTarget as HTMLAnchorElement;
-
-    if (!shouldNavigate(event, anchor)) {
-      return;
-    }
-
-    event.preventDefault();
-
-    void this.router
-      .rawNavigate(this.target)
-      .catch(reportNavigationError);
-  }
-
-  private refreshHref(): void {
-    this.href = this.router.rawHref(this.target);
-    this.changeDetectorRef.markForCheck();
-  }
-}
-
 function shouldNavigate(
   event: MouseEvent,
   anchor: HTMLAnchorElement,
@@ -678,8 +702,8 @@ function reportNavigationError(error: unknown): void {
 }
 
 @NgModule({
-  imports: [StreamixOutlet, StreamixLink],
-  exports: [StreamixOutlet, StreamixLink],
+  imports: [StreamixOutlet],
+  exports: [StreamixOutlet],
 })
 export class StreamixRouterModule {
   static forChild(

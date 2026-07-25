@@ -66,10 +66,18 @@ export type RouteComponent = (
   context: RouteRenderContext
 ) => MaybePromise<Node | RenderedRouteNode>;
 
+export interface LoadedRoute {
+  readonly component?: RouteComponent;
+  readonly routes?: readonly Route[];
+  readonly canActivate?: CanActivate[];
+  readonly canDeactivate?: CanDeactivate[];
+  readonly resolve?: Record<string, Resolve>;
+}
+
 export interface Route {
   name?: string;
   path: string;
-  loadComponent?: () => MaybePromise<RouteComponent | { default: RouteComponent }>;
+  load?: () => MaybePromise<LoadedRoute>;
   redirectTo?: string;
   data?: Record<string, unknown>;
   preload?: boolean;
@@ -346,6 +354,40 @@ function findNestedOutlet(node: Node): HTMLElement | null {
     return candidate instanceof HTMLElement ? candidate : null;
   }
   return null;
+}
+
+const routeLoads = new WeakMap<Route, Promise<LoadedRoute>>();
+
+function loadRoute(
+  route: Route,
+): Promise<LoadedRoute> {
+  let pending = routeLoads.get(route);
+
+  if (!pending) {
+    pending = Promise
+      .resolve(
+        route.load?.() ?? {
+          routes: [],
+        },
+      )
+      .then(loaded => ({
+        component: loaded.component,
+        routes: Object.freeze([
+          ...(loaded.routes ?? []),
+        ]),
+        canActivate: loaded.canActivate,
+        canDeactivate: loaded.canDeactivate,
+        resolve: loaded.resolve,
+      }))
+      .catch(error => {
+        routeLoads.delete(route);
+        throw error;
+      });
+
+    routeLoads.set(route, pending);
+  }
+
+  return pending;
 }
 
 export function createRouter(config: RouterConfig): Router {
@@ -1054,6 +1096,24 @@ export function createRouter(config: RouterConfig): Router {
         cleanups.push(output.dispose);
       }
 
+      if (index < routeStates.length - 1) {
+        const child = await renderAt(index + 1);
+        const outlet = findNestedOutlet(output.node);
+
+        if (!outlet) {
+          throw new Error(
+            `Route "${routeState.config.path}" owns nested routes but rendered no <router-outlet>.`,
+          );
+        }
+
+        outlet.replaceChildren(child.node);
+
+        notifyOutletActivate(
+          outlet,
+          child.component,
+        );
+      }
+
       return output;
     }
 
@@ -1070,7 +1130,9 @@ export function createRouter(config: RouterConfig): Router {
   async function recognize(
     routes: Route[],
     segments: string[],
+    segmentIndex = 0,
     parentParams: Record<string, string> = {},
+    chain: readonly Route[] = [],
   ): Promise<RouteMatch | null> {
     let fallback: Route | undefined;
 
@@ -1082,39 +1144,70 @@ export function createRouter(config: RouterConfig): Router {
 
       const pattern = getRoutePattern(route);
       const params = { ...parentParams };
-      let matched = true;
+      
+      if (
+        !matchPattern(
+          pattern,
+          segments,
+          segmentIndex,
+          params,
+        )
+      ) {
+        continue;
+      }
 
-      for (let index = 0; index < pattern.segments.length; index++) {
-        const expected = pattern.segments[index];
-        const actual = segments[index];
+      const nextIndex = segmentIndex + pattern.segments.length;
+      const nextChain = [...chain, route];
+      const loaded = await loadRoute(route);
 
-        if (actual === undefined) {
-          matched = false;
-          break;
-        }
+      if (loaded.routes && loaded.routes.length > 0) {
+        const childMatch = await recognize(
+          loaded.routes as Route[],
+          segments,
+          nextIndex,
+          params,
+          nextChain,
+        );
 
-        const parameterName = pattern.parameterNames[index];
-        if (parameterName) {
-          params[parameterName] = decodeSegment(actual);
-          continue;
-        }
-
-        if (expected !== actual) {
-          matched = false;
-          break;
+        if (childMatch) {
+          return childMatch;
         }
       }
 
-      if (!matched) continue;
-
-      const nextIndex = pattern.segments.length;
       if (nextIndex === segments.length) {
-        return { route, chain: [route], params };
+        return { route, chain: nextChain, params };
       }
     }
 
     if (!fallback) return null;
-    return { route: fallback, chain: [fallback], params: { ...parentParams } };
+    return { route: fallback, chain: [...chain, fallback], params: { ...parentParams } };
+  }
+
+  function matchPattern(
+    pattern: RoutePattern,
+    segments: readonly string[],
+    segmentIndex: number,
+    params: Record<string, string>,
+  ): boolean {
+    for (let i = 0; i < pattern.segments.length; i++) {
+      const expected = pattern.segments[i];
+      const actual = segments[segmentIndex + i];
+
+      if (actual === undefined) {
+        return false;
+      }
+
+      const parameterName = pattern.parameterNames[i];
+      if (parameterName) {
+        params[parameterName] = decodeSegment(actual);
+        continue;
+      }
+
+      if (expected !== actual) {
+        return false;
+      }
+    }
+    return true;
   }
 
   async function performNavigation(request: NavigationRequest, signal: AbortSignal): Promise<NavigationResult> {
@@ -1126,7 +1219,7 @@ export function createRouter(config: RouterConfig): Router {
     }
 
     const path = stripBaseHref(request.url.pathname, baseHref);
-    const match = await recognize(config.routes, splitPath(path));
+    const match = await recognize(config.routes, splitPath(path), 0, {}, []);
     throwIfAborted(signal);
 
     setPhase(request, 'guarding');
@@ -1166,8 +1259,11 @@ export function createRouter(config: RouterConfig): Router {
     }
 
     const guardContext: NavigationContext = { ...baseRoute, signal };
+    const loadedChain = await Promise.all(match.chain.map(r => loadRoute(r)));
+    throwIfAborted(signal);
+
     for (const route of match.chain) {
-      for (const guard of route.canActivate ?? []) {
+      for (const guard of (await loadRoute(route)).canActivate ?? []) {
         const result = await executeGuard(guard, guardContext);
         throwIfAborted(signal);
         const redirect = readRedirect(result);
@@ -1178,14 +1274,15 @@ export function createRouter(config: RouterConfig): Router {
 
     setPhase(request, 'resolving');
     const resolvedData: Record<string, unknown> = {};
-    for (const route of match.chain) {
+    for (let i = 0; i < match.chain.length; i++) {
+      const route = match.chain[i];
       const context: NavigationContext = {
         ...baseRoute,
         data: Object.freeze({ ...staticData, ...resolvedData }),
         signal,
       };
       const values = await Promise.all(
-        Object.entries(route.resolve ?? {}).map(async ([key, resolver]) => {
+        Object.entries(loadedChain[i].resolve ?? {}).map(async ([key, resolver]) => {
           const value = await executeResolver(resolver, context);
           return [key, value] as const;
         })
@@ -1217,6 +1314,30 @@ export function createRouter(config: RouterConfig): Router {
     return { type: 'success', request, route: activatedRoute, node, component, rendered };
   }
 
+  async function runNavigation(request: NavigationRequest, signal: AbortSignal): Promise<void> {
+    if (disposed) return;
+
+    try {
+      const result = await performNavigation(request, signal);
+      if (result.request.id !== latestRequestId) {
+        if (result.type === 'success') {
+          result.rendered.dispose();
+        }
+        return;
+      }
+      commit(result);
+    } catch (error) {
+      if (signal.aborted || isAbortError(error)) return;
+      const failure: NavigationFailure = { type: 'error', request, error };
+      if (failure.request.id !== latestRequestId) return;
+      commit(failure);
+    } finally {
+      if (activeController?.signal === signal) {
+        activeController = null;
+      }
+    }
+  }
+
   async function runExternalNavigation(request: NavigationRequest, signal: AbortSignal): Promise<void> {
     if (disposed) return;
 
@@ -1241,7 +1362,7 @@ export function createRouter(config: RouterConfig): Router {
         const href = url.pathname + url.search + url.hash;
         const historyState = window.history.state;
         const historyUpdate = createHistoryUpdate(href, redirect.replace, historyState);
-        window.history[redirect.replace ? 'replaceState' : 'pushState'](historyState, '', href);
+        window.historyredirect.replace ? 'replaceState' : 'pushState';
         dispatchRouterLocationChange();
         void requestNavigation(url, 0, request.completion, historyUpdate);
         return;
@@ -1258,30 +1379,6 @@ export function createRouter(config: RouterConfig): Router {
       settleRequest(request, true);
       notifyStateChange();
       navigateExternal(request.url);
-    } catch (error) {
-      if (signal.aborted || isAbortError(error)) return;
-      const failure: NavigationFailure = { type: 'error', request, error };
-      if (failure.request.id !== latestRequestId) return;
-      commit(failure);
-    } finally {
-      if (activeController?.signal === signal) {
-        activeController = null;
-      }
-    }
-  }
-
-  async function runNavigation(request: NavigationRequest, signal: AbortSignal): Promise<void> {
-    if (disposed) return;
-
-    try {
-      const result = await performNavigation(request, signal);
-      if (result.request.id !== latestRequestId) {
-        if (result.type === 'success') {
-          result.rendered.dispose();
-        }
-        return;
-      }
-      commit(result);
     } catch (error) {
       if (signal.aborted || isAbortError(error)) return;
       const failure: NavigationFailure = { type: 'error', request, error };
