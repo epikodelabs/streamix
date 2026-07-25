@@ -2,14 +2,13 @@ import {
   type InferParamType,
   type InferSearchType,
   type ParamSchema,
-  type SearchSchema,
+  type SearchSchema
 } from './search-schema';
 import type { StreamixRoute, StreamixRoutes } from './streamix-router';
 
 type SearchableRoute = StreamixRoute & {
   readonly paramsSchema?: Record<string, ParamSchema<unknown>>;
   readonly searchSchema?: Record<string, SearchSchema<unknown>>;
-  readonly children?: readonly SearchableRoute[];
 };
 
 type SearchableRoutes = readonly SearchableRoute[];
@@ -32,32 +31,11 @@ type JoinPath<TPrefix extends string, TSegment extends string> =
       ? TPrefix
       : `${TPrefix}/${TSegment}`;
 
-type RouteEntries<
-  TRoutes,
-  TPrefix extends string = '',
-> = TRoutes extends readonly (infer TRoute)[]
-  ? RouteEntry<TRoute, TPrefix>
+type RouteEntries<TRoutes> = TRoutes extends readonly (infer TRoute)[]
+  ? TRoute extends { path: infer TPath extends string }
+    ? { readonly path: TPath; readonly route: TRoute }
+    : never
   : never;
-
-type RouteEntry<TRoute, TPrefix extends string> =
-  TRoute extends {
-    path: infer TPath extends string;
-    children?: infer TChildren;
-  }
-    ? string extends TPath
-      ? {
-          readonly path: string;
-          readonly route: TRoute;
-        }
-      :
-          | {
-              readonly path: JoinPath<TPrefix, TPath>;
-              readonly route: TRoute;
-            }
-          | (TChildren extends readonly unknown[]
-              ? RouteEntries<TChildren, JoinPath<TPrefix, TPath>>
-              : never)
-    : never;
 
 type RouteSearch<TRoute> = TRoute extends { searchSchema: infer TSchema }
   ? TSchema extends Record<string, SearchSchema<unknown>>
@@ -65,17 +43,15 @@ type RouteSearch<TRoute> = TRoute extends { searchSchema: infer TSchema }
     : never
   : never;
 
-type RouteParamsFromSchema<TRoute, TPath extends string> =
-  TRoute extends { paramsSchema: infer TSchema }
-    ? TSchema extends Record<string, ParamSchema<unknown>>
-      ? {
-          [K in ExtractParam<TPath>]:
-            K extends keyof InferParamType<TSchema>
-              ? InferParamType<TSchema>[K]
-              : string;
-        }
-      : ParamsFromPath<TPath>
-    : ParamsFromPath<TPath>;
+type RouteParamsFromSchema<TRoute, TPath extends string> = TRoute extends {
+  paramsSchema: infer TSchema;
+}
+  ? TSchema extends Record<string, ParamSchema<unknown>>
+    ? {
+        [K in ExtractParam<TPath>]: K extends keyof InferParamType<TSchema> ? InferParamType<TSchema>[K] : string;
+      }
+    : ParamsFromPath<TPath>
+  : ParamsFromPath<TPath>;
 
 export interface TypedNavigateOptions<TSearch = never> {
   replace?: boolean;
@@ -87,47 +63,23 @@ export interface TypedHrefOptions<TSearch = never> {
   search?: TSearch extends never ? never : Partial<TSearch>;
 }
 
-type RawTypedNavigate = (
-  path: string,
-  paramsOrOptions?:
-    | Record<string, string>
-    | TypedNavigateOptions<Record<string, unknown>>,
-  options?: TypedNavigateOptions<Record<string, unknown>>,
-) => Promise<boolean>;
-
-type RawTypedHref = (
-  path: string,
-  paramsOrOptions?:
-    | Record<string, string>
-    | TypedHrefOptions<Record<string, unknown>>,
-  options?: TypedHrefOptions<Record<string, unknown>>,
-) => string;
-
-type NavigateCall<
-  TPath extends string,
-  TRoute,
-> = string extends TPath
-  ? RawTypedNavigate
-  : [ExtractParam<TPath>] extends [never]
-  ? (
-      path: TPath,
-      options?: TypedNavigateOptions<RouteSearch<TRoute>>,
-    ) => Promise<boolean>
+type NavigateCall<TPath extends string, TRoute> = [
+  ExtractParam<TPath>,
+] extends [never]
+  ? (options?: TypedNavigateOptions<RouteSearch<TRoute>>) => Promise<boolean>
   : (
-      path: TPath,
       params: RouteParamsFromSchema<TRoute, TPath>,
       options?: TypedNavigateOptions<RouteSearch<TRoute>>,
     ) => Promise<boolean>;
 
-type HrefCall<TPath extends string, TRoute> = string extends TPath
-  ? RawTypedHref
-  : [ExtractParam<TPath>] extends [never]
-    ? (path: TPath, options?: TypedHrefOptions<RouteSearch<TRoute>>) => string
-    : (
-        path: TPath,
-        params: RouteParamsFromSchema<TRoute, TPath>,
-        options?: TypedHrefOptions<RouteSearch<TRoute>>,
-      ) => string;
+type HrefCall<TPath extends string, TRoute> = [
+  ExtractParam<TPath>,
+] extends [never]
+  ? (options?: TypedHrefOptions<RouteSearch<TRoute>>) => string
+  : (
+      params: RouteParamsFromSchema<TRoute, TPath>,
+      options?: TypedHrefOptions<RouteSearch<TRoute>>,
+    ) => string;
 
 type UnionToIntersection<T> = (
   T extends unknown ? (value: T) => void : never
@@ -136,17 +88,23 @@ type UnionToIntersection<T> = (
   : never;
 
 type NavigateEntry<TEntry> = TEntry extends {
-  path: infer TPath extends string;
-  route: infer TRoute;
+  readonly name: infer TName extends string;
+  readonly fullPath: infer TPath extends string;
+  readonly route: infer TRoute;
 }
-  ? NavigateCall<TPath, TRoute>
+  ? {
+      readonly [K in TName]: NavigateCall<TPath, TRoute>;
+    }
   : never;
 
 type HrefEntry<TEntry> = TEntry extends {
-  path: infer TPath extends string;
-  route: infer TRoute;
+  readonly name: infer TName extends string;
+  readonly fullPath: infer TPath extends string;
+  readonly route: infer TRoute;
 }
-  ? HrefCall<TPath, TRoute>
+  ? {
+      readonly [K in TName]: HrefCall<TPath, TRoute>;
+    }
   : never;
 
 export type TypedNavigate<T extends StreamixRoutes> = UnionToIntersection<
@@ -156,6 +114,16 @@ export type TypedNavigate<T extends StreamixRoutes> = UnionToIntersection<
 export type TypedHref<T extends StreamixRoutes> = UnionToIntersection<
   HrefEntry<RouteEntries<T>>
 >;
+
+export interface TypedRouter<T extends StreamixRoutes> {
+  readonly navigate: TypedNavigate<T>;
+  readonly href: TypedHref<T>;
+}
+
+interface NamedRouteRecord {
+  readonly path: string;
+  readonly route: SearchableRoute;
+}
 
 function interpolatePath(path: string, params: Record<string, string>): string {
   return path.replace(/:([a-zA-Z0-9_]+)/g, (_, key: string) => {
@@ -175,6 +143,11 @@ function serializeKnownSearch(
   schema: Record<string, SearchSchema<unknown>>,
   values: Record<string, unknown>,
 ): string {
+  const serialized = serializeUnknownSearch(values, schema);
+  return serialized ? `?${serialized}` : '';
+}
+
+function serializeUnknownSearch(values: Record<string, unknown>, schema?: Record<string, SearchSchema<unknown>>): string {
   const searchParams = new URLSearchParams();
 
   for (const [key, value] of Object.entries(values)) {
@@ -182,7 +155,7 @@ function serializeKnownSearch(
       continue;
     }
 
-    const spec = schema[key];
+    const spec = schema?.[key];
     if (!spec) {
       continue;
     }
@@ -204,6 +177,12 @@ function serializeKnownSearch(
 
   const serialized = searchParams.toString();
   return serialized ? `?${serialized}` : '';
+}
+
+function joinRoutePath(prefix: string, segment: string): string {
+  const joined = [prefix, segment].filter(Boolean).join('/');
+
+  return joined.replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
 }
 
 function serializeKnownParams(
@@ -250,11 +229,6 @@ function serializeKnownParams(
   return params;
 }
 
-export interface TypedRouter<T extends StreamixRoutes> {
-  readonly navigate: TypedNavigate<T>;
-  readonly href: TypedHref<T>;
-}
-
 export function createTypedRouter<T extends StreamixRoutes>(
   routes: T,
   navigate: (
@@ -263,105 +237,128 @@ export function createTypedRouter<T extends StreamixRoutes>(
   ) => Promise<boolean>,
   href: (target: string | URL) => string,
 ): TypedRouter<T> {
-  const paramsSchemaMap = new Map<
-    string,
-    Record<string, ParamSchema<unknown>>
-  >();
-  const searchSchemaMap = new Map<
-    string,
-    Record<string, SearchSchema<unknown>>
-  >();
+  const routeMap = new Map<string, { path: string; route: SearchableRoute }>();
+  const collectRoutes = (routeList: SearchableRoutes, prefix = ''): void => {
+    for (const route of routeList) {
+      const fullPath = joinRoutePath(prefix, route.path);
 
-  function collectSchemas(routesArray: SearchableRoutes, prefix = ''): void {
-    for (const route of routesArray) {
-      const fullPath = prefix ? `${prefix}/${route.path}` : route.path;
+      if (route.name) {
+        if (routeMap.has(route.name)) {
+          throw new Error(
+            `[StreamixRouter] Duplicate route name "${route.name}". Route names must be unique.`,
+          );
+        }
 
-      if (route.paramsSchema) {
-        paramsSchemaMap.set(fullPath, route.paramsSchema);
-      }
-
-      if (route.searchSchema) {
-        searchSchemaMap.set(fullPath, route.searchSchema);
+        routeMap.set(route.name, {
+          path: fullPath,
+          route,
+        });
       }
 
       if (route.children) {
-        collectSchemas(route.children, fullPath);
+        collectRoutes(route.children, fullPath);
       }
     }
-  }
+  };
 
-  collectSchemas(routes as SearchableRoutes);
+  collectRoutes(routes as SearchableRoutes);
+
+  const resolveRoute = (name: PropertyKey): NamedRouteRecord => {
+    if (typeof name !== 'string') {
+      throw new TypeError('Route names must be strings.');
+    }
+
+    const record = routeMap.get(name);
+
+    if (!record) {
+      throw new Error(`[StreamixRouter] No route named "${name}".`);
+    }
+
+    return record;
+  };
 
   function buildTarget(
-    path: string,
+    record: NamedRouteRecord,
     params?: Record<string, unknown>,
     search?: Record<string, unknown>,
   ): string {
-    const paramsSchema = paramsSchemaMap.get(path);
-    const serializedParams = paramsSchema && params
-      ? serializeKnownParams(paramsSchema, params)
-      : params as Record<string, string> | undefined;
-    let target = serializedParams ? interpolatePath(path, serializedParams) : path;
+    const serializedParams =
+      record.route.paramsSchema && params
+        ? serializeKnownParams(record.route.paramsSchema, params)
+        : params
+        ? Object.fromEntries(
+            Object.entries(params)
+              .filter(([, value]) => value !== undefined)
+              .map(([key, value]) => [key, String(value)]),
+          )
+        : undefined;
+
+    let target = hasPathParams(record.path)
+      ? interpolatePath(record.path, serializedParams ?? {})
+      : record.path;
 
     if (search && Object.keys(search).length > 0) {
-      const schema = searchSchemaMap.get(path);
-
-      if (schema) {
-        target += serializeKnownSearch(schema, search);
-      } else {
-        const searchParams = new URLSearchParams();
-        for (const [key, value] of Object.entries(search)) {
-          if (value !== undefined) {
-            searchParams.set(key, String(value));
-          }
-        }
-
-        const serialized = searchParams.toString();
-        if (serialized) {
-          target += `?${serialized}`;
-        }
-      }
+      target += record.route.searchSchema
+        ? serializeKnownSearch(record.route.searchSchema, search)
+        : serializeUnknownSearch(search);
     }
 
     return target;
   }
 
+  const namedNavigate = new Proxy(Object.create(null), {
+    get(_, name: PropertyKey) {
+      if (name === 'then' || name === 'toJSON' || name === 'inspect') {
+        return undefined;
+      }
+
+      return (...args: unknown[]) => {
+        const record = resolveRoute(name);
+        const parameterized = hasPathParams(record.path);
+
+        const params = parameterized
+          ? (args[0] as Record<string, unknown> | undefined)
+          : undefined;
+
+        const options = (
+          parameterized ? args[1] : args[0]
+        ) as TypedNavigateOptions<Record<string, unknown>> | undefined;
+
+        const target = buildTarget(record, params, options?.search);
+
+        return navigate(target, {
+          replace: options?.replace,
+          state: options?.state,
+        });
+      };
+    },
+  }) as TypedNavigate<T>;
+
+  const namedHref = new Proxy(Object.create(null), {
+    get(_, name: PropertyKey) {
+      if (name === 'then' || name === 'toJSON' || name === 'inspect') {
+        return undefined;
+      }
+
+      return (...args: unknown[]) => {
+        const record = resolveRoute(name);
+        const parameterized = hasPathParams(record.path);
+
+        const params = parameterized
+          ? (args[0] as Record<string, unknown> | undefined)
+          : undefined;
+
+        const options = (
+          parameterized ? args[1] : args[0]
+        ) as TypedHrefOptions<Record<string, unknown>> | undefined;
+
+        return href(buildTarget(record, params, options?.search));
+      };
+    },
+  }) as TypedHref<T>;
+
   return {
-    navigate: ((path: string, ...args: unknown[]) => {
-      const params = hasPathParams(path)
-        ? (args[0] as Record<string, unknown> | undefined)
-        : undefined;
-      const options = params
-        ? (args[1] as TypedNavigateOptions | undefined)
-        : (args[0] as TypedNavigateOptions | undefined);
-
-      const target = buildTarget(
-        path,
-        params,
-        options?.search as Record<string, unknown> | undefined,
-      );
-
-      return navigate(target, {
-        replace: options?.replace,
-        state: options?.state,
-      });
-    }) as TypedNavigate<T>,
-
-    href: ((path: string, ...args: unknown[]) => {
-      const params = hasPathParams(path)
-        ? (args[0] as Record<string, unknown> | undefined)
-        : undefined;
-      const options = params
-        ? (args[1] as TypedHrefOptions | undefined)
-        : (args[0] as TypedHrefOptions | undefined);
-
-      const target = buildTarget(
-        path,
-        params,
-        options?.search as Record<string, unknown> | undefined,
-      );
-
-      return href(target);
-    }) as TypedHref<T>,
+    navigate: namedNavigate,
+    href: namedHref,
   };
 }

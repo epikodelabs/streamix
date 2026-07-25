@@ -67,12 +67,11 @@ export type RouteComponent = (
 ) => MaybePromise<Node | RenderedRouteNode>;
 
 export interface Route {
+  name?: string;
   path: string;
   loadComponent?: () => MaybePromise<RouteComponent | { default: RouteComponent }>;
-  loadChildren?: () => MaybePromise<Route[] | { default: Route[] }>;
   redirectTo?: string;
   data?: Record<string, unknown>;
-  children?: Route[];
   preload?: boolean;
   viewTransition?: boolean;
   canActivate?: CanActivate[];
@@ -139,7 +138,6 @@ export interface RouterConfig {
   baseHref?: string;
   enableTracing?: boolean;
   maxRedirects?: number;
-  /** Skips programmatic navigation to the active URL when set to `'ignore'`. */
   onSameUrlNavigation?: 'ignore';
   scrollRestoration?: ScrollRestorationMode;
   preloading?: PreloadingStrategy;
@@ -329,10 +327,6 @@ function defaultRender(outlet: HTMLElement, node: Node): void {
 
 function defaultRenderNotFound(outlet: HTMLElement): void {
   const heading = document.createElement('h1');
-  /* Legacy mojibake assignment removed.
-  heading.textContent = '404 вЂ” Page Not Found';
-  heading.textContent = '404 \u2014 Page Not Found';
-  */
   heading.textContent = '404 \u2014 Page Not Found';
   outlet.replaceChildren(heading);
 }
@@ -348,7 +342,6 @@ function findNestedOutlet(node: Node): HTMLElement | null {
     return node;
   }
   if (node instanceof Element || node instanceof DocumentFragment) {
-    // Nested outlets must be present in the rendered light DOM tree.
     const candidate = node.querySelector('[data-router-outlet]');
     return candidate instanceof HTMLElement ? candidate : null;
   }
@@ -367,7 +360,6 @@ export function createRouter(config: RouterConfig): Router {
   const viewTransitions = config.viewTransitions ?? false;
 
   const routePatterns = new WeakMap<Route, RoutePattern>();
-  const lazyChildren = new WeakMap<Route, Promise<Route[]>>();
 
   let currentState: ActiveRoute | null = null;
   let requestState: NavigationRequest | null = null;
@@ -865,21 +857,6 @@ export function createRouter(config: RouterConfig): Router {
     notifyStateChange();
   }
 
-  async function getChildren(route: Route): Promise<Route[]> {
-    if (route.children) return route.children;
-    if (!route.loadChildren) return [];
-
-    let cached = lazyChildren.get(route);
-    if (!cached) {
-      cached = Promise.resolve(route.loadChildren()).then(unwrapDefault).catch(error => {
-        lazyChildren.delete(route);
-        throw error;
-      });
-      lazyChildren.set(route, cached);
-    }
-    return cached;
-  }
-
   function getRoutePattern(route: Route): RoutePattern {
     const cached = routePatterns.get(route);
     if (cached && cached.path === route.path) return cached;
@@ -933,24 +910,6 @@ export function createRouter(config: RouterConfig): Router {
       } catch (error) {
         trace('Route component preload failed', route.path, error);
       }
-    }
-
-    const childRoutes = route.children ?? [];
-    for (const child of childRoutes) {
-      await preloadBranch(child, seen);
-    }
-
-    if (!shouldPreloadRoute(route) || !route.loadChildren) {
-      return;
-    }
-
-    try {
-      const lazyRoutes = await getChildren(route);
-      for (const child of lazyRoutes) {
-        await preloadBranch(child, seen);
-      }
-    } catch (error) {
-      trace('Route children preload failed', route.path, error);
     }
   }
 
@@ -1095,16 +1054,6 @@ export function createRouter(config: RouterConfig): Router {
         cleanups.push(output.dispose);
       }
 
-      if (index < routeStates.length - 1) {
-        const child = await renderAt(index + 1);
-        const outlet = findNestedOutlet(output.node);
-        if (!outlet) {
-          throw new Error(`Route "${routeState.config.path}" rendered no nested outlet`);
-        }
-        outlet.replaceChildren(child.node);
-        notifyOutletActivate(outlet, child.component);
-      }
-
       return output;
     }
 
@@ -1121,9 +1070,7 @@ export function createRouter(config: RouterConfig): Router {
   async function recognize(
     routes: Route[],
     segments: string[],
-    segmentIndex = 0,
     parentParams: Record<string, string> = {},
-    chainStack: Route[] = []
   ): Promise<RouteMatch | null> {
     let fallback: Route | undefined;
 
@@ -1139,7 +1086,7 @@ export function createRouter(config: RouterConfig): Router {
 
       for (let index = 0; index < pattern.segments.length; index++) {
         const expected = pattern.segments[index];
-        const actual = segments[segmentIndex + index];
+        const actual = segments[index];
 
         if (actual === undefined) {
           matched = false;
@@ -1160,26 +1107,14 @@ export function createRouter(config: RouterConfig): Router {
 
       if (!matched) continue;
 
-      const nextIndex = segmentIndex + pattern.segments.length;
-      chainStack.push(route);
-      try {
-        const children = await getChildren(route);
-
-        if (children.length > 0) {
-          const childMatch = await recognize(children, segments, nextIndex, params, chainStack);
-          if (childMatch) return childMatch;
-        }
-
-        if (nextIndex === segments.length) {
-          return { route, chain: [...chainStack], params };
-        }
-      } finally {
-        chainStack.pop();
+      const nextIndex = pattern.segments.length;
+      if (nextIndex === segments.length) {
+        return { route, chain: [route], params };
       }
     }
 
     if (!fallback) return null;
-    return { route: fallback, chain: [...chainStack, fallback], params: { ...parentParams } };
+    return { route: fallback, chain: [fallback], params: { ...parentParams } };
   }
 
   async function performNavigation(request: NavigationRequest, signal: AbortSignal): Promise<NavigationResult> {
@@ -1372,7 +1307,6 @@ export function createRouter(config: RouterConfig): Router {
           routeConfig: result.route.config,
           routeChain: result.route.chain,
         }, () => {
-          // Dispose while the old component is still connected to its outlet.
           replaceActiveRender(result.rendered);
           const outlet = resolveOutlet();
           if (outlet) {

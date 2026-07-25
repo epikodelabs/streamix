@@ -25,8 +25,7 @@ import {
 import {
   ModuleRegistry,
   runWithInjector,
-  unwrapDefault,
-  watchRouterLocation,
+  watchRouterLocation
 } from './adapter-utils';
 import { adaptRouteComponent, bindRouteInputs } from './route-adapter';
 import {
@@ -89,6 +88,7 @@ export type StreamixRouteProviders = readonly EnvironmentProviders[];
 
 export interface StreamixRoute {
   readonly path: string;
+  readonly name?: string;
   readonly redirectTo?: string;
   readonly component?: Type<unknown>;
   readonly loadComponent?: Lazy<Type<unknown>>;
@@ -248,6 +248,7 @@ function adaptRoutes(
 
 function adaptRoute(route: StreamixRoute, context: AdapterContext): Route {
   return {
+    name: route.name,
     path: route.path,
     redirectTo: route.redirectTo,
     data: route.data,
@@ -256,9 +257,8 @@ function adaptRoute(route: StreamixRoute, context: AdapterContext): Route {
     canActivate: adaptBeforeEnter(route.beforeEnter, context.injector),
     canDeactivate: adaptBeforeLeave(route.beforeLeave, context.injector),
     resolve: adaptLoaders(route, context.injector),
-    children: route.children ? adaptRoutes(route.children, context) : undefined,
     loadComponent: adaptRouteComponent(route, context),
-    loadChildren: adaptChildren(route.loadChildren, context),
+    // children and loadChildren are no longer supported
   };
 }
 
@@ -342,30 +342,6 @@ function adaptLoaders(
   );
 }
 
-function adaptChildren(
-  loader: StreamixRoute['loadChildren'],
-  context: AdapterContext,
-): Route['loadChildren'] {
-  if (!loader) return undefined;
-
-  let loaded: Promise<Route[]> | undefined;
-
-  return () => {
-    loaded ??= loadChildren(loader, context).catch((error) => {
-      loaded = undefined;
-      throw error;
-    });
-    return loaded;
-  };
-}
-
-async function loadChildren(
-  loader: NonNullable<StreamixRoute['loadChildren']>,
-  context: AdapterContext,
-): Promise<Route[]> {
-  const routes = unwrapDefault(await loader());
-  return adaptRoutes(routes, context);
-}
 
 const EMPTY_ROUTER_STATE: RouterState = Object.freeze({
   current: null,
@@ -451,14 +427,6 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
       navigate: TypedNavigate<TRoutes>;
       href: TypedHref<TRoutes>;
     };
-  }
-
-  get typedNavigate(): TypedNavigate<TRoutes> {
-    return this.typed.navigate;
-  }
-
-  get typedHref(): TypedHref<TRoutes> {
-    return this.typed.href;
   }
 
   get rawNavigate(): (
