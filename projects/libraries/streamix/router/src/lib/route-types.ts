@@ -1,9 +1,23 @@
-import type { EnvironmentProviders, Type } from '@angular/core';
+import type { EnvironmentProviders, Provider, Type } from '@angular/core';
 import type { ParamSchema, SearchSchema } from './search-schema';
 import type { DeactivationContext, NavigationContext } from './vanilla-router';
 
 export type MaybePromise<T> = T | PromiseLike<T>;
 export type Lazy<T> = () => MaybePromise<T | { readonly default: T }>;
+
+
+
+export type StreamixRouteProvider =
+  | Provider
+  | EnvironmentProviders;
+
+export interface StreamixRouteModule {
+  readonly component?: Type<unknown>;
+  readonly routes?: StreamixRoutes;
+  readonly providers?: StreamixRouteProviders;
+};
+
+
 
 export type RouteRedirect = {
   readonly redirectTo: string | URL;
@@ -23,7 +37,8 @@ export type RouteLoader<T = unknown> = (
 ) => MaybePromise<T>;
 
 export type RouteLoaders = Readonly<Record<string, RouteLoader>>;
-export type StreamixRouteProviders = readonly EnvironmentProviders[];
+export type StreamixRouteProviders =
+  readonly StreamixRouteProvider[];
 
 export interface StreamixRouteModule {
   readonly component?: Type<unknown>;

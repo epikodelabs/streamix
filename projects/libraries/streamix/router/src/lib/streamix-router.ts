@@ -122,16 +122,6 @@ function execute<TContext, TResult>(
   return runWithInjector(injector, handler, context);
 }
 
-function emitOutletEvent(
-  host: HTMLElement,
-  type: typeof OUTLET_ACTIVATE_EVENT | typeof OUTLET_DEACTIVATE_EVENT,
-  component: unknown,
-): void {
-  host.parentElement
-    ?.closest<HTMLElement>(`[${OUTLET_ATTRIBUTE}]`)
-    ?.dispatchEvent(new CustomEvent(type, { detail: component }));
-}
-
 function createAngularRenderer(appRef: ApplicationRef): RenderComponent {
   return (component, environmentInjector, routeProviders) =>
     (route, context) => {
@@ -186,7 +176,9 @@ function createAngularRenderer(appRef: ApplicationRef): RenderComponent {
           if (disposed) return;
           disposed = true;
 
-          emitOutletEvent(host, OUTLET_DEACTIVATE_EVENT, ref.instance);
+          host.parentElement
+            ?.closest<HTMLElement>(`[${OUTLET_ATTRIBUTE}]`)
+            ?.dispatchEvent(new CustomEvent(OUTLET_DEACTIVATE_EVENT, { detail: ref.instance }));
 
           try {
             if (attached) {

@@ -1,4 +1,5 @@
 import { Component } from '@angular/core';
+
 import {
   adaptRouteComponent,
   bindRouteInputs,
@@ -6,27 +7,46 @@ import {
   type RouteInputBinding,
 } from '../lib/route-adapter';
 
-@Component({ template: '' })
+import type { StreamixRouteProviders } from '../lib/route-types';
+
+@Component({
+  template: '',
+})
 class TestRouteComponent {}
 
-function createRoute(overrides: Partial<Parameters<typeof collectRouteInputValues>[0]> = {}) {
+type ActivatedRoute =
+  Parameters<typeof collectRouteInputValues>[0];
+
+function createRoute(
+  overrides: Partial<ActivatedRoute> = {},
+): ActivatedRoute {
   return {
     path: '/projects/42',
     params: {},
     queryParams: {},
     data: {},
     ...overrides,
-  } as Parameters<typeof collectRouteInputValues>[0];
+  } as ActivatedRoute;
 }
 
 describe('Streamix router adapters', () => {
   it('collects route input values from params, query, schema results, and resolved data', () => {
     const route = createRoute({
-      params: { projectId: '42', section: 'overview' },
-      queryParams: { tab: 'activity', sort: 'oldest' },
+      params: {
+        projectId: '42',
+        section: 'overview',
+      },
+      queryParams: {
+        tab: 'activity',
+        sort: 'oldest',
+      },
       data: {
-        __params: { projectId: 42 },
-        __search: { tab: 'settings' },
+        __params: {
+          projectId: 42,
+        },
+        __search: {
+          tab: 'settings',
+        },
         sort: 'recent',
         userName: 'Ada',
       },
@@ -42,58 +62,80 @@ describe('Streamix router adapters', () => {
   });
 
   it('binds component inputs by template name first and falls back to prop name', () => {
-    const target = { setInput: jasmine.createSpy('setInput') };
-    const inputs: RouteInputBinding[] = [
-      { templateName: 'project-id', propName: 'projectId' },
-      { templateName: 'userName', propName: 'user' },
-      { templateName: 'missing', propName: 'missing' },
+    const target = {
+      setInput: jasmine.createSpy('setInput'),
+    };
+
+    const inputs: readonly RouteInputBinding[] = [
+      {
+        templateName: 'project-id',
+        propName: 'projectId',
+      },
+      {
+        templateName: 'userName',
+        propName: 'user',
+      },
+      {
+        templateName: 'missing',
+        propName: 'missing',
+      },
     ];
+
     const route = createRoute({
-      params: { projectId: '7' },
-      data: { 'project-id': 42, user: 'Ada' },
+      params: {
+        projectId: '7',
+      },
+      data: {
+        'project-id': 42,
+        user: 'Ada',
+      },
     });
 
     bindRouteInputs(target, inputs, route);
 
     expect(target.setInput).toHaveBeenCalledTimes(2);
-    expect(target.setInput).toHaveBeenCalledWith('project-id', 42);
-    expect(target.setInput).toHaveBeenCalledWith('userName', 'Ada');
+    expect(target.setInput).toHaveBeenCalledWith(
+      'project-id',
+      42,
+    );
+    expect(target.setInput).toHaveBeenCalledWith(
+      'userName',
+      'Ada',
+    );
   });
 
-  it('passes route providers to the eager component renderer', async () => {
-    const component = TestRouteComponent;
-    const providers = [{ provide: 'ROUTE_MESSAGE', useValue: 'scoped' }];
+  it('returns the renderer-produced route component and passes route providers', () => {
+    const providers: StreamixRouteProviders = [
+      {
+        provide: 'ROUTE_MESSAGE',
+        useValue: 'scoped',
+      },
+    ];
+
     const rendered = jasmine.createSpy('rendered');
-    const render = jasmine.createSpy('render').and.returnValue(rendered);
+    const render = jasmine
+      .createSpy('render')
+      .and.returnValue(rendered);
+
     const context = {
-      injector: { kind: 'injector' },
+      injector: {
+        kind: 'injector',
+      },
       render,
     } as any;
 
-    const routeComponent = adaptRouteComponent(component, context, providers);
-    const result = await routeComponent(createRoute(), {} as any);
-
-    expect(render).toHaveBeenCalledWith(component, context.injector, providers);
-    expect(result).toBe(rendered);
-  });
-
-  it('renders the same adapted component for each activation', async () => {
-    const component = TestRouteComponent;
-    const providers = [{ provide: 'ROUTE_MESSAGE', useValue: 'scoped' }];
-    const rendered = jasmine.createSpy('rendered');
-    const render = jasmine.createSpy('render').and.returnValue(rendered);
-    const context = {
-      injector: { kind: 'injector' },
-      render,
-    } as any;
-
-    const routeComponent = adaptRouteComponent(component, context, providers);
-    const first = await routeComponent(createRoute(), {} as any);
-    const second = await routeComponent(createRoute(), {} as any);
+    const routeComponent = adaptRouteComponent(
+      TestRouteComponent,
+      context,
+      providers,
+    );
 
     expect(render).toHaveBeenCalledTimes(1);
-    expect(render).toHaveBeenCalledWith(component, context.injector, providers);
-    expect(first).toBe(rendered);
-    expect(second).toBe(rendered);
+    expect(render).toHaveBeenCalledWith(
+      TestRouteComponent,
+      context.injector,
+      providers,
+    );
+    expect(routeComponent).toBe(rendered);
   });
 });

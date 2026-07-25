@@ -5,7 +5,7 @@ import {
   StreamixOutlet,
   StreamixRouter,
   type StreamixRoutes,
-} from '@epikodelabs/streamix/router';
+} from '../lib';
 
 @Component({
   standalone: true,
@@ -49,7 +49,7 @@ describe('StreamixRouter: Nested Routing', () => {
   }
 
   async function navigate(path: string): Promise<void> {
-    const router = injector.get(StreamixRouter);
+    const router = injector.get(StreamixRouter) as StreamixRouter;
     await router.navigate({ path });
     await new Promise(resolve => setTimeout(resolve, 0));
   }

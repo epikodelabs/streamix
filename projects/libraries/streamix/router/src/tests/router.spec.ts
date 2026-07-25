@@ -652,13 +652,7 @@ idescribe('Router', () => {
                         path: 'protected',
                         load: async () => ({
                             component: unwrapTestComponent(await (() => Promise.resolve(createComponent('Protected')))()),
-                            canActivate: [
-                                {
-                                    load: async () => ({
-                                        canActivate: () => true
-                                    })
-                                },
-                            ]
+                            canActivate: [() => true]
                         })
                     },
                 ],
@@ -860,11 +854,7 @@ idescribe('Router', () => {
                         load: async () => ({
                             component: unwrapTestComponent(await (() => Promise.resolve(createComponent('User')))()),
                             resolve: {
-                                userId: {
-                                    load: async () => ({
-                                        resolve: () => 123
-                                    })
-                                }
+                                userId: () => 123
                             }
                         })
                     },

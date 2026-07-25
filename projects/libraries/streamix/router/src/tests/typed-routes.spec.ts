@@ -1,5 +1,6 @@
 import { s } from '../lib/search-schema';
-import type { StreamixRouter, StreamixRoutes } from '../lib/streamix-router';
+import type { StreamixRouter } from '../lib/streamix-router';
+import type { StreamixRoutes } from '../lib/route-types';
 
 const routes = [
   {
