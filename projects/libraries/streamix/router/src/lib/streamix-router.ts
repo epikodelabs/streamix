@@ -7,6 +7,7 @@ import {
   DestroyRef,
   EnvironmentInjector,
   EnvironmentProviders,
+  Injectable,
   InjectionToken,
   Provider,
   inject,
@@ -205,22 +206,18 @@ function loadComponent(
   return pending;
 }
 
-function snapshotRouterState(
-  state: RouterState,
-): RouterState {
+function snapshotRouterState(state: RouterState): RouterState {
   return Object.freeze({
-    current: state.current,
-    pending: state.pending,
-    phase: state.phase,
-    error: state.error,
-    path: state.path,
-    params: state.params,
-    search: state.search,
-    data: state.data,
-    historyState:
-      state.historyState,
-    routeConfig:
-      state.routeConfig,
+    current: state.current ?? null,
+    pending: state.pending ?? false,
+    phase: state.phase ?? null,
+    error: state.error ?? null,
+    path: state.path ?? '',
+    params: state.params ? Object.freeze({ ...state.params }) : Object.freeze({}),
+    search: state.search ? Object.freeze({ ...state.search }) : Object.freeze({}),
+    data: state.data ? Object.freeze({ ...state.data }) : Object.freeze({}),
+    historyState: state.historyState ?? null,
+    routeConfig: state.routeConfig ?? null,
   });
 }
 
@@ -438,47 +435,25 @@ function adaptSearchParser(
 }
 
 async function resolveViews(
-  layouts:
-    readonly StreamixLayout[],
-  route:
-    StreamixRoute,
-): Promise<
-  readonly ResolvedRouteView[]
-> {
-  const resolvedLayouts =
-    await Promise.all(
-      layouts.map(
-        async (
-          layout,
-          index,
-        ) => ({
-          component:
-            await loadComponent(
-              layout,
-            ),
-          providers:
-            layout.providers,
-          label:
-            `StreamixLayout(` +
-            `${layout.path || index}` +
-            `)`,
-        }),
-      ),
-    );
+  layouts: readonly StreamixLayout[],
+  route: StreamixRoute,
+): Promise<readonly ResolvedRouteView[]> {
+  const resolvedLayouts = await Promise.all(
+    layouts.map(async (layout, index) => ({
+      component: await loadComponent(layout),
+      providers: (layout.providers ?? []).filter(Boolean), // Clean up null/undefined providers
+      label: `StreamixLayout(${layout.path || index})`,
+    })),
+  );
 
-  const page =
-    await loadComponent(route);
+  const page = await loadComponent(route);
 
   return Object.freeze([
     ...resolvedLayouts,
     {
       component: page,
-      providers:
-        route.providers,
-      label:
-        `StreamixRoute(` +
-        `${route.path}` +
-        `)`,
+      providers: (route.providers ?? []).filter(Boolean), // Clean up null/undefined providers
+      label: `StreamixRoute(${route.path})`,
     },
   ]);
 }
@@ -1023,6 +998,19 @@ export class StreamixRouter<
   }
 }
 
+
+@Injectable()
+class StreamixRouterImpl<
+  TRoutes extends StreamixRoutes = StreamixRoutes,
+> extends StreamixRouter<TRoutes> {
+  constructor() {
+    const config = inject(
+      ROUTER_CONFIGURATION,
+    ) as RouterConfiguration<TRoutes>;
+    super(config);
+  }
+}
+
 export function provideStreamixRouter<
   const TRoutes extends
     StreamixRoutes,
@@ -1034,25 +1022,9 @@ export function provideStreamixRouter<
   const config: RouterConfiguration<TRoutes> = { ...options, routes };
 
   const providers: Provider[] = [
-    {
-      provide:
-        ROUTER_CONFIGURATION,
-      useValue:
-        config,
-    },
-    {
-      provide:
-        StreamixRouter,
-      useFactory:
-        () =>
-          new StreamixRouter<
-            TRoutes
-          >(
-            inject(
-              ROUTER_CONFIGURATION,
-            ) as RouterConfiguration<TRoutes>,
-          ),
-    },
+    { provide: ROUTER_CONFIGURATION, useValue: config },
+    StreamixRouterImpl,
+    { provide: StreamixRouter, useExisting: StreamixRouterImpl },
   ];
 
   return makeEnvironmentProviders(providers);
