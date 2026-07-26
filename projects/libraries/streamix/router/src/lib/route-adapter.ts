@@ -39,25 +39,6 @@ export function adaptRouteComponent(
   return context.render(component, context.injector, routeProviders);
 }
 
-export function collectRouteInputValues(
-  route: ActivatedRoute,
-): Readonly<Record<string, unknown>> {
-  const values = {
-    ...route.params,
-    ...route.query,
-    ...route.data,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ...((route.data as any)?.__params ?? {}),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ...((route.data as any)?.__query ?? {}),
-  };
-
-  delete values.__params;
-  delete values.__query;
-
-  return values;
-}
-
 export function bindRouteInputs(
   target: InputBindingTarget,
   component: Type<unknown>,
@@ -77,7 +58,16 @@ export function bindRouteInputs(
     );
   }
 
-  const values = collectRouteInputValues(route);
+  const data = route.data ?? {};
+  const values = {
+    ...route.params,
+    ...route.query,
+    ...data,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...((data as any)?.__params ?? {}),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...((data as any)?.__query ?? {}),
+  };
 
   for (const input of inputs) {
     const value =

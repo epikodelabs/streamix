@@ -31,7 +31,11 @@ class ShellComponent {}
 @Component({ standalone: true, template: '<h3>Child</h3>' })
 class ChildComponent {}
 
-@Component({ standalone: true, template: '<h3>Settings</h3>' })
+@Component({
+  standalone: true,
+  template: '<h3>Settings</h3>',
+  host: { 'settings-cmp': '' },
+})
 class SettingsComponent {}
 
 describe('StreamixRouter: flat routes and layouts', () => {

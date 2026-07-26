@@ -3,7 +3,6 @@ import { Component, Input } from '@angular/core';
 import {
   adaptRouteComponent,
   bindRouteInputs,
-  collectRouteInputValues,
 } from '../lib/route-adapter';
 
 import type { StreamixRouteProviders } from '../lib/route-types';
@@ -13,8 +12,7 @@ import type { StreamixRouteProviders } from '../lib/route-types';
 })
 class TestRouteComponent {}
 
-type ActivatedRoute =
-  Parameters<typeof collectRouteInputValues>[0];
+type ActivatedRoute = Parameters<typeof bindRouteInputs>[2];
 
 function createRoute(
   overrides: Partial<ActivatedRoute> = {},
@@ -29,37 +27,6 @@ function createRoute(
 }
 
 describe('Streamix router adapters', () => {
-  it('collects route input values from params, query, schema results, and resolved data', () => {
-    const route = createRoute({
-      params: {
-        projectId: '42',
-        section: 'overview',
-      },
-      query: {
-        tab: 'activity',
-        sort: 'oldest',
-      },
-      data: {
-        __params: {
-          projectId: 42,
-        },
-        __search: {
-          tab: 'settings',
-        },
-        sort: 'recent',
-        userName: 'Ada',
-      },
-    });
-
-    expect(collectRouteInputValues(route)).toEqual({
-      projectId: 42,
-      section: 'overview',
-      tab: 'settings',
-      sort: 'recent',
-      userName: 'Ada',
-    });
-  });
-
   it('binds component inputs by template name first and falls back to prop name', () => {
     const target = {
       setInput: jasmine.createSpy('setInput'),
@@ -75,10 +42,22 @@ describe('Streamix router adapters', () => {
     const route = createRoute({
       params: {
         projectId: '7',
-      }, 
+        section: 'overview',
+      },
+      query: {
+        tab: 'activity',
+        sort: 'oldest',
+      },
       data: {
         'project-id': 42,
         user: 'Ada',
+        __params: {
+          projectId: 42,
+        },
+        __query: {
+          tab: 'settings',
+        },
+        sort: 'recent',
       },
     });
 
