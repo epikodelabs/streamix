@@ -18,6 +18,9 @@ export type ParamSchema<T = unknown> =
   | ScalarSchema
   | OptionalSchema<ParamSchema<T>>;
 
+export type SearchSchemaRecord = Readonly<Record<string, SearchSchema<unknown>>>;
+export type ParamSchemaRecord = Readonly<Record<string, ParamSchema<unknown>>>;
+
 interface StringSchema {
   readonly _type: 'string';
   readonly default?: string;
@@ -279,41 +282,94 @@ export function parseParamsRecord(
   return Object.freeze(result);
 }
 
-export function serializeSearch<T extends Record<string, SearchSchema<unknown>>>(
+function unwrapOptionalSearchSchema(
+  schema: SearchSchema<unknown>,
+): SearchSchema<unknown> {
+  let current = schema;
+
+  while (current._type === 'optional') {
+    current = current.inner;
+  }
+
+  return current;
+}
+
+export function serializeSearch<
+  const T extends SearchSchemaRecord,
+>(
   schema: T,
-  values: Partial<InferSearchType<T>>,
+  values: Readonly<Record<string, unknown>>,
 ): string {
-  const params = new URLSearchParams();
+  return serializeSearchRecord(
+    schema,
+    values,
+  );
+}
+
+export function serializeSearchRecord(
+  schema: SearchSchemaRecord,
+  values: Readonly<Record<string, unknown>>,
+): string {
+  const params =
+    new URLSearchParams();
 
   for (const [key, value] of Object.entries(values)) {
     if (value === undefined) {
       continue;
     }
 
-    const spec = schema[key];
-    if (!spec) {
+    const declared =
+      schema[key];
+
+    if (!declared) {
       continue;
     }
 
-    if (spec._type === 'array' && Array.isArray(value)) {
+    const spec =
+      unwrapOptionalSearchSchema(
+        declared,
+      );
+
+    if (
+      spec._type === 'array' &&
+      Array.isArray(value)
+    ) {
       for (const item of value) {
-        params.append(key, String(item));
+        params.append(
+          key,
+          String(item),
+        );
       }
+
       continue;
     }
 
-    if (spec._type === 'date' && value instanceof Date) {
-      params.set(key, value.toISOString());
+    if (
+      spec._type === 'date' &&
+      value instanceof Date
+    ) {
+      params.set(
+        key,
+        value.toISOString(),
+      );
+
       continue;
     }
 
-    if (value !== getDefault(spec)) {
-      params.set(key, String(value));
+    if (value !== getDefault(declared)) {
+      params.set(
+        key,
+        String(value),
+      );
     }
   }
 
-  const search = params.toString();
-  return search ? `?${search}` : '';
+  const search =
+    params.toString();
+
+  return search
+    ? `?${search}`
+    : '';
 }
 
 function serializeValue(

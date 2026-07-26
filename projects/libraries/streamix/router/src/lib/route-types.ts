@@ -1,5 +1,5 @@
 import type { EnvironmentProviders, Provider, Type } from '@angular/core';
-import type { ParamSchema, SearchSchema } from './search-schema';
+import type { ParamSchemaRecord, SearchSchemaRecord } from './search-schema';
 import type { DeactivationContext, NavigationContext } from './vanilla-router';
 
 export type MaybePromise<T> = T | PromiseLike<T>;
@@ -27,16 +27,30 @@ export type RouteLoader<T = unknown> = (
 
 export type RouteLoaders = Readonly<Record<string, RouteLoader>>;
 
-export interface StreamixRoute {
+export type StreamixRouteOptions<
+  TName extends string | undefined = string | undefined,
+  TParamsSchema extends ParamSchemaRecord | undefined = ParamSchemaRecord | undefined,
+  TSearchSchema extends SearchSchemaRecord | undefined = SearchSchemaRecord | undefined,
+> = Omit<
+  StreamixRoute<string, TName, TParamsSchema, TSearchSchema>,
+  'kind' | 'path' | 'component' | 'loadComponent'
+>;
+
+export interface StreamixRoute<
+  TPath extends string = string,
+  TName extends string | undefined = string | undefined,
+  TParamsSchema extends ParamSchemaRecord | undefined = ParamSchemaRecord | undefined,
+  TSearchSchema extends SearchSchemaRecord | undefined = SearchSchemaRecord | undefined,
+> {
   readonly kind: 'route';
-  readonly path: string;
-  readonly name?: string;
+  readonly path: TPath;
+  readonly name?: TName;
   readonly redirectTo?: string;
   readonly preload?: boolean;
   readonly component?: Type<unknown>;
   readonly viewTransition?: boolean;
-  readonly paramsSchema?: Readonly<Record<string, ParamSchema<unknown>>>;
-  readonly searchSchema?: Readonly<Record<string, SearchSchema<unknown>>>;
+  readonly paramsSchema?: TParamsSchema;
+  readonly searchSchema?: TSearchSchema;
   readonly data?: Readonly<Record<string, unknown>>;
   readonly loadComponent?: Lazy<Type<unknown>>;
   readonly providers?: StreamixRouteProviders;
@@ -44,13 +58,17 @@ export interface StreamixRoute {
   readonly beforeLeave?: readonly BeforeLeave[];
   readonly resolve?: RouteLoaders;
 }
+export type StreamixLayoutOptions = Omit<
+  StreamixLayout,
+  'kind' | 'path' | 'component' | 'loadComponent' | 'entries'
+>;
 
-export interface StreamixLayout {
+export interface StreamixLayout<TPath extends string = string, TEntries extends StreamixRoutes = StreamixRoutes> {
   readonly kind: 'layout';
-  readonly path: string;
+  readonly path: TPath;
   readonly component?: Type<unknown>;
   readonly loadComponent?: Lazy<Type<unknown>>;
-  readonly entries: StreamixRoutes;
+  readonly entries: TEntries;
   readonly providers?: StreamixRouteProviders;
 }
 
