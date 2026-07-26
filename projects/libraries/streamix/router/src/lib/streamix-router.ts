@@ -15,7 +15,6 @@ import {
 } from '@angular/core';
 
 import {
-  ModuleRegistry,
   runWithInjector,
   unwrapDefault
 } from './adapter-utils';
@@ -199,6 +198,7 @@ function createAngularRenderer(appRef: ApplicationRef): RenderComponent {
 interface CompiledRoute {
   readonly route: StreamixRoute;
   readonly path: string;
+  readonly redirectTo?: string;
   readonly layouts: readonly StreamixLayout[];
 }
 
@@ -207,6 +207,13 @@ function joinRoutePath(parent: string, child: string): string {
   const childSegments = child.split('/').filter(Boolean);
   const path = [...parentSegments, ...childSegments].join('/');
   return path ? `/${path}` : '/';
+}
+
+function compileRedirect(parentPath: string, redirectTo: string | undefined): string | undefined {
+  if (!redirectTo) return undefined;
+  return redirectTo.startsWith('/')
+    ? joinRoutePath('/', redirectTo)
+    : joinRoutePath(parentPath, redirectTo);
 }
 
 function compileRoutes(
@@ -227,6 +234,7 @@ function compileRoutes(
       output.push({
         route: entry,
         path: joinRoutePath(parentPath, entry.path),
+        redirectTo: compileRedirect(parentPath, entry.redirectTo),
         layouts: Object.freeze([...layouts]),
       });
     }
@@ -237,7 +245,12 @@ function compileRoutes(
 function findNestedOutlet(node: Node): HTMLElement | null {
   if (!(node instanceof Element || node instanceof DocumentFragment)) return null;
   if (node instanceof HTMLElement && node.hasAttribute(OUTLET_ATTRIBUTE)) return node;
-  return node.querySelector<HTMLElement>(`[${OUTLET_ATTRIBUTE}]`);
+
+  const outlets = node.querySelectorAll<HTMLElement>(`[${OUTLET_ATTRIBUTE}]`);
+  if (outlets.length > 1) {
+    throw new Error('A layout must render exactly one router outlet.');
+  }
+  return outlets[0] ?? null;
 }
 
 function composeRouteView(
@@ -264,7 +277,7 @@ function composeRouteView(
         const child = normalized[index + 1];
         const outlet = findNestedOutlet(parent.node);
         if (!outlet) {
-          throw new Error(`Layout component at index ${index} rendered no <streamix-outlet>.`);
+          throw new Error(`Layout component at index ${index} rendered no router outlet.`);
         }
         outlet.replaceChildren(child.node);
         if (child.component !== undefined) {
@@ -308,35 +321,45 @@ function adaptRoutes(entries: StreamixRoutes, context: AdapterContext): Route[] 
 }
 
 function adaptRoute(compiled: CompiledRoute, context: AdapterContext): Route {
-  const { route, path, layouts } = compiled;
+  const { route, path, redirectTo, layouts } = compiled;
+  let loaded: ReturnType<NonNullable<Route['load']>> | null = null;
+
+  const load = (): ReturnType<NonNullable<Route['load']>> => {
+    if (loaded) return loaded;
+
+    loaded = Promise.all([
+      route.loadComponent
+        ? Promise.resolve(route.loadComponent()).then(unwrapDefault)
+        : Promise.resolve(route.component),
+      resolveLayouts(layouts),
+    ]).then(([component, resolvedLayouts]) => ({
+      component: component
+        ? composeRouteView(component, resolvedLayouts, context, route.providers)
+        : undefined,
+      canActivate: adaptBeforeEnter(route.beforeEnter, context.injector),
+      canDeactivate: adaptBeforeLeave(route.beforeLeave, context.injector),
+      resolve: adaptLoaders(
+        route.resolve,
+        route.paramsSchema,
+        route.searchSchema,
+        context.injector,
+      ),
+    })).catch((error) => {
+      loaded = null;
+      throw error;
+    });
+
+    return loaded;
+  };
+
   return {
     name: route.name,
     path,
-    redirectTo: route.redirectTo,
+    redirectTo,
     data: route.data,
     preload: route.preload,
     viewTransition: route.viewTransition,
-    load: async () => {
-      const [component, resolvedLayouts] = await Promise.all([
-        route.loadComponent
-          ? Promise.resolve(route.loadComponent()).then(unwrapDefault)
-          : Promise.resolve(route.component),
-        resolveLayouts(layouts),
-      ]);
-      return {
-        component: component
-          ? composeRouteView(component, resolvedLayouts, context, route.providers)
-          : undefined,
-        canActivate: adaptBeforeEnter(route.beforeEnter, context.injector),
-        canDeactivate: adaptBeforeLeave(route.beforeLeave, context.injector),
-        resolve: adaptLoaders(
-          route.resolve,
-          route.paramsSchema,
-          route.searchSchema,
-          context.injector,
-        ),
-      };
-    },
+    load,
   };
 }
 
@@ -464,7 +487,6 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
   private engine: Router | null = null;
   private currentState: RouterState = EMPTY_ROUTER_STATE;
   private outlet: HTMLElement | null = null;
-  private modules = new ModuleRegistry();
   private readonly namedRouteMap = new Map<string, { route: StreamixRoute; fullPath: string }>();
 
   public readonly navigateTo: TypedNavigate<TRoutes>;
@@ -527,15 +549,9 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
     try {
       engine.start();
     } catch (error) {
-      try {
-        engine.dispose();
-      } finally {
-        // If modules were used for something, they would be disposed here.
-      }
+      engine.dispose();
       throw error;
     }
-
-    this.modules.dispose();
     this.outlet = outlet;
     this.engine = engine;
     this.currentState = snapshotRouterState(engine.state);
@@ -596,20 +612,12 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
 
   dispose(): void {
     const engine = this.engine;
-    const modules = this.modules;
 
     this.engine = null;
     this.currentState = EMPTY_ROUTER_STATE;
     this.outlet = null;
-    this.modules = new ModuleRegistry();
 
-    try {
-      engine?.dispose();
-    } finally {
-      modules.dispose((error) =>
-        console.error('[StreamixRouter] Module cleanup failed', error),
-      );
-    }
+    engine?.dispose();
   }
 
   private get baseHref(): string {
@@ -625,60 +633,76 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
   }
 
   private createNavigateToProxy(): TypedNavigate<TRoutes> {
-    return new Proxy({} as any, {
-      get: (_target, prop: string) => {
-        return (options: { params?: any, search?: any } = {}) => {
-          return this.navigate({ name: prop, ...options });
-        };
+    return new Proxy(Object.create(null), {
+      get: (_target, prop: string | symbol) => {
+        if (typeof prop !== 'string' || prop === 'then') return undefined;
+        return (options: { params?: any; search?: any } = {}) =>
+          this.navigate({ name: prop, ...options });
       },
-    });
+    }) as TypedNavigate<TRoutes>;
   }
 
   private createHrefToProxy(): TypedHref<TRoutes> {
-    return new Proxy({} as any, {
-      get: (_target, prop: string) => {
-        return (options: { params?: any, search?: any } = {}) => {
-          return this.href({ name: prop, ...options });
-        };
+    return new Proxy(Object.create(null), {
+      get: (_target, prop: string | symbol) => {
+        if (typeof prop !== 'string' || prop === 'then') return undefined;
+        return (options: { params?: any; search?: any } = {}) =>
+          this.href({ name: prop, ...options });
       },
-    });
+    }) as TypedHref<TRoutes>;
   }
 
   private generateUrlFromNamedRoute(target: NamedNavigationTarget): string | null {
     const record = this.namedRouteMap.get(target.name);
-    if (!record) {
-      console.error(`[StreamixRouter] Route with name "${target.name}" not found.`);
-      return null;
-    }
+    if (!record) return null;
 
-    let path = record.fullPath;
     const params = target.params ?? {};
+    let missingParameter = false;
+    let path = record.fullPath.replace(
+      /:([A-Za-z_][A-Za-z0-9_]*)/g,
+      (_match, key: string) => {
+        const value = (params as Record<string, unknown>)[key];
+        if (value === undefined || value === null) {
+          missingParameter = true;
+          return `:${key}`;
+        }
+        return encodeURIComponent(String(value));
+      },
+    );
 
-    for (const key in params) {
-      if (Object.prototype.hasOwnProperty.call(params, key)) {
-        const value = String((params as any)[key]);
-        path = path.replace(`:${key}`, encodeURIComponent(value));
-      }
-    }
+    if (missingParameter) return null;
 
     if (target.search) {
-      const search = new URLSearchParams(target.search as Record<string, string>).toString();
-      if (search) {
-        path += `?${search}`;
+      const search = new URLSearchParams();
+      for (const [key, rawValue] of Object.entries(target.search)) {
+        if (rawValue === undefined || rawValue === null) continue;
+        if (Array.isArray(rawValue)) {
+          for (const value of rawValue) search.append(key, String(value));
+        } else {
+          search.set(key, String(rawValue));
+        }
       }
+      const query = search.toString();
+      if (query) path += `?${query}`;
     }
 
     return routerHref(resolveRouterUrl(path, this.baseHref, window.location, 'href'));
   }
 
   private collectAndValidateRoutes(entries: StreamixRoutes): void {
+    const paths = new Map<string, StreamixRoute>();
+
     for (const { route, path } of compileRoutes(entries)) {
-      if (!path.startsWith('/')) {
-        throw new Error(`Compiled route path "${path}" must be absolute.`);
+      if (paths.has(path)) {
+        throw new Error(`Duplicate compiled route path "${path}".`);
       }
+      paths.set(path, route);
+
       if (!route.name) continue;
       if (this.namedRouteMap.has(route.name)) {
-        throw new Error(`Duplicate route name "${route.name}". Route names must be globally unique.`);
+        throw new Error(
+          `Duplicate route name "${route.name}". Route names must be globally unique.`,
+        );
       }
       this.namedRouteMap.set(route.name, { route, fullPath: path });
     }
