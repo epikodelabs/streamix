@@ -151,8 +151,8 @@ export interface RouterConfig {
   navigateExternal?: (url: URL) => void;
   onOutletActivate?: (outlet: HTMLElement, component: unknown) => void;
   render?: (outlet: HTMLElement, node: Node, route: ActivatedRoute) => void;
-  renderNotFound?: (outlet: HTMLElement, url: URL) => void;
-  renderError?: (outlet: HTMLElement, error: unknown) => void;
+  renderNotFound?: (outlet: HTMLElement, url: URL, router: Router) => void;
+  renderError?: (outlet: HTMLElement, error: unknown, router: Router) => void;
   onStateChange?: (state: RouterState) => void;
 }
 
@@ -1270,7 +1270,7 @@ export function createRouter(config: RouterConfig): Router {
           routeConfig: null,
         }, () => {
           const outlet = resolveOutlet();
-          if (outlet) renderNotFound(outlet, result.request.url);
+          if (outlet) renderNotFound(outlet, result.request.url, publicRouter);
           replaceActiveRender(null);
         });
         commitHistoryUpdate(
@@ -1298,7 +1298,7 @@ export function createRouter(config: RouterConfig): Router {
           error: result.error,
         }, () => {
           const outlet = resolveOutlet();
-          if (outlet) renderError(outlet, result.error);
+          if (outlet) renderError(outlet, result.error, publicRouter);
           replaceActiveRender(null);
         });
         rollbackHistoryUpdate(result.request.historyUpdate);
@@ -1435,6 +1435,8 @@ export function createRouter(config: RouterConfig): Router {
     return link;
   }
 
+  let publicRouter: Router;
+
   const publicState: RouterState = {
     get current() {
       if (disposed) return null;
@@ -1478,7 +1480,7 @@ export function createRouter(config: RouterConfig): Router {
     },
   };
 
-  return {
+  publicRouter = {
     state: publicState,
     start: () => startRouter(),
     stop: () => stopRouter(),
@@ -1496,6 +1498,8 @@ export function createRouter(config: RouterConfig): Router {
     href: (target) => href(target),
     createLink: (to, text, className) => createLink(to, text, className),
   };
+
+  return publicRouter;
 }
 
 export type VanillaRouterInstance = ReturnType<typeof createRouter>;
