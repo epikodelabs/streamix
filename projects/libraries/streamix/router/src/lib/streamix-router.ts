@@ -26,8 +26,8 @@ import {
   BeforeLeave,
   MaybePromise,
   RouteLoader,
-  StreamixRoute,
   StreamixLayout,
+  StreamixRoute,
   StreamixRouteProviders,
   StreamixRoutes
 } from './route-types';
@@ -252,7 +252,6 @@ function composeRouteView(
   ];
 
   return async (route, renderContext) => {
-    const rendered: Array<Awaited<ReturnType<RouteComponent>>> = [];
     const normalized: Array<{ node: Node; component?: unknown; dispose?: () => void }> = [];
     try {
       for (const renderer of renderers) {
@@ -297,7 +296,7 @@ async function resolveLayouts(layouts: readonly StreamixLayout[]): Promise<
 > {
   return Promise.all(layouts.map(async layout => {
     const component = layout.loadComponent
-      ? unwrapDefault(await layout.loadComponent())
+      ? await Promise.resolve(layout.loadComponent()).then(unwrapDefault)
       : layout.component;
     if (!component) throw new Error('A layout must define component or loadComponent.');
     return { component, providers: layout.providers };
