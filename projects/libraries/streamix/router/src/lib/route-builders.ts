@@ -1,21 +1,9 @@
 import type { Type } from '@angular/core';
 
 import type {
-  Lazy, StreamixLayout, StreamixRoute, StreamixRoutes
+  Lazy, StreamixLayout, StreamixLayoutOptions, StreamixRoute, StreamixRouteOptions, StreamixRoutes
 } from './route-types';
 import type { ParamSchemaRecord, SearchSchemaRecord } from './search-schema';
-
-export type StreamixRouteOptions<
-  TName extends string | undefined = string | undefined,
-  TParamsSchema extends ParamSchemaRecord | undefined = ParamSchemaRecord | undefined,
-  TSearchSchema extends SearchSchemaRecord | undefined = SearchSchemaRecord | undefined,
-> = Omit<
-  StreamixRoute<string, TName, TParamsSchema, TSearchSchema>,
-  'kind' | 'path' | 'component' | 'loadComponent'
->;
-
-export type StreamixLayoutOptions = Omit<StreamixLayout, 'kind' | 'path' | 'component' | 'loadComponent' | 'entries'>;
-
 
 export function route<
   const TPath extends string,

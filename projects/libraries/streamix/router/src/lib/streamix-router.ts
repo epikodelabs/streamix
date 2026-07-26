@@ -20,11 +20,6 @@ import {
   unwrapDefault,
 } from './adapter-utils';
 
-import {
-  StreamixLayoutOptions,
-  StreamixRouteOptions,
-} from './route-builders';
-
 import type {
   NamedNavigationTarget,
   NavigationTarget,
@@ -46,7 +41,9 @@ import type {
   MaybePromise,
   RouteLoader,
   StreamixLayout,
+  StreamixLayoutOptions,
   StreamixRoute,
+  StreamixRouteOptions,
   StreamixRoutes
 } from './route-types';
 
