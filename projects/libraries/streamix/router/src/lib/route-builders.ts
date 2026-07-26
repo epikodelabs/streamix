@@ -1,9 +1,9 @@
 import type { Type } from '@angular/core';
 
+import type { ParamSchemaRecord, QuerySchemaRecord } from './query-schema';
 import type {
   Lazy, StreamixLayout, StreamixLayoutOptions, StreamixRoute, StreamixRouteOptions, StreamixRoutes
 } from './route-types';
-import type { ParamSchemaRecord, SearchSchemaRecord } from './search-schema';
 
 export function route<
   const TPath extends string,
@@ -11,21 +11,21 @@ export function route<
     string | undefined = undefined,
   const TParamsSchema extends
     ParamSchemaRecord | undefined = undefined,
-  const TSearchSchema extends
-    SearchSchemaRecord | undefined = undefined,
+  const TQuerySchema extends
+    QuerySchemaRecord | undefined = undefined,
 >(
   path: TPath,
   component: Type<unknown>,
   options: StreamixRouteOptions<
     TName,
     TParamsSchema,
-    TSearchSchema
+    TQuerySchema
   > = {},
 ): StreamixRoute<
   TPath,
   TName,
   TParamsSchema,
-  TSearchSchema
+  TQuerySchema
 > {
   return {
     kind: 'route',
@@ -41,21 +41,21 @@ export function lazyRoute<
     string | undefined = undefined,
   const TParamsSchema extends
     ParamSchemaRecord | undefined = undefined,
-  const TSearchSchema extends
-    SearchSchemaRecord | undefined = undefined,
+  const TQuerySchema extends
+    QuerySchemaRecord | undefined = undefined,
 >(
   path: TPath,
   loadComponent: Lazy<Type<unknown>>,
   options: StreamixRouteOptions<
     TName,
     TParamsSchema,
-    TSearchSchema
+    TQuerySchema
   > = {},
 ): StreamixRoute<
   TPath,
   TName,
   TParamsSchema,
-  TSearchSchema
+  TQuerySchema
 > {
   return {
     kind: 'route',
@@ -75,7 +75,7 @@ export function redirectRoute<
   redirectTo: TRedirectTo,
   options: Omit<
     StreamixRouteOptions<TName, undefined, undefined>,
-    'redirectTo' | 'paramsSchema' | 'searchSchema'
+    'redirectTo' | 'paramsSchema' | 'querySchema'
   > = {},
 ): StreamixRoute<
   TPath,

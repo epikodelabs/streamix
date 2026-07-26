@@ -1,327 +1,97 @@
+import type { InferParamType, ParamSchemaRecord } from './query-schema';
 import type {
-  InferParamType,
-  InferSearchType,
-  ParamSchema,
-  SearchSchema,
-} from './search-schema';
-
-import type {
+  StreamixLayout,
+  StreamixLeafRoute,
+  StreamixRoute,
   StreamixRoutes,
 } from './route-types';
 
-type TrimLeadingSlash<
-  TPath extends string,
-> =
-  TPath extends `/${infer TRest}`
-    ? TrimLeadingSlash<TRest>
-    : TPath;
+/**
+ * Extracts named parameter tokens from path string templates (e.g. "/users/:id")
+ */
+export type ExtractPathParams<T extends string> =
+  T extends `${string}:${infer Param}/${infer Rest}`
+    ? Param | ExtractPathParams<`/${Rest}`>
+    : T extends `${string}:${infer Param}`
+    ? Param
+    : never;
 
-type TrimTrailingSlash<
-  TPath extends string,
-> =
-  TPath extends `${infer TRest}/`
-    ? TrimTrailingSlash<TRest>
-    : TPath;
-
-type NormalizeSegment<
-  TPath extends string,
-> =
-  TrimTrailingSlash<
-    TrimLeadingSlash<TPath>
-  >;
-
-export type JoinRoutePath<
-  TParent extends string,
-  TChild extends string,
-> =
-  NormalizeSegment<TParent> extends
-    infer TParentPart extends string
-      ? NormalizeSegment<TChild> extends
-          infer TChildPart extends string
-        ? TParentPart extends ''
-          ? TChildPart extends ''
-            ? '/'
-            : `/${TChildPart}`
-          : TChildPart extends ''
-            ? `/${TParentPart}`
-            : `/${TParentPart}/${TChildPart}`
+/**
+ * Flattens top-level routes and layout entries into leaf routes using a single unroll level.
+ */
+export type ExtractLeafRoutes<TRoutes extends StreamixRoutes> =
+  TRoutes[number] extends infer TEntry
+    ? TEntry extends StreamixRoute<any, any, any, any>
+      ? TEntry
+      : TEntry extends StreamixLayout<any, infer TEntries>
+      ? TEntries[number] extends infer TChild
+        ? TChild extends StreamixRoute<any, any, any, any>
+          ? TChild
+          : TChild extends StreamixLayout<any, any>
+          ? StreamixLeafRoute<TChild>
+          : never
         : never
-      : never;
+      : never
+    : never;
 
-export interface CompiledRouteType<
-  TRoute,
-  TPath extends string,
-> {
-  readonly route: TRoute;
-  readonly path: TPath;
-}
+/**
+ * Extracts route names safely across layout entries without deep recursion.
+ */
+export type ExtractRouteNames<TRoutes extends StreamixRoutes> =
+  Extract<ExtractLeafRoutes<TRoutes>, { name: string }>['name'];
 
-type CompileEntry<
-  TEntry,
-  TParentPath extends string,
-> =
-  TEntry extends {
-    readonly kind: 'layout';
-    readonly path:
-      infer TLayoutPath extends string;
-    readonly entries:
-      infer TEntries extends
-        readonly unknown[];
-  }
-    ? CompileEntries<
-        TEntries,
-        JoinRoutePath<
-          TParentPath,
-          TLayoutPath
-        >
-      >
-    : TEntry extends {
-        readonly kind: 'route';
-        readonly path:
-          infer TRoutePath extends string;
+/**
+ * Infers route path parameter types from paramsSchema or path template tokens.
+ */
+export type InferRouteParams<TRoute> = TRoute extends { paramsSchema: ParamSchemaRecord }
+  ? InferParamType<TRoute['paramsSchema']>
+  : TRoute extends { path: infer P extends string }
+  ? [ExtractPathParams<P>] extends [never]
+    ? Record<string, never>
+    : Record<ExtractPathParams<P>, string | number>
+  : Record<string, unknown>;
+
+/**
+ * Infers route query parameter types from querySchema or searchSchema.
+ */
+export type InferRouteQuery<TRoute> = TRoute extends { querySchema: ParamSchemaRecord }
+  ? InferParamType<TRoute['querySchema']>
+  : TRoute extends { searchSchema: ParamSchemaRecord }
+  ? InferParamType<TRoute['searchSchema']>
+  : Record<string, unknown>;
+
+/**
+ * Maps options (params, query, search, navigation state) for a target route name.
+ */
+export type RouteOptionsByName<
+  TRoutes extends StreamixRoutes,
+  TName extends string,
+> = Extract<ExtractLeafRoutes<TRoutes>, { name: TName }> extends infer TRoute
+  ? [TRoute] extends [never]
+    ? never
+    : {
+        params?: InferRouteParams<TRoute>;
+        query?: InferRouteQuery<TRoute>;
+        search?: InferRouteQuery<TRoute>;
+        state?: unknown;
+        replace?: boolean;
       }
-      ? CompiledRouteType<
-          TEntry,
-          JoinRoutePath<
-            TParentPath,
-            TRoutePath
-          >
-        >
-      : never;
+  : never;
 
-export type CompileEntries<
-  TEntries,
-  TParentPath extends string = '/',
-> =
-  TEntries extends readonly unknown[]
-    ? {
-        [K in keyof TEntries]:
-          CompileEntry<
-            TEntries[K],
-            TParentPath
-          >
-      }[number]
-    : never;
-
-export type RouteNames<
-  TRoutes extends StreamixRoutes,
-> =
-  CompileEntries<TRoutes> extends
-    infer TEntry
-      ? TEntry extends {
-          readonly route: {
-            readonly name:
-              infer TName extends string;
-          };
-        }
-        ? TName
-        : never
-      : never;
-
-export type CompiledRouteByName<
-  TRoutes extends StreamixRoutes,
-  TName extends string,
-> =
-  Extract<
-    CompileEntries<TRoutes>,
-    {
-      readonly route: {
-        readonly name: TName;
-      };
-    }
-  >;
-
-type StripParamModifier<
-  TName extends string,
-> =
-  TName extends `${infer TBase}?`
-    ? TBase
-    : TName extends `${infer TBase}*`
-      ? TBase
-      : TName;
-
-export type ExtractPathParams<
-  TPath extends string,
-> =
-  TPath extends
-    `${string}:${infer TParam}/${infer TRest}`
-      ? StripParamModifier<TParam> |
-          ExtractPathParams<`/${TRest}`>
-      : TPath extends
-          `${string}:${infer TParam}`
-        ? StripParamModifier<TParam>
-        : never;
-
-type RouteParamSchema<
-  TRoute,
-> =
-  TRoute extends {
-    readonly paramsSchema?:
-      infer TSchema;
-  }
-    ? Exclude<TSchema, undefined>
-    : never;
-
-type RouteSearchSchema<
-  TRoute,
-> =
-  TRoute extends {
-    readonly searchSchema?:
-      infer TSchema;
-  }
-    ? Exclude<TSchema, undefined>
-    : never;
-
-type SchemaParams<
-  TRoute,
-> =
-  [RouteParamSchema<TRoute>] extends
-    [never]
-      ? {}
-      : RouteParamSchema<TRoute> extends
-          Record<
-            string,
-            ParamSchema<unknown>
-          >
-        ? InferParamType<
-            RouteParamSchema<TRoute>
-          >
-        : {};
-
-type PathParams<
-  TPath extends string,
-  TRoute,
-> = {
-  [K in ExtractPathParams<TPath>]:
-    K extends keyof SchemaParams<TRoute>
-      ? SchemaParams<TRoute>[K]
-      : string;
+/**
+ * Strongly-typed navigation proxy for StreamixRouter.
+ */
+export type TypedNavigate<TRoutes extends StreamixRoutes> = {
+  [K in ExtractRouteNames<TRoutes>]: (
+    options?: RouteOptionsByName<TRoutes, K>,
+  ) => Promise<boolean>;
 };
 
-type SearchValues<
-  TRoute,
-> =
-  [RouteSearchSchema<TRoute>] extends
-    [never]
-      ? never
-      : RouteSearchSchema<TRoute> extends
-          Record<
-            string,
-            SearchSchema<unknown>
-          >
-        ? Partial<
-            InferSearchType<
-              RouteSearchSchema<TRoute>
-            >
-          >
-        : never;
-
-type HasParams<
-  TPath extends string,
-> =
-  [ExtractPathParams<TPath>] extends
-    [never]
-      ? false
-      : true;
-
-type HasSearch<
-  TRoute,
-> =
-  [SearchValues<TRoute>] extends
-    [never]
-      ? false
-      : true;
-
-export type NamedRouteOptions<
-  TEntry,
-> =
-  TEntry extends {
-    readonly path:
-      infer TPath extends string;
-    readonly route:
-      infer TRoute;
-  }
-    ? (
-        HasParams<TPath> extends true
-          ? {
-              readonly params:
-                PathParams<
-                  TPath,
-                  TRoute
-                >;
-            }
-          : {
-              readonly params?: never;
-            }
-      ) &
-      (
-        HasSearch<TRoute> extends true
-          ? {
-              readonly search?:
-                SearchValues<TRoute>;
-            }
-          : {
-              readonly search?: never;
-            }
-      )
-    : never;
-
-type NavigateCall<
-  TEntry,
-> =
-  TEntry extends {
-    readonly path:
-      infer TPath extends string;
-  }
-    ? HasParams<TPath> extends true
-      ? (
-          options:
-            NamedRouteOptions<TEntry>,
-        ) => Promise<boolean>
-      : (
-          options?:
-            NamedRouteOptions<TEntry>,
-        ) => Promise<boolean>
-    : never;
-
-type HrefCall<
-  TEntry,
-> =
-  TEntry extends {
-    readonly path:
-      infer TPath extends string;
-  }
-    ? HasParams<TPath> extends true
-      ? (
-          options:
-            NamedRouteOptions<TEntry>,
-        ) => string | null
-      : (
-          options?:
-            NamedRouteOptions<TEntry>,
-        ) => string | null
-    : never;
-
-export type TypedNavigate<
-  TRoutes extends StreamixRoutes,
-> = {
-  [TName in RouteNames<TRoutes>]:
-    NavigateCall<
-      CompiledRouteByName<
-        TRoutes,
-        TName
-      >
-    >;
-};
-
-export type TypedHref<
-  TRoutes extends StreamixRoutes,
-> = {
-  [TName in RouteNames<TRoutes>]:
-    HrefCall<
-      CompiledRouteByName<
-        TRoutes,
-        TName
-      >
-    >;
+/**
+ * Strongly-typed href generator proxy for StreamixRouter.
+ */
+export type TypedHref<TRoutes extends StreamixRoutes> = {
+  [K in ExtractRouteNames<TRoutes>]: (
+    options?: RouteOptionsByName<TRoutes, K>,
+  ) => string | null;
 };

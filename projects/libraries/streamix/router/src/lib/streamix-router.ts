@@ -64,14 +64,15 @@ import {
 
 import {
   parseParamsRecord,
-  parseSearchRecord,
+  parseQueryRecord,
   serializeParams,
-  serializeSearch,
+  serializeQuery,
   type InferParamType,
   type ParamSchemaRecord
-} from './search-schema';
+} from './query-schema';
 
 import {
+  LoadedRoute,
   createRouter,
   type ActivatedRoute,
   type NavigationContext,
@@ -399,21 +400,21 @@ function adaptParamsParser(
     )) as never;
 }
 
-function adaptSearchParser(
+function adaptQueryParser(
   route: StreamixRoute,
   injector:
     EnvironmentInjector,
 ): Route['load'] extends
-  () => MaybePromise<infer TLoaded>
-    ? TLoaded extends {
-        parseSearch?:
+  () => MaybePromise<unknown>
+    ? LoadedRoute extends {
+        parseParams?:
           infer TParser;
       }
       ? TParser
       : never
     : never {
   const schema =
-    route.searchSchema;
+    route.querySchema;
 
   if (!schema) {
     return undefined as never;
@@ -426,7 +427,7 @@ function adaptSearchParser(
       injector,
       () =>
         Promise.resolve(
-          parseSearchRecord(
+          parseQueryRecord(
             schema,
             url,
           ),
@@ -530,8 +531,8 @@ function adaptRoutes(
                 injector,
               ),
 
-            parseSearch:
-              adaptSearchParser(
+            parseQuery:
+              adaptQueryParser(
                 route,
                 injector,
               ),
@@ -916,18 +917,18 @@ export class StreamixRouter<
       return null;
     }
 
-    const search =
-      record.route.searchSchema &&
-      target.search
-        ? serializeSearch(
+    const query =
+      record.route.querySchema &&
+      target.query
+        ? serializeQuery(
             record.route
-              .searchSchema,
-            target.search,
+              .querySchema,
+            target.query,
           )
         : '';
 
     return this.resolveHref(
-      `${path}${search}`,
+      `${path}${query}`,
     );
   }
 

@@ -8,20 +8,16 @@ type NonOptionalSchema =
   | ScalarSchema
   | ArraySchema;
 
-type AnySchema =
+export type QuerySchema =
   | NonOptionalSchema
   | OptionalSchema<NonOptionalSchema>;
 
-export type SearchSchema<T = unknown> =
-  | NonOptionalSchema
-  | OptionalSchema<NonOptionalSchema>;
-
-export type ParamSchema<T = unknown> =
+export type ParamSchema =
   | ScalarSchema
   | OptionalSchema<ScalarSchema>;
 
-export type SearchSchemaRecord = Readonly<Record<string, SearchSchema<unknown>>>;
-export type ParamSchemaRecord = Readonly<Record<string, ParamSchema<unknown>>>;
+export type QuerySchemaRecord = Readonly<Record<string, QuerySchema>>;
+export type ParamSchemaRecord = Readonly<Record<string, ParamSchema>>;
 
 interface StringSchema {
   readonly _type: 'string';
@@ -91,7 +87,7 @@ export const s = {
   }),
 } as const;
 
-type SchemaValue<TSchema extends SearchSchema<unknown> | ParamSchema<unknown>> =
+type SchemaValue<TSchema extends QuerySchema | ParamSchema> =
   TSchema extends OptionalSchema<infer TInner>
     ? SchemaValue<TInner>
     : TSchema extends StringSchema
@@ -106,28 +102,28 @@ type SchemaValue<TSchema extends SearchSchema<unknown> | ParamSchema<unknown>> =
               ? Date
               : unknown;
 
-export type InferSearchType<T extends Record<string, SearchSchema<unknown>>> = {
-  [K in keyof T as T[K] extends OptionalSchema<SearchSchema<unknown>>
+export type InferQueryType<T extends Record<string, QuerySchema>> = {
+  [K in keyof T as T[K] extends OptionalSchema<NonOptionalSchema>
     ? never
     : K]: SchemaValue<T[K]>;
 } & {
-  [K in keyof T as T[K] extends OptionalSchema<SearchSchema<unknown>>
+  [K in keyof T as T[K] extends OptionalSchema<NonOptionalSchema>
     ? K
     : never]?: SchemaValue<T[K]>;
 };
 
-export type InferParamType<T extends Record<string, ParamSchema<unknown>>> = {
-  [K in keyof T as T[K] extends OptionalSchema<ParamSchema<unknown>>
+export type InferParamType<T extends Record<string, ParamSchema>> = {
+  [K in keyof T as T[K] extends OptionalSchema<ScalarSchema>
     ? never
     : K]: SchemaValue<T[K]>;
 } & {
-  [K in keyof T as T[K] extends OptionalSchema<ParamSchema<unknown>>
+  [K in keyof T as T[K] extends OptionalSchema<ScalarSchema>
     ? K
     : never]?: SchemaValue<T[K]>;
 };
 
 function parseValue(
-  spec: SearchSchema<unknown> | ParamSchema<unknown>,
+  spec: QuerySchema | ParamSchema,
   raw: string | undefined,
 ): unknown {
   if (raw === undefined) {
@@ -183,7 +179,7 @@ function parseValue(
   }
 }
 
-function getDefault(spec: SearchSchema<unknown>): unknown {
+function getDefault(spec: QuerySchema): unknown {
   switch (spec._type) {
     case 'string':
       return spec.default ?? '';
@@ -204,7 +200,7 @@ function getDefault(spec: SearchSchema<unknown>): unknown {
   }
 }
 
-function getParamDefault(spec: ParamSchema<unknown>): unknown {
+function getParamDefault(spec: ParamSchema): unknown {
   switch (spec._type) {
     case 'string':
       return spec.default ?? '';
@@ -223,8 +219,8 @@ function getParamDefault(spec: ParamSchema<unknown>): unknown {
   }
 }
 
-function parseSearchInternal(
-  schema: Record<string, SearchSchema<unknown>>,
+function parseQueryInternal(
+  schema: Record<string, QuerySchema>,
   url: URL,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -252,21 +248,21 @@ function parseSearchInternal(
   return Object.freeze(result);
 }
 
-export function parseSearch<T extends Record<string, SearchSchema<unknown>>>(
+export function parseQuery<T extends Record<string, QuerySchema>>(
   schema: T,
   url: URL,
-): InferSearchType<T> {
-  return parseSearchInternal(schema, url) as InferSearchType<T>;
+): InferQueryType<T> {
+  return parseQueryInternal(schema, url) as InferQueryType<T>;
 }
 
-export function parseSearchRecord(
-  schema: Record<string, SearchSchema<unknown>>,
+export function parseQueryRecord(
+  schema: Record<string, QuerySchema>,
   url: URL,
 ): Record<string, unknown> {
-  return parseSearchInternal(schema, url);
+  return parseQueryInternal(schema, url);
 }
 
-export function parseParams<T extends Record<string, ParamSchema<unknown>>>(
+export function parseParams<T extends Record<string, ParamSchema>>(
   schema: T,
   params: Record<string, string>,
 ): InferParamType<T> {
@@ -287,7 +283,7 @@ export function parseParams<T extends Record<string, ParamSchema<unknown>>>(
 }
 
 export function parseParamsRecord(
-  schema: Record<string, ParamSchema<unknown>>,
+  schema: Record<string, ParamSchema>,
   params: Record<string, string>,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -306,9 +302,9 @@ export function parseParamsRecord(
   return Object.freeze(result);
 }
 
-function unwrapOptionalSearchSchema(
-  schema: SearchSchema<unknown>,
-): SearchSchema<unknown> {
+function unwrapOptionalQuerySchema(
+  schema: QuerySchema,
+): QuerySchema {
   let current = schema;
 
   while (current._type === 'optional') {
@@ -318,20 +314,20 @@ function unwrapOptionalSearchSchema(
   return current;
 }
 
-export function serializeSearch<
-  const T extends SearchSchemaRecord,
+export function serializeQuery<
+  const T extends QuerySchemaRecord,
 >(
   schema: T,
   values: Readonly<Record<string, unknown>>,
 ): string {
-  return serializeSearchRecord(
+  return serializeQueryRecord(
     schema,
     values,
   );
 }
 
-export function serializeSearchRecord(
-  schema: SearchSchemaRecord,
+export function serializeQueryRecord(
+  schema: QuerySchemaRecord,
   values: Readonly<Record<string, unknown>>,
 ): string {
   const params =
@@ -350,7 +346,7 @@ export function serializeSearchRecord(
     }
 
     const spec =
-      unwrapOptionalSearchSchema(
+      unwrapOptionalQuerySchema(
         declared,
       );
 
@@ -397,7 +393,7 @@ export function serializeSearchRecord(
 }
 
 function serializeValue(
-  spec: SearchSchema<unknown> | ParamSchema<unknown>,
+  spec: QuerySchema | ParamSchema,
   value: unknown,
 ): string {
   if (spec._type === 'optional') {
@@ -415,7 +411,7 @@ function serializeValue(
   return String(value);
 }
 
-export function serializeParams<T extends Record<string, ParamSchema<unknown>>>(
+export function serializeParams<T extends Record<string, ParamSchema>>(
   schema: T,
   values: InferParamType<T>,
 ): Record<string, string> {

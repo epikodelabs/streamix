@@ -15,7 +15,7 @@ type RawRouteParams = Readonly<Record<string, string>>;
 export type RouteParams =
   Readonly<Record<string, unknown>>;
 
-export type RouteSearch =
+export type RouteQuery =
   Readonly<Record<string, unknown>>;
 
 export type RouteData =
@@ -34,7 +34,7 @@ export interface ActivatedRoute {
    * Parsed and validated search values.
    * Raw URLSearchParams remain available through `url.searchParams`.
    */
-  readonly search: RouteSearch;
+  readonly query: RouteQuery;
 
   readonly data: RouteData;
   readonly historyState: unknown;
@@ -89,10 +89,10 @@ export type ParseRouteParams = (
   signal: AbortSignal,
 ) => MaybePromise<RouteParams>;
 
-export type ParseRouteSearch = (
+export type ParseRouteQuery = (
   url: URL,
   signal: AbortSignal,
-) => MaybePromise<RouteSearch>;
+) => MaybePromise<RouteQuery>;
 
 export interface LoadedRoute {
   readonly component?: RouteComponent;
@@ -100,7 +100,7 @@ export interface LoadedRoute {
   readonly canDeactivate?: CanDeactivate[];
   readonly resolve?: Record<string, Resolve>;
   readonly parseParams?: ParseRouteParams;
-  readonly parseSearch?: ParseRouteSearch;
+  readonly parseQuery?: ParseRouteQuery;
 }
 
 export interface Route {
@@ -147,7 +147,7 @@ export interface RouterState {
   readonly error: unknown;
   readonly path: string;
   readonly params: RouteParams;
-  readonly query: RouteSearch;
+  readonly query: RouteQuery;
   readonly data: RouteData;
   readonly historyState: unknown;
   readonly routeConfig: Route | null;
@@ -280,7 +280,7 @@ interface ActiveRender {
 const EMPTY_PARAMS: RouteParams =
   Object.freeze({});
 
-const EMPTY_SEARCH: RouteSearch =
+const EMPTY_QUERY: RouteQuery =
   Object.freeze({});
 
 const EMPTY_DATA: RouteData =
@@ -387,7 +387,7 @@ function loadRoute(
         canDeactivate: loaded.canDeactivate,
         resolve: loaded.resolve,
         parseParams: loaded.parseParams,
-        parseSearch: loaded.parseSearch,
+        parseQuery: loaded.parseQuery,
       }))
       .catch(error => {
         routeLoads.delete(route);
@@ -1185,10 +1185,10 @@ export function createRouter(config: RouterConfig): Router {
     throwIfAborted(signal);
 
     // Parse URL-derived values before guards and resolvers. Public route
-    // contexts therefore never expose unvalidated path or search strings.
+    // contexts therefore never expose unvalidated path or query strings.
     const [
       parsedParams,
-      parsedSearch,
+      parsedQuery,
     ] = await Promise.all([
       loadedRoute.parseParams
         ? loadedRoute.parseParams(
@@ -1202,15 +1202,15 @@ export function createRouter(config: RouterConfig): Router {
             }) as RouteParams,
           ),
 
-      loadedRoute.parseSearch
-        ? loadedRoute.parseSearch(
+      loadedRoute.parseQuery
+        ? loadedRoute.parseQuery(
             request.url,
             signal,
           )
         : Promise.resolve(
             Object.freeze(
               Object.fromEntries(request.url.searchParams),
-            ) as RouteSearch,
+            ) as RouteQuery,
           ),
     ]);
 
@@ -1224,9 +1224,9 @@ export function createRouter(config: RouterConfig): Router {
         Object.freeze({
           ...parsedParams,
         }),
-      search:
+      query:
         Object.freeze({
-          ...parsedSearch,
+          ...parsedQuery,
         }),
       data:
         Object.freeze({
@@ -1692,14 +1692,8 @@ export function createRouter(config: RouterConfig): Router {
       return currentState?.params ?? EMPTY_PARAMS;
     },
     get query() {
-      if (disposed) {
-        return EMPTY_SEARCH;
-      }
-
-      return (
-        currentState?.search ??
-        EMPTY_SEARCH
-      );
+      if (disposed) return EMPTY_QUERY;
+      return currentState?.query ?? EMPTY_QUERY;
     },
     get data() {
       if (disposed) return EMPTY_DATA;

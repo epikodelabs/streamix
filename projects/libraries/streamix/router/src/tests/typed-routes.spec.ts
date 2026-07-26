@@ -1,7 +1,7 @@
-import { layout, route } from '../lib/route-branch-types';
-import { s } from '../lib/search-schema';
-import type { StreamixRouter } from '../lib/streamix-router';
+import { s } from '../lib/query-schema';
+import { layout, route } from '../lib/route-builders';
 import type { StreamixRoutes } from '../lib/route-types';
+import type { StreamixRouter } from '../lib/streamix-router';
 
 class DashboardLayout {}
 class DashboardPage {}
@@ -14,7 +14,7 @@ const routes = [
       paramsSchema: {
         projectId: s.number({ min: 1 }),
       },
-      searchSchema: {
+      querySchema: {
         tab: s.string('overview'),
         page: s.number({ default: 1, min: 1 }),
         filters: s.array(),
@@ -23,7 +23,7 @@ const routes = [
     }),
     route('/settings', SettingsPage, {
       name: 'settings',
-      searchSchema: {
+      querySchema: {
         section: s.string('general'),
       },
     }),
@@ -37,7 +37,7 @@ function assertNamedNavigation(router: StreamixRouter<typeof routes>): void {
 
   void router.navigateTo.dashboard({
     params: { projectId: 123 },
-    search: {
+    query: {
       tab: 'settings',
       page: 2,
       filters: ['a', 'b'],
@@ -46,12 +46,12 @@ function assertNamedNavigation(router: StreamixRouter<typeof routes>): void {
   });
 
   void router.navigateTo.settings({
-    search: { section: 'billing' },
+    query: { section: 'billing' },
   });
 
   const href = router.hrefTo.dashboard({
     params: { projectId: 123 },
-    search: { tab: 'overview' },
+    query: { tab: 'overview' },
   });
 
   const typedHref: string | null = href;

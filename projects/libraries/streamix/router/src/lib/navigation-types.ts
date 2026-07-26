@@ -5,11 +5,11 @@ export type PathNavigationTarget = {
 export type NamedNavigationTarget<
   TName extends string = string,
   TParams = Record<string, unknown>,
-  TSearch = Record<string, unknown>,
+  TQuery = Record<string, unknown>,
 > = {
   readonly name: TName;
   readonly params?: TParams;
-  readonly search?: TSearch;
+  readonly query?: TQuery;
 };
 
 /**

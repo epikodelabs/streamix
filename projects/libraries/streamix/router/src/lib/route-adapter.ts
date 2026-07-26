@@ -44,16 +44,16 @@ export function collectRouteInputValues(
 ): Readonly<Record<string, unknown>> {
   const values = {
     ...route.params,
-    ...route.search,
+    ...route.query,
     ...route.data,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ...((route.data as any)?.__params ?? {}),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ...((route.data as any)?.__search ?? {}),
+    ...((route.data as any)?.__query ?? {}),
   };
 
   delete values.__params;
-  delete values.__search;
+  delete values.__query;
 
   return values;
 }

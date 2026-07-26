@@ -6,7 +6,7 @@ import {
   lazyLayout,
   lazyRoute,
   route,
-} from '../lib/route-branch-types';
+} from '../lib/route-builders';
 import type { StreamixRoutes } from '../lib/route-types';
 import {
   StreamixRouter,
