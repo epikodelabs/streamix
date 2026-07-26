@@ -10,15 +10,32 @@ import {
 
 type MaybePromise<T> = T | PromiseLike<T>;
 
-export type RouteParams = Readonly<Record<string, string>>;
-export type QueryParams = Readonly<Record<string, string>>;
-export type RouteData = Readonly<Record<string, unknown>>;
+type RawRouteParams = Readonly<Record<string, string>>;
+
+export type RouteParams =
+  Readonly<Record<string, unknown>>;
+
+export type RouteSearch =
+  Readonly<Record<string, unknown>>;
+
+export type RouteData =
+  Readonly<Record<string, unknown>>;
 
 export interface ActivatedRoute {
   readonly url: URL;
   readonly path: string;
+  /**
+   * Parsed and validated path parameters.
+   * Raw matcher captures remain internal to the router.
+   */
   readonly params: RouteParams;
-  readonly queryParams: QueryParams;
+
+  /**
+   * Parsed and validated search values.
+   * Raw URLSearchParams remain available through `url.searchParams`.
+   */
+  readonly search: RouteSearch;
+
   readonly data: RouteData;
   readonly historyState: unknown;
   readonly config: Route;
@@ -66,11 +83,24 @@ export type RouteComponent = (
   context: RouteRenderContext
 ) => MaybePromise<Node | RenderedRouteNode>;
 
+export type ParseRouteParams = (
+  params: RawRouteParams,
+  url: URL,
+  signal: AbortSignal,
+) => MaybePromise<RouteParams>;
+
+export type ParseRouteSearch = (
+  url: URL,
+  signal: AbortSignal,
+) => MaybePromise<RouteSearch>;
+
 export interface LoadedRoute {
   readonly component?: RouteComponent;
   readonly canActivate?: CanActivate[];
   readonly canDeactivate?: CanDeactivate[];
   readonly resolve?: Record<string, Resolve>;
+  readonly parseParams?: ParseRouteParams;
+  readonly parseSearch?: ParseRouteSearch;
 }
 
 export interface Route {
@@ -117,7 +147,7 @@ export interface RouterState {
   readonly error: unknown;
   readonly path: string;
   readonly params: RouteParams;
-  readonly query: QueryParams;
+  readonly search: RouteSearch;
   readonly data: RouteData;
   readonly historyState: unknown;
   readonly routeConfig: Route | null;
@@ -191,7 +221,7 @@ interface HistoryUpdate {
 
 interface RouteMatch {
   readonly route: Route;
-  readonly params: Record<string, string>;
+  readonly params: RawRouteParams;
 }
 
 interface RoutePattern {
@@ -247,9 +277,14 @@ interface ActiveRender {
   readonly dispose: () => void;
 }
 
-const EMPTY_PARAMS: RouteParams = Object.freeze({});
-const EMPTY_QUERY: QueryParams = Object.freeze({});
-const EMPTY_DATA: RouteData = Object.freeze({});
+const EMPTY_PARAMS: RouteParams =
+  Object.freeze({});
+
+const EMPTY_SEARCH: RouteSearch =
+  Object.freeze({});
+
+const EMPTY_DATA: RouteData =
+  Object.freeze({});
 const ZERO_SCROLL: ScrollPosition = Object.freeze({ x: 0, y: 0 });
 
 function splitPath(path: string): string[] {
@@ -264,9 +299,6 @@ function decodeSegment(value: string): string {
   }
 }
 
-function readQuery(url: URL): QueryParams {
-  return Object.freeze(Object.fromEntries(url.searchParams.entries()));
-}
 
 function isRenderedRouteNode(value: unknown): value is RenderedRouteNode {
   return value !== null && typeof value === 'object' && 'node' in value;
@@ -301,7 +333,10 @@ function isAbortError(error: unknown): boolean {
     && (error as { name?: string }).name === 'AbortError';
 }
 
-function interpolateRedirect(redirectTo: string, params: RouteParams): string {
+function interpolateRedirect(
+  redirectTo: string,
+  params: RawRouteParams,
+): string {
   return redirectTo.replace(/:([A-Za-z0-9_]+)/g, (_, key: string) => {
     if (!(key in params)) {
       throw new Error(`Missing route parameter "${key}" for redirect "${redirectTo}"`);
@@ -351,6 +386,8 @@ function loadRoute(
         canActivate: loaded.canActivate,
         canDeactivate: loaded.canDeactivate,
         resolve: loaded.resolve,
+        parseParams: loaded.parseParams,
+        parseSearch: loaded.parseSearch,
       }))
       .catch(error => {
         routeLoads.delete(route);
@@ -1118,55 +1155,174 @@ export function createRouter(config: RouterConfig): Router {
       return { type: 'not-found', request };
     }
 
-    const staticData = { ...(match.route.data ?? {}) };
-    const historyState = request.historyUpdate.nextEntry?.state ?? readHistoryState();
-    const baseRoute: ActivatedRoute = {
-      url: request.url,
-      path,
-      params: Object.freeze({ ...match.params }),
-      queryParams: readQuery(request.url),
-      data: Object.freeze({ ...staticData }),
-      historyState,
-      config: match.route,
+    const staticData = {
+      ...(match.route.data ?? {}),
     };
+
+    const historyState =
+      request.historyUpdate
+        .nextEntry?.state ??
+      readHistoryState();
 
     if (match.route.redirectTo) {
       return {
         type: 'redirect',
         request,
-        redirectTo: interpolateRedirect(match.route.redirectTo, match.params),
+        redirectTo:
+          interpolateRedirect(
+            match.route.redirectTo,
+            match.params,
+          ),
         replace: true,
       };
     }
 
-    const guardContext: NavigationContext = { ...baseRoute, signal };
-    const loadedRoute = await loadRoute(match.route);
+    const loadedRoute =
+      await loadRoute(
+        match.route,
+      );
+
     throwIfAborted(signal);
 
-    for (const guard of loadedRoute.canActivate ?? []) {
-        const result = await executeGuard(guard, guardContext);
-        throwIfAborted(signal);
-        const redirect = readRedirect(result);
-        if (redirect) return { type: 'redirect', request, ...redirect };
-        if (result === false) return { type: 'blocked', request };
+    // Parse URL-derived values before guards and resolvers. Public route
+    // contexts therefore never expose unvalidated path or search strings.
+    const [
+      parsedParams,
+      parsedSearch,
+    ] = await Promise.all([
+      loadedRoute.parseParams
+        ? loadedRoute.parseParams(
+            match.params,
+            request.url,
+            signal,
+          )
+        : Promise.resolve(
+            Object.freeze({
+              ...match.params,
+            }) as RouteParams,
+          ),
+
+      loadedRoute.parseSearch
+        ? loadedRoute.parseSearch(
+            request.url,
+            signal,
+          )
+        : Promise.resolve(
+            EMPTY_SEARCH,
+          ),
+    ]);
+
+    throwIfAborted(signal);
+
+    const baseRoute:
+      ActivatedRoute = {
+      url: request.url,
+      path,
+      params:
+        Object.freeze({
+          ...parsedParams,
+        }),
+      search:
+        Object.freeze({
+          ...parsedSearch,
+        }),
+      data:
+        Object.freeze({
+          ...staticData,
+        }),
+      historyState,
+      config:
+        match.route,
+    };
+
+    const guardContext:
+      NavigationContext = {
+      ...baseRoute,
+      signal,
+    };
+
+    for (
+      const guard
+      of loadedRoute.canActivate ?? []
+    ) {
+      const result =
+        await executeGuard(
+          guard,
+          guardContext,
+        );
+
+      throwIfAborted(signal);
+
+      const redirect =
+        readRedirect(result);
+
+      if (redirect) {
+        return {
+          type: 'redirect',
+          request,
+          ...redirect,
+        };
+      }
+
+      if (result === false) {
+        return {
+          type: 'blocked',
+          request,
+        };
+      }
     }
 
-    setPhase(request, 'resolving');
-    const resolvedData: Record<string, unknown> = {};
-    const resolveContext: NavigationContext = { ...baseRoute, signal };
-    const values = await Promise.all(
-      Object.entries(loadedRoute.resolve ?? {}).map(async ([key, resolver]) => {
-        const value = await executeResolver(resolver, resolveContext);
-        return [key, value] as const;
-      }),
+    setPhase(
+      request,
+      'resolving',
     );
-    throwIfAborted(signal);
-    Object.assign(resolvedData, Object.fromEntries(values));
 
-    const mergedData = Object.freeze({ ...staticData, ...resolvedData });
-    const activatedRoute: ActiveRoute = {
+    const resolvedData:
+      Record<string, unknown> = {};
+
+    const resolveContext:
+      NavigationContext = {
       ...baseRoute,
-      data: mergedData,
+      signal,
+    };
+
+    const values =
+      await Promise.all(
+        Object.entries(
+          loadedRoute.resolve ?? {},
+        ).map(
+          async (
+            [key, resolver],
+          ) => {
+            const value =
+              await executeResolver(
+                resolver,
+                resolveContext,
+              );
+
+            return [
+              key,
+              value,
+            ] as const;
+          },
+        ),
+      );
+
+    throwIfAborted(signal);
+
+    Object.assign(
+      resolvedData,
+      Object.fromEntries(values),
+    );
+
+    const activatedRoute:
+      ActiveRoute = {
+      ...baseRoute,
+      data:
+        Object.freeze({
+          ...staticData,
+          ...resolvedData,
+        }),
     };
 
     setPhase(request, 'loading');
@@ -1533,9 +1689,15 @@ export function createRouter(config: RouterConfig): Router {
       if (disposed) return EMPTY_PARAMS;
       return currentState?.params ?? EMPTY_PARAMS;
     },
-    get query() {
-      if (disposed) return EMPTY_QUERY;
-      return currentState?.queryParams ?? EMPTY_QUERY;
+    get search() {
+      if (disposed) {
+        return EMPTY_SEARCH;
+      }
+
+      return (
+        currentState?.search ??
+        EMPTY_SEARCH
+      );
     },
     get data() {
       if (disposed) return EMPTY_DATA;

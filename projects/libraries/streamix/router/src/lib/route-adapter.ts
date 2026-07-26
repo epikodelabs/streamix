@@ -39,15 +39,13 @@ export function adaptRouteComponent(
   return context.render(component, context.injector, routeProviders);
 }
 
-export function collectRouteInputValues(route: ActivatedRoute): Record<string, unknown> {
-  const { __params, __search, ...resolved } = route.data ?? {};
-
+export function collectRouteInputValues(
+  route: ActivatedRoute,
+): Record<string, unknown> {
   return {
     ...route.params,
-    ...route.queryParams,
-    ...(__params && typeof __params === 'object' ? __params : {}),
-    ...(__search && typeof __search === 'object' ? __search : {}),
-    ...resolved,
+    ...route.search,
+    ...route.data,
   };
 }
 

@@ -11,6 +11,7 @@ import {
   Provider,
   inject,
   makeEnvironmentProviders,
+  runInInjectionContext,
   type Type,
 } from '@angular/core';
 
@@ -38,7 +39,6 @@ import type {
   BeforeEnter,
   BeforeLeave,
   MaybePromise,
-  RouteLoader,
   StreamixLayout,
   StreamixLayoutOptions,
   StreamixRoute,
@@ -66,8 +66,8 @@ import {
   parseSearchRecord,
   serializeParams,
   serializeSearch,
-  type ParamSchema,
-  type SearchSchema
+  type InferParamType,
+  type ParamSchemaRecord
 } from './search-schema';
 
 import {
@@ -130,7 +130,7 @@ const EMPTY_ROUTER_STATE:
     error: null,
     path: '',
     params: Object.freeze({}),
-    query: Object.freeze({}),
+    search: Object.freeze({}),
     data: Object.freeze({}),
     historyState: null,
     routeConfig: null,
@@ -215,7 +215,7 @@ function snapshotRouterState(
     error: state.error,
     path: state.path,
     params: state.params,
-    query: state.query,
+    search: state.search,
     data: state.data,
     historyState:
       state.historyState,
@@ -332,34 +332,6 @@ function adaptBeforeLeave(
   );
 }
 
-function createSearchResolver(
-  schema:
-    Record<
-      string,
-      SearchSchema<unknown>
-    >,
-): RouteLoader {
-  return context =>
-    parseSearchRecord(
-      schema,
-      context.url,
-    );
-}
-
-function createParamsResolver(
-  schema:
-    Record<
-      string,
-      ParamSchema<unknown>
-    >,
-): RouteLoader {
-  return context =>
-    parseParamsRecord(
-      schema,
-      context.params,
-    );
-}
-
 function adaptLoaders(
   route: StreamixRoute,
   injector:
@@ -367,73 +339,102 @@ function adaptLoaders(
 ): Route['resolve'] {
   const {
     resolve,
-    paramsSchema,
-    searchSchema,
   } = route;
 
-  if (
-    !resolve &&
-    !paramsSchema &&
-    !searchSchema
-  ) {
+  if (!resolve) {
     return undefined;
   }
 
-  const adapted:
-    Record<
-      string,
-      (
-        context:
-          NavigationContext,
-      ) => Promise<unknown>
-    > = {};
+  return Object.fromEntries(
+    Object.entries(resolve)
+      .map(
+        ([key, loader]) => [
+          key,
+          (
+            context:
+              NavigationContext,
+          ) =>
+            execute(
+              injector,
+              loader,
+              context,
+            ),
+        ],
+      ),
+  );
+}
 
-  for (
-    const [key, loader]
-    of Object.entries(
-      resolve ?? {},
-    )
-  ) {
-    adapted[key] =
-      context =>
-        execute(
-          injector,
-          loader,
-          context,
-        );
+function adaptParamsParser(
+  route: StreamixRoute,
+  injector:
+    EnvironmentInjector,
+): Route['load'] extends
+  () => MaybePromise<infer TLoaded>
+    ? TLoaded extends {
+        parseParams?:
+          infer TParser;
+      }
+      ? TParser
+      : never
+    : never {
+  const schema =
+    route.paramsSchema;
+
+  if (!schema) {
+    return undefined as never;
   }
 
-  if (paramsSchema) {
-    const resolver =
-      createParamsResolver(
-        paramsSchema,
-      );
+  return ((
+    params:
+      Readonly<
+        Record<string, string>
+      >,
+  ) =>
+    runInInjectionContext(
+      injector,
+      () =>
+        Promise.resolve(
+          parseParamsRecord(
+            schema,
+            params,
+          ),
+        ),
+    )) as never;
+}
 
-    adapted['__params'] =
-      context =>
-        execute(
-          injector,
-          resolver,
-          context,
-        );
+function adaptSearchParser(
+  route: StreamixRoute,
+  injector:
+    EnvironmentInjector,
+): Route['load'] extends
+  () => MaybePromise<infer TLoaded>
+    ? TLoaded extends {
+        parseSearch?:
+          infer TParser;
+      }
+      ? TParser
+      : never
+    : never {
+  const schema =
+    route.searchSchema;
+
+  if (!schema) {
+    return undefined as never;
   }
 
-  if (searchSchema) {
-    const resolver =
-      createSearchResolver(
-        searchSchema,
-      );
-
-    adapted['__search'] =
-      context =>
-        execute(
-          injector,
-          resolver,
-          context,
-        );
-  }
-
-  return adapted;
+  return ((
+    url: URL,
+  ) =>
+    runInInjectionContext(
+      injector,
+      () =>
+        Promise.resolve(
+          parseSearchRecord(
+            schema,
+            url,
+          ),
+        ),
+    )) as never;
 }
 
 async function resolveViews(
@@ -547,6 +548,18 @@ function adaptRoutes(
                 route,
                 injector,
               ),
+
+            parseParams:
+              adaptParamsParser(
+                route,
+                injector,
+              ),
+
+            parseSearch:
+              adaptSearchParser(
+                route,
+                injector,
+              ),
           };
         },
       }),
@@ -571,7 +584,7 @@ function interpolateNamedPath(
     schema
       ? serializeParams(
           schema,
-          params as Record<string, any>,
+          params as unknown as InferParamType<ParamSchemaRecord>,
         )
       : Object.fromEntries(
           Object.entries(params)
