@@ -20,6 +20,7 @@ import {
   OUTLET_ATTRIBUTE,
   OUTLET_DEACTIVATE_EVENT,
   dispatchOutletLifecycleEvent,
+  findOutlet,
 } from './router-events';
 
 import type {
@@ -52,36 +53,7 @@ interface RenderedLayer {
 function findNestedOutlet(
   node: Node,
 ): HTMLElement | null {
-  if (
-    !(
-      node instanceof Element ||
-      node instanceof DocumentFragment
-    )
-  ) {
-    return null;
-  }
-
-  if (
-    node instanceof HTMLElement &&
-    node.hasAttribute(
-      OUTLET_ATTRIBUTE,
-    )
-  ) {
-    return node;
-  }
-
-  const outlets =
-    node.querySelectorAll<HTMLElement>(
-      `[${OUTLET_ATTRIBUTE}]`,
-    );
-
-  if (outlets.length > 1) {
-    throw new Error(
-      'A layout must render exactly one router outlet.',
-    );
-  }
-
-  return outlets[0] ?? null;
+  return findOutlet(node, '');
 }
 
 function createScopedInjector(
@@ -299,10 +271,9 @@ export function composeAngularRouteView(
 
           if (!outlet) {
             throw new Error(
-              `Cannot render ` +
-              `"${view.label}": ` +
-              'the parent layout ' +
-              'has no router outlet.',
+              `Cannot render "${view.label}": ` +
+              'the parent layout has no primary (unnamed) router outlet. ' +
+              'Named outlets are allowed but the hierarchical child needs a primary one.',
             );
           }
 

@@ -3,6 +3,7 @@ import {
   Directive,
   ElementRef,
   EventEmitter,
+  Input,
   Output,
   inject,
 } from '@angular/core';
@@ -14,12 +15,12 @@ import {
 } from './router-events';
 import { StreamixRouter } from './streamix-router';
 
-
 @Directive({
   selector: 'streamix-outlet',
   standalone: true,
   host: {
-    [`[attr.${OUTLET_ATTRIBUTE}]`]: '""',
+    // Empty string = primary outlet. Any other value = named outlet.
+    [`[attr.${OUTLET_ATTRIBUTE}]`]: 'outletName',
   },
 })
 export class StreamixOutlet {
@@ -27,6 +28,18 @@ export class StreamixOutlet {
   private readonly element = inject(ElementRef<HTMLElement>).nativeElement;
   private readonly destroyRef = inject(DestroyRef);
   private connectedRoot = false;
+
+  /**
+   * Optional outlet name.
+   * - omitted / empty → primary outlet (used by hierarchical layouts)
+   * - any string → named secondary outlet
+   */
+  @Input() name = '';
+
+  /** Used by the host binding */
+  get outletName(): string {
+    return this.name || '';
+  }
 
   @Output() readonly activate = new EventEmitter<unknown>();
   @Output() readonly deactivate = new EventEmitter<unknown>();
@@ -39,7 +52,9 @@ export class StreamixOutlet {
 
     this.element.addEventListener(OUTLET_ACTIVATE_EVENT, onActivate);
     this.element.addEventListener(OUTLET_DEACTIVATE_EVENT, onDeactivate);
-    if (!this.router.active) {
+
+    // Only the primary (unnamed) outlet connects the router
+    if (!this.router.active && !this.name) {
       this.router.connect(this.element);
       this.connectedRoot = true;
     }
