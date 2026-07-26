@@ -1,4 +1,4 @@
-import { Component, EnvironmentInjector } from '@angular/core';
+import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
 import {
@@ -12,13 +12,6 @@ import {
   StreamixRouter,
   provideStreamixRouter,
 } from '../lib/streamix-router';
-
-@Component({
-  standalone: true,
-  selector: 'app-root',
-  template: '<div data-router-outlet></div>',
-})
-class RootComponent {}
 
 @Component({ standalone: true, template: '<h1>Home</h1>' })
 class HomeComponent {}
@@ -42,33 +35,24 @@ class ChildComponent {}
 class SettingsComponent {}
 
 describe('StreamixRouter: flat routes and layouts', () => {
-  let injector: EnvironmentInjector;
-  let rootFixture: HTMLElement;
+  let outlet: HTMLElement;
   let router: StreamixRouter;
 
-  async function bootstrap(routes: StreamixRoutes): Promise<void> {
-    await TestBed.configureTestingModule({
-      imports: [RootComponent],
+  function bootstrap(routes: StreamixRoutes): void {
+    TestBed.configureTestingModule({
       providers: [provideStreamixRouter(routes)],
-    }).compileComponents();
+    });
 
-    const fixture = TestBed.createComponent(RootComponent);
-    injector = fixture.debugElement.injector.get(EnvironmentInjector);
-    rootFixture = fixture.debugElement.nativeElement;
-    fixture.detectChanges();
+    outlet = document.createElement('div');
+    outlet.setAttribute('data-router-outlet', '');
+    document.body.appendChild(outlet);
 
-    router = injector.get(StreamixRouter);
-    const outlet = rootFixture.querySelector<HTMLElement>('[data-router-outlet]');
-
-    if (!outlet) {
-      throw new Error('Test root rendered no router outlet.');
-    }
-
+    router = TestBed.inject(StreamixRouter);
     router.connect(outlet);
   }
 
   function getOutletContent(): string {
-    return rootFixture.querySelector<HTMLElement>('[data-router-outlet]')?.innerHTML ?? '';
+    return outlet.innerHTML;
   }
 
   async function navigate(path: string): Promise<void> {
@@ -85,6 +69,7 @@ describe('StreamixRouter: flat routes and layouts', () => {
 
   afterEach(() => {
     router?.dispose();
+    outlet?.remove();
   });
 
   it('renders a leaf route without a layout', async () => {
@@ -92,50 +77,65 @@ describe('StreamixRouter: flat routes and layouts', () => {
       route('/', HomeComponent),
     ] as const satisfies StreamixRoutes;
 
-    await bootstrap(routes);
+    bootstrap(routes);
     await navigate('/');
 
     expect(getOutletContent()).toContain('<h1>Home</h1>');
   });
 
+  it('supports a layout index route', async () => {
+    const routes = [
+      layout('/admin', ParentComponent, [
+        route('', HomeComponent),
+      ]),
+    ] as const satisfies StreamixRoutes;
+
+    bootstrap(routes);
+    await navigate('/admin');
+
+    const content = getOutletContent();
+    expect(content).toContain('<h2>Parent</h2>');
+    expect(content).toContain('<h1>Home</h1>');
+  });
+
   it('renders an eager layout around an eager leaf route', async () => {
     const routes = [
-      layout(ParentComponent, [
+      layout('/admin', ParentComponent, [
         route('/child', ChildComponent),
       ]),
     ] as const satisfies StreamixRoutes;
 
-    await bootstrap(routes);
-    await navigate('/child');
+    bootstrap(routes);
+    await navigate('/admin/child');
 
     const content = getOutletContent();
     expect(content).toContain('<h2>Parent</h2>');
     expect(content).toContain('<h3>Child</h3>');
   });
 
-  it('does not prefix leaf paths with layout names', async () => {
+  it('inherits the layout path prefix' , async () => {
     const routes = [
-      layout(ParentComponent, [
+      layout('/admin', ParentComponent, [
         route('/settings', SettingsComponent),
       ]),
     ] as const satisfies StreamixRoutes;
 
-    await bootstrap(routes);
-    await navigate('/settings');
+    bootstrap(routes);
+    await navigate('/admin/settings');
 
     expect(getOutletContent()).toContain('<h3>Settings</h3>');
-    expect(router.state.path).toBe('/settings');
+    expect(router.state.path).toBe('/admin/settings');
   });
 
   it('renders an eager layout around a lazy leaf route', async () => {
     const routes = [
-      layout(ParentComponent, [
+      layout('/admin', ParentComponent, [
         lazyRoute('/lazy-child', async () => ChildComponent),
       ]),
     ] as const satisfies StreamixRoutes;
 
-    await bootstrap(routes);
-    await navigate('/lazy-child');
+    bootstrap(routes);
+    await navigate('/admin/lazy-child');
 
     const content = getOutletContent();
     expect(content).toContain('<h2>Parent</h2>');
@@ -145,13 +145,14 @@ describe('StreamixRouter: flat routes and layouts', () => {
   it('renders a lazy layout around an eager leaf route', async () => {
     const routes = [
       lazyLayout(
+        '/admin',
         async () => ParentComponent,
         [route('/child', ChildComponent)],
       ),
     ] as const satisfies StreamixRoutes;
 
-    await bootstrap(routes);
-    await navigate('/child');
+    bootstrap(routes);
+    await navigate('/admin/child');
 
     const content = getOutletContent();
     expect(content).toContain('<h2>Parent</h2>');
@@ -161,13 +162,14 @@ describe('StreamixRouter: flat routes and layouts', () => {
   it('renders a lazy layout around a lazy leaf route', async () => {
     const routes = [
       lazyLayout(
+        '/admin',
         async () => ParentComponent,
         [lazyRoute('/lazy-child', async () => ChildComponent)],
       ),
     ] as const satisfies StreamixRoutes;
 
-    await bootstrap(routes);
-    await navigate('/lazy-child');
+    bootstrap(routes);
+    await navigate('/admin/lazy-child');
 
     const content = getOutletContent();
     expect(content).toContain('<h2>Parent</h2>');
@@ -176,15 +178,15 @@ describe('StreamixRouter: flat routes and layouts', () => {
 
   it('composes multiple layouts without creating a route hierarchy', async () => {
     const routes = [
-      layout(ShellComponent, [
-        layout(ParentComponent, [
+      layout('/app', ShellComponent, [
+        layout('/admin', ParentComponent, [
           route('/child', ChildComponent),
         ]),
       ]),
     ] as const satisfies StreamixRoutes;
 
-    await bootstrap(routes);
-    await navigate('/child');
+    bootstrap(routes);
+    await navigate('/app/admin/child');
 
     const content = getOutletContent();
     expect(content).toContain('<h2>Shell</h2>');
@@ -192,20 +194,20 @@ describe('StreamixRouter: flat routes and layouts', () => {
     expect(content).toContain('<h3>Child</h3>');
   });
 
-  it('supports multiple absolute leaf routes inside one layout', async () => {
+  it('supports multiple leaf routes inside one prefixed layout', async () => {
     const routes = [
-      layout(ParentComponent, [
+      layout('/admin', ParentComponent, [
         route('/child', ChildComponent),
         route('/settings', SettingsComponent),
       ]),
     ] as const satisfies StreamixRoutes;
 
-    await bootstrap(routes);
+    bootstrap(routes);
 
-    await navigate('/child');
+    await navigate('/admin/child');
     expect(getOutletContent()).toContain('<h3>Child</h3>');
 
-    await navigate('/settings');
+    await navigate('/admin/settings');
     const content = getOutletContent();
     expect(content).toContain('<h2>Parent</h2>');
     expect(content).toContain('<h3>Settings</h3>');

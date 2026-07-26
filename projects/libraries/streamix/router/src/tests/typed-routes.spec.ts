@@ -8,7 +8,7 @@ class DashboardPage {}
 class SettingsPage {}
 
 const routes = [
-  layout(DashboardLayout, [
+  layout('/app', DashboardLayout, [
     route('/dashboard/:projectId', DashboardPage, {
       name: 'dashboard',
       paramsSchema: {

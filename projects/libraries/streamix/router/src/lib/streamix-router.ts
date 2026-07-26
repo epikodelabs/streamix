@@ -198,19 +198,37 @@ function createAngularRenderer(appRef: ApplicationRef): RenderComponent {
 
 interface CompiledRoute {
   readonly route: StreamixRoute;
+  readonly path: string;
   readonly layouts: readonly StreamixLayout[];
+}
+
+function joinRoutePath(parent: string, child: string): string {
+  const parentSegments = parent.split('/').filter(Boolean);
+  const childSegments = child.split('/').filter(Boolean);
+  const path = [...parentSegments, ...childSegments].join('/');
+  return path ? `/${path}` : '/';
 }
 
 function compileRoutes(
   entries: StreamixRoutes,
+  parentPath = '/',
   layouts: readonly StreamixLayout[] = [],
   output: CompiledRoute[] = [],
 ): readonly CompiledRoute[] {
   for (const entry of entries) {
     if (entry.kind === 'layout') {
-      compileRoutes(entry.entries, [...layouts, entry], output);
+      compileRoutes(
+        entry.entries,
+        joinRoutePath(parentPath, entry.path),
+        [...layouts, entry],
+        output,
+      );
     } else {
-      output.push({ route: entry, layouts: Object.freeze([...layouts]) });
+      output.push({
+        route: entry,
+        path: joinRoutePath(parentPath, entry.path),
+        layouts: Object.freeze([...layouts]),
+      });
     }
   }
   return output;
@@ -291,10 +309,10 @@ function adaptRoutes(entries: StreamixRoutes, context: AdapterContext): Route[] 
 }
 
 function adaptRoute(compiled: CompiledRoute, context: AdapterContext): Route {
-  const { route, layouts } = compiled;
+  const { route, path, layouts } = compiled;
   return {
     name: route.name,
-    path: route.path,
+    path,
     redirectTo: route.redirectTo,
     data: route.data,
     preload: route.preload,
@@ -655,15 +673,15 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
   }
 
   private collectAndValidateRoutes(entries: StreamixRoutes): void {
-    for (const { route } of compileRoutes(entries)) {
-      if (!route.path.startsWith('/')) {
-        throw new Error(`Route path "${route.path}" must be absolute.`);
+    for (const { route, path } of compileRoutes(entries)) {
+      if (!path.startsWith('/')) {
+        throw new Error(`Compiled route path "${path}" must be absolute.`);
       }
       if (!route.name) continue;
       if (this.namedRouteMap.has(route.name)) {
         throw new Error(`Duplicate route name "${route.name}". Route names must be globally unique.`);
       }
-      this.namedRouteMap.set(route.name, { route, fullPath: route.path });
+      this.namedRouteMap.set(route.name, { route, fullPath: path });
     }
   }
 }

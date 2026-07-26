@@ -47,6 +47,7 @@ export interface StreamixRoute {
 
 export interface StreamixLayout {
   readonly kind: 'layout';
+  readonly path: string;
   readonly component?: Type<unknown>;
   readonly loadComponent?: Lazy<Type<unknown>>;
   readonly entries: StreamixRoutes;
