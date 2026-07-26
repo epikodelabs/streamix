@@ -214,6 +214,7 @@ function snapshotRouterState(state: RouterState): RouterState {
     error: state.error ?? null,
     path: state.path ?? '',
     params: state.params ? Object.freeze({ ...state.params }) : Object.freeze({}),
+    query: state.search ? Object.freeze({ ...state.search }) : Object.freeze({}),
     search: state.search ? Object.freeze({ ...state.search }) : Object.freeze({}),
     data: state.data ? Object.freeze({ ...state.data }) : Object.freeze({}),
     historyState: state.historyState ?? null,
@@ -441,7 +442,7 @@ async function resolveViews(
   const resolvedLayouts = await Promise.all(
     layouts.map(async (layout, index) => ({
       component: await loadComponent(layout),
-      providers: (layout.providers ?? []).filter(Boolean), // Clean up null/undefined providers
+      providers: (layout.providers ?? []).filter(p => p),
       label: `StreamixLayout(${layout.path || index})`,
     })),
   );
@@ -452,7 +453,7 @@ async function resolveViews(
     ...resolvedLayouts,
     {
       component: page,
-      providers: (route.providers ?? []).filter(Boolean), // Clean up null/undefined providers
+      providers: (route.providers ?? []).filter(p => p),
       label: `StreamixRoute(${route.path})`,
     },
   ]);
