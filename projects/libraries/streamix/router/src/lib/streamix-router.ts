@@ -96,7 +96,6 @@ interface RouterConfiguration extends StreamixRouterOptions {
 interface AdapterContext {
   readonly injector: EnvironmentInjector;
   readonly render: RenderComponent;
-  readonly modules: ModuleRegistry;
 }
 
 type RenderComponent = (
@@ -392,11 +391,9 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
       );
     }
 
-    const modules = new ModuleRegistry();
     const context: AdapterContext = {
       injector: this.injector,
       render: createAngularRenderer(this.appRef),
-      modules,
     };
 
     const engine = createRouter({
@@ -423,13 +420,12 @@ export class StreamixRouter<TRoutes extends StreamixRoutes = StreamixRoutes> {
       try {
         engine.dispose();
       } finally {
-        modules.dispose();
+        // If modules were used for something, they would be disposed here.
       }
       throw error;
     }
 
     this.modules.dispose();
-    this.modules = modules;
     this.outlet = outlet;
     this.engine = engine;
     this.currentState = snapshotRouterState(engine.state);

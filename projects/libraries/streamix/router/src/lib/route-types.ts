@@ -11,14 +11,6 @@ export type StreamixRouteProvider =
   | Provider
   | EnvironmentProviders;
 
-export interface StreamixRouteModule {
-  readonly component?: Type<unknown>;
-  readonly routes?: StreamixRoutes;
-  readonly providers?: StreamixRouteProviders;
-};
-
-
-
 export type RouteRedirect = {
   readonly redirectTo: string | URL;
   readonly replace?: boolean;
