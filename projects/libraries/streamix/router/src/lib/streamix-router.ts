@@ -1011,6 +1011,18 @@ export abstract class StreamixRouter<
   }
 }
 
+@Injectable()
+class StreamixRouterImpl<
+  TRoutes extends StreamixRoutes = StreamixRoutes,
+> extends StreamixRouter<TRoutes> {
+  constructor() {
+    const config = inject(
+      ROUTER_CONFIGURATION,
+    ) as RouterConfiguration<TRoutes>;
+    super(config);
+  }
+}
+
 export function provideStreamixRouter<
   const TRoutes extends
     StreamixRoutes,
@@ -1020,13 +1032,6 @@ export function provideStreamixRouter<
     StreamixRouterOptions = {},
 ): EnvironmentProviders {  
   const config: RouterConfiguration<TRoutes> = { ...options, routes };
-
-  @Injectable()
-  class StreamixRouterImpl extends StreamixRouter<TRoutes> {
-    constructor() {
-      super(config);
-    }
-  }
 
   const providers: Provider[] = [
     { provide: ROUTER_CONFIGURATION, useValue: config },
@@ -1047,4 +1052,4 @@ export {
     lazyLayout, lazyRoute,
     redirectRoute, route
   } from './route-builders';
-
+  
