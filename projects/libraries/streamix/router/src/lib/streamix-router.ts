@@ -131,7 +131,7 @@ const EMPTY_ROUTER_STATE:
     error: null,
     path: '',
     params: Object.freeze({}),
-    search: Object.freeze({}),
+    query: Object.freeze({}),
     data: Object.freeze({}),
     historyState: null,
     routeConfig: null,
@@ -214,8 +214,7 @@ function snapshotRouterState(state: RouterState): RouterState {
     error: state.error ?? null,
     path: state.path ?? '',
     params: state.params ? Object.freeze({ ...state.params }) : Object.freeze({}),
-    query: state.search ? Object.freeze({ ...state.search }) : Object.freeze({}),
-    search: state.search ? Object.freeze({ ...state.search }) : Object.freeze({}),
+    query: state.query ? Object.freeze({ ...state.query }) : Object.freeze({}),
     data: state.data ? Object.freeze({ ...state.data }) : Object.freeze({}),
     historyState: state.historyState ?? null,
     routeConfig: state.routeConfig ?? null,
@@ -442,7 +441,7 @@ async function resolveViews(
   const resolvedLayouts = await Promise.all(
     layouts.map(async (layout, index) => ({
       component: await loadComponent(layout),
-      providers: (layout.providers ?? []).filter(p => p),
+      providers: (layout.providers ?? []).flat().filter(p => p),
       label: `StreamixLayout(${layout.path || index})`,
     })),
   );
@@ -453,7 +452,7 @@ async function resolveViews(
     ...resolvedLayouts,
     {
       component: page,
-      providers: (route.providers ?? []).filter(p => p),
+      providers: (route.providers ?? []).flat().filter(p => p),
       label: `StreamixRoute(${route.path})`,
     },
   ]);

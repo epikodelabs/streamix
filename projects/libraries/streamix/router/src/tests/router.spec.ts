@@ -80,7 +80,7 @@ idescribe('Router', () => {
             expect(router.state.phase).toBeNull();
             expect(router.state.path).toBe('');
             expect(router.state.params).toEqual({});
-            expect(router.state.search).toEqual({});
+            expect(router.state.query).toEqual({});
             expect(router.state.data).toEqual({});
             expect(router.state.routeConfig).toBeNull();
         });
@@ -239,7 +239,7 @@ idescribe('Router', () => {
             router.start();
             router.navigate('/?foo=bar&baz=qux');
             await delay(50);
-            expect(router.state.search).toEqual({ foo: 'bar', baz: 'qux' });
+            expect(router.state.query).toEqual({ foo: 'bar', baz: 'qux' });
         });
         it('should handle navigation with hash', async () => {
             const config: RouterConfig = {
@@ -1411,7 +1411,7 @@ idescribe('Router', () => {
             await delay(50);
             expect(router.state.path).toBe('/about');
             expect(router.state.params).toEqual({});
-            expect(router.state.search).toEqual({});
+            expect(router.state.query).toEqual({});
             expect(router.state.routeConfig).toBeDefined();
             expect(router.state.pending).toBeFalse();
             expect(router.state.phase).toBeNull();

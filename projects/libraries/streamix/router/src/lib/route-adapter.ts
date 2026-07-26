@@ -41,12 +41,10 @@ export function adaptRouteComponent(
 
 export function collectRouteInputValues(
   route: ActivatedRoute,
-): Readonly<Record<string, unknown>> {  
-  const queryParams = (route as unknown as { queryParams: Record<string, unknown> }).queryParams;
-
+): Readonly<Record<string, unknown>> {
   const values = {
     ...route.params,
-    ...(queryParams ?? route.search),
+    ...route.search,
     ...route.data,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ...((route.data as any)?.__params ?? {}),

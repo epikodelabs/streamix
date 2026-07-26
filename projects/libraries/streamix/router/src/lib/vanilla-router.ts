@@ -147,7 +147,7 @@ export interface RouterState {
   readonly error: unknown;
   readonly path: string;
   readonly params: RouteParams;
-  readonly search: RouteSearch;
+  readonly query: RouteSearch;
   readonly data: RouteData;
   readonly historyState: unknown;
   readonly routeConfig: Route | null;
@@ -1208,7 +1208,9 @@ export function createRouter(config: RouterConfig): Router {
             signal,
           )
         : Promise.resolve(
-            EMPTY_SEARCH,
+            Object.freeze(
+              Object.fromEntries(request.url.searchParams),
+            ) as RouteSearch,
           ),
     ]);
 
@@ -1689,7 +1691,7 @@ export function createRouter(config: RouterConfig): Router {
       if (disposed) return EMPTY_PARAMS;
       return currentState?.params ?? EMPTY_PARAMS;
     },
-    get search() {
+    get query() {
       if (disposed) {
         return EMPTY_SEARCH;
       }
