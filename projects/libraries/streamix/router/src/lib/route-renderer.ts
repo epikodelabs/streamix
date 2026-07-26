@@ -66,11 +66,19 @@ function createScopedInjector(
     return undefined;
   }
 
-  return createEnvironmentInjector(
-    Array.from(providers),
-    parent,
-    label,
-  );
+  try {
+    return createEnvironmentInjector(
+      Array.from(providers),
+      parent,
+      label,
+    );
+  } catch (error) {
+    throw new Error(
+      `Failed to create route injector for "${label}": ` +
+      (error instanceof Error ? error.message : String(error)),
+      { cause: error },
+    );
+  }
 }
 
 function createAngularComponent(
@@ -117,13 +125,22 @@ function createAngularComponent(
 
   let attached = false;
   let disposed = false;
+  let containingOutlet: HTMLElement | null = null;
 
   try {
-    bindRouteInputs(
-      ref,
-      component,
-      route,
-    );
+    try {
+      bindRouteInputs(
+        ref,
+        component,
+        route,
+      );
+    } catch (error) {
+      throw new Error(
+        `Failed to bind route inputs for "${component.name || 'anonymous component'}": ` +
+        (error instanceof Error ? error.message : String(error)),
+        { cause: error },
+      );
+    }
 
     appRef.attachView(
       ref.hostView,
@@ -157,19 +174,24 @@ function createAngularComponent(
 
       disposed = true;
 
-      host.parentElement
-        ?.closest<HTMLElement>(
+      containingOutlet ??=
+        (host as Node & {
+          __streamixOutlet?: HTMLElement;
+        }).__streamixOutlet ?? null;
+
+      const outlet =
+        containingOutlet ??
+        host.closest<HTMLElement>(
           `[${OUTLET_ATTRIBUTE}]`,
-        )
-        ?.dispatchEvent(
-          new CustomEvent(
-            OUTLET_DEACTIVATE_EVENT,
-            {
-              detail:
-                ref.instance,
-            },
-          ),
         );
+
+      if (outlet) {
+        dispatchOutletLifecycleEvent(
+          outlet,
+          OUTLET_DEACTIVATE_EVENT,
+          ref.instance,
+        );
+      }
 
       try {
         if (attached) {
@@ -191,6 +213,8 @@ function disposeLayers(
   layers:
     readonly RenderedLayer[],
 ): void {
+  const errors: unknown[] = [];
+
   for (
     let index =
       layers.length - 1;
@@ -203,10 +227,27 @@ function disposeLayers(
     try {
       layer.rendered
         .dispose?.();
-    } finally {
+    } catch (error) {
+      errors.push(error);
+    }
+
+    try {
       layer.injector
         ?.destroy();
+    } catch (error) {
+      errors.push(error);
     }
+  }
+
+  if (errors.length === 1) {
+    throw errors[0];
+  }
+
+  if (errors.length > 1) {
+    throw new AggregateError(
+      errors,
+      'Multiple errors occurred while disposing a route view.',
+    );
   }
 }
 
@@ -280,6 +321,14 @@ export function composeAngularRouteView(
           outlet.replaceChildren(
             rendered.node,
           );
+
+          // Capture the outlet while the node is attached. Parent-layer
+          // disposal may detach this host before its own dispose() runs.
+          const renderedNode =
+            rendered.node as Node & {
+              __streamixOutlet?: HTMLElement;
+            };
+          renderedNode.__streamixOutlet = outlet;
 
           if (
             rendered.component !==

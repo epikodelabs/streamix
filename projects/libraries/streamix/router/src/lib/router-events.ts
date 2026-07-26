@@ -29,41 +29,32 @@ export function findOutlet(
   node: Node,
   name?: string | null,
 ): HTMLElement | null {
-  if (!(node instanceof Element || node instanceof DocumentFragment)) {
+  if (
+    !(
+      node instanceof Element ||
+      node instanceof DocumentFragment
+    )
+  ) {
     return null;
   }
 
   const targetName = name ?? '';
 
-  // Direct match on the node itself
-  if (node instanceof HTMLElement && node.hasAttribute(OUTLET_ATTRIBUTE)) {
-    const outletName = node.getAttribute(OUTLET_ATTRIBUTE) ?? '';
-    if (outletName === targetName) {
-      return node;
-    }
+  if (
+    node instanceof HTMLElement &&
+    node.getAttribute(OUTLET_ATTRIBUTE) === targetName
+  ) {
+    return node;
   }
 
-  const outlets = Array.from(
-    node.querySelectorAll<HTMLElement>(`[${OUTLET_ATTRIBUTE}]`),
+  return (
+    Array.from(
+      node.querySelectorAll<HTMLElement>(
+        `[${OUTLET_ATTRIBUTE}]`,
+      ),
+    ).find(
+      element =>
+        element.getAttribute(OUTLET_ATTRIBUTE) === targetName,
+    ) ?? null
   );
-
-  // Exact name match first
-  const exact = outlets.find(
-    (el) => (el.getAttribute(OUTLET_ATTRIBUTE) ?? '') === targetName,
-  );
-  if (exact) {
-    return exact;
-  }
-
-  // Primary outlet fallback: empty or missing value
-  if (targetName === '') {
-    return (
-      outlets.find((el) => {
-        const val = el.getAttribute(OUTLET_ATTRIBUTE);
-        return val === '' || val === null;
-      }) ?? null
-    );
-  }
-
-  return null;
 }

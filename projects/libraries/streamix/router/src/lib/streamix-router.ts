@@ -7,7 +7,6 @@ import {
   DestroyRef,
   EnvironmentInjector,
   EnvironmentProviders,
-  Injectable,
   InjectionToken,
   Provider,
   inject,
@@ -572,7 +571,7 @@ function interpolateNamedPath(
     schema
       ? serializeParams(
           schema,
-          params as never,
+          params as Record<string, any>,
         )
       : Object.fromEntries(
           Object.entries(params)
@@ -623,7 +622,7 @@ function interpolateNamedPath(
   return path;
 }
 
-export abstract class StreamixRouter<
+export class StreamixRouter<
   TRoutes extends StreamixRoutes =
     any,
 > {
@@ -866,10 +865,10 @@ export abstract class StreamixRouter<
     this.engine = null;
     this.outlet = null;
 
+    engine?.dispose();
+
     this.currentState =
       EMPTY_ROUTER_STATE;
-
-    engine?.dispose();
   }
 
   private get baseHref():
@@ -1011,18 +1010,6 @@ export abstract class StreamixRouter<
   }
 }
 
-@Injectable()
-class StreamixRouterImpl<
-  TRoutes extends StreamixRoutes = StreamixRoutes,
-> extends StreamixRouter<TRoutes> {
-  constructor() {
-    const config = inject(
-      ROUTER_CONFIGURATION,
-    ) as RouterConfiguration<TRoutes>;
-    super(config);
-  }
-}
-
 export function provideStreamixRouter<
   const TRoutes extends
     StreamixRoutes,
@@ -1034,9 +1021,25 @@ export function provideStreamixRouter<
   const config: RouterConfiguration<TRoutes> = { ...options, routes };
 
   const providers: Provider[] = [
-    { provide: ROUTER_CONFIGURATION, useValue: config },
-    StreamixRouterImpl,
-    { provide: StreamixRouter, useExisting: StreamixRouterImpl },
+    {
+      provide:
+        ROUTER_CONFIGURATION,
+      useValue:
+        config,
+    },
+    {
+      provide:
+        StreamixRouter,
+      useFactory:
+        () =>
+          new StreamixRouter<
+            TRoutes
+          >(
+            inject(
+              ROUTER_CONFIGURATION,
+            ) as RouterConfiguration<TRoutes>,
+          ),
+    },
   ];
 
   return makeEnvironmentProviders(providers);

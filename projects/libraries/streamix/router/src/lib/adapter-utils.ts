@@ -37,6 +37,14 @@ export function unwrapDefault<T>(value: T | { default: T }): T {
     : (value as T);
 }
 
+/**
+ * Invokes a handler inside Angular's synchronous injection context.
+ *
+ * The handler may call inject() during its initial synchronous execution.
+ * Dependencies needed after an await boundary must be captured before the
+ * handler yields, because Angular does not preserve injection context across
+ * arbitrary asynchronous continuations.
+ */
 export function runWithInjector<TContext, TResult>(
   injector: EnvironmentInjector,
   handler: (context: TContext) => MaybePromise<TResult>,

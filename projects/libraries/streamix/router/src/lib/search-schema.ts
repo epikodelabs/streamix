@@ -4,19 +4,21 @@ type ScalarSchema =
   | BooleanSchema
   | DateSchema;
 
-type AnySchema =
+type NonOptionalSchema =
   | ScalarSchema
-  | ArraySchema
-  | OptionalSchema<AnySchema>;
+  | ArraySchema;
+
+type AnySchema =
+  | NonOptionalSchema
+  | OptionalSchema<NonOptionalSchema>;
 
 export type SearchSchema<T = unknown> =
-  | ScalarSchema
-  | ArraySchema
-  | OptionalSchema<SearchSchema<T>>;
+  | NonOptionalSchema
+  | OptionalSchema<NonOptionalSchema>;
 
 export type ParamSchema<T = unknown> =
   | ScalarSchema
-  | OptionalSchema<ParamSchema<T>>;
+  | OptionalSchema<ScalarSchema>;
 
 export type SearchSchemaRecord = Readonly<Record<string, SearchSchema<unknown>>>;
 export type ParamSchemaRecord = Readonly<Record<string, ParamSchema<unknown>>>;
@@ -48,7 +50,7 @@ interface DateSchema {
   readonly default?: Date;
 }
 
-interface OptionalSchema<T extends AnySchema> {
+interface OptionalSchema<T extends NonOptionalSchema> {
   readonly _type: 'optional';
   readonly inner: T;
 }
@@ -83,7 +85,7 @@ export const s = {
     default: defaultValue,
   }),
 
-  optional: <T extends AnySchema>(inner: T): OptionalSchema<T> => ({
+  optional: <T extends NonOptionalSchema>(inner: T): OptionalSchema<T> => ({
     _type: 'optional',
     inner,
   }),
@@ -139,7 +141,13 @@ function parseValue(
     case 'number': {
       const value = Number(raw);
       if (Number.isNaN(value)) {
-        return spec.default ?? 0;
+        if (spec.default !== undefined) {
+          return spec.default;
+        }
+
+        throw new Error(
+          `Invalid number value "${raw}".`,
+        );
       }
 
       const min = spec.min ?? -Infinity;
@@ -154,7 +162,19 @@ function parseValue(
           : (spec.default ?? false);
     case 'date': {
       const value = new Date(raw);
-      return Number.isNaN(value.getTime()) ? (spec.default ?? new Date()) : value;
+      if (!Number.isNaN(value.getTime())) {
+        return value;
+      }
+
+      if (spec.default) {
+        return new Date(
+          spec.default.getTime(),
+        );
+      }
+
+      throw new Error(
+        `Invalid date value "${raw}".`,
+      );
     }
     case 'optional':
       return parseValue(spec.inner, raw);
@@ -174,7 +194,9 @@ function getDefault(spec: SearchSchema<unknown>): unknown {
     case 'array':
       return Object.freeze([...(spec.default ?? [])]);
     case 'date':
-      return spec.default ?? new Date();
+      return spec.default
+        ? new Date(spec.default.getTime())
+        : new Date();
     case 'optional':
       return undefined;
     default:
@@ -191,7 +213,9 @@ function getParamDefault(spec: ParamSchema<unknown>): unknown {
     case 'boolean':
       return spec.default ?? false;
     case 'date':
-      return spec.default ?? new Date();
+      return spec.default
+        ? new Date(spec.default.getTime())
+        : new Date();
     case 'optional':
       return undefined;
     default:

@@ -45,6 +45,13 @@ export function compileRedirect(
     return undefined;
   }
 
+  if (
+    /^[A-Za-z][A-Za-z\d+.-]*:/.test(redirectTo) ||
+    redirectTo.startsWith('//')
+  ) {
+    return redirectTo;
+  }
+
   return redirectTo.startsWith('/')
     ? joinRoutePath('/', redirectTo)
     : joinRoutePath(

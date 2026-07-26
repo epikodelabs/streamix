@@ -7,6 +7,15 @@ import {
 import type { StreamixRouteProviders } from './route-types';
 import type { ActivatedRoute, RouteComponent } from './vanilla-router';
 
+const componentInputs =
+  new WeakMap<
+    Type<unknown>,
+    readonly {
+      readonly templateName: string;
+      readonly propName: string;
+    }[]
+  >();
+
 export interface InputBindingTarget {
   setInput(name: string, value: unknown): void;
 }
@@ -47,7 +56,20 @@ export function bindRouteInputs(
   component: Type<unknown>,
   route: ActivatedRoute,
 ): void {
-  const inputs = reflectComponentType(component)?.inputs ?? [];
+  let inputs =
+    componentInputs.get(component);
+
+  if (!inputs) {
+    inputs =
+      reflectComponentType(component)
+        ?.inputs ?? [];
+
+    componentInputs.set(
+      component,
+      inputs,
+    );
+  }
+
   const values = collectRouteInputValues(route);
 
   for (const input of inputs) {

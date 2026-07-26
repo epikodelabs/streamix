@@ -175,15 +175,18 @@ type RouteSearchSchema<
 type SchemaParams<
   TRoute,
 > =
-  RouteParamSchema<TRoute> extends
-    Record<
-      string,
-      ParamSchema<unknown>
-    >
-    ? InferParamType<
-        RouteParamSchema<TRoute>
-      >
-    : {};
+  [RouteParamSchema<TRoute>] extends
+    [never]
+      ? {}
+      : RouteParamSchema<TRoute> extends
+          Record<
+            string,
+            ParamSchema<unknown>
+          >
+        ? InferParamType<
+            RouteParamSchema<TRoute>
+          >
+        : {};
 
 type PathParams<
   TPath extends string,
@@ -198,17 +201,20 @@ type PathParams<
 type SearchValues<
   TRoute,
 > =
-  RouteSearchSchema<TRoute> extends
-    Record<
-      string,
-      SearchSchema<unknown>
-    >
-    ? Partial<
-        InferSearchType<
-          RouteSearchSchema<TRoute>
-        >
-      >
-    : never;
+  [RouteSearchSchema<TRoute>] extends
+    [never]
+      ? never
+      : RouteSearchSchema<TRoute> extends
+          Record<
+            string,
+            SearchSchema<unknown>
+          >
+        ? Partial<
+            InferSearchType<
+              RouteSearchSchema<TRoute>
+            >
+          >
+        : never;
 
 type HasParams<
   TPath extends string,

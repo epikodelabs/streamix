@@ -392,6 +392,8 @@ export function createRouter(config: RouterConfig): Router {
   let historyIndex = -1;
   let preloadTask: Promise<void> | null = null;
   let preloadQueued = false;
+  let preloadIdleId: number | null = null;
+  let preloadTimeoutId: number | null = null;
 
   function trace(message: string, ...values: unknown[]): void {
     if (config.enableTracing) console.debug(`[Router] ${message}`, ...values);
@@ -469,13 +471,16 @@ export function createRouter(config: RouterConfig): Router {
   }
 
   function createDefaultHistoryUpdate(): HistoryUpdate {
-      return {
-        type: 'none',
-        previousIndex: historyIndex,
-        nextIndex: historyIndex,
-        previousScroll: readScroll(),
-        previousEntry: historyEntries[historyIndex],
-      };
+    ensureHistoryEntry();
+
+    return {
+      type: 'none',
+      previousIndex: historyIndex,
+      nextIndex: historyIndex,
+      previousScroll: readScroll(),
+      previousEntry:
+        historyEntries[historyIndex],
+    };
   }
 
   function createHistoryUpdate(
@@ -665,11 +670,29 @@ export function createRouter(config: RouterConfig): Router {
   }
 
   function restoreActiveUrl(): void {
-    const href = activeHref();
-    if (href) {
-      window.history.replaceState(currentState?.historyState ?? null, '', href);
-      dispatchRouterLocationChange();
-    }
+    ensureHistoryEntry();
+
+    const active = activeHref();
+    const fallback =
+      historyEntries[historyIndex]
+        ?.href ??
+      historyEntries[0]
+        ?.href ??
+      currentHref();
+
+    const href =
+      active ?? fallback;
+
+    window.history.replaceState(
+      currentState?.historyState ??
+        historyEntries[historyIndex]
+          ?.state ??
+        null,
+      '',
+      href,
+    );
+
+    dispatchRouterLocationChange();
   }
 
   function applyHistoryStateToRoute(
@@ -703,8 +726,13 @@ export function createRouter(config: RouterConfig): Router {
       state: state ?? null,
     };
 
-    window.history.replaceState(nextEntry.state, '', nextEntry.href);
+    window.history.replaceState(
+      nextEntry.state,
+      '',
+      nextEntry.href,
+    );
     updateCurrentHistoryEntry(nextEntry);
+    dispatchRouterLocationChange();
 
     if (currentState) {
       currentState = applyHistoryStateToRoute(currentState, nextEntry.state);
@@ -888,17 +916,50 @@ export function createRouter(config: RouterConfig): Router {
     return preloadTask;
   }
 
+  function cancelScheduledPreloading(): void {
+    if (preloadIdleId !== null) {
+      const cancelIdle =
+        (window as Window & {
+          cancelIdleCallback?: (
+            id: number,
+          ) => void;
+        }).cancelIdleCallback;
+
+      cancelIdle?.(preloadIdleId);
+      preloadIdleId = null;
+    }
+
+    if (preloadTimeoutId !== null) {
+      window.clearTimeout(
+        preloadTimeoutId,
+      );
+      preloadTimeoutId = null;
+    }
+
+    preloadQueued = false;
+  }
+
   function schedulePreloading(): void {
-    if (disposed || preloading === 'none' || preloadTask || preloadQueued) {
+    if (
+      disposed ||
+      preloading === 'none' ||
+      preloadTask ||
+      preloadQueued
+    ) {
       return;
     }
 
     preloadQueued = true;
+
     const run = () => {
-      if (disposed) {
+      preloadIdleId = null;
+      preloadTimeoutId = null;
+
+      if (disposed || !started) {
         preloadQueued = false;
         return;
       }
+
       void preload();
     };
 
@@ -907,16 +968,24 @@ export function createRouter(config: RouterConfig): Router {
       return;
     }
 
-    const requestIdle = (window as Window & {
-      requestIdleCallback?: (callback: () => void) => number;
-    }).requestIdleCallback;
+    const requestIdle =
+      (window as Window & {
+        requestIdleCallback?: (
+          callback: () => void,
+        ) => number;
+      }).requestIdleCallback;
 
     if (typeof requestIdle === 'function') {
-      requestIdle(() => run());
+      preloadIdleId =
+        requestIdle(run);
       return;
     }
 
-    window.setTimeout(run, 0);
+    preloadTimeoutId =
+      window.setTimeout(
+        run,
+        0,
+      );
   }
 
   async function runCanDeactivateGuards(
@@ -1404,6 +1473,8 @@ export function createRouter(config: RouterConfig): Router {
   }
 
   function stopRouter(): void {
+    cancelScheduledPreloading();
+
     if (!started) {
       cancelActiveNavigation();
       return;

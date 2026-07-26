@@ -28,9 +28,9 @@ export type RouteLoader<T = unknown> = (
 export type RouteLoaders = Readonly<Record<string, RouteLoader>>;
 
 export type StreamixRouteOptions<
-  TName extends string | undefined = string | undefined,
-  TParamsSchema extends ParamSchemaRecord | undefined = ParamSchemaRecord | undefined,
-  TSearchSchema extends SearchSchemaRecord | undefined = SearchSchemaRecord | undefined,
+  TName extends string | undefined = undefined,
+  TParamsSchema extends ParamSchemaRecord | undefined = undefined,
+  TSearchSchema extends SearchSchemaRecord | undefined = undefined,
 > = Omit<
   StreamixRoute<string, TName, TParamsSchema, TSearchSchema>,
   'kind' | 'path' | 'component' | 'loadComponent'
@@ -38,9 +38,9 @@ export type StreamixRouteOptions<
 
 export interface StreamixRoute<
   TPath extends string = string,
-  TName extends string | undefined = string | undefined,
-  TParamsSchema extends ParamSchemaRecord | undefined = ParamSchemaRecord | undefined,
-  TSearchSchema extends SearchSchemaRecord | undefined = SearchSchemaRecord | undefined,
+  TName extends string | undefined = undefined,
+  TParamsSchema extends ParamSchemaRecord | undefined = undefined,
+  TSearchSchema extends SearchSchemaRecord | undefined = undefined,
 > {
   readonly kind: 'route';
   readonly path: TPath;
