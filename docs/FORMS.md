@@ -1,11 +1,74 @@
 # Streamix Forms
 
-A reactive, framework-agnostic forms engine built on top of [`@epikodelabs/streamix`](https://www.npmjs.com/package/@epikodelabs/streamix) atoms, with an optional Angular directive (`sxFormBinding`) that binds a form model directly to plain HTML markup — no reactive-forms boilerplate, no template-driven `ngModel` wiring.
+**Streamix Forms** is a framework-independent forms engine for building reactive forms without RxJS, Angular Reactive Forms, or framework-specific state management.
 
-- **Core (`forms.ts`)** — framework-agnostic `Field` / `Form` / `List` nodes, validation, and status derivation.
-- **`path.ts`** — resolve nodes/fields by dotted string path (`"address.city"`, `"contacts.0.email"`).
-- **`bind-form.ts` / `native-control.ts` / `template-validators.ts`** — DOM binding layer that wires native `<input>`/`<select>`/`<textarea>` elements to fields by `name`, and lets you register custom validation attributes (`sxRequired`, `sxMatch`, etc.).
-- **`form-binding.directive.ts`** — the Angular `[sxFormBinding]` structural directive that ties it all together.
+Instead of coupling validation, state, and rendering to a UI framework, Streamix Forms models every field, group, and list as reactive nodes powered by **Streamix atoms**. The same form model can be reused across frameworks while keeping business logic completely independent of the UI layer.
+
+Unlike traditional form libraries, Streamix Forms separates responsibilities into three distinct layers:
+
+- **Core** — framework-agnostic form state, validation, and lifecycle.
+- **DOM Binding** — automatic synchronization between form nodes and native HTML controls.
+- **Framework Adapters** — lightweight integrations such as the Angular `sxFormBinding` directive.
+
+```text
+          Streamix Forms
+
+      ┌─────────────────────┐
+      │     Form Model      │
+      │ Field / Form / List │
+      └─────────┬───────────┘
+                │
+      Validation │ State │ Status
+                │
+      ┌─────────▼───────────┐
+      │   DOM Binding Layer │
+      └─────────┬───────────┘
+                │
+        Native HTML Controls
+                │
+      ┌─────────▼───────────┐
+      │ Angular Integration │
+      │   sxFormBinding     │
+      └─────────────────────┘
+```
+
+## Why Streamix Forms?
+
+- Framework-independent core
+- No RxJS
+- No Angular Reactive Forms
+- Fine-grained reactive state
+- Synchronous and asynchronous validation
+- Cross-field validation
+- Automatic dirty, touched, pending and disabled tracking
+- Native HTML validation integration
+- Automatic DOM binding using `name`
+- Custom template validators
+- Strong TypeScript inference
+- Disposable form trees
+- Reusable across frameworks
+
+## Architecture
+
+```
+Application
+     │
+     ▼
+ Form Model
+(Field / Form / List)
+     │
+     ▼
+Validation Engine
+     │
+     ▼
+DOM Binding
+     │
+     ▼
+Angular Integration
+```
+
+The form model contains **no Angular code**, **no RxJS**, and **no DOM assumptions**. UI frameworks are optional adapters on top of the same reactive core.
+
 
 ## Installation
 
