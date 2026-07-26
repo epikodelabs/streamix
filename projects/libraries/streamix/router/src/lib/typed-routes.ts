@@ -1,9 +1,11 @@
-import type { InferParamType, ParamSchemaRecord } from './query-schema';
 import type {
-  StreamixLayout,
-  StreamixLeafRoute,
-  StreamixRoute,
-  StreamixRoutes,
+  InferParamType,
+  InferQueryType,
+  ParamSchemaRecord,
+  QuerySchemaRecord,
+} from './query-schema';
+import type {
+  StreamixRoute, StreamixRoutes
 } from './route-types';
 
 /**
@@ -17,28 +19,25 @@ export type ExtractPathParams<T extends string> =
     : never;
 
 /**
- * Flattens top-level routes and layout entries into leaf routes using a single unroll level.
+ * Recursively flattens all routes and layout entries into a union of leaf routes.
  */
-export type ExtractLeafRoutes<TRoutes extends StreamixRoutes> =
-  TRoutes[number] extends infer TEntry
-    ? TEntry extends StreamixRoute<any, any, any, any>
-      ? TEntry
-      : TEntry extends StreamixLayout<any, infer TEntries>
-      ? TEntries[number] extends infer TChild
-        ? TChild extends StreamixRoute<any, any, any, any>
-          ? TChild
-          : TChild extends StreamixLayout<any, any>
-          ? StreamixLeafRoute<TChild>
-          : never
-        : never
-      : never
-    : never;
+export type StreamixLeafRoutes<TRoutes extends StreamixRoutes> =
+  TRoutes[number] extends infer TEntry ? TEntry extends { kind: 'route' } ? TEntry : TEntry extends { kind: 'layout', entries: infer TEntries extends StreamixRoutes } ? StreamixLeafRoutes<TEntries> : never : never;
+
+type RouteName<TRoute> = TRoute extends StreamixRoute<
+  string,
+  infer TName,
+  ParamSchemaRecord | undefined,
+  QuerySchemaRecord | undefined
+>
+  ? Extract<TName, string>
+  : never;
 
 /**
  * Extracts route names safely across layout entries without deep recursion.
  */
 export type ExtractRouteNames<TRoutes extends StreamixRoutes> =
-  Extract<ExtractLeafRoutes<TRoutes>, { name: string }>['name'];
+  RouteName<StreamixLeafRoutes<TRoutes>>;
 
 /**
  * Infers route path parameter types from paramsSchema or path template tokens.
@@ -54,11 +53,20 @@ export type InferRouteParams<TRoute> = TRoute extends { paramsSchema: ParamSchem
 /**
  * Infers route query parameter types from querySchema or searchSchema.
  */
-export type InferRouteQuery<TRoute> = TRoute extends { querySchema: ParamSchemaRecord }
-  ? InferParamType<TRoute['querySchema']>
-  : TRoute extends { searchSchema: ParamSchemaRecord }
-  ? InferParamType<TRoute['searchSchema']>
+export type InferRouteQuery<TRoute> = TRoute extends {
+  querySchema: infer TSchema extends QuerySchemaRecord;
+}
+  ? InferQueryType<TSchema>
   : Record<string, unknown>;
+
+type HasRequiredParams<TRoute> =
+  InferRouteParams<TRoute> extends infer TParams
+    ? keyof TParams extends never
+      ? false
+      : TParams extends Record<string, never>
+      ? false
+      : true
+    : false;
 
 /**
  * Maps options (params, query, search, navigation state) for a target route name.
@@ -66,16 +74,22 @@ export type InferRouteQuery<TRoute> = TRoute extends { querySchema: ParamSchemaR
 export type RouteOptionsByName<
   TRoutes extends StreamixRoutes,
   TName extends string,
-> = Extract<ExtractLeafRoutes<TRoutes>, { name: TName }> extends infer TRoute
-  ? [TRoute] extends [never]
-    ? never
-    : {
-        params?: InferRouteParams<TRoute>;
-        query?: InferRouteQuery<TRoute>;
-        search?: InferRouteQuery<TRoute>;
-        state?: unknown;
-        replace?: boolean;
-      }
+> = StreamixLeafRoutes<TRoutes> extends infer TRoute
+  ? TRoute extends StreamixRoute<string, TName, any, any>
+    ? HasRequiredParams<TRoute> extends true
+      ? {
+          readonly params: InferRouteParams<TRoute>;
+          readonly query?: InferRouteQuery<TRoute>;
+          readonly state?: unknown;
+          readonly replace?: boolean;
+        }
+      : {
+          readonly params?: InferRouteParams<TRoute>;
+          readonly query?: InferRouteQuery<TRoute>;
+          readonly state?: unknown;
+          readonly replace?: boolean;
+        }
+    : never
   : never;
 
 /**

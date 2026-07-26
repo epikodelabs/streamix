@@ -51,7 +51,6 @@ export interface StreamixRoute<
   readonly viewTransition?: boolean;
   readonly paramsSchema?: TParamsSchema;
   readonly querySchema?: TQuerySchema;
-  readonly searchSchema?: TQuerySchema;
   readonly data?: Readonly<Record<string, unknown>>;
   readonly loadComponent?: Lazy<Type<unknown>>;
   readonly providers?: StreamixRouteProviders;
@@ -83,13 +82,3 @@ export type AnyStreamixLayout = StreamixLayout<any, any>;
 
 export type StreamixRouteEntry = AnyStreamixRoute | AnyStreamixLayout;
 export type StreamixRoutes = readonly StreamixRouteEntry[];
-
-export type StreamixLeafRoute<TEntry> =
-  TEntry extends StreamixRoute<any, any, any, any>
-    ? TEntry
-    : TEntry extends StreamixLayout<any, infer TEntries>
-      ? StreamixLeafRoute<TEntries[number]>
-      : never;
-
-export type StreamixLeafRoutes<TRoutes extends StreamixRoutes> =
-  StreamixLeafRoute<TRoutes[number]>;

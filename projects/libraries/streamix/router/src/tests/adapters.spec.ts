@@ -22,7 +22,7 @@ function createRoute(
   return {
     path: '/projects/42',
     params: {},
-    queryParams: {},
+    query: {},
     data: {},
     ...overrides,
   } as ActivatedRoute;
@@ -35,7 +35,7 @@ describe('Streamix router adapters', () => {
         projectId: '42',
         section: 'overview',
       },
-      queryParams: {
+      query: {
         tab: 'activity',
         sort: 'oldest',
       },
