@@ -5,11 +5,8 @@ import type { DeactivationContext, NavigationContext } from './vanilla-router';
 export type MaybePromise<T> = T | PromiseLike<T>;
 export type Lazy<T> = () => MaybePromise<T | { readonly default: T }>;
 
-
-
-export type StreamixRouteProvider =
-  | Provider
-  | EnvironmentProviders;
+export type StreamixRouteProvider = Provider | EnvironmentProviders;
+export type StreamixRouteProviders = readonly StreamixRouteProvider[];
 
 export type RouteRedirect = {
   readonly redirectTo: string | URL;
@@ -29,35 +26,42 @@ export type RouteLoader<T = unknown> = (
 ) => MaybePromise<T>;
 
 export type RouteLoaders = Readonly<Record<string, RouteLoader>>;
-export type StreamixRouteProviders =
-  readonly StreamixRouteProvider[];
-
-export interface StreamixRouteModule {
-  readonly component?: Type<unknown>;
-  readonly routes?: StreamixRoutes;
-  readonly beforeEnter?: readonly BeforeEnter[];
-  readonly beforeLeave?: readonly BeforeLeave[];
-  readonly resolve?: RouteLoaders;
-  readonly providers?: StreamixRouteProviders;
-}
 
 export interface StreamixRoute {
+  readonly kind: 'route';
   readonly path: string;
   readonly name?: string;
   readonly redirectTo?: string;
   readonly preload?: boolean;
   readonly component?: Type<unknown>;
-  readonly children?: StreamixRoutes;
   readonly viewTransition?: boolean;
   readonly paramsSchema?: Readonly<Record<string, ParamSchema<unknown>>>;
   readonly searchSchema?: Readonly<Record<string, SearchSchema<unknown>>>;
   readonly data?: Readonly<Record<string, unknown>>;
   readonly loadComponent?: Lazy<Type<unknown>>;
-  readonly loadChildren?: Lazy<StreamixRoutes>;
   readonly providers?: StreamixRouteProviders;
   readonly beforeEnter?: readonly BeforeEnter[];
   readonly beforeLeave?: readonly BeforeLeave[];
   readonly resolve?: RouteLoaders;
 }
 
-export type StreamixRoutes = readonly StreamixRoute[];
+export interface StreamixLayout {
+  readonly kind: 'layout';
+  readonly component?: Type<unknown>;
+  readonly loadComponent?: Lazy<Type<unknown>>;
+  readonly entries: StreamixRoutes;
+  readonly providers?: StreamixRouteProviders;
+}
+
+export type StreamixRouteEntry = StreamixRoute | StreamixLayout;
+export type StreamixRoutes = readonly StreamixRouteEntry[];
+
+export type StreamixLeafRoute<TEntry> =
+  TEntry extends StreamixRoute
+    ? TEntry
+    : TEntry extends StreamixLayout
+      ? StreamixLeafRoute<TEntry['entries'][number]>
+      : never;
+
+export type StreamixLeafRoutes<TRoutes extends StreamixRoutes> =
+  StreamixLeafRoute<TRoutes[number]>;

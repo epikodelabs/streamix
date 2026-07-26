@@ -1,16 +1,45 @@
 import type { Type } from '@angular/core';
-import type { StreamixRoutes } from './route-types';
+import type {
+  Lazy,
+  StreamixLayout,
+  StreamixRoute,
+  StreamixRoutes,
+} from './route-types';
 
-export interface RouteBranch<
-  TRoutes extends StreamixRoutes = StreamixRoutes,
-> {
-  readonly component?: Type<unknown>;
-  readonly routes?: TRoutes;
+export type RouteOptions = Omit<StreamixRoute, 'kind' | 'path' | 'component'>;
+export type LayoutOptions = Omit<
+  StreamixLayout,
+  'kind' | 'component' | 'loadComponent' | 'entries'
+>;
+
+export function route(
+  path: string,
+  component: Type<unknown>,
+  options: RouteOptions = {},
+): StreamixRoute {
+  return { kind: 'route', path, component, ...options };
 }
 
-export function branch<const TRoutes extends StreamixRoutes>(
+export function lazyRoute(
+  path: string,
+  loadComponent: Lazy<Type<unknown>>,
+  options: RouteOptions = {},
+): StreamixRoute {
+  return { kind: 'route', path, loadComponent, ...options };
+}
+
+export function layout<const TRoutes extends StreamixRoutes>(
   component: Type<unknown>,
-  routes: TRoutes,
-): RouteBranch<TRoutes> {
-  return { component, routes };
+  entries: TRoutes,
+  options: LayoutOptions = {},
+): StreamixLayout & { readonly entries: TRoutes } {
+  return { kind: 'layout', component, entries, ...options };
+}
+
+export function lazyLayout<const TRoutes extends StreamixRoutes>(
+  loadComponent: Lazy<Type<unknown>>,
+  entries: TRoutes,
+  options: LayoutOptions = {},
+): StreamixLayout & { readonly entries: TRoutes } {
+  return { kind: 'layout', loadComponent, entries, ...options };
 }

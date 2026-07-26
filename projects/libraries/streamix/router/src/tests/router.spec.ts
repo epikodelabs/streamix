@@ -14,17 +14,6 @@ function delay(ms: number): Promise<void> {
 function createComponent(text: string): () => Node {
     return () => document.createTextNode(text);
 }
-function createLayoutComponent(text: string): () => Node {
-    return () => {
-        const wrapper = document.createElement('section');
-        const heading = document.createElement('span');
-        heading.textContent = text;
-        const nestedOutlet = document.createElement('div');
-        nestedOutlet.setAttribute('data-router-outlet', '');
-        wrapper.append(heading, nestedOutlet);
-        return wrapper;
-    };
-}
 function dispatchAnchorClick(target: HTMLAnchorElement, init: MouseEventInit = {}): boolean {
     const event = new MouseEvent('click', {
         bubbles: true,
@@ -391,87 +380,35 @@ idescribe('Router', () => {
             expect(router.state.current?.config.path).toBe('**');
             expect(outlet.textContent).toBe('404');
         });
-        it('should handle nested routes', async () => {
-            const config: RouterConfig = {
+    });
+        it('should only match complete flat route paths', async () => {
+            router = createRouter({
                 routes: [
-                    {
-                        path: 'admin',
-                        load: async () => ({
-                            routes: [
-                                routeWithComponent('', 'Admin Home'),
-                                routeWithComponent('users', 'Admin Users'),
-                            ]
-                        })
-                    },
+                    routeWithComponent('admin/users', 'Admin Users'),
+                    routeWithComponent('admin/settings', 'Admin Settings'),
                 ],
                 outlet
-            };
-            router = createRouter(config);
-            router.start();
-            router.navigate('/admin/users');
-            await delay(50);
-            expect(router.state.current?.path).toBe('/admin/users');
+            });
+
+            await router.navigate('/admin/users');
+
+            expect(router.state.current?.config.path).toBe('admin/users');
             expect(outlet.textContent).toBe('Admin Users');
         });
-        it('should handle deeply nested routes', async () => {
-            const config: RouterConfig = {
+        it('should not infer parent routes from path prefixes', async () => {
+            router = createRouter({
                 routes: [
-                    {
-                        path: 'dashboard',
-                        load: async () => ({
-                            routes: [
-                                {
-                                    path: 'admin',
-                                    load: async () => ({
-                                        routes: [
-                                            routeWithComponent('users', 'Dashboard Admin Users'),
-                                        ]
-                                    })
-                                },
-                            ]
-                        })
-                    },
+                    routeWithComponent('admin', 'Admin'),
+                    routeWithComponent('admin/users', 'Admin Users'),
                 ],
                 outlet
-            };
-            router = createRouter(config);
-            router.start();
-            router.navigate('/dashboard/admin/users');
-            await delay(50);
-            expect(router.state.current?.path).toBe('/dashboard/admin/users');
-            expect(outlet.textContent).toBe('Dashboard Admin Users');
-        });
-        it('should collect data from route chain', async () => {
-            const config: RouterConfig = {
-                routes: [
-                    {
-                        path: 'admin',
-                        data: { role: 'admin' },
-                        load: async () => ({
-                            routes: [
-                                {
-                                    path: 'users',
-                                    data: { section: 'users' },
-                                    load: async () => ({
-                                        component: unwrapTestComponent(await (() => Promise.resolve(createComponent('Admin Users')))())
-                                    })
-                                },
-                            ]
-                        })
-                    },
-                ],
-                outlet
-            };
-            router = createRouter(config);
-            router.start();
-            router.navigate('/admin/users');
-            await delay(50);
-            expect(router.state.current?.data).toEqual({
-                role: 'admin',
-                section: 'users'
             });
+
+            await router.navigate('/admin/users');
+
+            expect(router.state.current?.config.path).toBe('admin/users');
+            expect(outlet.textContent).toBe('Admin Users');
         });
-    });
     describe('guards', () => {
         it('should allow navigation when guard returns true', async () => {
             const config: RouterConfig = {
@@ -810,42 +747,6 @@ idescribe('Router', () => {
                 dynamic: 'dynamic-value'
             });
         });
-        it('should resolve data from multiple routes in chain', async () => {
-            const config: RouterConfig = {
-                routes: [
-                    {
-                        path: 'admin',
-                        data: { role: 'admin' },
-                        load: async () => ({
-                            routes: [
-                                {
-                                    path: 'users',
-                                    load: async () => ({
-                                        component: unwrapTestComponent(await (() => Promise.resolve(createComponent('Admin Users')))()),
-                                        resolve: {
-                                            users: () => ['Alice', 'Bob']
-                                        }
-                                    })
-                                },
-                            ],
-                            resolve: {
-                                permissions: () => ['read', 'write']
-                            }
-                        })
-                    },
-                ],
-                outlet
-            };
-            router = createRouter(config);
-            router.start();
-            router.navigate('/admin/users');
-            await delay(50);
-            expect(router.state.current?.data).toEqual({
-                role: 'admin',
-                permissions: ['read', 'write'],
-                users: ['Alice', 'Bob']
-            });
-        });
         it('should work with resolver objects', async () => {
             const config: RouterConfig = {
                 routes: [
@@ -993,54 +894,6 @@ idescribe('Router', () => {
             router.navigate('/lazy-default');
             await delay(50);
             expect(outlet.textContent).toBe('Lazy Default');
-        });
-        it('should lazy load child routes', async () => {
-            const config: RouterConfig = {
-                routes: [
-                    {
-                        path: 'admin',
-                        load: async () => ({
-                            routes: await (() => Promise.resolve([
-                                routeWithComponent('', 'Admin Home'),
-                                routeWithComponent('users', 'Admin Users'),
-                            ]))()
-                        })
-                    },
-                ],
-                outlet
-            };
-            router = createRouter(config);
-            router.start();
-            router.navigate('/admin/users');
-            await delay(50);
-            expect(router.state.current?.path).toBe('/admin/users');
-            expect(outlet.textContent).toBe('Admin Users');
-        });
-        it('should cache lazy loaded routes', async () => {
-            let loadCount = 0;
-            const config: RouterConfig = {
-                routes: [
-                    {
-                        path: 'cached',
-                        load: async () => ({
-                            routes: await (() => {
-                                loadCount++;
-                                return Promise.resolve([
-                                    routeWithComponent('', 'Cached'),
-                                ]);
-                            })()
-                        })
-                    },
-                ],
-                outlet
-            };
-            router = createRouter(config);
-            router.start();
-            router.navigate('/cached');
-            await delay(50);
-            router.navigate('/cached');
-            await delay(50);
-            expect(loadCount).toBe(1);
         });
         it('should handle lazy loading errors', async () => {
             const config: RouterConfig = {
@@ -1367,43 +1220,36 @@ idescribe('Router', () => {
                 transitionDocument.startViewTransition = original;
             }
         });
-        it('should preload lazy routes eagerly when configured', async () => {
+        it('should preload flat lazy routes eagerly when configured', async () => {
             const aboutLoader = jasmine.createSpy('aboutLoader')
                 .and.returnValue(Promise.resolve(createComponent('About')));
-            const childLoader = jasmine.createSpy('childLoader')
-                .and.returnValue(Promise.resolve(createComponent('Admin')));
-            const loadChildren = jasmine.createSpy('loadChildren')
-                .and.returnValue(Promise.resolve([
-                {
-                    path: 'child',
-                    load: async () => ({
-                        component: unwrapTestComponent(await (childLoader)())
-                    })
-                },
-            ] satisfies Route[]));
+            const settingsLoader = jasmine.createSpy('settingsLoader')
+                .and.returnValue(Promise.resolve(createComponent('Settings')));
+
             router = createRouter({
                 routes: [
                     {
                         path: 'about',
                         load: async () => ({
-                            component: unwrapTestComponent(await (aboutLoader)())
+                            component: unwrapTestComponent(await aboutLoader())
                         })
                     },
                     {
-                        path: 'admin',
+                        path: 'settings',
                         load: async () => ({
-                            routes: await (loadChildren)()
+                            component: unwrapTestComponent(await settingsLoader())
                         })
                     },
                 ],
                 outlet,
                 preloading: 'eager'
             });
+
             router.start();
             await delay(50);
-            expect(aboutLoader).toHaveBeenCalled();
-            expect(loadChildren).toHaveBeenCalled();
-            expect(childLoader).toHaveBeenCalled();
+
+            expect(aboutLoader).toHaveBeenCalledTimes(1);
+            expect(settingsLoader).toHaveBeenCalledTimes(1);
         });
         it('should clear stale error state on blocked navigation', async () => {
             const config: RouterConfig = {
@@ -1988,28 +1834,6 @@ idescribe('Router', () => {
             await delay(50);
             expect(router.state.error).toBeDefined();
             expect((router.state.error as Error).message).toBe('Resolver failed');
-        });
-        it('should render parent and child components through nested outlets', async () => {
-            const config: RouterConfig = {
-                routes: [
-                    {
-                        path: 'dashboard',
-                        load: async () => ({
-                            component: unwrapTestComponent(await (() => Promise.resolve(createLayoutComponent('Dashboard')))()),
-                            routes: [
-                                routeWithComponent('reports', 'Reports'),
-                            ]
-                        })
-                    },
-                ],
-                outlet
-            };
-            router = createRouter(config);
-            router.start();
-            router.navigate('/dashboard/reports');
-            await delay(50);
-            expect(outlet.textContent).toBe('DashboardReports');
-            expect(router.state.current?.path).toBe('/dashboard/reports');
         });
     });
     describe('tracing', () => {

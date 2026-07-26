@@ -1,4 +1,4 @@
-import { dispatchRouterLocationChange, OUTLET_ATTRIBUTE } from './router-events';
+import { dispatchRouterLocationChange } from './router-events';
 import {
   isPathInsideBase,
   normalizeBaseHref,
@@ -68,7 +68,6 @@ export type RouteComponent = (
 
 export interface LoadedRoute {
   readonly component?: RouteComponent;
-  readonly routes?: readonly Route[];
   readonly canActivate?: CanActivate[];
   readonly canDeactivate?: CanDeactivate[];
   readonly resolve?: Record<string, Resolve>;
@@ -104,7 +103,6 @@ export interface ViewTransitionContext {
   readonly to: ActivatedRoute | null;
   readonly phase: ViewTransitionPhase;
   readonly routeConfig: Route | null;
-  readonly routeChain?: readonly Route[];
   readonly error?: unknown;
 }
 
@@ -193,7 +191,6 @@ interface HistoryUpdate {
 
 interface RouteMatch {
   readonly route: Route;
-  readonly chain: Route[];
   readonly params: Record<string, string>;
 }
 
@@ -243,8 +240,6 @@ type NavigationResult =
   | NavigationFailure;
 
 interface ActiveRoute extends ActivatedRoute {
-  readonly chain: readonly Route[];
-  readonly routeStates: readonly ActivatedRoute[];
 }
 
 interface ActiveRender {
@@ -339,16 +334,6 @@ function defaultRenderError(outlet: HTMLElement): void {
   outlet.replaceChildren(heading);
 }
 
-function findNestedOutlet(node: Node): HTMLElement | null {
-  if (!(node instanceof Element || node instanceof DocumentFragment)) {
-    return null;
-  }
-  if (node instanceof HTMLElement && node.hasAttribute(OUTLET_ATTRIBUTE)) {
-    return node as HTMLElement;
-  }
-  return node.querySelector<HTMLElement>(`[${OUTLET_ATTRIBUTE}]`);
-}
-
 const routeLoads = new WeakMap<Route, Promise<LoadedRoute>>();
 
 function loadRoute(
@@ -359,15 +344,10 @@ function loadRoute(
   if (!pending) {
     pending = Promise
       .resolve(
-        route.load?.() ?? {
-          routes: [],
-        },
+        route.load?.() ?? {},
       )
       .then(loaded => ({
         component: loaded.component,
-        routes: Object.freeze([
-          ...(loaded.routes ?? []),
-        ]),
         canActivate: loaded.canActivate,
         canDeactivate: loaded.canDeactivate,
         resolve: loaded.resolve,
@@ -696,16 +676,7 @@ export function createRouter(config: RouterConfig): Router {
     route: ActiveRoute,
     historyState: unknown,
   ): ActiveRoute {
-    const routeStates = route.routeStates.map(routeState => ({
-      ...routeState,
-      historyState,
-    }));
-
-    return {
-      ...route,
-      historyState,
-      routeStates: Object.freeze(routeStates),
-    };
+    return { ...route, historyState };
   }
 
   function updateCurrentHistoryEntry(entry: HistoryEntry): void {
@@ -741,30 +712,11 @@ export function createRouter(config: RouterConfig): Router {
     }
   }
 
-  function readRouteViewTransition(
-    routeChain: readonly Route[] | undefined,
-  ): boolean | undefined {
-    if (!routeChain) {
-      return undefined;
-    }
-
-    for (let index = routeChain.length - 1; index >= 0; index--) {
-      const value = routeChain[index]?.viewTransition;
-      if (value !== undefined) {
-        return value;
-      }
-    }
-
-    return undefined;
-  }
-
   function shouldUseViewTransition(
     context: ViewTransitionContext,
   ): boolean {
-    const routeOverride = readRouteViewTransition(context.routeChain);
-    if (routeOverride !== undefined) {
-      return routeOverride;
-    }
+    const routeOverride = context.routeConfig?.viewTransition;
+    if (routeOverride !== undefined) return routeOverride;
 
     return typeof viewTransitions === 'function'
       ? viewTransitions(context)
@@ -906,47 +858,15 @@ export function createRouter(config: RouterConfig): Router {
     return pattern;
   }
 
-  function createRouteStates(
-    chain: readonly Route[],
-    url: URL,
-    path: string,
-    params: RouteParams,
-    queryParams: QueryParams,
-    data: RouteData,
-    historyState: unknown,
-  ): readonly ActivatedRoute[] {
-    return chain.map(route => ({
-      url,
-      path,
-      params,
-      queryParams,
-      data,
-      historyState,
-      config: route,
-    }));
-  }
-
   function shouldPreloadRoute(route: Route): boolean {
     return route.preload !== false;
   }
 
-  async function preloadBranch(
-    route: Route,
-    seen: WeakSet<Route>,
-  ): Promise<void> {
-    if (seen.has(route)) return;
+  async function preloadRoute(route: Route, seen: WeakSet<Route>): Promise<void> {
+    if (seen.has(route) || !shouldPreloadRoute(route)) return;
     seen.add(route);
-
-    if (!shouldPreloadRoute(route)) return;
-
-    try {
-      const loaded = await loadRoute(route);
-      for (const child of loaded.routes ?? []) {
-        await preloadBranch(child, seen);
-      }
-    } catch (error) {
-      trace('Route preload failed', route.path, error);
-    }
+    try { await loadRoute(route); }
+    catch (error) { trace('Route preload failed', route.path, error); }
   }
 
   async function runPreloading(): Promise<void> {
@@ -956,7 +876,7 @@ export function createRouter(config: RouterConfig): Router {
 
     const seen = new WeakSet<Route>();
     for (const route of config.routes) {
-      await preloadBranch(route, seen);
+      await preloadRoute(route, seen);
     }
   }
 
@@ -1006,178 +926,74 @@ export function createRouter(config: RouterConfig): Router {
     const activeRoute = currentState;
     if (!activeRoute) return true;
 
-    for (let index = activeRoute.routeStates.length - 1; index >= 0; index--) {
-      const routeState = activeRoute.routeStates[index];
-      const context: DeactivationContext = {
-        ...routeState,
-        nextUrl,
-        signal,
-      };
-
-      const loaded = await loadRoute(routeState.config);
+    const context: DeactivationContext = {
+      ...activeRoute,
+      nextUrl,
+      signal,
+    };
+    const loaded = await loadRoute(activeRoute.config);
+    throwIfAborted(signal);
+    for (const guard of loaded.canDeactivate ?? []) {
+      const result = await executeDeactivationGuard(guard, context);
       throwIfAborted(signal);
-
-      for (const guard of loaded.canDeactivate ?? []) {
-        const result = await executeDeactivationGuard(guard, context);
-        throwIfAborted(signal);
-        const redirect = readRedirect(result);
-        if (redirect) {
-          const redirectUrl = resolveAppUrl(redirect.redirectTo, 'href');
-          if (redirectUrl.href === nextUrl.href) {
-            warn(
-              'Ignoring canDeactivate redirect to the pending URL',
-              redirect.redirectTo,
-            );
-            continue;
-          }
-          return redirect;
+      const redirect = readRedirect(result);
+      if (redirect) {
+        const redirectUrl = resolveAppUrl(redirect.redirectTo, 'href');
+        if (redirectUrl.href === nextUrl.href) {
+          warn('Ignoring canDeactivate redirect to the pending URL', redirect.redirectTo);
+          continue;
         }
-        if (result === false) return false;
+        return redirect;
       }
+      if (result === false) return false;
     }
 
     return true;
   }
 
-  async function renderRouteChain(
-    routeStates: readonly ActivatedRoute[],
-    signal: AbortSignal
+  async function renderMatchedRoute(
+    routeState: ActivatedRoute,
+    signal: AbortSignal,
   ): Promise<{ node: Node; component?: unknown; rendered: ActiveRender }> {
-    if (routeStates.length === 0) {
-      throw new Error('Route render chain is empty');
-    }
-
     const destroyController = new AbortController();
-    const cleanups: Array<() => void> = [];
-
-    const rendered: ActiveRender = {
-      controller: destroyController,
-      dispose: () => {
-        destroyController.abort();
-        while (cleanups.length > 0) {
-          const cleanup = cleanups.pop();
-          try {
-            cleanup?.();
-          } catch (error) {
-            trace('Route cleanup failed', error);
-          }
-        }
+    const loaded = await loadRoute(routeState.config);
+    throwIfAborted(signal);
+    if (!loaded.component) {
+      throw new Error(`Matched route "${routeState.config.path}" has no component`);
+    }
+    const output = normalizeRenderedRouteNode(
+      await loaded.component(routeState, {
+        signal,
+        destroySignal: destroyController.signal,
+      }),
+    );
+    throwIfAborted(signal);
+    return {
+      node: output.node,
+      component: output.component,
+      rendered: {
+        controller: destroyController,
+        dispose: () => {
+          destroyController.abort();
+          output.dispose?.();
+        },
       },
     };
-
-    async function renderAt(index: number): Promise<RenderedRouteNode> {
-      const routeState = routeStates[index];
-      if (!routeState) {
-        throw new Error('Route render chain is empty');
-      }
-
-      const loaded = await loadRoute(routeState.config);
-      throwIfAborted(signal);
-
-      if (!loaded.component) {
-        if (index === routeStates.length - 1) {
-          throw new Error(`Matched route "${routeState.config.path}" has no component`);
-        }
-        return renderAt(index + 1);
-      }
-
-      const output = normalizeRenderedRouteNode(
-        await loaded.component(routeState, {
-          signal,
-          destroySignal: destroyController.signal,
-        })
-      );
-      throwIfAborted(signal);
-
-      if (output.dispose) {
-        cleanups.push(output.dispose);
-      }
-
-      if (index < routeStates.length - 1) {
-        const child = await renderAt(index + 1);
-        const outlet = findNestedOutlet(output.node);
-
-        if (!outlet) {
-          throw new Error(
-            `Route "${routeState.config.path}" owns nested routes but rendered no <router-outlet>.`,
-          );
-        }
-
-        outlet.replaceChildren(child.node);
-
-        notifyOutletActivate(
-          outlet,
-          child.component,
-        );
-      }
-
-      return output;
-    }
-
-    try {
-      const output = await renderAt(0);
-      throwIfAborted(signal);
-      return { node: output.node, component: output.component, rendered };
-    } catch (error) {
-      rendered.dispose();
-      throw error;
-    }
   }
 
-  async function recognize(
-    routes: Route[],
-    segments: string[],
-    segmentIndex = 0,
-    parentParams: Record<string, string> = {},
-    chain: readonly Route[] = [],
-  ): Promise<RouteMatch | null> {
+  function recognize(routes: readonly Route[], segments: readonly string[]): RouteMatch | null {
     let fallback: Route | undefined;
-
     for (const route of routes) {
       if (route.path === '**' || route.path === '*') {
         fallback = route;
         continue;
       }
-
       const pattern = getRoutePattern(route);
-      const params = { ...parentParams };
-      
-      if (
-        !matchPattern(
-          pattern,
-          segments,
-          segmentIndex,
-          params,
-        )
-      ) {
-        continue;
-      }
-
-      const nextIndex = segmentIndex + pattern.segments.length;
-      const nextChain = [...chain, route];
-      const loaded = await loadRoute(route);
-
-      if (loaded.routes && loaded.routes.length > 0) {
-        const childMatch = await recognize(
-          loaded.routes as Route[],
-          segments,
-          nextIndex,
-          params,
-          nextChain,
-        );
-
-        if (childMatch) {
-          return childMatch;
-        }
-      }
-
-      if (nextIndex === segments.length) {
-        return { route, chain: nextChain, params };
-      }
+      if (pattern.segments.length !== segments.length) continue;
+      const params: Record<string, string> = {};
+      if (matchPattern(pattern, segments, 0, params)) return { route, params };
     }
-
-    if (!fallback) return null;
-    return { route: fallback, chain: [...chain, fallback], params: { ...parentParams } };
+    return fallback ? { route: fallback, params: {} } : null;
   }
 
   function matchPattern(
@@ -1216,7 +1032,7 @@ export function createRouter(config: RouterConfig): Router {
     }
 
     const path = stripBaseHref(request.url.pathname, baseHref);
-    const match = await recognize(config.routes, splitPath(path), 0, {}, []);
+    const match = recognize(config.routes, splitPath(path));
     throwIfAborted(signal);
 
     setPhase(request, 'guarding');
@@ -1233,7 +1049,7 @@ export function createRouter(config: RouterConfig): Router {
       return { type: 'not-found', request };
     }
 
-    const staticData = Object.assign({}, ...match.chain.map(route => route.data ?? {}));
+    const staticData = { ...(match.route.data ?? {}) };
     const historyState = request.historyUpdate.nextEntry?.state ?? readHistoryState();
     const baseRoute: ActivatedRoute = {
       url: request.url,
@@ -1245,68 +1061,47 @@ export function createRouter(config: RouterConfig): Router {
       config: match.route,
     };
 
-    for (const route of match.chain) {
-      if (!route.redirectTo) continue;
+    if (match.route.redirectTo) {
       return {
         type: 'redirect',
         request,
-        redirectTo: interpolateRedirect(route.redirectTo, match.params),
+        redirectTo: interpolateRedirect(match.route.redirectTo, match.params),
         replace: true,
       };
     }
 
     const guardContext: NavigationContext = { ...baseRoute, signal };
-    const loadedChain = await Promise.all(match.chain.map(r => loadRoute(r)));
+    const loadedRoute = await loadRoute(match.route);
     throwIfAborted(signal);
 
-    for (const route of match.chain) {
-      for (const guard of (await loadRoute(route)).canActivate ?? []) {
+    for (const guard of loadedRoute.canActivate ?? []) {
         const result = await executeGuard(guard, guardContext);
         throwIfAborted(signal);
         const redirect = readRedirect(result);
         if (redirect) return { type: 'redirect', request, ...redirect };
         if (result === false) return { type: 'blocked', request };
-      }
     }
 
     setPhase(request, 'resolving');
     const resolvedData: Record<string, unknown> = {};
-    for (let i = 0; i < match.chain.length; i++) {
-      const context: NavigationContext = {
-        ...baseRoute,
-        data: Object.freeze({ ...staticData, ...resolvedData }),
-        signal,
-      };
-      const values = await Promise.all(
-        Object.entries(loadedChain[i].resolve ?? {}).map(async ([key, resolver]) => {
-          const value = await executeResolver(resolver, context);
-          return [key, value] as const;
-        })
-      );
-      throwIfAborted(signal);
-      Object.assign(resolvedData, Object.fromEntries(values));
-    }
+    const resolveContext: NavigationContext = { ...baseRoute, signal };
+    const values = await Promise.all(
+      Object.entries(loadedRoute.resolve ?? {}).map(async ([key, resolver]) => {
+        const value = await executeResolver(resolver, resolveContext);
+        return [key, value] as const;
+      }),
+    );
+    throwIfAborted(signal);
+    Object.assign(resolvedData, Object.fromEntries(values));
 
     const mergedData = Object.freeze({ ...staticData, ...resolvedData });
-    const routeStates = createRouteStates(
-      match.chain,
-      request.url,
-      path,
-      baseRoute.params,
-      baseRoute.queryParams,
-      mergedData,
-      historyState,
-    );
-
     const activatedRoute: ActiveRoute = {
       ...baseRoute,
       data: mergedData,
-      chain: Object.freeze([...match.chain]),
-      routeStates: Object.freeze(routeStates),
     };
 
     setPhase(request, 'loading');
-    const { node, component, rendered } = await renderRouteChain(routeStates, signal);
+    const { node, component, rendered } = await renderMatchedRoute(activatedRoute, signal);
     return { type: 'success', request, route: activatedRoute, node, component, rendered };
   }
 
@@ -1398,7 +1193,6 @@ export function createRouter(config: RouterConfig): Router {
           to: result.route,
           phase: 'success',
           routeConfig: result.route.config,
-          routeChain: result.route.chain,
         }, () => {
           replaceActiveRender(result.rendered);
           const outlet = resolveOutlet();
