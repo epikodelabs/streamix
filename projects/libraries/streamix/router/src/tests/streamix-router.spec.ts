@@ -1,6 +1,9 @@
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-
+import {
+  BrowserTestingModule,
+  platformBrowserTesting,
+} from '@angular/platform-browser/testing';
 import {
   layout,
   lazyLayout,
@@ -56,6 +59,14 @@ describe('StreamixRouter: flat routes and layouts', () => {
     router = TestBed.inject(StreamixRouter);
     router.connect('', outlet);
   }
+
+  // Initialize Angular test environment once for the entire suite
+  beforeAll(() => {
+    TestBed.initTestEnvironment(
+      BrowserTestingModule,
+      platformBrowserTesting(),
+    );
+  });
 
   function getOutletContent(): string {
     return outlet.innerHTML;

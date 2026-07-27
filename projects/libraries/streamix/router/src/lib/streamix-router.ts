@@ -710,10 +710,6 @@ export class StreamixRouter<
             this.injector,
           ),
 
-        outlet:
-          this.outlets.get('') ??
-          null,
-
         baseHref:
           this.baseHref,
 
@@ -762,8 +758,17 @@ export class StreamixRouter<
         },
 
         renderNotFound: (
-          target,
+          targetName,
         ) => {
+          const target =
+            this.outlets.get(
+              targetName,
+            );
+
+          if (!target) {
+            return;
+          }
+
           const heading =
             document.createElement(
               'h1',
@@ -778,8 +783,17 @@ export class StreamixRouter<
         },
 
         renderError: (
-          target,
+          targetName,
         ) => {
+          const target =
+            this.outlets.get(
+              targetName,
+            );
+
+          if (!target) {
+            return;
+          }
+
           const heading =
             document.createElement(
               'h1',

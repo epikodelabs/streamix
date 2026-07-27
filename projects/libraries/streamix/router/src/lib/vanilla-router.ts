@@ -422,7 +422,7 @@ export function createRouter(config: RouterConfig): Router {
   let navigationId = 0;
   let latestRequestId = 0;
   let activeController: AbortController | null = null;
-  let activeRender: ActiveRender | null = null;
+  const activeRenders = new Map<string, ActiveRender>();
   let startRequestQueued = false;
   let preloadTask: Promise<void> | null = null;
   let preloadQueued = false;
@@ -472,10 +472,33 @@ export function createRouter(config: RouterConfig): Router {
     renderInstance.dispose();
   }
 
-  function replaceActiveRender(renderInstance: ActiveRender | null): void {
-    const previousRender = activeRender;
-    activeRender = renderInstance;
+  function replaceActiveRender(
+    outletName: string,
+    renderInstance: ActiveRender | null,
+  ): void {
+    const previousRender =
+      activeRenders.get(outletName) ?? null;
+
+    if (renderInstance) {
+      activeRenders.set(
+        outletName,
+        renderInstance,
+      );
+    } else {
+      activeRenders.delete(
+        outletName,
+      );
+    }
+
     disposeRender(previousRender);
+  }
+
+  function disposeAllRenders(): void {
+    for (const renderInstance of activeRenders.values()) {
+      disposeRender(renderInstance);
+    }
+
+    activeRenders.clear();
   }
 
   function clearOutlet(): void {
@@ -1324,8 +1347,13 @@ export function createRouter(config: RouterConfig): Router {
           phase: 'success',
           routeConfig: result.route.config,
         }, () => {
-          replaceActiveRender(result.rendered);
-          const outletName = result.route.config.outlet ?? '';
+          const outletName =
+            result.route.config.outlet ?? '';
+
+          replaceActiveRender(
+            outletName,
+            result.rendered,
+          );
           const outlet = resolveOutlet();
 
           render(
@@ -1423,7 +1451,7 @@ export function createRouter(config: RouterConfig): Router {
             );
           }
 
-          replaceActiveRender(null);
+          replaceActiveRender('', null);
         });
         history.commitUpdate(
           result.request.historyUpdate,
@@ -1460,7 +1488,7 @@ export function createRouter(config: RouterConfig): Router {
             );
           }
 
-          replaceActiveRender(null);
+          replaceActiveRender('', null);
         });
         history.rollbackUpdate(result.request.historyUpdate);
         currentState = null;
@@ -1610,7 +1638,7 @@ export function createRouter(config: RouterConfig): Router {
     window.removeEventListener('popstate', handlePopState);
     document.removeEventListener('click', handleClick);
     cancelActiveNavigation();
-    replaceActiveRender(null);
+    disposeAllRenders();
     clearOutlet();
     started = false;
     startRequestQueued = false;
