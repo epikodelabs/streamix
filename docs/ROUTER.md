@@ -934,6 +934,29 @@ These checks make outlet configuration errors fail early rather than producing s
 
 Named outlets do not reintroduce a recursive runtime router.
 
+---
+
+## Future Features
+
+The following features are planned for future development, prioritized based on developer value and architectural impact.
+
+### Recommended order
+
+I would prioritize them like this:
+
+1.  **Typed route references**
+    High developer value with little runtime complexity.
+2.  **Structured navigation diagnostics**
+    Your router is already sophisticated enough that observability will become important.
+3.  **Smarter explicit preloading**
+    Relatively isolated and useful immediately.
+4.  **SSR platform separation**
+    Architecturally important, but it requires careful separation of browser APIs.
+5.  **Hydration and partial hydration**
+    Build this only after the SSR boundary is stable.
+6.  **Advanced transition coordination**
+    Visually valuable, but it should remain an optional layer above the core navigation state machine.
+
 They are compiled rendering targets attached to flat leaf routes.
 
 The vanilla router decides what navigation state is active.
