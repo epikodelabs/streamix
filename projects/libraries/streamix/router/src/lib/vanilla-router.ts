@@ -1,11 +1,11 @@
+import { HistoryManager, ZERO_SCROLL, type HistoryEntry, type HistoryUpdate, type ScrollPosition } from './history';
 import { dispatchRouterLocationChange } from './router-events';
 import {
   isPathInsideBase,
   normalizeBaseHref,
-  normalizePath,
   resolveRouterUrl,
   routerHref,
-  stripBaseHref,
+  stripBaseHref
 } from './router-url';
 
 type MaybePromise<T> = T | PromiseLike<T>;
@@ -106,6 +106,7 @@ export interface LoadedRoute {
 export interface Route {
   name?: string;
   path: string;
+  outlet?: string;
   load?: () => MaybePromise<LoadedRoute>;
   redirectTo?: string;
   data?: Record<string, unknown>;
@@ -186,37 +187,17 @@ export interface RouterConfig {
   onStateChange?: (state: RouterState) => void;
 }
 
+interface NavigationCompletion {
+  settled: boolean;
+  resolve(success: boolean): void;
+}
+
 interface NavigationRequest {
   readonly id: number;
   readonly url: URL;
   readonly redirectCount: number;
   readonly completion: NavigationCompletion;
   readonly historyUpdate: HistoryUpdate;
-}
-
-interface NavigationCompletion {
-  settled: boolean;
-  resolve(success: boolean): void;
-}
-
-interface ScrollPosition {
-  readonly x: number;
-  readonly y: number;
-}
-
-interface HistoryEntry {
-  readonly href: string;
-  readonly scroll: ScrollPosition;
-  readonly state: unknown;
-}
-
-interface HistoryUpdate {
-  readonly type: 'none' | 'push' | 'replace' | 'popstate';
-  readonly previousIndex: number;
-  readonly nextIndex: number;
-  readonly previousEntry?: HistoryEntry;
-  readonly previousScroll: ScrollPosition;
-  readonly nextEntry?: HistoryEntry;
 }
 
 interface RouteMatch {
@@ -285,10 +266,11 @@ const EMPTY_QUERY: RouteQuery =
 
 const EMPTY_DATA: RouteData =
   Object.freeze({});
-const ZERO_SCROLL: ScrollPosition = Object.freeze({ x: 0, y: 0 });
 
 function splitPath(path: string): string[] {
-  return normalizePath(path).split('/').filter(Boolean);
+  return path
+    .split('/')
+    .filter(Boolean);
 }
 
 function decodeSegment(value: string): string {
@@ -299,13 +281,27 @@ function decodeSegment(value: string): string {
   }
 }
 
-
 function isRenderedRouteNode(value: unknown): value is RenderedRouteNode {
   return value !== null && typeof value === 'object' && 'node' in value;
 }
 
 function normalizeRenderedRouteNode(value: Node | RenderedRouteNode): RenderedRouteNode {
   return isRenderedRouteNode(value) ? value : { node: value };
+}
+
+function readRawQuery(
+  url: URL,
+): RouteQuery {
+  const values:
+    Record<string, string> = {};
+
+  url.searchParams.forEach(
+    (value, key) => {
+      values[key] = value;
+    },
+  );
+
+  return Object.freeze(values);
 }
 
 
@@ -410,12 +406,12 @@ export function createRouter(config: RouterConfig): Router {
   const scrollRestoration = config.scrollRestoration ?? 'preserve';
   const preloading = config.preloading ?? 'none';
   const viewTransitions = config.viewTransitions ?? false;
-
+  const history = new HistoryManager();
   const routePatterns = new WeakMap<Route, RoutePattern>();
 
   let currentState: ActiveRoute | null = null;
   let requestState: NavigationRequest | null = null;
-  let phaseState: NavigationPhase = null;
+  let navigationPhase: NavigationPhase = null;
   let errorState: unknown = null;
 
   let started = false;
@@ -424,9 +420,6 @@ export function createRouter(config: RouterConfig): Router {
   let latestRequestId = 0;
   let activeController: AbortController | null = null;
   let activeRender: ActiveRender | null = null;
-  let startRequestQueued = false;
-  let historyEntries: HistoryEntry[] = [];
-  let historyIndex = -1;
   let preloadTask: Promise<void> | null = null;
   let preloadQueued = false;
   let preloadIdleId: number | null = null;
@@ -468,208 +461,11 @@ export function createRouter(config: RouterConfig): Router {
     return {
       x: window.scrollX,
       y: window.scrollY,
-    };
-  }
-
-  function readHistoryState(): unknown {
-    return window.history.state ?? null;
+    }
   }
 
   function scrollToPosition(position: ScrollPosition): void {
     window.scrollTo(position.x, position.y);
-  }
-
-  function ensureHistoryEntry(): void {
-    if (historyEntries.length > 0) {
-      return;
-    }
-
-    historyEntries = [{
-      href: currentHref(),
-      scroll: readScroll(),
-      state: readHistoryState(),
-    }];
-    historyIndex = 0;
-  }
-
-  function saveCurrentScroll(): ScrollPosition {
-    const scroll = readScroll();
-    if (historyIndex >= 0) {
-      const entry = historyEntries[historyIndex];
-      if (entry) {
-        historyEntries[historyIndex] = {
-          href: entry.href,
-          scroll,
-          state: entry.state,
-        };
-      }
-    }
-    return scroll;
-  }
-
-  function createDefaultHistoryUpdate(): HistoryUpdate {
-    ensureHistoryEntry();
-
-    return {
-      type: 'none',
-      previousIndex: historyIndex,
-      nextIndex: historyIndex,
-      previousScroll: readScroll(),
-      previousEntry:
-        historyEntries[historyIndex],
-    };
-  }
-
-  function createHistoryUpdate(
-    href: string,
-    replace: boolean,
-    state: unknown,
-  ): HistoryUpdate {
-    ensureHistoryEntry();
-    const previousScroll = saveCurrentScroll();
-    const previousIndex = historyIndex;
-    const nextEntry: HistoryEntry = {
-      href,
-      scroll: replace ? previousScroll : ZERO_SCROLL,
-      state: state ?? null,
-    };
-
-    if (replace) {
-      const previousEntry = historyEntries[historyIndex];
-      historyEntries[historyIndex] = nextEntry;
-      return {
-        type: 'replace',
-        previousIndex,
-        nextIndex: historyIndex,
-        previousEntry,
-        previousScroll,
-        nextEntry,
-      };
-    }
-
-    historyEntries = historyEntries.slice(0, historyIndex + 1);
-    historyEntries.push(nextEntry);
-    return {
-      type: 'push',
-      previousIndex,
-      nextIndex: historyIndex + 1,
-      previousScroll,
-      previousEntry: historyEntries[previousIndex],
-      nextEntry,
-    };
-  }
-
-  function findHistoryIndexByHref(href: string): number {
-    if (historyEntries.length === 0) {
-      return -1;
-    }
-
-    const previous = historyEntries[historyIndex - 1];
-    if (previous?.href === href) {
-      return historyIndex - 1;
-    }
-
-    const next = historyEntries[historyIndex + 1];
-    if (next?.href === href) {
-      return historyIndex + 1;
-    }
-
-    let bestIndex = -1;
-    let bestDistance = Number.POSITIVE_INFINITY;
-
-    for (let index = 0; index < historyEntries.length; index++) {
-      if (historyEntries[index]?.href !== href || index === historyIndex) {
-        continue;
-      }
-
-      const distance = Math.abs(index - historyIndex);
-      if (distance < bestDistance) {
-        bestIndex = index;
-        bestDistance = distance;
-      }
-    }
-
-    return bestIndex;
-  }
-
-  function createPopStateHistoryUpdate(href: string): HistoryUpdate {
-    ensureHistoryEntry();
-    const previousScroll = saveCurrentScroll();
-    const previousIndex = historyIndex;
-    const resolvedIndex = findHistoryIndexByHref(href);
-    const nextIndex = resolvedIndex >= 0 ? resolvedIndex : previousIndex;
-    const nextEntry = historyEntries[nextIndex]
-      ? {
-          ...historyEntries[nextIndex]!,
-          href,
-          state: readHistoryState(),
-        }
-      : {
-          href,
-          scroll: ZERO_SCROLL,
-          state: readHistoryState(),
-        };
-
-    return {
-      type: 'popstate',
-      previousIndex,
-      nextIndex,
-      previousScroll,
-      previousEntry: historyEntries[previousIndex],
-      nextEntry,
-    };
-  }
-
-  function rollbackHistoryUpdate(update: HistoryUpdate): void {
-    switch (update.type) {
-      case 'push':
-        historyEntries = historyEntries.slice(0, update.previousIndex + 1);
-        historyIndex = update.previousIndex;
-        return;
-      case 'replace':
-        if (update.previousEntry && update.previousIndex >= 0) {
-          historyEntries[update.previousIndex] = update.previousEntry;
-        }
-        historyIndex = update.previousIndex;
-        return;
-      case 'popstate':
-      case 'none':
-        historyIndex = update.previousIndex;
-        return;
-    }
-  }
-
-  function commitHistoryUpdate(update: HistoryUpdate, href: string): void {
-    switch (update.type) {
-      case 'push':
-      case 'replace':
-        historyIndex = update.nextIndex;
-        historyEntries[historyIndex] = update.nextEntry ?? {
-          href,
-          scroll: update.type === 'replace' ? update.previousScroll : ZERO_SCROLL,
-          state: null,
-        };
-        return;
-      case 'popstate': {
-        historyIndex = update.nextIndex;
-        const existingEntry = historyEntries[historyIndex];
-        historyEntries[historyIndex] = existingEntry
-          ? {
-              href,
-              scroll: existingEntry.scroll,
-              state: update.nextEntry?.state ?? existingEntry.state,
-            }
-          : update.nextEntry ?? {
-              href,
-              scroll: ZERO_SCROLL,
-              state: null,
-            };
-        return;
-      }
-      case 'none':
-        ensureHistoryEntry();
-        return;
-    }
   }
 
   function restoreScroll(update: HistoryUpdate): void {
@@ -678,7 +474,7 @@ export function createRouter(config: RouterConfig): Router {
     }
 
     if (scrollRestoration === 'restore' && update.type === 'popstate') {
-      scrollToPosition(historyEntries[update.nextIndex]?.scroll ?? ZERO_SCROLL);
+      scrollToPosition(update.nextEntry?.scroll ?? ZERO_SCROLL);
       return;
     }
 
@@ -707,24 +503,14 @@ export function createRouter(config: RouterConfig): Router {
   }
 
   function restoreActiveUrl(): void {
-    ensureHistoryEntry();
-
     const active = activeHref();
-    const fallback =
-      historyEntries[historyIndex]
-        ?.href ??
-      historyEntries[0]
-        ?.href ??
-      currentHref();
-
+    const fallback = history.createDefaultUpdate().previousEntry?.href ?? currentHref();
     const href =
       active ?? fallback;
 
     window.history.replaceState(
       currentState?.historyState ??
-        historyEntries[historyIndex]
-          ?.state ??
-        null,
+        history.createDefaultUpdate().previousEntry?.state ?? null,
       '',
       href,
     );
@@ -739,20 +525,12 @@ export function createRouter(config: RouterConfig): Router {
     return { ...route, historyState };
   }
 
-  function updateCurrentHistoryEntry(entry: HistoryEntry): void {
-    if (historyIndex < 0) {
-      return;
-    }
-    historyEntries[historyIndex] = entry;
-  }
-
   function updateHistoryState(state: unknown): void {
     if (disposed) {
       throw new Error('Cannot update history state on a disposed router');
     }
 
-    ensureHistoryEntry();
-    const entry = historyEntries[historyIndex] ?? {
+    const entry = history.createDefaultUpdate().previousEntry ?? {
       href: currentHref(),
       scroll: readScroll(),
       state: null,
@@ -768,7 +546,7 @@ export function createRouter(config: RouterConfig): Router {
       '',
       nextEntry.href,
     );
-    updateCurrentHistoryEntry(nextEntry);
+    history.commitUpdate({ ...history.createDefaultUpdate(), nextEntry }, nextEntry.href);
     dispatchRouterLocationChange();
 
     if (currentState) {
@@ -874,7 +652,7 @@ export function createRouter(config: RouterConfig): Router {
     url: URL,
     redirectCount = 0,
     completion?: NavigationCompletion,
-    historyUpdate: HistoryUpdate = createDefaultHistoryUpdate(),
+    historyUpdate: HistoryUpdate = history.createDefaultUpdate(),
   ): Promise<boolean> {
     return createRequest(
       url,
@@ -888,7 +666,7 @@ export function createRouter(config: RouterConfig): Router {
   function requestExternalNavigation(
     url: URL,
     completion?: NavigationCompletion,
-    historyUpdate: HistoryUpdate = createDefaultHistoryUpdate(),
+    historyUpdate: HistoryUpdate = history.createDefaultUpdate(),
   ): Promise<boolean> {
     return createRequest(
       url,
@@ -903,35 +681,93 @@ export function createRouter(config: RouterConfig): Router {
     config.onStateChange?.(publicState);
   }
 
-  function setPhase(request: NavigationRequest, phase: NavigationPhase): void {
-    if (request.id !== latestRequestId) return;
-    phaseState = phase;
+  function setPhase(
+    request: NavigationRequest,
+    phase: NavigationPhase,
+  ): void {
+    if (request.id !== latestRequestId) {
+      return;
+    }
+
+    navigationPhase = phase;
     notifyStateChange();
   }
 
   function getRoutePattern(route: Route): RoutePattern {
     const cached = routePatterns.get(route);
-    if (cached && cached.path === route.path) return cached;
+    if (cached && cached.path === route.path) {
+      return cached;
+    }
 
     const segments = splitPath(route.path);
     const pattern: RoutePattern = {
       path: route.path,
       segments,
-      parameterNames: segments.map(segment => segment.startsWith(':') ? segment.slice(1) : null),
+      parameterNames: segments.map(segment =>
+        segment.startsWith(':')
+          ? segment.slice(1)
+          : null,
+      ),
     };
+
     routePatterns.set(route, pattern);
     return pattern;
   }
 
-  function shouldPreloadRoute(route: Route): boolean {
-    return route.preload !== false;
+  function matchPattern(
+    pattern: RoutePattern,
+    segments: readonly string[],
+    params: Record<string, string>,
+  ): boolean {
+    for (let index = 0; index < pattern.segments.length; index++) {
+      const expected = pattern.segments[index];
+      const actual = segments[index];
+
+      if (actual === undefined) {
+        return false;
+      }
+
+      const parameterName = pattern.parameterNames[index];
+      if (parameterName) {
+        params[parameterName] = decodeSegment(actual);
+        continue;
+      }
+
+      if (expected !== actual) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
-  async function preloadRoute(route: Route, seen: WeakSet<Route>): Promise<void> {
-    if (seen.has(route) || !shouldPreloadRoute(route)) return;
-    seen.add(route);
-    try { await loadRoute(route); }
-    catch (error) { trace('Route preload failed', route.path, error); }
+  function recognize(path: string): RouteMatch | null {
+    const segments = splitPath(path);
+    let fallback: Route | undefined;
+
+    for (const route of config.routes) {
+      if (route.path === '**' || route.path === '*') {
+        fallback = route;
+        continue;
+      }
+
+      const pattern = getRoutePattern(route);
+      if (pattern.segments.length !== segments.length) {
+        continue;
+      }
+
+      const params: Record<string, string> = {};
+      if (matchPattern(pattern, segments, params)) {
+        return {
+          route,
+          params: Object.freeze(params),
+        };
+      }
+    }
+
+    return fallback
+      ? { route: fallback, params: Object.freeze({}) }
+      : null;
   }
 
   async function runPreloading(): Promise<void> {
@@ -939,9 +775,16 @@ export function createRouter(config: RouterConfig): Router {
       return;
     }
 
-    const seen = new WeakSet<Route>();
     for (const route of config.routes) {
-      await preloadRoute(route, seen);
+      if (route.preload === false) {
+        continue;
+      }
+
+      try {
+        await loadRoute(route);
+      } catch (error) {
+        trace('Route preload failed', route.path, error);
+      }
     }
   }
 
@@ -955,21 +798,16 @@ export function createRouter(config: RouterConfig): Router {
 
   function cancelScheduledPreloading(): void {
     if (preloadIdleId !== null) {
-      const cancelIdle =
-        (window as Window & {
-          cancelIdleCallback?: (
-            id: number,
-          ) => void;
-        }).cancelIdleCallback;
+      const cancelIdle = (window as Window & {
+        cancelIdleCallback?: (id: number) => void;
+      }).cancelIdleCallback;
 
       cancelIdle?.(preloadIdleId);
       preloadIdleId = null;
     }
 
     if (preloadTimeoutId !== null) {
-      window.clearTimeout(
-        preloadTimeoutId,
-      );
+      window.clearTimeout(preloadTimeoutId);
       preloadTimeoutId = null;
     }
 
@@ -1005,24 +843,16 @@ export function createRouter(config: RouterConfig): Router {
       return;
     }
 
-    const requestIdle =
-      (window as Window & {
-        requestIdleCallback?: (
-          callback: () => void,
-        ) => number;
-      }).requestIdleCallback;
+    const requestIdle = (window as Window & {
+      requestIdleCallback?: (callback: () => void) => number;
+    }).requestIdleCallback;
 
     if (typeof requestIdle === 'function') {
-      preloadIdleId =
-        requestIdle(run);
+      preloadIdleId = requestIdle(run);
       return;
     }
 
-    preloadTimeoutId =
-      window.setTimeout(
-        run,
-        0,
-      );
+    preloadTimeoutId = window.setTimeout(run, 0);
   }
 
   async function runCanDeactivateGuards(
@@ -1087,48 +917,6 @@ export function createRouter(config: RouterConfig): Router {
     };
   }
 
-  function recognize(routes: readonly Route[], segments: readonly string[]): RouteMatch | null {
-    let fallback: Route | undefined;
-    for (const route of routes) {
-      if (route.path === '**' || route.path === '*') {
-        fallback = route;
-        continue;
-      }
-      const pattern = getRoutePattern(route);
-      if (pattern.segments.length !== segments.length) continue;
-      const params: Record<string, string> = {};
-      if (matchPattern(pattern, segments, 0, params)) return { route, params };
-    }
-    return fallback ? { route: fallback, params: {} } : null;
-  }
-
-  function matchPattern(
-    pattern: RoutePattern,
-    segments: readonly string[],
-    segmentIndex: number,
-    params: Record<string, string>,
-  ): boolean {
-    for (let i = 0; i < pattern.segments.length; i++) {
-      const expected = pattern.segments[i];
-      const actual = segments[segmentIndex + i];
-
-      if (actual === undefined) {
-        return false;
-      }
-
-      const parameterName = pattern.parameterNames[i];
-      if (parameterName) {
-        params[parameterName] = decodeSegment(actual);
-        continue;
-      }
-
-      if (expected !== actual) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   async function performNavigation(request: NavigationRequest, signal: AbortSignal): Promise<NavigationResult> {
     trace('Navigation started', request.url.href);
     setPhase(request, 'recognizing');
@@ -1138,7 +926,7 @@ export function createRouter(config: RouterConfig): Router {
     }
 
     const path = stripBaseHref(request.url.pathname, baseHref);
-    const match = recognize(config.routes, splitPath(path));
+    const match = recognize(path);
     throwIfAborted(signal);
 
     setPhase(request, 'guarding');
@@ -1155,14 +943,9 @@ export function createRouter(config: RouterConfig): Router {
       return { type: 'not-found', request };
     }
 
-    const staticData = {
-      ...(match.route.data ?? {}),
-    };
-
     const historyState =
       request.historyUpdate
-        .nextEntry?.state ??
-      readHistoryState();
+        .nextEntry?.state ?? null;
 
     if (match.route.redirectTo) {
       return {
@@ -1208,9 +991,9 @@ export function createRouter(config: RouterConfig): Router {
             signal,
           )
         : Promise.resolve(
-            Object.freeze(
-              Object.fromEntries(request.url.searchParams),
-            ) as RouteQuery,
+            readRawQuery(
+              request.url,
+            ),
           ),
     ]);
 
@@ -1229,9 +1012,7 @@ export function createRouter(config: RouterConfig): Router {
           ...parsedQuery,
         }),
       data:
-        Object.freeze({
-          ...staticData,
-        }),
+        Object.freeze(match.route.data ?? {}),
       historyState,
       config:
         match.route,
@@ -1320,11 +1101,10 @@ export function createRouter(config: RouterConfig): Router {
     const activatedRoute:
       ActiveRoute = {
       ...baseRoute,
-      data:
-        Object.freeze({
-          ...staticData,
-          ...resolvedData,
-        }),
+      data: Object.freeze({
+        ...baseRoute.data,
+        ...resolvedData,
+      }),
     };
 
     setPhase(request, 'loading');
@@ -1337,7 +1117,7 @@ export function createRouter(config: RouterConfig): Router {
 
     try {
       const result = await performNavigation(request, signal);
-      if (result.request.id !== latestRequestId) {
+      if (disposed || result.request.id !== latestRequestId) {
         if (result.type === 'success') {
           result.rendered.dispose();
         }
@@ -1356,54 +1136,147 @@ export function createRouter(config: RouterConfig): Router {
     }
   }
 
-  async function runExternalNavigation(request: NavigationRequest, signal: AbortSignal): Promise<void> {
-    if (disposed) return;
+  async function runExternalNavigation(
+    request: NavigationRequest,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (disposed) {
+      settleRequest(request, false);
+      return;
+    }
 
     try {
       setPhase(request, 'guarding');
-      const deactivationResult = await runCanDeactivateGuards(request.url, signal);
-      if (request.id !== latestRequestId) return;
 
-      const redirect = deactivationResult ? readRedirect(deactivationResult) : null;
-      if (redirect) {
-        const url = resolveAppUrl(redirect.redirectTo, 'href');
-        if (url.origin !== window.location.origin) {
-          requestState = null;
-          phaseState = null;
-          errorState = null;
-          settleRequest(request, true);
-          notifyStateChange();
-          navigateExternal(url);
-          return;
-        }
+      const deactivationResult =
+        await runCanDeactivateGuards(
+          request.url,
+          signal,
+        );
 
-        const href = url.pathname + url.search + url.hash;
-        const historyState = window.history.state;
-        const historyUpdate = createHistoryUpdate(href, redirect.replace, historyState);
-        window.history[redirect.replace ? 'replaceState' : 'pushState'](historyState, '', href);
-        dispatchRouterLocationChange();
-        void requestNavigation(url, 0, request.completion, historyUpdate);
+      throwIfAborted(signal);
+
+      if (request.id !== latestRequestId) {
         return;
       }
 
-      if (deactivationResult === false) {
-        commit({ type: 'blocked', request });
+      const redirect =
+        deactivationResult
+          ? readRedirect(
+              deactivationResult,
+            )
+          : null;
+
+      if (redirect) {
+        const redirectUrl =
+          resolveAppUrl(
+            redirect.redirectTo,
+            'href',
+          );
+
+        if (
+          redirectUrl.origin !==
+          window.location.origin
+        ) {
+          requestState = null;
+          navigationPhase = null;
+          errorState = null;
+          settleRequest(
+            request,
+            true,
+          );
+          notifyStateChange();
+          navigateExternal(
+            redirectUrl,
+          );
+          return;
+        }
+
+        const href =
+          redirectUrl.pathname +
+          redirectUrl.search +
+          redirectUrl.hash;
+
+        const historyState =
+          window.history.state;
+
+        const historyUpdate =
+          history.createUpdate(
+            href,
+            redirect.replace,
+            historyState,
+          );
+
+        window.history[
+          redirect.replace
+            ? 'replaceState'
+            : 'pushState'
+        ](
+          historyState,
+          '',
+          href,
+        );
+
+        dispatchRouterLocationChange();
+
+        void requestNavigation(
+          redirectUrl,
+          0,
+          request.completion,
+          historyUpdate,
+        );
+
+        return;
+      }
+
+      if (
+        deactivationResult === false
+      ) {
+        commit({
+          type: 'blocked',
+          request,
+        });
         return;
       }
 
       requestState = null;
-      phaseState = null;
+      navigationPhase = null;
       errorState = null;
-      settleRequest(request, true);
+
+      settleRequest(
+        request,
+        true,
+      );
+
       notifyStateChange();
-      navigateExternal(request.url);
+      navigateExternal(
+        request.url,
+      );
     } catch (error) {
-      if (signal.aborted || isAbortError(error)) return;
-      const failure: NavigationFailure = { type: 'error', request, error };
-      if (failure.request.id !== latestRequestId) return;
-      commit(failure);
+      if (
+        signal.aborted ||
+        isAbortError(error)
+      ) {
+        return;
+      }
+
+      if (
+        request.id !==
+        latestRequestId
+      ) {
+        return;
+      }
+
+      commit({
+        type: 'error',
+        request,
+        error,
+      });
     } finally {
-      if (activeController?.signal === signal) {
+      if (
+        activeController?.signal ===
+        signal
+      ) {
         activeController = null;
       }
     }
@@ -1428,13 +1301,13 @@ export function createRouter(config: RouterConfig): Router {
             notifyOutletActivate(outlet, result.component);
           }
         });
-        commitHistoryUpdate(
+        history.commitUpdate(
           result.request.historyUpdate,
           result.request.url.pathname + result.request.url.search + result.request.url.hash,
         );
         currentState = result.route;
         requestState = null;
-        phaseState = null;
+        navigationPhase = null;
         errorState = null;
         window.dispatchEvent(new CustomEvent('routechange', { detail: result.route }));
         trace('Navigation completed', result.route.path);
@@ -1454,7 +1327,10 @@ export function createRouter(config: RouterConfig): Router {
         }
 
         const url = resolveAppUrl(result.redirectTo, 'href');
-        if (url.origin !== window.location.origin) {
+        if (
+          url.origin !==
+          window.location.origin
+        ) {
           void requestExternalNavigation(
             url,
             result.request.completion,
@@ -1465,7 +1341,7 @@ export function createRouter(config: RouterConfig): Router {
 
         const href = url.pathname + url.search + url.hash;
         const historyState = window.history.state;
-        const historyUpdate = createHistoryUpdate(href, result.replace, historyState);
+        const historyUpdate = history.createUpdate(href, result.replace, historyState);
         window.history[result.replace ? 'replaceState' : 'pushState'](historyState, '', href);
         dispatchRouterLocationChange();
         void requestNavigation(
@@ -1478,9 +1354,9 @@ export function createRouter(config: RouterConfig): Router {
       }
       case 'blocked': {
         restoreActiveUrl();
-        rollbackHistoryUpdate(result.request.historyUpdate);
+        history.rollbackUpdate(result.request.historyUpdate);
         requestState = null;
-        phaseState = null;
+        navigationPhase = null;
         errorState = null;
         trace('Navigation blocked');
         restorePreviousScroll(result.request.historyUpdate);
@@ -1500,13 +1376,13 @@ export function createRouter(config: RouterConfig): Router {
           if (outlet) renderNotFound(outlet, result.request.url, publicRouter);
           replaceActiveRender(null);
         });
-        commitHistoryUpdate(
+        history.commitUpdate(
           result.request.historyUpdate,
           result.request.url.pathname + result.request.url.search + result.request.url.hash,
         );
         currentState = null;
         requestState = null;
-        phaseState = null;
+        navigationPhase = null;
         errorState = null;
         trace('Route not found', result.request.url.pathname);
         restoreScroll(result.request.historyUpdate);
@@ -1528,10 +1404,10 @@ export function createRouter(config: RouterConfig): Router {
           if (outlet) renderError(outlet, result.error, publicRouter);
           replaceActiveRender(null);
         });
-        rollbackHistoryUpdate(result.request.historyUpdate);
+        history.rollbackUpdate(result.request.historyUpdate);
         currentState = null;
         requestState = null;
-        phaseState = null;
+        navigationPhase = null;
         errorState = result.error;
         trace('Navigation failed', result.error);
         restorePreviousScroll(result.request.historyUpdate);
@@ -1547,7 +1423,7 @@ export function createRouter(config: RouterConfig): Router {
       new URL(window.location.href),
       0,
       undefined,
-      createPopStateHistoryUpdate(currentHref()),
+      history.createPopStateUpdate(currentHref()),
     );
   }
 
@@ -1582,8 +1458,15 @@ export function createRouter(config: RouterConfig): Router {
     if (disposed) throw new Error('Cannot navigate with a disposed router');
     const url = resolveAppUrl(target, 'navigate');
 
-    if (url.origin !== window.location.origin) {
-      return requestExternalNavigation(url, undefined, createDefaultHistoryUpdate());
+    if (
+      url.origin !==
+      window.location.origin
+    ) {
+      return requestExternalNavigation(
+        url,
+        undefined,
+        history.createDefaultUpdate(),
+      );
     }
 
     if (!isInsideBase(url.pathname)) {
@@ -1596,7 +1479,7 @@ export function createRouter(config: RouterConfig): Router {
 
     const href = url.pathname + url.search + url.hash;
     const historyState = options.state ?? null;
-    const historyUpdate = createHistoryUpdate(href, options.replace ?? false, historyState);
+    const historyUpdate = history.createUpdate(href, options.replace ?? false, historyState);
     window.history[options.replace ? 'replaceState' : 'pushState'](historyState, '', href);
     dispatchRouterLocationChange();
     return requestNavigation(url, 0, undefined, historyUpdate);
@@ -1609,25 +1492,16 @@ export function createRouter(config: RouterConfig): Router {
   function startRouter(): void {
     if (disposed) throw new Error('Cannot start a disposed router');
     if (started) return;
-
-    ensureHistoryEntry();
     started = true;
     window.addEventListener('popstate', handlePopState);
     document.addEventListener('click', handleClick);
     schedulePreloading();
-
-    if (startRequestQueued) return;
-    startRequestQueued = true;
-    queueMicrotask(() => {
-      startRequestQueued = false;
-      if (!started || disposed || currentState !== null || requestState !== null) return;
-      requestNavigation(
-        new URL(window.location.href),
-        0,
-        undefined,
-        createDefaultHistoryUpdate(),
-      );
-    });
+    requestNavigation(
+      new URL(window.location.href),
+      0,
+      undefined,
+      history.createDefaultUpdate(),
+    );
   }
 
   function stopRouter(): void {
@@ -1645,7 +1519,7 @@ export function createRouter(config: RouterConfig): Router {
     clearOutlet();
     started = false;
     requestState = null;
-    phaseState = null;
+    navigationPhase = null;
     errorState = null;
     currentState = null;
     notifyStateChange();
@@ -1677,7 +1551,7 @@ export function createRouter(config: RouterConfig): Router {
     },
     get phase() {
       if (disposed) return null;
-      return phaseState;
+      return navigationPhase;
     },
     get error() {
       if (disposed) return null;
@@ -1701,7 +1575,7 @@ export function createRouter(config: RouterConfig): Router {
     },
     get historyState() {
       if (disposed) return null;
-      return currentState?.historyState ?? readHistoryState();
+      return currentState?.historyState ?? history.createDefaultUpdate().previousEntry?.state ?? null;
     },
     get routeConfig() {
       if (disposed) return null;

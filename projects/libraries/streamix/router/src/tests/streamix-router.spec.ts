@@ -19,16 +19,21 @@ class HomeComponent {}
 @Component({
   standalone: true,
   template: '<h2>Parent</h2><div data-router-outlet></div>',
+  host: { 'parent-cmp': '' },
 })
 class ParentComponent {}
 
 @Component({
   standalone: true,
   template: '<h2>Shell</h2><div data-router-outlet></div>',
+  host: { 'shell-cmp': '' },
 })
 class ShellComponent {}
 
-@Component({ standalone: true, template: '<h3>Child</h3>' })
+@Component({
+  standalone: true, template: '<h3>Child</h3>',
+  host: { 'child-cmp': '' }
+})
 class ChildComponent {}
 
 @Component({
@@ -48,11 +53,8 @@ describe('StreamixRouter: flat routes and layouts', () => {
     });
 
     outlet = document.createElement('div');
-    outlet.setAttribute('data-router-outlet', '');
-    document.body.appendChild(outlet);
-
     router = TestBed.inject(StreamixRouter);
-    router.connect(outlet);
+    router.connect('', outlet);
   }
 
   function getOutletContent(): string {

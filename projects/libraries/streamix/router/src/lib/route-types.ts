@@ -46,6 +46,7 @@ export interface StreamixRoute<
   readonly path: TPath;
   readonly name?: TName;
   readonly redirectTo?: string;
+  readonly outlet?: string;
   readonly preload?: boolean;
   readonly component?: Type<unknown>;
   readonly viewTransition?: boolean;

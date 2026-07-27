@@ -477,6 +477,7 @@ function adaptRoutes(
         path,
         redirectTo,
         data: route.data,
+        outlet: route.outlet,
         preload:
           route.preload,
         viewTransition:
@@ -622,7 +623,7 @@ export class StreamixRouter<
   private readonly registry: ReturnType<typeof createRouteRegistry>;
   private engine: Router | null = null;
   private currentState: RouterState = EMPTY_ROUTER_STATE;
-  private outlet: HTMLElement | null = null;
+  private readonly outlets = new Map<string, HTMLElement>();
 
   public readonly navigateTo: TypedNavigate<TRoutes>;
   public readonly hrefTo: TypedHref<TRoutes>;
@@ -673,18 +674,19 @@ export class StreamixRouter<
   }
 
   connect(
+    name: string,
     outlet: HTMLElement,
   ): void {
-    if (
-      this.outlet === outlet
-    ) {
-      return;
+    if (this.outlets.has(name)) {
+      // Potentially a HMR-related re-mount of the same-named outlet.
+      // Disconnect the old one before connecting the new.
+      this.disconnect(name, this.outlets.get(name)!);
     }
 
-    if (this.outlet) {
-      throw new Error(
-        'StreamixRouter is already connected to another root outlet.',
-      );
+    this.outlets.set(name, outlet);
+
+    if (this.engine) {
+      return;
     }
 
     const engine =
@@ -695,8 +697,7 @@ export class StreamixRouter<
             this.appRef,
             this.injector,
           ),
-
-        outlet,
+        render: (outlet, node) => outlet.replaceChildren(node),
         baseHref:
           this.baseHref,
 
@@ -752,7 +753,6 @@ export class StreamixRouter<
       throw error;
     }
 
-    this.outlet = outlet;
     this.engine = engine;
 
     this.currentState =
@@ -762,11 +762,14 @@ export class StreamixRouter<
   }
 
   disconnect(
+    name: string,
     outlet: HTMLElement,
   ): void {
-    if (
-      this.outlet === outlet
-    ) {
+    if (this.outlets.get(name) === outlet) {
+      this.outlets.delete(name);
+    }
+
+    if (this.outlets.size === 0) {
       this.dispose();
     }
   }
@@ -852,7 +855,7 @@ export class StreamixRouter<
       this.engine;
 
     this.engine = null;
-    this.outlet = null;
+    this.outlets.clear();
 
     engine?.dispose();
 

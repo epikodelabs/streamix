@@ -50,11 +50,6 @@ interface RenderedLayer {
     EnvironmentInjector;
 }
 
-function findNestedOutlet(
-  node: Node,
-): HTMLElement | null {
-  return findOutlet(node, '');
-}
 
 function createScopedInjector(
   providers:
@@ -305,16 +300,14 @@ export function composeAngularRouteView(
           ];
 
         if (parent) {
-          const outlet =
-            findNestedOutlet(
-              parent.rendered.node,
-            );
+          const outletName = route.config.outlet ?? '';
+          const outlet = findOutlet(parent.rendered.node, outletName);
 
           if (!outlet) {
             throw new Error(
               `Cannot render "${view.label}": ` +
-              'the parent layout has no primary (unnamed) router outlet. ' +
-              'Named outlets are allowed but the hierarchical child needs a primary one.',
+              `the parent layout has no router outlet` +
+              (outletName ? ` named "${outletName}"` : ` (primary)`),
             );
           }
 
