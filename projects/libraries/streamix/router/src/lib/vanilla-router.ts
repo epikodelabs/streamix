@@ -253,6 +253,7 @@ interface NavigationFailure {
   type: 'error';
   request: NavigationRequest;
   error: unknown;
+  preserveActive?: boolean;
 }
 
 type NavigationResult =
@@ -261,6 +262,21 @@ type NavigationResult =
   | NavigationBlocked
   | NavigationNotFound
   | NavigationFailure;
+
+class RoutePreparationError extends Error {
+  constructor(
+    readonly originalError: unknown,
+    readonly preserveActive: boolean,
+  ) {
+    super(
+      originalError instanceof Error
+        ? originalError.message
+        : String(originalError),
+      { cause: originalError },
+    );
+    this.name = 'RoutePreparationError';
+  }
+}
 
 interface ActiveRoute extends ActivatedRoute {
 }
@@ -361,17 +377,8 @@ function readRedirect(result: GuardResult): { redirectTo: string; replace: boole
   return null;
 }
 
-
-function defaultRenderNotFound(outlet: HTMLElement): void {
-  const heading = document.createElement('h1');
-  heading.textContent = '404 \u2014 Page Not Found';
-  outlet.replaceChildren(heading);
-}
-
-function defaultRenderError(outlet: HTMLElement): void {
-  const heading = document.createElement('h1');
-  heading.textContent = 'Page failed to load';
-  outlet.replaceChildren(heading);
+function defaultRender(outlet: HTMLElement, node: Node): void {
+  outlet.replaceChildren(node);
 }
 
 
@@ -515,6 +522,31 @@ export function createRouter(config: RouterConfig): Router {
 
   function resolveOutlet(): HTMLElement | null {
     return config.outlet ?? document.getElementById('app');
+  }
+
+  function createStatusRoute(url: URL): ActivatedRoute {
+    return currentState ?? {
+      url,
+      path: stripBaseHref(url.pathname, baseHref),
+      params: EMPTY_PARAMS,
+      query: readRawQuery(url),
+      data: EMPTY_DATA,
+      historyState: window.history.state,
+      config: config.routes[0] ?? { path: '**' },
+    };
+  }
+
+  function renderPrimaryNode(node: Node, route: ActivatedRoute): HTMLElement | null {
+    if (render) {
+      render('', node, route);
+      return node.parentElement ?? resolveOutlet();
+    }
+
+    const outlet = resolveOutlet();
+    if (outlet) {
+      defaultRender(outlet, node);
+    }
+    return outlet;
   }
 
   function disposeRender(renderInstance: ActiveRender | null): void {
@@ -1082,7 +1114,15 @@ export function createRouter(config: RouterConfig): Router {
       };
     }
 
-    const loadedRoutes = await Promise.all(routes.map(loadRoute));
+    let loadedRoutes: LoadedRoute[];
+    try {
+      loadedRoutes = await Promise.all(routes.map(loadRoute));
+    } catch (error) {
+      throw new RoutePreparationError(
+        error,
+        currentState !== null && routes.length > 1,
+      );
+    }
     throwIfAborted(signal);
 
     for (let index = 1; index < loadedRoutes.length; index++) {
@@ -1187,7 +1227,11 @@ export function createRouter(config: RouterConfig): Router {
           prepared[index].rendered.dispose();
         } catch {}
       }
-      throw error;
+
+      throw new RoutePreparationError(
+        error,
+        currentState !== null && routes.length > 1,
+      );
     }
 
     return {
@@ -1214,7 +1258,16 @@ export function createRouter(config: RouterConfig): Router {
       commit(result);
     } catch (error) {
       if (signal.aborted || isAbortError(error)) return;
-      const failure: NavigationFailure = { type: 'error', request, error };
+      const preparationError =
+        error instanceof RoutePreparationError
+          ? error
+          : null;
+      const failure: NavigationFailure = {
+        type: 'error',
+        request,
+        error: preparationError?.originalError ?? error,
+        preserveActive: preparationError?.preserveActive ?? false,
+      };
       if (failure.request.id !== latestRequestId) return;
       commit(failure);
     } finally {
@@ -1384,14 +1437,32 @@ export function createRouter(config: RouterConfig): Router {
         }, () => {
           const nextNames = new Set(result.outlets.map(outlet => outlet.name));
 
-          // All nodes are prepared before this mutation phase. A custom commit
-          // should apply the complete group synchronously or throw.
+          // A custom group commit remains atomic: old renders stay active until
+          // the complete group has committed successfully. The built-in/per-outlet
+          // renderer disposes old views first so their disposal hooks still observe
+          // the view attached to its outlet.
+          if (!commitOutlets) {
+            for (const renderInstance of activeRenders.values()) {
+              disposeRender(renderInstance);
+            }
+            activeRenders.clear();
+            activeRouteStates.clear();
+          }
+
           try {
             if (commitOutlets) {
               commitOutlets(result.outlets);
             } else {
               for (const outlet of result.outlets) {
-                render?.(outlet.name, outlet.node, outlet.route);
+                if (outlet.name === '') {
+                  renderPrimaryNode(outlet.node, outlet.route);
+                } else if (render) {
+                  render(outlet.name, outlet.node, outlet.route);
+                } else {
+                  throw new Error(
+                    `No renderer is configured for outlet "${outlet.name}"`,
+                  );
+                }
               }
             }
           } catch (error) {
@@ -1401,21 +1472,27 @@ export function createRouter(config: RouterConfig): Router {
             throw error;
           }
 
-          for (const [name] of activeRenders.entries()) {
-            if (!nextNames.has(name)) {
-              replaceActiveRender(name, null);
-              activeRouteStates.delete(name);
+          if (commitOutlets) {
+            for (const [name] of activeRenders.entries()) {
+              if (!nextNames.has(name)) {
+                replaceActiveRender(name, null);
+                activeRouteStates.delete(name);
+              }
             }
           }
 
           for (const outlet of result.outlets) {
-            replaceActiveRender(outlet.name, outlet.rendered);
+            if (commitOutlets) {
+              replaceActiveRender(outlet.name, outlet.rendered);
+            } else {
+              activeRenders.set(outlet.name, outlet.rendered);
+            }
             activeRouteStates.set(outlet.name, outlet.route);
 
             // The router only knows the concrete DOM target for its default
             // primary outlet. Custom named-outlet renderers own activation hooks.
             if (!commitOutlets && outlet.name === '') {
-              const target = resolveOutlet();
+              const target = outlet.node.parentElement ?? resolveOutlet();
               if (target) {
                 notifyOutletActivate(target, outlet.component);
               }
@@ -1496,14 +1573,15 @@ export function createRouter(config: RouterConfig): Router {
           if (renderNotFound) {
             renderNotFound('', result.request.url, publicRouter);
           } else {
-            const outlet = resolveOutlet();
-            if (outlet) {
-              defaultRenderNotFound(outlet);
-            }
+            const heading = document.createElement('h1');
+            heading.textContent = '404 — Page Not Found';
+            renderPrimaryNode(
+              heading,
+              createStatusRoute(result.request.url),
+            );
           }
 
           disposeAllRenders();
-          activeRouteStates.clear();
         });
         history.commitUpdate(
           result.request.historyUpdate,
@@ -1521,31 +1599,35 @@ export function createRouter(config: RouterConfig): Router {
       }
       case 'error': {
         restoreActiveUrl();
-        runWithViewTransition({
-          url: result.request.url,
-          from: currentState,
-          to: null,
-          phase: 'error',
-          routeConfig: null,
-          error: result.error,
-        }, () => {
-          // Preserve the active route on failed subsequent navigation. Error
-          // rendering is only used when there is no successfully committed view.
-          if (!currentState) {
+
+        if (!result.preserveActive) {
+          runWithViewTransition({
+            url: result.request.url,
+            from: currentState,
+            to: null,
+            phase: 'error',
+            routeConfig: null,
+            error: result.error,
+          }, () => {
             if (renderError) {
               renderError('', result.error, publicRouter);
             } else {
-              const outlet = resolveOutlet();
-              if (outlet) {
-                defaultRenderError(outlet);
-              }
+              const heading = document.createElement('h1');
+              heading.textContent = 'Page failed to load';
+              renderPrimaryNode(
+                heading,
+                createStatusRoute(result.request.url),
+              );
             }
 
             disposeAllRenders();
-            activeRouteStates.clear();
-          }
-        });
+          });
+        }
+
         history.rollbackUpdate(result.request.historyUpdate);
+        if (!result.preserveActive) {
+          currentState = null;
+        }
         requestState = null;
         navigationPhase = null;
         errorState = result.error;
