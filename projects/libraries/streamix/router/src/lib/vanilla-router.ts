@@ -185,8 +185,8 @@ export interface RouterConfig {
   navigateExternal?: (url: URL) => void;
   onOutletActivate?: (outlet: HTMLElement, component: unknown) => void;
   render?: (outletName: string, node: Node, route: ActivatedRoute) => void;
-  renderNotFound?: (outlet: HTMLElement, url: URL, router: Router) => void;
-  renderError?: (outlet: HTMLElement, error: unknown, router: Router) => void;
+  renderNotFound?: (outletName: string, url: URL, router: Router) => void;
+  renderError?: (outletName: string, error: unknown, router: Router) => void;
   onStateChange?: (state: RouterState) => void;
 }
 
@@ -356,16 +356,16 @@ function defaultRender(outlet: HTMLElement, node: Node): void {
   outlet?.replaceChildren(node);
 }
 
-function defaultRenderNotFound(outlet: HTMLElement): void {
+function defaultRenderNotFound(outletName: string, outlet: HTMLElement | null): void {
   const heading = document.createElement('h1');
   heading.textContent = '404 \u2014 Page Not Found';
-  outlet.replaceChildren(heading);
+  outlet?.replaceChildren(heading);
 }
 
-function defaultRenderError(outlet: HTMLElement): void {
+function defaultRenderError(outletName: string, outlet: HTMLElement | null): void {
   const heading = document.createElement('h1');
   heading.textContent = 'Page failed to load';
-  outlet.replaceChildren(heading);
+  outlet?.replaceChildren(heading);
 }
 
 const routeLoads = new WeakMap<Route, Promise<LoadedRoute>>();
@@ -422,7 +422,7 @@ export function createRouter(config: RouterConfig): Router {
   let navigationId = 0;
   let latestRequestId = 0;
   let activeController: AbortController | null = null;
-  const activeRenders = new Map<string, ActiveRender>();
+  let activeRender: ActiveRender | null = null;
   let startRequestQueued = false;
   let preloadTask: Promise<void> | null = null;
   let preloadQueued = false;
@@ -451,54 +451,29 @@ export function createRouter(config: RouterConfig): Router {
     }
   });
 
-  renderNotFound =
-    config.renderNotFound ??
-    ((outlet) => {
-      defaultRenderNotFound(
-        outlet,
-      );
-    });
+  renderNotFound = config.renderNotFound ?? ((outletName) => {
+    const outlet = resolveOutlet();
+    if (outlet) {
+      defaultRenderNotFound(outletName, outlet);
+    }
+  });
 
-  renderError =
-    config.renderError ??
-    ((outlet) => {
-      defaultRenderError(
-        outlet,
-      );
-    });
+  renderError = config.renderError ?? ((outletName) => {
+    const outlet = resolveOutlet();
+    if (outlet) {
+      defaultRenderError(outletName, outlet);
+    }
+  });
 
   function disposeRender(renderInstance: ActiveRender | null): void {
     if (!renderInstance) return;
     renderInstance.dispose();
   }
 
-  function replaceActiveRender(
-    outletName: string,
-    renderInstance: ActiveRender | null,
-  ): void {
-    const previousRender =
-      activeRenders.get(outletName) ?? null;
-
-    if (renderInstance) {
-      activeRenders.set(
-        outletName,
-        renderInstance,
-      );
-    } else {
-      activeRenders.delete(
-        outletName,
-      );
-    }
-
+  function replaceActiveRender(renderInstance: ActiveRender | null): void {
+    const previousRender = activeRender;
+    activeRender = renderInstance;
     disposeRender(previousRender);
-  }
-
-  function disposeAllRenders(): void {
-    for (const renderInstance of activeRenders.values()) {
-      disposeRender(renderInstance);
-    }
-
-    activeRenders.clear();
   }
 
   function clearOutlet(): void {
@@ -1347,13 +1322,8 @@ export function createRouter(config: RouterConfig): Router {
           phase: 'success',
           routeConfig: result.route.config,
         }, () => {
-          const outletName =
-            result.route.config.outlet ?? '';
-
-          replaceActiveRender(
-            outletName,
-            result.rendered,
-          );
+          replaceActiveRender(result.rendered);
+          const outletName = result.route.config.outlet ?? '';
           const outlet = resolveOutlet();
 
           render(
@@ -1440,18 +1410,12 @@ export function createRouter(config: RouterConfig): Router {
           phase: 'not-found',
           routeConfig: null,
         }, () => {
-          const outlet =
-            resolveOutlet();
-
-          if (outlet) {
-            renderNotFound(
-              outlet,
-              result.request.url,
-              publicRouter,
-            );
-          }
-
-          replaceActiveRender('', null);
+          renderNotFound(
+            '',
+            result.request.url,
+            publicRouter,
+          );
+          replaceActiveRender(null);
         });
         history.commitUpdate(
           result.request.historyUpdate,
@@ -1477,18 +1441,12 @@ export function createRouter(config: RouterConfig): Router {
           routeConfig: null,
           error: result.error,
         }, () => {
-          const outlet =
-            resolveOutlet();
-
-          if (outlet) {
-            renderError(
-              outlet,
-              result.error,
-              publicRouter,
-            );
-          }
-
-          replaceActiveRender('', null);
+          renderError(
+            '',
+            result.error,
+            publicRouter,
+          );
+          replaceActiveRender(null);
         });
         history.rollbackUpdate(result.request.historyUpdate);
         currentState = null;
@@ -1638,7 +1596,7 @@ export function createRouter(config: RouterConfig): Router {
     window.removeEventListener('popstate', handlePopState);
     document.removeEventListener('click', handleClick);
     cancelActiveNavigation();
-    disposeAllRenders();
+    replaceActiveRender(null);
     clearOutlet();
     started = false;
     startRequestQueued = false;

@@ -807,6 +807,56 @@ export class StreamixRouter<
           );
         },
 
+        renderNotFound: (
+          targetName,
+        ) => {
+          const target =
+            this.outlets.get(
+              targetName,
+            );
+
+          if (!target) {
+            return;
+          }
+
+          const heading =
+            document.createElement(
+              'h1',
+            );
+
+          heading.textContent =
+            '404 — Page Not Found';
+
+          target.replaceChildren(
+            heading,
+          );
+        },
+
+        renderError: (
+          targetName,
+        ) => {
+          const target =
+            this.outlets.get(
+              targetName,
+            );
+
+          if (!target) {
+            return;
+          }
+
+          const heading =
+            document.createElement(
+              'h1',
+            );
+
+          heading.textContent =
+            'Page failed to load';
+
+          target.replaceChildren(
+            heading,
+          );
+        },
+
         onStateChange:
           state => {
             this.currentState =
