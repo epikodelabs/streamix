@@ -54,7 +54,7 @@ describe('StreamixRouter: flat routes and layouts', () => {
 
     outlet = document.createElement('div');
     router = TestBed.inject(StreamixRouter);
-    router.connect(outlet);
+    router.connect('', outlet);
   }
 
   function getOutletContent(): string {
@@ -218,5 +218,28 @@ describe('StreamixRouter: flat routes and layouts', () => {
     expect(content).toContain('<h2>Parent</h2>');
     expect(content).toContain('<h3>Settings</h3>');
     expect(content).not.toContain('<h3>Child</h3>');
+  });
+
+  it('supports named outlets', async () => {
+    const routes = [
+      route('/sidebar', SettingsComponent, { outlet: 'sidebar' }),
+      route('/', HomeComponent),
+    ] as const satisfies StreamixRoutes;
+
+    const sidebarOutlet = document.createElement('div');
+    sidebarOutlet.id = 'sidebar-outlet';
+
+    bootstrap(routes);
+    router.connect('sidebar', sidebarOutlet);
+
+    await navigate('/');
+    expect(getOutletContent()).toContain('<h1>Home</h1>');
+    expect(sidebarOutlet.innerHTML).toBe('');
+
+    await navigate('/sidebar');
+    expect(getOutletContent()).toContain('<h1>Home</h1>');
+    expect(sidebarOutlet.innerHTML).toContain('<h3>Settings</h3>');
+
+    router.disconnect('sidebar', sidebarOutlet);
   });
 });

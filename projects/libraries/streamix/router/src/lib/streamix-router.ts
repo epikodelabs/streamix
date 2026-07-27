@@ -6,10 +6,11 @@ import {
   ApplicationRef,
   DestroyRef,
   EnvironmentInjector,
+  Injectable,
   InjectionToken,
-  type Provider,
   inject,
   runInInjectionContext,
+  type Provider,
   type Type,
 } from '@angular/core';
 
@@ -474,6 +475,7 @@ function adaptRoutes(
         path,
         redirectTo,
         data: route.data,
+        outlet: route.outlet,
         preload:
           route.preload,
         viewTransition:
@@ -619,7 +621,7 @@ export class StreamixRouter<
   private readonly registry: ReturnType<typeof createRouteRegistry>;
   private engine: Router | null = null;
   private currentState: RouterState = EMPTY_ROUTER_STATE;
-  private outlet: HTMLElement | null = null;
+  private outlets = new Map<string, HTMLElement>();
 
   public readonly navigateTo: TypedNavigate<TRoutes>;
   public readonly hrefTo: TypedHref<TRoutes>;
@@ -669,19 +671,15 @@ export class StreamixRouter<
       : '';
   }
 
-  connect(
-    outlet: HTMLElement,
-  ): void {
-    if (
-      this.outlet === outlet
-    ) {
-      return;
+  connect(name: string, outlet: HTMLElement): void {
+    if (this.outlets.has(name)) {
+      this.disconnect(name, this.outlets.get(name)!);
     }
 
-    if (this.outlet) {
-      throw new Error(
-        'StreamixRouter is already connected to another root outlet.',
-      );
+    this.outlets.set(name, outlet);
+
+    if (this.engine) {
+      return;
     }
 
     const engine =
@@ -692,8 +690,9 @@ export class StreamixRouter<
             this.appRef,
             this.injector,
           ),
-
-        outlet,
+        render: (outletName, node) => {
+          this.outlets.get(outletName)?.replaceChildren(node);
+        },
         baseHref:
           this.baseHref,
 
@@ -749,7 +748,6 @@ export class StreamixRouter<
       throw error;
     }
 
-    this.outlet = outlet;
     this.engine = engine;
 
     this.currentState =
@@ -758,12 +756,12 @@ export class StreamixRouter<
       );
   }
 
-  disconnect(
-    outlet: HTMLElement,
-  ): void {
-    if (
-      this.outlet === outlet
-    ) {
+  disconnect(name: string, outlet: HTMLElement): void {
+    if (this.outlets.get(name) === outlet) {
+      this.outlets.delete(name);
+    }
+
+    if (this.outlets.size === 0) {
       this.dispose();
     }
   }
@@ -849,7 +847,7 @@ export class StreamixRouter<
       this.engine;
 
     this.engine = null;
-    this.outlet = null;
+    this.outlets.clear();
 
     engine?.dispose();
 
@@ -996,38 +994,24 @@ export class StreamixRouter<
   }
 }
 
+@Injectable()
+class StreamixRouterImpl extends StreamixRouter<any> {
+  constructor() {
+    const config = inject(ROUTER_CONFIGURATION);
+    super(config);
+  }
+}
 
-export function provideStreamixRouter<
-  const TRoutes extends
-    StreamixRoutes,
->(
+
+export function provideStreamixRouter<const TRoutes extends StreamixRoutes>(
   routes: TRoutes,
-  options:
-    StreamixRouterOptions = {},
-): Provider[] {  
-  const config: RouterConfiguration<TRoutes> = {
-    ...options,
-    routes,
-  };
-
+  options: StreamixRouterOptions = {},
+): Provider[] {
+  const config: RouterConfiguration<TRoutes> = { ...options, routes };
   return [
-    {
-      provide: ROUTER_CONFIGURATION,
-      useValue: config,
-    },
-    {
-      provide: StreamixRouter,
-      useFactory: (
-        configuration:
-          RouterConfiguration<TRoutes>,
-      ) =>
-        new StreamixRouter<TRoutes>(
-          configuration,
-        ),
-      deps: [
-        ROUTER_CONFIGURATION,
-      ],
-    },
+    { provide: ROUTER_CONFIGURATION, useValue: config },
+    StreamixRouterImpl,
+    { provide: StreamixRouter, useExisting: StreamixRouterImpl },
   ];
 }
 
