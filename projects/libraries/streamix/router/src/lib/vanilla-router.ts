@@ -185,8 +185,8 @@ export interface RouterConfig {
   navigateExternal?: (url: URL) => void;
   onOutletActivate?: (outlet: HTMLElement, component: unknown) => void;
   render?: (outletName: string, node: Node, route: ActivatedRoute) => void;
-  renderNotFound?: (outletName: string, url: URL, router: Router) => void;
-  renderError?: (outletName: string, error: unknown, router: Router) => void;
+  renderNotFound?: (outlet: HTMLElement, url: URL, router: Router) => void;
+  renderError?: (outlet: HTMLElement, error: unknown, router: Router) => void;
   onStateChange?: (state: RouterState) => void;
 }
 
@@ -451,19 +451,21 @@ export function createRouter(config: RouterConfig): Router {
     }
   });
 
-  renderNotFound = config.renderNotFound ?? ((_outletName) => {
-    const outlet = resolveOutlet();
-    if (outlet) {
-      defaultRenderNotFound(outlet);
-    }
-  });
+  renderNotFound =
+    config.renderNotFound ??
+    ((outlet) => {
+      defaultRenderNotFound(
+        outlet,
+      );
+    });
 
-  renderError = config.renderError ?? ((_outletName) => {
-    const outlet = resolveOutlet();
-    if (outlet) {
-      defaultRenderError(outlet);
-    }
-  });
+  renderError =
+    config.renderError ??
+    ((outlet) => {
+      defaultRenderError(
+        outlet,
+      );
+    });
 
   function disposeRender(renderInstance: ActiveRender | null): void {
     if (!renderInstance) return;
@@ -1410,11 +1412,17 @@ export function createRouter(config: RouterConfig): Router {
           phase: 'not-found',
           routeConfig: null,
         }, () => {
-          renderNotFound(
-            '',
-            result.request.url,
-            publicRouter,
-          );
+          const outlet =
+            resolveOutlet();
+
+          if (outlet) {
+            renderNotFound(
+              outlet,
+              result.request.url,
+              publicRouter,
+            );
+          }
+
           replaceActiveRender(null);
         });
         history.commitUpdate(
@@ -1441,11 +1449,17 @@ export function createRouter(config: RouterConfig): Router {
           routeConfig: null,
           error: result.error,
         }, () => {
-          renderError(
-            '',
-            result.error,
-            publicRouter,
-          );
+          const outlet =
+            resolveOutlet();
+
+          if (outlet) {
+            renderError(
+              outlet,
+              result.error,
+              publicRouter,
+            );
+          }
+
           replaceActiveRender(null);
         });
         history.rollbackUpdate(result.request.historyUpdate);

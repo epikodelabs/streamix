@@ -6,7 +6,6 @@ import {
   ApplicationRef,
   DestroyRef,
   EnvironmentInjector,
-  Injectable,
   InjectionToken,
   inject,
   runInInjectionContext,
@@ -473,9 +472,9 @@ function adaptRoutes(
       }) => ({
         name: route.name,
         path,
+        outlet: route.outlet,
         redirectTo,
         data: route.data,
-        outlet: route.outlet,
         preload:
           route.preload,
         viewTransition:
@@ -621,7 +620,7 @@ export class StreamixRouter<
   private readonly registry: ReturnType<typeof createRouteRegistry>;
   private engine: Router | null = null;
   private currentState: RouterState = EMPTY_ROUTER_STATE;
-  private outlets = new Map<string, HTMLElement>();
+  private readonly outlets = new Map<string, HTMLElement>();
 
   public readonly navigateTo: TypedNavigate<TRoutes>;
   public readonly hrefTo: TypedHref<TRoutes>;
@@ -671,12 +670,32 @@ export class StreamixRouter<
       : '';
   }
 
-  connect(name: string, outlet: HTMLElement): void {
-    if (this.outlets.has(name)) {
-      this.disconnect(name, this.outlets.get(name)!);
+  connect(
+    name: string,
+    outlet: HTMLElement,
+  ): void {
+    const outletName =
+      name.trim();
+
+    const existing =
+      this.outlets.get(
+        outletName,
+      );
+
+    if (existing === outlet) {
+      return;
     }
 
-    this.outlets.set(name, outlet);
+    if (existing) {
+      throw new Error(
+        `StreamixRouter outlet "${outletName}" is already connected.`,
+      );
+    }
+
+    this.outlets.set(
+      outletName,
+      outlet,
+    );
 
     if (this.engine) {
       return;
@@ -690,9 +709,11 @@ export class StreamixRouter<
             this.appRef,
             this.injector,
           ),
-        render: (outletName, node) => {
-          this.outlets.get(outletName)?.replaceChildren(node);
-        },
+
+        outlet:
+          this.outlets.get('') ??
+          null,
+
         baseHref:
           this.baseHref,
 
@@ -720,6 +741,58 @@ export class StreamixRouter<
           this.configuration
             .viewTransitions,
 
+        render: (
+          targetName,
+          node,
+        ) => {
+          const target =
+            this.outlets.get(
+              targetName,
+            );
+
+          if (!target) {
+            throw new Error(
+              `StreamixRouter outlet "${targetName}" is not connected.`,
+            );
+          }
+
+          target.replaceChildren(
+            node,
+          );
+        },
+
+        renderNotFound: (
+          target,
+        ) => {
+          const heading =
+            document.createElement(
+              'h1',
+            );
+
+          heading.textContent =
+            '404 — Page Not Found';
+
+          target.replaceChildren(
+            heading,
+          );
+        },
+
+        renderError: (
+          target,
+        ) => {
+          const heading =
+            document.createElement(
+              'h1',
+            );
+
+          heading.textContent =
+            'Page failed to load';
+
+          target.replaceChildren(
+            heading,
+          );
+        },
+
         onStateChange:
           state => {
             this.currentState =
@@ -744,6 +817,9 @@ export class StreamixRouter<
     try {
       engine.start();
     } catch (error) {
+      this.outlets.delete(
+        outletName,
+      );
       engine.dispose();
       throw error;
     }
@@ -756,12 +832,28 @@ export class StreamixRouter<
       );
   }
 
-  disconnect(name: string, outlet: HTMLElement): void {
-    if (this.outlets.get(name) === outlet) {
-      this.outlets.delete(name);
+  disconnect(
+    name: string,
+    outlet: HTMLElement,
+  ): void {
+    const outletName =
+      name.trim();
+
+    if (
+      this.outlets.get(
+        outletName,
+      ) !== outlet
+    ) {
+      return;
     }
 
-    if (this.outlets.size === 0) {
+    this.outlets.delete(
+      outletName,
+    );
+
+    if (
+      this.outlets.size === 0
+    ) {
       this.dispose();
     }
   }
@@ -994,24 +1086,38 @@ export class StreamixRouter<
   }
 }
 
-@Injectable()
-class StreamixRouterImpl extends StreamixRouter<any> {
-  constructor() {
-    const config = inject(ROUTER_CONFIGURATION);
-    super(config);
-  }
-}
 
-
-export function provideStreamixRouter<const TRoutes extends StreamixRoutes>(
+export function provideStreamixRouter<
+  const TRoutes extends
+    StreamixRoutes,
+>(
   routes: TRoutes,
-  options: StreamixRouterOptions = {},
-): Provider[] {
-  const config: RouterConfiguration<TRoutes> = { ...options, routes };
+  options:
+    StreamixRouterOptions = {},
+): Provider[] {  
+  const config: RouterConfiguration<TRoutes> = {
+    ...options,
+    routes,
+  };
+
   return [
-    { provide: ROUTER_CONFIGURATION, useValue: config },
-    StreamixRouterImpl,
-    { provide: StreamixRouter, useExisting: StreamixRouterImpl },
+    {
+      provide: ROUTER_CONFIGURATION,
+      useValue: config,
+    },
+    {
+      provide: StreamixRouter,
+      useFactory: (
+        configuration:
+          RouterConfiguration<TRoutes>,
+      ) =>
+        new StreamixRouter<TRoutes>(
+          configuration,
+        ),
+      deps: [
+        ROUTER_CONFIGURATION,
+      ],
+    },
   ];
 }
 
