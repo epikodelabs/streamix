@@ -4,13 +4,12 @@ import type {
   StreamixRoutes,
 } from './route-types';
 
-export const PRIMARY_OUTLET = '';
-
 export interface CompiledRoute {
   readonly route: StreamixRoute;
   readonly path: string;
   readonly redirectTo?: string;
-  readonly layouts: readonly StreamixLayout[];
+  readonly layouts:
+    readonly StreamixLayout[];
 }
 
 export interface CompiledRouteGroup {
@@ -20,27 +19,38 @@ export interface CompiledRouteGroup {
   readonly outlets: readonly CompiledRoute[];
 }
 
-export function normalizeOutletName(
-  outlet: string | undefined,
-): string {
-  return outlet?.trim() ?? PRIMARY_OUTLET;
-}
-
 export function joinRoutePath(
   parent: string,
   child: string,
 ): string {
-  const parentSegments = parent.split('/').filter(Boolean);
-  const childSegments = child.split('/').filter(Boolean);
-  const joined = [...parentSegments, ...childSegments].join('/');
-  return joined ? `/${joined}` : '/';
+  const parentSegments =
+    parent
+      .split('/')
+      .filter(Boolean);
+
+  const childSegments =
+    child
+      .split('/')
+      .filter(Boolean);
+
+  const joined = [
+    ...parentSegments,
+    ...childSegments,
+  ].join('/');
+
+  return joined
+    ? `/${joined}`
+    : '/';
 }
 
 export function compileRedirect(
   parentPath: string,
-  redirectTo: string | undefined,
+  redirectTo:
+    string | undefined,
 ): string | undefined {
-  if (!redirectTo) return undefined;
+  if (!redirectTo) {
+    return undefined;
+  }
 
   if (
     /^[A-Za-z][A-Za-z\d+.-]*:/.test(redirectTo) ||
@@ -51,30 +61,47 @@ export function compileRedirect(
 
   return redirectTo.startsWith('/')
     ? joinRoutePath('/', redirectTo)
-    : joinRoutePath(parentPath, redirectTo);
+    : joinRoutePath(
+        parentPath,
+        redirectTo,
+      );
 }
 
-function flattenRoutes(
+export function compileRoutes(
   entries: StreamixRoutes,
   parentPath = '/',
-  layouts: readonly StreamixLayout[] = [],
-  output: CompiledRoute[] = [],
+  layouts:
+    readonly StreamixLayout[] = [],
+  output: CompiledRoute[] = []
 ): readonly CompiledRoute[] {
   for (const entry of entries) {
     if (entry.kind === 'layout') {
-      flattenRoutes(
+      compileRoutes(
         entry.entries,
-        joinRoutePath(parentPath, entry.path),
-        Object.freeze([...layouts, entry]),
+        joinRoutePath(
+          parentPath,
+          entry.path,
+        ),
+        Object.freeze([
+          ...layouts,
+          entry,
+        ]),
         output,
       );
+
       continue;
     }
 
     output.push({
       route: entry,
-      path: joinRoutePath(parentPath, entry.path),
-      redirectTo: compileRedirect(parentPath, entry.redirectTo),
+      path: joinRoutePath(
+        parentPath,
+        entry.path,
+      ),
+      redirectTo: compileRedirect(
+        parentPath,
+        entry.redirectTo,
+      ),
       layouts,
     });
   }
@@ -82,101 +109,111 @@ function flattenRoutes(
   return output;
 }
 
-function sameLayoutChain(
-  left: readonly StreamixLayout[],
-  right: readonly StreamixLayout[],
-): boolean {
-  return left.length === right.length &&
-    left.every((layout, index) => layout === right[index]);
-}
-
-export function compileRoutes(
-  entries: StreamixRoutes,
+export function groupRoutes(
+  compiled: readonly CompiledRoute[],
 ): readonly CompiledRouteGroup[] {
-  const groups = new Map<string, {
-    layouts: readonly StreamixLayout[];
-    routes: Map<string, CompiledRoute>;
-  }>();
+  const groups = new Map<string, CompiledRouteGroup>();
 
-  for (const compiled of flattenRoutes(entries)) {
-    const outlet = normalizeOutletName(compiled.route.outlet);
-    const current = groups.get(compiled.path);
+  for (const route of compiled) {
+    const key = `${route.path}#${route.layouts.map(l => l.path).join('/')}`;
+    let group = groups.get(key);
 
-    if (!current) {
-      groups.set(compiled.path, {
-        layouts: compiled.layouts,
-        routes: new Map([[outlet, compiled]]),
-      });
-      continue;
-    }
+    if (!group) {
+      if (route.route.outlet) {
+        throw new Error(
+          `Named outlet route "${route.route.name ?? route.path}" with path "${route.path}" has no corresponding primary outlet route with the same path.`,
+        );
+      }
 
-    if (!sameLayoutChain(current.layouts, compiled.layouts)) {
+      group = {
+        path: route.path,
+        layouts: route.layouts,
+        primary: route,
+        outlets: [],
+      };
+
+      groups.set(key, group);
+    } else if (!route.route.outlet) {
       throw new Error(
-        `Compiled route path "${compiled.path}" is declared under different layout branches. ` +
-        'Named outlets must belong to the same layout branch.',
+        `Duplicate primary route for path "${route.path}" under the same layout chain.`,
       );
-    }
+    } else {
+      group = {
+        ...group,
+        outlets: [...group.outlets, route],
+      };
 
-    if (current.routes.has(outlet)) {
-      throw new Error(
-        `Duplicate compiled route for path "${compiled.path}" and outlet ` +
-        `"${outlet || 'primary'}".`,
-      );
+      groups.set(key, group);
     }
-
-    current.routes.set(outlet, compiled);
   }
 
-  const output: CompiledRouteGroup[] = [];
+  return Array.from(groups.values());
+}
 
-  for (const [path, group] of groups) {
-    const primary = group.routes.get(PRIMARY_OUTLET);
+function validateRouteGroups(
+  groups: readonly CompiledRouteGroup[],
+): void {
+  const names = new Set<string>();
 
-    if (!primary) {
+  for (const group of groups) {
+    const primaryName = group.primary.route.name;
+    if (primaryName) {
+      if (names.has(primaryName)) {
+        throw new Error(`Duplicate route name "${primaryName}". Route names must be globally unique.`);
+      }
+      names.add(primaryName);
+    }
+
+    if (group.primary.redirectTo && group.outlets.length > 0) {
       throw new Error(
-        `Route group "${path}" has named outlets but no primary route.`,
+        `A redirect route cannot have named outlets. Path: "${group.path}"`,
       );
     }
 
-    const outlets = [...group.routes.entries()]
-      .filter(([name]) => name !== PRIMARY_OUTLET)
-      .map(([, route]) => route);
+    const outletNames = new Set<string>();
+    for (const outlet of group.outlets) {
+      const outletName = outlet.route.outlet!;
+      if (outletNames.has(outletName)) {
+        throw new Error(
+          `Duplicate outlet named "${outletName}" for route path "${group.path}".`,
+        );
+      }
+      outletNames.add(outletName);
 
-    for (const outlet of outlets) {
       if (outlet.route.name) {
         throw new Error(
-          `Named outlet route "${path}" (${normalizeOutletName(outlet.route.outlet)}) ` +
-          'cannot define a route name. Only primary routes are navigable.',
+          `Named outlet routes cannot have a "name" property. Route path: "${group.path}", outlet: "${outletName}"`,
         );
       }
 
       if (outlet.redirectTo) {
         throw new Error(
-          `Named outlet route "${path}" (${normalizeOutletName(outlet.route.outlet)}) ` +
-          'cannot redirect independently.',
+          `Named outlet routes cannot be redirects. Route path: "${group.path}", outlet: "${outletName}"`,
         );
       }
-    }
 
-    if (primary.redirectTo && outlets.length > 0) {
-      throw new Error(
-        `Redirect route "${path}" cannot have named outlet routes.`,
-      );
-    }
+      if (outlet.route.paramsSchema || outlet.route.querySchema) {
+        throw new Error('Named outlet routes cannot define paramsSchema or querySchema.');
+      }
 
-    output.push(Object.freeze({
-      path,
-      layouts: group.layouts,
-      primary,
-      outlets: Object.freeze(outlets),
-    }));
+      if (outlet.route.viewTransition !== undefined) {
+        throw new Error('Named outlet routes cannot define viewTransition.');
+      }
+
+      if (outlet.route.preload !== undefined) {
+        throw new Error('Named outlet routes cannot define preload.');
+      }
+    }
   }
-
-  return Object.freeze(output);
 }
 
-function normalizePattern(path: string): string {
-  return path.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, ':');
+function normalizePattern(
+  path: string,
+): string {
+  return path.replace(
+    /:([A-Za-z_][A-Za-z0-9_]*)/g,
+    ':',
+  );
 }
 
 export interface RouteRegistryRecord {
@@ -185,36 +222,93 @@ export interface RouteRegistryRecord {
 }
 
 export interface RouteRegistry {
-  readonly namedRoutes: ReadonlyMap<string, RouteRegistryRecord>;
+  readonly namedRoutes:
+    ReadonlyMap<
+      string,
+      RouteRegistryRecord
+    >;
+  readonly groups:
+    readonly CompiledRouteGroup[];
 }
 
-export function createRouteRegistry(entries: StreamixRoutes): RouteRegistry {
-  const namedRoutes = new Map<string, RouteRegistryRecord>();
-  const patterns = new Map<string, string>();
+export function createRouteRegistry(
+  entries: StreamixRoutes,
+): RouteRegistry {
+  const namedRoutes =
+    new Map<
+      string,
+      RouteRegistryRecord
+    >();
+  
+  const groups = groupRoutes(compileRoutes(entries));
+  validateRouteGroups(groups);
+  
+  const literalPaths =
+    new Map<string, StreamixRoute>();
 
-  for (const group of compileRoutes(entries)) {
-    const pattern = normalizePattern(group.path);
-    const previousPattern = patterns.get(pattern);
+  const patterns =
+    new Map<string, string>();
 
-    if (previousPattern && previousPattern !== group.path) {
+  for (
+    const {
+      route,
+      path,
+    } of groups.flatMap(g => [g.primary, ...g.outlets])
+  ) {
+    const previous =
+      literalPaths.get(path);
+
+    if (previous && !previous.outlet && !route.outlet) {
       throw new Error(
-        `Conflicting route patterns "${previousPattern}" and "${group.path}".`,
+        `Duplicate compiled route path "${path}".`,
       );
     }
 
-    patterns.set(pattern, group.path);
+    literalPaths.set(path, route);
 
-    const route = group.primary.route;
-    if (!route.name) continue;
+    const pattern =
+      normalizePattern(path);
 
-    if (namedRoutes.has(route.name)) {
+    const previousPattern =
+      patterns.get(pattern);
+
+    if (
+      previousPattern &&
+      previousPattern !== path
+    ) {
       throw new Error(
-        `Duplicate route name "${route.name}". Route names must be globally unique.`,
+        `Conflicting route patterns ` +
+        `"${previousPattern}" and "${path}".`,
       );
     }
 
-    namedRoutes.set(route.name, { route, fullPath: group.path });
+    patterns.set(pattern, path);
+
+    if (!route.name) {
+      continue;
+    }
+
+    if (
+      namedRoutes.has(route.name)
+    ) {
+      throw new Error(
+        `Duplicate route name ` +
+        `"${route.name}". ` +
+        'Route names must be globally unique.',
+      );
+    }
+
+    namedRoutes.set(
+      route.name,
+      {
+        route,
+        fullPath: path,
+      },
+    );
   }
 
-  return { namedRoutes };
+  return {
+    namedRoutes,
+    groups,
+  };
 }

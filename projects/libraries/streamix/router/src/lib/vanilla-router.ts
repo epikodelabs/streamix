@@ -188,6 +188,7 @@ export interface RouterConfig {
   onOutletActivate?: (outlet: HTMLElement, component: unknown) => void;
   render?: (outletName: string, node: Node, route: ActivatedRoute) => void;
   renderNotFound?: (outletName: string, url: URL, router: Router) => void;
+  commit?: (outlets: readonly PreparedOutlet[]) => void;
   renderError?: (outletName: string, error: unknown, router: Router) => void;
   onStateChange?: (state: RouterState) => void;
 }
@@ -216,7 +217,7 @@ interface RoutePattern {
   readonly parameterNames: readonly (string | null)[];
 }
 
-interface PreparedOutlet {
+export interface PreparedOutlet {
   readonly name: string;
   readonly route: ActiveRoute;
   readonly node: Node;
@@ -360,9 +361,6 @@ function readRedirect(result: GuardResult): { redirectTo: string; replace: boole
   return null;
 }
 
-function defaultRender(outlet: HTMLElement, node: Node): void {
-  outlet?.replaceChildren(node);
-}
 
 function defaultRenderNotFound(outlet: HTMLElement): void {
   const heading = document.createElement('h1');
@@ -374,6 +372,72 @@ function defaultRenderError(outlet: HTMLElement): void {
   const heading = document.createElement('h1');
   heading.textContent = 'Page failed to load';
   outlet.replaceChildren(heading);
+}
+
+
+function validateRouteGroups(routes: readonly Route[]): void {
+  const primaryPaths = new Set<string>();
+
+  for (const primary of routes) {
+    const primaryOutlet = primary.outlet?.trim() ?? '';
+    if (primaryOutlet) {
+      throw new Error(
+        `Top-level route "${primary.path}" must target the primary outlet`,
+      );
+    }
+
+    if (primaryPaths.has(primary.path)) {
+      throw new Error(`Duplicate primary route path "${primary.path}"`);
+    }
+    primaryPaths.add(primary.path);
+
+    const outletNames = new Set<string>();
+    for (const outlet of primary.outlets ?? []) {
+      const name = outlet.outlet?.trim() ?? '';
+      if (!name) {
+        throw new Error(
+          `Secondary route for "${primary.path}" must define a named outlet`,
+        );
+      }
+      if (outletNames.has(name)) {
+        throw new Error(
+          `Duplicate outlet "${name}" for route "${primary.path}"`,
+        );
+      }
+      outletNames.add(name);
+
+      if (outlet.path !== primary.path) {
+        throw new Error(
+          `Outlet "${name}" must use the primary path "${primary.path}"`,
+        );
+      }
+      if (outlet.outlets?.length) {
+        throw new Error(`Outlet "${name}" cannot contain nested outlets`);
+      }
+      if (outlet.redirectTo) {
+        throw new Error(`Outlet "${name}" cannot redirect`);
+      }
+      if (outlet.name) {
+        throw new Error(`Outlet "${name}" cannot define a route name`);
+      }
+      if (outlet.preload !== undefined) {
+        throw new Error(
+          `Outlet "${name}" cannot define preload; the primary route owns group preloading`,
+        );
+      }
+      if (outlet.viewTransition !== undefined) {
+        throw new Error(
+          `Outlet "${name}" cannot define viewTransition; the primary route owns the transition`,
+        );
+      }
+    }
+
+    if (primary.redirectTo && outletNames.size > 0) {
+      throw new Error(
+        `Redirect route "${primary.path}" cannot activate named outlets`,
+      );
+    }
+  }
 }
 
 const routeLoads = new WeakMap<Route, Promise<LoadedRoute>>();
@@ -408,16 +472,19 @@ function loadRoute(
 }
 
 export function createRouter(config: RouterConfig): Router {
-  let render: NonNullable<RouterConfig['render']>;
-  let renderNotFound: NonNullable<RouterConfig['renderNotFound']>;
-  let renderError: NonNullable<RouterConfig['renderError']>;
+  validateRouteGroups(config.routes);
+  const render = config.render;
+  const renderNotFound = config.renderNotFound;
+  const renderError = config.renderError;
+  const commitOutlets = config.commit;
   const navigateExternal = config.navigateExternal ?? ((url: URL) => window.location.assign(url.href));
   const baseHref = normalizeBaseHref(config.baseHref ?? '/');
   const maxRedirects = config.maxRedirects ?? 10;
   const scrollRestoration = config.scrollRestoration ?? 'preserve';
   const preloading = config.preloading ?? 'none';
   const viewTransitions = config.viewTransitions ?? false;
-  const history = new HistoryManager();
+  const history =
+    new HistoryManager();
   const routePatterns = new WeakMap<Route, RoutePattern>();
 
   let currentState: ActiveRoute | null = null;
@@ -449,30 +516,6 @@ export function createRouter(config: RouterConfig): Router {
   function resolveOutlet(): HTMLElement | null {
     return config.outlet ?? document.getElementById('app');
   }
-
-  // Normalize all renderer callbacks to the public named-outlet contract.
-  // The built-in fallback resolves the configured HTMLElement internally,
-  // avoiding a union of `(string, ...)` and `(HTMLElement, ...)` callbacks.
-  render = config.render ?? ((_outletName, node) => {
-    const outlet = resolveOutlet();
-    if (outlet) {
-      defaultRender(outlet, node);
-    }
-  });
-
-  renderNotFound =
-    config.renderNotFound ??
-    ((_outletName) => {
-      const outlet = resolveOutlet();
-      if (outlet) defaultRenderNotFound(outlet);
-    });
-
-  renderError =
-    config.renderError ??
-    ((_outletName) => {
-      const outlet = resolveOutlet();
-      if (outlet) defaultRenderError(outlet);
-    });
 
   function disposeRender(renderInstance: ActiveRender | null): void {
     if (!renderInstance) return;
@@ -507,7 +550,7 @@ export function createRouter(config: RouterConfig): Router {
 
     activeRenders.clear();
     activeRouteStates.clear();
-  }
+  }  
 
   function clearOutlet(): void {
     const outlet = resolveOutlet();
@@ -841,10 +884,18 @@ export function createRouter(config: RouterConfig): Router {
         continue;
       }
 
-      try {
-        await loadRoute(route);
-      } catch (error) {
-        trace('Route preload failed', route.path, error);
+      const group = [route, ...(route.outlets ?? [])];
+      for (const member of group) {
+        try {
+          const loaded = await loadRoute(member);
+          if (member !== route && (loaded.parseParams || loaded.parseQuery)) {
+            throw new Error(
+              `Outlet "${member.outlet}" cannot define parseParams or parseQuery`,
+            );
+          }
+        } catch (error) {
+          trace('Route preload failed', member.path, member.outlet ?? '', error);
+        }
       }
     }
   }
@@ -1033,6 +1084,14 @@ export function createRouter(config: RouterConfig): Router {
 
     const loadedRoutes = await Promise.all(routes.map(loadRoute));
     throwIfAborted(signal);
+
+    for (let index = 1; index < loadedRoutes.length; index++) {
+      if (loadedRoutes[index].parseParams || loadedRoutes[index].parseQuery) {
+        throw new Error(
+          `Outlet "${routes[index].outlet}" cannot define parseParams or parseQuery`,
+        );
+      }
+    }
 
     // The primary route owns URL parsing. Secondary outlets share the same
     // validated params and query because they are not independently navigable.
@@ -1325,14 +1384,24 @@ export function createRouter(config: RouterConfig): Router {
         }, () => {
           const nextNames = new Set(result.outlets.map(outlet => outlet.name));
 
-          // Render every prepared node before disposing routes that disappear.
-          // All asynchronous work has completed at this point, so the commit is
-          // synchronous and cannot expose partially loaded outlet state.
-          for (const outlet of result.outlets) {
-            render(outlet.name, outlet.node, outlet.route);
+          // All nodes are prepared before this mutation phase. A custom commit
+          // should apply the complete group synchronously or throw.
+          try {
+            if (commitOutlets) {
+              commitOutlets(result.outlets);
+            } else {
+              for (const outlet of result.outlets) {
+                render?.(outlet.name, outlet.node, outlet.route);
+              }
+            }
+          } catch (error) {
+            for (const outlet of result.outlets) {
+              outlet.rendered.dispose();
+            }
+            throw error;
           }
 
-          for (const [name] of activeRenders) {
+          for (const [name] of activeRenders.entries()) {
             if (!nextNames.has(name)) {
               replaceActiveRender(name, null);
               activeRouteStates.delete(name);
@@ -1343,9 +1412,13 @@ export function createRouter(config: RouterConfig): Router {
             replaceActiveRender(outlet.name, outlet.rendered);
             activeRouteStates.set(outlet.name, outlet.route);
 
-            const target = outlet.name === '' ? resolveOutlet() : null;
-            if (target) {
-              notifyOutletActivate(target, outlet.component);
+            // The router only knows the concrete DOM target for its default
+            // primary outlet. Custom named-outlet renderers own activation hooks.
+            if (!commitOutlets && outlet.name === '') {
+              const target = resolveOutlet();
+              if (target) {
+                notifyOutletActivate(target, outlet.component);
+              }
             }
           }
         });
@@ -1419,16 +1492,14 @@ export function createRouter(config: RouterConfig): Router {
           to: null,
           phase: 'not-found',
           routeConfig: null,
-        }, () => {
-          const outlet =
-            resolveOutlet();
-
-          if (outlet) {
-            renderNotFound(
-              '',
-              result.request.url,
-              publicRouter,
-            );
+        }, () => {          
+          if (renderNotFound) {
+            renderNotFound('', result.request.url, publicRouter);
+          } else {
+            const outlet = resolveOutlet();
+            if (outlet) {
+              defaultRenderNotFound(outlet);
+            }
           }
 
           disposeAllRenders();
@@ -1458,22 +1529,23 @@ export function createRouter(config: RouterConfig): Router {
           routeConfig: null,
           error: result.error,
         }, () => {
-          const outlet =
-            resolveOutlet();
+          // Preserve the active route on failed subsequent navigation. Error
+          // rendering is only used when there is no successfully committed view.
+          if (!currentState) {
+            if (renderError) {
+              renderError('', result.error, publicRouter);
+            } else {
+              const outlet = resolveOutlet();
+              if (outlet) {
+                defaultRenderError(outlet);
+              }
+            }
 
-          if (outlet) {
-            renderError(
-              '',
-              result.error,
-              publicRouter,
-            );
+            disposeAllRenders();
+            activeRouteStates.clear();
           }
-
-          disposeAllRenders();
-          activeRouteStates.clear();
         });
         history.rollbackUpdate(result.request.historyUpdate);
-        currentState = null;
         requestState = null;
         navigationPhase = null;
         errorState = result.error;

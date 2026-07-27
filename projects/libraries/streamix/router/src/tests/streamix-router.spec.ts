@@ -233,7 +233,7 @@ describe('StreamixRouter: flat routes and layouts', () => {
 
   it('supports named outlets', async () => {
     const routes = [
-      route('/sidebar', SettingsComponent, { outlet: 'sidebar' }),
+      route('/', SettingsComponent, { outlet: 'sidebar' }),
       route('/', HomeComponent),
     ] as const satisfies StreamixRoutes;
 
@@ -245,10 +245,7 @@ describe('StreamixRouter: flat routes and layouts', () => {
 
     await navigate('/');
     expect(getOutletContent()).toContain('<h1>Home</h1>');
-    expect(sidebarOutlet.innerHTML).toBe('');
-
-    await navigate('/sidebar');
-    expect(getOutletContent()).toContain('<h1>Home</h1>');
+    // After navigating to '/', both the primary and sidebar outlets should render.
     expect(sidebarOutlet.innerHTML).toContain('<h3>Settings</h3>');
 
     router.disconnect('sidebar', sidebarOutlet);

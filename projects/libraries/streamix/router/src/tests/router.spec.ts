@@ -70,7 +70,9 @@ idescribe('Router', () => {
         it('should create a router instance', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             expect(router).toBeDefined();
@@ -99,7 +101,9 @@ idescribe('Router', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
                 baseHref: '/app/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             expect(router.href('/about')).toBe('/app/about');
@@ -112,7 +116,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -126,7 +132,9 @@ idescribe('Router', () => {
         it('should resolve navigation after the route has rendered', async () => {
             router = createRouter({
                 routes: [routeWithComponent('about', 'About')],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             });
             const completed = await router.navigate('/about');
             expect(completed).toBeTrue();
@@ -144,8 +152,9 @@ idescribe('Router', () => {
                                 component: { kind: 'about-component' }
                             })))())
                         })
-                    }],
-                outlet,
+                    }], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
                 onOutletActivate
             });
             await router.navigate('/about');
@@ -157,7 +166,9 @@ idescribe('Router', () => {
                 routes: [
                     routeWithComponent('', 'Home'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -172,7 +183,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -188,7 +201,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -205,7 +220,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             });
             router.start();
             await router.navigate('/about', { state: { from: 'test' } });
@@ -219,7 +236,9 @@ idescribe('Router', () => {
             const navigateExternal = jasmine.createSpy('navigateExternal');
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
-                outlet,
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
                 navigateExternal
             };
             router = createRouter(config);
@@ -233,7 +252,9 @@ idescribe('Router', () => {
                 routes: [
                     routeWithComponent('', 'Home'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -246,7 +267,9 @@ idescribe('Router', () => {
                 routes: [
                     routeWithComponent('', 'Home'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -278,8 +301,9 @@ idescribe('Router', () => {
                                 }
                             }
                         })
-                    }],
-                outlet,
+                    }], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
                 onSameUrlNavigation: 'ignore'
             });
             await router.navigate('/same');
@@ -302,8 +326,9 @@ idescribe('Router', () => {
                                 return Promise.resolve(createComponent('Same'));
                             })())
                         })
-                    }],
-                outlet
+                    }], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             });
             await router.navigate('/same');
             const navigated = await router.navigate('/same');
@@ -314,7 +339,9 @@ idescribe('Router', () => {
     describe('route matching', () => {
         it('should refresh a cached route pattern when its path changes', async () => {
             const route = routeWithComponent('first', 'Route');
-            router = createRouter({ routes: [route], outlet });
+            router = createRouter({ routes: [route], render: (name, node) => {
+                outlet.replaceChildren(node);
+            }, });
             await router.navigate('/first');
             route.path = 'second';
             await router.navigate('/second');
@@ -330,8 +357,9 @@ idescribe('Router', () => {
                             component: unwrapTestComponent(await (() => Promise.resolve(createComponent('User')))())
                         })
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -351,8 +379,9 @@ idescribe('Router', () => {
                             component: unwrapTestComponent(await (() => Promise.resolve(createComponent('User')))())
                         })
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -370,8 +399,9 @@ idescribe('Router', () => {
                             component: unwrapTestComponent(await (() => Promise.resolve(createComponent('404')))())
                         })
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -387,7 +417,9 @@ idescribe('Router', () => {
                     routeWithComponent('admin/users', 'Admin Users'),
                     routeWithComponent('admin/settings', 'Admin Settings'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             });
 
             await router.navigate('/admin/users');
@@ -401,7 +433,9 @@ idescribe('Router', () => {
                     routeWithComponent('admin', 'Admin'),
                     routeWithComponent('admin/users', 'Admin Users'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             });
 
             await router.navigate('/admin/users');
@@ -421,7 +455,9 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -459,8 +495,9 @@ idescribe('Router', () => {
                             component: unwrapTestComponent(await (() => Promise.resolve(createComponent('Protected')))()),
                             canActivate: [() => false]
                         })
-                    }],
-                outlet
+                    }], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             });
             const completed = await router.navigate('/protected');
             expect(completed).toBeFalse();
@@ -524,7 +561,9 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -548,7 +587,9 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -573,7 +614,9 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -593,7 +636,9 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -685,7 +730,9 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -712,7 +759,9 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -736,7 +785,9 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -760,7 +811,9 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -803,8 +856,9 @@ idescribe('Router', () => {
                             component: unwrapTestComponent(await (() => Promise.resolve(createComponent('Profile')))())
                         })
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -824,8 +878,9 @@ idescribe('Router', () => {
                         path: 'b',
                         redirectTo: '/a'
                     },
-                ],
-                outlet,
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
                 maxRedirects: 3
             };
             router = createRouter(config);
@@ -844,8 +899,9 @@ idescribe('Router', () => {
                         path: 'external',
                         redirectTo: 'https://example.com'
                     },
-                ],
-                outlet,
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
                 navigateExternal
             };
             router = createRouter(config);
@@ -865,8 +921,9 @@ idescribe('Router', () => {
                             component: unwrapTestComponent(await (() => Promise.resolve(createComponent('Lazy Loaded')))())
                         })
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -887,7 +944,9 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -904,8 +963,9 @@ idescribe('Router', () => {
                             component: unwrapTestComponent(await (() => Promise.reject(new Error('Load failed')))())
                         })
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -928,8 +988,9 @@ idescribe('Router', () => {
                             component: unwrapTestComponent(await (() => Promise.resolve(createComponent('User')))())
                         })
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -952,8 +1013,9 @@ idescribe('Router', () => {
                             component: unwrapTestComponent(await (() => Promise.resolve(createComponent('User')))())
                         })
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -973,7 +1035,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1002,7 +1066,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet,
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
                 scrollRestoration: 'top'
             });
             router.start();
@@ -1025,7 +1091,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet,
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
                 scrollRestoration: 'restore'
             });
             router.start();
@@ -1050,8 +1118,9 @@ idescribe('Router', () => {
                             canActivate: [() => false]
                         })
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1082,7 +1151,6 @@ idescribe('Router', () => {
                         routeWithComponent('', 'Home'),
                         routeWithComponent('about', 'About'),
                     ],
-                    outlet,
                     viewTransitions: true
                 });
                 await router.navigate('/about');
@@ -1116,8 +1184,9 @@ idescribe('Router', () => {
                                 component: unwrapTestComponent(await (() => Promise.resolve(createComponent('About')))())
                             })
                         },
-                    ],
-                    outlet
+                    ], render: (name, node) => {
+                        outlet.replaceChildren(node);
+                    },
                 });
                 await router.navigate('/about');
                 expect(startViewTransition).toHaveBeenCalled();
@@ -1150,8 +1219,9 @@ idescribe('Router', () => {
                                 component: unwrapTestComponent(await (() => Promise.resolve(createComponent('About')))())
                             })
                         },
-                    ],
-                    outlet,
+                    ], render: (name, node) => {
+                        outlet.replaceChildren(node);
+                    },
                     viewTransitions: true
                 });
                 await router.navigate('/about');
@@ -1192,7 +1262,6 @@ idescribe('Router', () => {
                         routeWithComponent('about', 'About'),
                         routeWithComponent('settings', 'Settings'),
                     ],
-                    outlet,
                     viewTransitions: predicate
                 });
                 await router.navigate('/about');
@@ -1240,8 +1309,9 @@ idescribe('Router', () => {
                             component: unwrapTestComponent(await settingsLoader())
                         })
                     },
-                ],
-                outlet,
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
                 preloading: 'eager'
             });
 
@@ -1288,7 +1358,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1307,7 +1379,9 @@ idescribe('Router', () => {
                 routes: [
                     routeWithComponent('', 'Home'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1326,7 +1400,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1343,7 +1419,9 @@ idescribe('Router', () => {
                 routes: [
                     routeWithComponent('', 'Home'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1360,7 +1438,9 @@ idescribe('Router', () => {
                 routes: [
                     routeWithComponent('', 'Home'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1378,7 +1458,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1403,7 +1485,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1423,7 +1507,9 @@ idescribe('Router', () => {
                     routeWithComponent('about', 'About'),
                 ],
                 baseHref: '/app/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1448,8 +1534,9 @@ idescribe('Router', () => {
                             }
                         })
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1474,8 +1561,9 @@ idescribe('Router', () => {
                             }
                         })
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1510,7 +1598,9 @@ idescribe('Router', () => {
         it('should start and stop the router', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1522,7 +1612,9 @@ idescribe('Router', () => {
         it('should prevent starting a disposed router', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.dispose();
@@ -1533,7 +1625,9 @@ idescribe('Router', () => {
         it('should prevent navigation after disposal', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1545,7 +1639,9 @@ idescribe('Router', () => {
         it('should clean up event listeners on dispose', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             const removeEventListenerSpy = spyOn(window, 'removeEventListener').and.callThrough();
             const documentRemoveSpy = spyOn(document, 'removeEventListener').and.callThrough();
@@ -1571,7 +1667,6 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
             };
             router = createRouter(config);
             router.start();
@@ -1627,7 +1722,9 @@ idescribe('Router', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
                 baseHref: '/app/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             expect(router.href('/about')).toBe('/app/about');
@@ -1636,7 +1733,9 @@ idescribe('Router', () => {
         it('should generate href with query parameters', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             expect(router.href('/about?foo=bar')).toBe('/about?foo=bar');
@@ -1646,7 +1745,9 @@ idescribe('Router', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
                 baseHref: '/app/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             expect(router.href('child')).toBe('/app/section/child');
@@ -1656,7 +1757,9 @@ idescribe('Router', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
                 baseHref: '/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             expect(router.href('settings')).toBe('/dashboard/settings');
@@ -1665,7 +1768,9 @@ idescribe('Router', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
                 baseHref: '/app/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             const link = router.createLink('/about', 'About', 'nav-link');
@@ -1677,7 +1782,9 @@ idescribe('Router', () => {
         it('should create links without className', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             const link = router.createLink('/about', 'About');
@@ -1693,8 +1800,9 @@ idescribe('Router', () => {
                     {
                         path: 'broken'
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1711,9 +1819,9 @@ idescribe('Router', () => {
                     {
                         path: 'broken'
                     },
-                ],
-                outlet,
-                renderError: (outlet: HTMLElement, error: unknown) => {
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                }, renderError: (outletName: string, error: unknown) => {
                     errorRendered = true;
                     outlet.textContent = 'Custom Error: ' + (error as Error).message;
                 }
@@ -1732,8 +1840,9 @@ idescribe('Router', () => {
                     {
                         path: 'broken'
                     },
-                ],
-                outlet
+                ], render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1776,7 +1885,6 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
             };
             router = createRouter(config);
             router.start();
@@ -1826,7 +1934,6 @@ idescribe('Router', () => {
                         })
                     },
                 ],
-                outlet
             };
             router = createRouter(config);
             router.start();
@@ -1842,8 +1949,9 @@ idescribe('Router', () => {
             debugSpy.calls.reset();
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
-                outlet,
-                enableTracing: true
+                enableTracing: true, render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1856,8 +1964,9 @@ idescribe('Router', () => {
             debugSpy.calls.reset();
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
-                outlet,
-                enableTracing: false
+                enableTracing: false, render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1873,7 +1982,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1889,7 +2000,9 @@ idescribe('Router', () => {
                     routeWithComponent('', 'Home'),
                     routeWithComponent('about', 'About'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1907,7 +2020,9 @@ idescribe('Router', () => {
                     routeWithComponent('about', 'About'),
                 ],
                 baseHref: '/app/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1921,7 +2036,9 @@ idescribe('Router', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
                 baseHref: '/app/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1936,7 +2053,9 @@ idescribe('Router', () => {
                     routeWithComponent('about', 'About'),
                 ],
                 baseHref: '/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1953,7 +2072,9 @@ idescribe('Router', () => {
                     routeWithComponent('dashboard/settings', 'Settings'),
                 ],
                 baseHref: '/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -1968,7 +2089,9 @@ idescribe('Router', () => {
             const config: RouterConfig = {
                 routes: [routeWithComponent('', 'Home')],
                 baseHref: '/app/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             // Should create href with baseHref
@@ -1983,7 +2106,9 @@ idescribe('Router', () => {
                     routeWithComponent('section/child', 'Child'),
                 ],
                 baseHref: '/app/',
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -2001,8 +2126,9 @@ idescribe('Router', () => {
                 routes: [
                     routeWithComponent('', 'Home'),
                 ],
-                outlet,
-                renderNotFound: (outlet: HTMLElement, _url: URL) => {
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                }, renderNotFound: (outletName: string, _url: URL) => {
                     notFoundCalled = true;
                     outlet.textContent = 'Custom 404';
                 }
@@ -2022,7 +2148,9 @@ idescribe('Router', () => {
                 routes: [
                     routeWithComponent('', 'Home'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -2035,7 +2163,9 @@ idescribe('Router', () => {
                 routes: [
                     routeWithComponent('', 'Home'),
                 ],
-                outlet
+                render: (name, node) => {
+                    outlet.replaceChildren(node);
+                },
             };
             router = createRouter(config);
             router.start();
@@ -2048,4 +2178,183 @@ idescribe('Router', () => {
             expect(router.state.path).toBe('');
         });
     });
+    describe('grouped named outlets', () => {
+        function groupedRoute(): Route {
+            return {
+                path: 'project/:id',
+                load: async () => ({
+                    component: () => document.createTextNode('Primary')
+                }),
+                outlets: [{
+                    path: 'project/:id',
+                    outlet: 'sidebar',
+                    load: async () => ({
+                        component: () => document.createTextNode('Sidebar')
+                    })
+                }]
+            };
+        }
+
+        it('should prepare and commit the complete outlet group', async () => {
+            const primary = document.createElement('div');
+            const sidebar = document.createElement('div');
+            const committed: string[][] = [];
+
+            router = createRouter({
+                routes: [groupedRoute()],
+                commit: outlets => {
+                    committed.push(outlets.map(current => current.name));
+                    for (const current of outlets) {
+                        (current.name === 'sidebar' ? sidebar : primary)
+                            .replaceChildren(current.node);
+                    }
+                }
+            });
+
+            expect(await router.navigate('/project/42')).toBeTrue();
+            expect(committed).toEqual([['', 'sidebar']]);
+            expect(primary.textContent).toBe('Primary');
+            expect(sidebar.textContent).toBe('Sidebar');
+            expect(router.state.params).toEqual({ id: '42' });
+        });
+
+        it('should reject malformed groups before navigation starts', () => {
+            expect(() => createRouter({
+                routes: [{
+                    path: 'project',
+                    load: async () => ({ component: createComponent('Primary') }),
+                    outlets: [{
+                        path: 'other',
+                        outlet: 'sidebar',
+                        load: async () => ({ component: createComponent('Sidebar') })
+                    }]
+                }]
+            })).toThrowError(/must use the primary path/);
+
+            expect(() => createRouter({
+                routes: [{
+                    path: 'project',
+                    load: async () => ({ component: createComponent('Primary') }),
+                    outlets: [
+                        {
+                            path: 'project',
+                            outlet: 'sidebar',
+                            load: async () => ({ component: createComponent('One') })
+                        },
+                        {
+                            path: 'project',
+                            outlet: 'sidebar',
+                            load: async () => ({ component: createComponent('Two') })
+                        }
+                    ]
+                }]
+            })).toThrowError(/Duplicate outlet/);
+        });
+
+        it('should reject URL parsers declared by a secondary outlet', async () => {
+            router = createRouter({
+                routes: [{
+                    path: 'project/:id',
+                    load: async () => ({ component: createComponent('Primary') }),
+                    outlets: [{
+                        path: 'project/:id',
+                        outlet: 'sidebar',
+                        load: async () => ({
+                            component: createComponent('Sidebar'),
+                            parseParams: params => params
+                        })
+                    }]
+                }],
+                commit: () => undefined
+            });
+
+            expect(await router.navigate('/project/42')).toBeFalse();
+            expect((router.state.error as Error).message)
+                .toContain('cannot define parseParams or parseQuery');
+        });
+
+        it('should preload every member of an enabled route group', async () => {
+            const primaryLoad = jasmine.createSpy('primaryLoad').and.resolveTo({
+                component: createComponent('Primary')
+            });
+            const sidebarLoad = jasmine.createSpy('sidebarLoad').and.resolveTo({
+                component: createComponent('Sidebar')
+            });
+
+            router = createRouter({
+                routes: [{
+                    path: 'project',
+                    load: primaryLoad,
+                    outlets: [{
+                        path: 'project',
+                        outlet: 'sidebar',
+                        load: sidebarLoad
+                    }]
+                }]
+            });
+
+            await router.preload();
+            expect(primaryLoad).toHaveBeenCalledTimes(1);
+            expect(sidebarLoad).toHaveBeenCalledTimes(1);
+        });
+
+        it('should preserve the active route when a later group fails to prepare', async () => {
+            const primary = document.createElement('div');
+            router = createRouter({
+                routes: [
+                    routeWithComponent('stable', 'Stable'),
+                    {
+                        path: 'broken',
+                        load: async () => ({ component: createComponent('Broken') }),
+                        outlets: [{
+                            path: 'broken',
+                            outlet: 'sidebar',
+                            load: async () => { throw new Error('Sidebar failed'); }
+                        }]
+                    }
+                ],
+                commit: outlets => {
+                    primary.replaceChildren(outlets[0].node);
+                }
+            });
+
+            expect(await router.navigate('/stable')).toBeTrue();
+            expect(primary.textContent).toBe('Stable');
+            expect(await router.navigate('/broken')).toBeFalse();
+            expect(router.state.current?.path).toBe('/stable');
+            expect(primary.textContent).toBe('Stable');
+            expect((router.state.error as Error).message).toBe('Sidebar failed');
+        });
+
+        it('should dispose all staged views when the group commit throws', async () => {
+            const destroyed: boolean[] = [];
+            router = createRouter({
+                routes: [{
+                    path: 'project',
+                    load: async () => ({
+                        component: (_route, context) => {
+                            context.destroySignal.addEventListener('abort', () => destroyed.push(true));
+                            return document.createTextNode('Primary');
+                        }
+                    }),
+                    outlets: [{
+                        path: 'project',
+                        outlet: 'sidebar',
+                        load: async () => ({
+                            component: (_route, context) => {
+                                context.destroySignal.addEventListener('abort', () => destroyed.push(true));
+                                return document.createTextNode('Sidebar');
+                            }
+                        })
+                    }]
+                }],
+                commit: () => { throw new Error('Commit failed'); }
+            });
+
+            expect(await router.navigate('/project')).toBeFalse();
+            expect(destroyed.length).toBe(2);
+            expect((router.state.error as Error).message).toBe('Commit failed');
+        });
+    });
+
 });

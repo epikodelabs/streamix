@@ -24,8 +24,11 @@ import type {
 } from './navigation-types';
 
 import {
+  CompiledRoute,
+  CompiledRouteGroup,
   compileRoutes,
   createRouteRegistry,
+  groupRoutes,
 } from './route-compiler';
 
 import {
@@ -460,31 +463,35 @@ function adaptRoutes(
   appRef: ApplicationRef,
   injector: EnvironmentInjector,
 ): Route[] {
-  return compileRoutes(entries).map(group => {
-    const primary = adaptRoute(
-      group.primary.route,
-      group.path,
-      group.primary.redirectTo,
-      group.layouts,
-      appRef,
-      injector,
-    );
+  const compiled = compileRoutes(entries);
+  const groups = groupRoutes(compiled);
+  // validateRouteGroups(groups); // This is now done inside createRouteRegistry
 
-    const outlets = group.outlets.map(compiled =>
-      adaptRoute(
-        compiled.route,
+  return groups.map((group: CompiledRouteGroup) => {
+      const primary = adaptRoute(
+        group.primary.route,
         group.path,
-        compiled.redirectTo,
+        group.primary.redirectTo,
         group.layouts,
         appRef,
         injector,
-      ),
-    );
-
-    return outlets.length > 0
-      ? { ...primary, outlets: Object.freeze(outlets) }
-      : primary;
-  });
+      );
+  
+      const outlets = group.outlets.map((compiled: CompiledRoute) =>
+        adaptRoute(
+          compiled.route,
+          group.path,
+          compiled.redirectTo,
+          group.layouts,
+          appRef,
+          injector,
+        ),
+      );
+  
+      return outlets.length > 0
+        ? { ...primary, outlets: Object.freeze(outlets) }
+        : primary;
+    });
 }
 
 function interpolateNamedPath(
@@ -704,8 +711,30 @@ export class StreamixRouter<
           );
         },
 
+      commit: (outlets) => {
+        // First phase: validate all outlets exist before any DOM mutation.
+        for (const outlet of outlets) {
+          if (!this.outlets.has(outlet.name)) {
+            throw new Error(`Router outlet "${outlet.name}" is not connected.`);
+          }
+        }
+
+        // Second phase: perform synchronous DOM mutations.
+        for (const outlet of outlets) {
+          const target = this.outlets.get(outlet.name)!;
+          target.replaceChildren(outlet.node);
+          dispatchOutletLifecycleEvent(
+            target,
+            OUTLET_ACTIVATE_EVENT,
+            outlet.component,
+          );
+        }
+      },
+
         renderNotFound: (
           targetName,
+          _url,
+          _router,
         ) => {
           const target =
             this.outlets.get(
@@ -731,6 +760,8 @@ export class StreamixRouter<
 
         renderError: (
           targetName,
+          _error,
+          _router,
         ) => {
           const target =
             this.outlets.get(
