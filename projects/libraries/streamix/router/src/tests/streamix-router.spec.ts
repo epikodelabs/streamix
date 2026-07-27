@@ -49,12 +49,12 @@ describe('StreamixRouter: flat routes and layouts', () => {
 
   function bootstrap(routes: StreamixRoutes): void {
     TestBed.configureTestingModule({
-      providers: [provideStreamixRouter(routes)],
+      providers: [...provideStreamixRouter(routes)],
     });
 
     outlet = document.createElement('div');
     router = TestBed.inject(StreamixRouter);
-    router.connect('', outlet);
+    router.connect(outlet);
   }
 
   function getOutletContent(): string {

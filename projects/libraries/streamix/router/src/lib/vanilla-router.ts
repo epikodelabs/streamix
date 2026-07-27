@@ -420,6 +420,7 @@ export function createRouter(config: RouterConfig): Router {
   let latestRequestId = 0;
   let activeController: AbortController | null = null;
   let activeRender: ActiveRender | null = null;
+  let startRequestQueued = false;
   let preloadTask: Promise<void> | null = null;
   let preloadQueued = false;
   let preloadIdleId: number | null = null;
@@ -1490,18 +1491,55 @@ export function createRouter(config: RouterConfig): Router {
   }
 
   function startRouter(): void {
-    if (disposed) throw new Error('Cannot start a disposed router');
-    if (started) return;
+    if (disposed) {
+      throw new Error(
+        'Cannot start a disposed router',
+      );
+    }
+
+    if (started) {
+      return;
+    }
+
     started = true;
-    window.addEventListener('popstate', handlePopState);
-    document.addEventListener('click', handleClick);
-    schedulePreloading();
-    requestNavigation(
-      new URL(window.location.href),
-      0,
-      undefined,
-      history.createDefaultUpdate(),
+    window.addEventListener(
+      'popstate',
+      handlePopState,
     );
+    document.addEventListener(
+      'click',
+      handleClick,
+    );
+    schedulePreloading();
+
+    // Starting the router must be synchronous from the caller's point of
+    // view. Queue initial URL recognition so `state.pending` remains false
+    // immediately after start(), and let an explicit navigate() win.
+    if (startRequestQueued) {
+      return;
+    }
+
+    startRequestQueued = true;
+
+    queueMicrotask(() => {
+      startRequestQueued = false;
+
+      if (
+        !started ||
+        disposed ||
+        currentState !== null ||
+        requestState !== null
+      ) {
+        return;
+      }
+
+      void requestNavigation(
+        new URL(window.location.href),
+        0,
+        undefined,
+        history.createDefaultUpdate(),
+      );
+    });
   }
 
   function stopRouter(): void {
@@ -1518,6 +1556,7 @@ export function createRouter(config: RouterConfig): Router {
     replaceActiveRender(null);
     clearOutlet();
     started = false;
+    startRequestQueued = false;
     requestState = null;
     navigationPhase = null;
     errorState = null;
