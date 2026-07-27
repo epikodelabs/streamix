@@ -300,7 +300,9 @@ export function composeAngularRouteView(
           ];
 
         if (parent) {
-          const outletName = route.config.outlet ?? '';
+          // The route outlet selects the application-level render target.
+          // Layout layers always compose through their primary child outlet.
+          const outletName = '';
           const outlet = findOutlet(parent.rendered.node, outletName);
 
           if (!outlet) {

@@ -107,6 +107,8 @@ export interface Route {
   name?: string;
   path: string;
   outlet?: string;
+  /** Same-path named outlets activated atomically with this primary route. */
+  outlets?: readonly Route[];
   load?: () => MaybePromise<LoadedRoute>;
   redirectTo?: string;
   data?: Record<string, unknown>;
@@ -214,13 +216,19 @@ interface RoutePattern {
   readonly parameterNames: readonly (string | null)[];
 }
 
+interface PreparedOutlet {
+  readonly name: string;
+  readonly route: ActiveRoute;
+  readonly node: Node;
+  readonly component?: unknown;
+  readonly rendered: ActiveRender;
+}
+
 interface NavigationSuccess {
   type: 'success';
   request: NavigationRequest;
   route: ActiveRoute;
-  node: Node;
-  component?: unknown;
-  rendered: ActiveRender;
+  outlets: readonly PreparedOutlet[];
 }
 
 interface NavigationRedirect {
@@ -356,16 +364,16 @@ function defaultRender(outlet: HTMLElement, node: Node): void {
   outlet?.replaceChildren(node);
 }
 
-function defaultRenderNotFound(outletName: string, outlet: HTMLElement | null): void {
+function defaultRenderNotFound(outlet: HTMLElement): void {
   const heading = document.createElement('h1');
   heading.textContent = '404 \u2014 Page Not Found';
-  outlet?.replaceChildren(heading);
+  outlet.replaceChildren(heading);
 }
 
-function defaultRenderError(outletName: string, outlet: HTMLElement | null): void {
+function defaultRenderError(outlet: HTMLElement): void {
   const heading = document.createElement('h1');
   heading.textContent = 'Page failed to load';
-  outlet?.replaceChildren(heading);
+  outlet.replaceChildren(heading);
 }
 
 const routeLoads = new WeakMap<Route, Promise<LoadedRoute>>();
@@ -422,7 +430,8 @@ export function createRouter(config: RouterConfig): Router {
   let navigationId = 0;
   let latestRequestId = 0;
   let activeController: AbortController | null = null;
-  let activeRender: ActiveRender | null = null;
+  const activeRenders = new Map<string, ActiveRender>();
+  const activeRouteStates = new Map<string, ActiveRoute>();
   let startRequestQueued = false;
   let preloadTask: Promise<void> | null = null;
   let preloadQueued = false;
@@ -451,29 +460,53 @@ export function createRouter(config: RouterConfig): Router {
     }
   });
 
-  renderNotFound = config.renderNotFound ?? ((outletName) => {
-    const outlet = resolveOutlet();
-    if (outlet) {
-      defaultRenderNotFound(outletName, outlet);
-    }
-  });
+  renderNotFound =
+    config.renderNotFound ??
+    ((_outletName) => {
+      const outlet = resolveOutlet();
+      if (outlet) defaultRenderNotFound(outlet);
+    });
 
-  renderError = config.renderError ?? ((outletName) => {
-    const outlet = resolveOutlet();
-    if (outlet) {
-      defaultRenderError(outletName, outlet);
-    }
-  });
+  renderError =
+    config.renderError ??
+    ((_outletName) => {
+      const outlet = resolveOutlet();
+      if (outlet) defaultRenderError(outlet);
+    });
 
   function disposeRender(renderInstance: ActiveRender | null): void {
     if (!renderInstance) return;
     renderInstance.dispose();
   }
 
-  function replaceActiveRender(renderInstance: ActiveRender | null): void {
-    const previousRender = activeRender;
-    activeRender = renderInstance;
+  function replaceActiveRender(
+    outletName: string,
+    renderInstance: ActiveRender | null,
+  ): void {
+    const previousRender =
+      activeRenders.get(outletName) ?? null;
+
+    if (renderInstance) {
+      activeRenders.set(
+        outletName,
+        renderInstance,
+      );
+    } else {
+      activeRenders.delete(
+        outletName,
+      );
+    }
+
     disposeRender(previousRender);
+  }
+
+  function disposeAllRenders(): void {
+    for (const renderInstance of activeRenders.values()) {
+      disposeRender(renderInstance);
+    }
+
+    activeRenders.clear();
+    activeRouteStates.clear();
   }
 
   function clearOutlet(): void {
@@ -885,31 +918,37 @@ export function createRouter(config: RouterConfig): Router {
 
   async function runCanDeactivateGuards(
     nextUrl: URL,
-    signal: AbortSignal
+    signal: AbortSignal,
   ): Promise<GuardResult> {
-    const activeRoute = currentState;
-    if (!activeRoute) return true;
+    const routes = activeRouteStates.size > 0
+      ? [...activeRouteStates.values()]
+      : currentState
+        ? [currentState]
+        : [];
 
-    const context: DeactivationContext = {
-      ...activeRoute,
-      nextUrl,
-      signal,
-    };
-    const loaded = await loadRoute(activeRoute.config);
-    throwIfAborted(signal);
-    for (const guard of loaded.canDeactivate ?? []) {
-      const result = await executeDeactivationGuard(guard, context);
+    for (const activeRoute of routes) {
+      const context: DeactivationContext = {
+        ...activeRoute,
+        nextUrl,
+        signal,
+      };
+      const loaded = await loadRoute(activeRoute.config);
       throwIfAborted(signal);
-      const redirect = readRedirect(result);
-      if (redirect) {
-        const redirectUrl = resolveAppUrl(redirect.redirectTo, 'href');
-        if (redirectUrl.href === nextUrl.href) {
-          warn('Ignoring canDeactivate redirect to the pending URL', redirect.redirectTo);
-          continue;
+
+      for (const guard of loaded.canDeactivate ?? []) {
+        const result = await executeDeactivationGuard(guard, context);
+        throwIfAborted(signal);
+        const redirect = readRedirect(result);
+        if (redirect) {
+          const redirectUrl = resolveAppUrl(redirect.redirectTo, 'href');
+          if (redirectUrl.href === nextUrl.href) {
+            warn('Ignoring canDeactivate redirect to the pending URL', redirect.redirectTo);
+            continue;
+          }
+          return redirect;
         }
-        return redirect;
+        if (result === false) return false;
       }
-      if (result === false) return false;
     }
 
     return true;
@@ -917,10 +956,10 @@ export function createRouter(config: RouterConfig): Router {
 
   async function renderMatchedRoute(
     routeState: ActivatedRoute,
+    loaded: LoadedRoute,
     signal: AbortSignal,
   ): Promise<{ node: Node; component?: unknown; rendered: ActiveRender }> {
     const destroyController = new AbortController();
-    const loaded = await loadRoute(routeState.config);
     throwIfAborted(signal);
     if (!loaded.component) {
       throw new Error(`Matched route "${routeState.config.path}" has no component`);
@@ -945,12 +984,17 @@ export function createRouter(config: RouterConfig): Router {
     };
   }
 
-  async function performNavigation(request: NavigationRequest, signal: AbortSignal): Promise<NavigationResult> {
+  async function performNavigation(
+    request: NavigationRequest,
+    signal: AbortSignal,
+  ): Promise<NavigationResult> {
     trace('Navigation started', request.url.href);
     setPhase(request, 'recognizing');
 
     if (!isInsideBase(request.url.pathname)) {
-      throw new Error(`URL "${request.url.pathname}" is outside router base "${baseHref}"`);
+      throw new Error(
+        `URL "${request.url.pathname}" is outside router base "${baseHref}"`,
+      );
     }
 
     const path = stripBaseHref(request.url.pathname, baseHref);
@@ -962,182 +1006,137 @@ export function createRouter(config: RouterConfig): Router {
     if (deactivationResult === false) {
       return { type: 'blocked', request };
     }
-    if (deactivationResult) {
-      const redirect = readRedirect(deactivationResult);
-      if (redirect) return { type: 'redirect', request, ...redirect };
+
+    const deactivationRedirect = deactivationResult
+      ? readRedirect(deactivationResult)
+      : null;
+    if (deactivationRedirect) {
+      return { type: 'redirect', request, ...deactivationRedirect };
     }
 
     if (!match) {
       return { type: 'not-found', request };
     }
 
-    const historyState =
-      request.historyUpdate
-        .nextEntry?.state ?? null;
+    const primaryRoute = match.route;
+    const routes = [primaryRoute, ...(primaryRoute.outlets ?? [])];
+    const historyState = request.historyUpdate.nextEntry?.state ?? null;
 
-    if (match.route.redirectTo) {
+    if (primaryRoute.redirectTo) {
       return {
         type: 'redirect',
         request,
-        redirectTo:
-          interpolateRedirect(
-            match.route.redirectTo,
-            match.params,
-          ),
+        redirectTo: interpolateRedirect(primaryRoute.redirectTo, match.params),
         replace: true,
       };
     }
 
-    const loadedRoute =
-      await loadRoute(
-        match.route,
-      );
-
+    const loadedRoutes = await Promise.all(routes.map(loadRoute));
     throwIfAborted(signal);
 
-    // Parse URL-derived values before guards and resolvers. Public route
-    // contexts therefore never expose unvalidated path or query strings.
-    const [
-      parsedParams,
-      parsedQuery,
-    ] = await Promise.all([
-      loadedRoute.parseParams
-        ? loadedRoute.parseParams(
-            match.params,
-            request.url,
-            signal,
-          )
+    // The primary route owns URL parsing. Secondary outlets share the same
+    // validated params and query because they are not independently navigable.
+    const primaryLoaded = loadedRoutes[0];
+    const [parsedParams, parsedQuery] = await Promise.all([
+      primaryLoaded.parseParams
+        ? primaryLoaded.parseParams(match.params, request.url, signal)
         : Promise.resolve(
-            Object.freeze({
-              ...match.params,
-            }) as RouteParams,
+            Object.freeze({ ...match.params }) as RouteParams,
           ),
-
-      loadedRoute.parseQuery
-        ? loadedRoute.parseQuery(
-            request.url,
-            signal,
-          )
-        : Promise.resolve(
-            readRawQuery(
-              request.url,
-            ),
-          ),
+      primaryLoaded.parseQuery
+        ? primaryLoaded.parseQuery(request.url, signal)
+        : Promise.resolve(readRawQuery(request.url)),
     ]);
-
     throwIfAborted(signal);
 
-    const baseRoute:
-      ActivatedRoute = {
+    const sharedParams = Object.freeze({ ...parsedParams });
+    const sharedQuery = Object.freeze({ ...parsedQuery });
+
+    const baseRoutes = routes.map<ActivatedRoute>(route => ({
       url: request.url,
       path,
-      params:
-        Object.freeze({
-          ...parsedParams,
-        }),
-      query:
-        Object.freeze({
-          ...parsedQuery,
-        }),
-      data:
-        Object.freeze(match.route.data ?? {}),
+      params: sharedParams,
+      query: sharedQuery,
+      data: Object.freeze(route.data ?? {}),
       historyState,
-      config:
-        match.route,
-    };
+      config: route,
+    }));
 
-    const guardContext:
-      NavigationContext = {
-      ...baseRoute,
-      signal,
-    };
+    for (let index = 0; index < loadedRoutes.length; index++) {
+      const context: NavigationContext = {
+        ...baseRoutes[index],
+        signal,
+      };
 
-    for (
-      const guard
-      of loadedRoute.canActivate ?? []
-    ) {
-      const result =
-        await executeGuard(
-          guard,
-          guardContext,
-        );
-
-      throwIfAborted(signal);
-
-      const redirect =
-        readRedirect(result);
-
-      if (redirect) {
-        return {
-          type: 'redirect',
-          request,
-          ...redirect,
-        };
-      }
-
-      if (result === false) {
-        return {
-          type: 'blocked',
-          request,
-        };
+      for (const guard of loadedRoutes[index].canActivate ?? []) {
+        const result = await executeGuard(guard, context);
+        throwIfAborted(signal);
+        const redirect = readRedirect(result);
+        if (redirect) {
+          return { type: 'redirect', request, ...redirect };
+        }
+        if (result === false) {
+          return { type: 'blocked', request };
+        }
       }
     }
 
-    setPhase(
-      request,
-      'resolving',
-    );
+    setPhase(request, 'resolving');
 
-    const resolvedData:
-      Record<string, unknown> = {};
-
-    const resolveContext:
-      NavigationContext = {
-      ...baseRoute,
-      signal,
-    };
-
-    const values =
-      await Promise.all(
-        Object.entries(
-          loadedRoute.resolve ?? {},
-        ).map(
-          async (
-            [key, resolver],
-          ) => {
-            const value =
-              await executeResolver(
-                resolver,
-                resolveContext,
-              );
-
-            return [
+    const activatedRoutes = await Promise.all(
+      baseRoutes.map(async (baseRoute, index): Promise<ActiveRoute> => {
+        const entries = await Promise.all(
+          Object.entries(loadedRoutes[index].resolve ?? {}).map(
+            async ([key, resolver]) => [
               key,
-              value,
-            ] as const;
-          },
-        ),
-      );
+              await executeResolver(resolver, { ...baseRoute, signal }),
+            ] as const,
+          ),
+        );
+        throwIfAborted(signal);
 
-    throwIfAborted(signal);
-
-    Object.assign(
-      resolvedData,
-      Object.fromEntries(values),
-    );
-
-    const activatedRoute:
-      ActiveRoute = {
-      ...baseRoute,
-      data: Object.freeze({
-        ...baseRoute.data,
-        ...resolvedData,
+        return {
+          ...baseRoute,
+          data: Object.freeze({
+            ...baseRoute.data,
+            ...Object.fromEntries(entries),
+          }),
+        };
       }),
-    };
+    );
 
     setPhase(request, 'loading');
-    const { node, component, rendered } = await renderMatchedRoute(activatedRoute, signal);
-    return { type: 'success', request, route: activatedRoute, node, component, rendered };
+
+    const prepared: PreparedOutlet[] = [];
+    try {
+      for (let index = 0; index < activatedRoutes.length; index++) {
+        const route = activatedRoutes[index];
+        const rendered = await renderMatchedRoute(
+          route,
+          loadedRoutes[index],
+          signal,
+        );
+        prepared.push({
+          name: route.config.outlet?.trim() ?? '',
+          route,
+          ...rendered,
+        });
+      }
+    } catch (error) {
+      for (let index = prepared.length - 1; index >= 0; index--) {
+        try {
+          prepared[index].rendered.dispose();
+        } catch {}
+      }
+      throw error;
+    }
+
+    return {
+      type: 'success',
+      request,
+      route: activatedRoutes[0],
+      outlets: Object.freeze(prepared),
+    };
   }
 
   async function runNavigation(request: NavigationRequest, signal: AbortSignal): Promise<void> {
@@ -1147,7 +1146,9 @@ export function createRouter(config: RouterConfig): Router {
       const result = await performNavigation(request, signal);
       if (disposed || result.request.id !== latestRequestId) {
         if (result.type === 'success') {
-          result.rendered.dispose();
+          for (const outlet of result.outlets) {
+            outlet.rendered.dispose();
+          }
         }
         return;
       }
@@ -1322,21 +1323,30 @@ export function createRouter(config: RouterConfig): Router {
           phase: 'success',
           routeConfig: result.route.config,
         }, () => {
-          replaceActiveRender(result.rendered);
-          const outletName = result.route.config.outlet ?? '';
-          const outlet = resolveOutlet();
+          const nextNames = new Set(result.outlets.map(outlet => outlet.name));
 
-          render(
-            outletName,
-            result.node,
-            result.route,
-          );
+          // Render every prepared node before disposing routes that disappear.
+          // All asynchronous work has completed at this point, so the commit is
+          // synchronous and cannot expose partially loaded outlet state.
+          for (const outlet of result.outlets) {
+            render(outlet.name, outlet.node, outlet.route);
+          }
 
-          if (outlet) {
-            notifyOutletActivate(
-              outlet,
-              result.component,
-            );
+          for (const [name] of activeRenders) {
+            if (!nextNames.has(name)) {
+              replaceActiveRender(name, null);
+              activeRouteStates.delete(name);
+            }
+          }
+
+          for (const outlet of result.outlets) {
+            replaceActiveRender(outlet.name, outlet.rendered);
+            activeRouteStates.set(outlet.name, outlet.route);
+
+            const target = outlet.name === '' ? resolveOutlet() : null;
+            if (target) {
+              notifyOutletActivate(target, outlet.component);
+            }
           }
         });
         history.commitUpdate(
@@ -1410,12 +1420,19 @@ export function createRouter(config: RouterConfig): Router {
           phase: 'not-found',
           routeConfig: null,
         }, () => {
-          renderNotFound(
-            '',
-            result.request.url,
-            publicRouter,
-          );
-          replaceActiveRender(null);
+          const outlet =
+            resolveOutlet();
+
+          if (outlet) {
+            renderNotFound(
+              '',
+              result.request.url,
+              publicRouter,
+            );
+          }
+
+          disposeAllRenders();
+          activeRouteStates.clear();
         });
         history.commitUpdate(
           result.request.historyUpdate,
@@ -1441,12 +1458,19 @@ export function createRouter(config: RouterConfig): Router {
           routeConfig: null,
           error: result.error,
         }, () => {
-          renderError(
-            '',
-            result.error,
-            publicRouter,
-          );
-          replaceActiveRender(null);
+          const outlet =
+            resolveOutlet();
+
+          if (outlet) {
+            renderError(
+              '',
+              result.error,
+              publicRouter,
+            );
+          }
+
+          disposeAllRenders();
+          activeRouteStates.clear();
         });
         history.rollbackUpdate(result.request.historyUpdate);
         currentState = null;
@@ -1596,7 +1620,7 @@ export function createRouter(config: RouterConfig): Router {
     window.removeEventListener('popstate', handlePopState);
     document.removeEventListener('click', handleClick);
     cancelActiveNavigation();
-    replaceActiveRender(null);
+    disposeAllRenders();
     clearOutlet();
     started = false;
     startRequestQueued = false;

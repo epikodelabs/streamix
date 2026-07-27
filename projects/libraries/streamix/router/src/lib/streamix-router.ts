@@ -361,75 +361,30 @@ function adaptLoaders(
 
 function adaptParamsParser(
   route: StreamixRoute,
-  injector:
-    EnvironmentInjector,
-): Route['load'] extends
-  () => MaybePromise<infer TLoaded>
-    ? TLoaded extends {
-        parseParams?:
-          infer TParser;
-      }
-      ? TParser
-      : never
-    : never {
-  const schema =
-    route.paramsSchema;
+  injector: EnvironmentInjector,
+): LoadedRoute['parseParams'] {
+  const schema = route.paramsSchema;
+  if (!schema) return undefined;
 
-  if (!schema) {
-    return undefined as never;
-  }
-
-  return ((
-    params:
-      Readonly<
-        Record<string, string>
-      >,
-  ) =>
+  return (params, _url, _signal) =>
     runInInjectionContext(
       injector,
-      () =>
-        Promise.resolve(
-          parseParamsRecord(
-            schema,
-            params,
-          ),
-        ),
-    )) as never;
+      () => Promise.resolve(parseParamsRecord(schema, params)),
+    );
 }
 
 function adaptQueryParser(
   route: StreamixRoute,
-  injector:
-    EnvironmentInjector,
-): Route['load'] extends
-  () => MaybePromise<unknown>
-    ? LoadedRoute extends {
-        parseParams?:
-          infer TParser;
-      }
-      ? TParser
-      : never
-    : never {
-  const schema =
-    route.querySchema;
+  injector: EnvironmentInjector,
+): LoadedRoute['parseQuery'] {
+  const schema = route.querySchema;
+  if (!schema) return undefined;
 
-  if (!schema) {
-    return undefined as never;
-  }
-
-  return ((
-    url: URL,
-  ) =>
+  return (url, _signal) =>
     runInInjectionContext(
       injector,
-      () =>
-        Promise.resolve(
-          parseQueryRecord(
-            schema,
-            url,
-          ),
-        ),
-    )) as never;
+      () => Promise.resolve(parseQueryRecord(schema, url)),
+    );
 }
 
 async function resolveViews(
@@ -456,88 +411,80 @@ async function resolveViews(
   ]);
 }
 
+function adaptRoute(
+  route: StreamixRoute,
+  path: string,
+  redirectTo: string | undefined,
+  layouts: readonly StreamixLayout[],
+  appRef: ApplicationRef,
+  injector: EnvironmentInjector,
+): Route {
+  return {
+    name: route.name,
+    path,
+    outlet: route.outlet,
+    redirectTo,
+    data: route.data,
+    preload: route.preload,
+    viewTransition: route.viewTransition,
+
+    load: async () => {
+      if (redirectTo) {
+        return {};
+      }
+
+      const views = await resolveViews(layouts, route);
+
+      return {
+        component: composeAngularRouteView(
+          appRef,
+          injector,
+          {
+            routeToken: STREAMIX_ROUTE,
+            contextToken: STREAMIX_ROUTE_CONTEXT,
+          },
+          views,
+        ),
+        canActivate: adaptBeforeEnter(route.beforeEnter, injector),
+        canDeactivate: adaptBeforeLeave(route.beforeLeave, injector),
+        resolve: adaptLoaders(route, injector),
+        parseParams: adaptParamsParser(route, injector),
+        parseQuery: adaptQueryParser(route, injector),
+      };
+    },
+  };
+}
+
 function adaptRoutes(
   entries: StreamixRoutes,
   appRef: ApplicationRef,
-  injector:
-    EnvironmentInjector,
+  injector: EnvironmentInjector,
 ): Route[] {
-  return compileRoutes(entries)
-    .map(
-      ({
-        route,
-        path,
-        redirectTo,
-        layouts,
-      }) => ({
-        name: route.name,
-        path,
-        outlet: route.outlet,
-        redirectTo,
-        data: route.data,
-        preload:
-          route.preload,
-        viewTransition:
-          route.viewTransition,
-
-        load: async () => {
-          if (redirectTo) {
-            return {};
-          }
-
-          const views =
-            await resolveViews(
-              layouts,
-              route,
-            );
-
-          return {
-            component:
-              composeAngularRouteView(
-                appRef,
-                injector,
-                {
-                  routeToken:
-                    STREAMIX_ROUTE,
-                  contextToken:
-                    STREAMIX_ROUTE_CONTEXT,
-                },
-                views,
-              ),
-
-            canActivate:
-              adaptBeforeEnter(
-                route.beforeEnter,
-                injector,
-              ),
-
-            canDeactivate:
-              adaptBeforeLeave(
-                route.beforeLeave,
-                injector,
-              ),
-
-            resolve:
-              adaptLoaders(
-                route,
-                injector,
-              ),
-
-            parseParams:
-              adaptParamsParser(
-                route,
-                injector,
-              ),
-
-            parseQuery:
-              adaptQueryParser(
-                route,
-                injector,
-              ),
-          };
-        },
-      }),
+  return compileRoutes(entries).map(group => {
+    const primary = adaptRoute(
+      group.primary.route,
+      group.path,
+      group.primary.redirectTo,
+      group.layouts,
+      appRef,
+      injector,
     );
+
+    const outlets = group.outlets.map(compiled =>
+      adaptRoute(
+        compiled.route,
+        group.path,
+        compiled.redirectTo,
+        group.layouts,
+        appRef,
+        injector,
+      ),
+    );
+
+    return outlets.length > 0
+      ? { ...primary, outlets: Object.freeze(outlets) }
+      : primary;
+  });
 }
 
 function interpolateNamedPath(
@@ -754,56 +701,6 @@ export class StreamixRouter<
 
           target.replaceChildren(
             node,
-          );
-        },
-
-        renderNotFound: (
-          targetName,
-        ) => {
-          const target =
-            this.outlets.get(
-              targetName,
-            );
-
-          if (!target) {
-            return;
-          }
-
-          const heading =
-            document.createElement(
-              'h1',
-            );
-
-          heading.textContent =
-            '404 — Page Not Found';
-
-          target.replaceChildren(
-            heading,
-          );
-        },
-
-        renderError: (
-          targetName,
-        ) => {
-          const target =
-            this.outlets.get(
-              targetName,
-            );
-
-          if (!target) {
-            return;
-          }
-
-          const heading =
-            document.createElement(
-              'h1',
-            );
-
-          heading.textContent =
-            'Page failed to load';
-
-          target.replaceChildren(
-            heading,
           );
         },
 

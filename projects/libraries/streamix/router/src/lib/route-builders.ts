@@ -75,7 +75,7 @@ export function redirectRoute<
   redirectTo: TRedirectTo,
   options: Omit<
     StreamixRouteOptions<TName, undefined, undefined>,
-    'redirectTo' | 'paramsSchema' | 'querySchema'
+    'redirectTo' | 'paramsSchema' | 'querySchema' | 'outlet'
   > = {},
 ): StreamixRoute<
   TPath,
