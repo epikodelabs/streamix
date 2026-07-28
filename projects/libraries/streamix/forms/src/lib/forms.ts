@@ -1,4 +1,6 @@
-import { atom, type Atom, type Subscription, type Writable } from "@epikodelabs/streamix";
+import { atom, type Atom, type Subscription, type Writable } from "./reactive-state";
+
+export type { Atom, Subscription, Writable } from "./reactive-state";
 
 /**
  * A keyed validation-result dictionary.
