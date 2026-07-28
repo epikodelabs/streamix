@@ -1,6 +1,6 @@
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { StreamixOutlet } from '../lib/outlet';
+import { StreamixOutlet } from '@epikodelabs/streamix/router';
 
 @Component({
   standalone: true,

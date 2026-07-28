@@ -8,13 +8,11 @@ import {
   layout,
   lazyLayout,
   lazyRoute,
-  route,
-} from '../lib/route-builders';
-import type { StreamixRoutes } from '../lib/route-types';
-import {
-  StreamixRouter,
   provideStreamixRouter,
-} from '../lib/streamix-router';
+  route,
+  StreamixRouter,
+  type StreamixRoutes,
+} from '@epikodelabs/streamix/router';
 
 @Component({ standalone: true, template: '<h1>Home</h1>' })
 class HomeComponent {}

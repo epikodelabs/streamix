@@ -1,7 +1,4 @@
-import { s } from '../lib/query-schema';
-import { layout, route } from '../lib/route-builders';
-import type { StreamixRoutes } from '../lib/route-types';
-import type { StreamixRouter } from '../lib/streamix-router';
+import { layout, route, s, type StreamixRoutes, type StreamixRouter } from '@epikodelabs/streamix/router';
 
 class DashboardLayout {}
 class DashboardPage {}

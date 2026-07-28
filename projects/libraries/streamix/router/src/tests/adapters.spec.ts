@@ -3,9 +3,8 @@ import { Component, Input } from '@angular/core';
 import {
   adaptRouteComponent,
   bindRouteInputs,
-} from '../lib/route-adapter';
-
-import type { StreamixRouteProviders } from '../lib/route-types';
+  type StreamixRouteProviders,
+} from '@epikodelabs/streamix/router';
 
 @Component({
   template: '',
