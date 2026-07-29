@@ -7,7 +7,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  * This stream is a wrapper around the `ResizeObserver` API.
  *
  * **Behavior:**
- * - Resolves the element once on first subscription.
+ * - Reads the element once on first subscription.
  * - Emits the current width and height whenever the element is resized.
  * - Emits the initial size on start.
  * - Starts observing on first subscriber.

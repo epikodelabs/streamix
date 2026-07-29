@@ -8,7 +8,7 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
  * for reacting to DOM structure or attribute changes.
  *
  * **Behavior:**
- * - Resolves the target element and options once on first subscription.
+ * - Reads the target element and options once on first subscription.
  * - Emits mutation records whenever changes occur.
  * - Starts observing on first subscriber.
  * - Stops observing when the last subscriber unsubscribes.

@@ -5,8 +5,8 @@ import { createSharedSource } from "../utils/sharedSource";
  * Creates an atom that emits events of the specified type from the given EventTarget.
  *
  * @template T The type of the event to emit.
- * @param target The event target to listen to (or a promise that resolves to one).
- * @param event The name of the event to listen for (or a promise that resolves to one).
+ * @param target The event target to listen to.
+ * @param event The name of the event to listen for.
  * @param options Optional event listener options.
  * @returns An atom that emits the event objects as they occur.
  */

@@ -11,7 +11,7 @@ import {
  * for lazy loading, visibility tracking, and viewport-aware effects.
  *
  * **Behavior:**
- * - Resolves the element and options once on first subscription.
+ * - Reads the element and options once on first subscription.
  * - Emits the current intersection state whenever it changes.
  * - Starts observing on first subscriber.
  * - Stops observing when the last subscriber unsubscribes.

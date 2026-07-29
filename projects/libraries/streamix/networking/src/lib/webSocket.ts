@@ -65,7 +65,7 @@ const WS_OPEN = 1;
  * Features:
  * - Bidirectional messaging
  * - Automatic send queue while connecting
- * - Async URL / socket factory support
+ * - Async socket factory support
  * - Proper stream termination semantics
  * - AbortSignal support
  * - Cleanup-safe event handling
