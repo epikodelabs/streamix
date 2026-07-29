@@ -1,8 +1,6 @@
 import {
   createSharedSource,
-  isPromiseLike,
   type Atom,
-  type MaybePromise,
 } from "@epikodelabs/streamix";
 
 /**
@@ -20,13 +18,13 @@ import {
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @param element The DOM element (or promise) to observe.
- * @param options Optional IntersectionObserver options (or promise).
+ * @param element The DOM element to observe.
+ * @param options Optional IntersectionObserver options.
  * @returns {Atom<boolean>} An atom emitting intersection state.
  */
 export function intersection(
-  element: MaybePromise<Element>,
-  options?: MaybePromise<IntersectionObserverInit>
+  element: Element,
+  options?: IntersectionObserverInit
 ): Atom<boolean> {
   return createSharedSource<boolean>((push) => {
     let cleaned = false;
@@ -67,8 +65,8 @@ export function intersection(
     }
 
     void (async () => {
-      const el = (isPromiseLike(element) ? await element : element) ?? null;
-      const resolvedOptions = isPromiseLike(options) ? await options : options;
+      const el = element ?? null;
+      const resolvedOptions = options;
 
       if (cleaned || !el) {
         return;

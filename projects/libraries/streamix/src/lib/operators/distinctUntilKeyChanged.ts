@@ -18,20 +18,12 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
  * @returns An `Operator<T, T>` instance that can be used in a stream's `pipe` method.
  */
 export const distinctUntilKeyChanged = <T extends object = any, K extends keyof T = keyof T>(
-  key: MaybePromise<K>,
+  key: K,
   comparator?: (prev: T[K], curr: T[K]) => MaybePromise<boolean>
 ): Operator<T, T> =>
   createOperator<T, T>('distinctUntilKeyChanged', function (this: Operator, source) {
     let lastValue: T | undefined;
     let isFirst = true;
-    let resolvedKey: K | undefined;
-
-    const getKey = async () => {
-      if (resolvedKey === undefined) {
-        resolvedKey = isPromiseLike(key) ? await key : key;
-      }
-      return resolvedKey;
-    };
 
     return {
       next: async () => {
@@ -40,7 +32,7 @@ export const distinctUntilKeyChanged = <T extends object = any, K extends keyof 
           if (result.done) return DONE;
 
           const current = result.value;
-          const currentKey = await getKey();
+          const currentKey = key;
 
           if (isFirst) {
             isFirst = false;

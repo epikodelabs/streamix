@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
+import { createPushOperator } from "../atoms";
 import { normalizeError } from "../atoms";
 
 /**
@@ -11,18 +11,16 @@ import { normalizeError } from "../atoms";
  * @param ms The time in milliseconds to delay each value.
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
-export function delay<T = any>(ms: MaybePromise<number>) {
+export function delay<T = any>(ms: number) {
   return createPushOperator<T>('delay', (source, output) => {
     void (async () => {
       try {
-        const resolvedMs = isPromiseLike(ms) ? await ms : ms;
-
         while (true) {
           const result = await source.next();
           if (result.done) break;
 
-          if (resolvedMs !== undefined) {
-            await new Promise((resolve) => setTimeout(resolve, resolvedMs));
+          if (ms !== undefined) {
+            await new Promise((resolve) => setTimeout(resolve, ms));
           }
 
           output.push(result.value!);

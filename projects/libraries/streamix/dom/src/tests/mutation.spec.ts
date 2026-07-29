@@ -98,28 +98,6 @@ idescribe('onMutation', () => {
       nestedParent.appendChild(newChild);
     }, 100);
   });
-
-  it('should resolve promised element and options before observing', (done) => {
-    const element$ = Promise.resolve(observedElement);
-    const options$ = Promise.resolve({ attributes: true });
-
-    const mutation = on('mutation', element$, options$);
-    const unsubscribe = mutation.subscribe((mutations: MutationRecord[]) => {
-        try {
-          expect(mutations.some(m => m.type === 'attributes')).toBeTrue();
-          expect(mutations.some(m => m.attributeName === 'data-test')).toBeTrue();
-          unsubscribe();
-          done();
-        } catch (error: any) {
-          done.fail(error);
-        }
-      });
-
-    setTimeout(() => {
-      observedElement.setAttribute('data-test', 'async-value');
-    }, 100);
-  });
-
   it('should no-op when MutationObserver is unavailable', (done) => {
     const savedObserver = (globalThis as any).MutationObserver;
     (globalThis as any).MutationObserver = undefined;
@@ -184,64 +162,6 @@ idescribe('onMutation', () => {
       }
     }
   });
-
-  it('does not observe when unsubscribed before promise inputs resolve (fake observer)', async () => {
-    const originalObserver = (globalThis as any).MutationObserver;
-
-    const observeSpy = jasmine.createSpy('observe');
-
-    class FakeMutationObserver {
-      constructor(_cb: (mutations: MutationRecord[]) => void) {}
-      observe(el: Element, opts?: MutationObserverInit) {
-        observeSpy(el, opts);
-      }
-      disconnect() {}
-    }
-
-    (globalThis as any).MutationObserver = FakeMutationObserver;
-
-    try {
-      let resolveElement!: (el: Element) => void;
-      let resolveOptions!: (opts: MutationObserverInit) => void;
-
-      const element$ = new Promise<Element>((resolve) => {
-        resolveElement = resolve;
-      });
-      const options$ = new Promise<MutationObserverInit>((resolve) => {
-        resolveOptions = resolve;
-      });
-
-      const values: MutationRecord[][] = [];
-      const unsubscribe = on('mutation', element$, options$).subscribe(v => values.push(v));
-
-      unsubscribe();
-
-      resolveElement(observedElement);
-      resolveOptions({ attributes: true });
-
-      await new Promise(resolve => setTimeout(resolve, 0));
-
-      expect(observeSpy).not.toHaveBeenCalled();
-      expect(values).toEqual([]);
-    } finally {
-      if (originalObserver) {
-        (globalThis as any).MutationObserver = originalObserver;
-      } else {
-        delete (globalThis as any).MutationObserver;
-      }
-    }
-  });
-
-  it('handles null element from promise resolution', async () => {
-    const values: MutationRecord[][] = [];
-    const unsubscribe = on('mutation', Promise.resolve(null as any)).subscribe(v => values.push(v));
-
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    expect(values).toEqual([]);
-    unsubscribe();
-  });
-
   it('handles synchronous null element gracefully', async () => {
     // Skip: MutationObserver.observe() requires a valid Node parameter
     // Null checking happens before observe() is called in implementation
@@ -261,23 +181,6 @@ idescribe('onMutation', () => {
 
     sub1();
     sub2();
-  });
-
-  it('resolves options promise independently', async () => {
-    const options$ = Promise.resolve({ attributes: true });
-
-    const values: MutationRecord[][] = [];
-    const unsubscribe = on('mutation', observedElement, options$).subscribe(v => values.push(v));
-
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    observedElement.setAttribute('data-test', 'value');
-
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    expect(values.some(arr => arr.some(m => m.type === 'attributes'))).toBeTrue();
-
-    unsubscribe();
   });
 });
 

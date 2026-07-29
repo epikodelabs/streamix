@@ -137,11 +137,11 @@ describe('retry', () => {
     expect(result).toEqual([1, 2, 3, 4]);
   });
 
-  it('should support promise-like options and a promise-produced plain value', async () => {
+  it('should support async factory results with synchronous retry options', async () => {
     const factory = jasmine.createSpy('factory').and.callFake(() => Promise.resolve(5));
 
     const result: number[] = [];
-    const atom = retry(factory, Promise.resolve(0), undefined as any);
+    const atom = retry(factory, 0, undefined as any);
 
     for await (const value of iterate(atom)) {
       result.push(value);
@@ -253,43 +253,6 @@ describe('retry', () => {
 
     expect(values).toEqual([]);
     expect(factory).toHaveBeenCalledTimes(1);
-  });
-
-  it('should wait for a promised delay before retrying', async () => {
-    let attempt = 0;
-    let delayResolve!: (value: number) => void;
-    const delay$ = new Promise<number>((resolve) => {
-      delayResolve = resolve;
-    });
-
-    const factory = jasmine.createSpy('factory').and.callFake(() => {
-      attempt++;
-      return flow<number>( async function* () {
-        if (attempt === 1) {
-          yield 1;
-          throw new Error('Need retry');
-        }
-        yield 2;
-      });
-    });
-
-    const result: number[] = [];
-    void (async () => {
-      for await (const value of iterate(retry(factory, 1, delay$))) {
-        result.push(value);
-      }
-    })();
-
-    await sleep(50);
-    expect(factory).toHaveBeenCalledTimes(1);
-    expect(result).toEqual([1]);
-
-    delayResolve(0);
-
-    await sleep(0);
-
-    expect(factory).toHaveBeenCalledTimes(2);
-    expect(result).toEqual([1, 2]);
   });
 
   it('should abort at loop start when signal is already aborted', async () => {

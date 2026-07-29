@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from "../atoms";
+import { createOperator, DONE, type Operator } from "../atoms";
 
 /**
  * Creates a stream operator that immediately throws an error with the provided message.
@@ -14,14 +14,14 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator }
  * @param message The error message to be thrown.
  * @returns An `Operator` instance that creates a stream which errors upon its first request.
  */
-export const throwError = <T = any>(message: MaybePromise<string>) =>
+export const throwError = <T = any>(message: string) =>
   createOperator<T, never>('throwError', function (this: Operator, source) {
 
     return {
       next: async () => {
         const result = await source.next();
         if (result.done) return DONE as any;
-        throw new Error(isPromiseLike(message) ? await message : message);
+        throw new Error(message);
       }
     };
   });

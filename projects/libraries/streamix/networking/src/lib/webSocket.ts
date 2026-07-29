@@ -3,7 +3,6 @@ import {
     isPromiseLike,
     normalizeError,
     type Atom,
-    type MaybePromise,
 } from "@epikodelabs/streamix";
 
 /**
@@ -77,7 +76,7 @@ const WS_OPEN = 1;
  * @template T Message payload type.
  *
  * @param url
- * WebSocket URL or async URL provider.
+ * WebSocket URL.
  *
  * @param factory
  * Optional WebSocket factory for dependency injection or testing.
@@ -85,7 +84,7 @@ const WS_OPEN = 1;
  * @returns A {@link WebSocketStream} instance.
  */
 export function webSocket<T = any>(
-  url: MaybePromise<string>,
+  url: string,
   factory: (url: string) => MaybePromise<WebSocket> = (u: string) => new WebSocket(u)
 ): WebSocketStream<T> {
   /**
@@ -266,8 +265,7 @@ export function webSocket<T = any>(
    */
   const init$ = (async () => {
     try {
-      const resolvedUrl = isPromiseLike(url) ? await url : url;
-      const created = factory(resolvedUrl);
+      const created = factory(url);
 
       socket = isPromiseLike(created)
         ? await created

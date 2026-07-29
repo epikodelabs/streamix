@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, normalizeError, type MaybePromise } from "../atoms";
+import { createPushOperator, normalizeError } from "../atoms";
 
 /**
  * Creates a throttle operator that emits the first value immediately, then ignores subsequent
@@ -13,7 +13,7 @@ import { createPushOperator, isPromiseLike, normalizeError, type MaybePromise } 
  * @param duration The throttle duration in milliseconds.
  * @returns An Operator instance that applies throttling to the source stream.
  */
-export const throttle = <T = any>(duration: MaybePromise<number>) =>
+export const throttle = <T = any>(duration: number) =>
   createPushOperator<T>('throttle', (source, output) => {
     let lastEmit = -Infinity; // Initialize to -Infinity to ensure the first value is always emitted as a leading value
     let pendingResult: IteratorResult<T> | undefined;
@@ -42,7 +42,7 @@ export const throttle = <T = any>(duration: MaybePromise<number>) =>
 
     void (async () => {
       try {
-        resolvedDuration = isPromiseLike(duration) ? await duration : duration;
+        resolvedDuration = duration;
 
         while (true) {
           const result = await source.next();

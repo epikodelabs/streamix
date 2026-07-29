@@ -1,4 +1,4 @@
-import { flow, isPromiseLike, type Atom, type MaybePromise } from '@epikodelabs/streamix';
+import { flow, type Atom } from '@epikodelabs/streamix';
 
 /**
  * Creates a stream that performs a JSONP request and emits the resulting data once.
@@ -10,11 +10,11 @@ import { flow, isPromiseLike, type Atom, type MaybePromise } from '@epikodelabs/
  * value and then completes.
  *
  * @template T The type of the JSONP data to be emitted.
- * @param {MaybePromise<string>} url The URL to make the JSONP request to.
- * @param {MaybePromise<string>} [callbackParam='callback'] The name of the query parameter for the callback function.
+ * @param {string} url The URL to make the JSONP request to.
+ * @param {string} [callbackParam='callback'] The name of the query parameter for the callback function.
  * @returns {Atom<T>} A new atom that emits the JSONP data and then completes.
  */
-export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePromise<string> = 'callback'): Atom<T> {
+export function jsonp<T = any>(url: string, callbackParam: string = 'callback'): Atom<T> {
   return flow<T>(async function* (signal) {
     if (
       typeof document === "undefined" ||
@@ -24,13 +24,10 @@ export function jsonp<T = any>(url: MaybePromise<string>, callbackParam: MaybePr
       throw new Error("JSONP requires a browser environment");
     }
 
-    const resolvedUrl = isPromiseLike(url) ? await url : url;
-    const resolvedCallbackParam = isPromiseLike(callbackParam) ? await callbackParam : callbackParam;
-
-    const uniqueCallbackName = `${resolvedCallbackParam}_${Math.random().toString(36).slice(2)}`;
+    const uniqueCallbackName = `${callbackParam}_${Math.random().toString(36).slice(2)}`;
     const script = document.createElement('script');
 
-    const fullUrl = `${resolvedUrl}${resolvedUrl.includes('?') ? '&' : '?'}${resolvedCallbackParam}=${encodeURIComponent(uniqueCallbackName)}`;
+    const fullUrl = `${url}${url.includes('?') ? '&' : '?'}${callbackParam}=${encodeURIComponent(uniqueCallbackName)}`;
 
     // Promise that resolves when JSONP callback fires or rejects on error
     const data$ = new Promise<T>((resolve, reject) => {

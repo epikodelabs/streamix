@@ -223,14 +223,6 @@ idescribe("webSocket", () => {
     expect(ws).toBeDefined();
     expect(ws!.readyState).toBe(3);
   });
-
-  it("should error if socket fails to initialize (rejected URL promise)", async () => {
-    const stream = webSocket<any>(Promise.reject(new Error("bad url")), factory);
-    const iterator = iterate(stream)[Symbol.asyncIterator]();
-
-    await expectAsync(iterator.next()).toBeRejectedWithError("bad url");
-  });
-
   it("should use the default factory when none is provided", async () => {
     const originalWebSocket = (globalThis as any).WebSocket;
     (globalThis as any).WebSocket = MockWebSocket as any;

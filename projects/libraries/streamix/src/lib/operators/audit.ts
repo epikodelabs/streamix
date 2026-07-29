@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
+import { createPushOperator } from "../atoms";
 import { normalizeError } from "../atoms";
 
 /**
@@ -11,11 +11,10 @@ import { normalizeError } from "../atoms";
  * is released without surfacing them as real emissions.
  *
  * @template T The type of the values in the stream.
- * @param duration The time in milliseconds (or a promise resolving to it) to wait
- * before emitting the latest value.
+ * @param duration The time in milliseconds to wait before emitting the latest value.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const audit = <T = any>(duration: MaybePromise<number>) =>
+export const audit = <T = any>(duration: number) =>
   createPushOperator<T>('audit', (source, output) => {
     let bufferedResult: IteratorResult<T> | undefined;
     let timerId: ReturnType<typeof setTimeout> | undefined;
@@ -40,7 +39,7 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
 
     void (async () => {
       try {
-        resolvedDuration = isPromiseLike(duration) ? await duration : duration;
+        resolvedDuration = duration;
 
         while (true) {
           const result = await source.next();

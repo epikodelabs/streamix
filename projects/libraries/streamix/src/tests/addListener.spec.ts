@@ -70,24 +70,6 @@ idescribe('fromEvent', () => {
     await delay(10);
     expect(count).toBe(1);
   });
-
-  it('supports promise-based targets and event names', async () => {
-    const element = document.createElement('button');
-    const target$ = Promise.resolve(element);
-    const event$ = new Promise<string>((resolve) => setTimeout(() => resolve('click'), 0));
-
-    const atom = addListener(target$, event$);
-    let received: Event | undefined;
-    const unsubscribe = atom.subscribe(ev => { received = ev; });
-
-    await delay(20);
-    element.click();
-    await flushMicrotasks();
-
-    expect(received).toBeInstanceOf(Event);
-    unsubscribe();
-  });
-
   it('should emit to multiple subscribers', async () => {
     const element = document.createElement('button');
     const atom = addListener(element, 'click');
@@ -153,29 +135,5 @@ idescribe('fromEvent', () => {
     expect(maxActive).toBe(1);
 
     unsubscribe();
-  });
-
-  it('does not attach listener when unsubscribed before pending target resolves', async () => {
-    const element = document.createElement('button');
-
-    let listenerAdded = false;
-    const originalAdd = element.addEventListener;
-    element.addEventListener = function (...args: any[]) {
-      listenerAdded = true;
-      return originalAdd.apply(this, args as any);
-    };
-
-    const target$ = new Promise<EventTarget>((resolve) => {
-      setTimeout(() => resolve(element), 20);
-    });
-
-    const atom = addListener(target$, Promise.resolve('click'));
-    const unsubscribe = atom.subscribe(() => listenerAdded = true);
-
-    unsubscribe();
-
-    await delay(40);
-    expect(listenerAdded).toBe(false);
-    element.addEventListener = originalAdd;
   });
 });

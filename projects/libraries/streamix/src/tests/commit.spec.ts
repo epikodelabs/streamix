@@ -30,10 +30,6 @@ describe("commit", () => {
 
   it("should not emit buffered values before a delayed retry commits", async () => {
     let attempt = 0;
-    let resolveDelay!: (value: number) => void;
-    const delay$ = new Promise<number>((resolve) => {
-      resolveDelay = resolve;
-    });
 
     const factory = jasmine.createSpy("factory").and.callFake(() => {
       attempt++;
@@ -49,7 +45,7 @@ describe("commit", () => {
 
     const values: number[] = [];
     const finished = (async () => {
-      for await (const value of iterate(commit(factory, 1, delay$))) {
+      for await (const value of iterate(commit(factory, 1, 50))) {
         if (value !== undefined) values.push(value);
       }
     })();
@@ -58,7 +54,6 @@ describe("commit", () => {
     expect(factory).toHaveBeenCalledTimes(1);
     expect(values).toEqual([]);
 
-    resolveDelay(0);
     await finished;
 
     expect(factory).toHaveBeenCalledTimes(2);

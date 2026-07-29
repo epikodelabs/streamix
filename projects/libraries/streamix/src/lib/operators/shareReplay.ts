@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from "../atoms";
+import { createOperator, DONE, type Operator } from "../atoms";
 import { normalizeError } from "../atoms";
 
 /**
@@ -16,10 +16,9 @@ import { normalizeError } from "../atoms";
  *
  * @template T The type of the values in the stream.
  * @param bufferSize The number of last values to replay to new subscribers. Defaults to `Infinity`.
- *                   Can be a Promise that resolves to a number.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity) {
+export function shareReplay<T = any>(bufferSize: number = Infinity) {
   let isConnected = false;
   let resolvedSize: number | undefined;
   let sourceIterator: AsyncIterator<T> | null = null;
@@ -162,7 +161,7 @@ export function shareReplay<T = any>(bufferSize: MaybePromise<number> = Infinity
       if (initialized) return;
       initialized = true;
       if (resolvedSize === undefined) {
-        resolvedSize = isPromiseLike(bufferSize) ? await bufferSize : bufferSize;
+        resolvedSize = bufferSize;
       }
 
       subscriber.queue.push(...snapshotReplay());

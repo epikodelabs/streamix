@@ -125,33 +125,6 @@ describe('throttle', () => {
     expect(output).toEqual([1, 2, 3]);
   });
 
-  it('should wait for promised duration before starting throttle window', async () => {
-    const output: number[] = [];
-    const subject = atom<number>();
-
-    const duration = new Promise<number>((resolve) =>
-      setTimeout(() => resolve(100), 50)
-    );
-
-    const reader = (async () => {
-      for await (const v of iterate(pipe(subject, throttle(duration)))) {
-        output.push(v);
-      }
-    })();
-
-    await sleep(50);
-     // Ensure the duration promise hasn't resolved yet
-    subject.next(1);
-    subject.next(2);
-
-    await sleep(200);
-
-    subject.dispose();
-    await reader;
-    
-    expect(output).toEqual([1, 2]);
-  });
-
   it('should flush a queued trailing value before the next leading value when the timer has not fired yet', async () => {
     const dateNowSpy = spyOn(Date, 'now').and.returnValues(0, 50, 150, 150);
     const output: number[] = [];

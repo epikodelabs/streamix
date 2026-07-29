@@ -107,34 +107,6 @@ idescribe('onIntersection', () => {
       await expectAsync(firstValue<boolean>(on('intersection', element))).toBeResolvedTo(false);
     });
   });
-
-  it('supports promise-based elements and options', async () => {
-    class FakeIntersectionObserver {
-      constructor(private cb: (entries: IntersectionObserverEntry[]) => void) {}
-      observe() {
-        this.cb([{ isIntersecting: true } as IntersectionObserverEntry]);
-      }
-      disconnect() {}
-      unobserve() {}
-    }
-
-    class FakeMutationObserver {
-      constructor(_cb: () => void) {}
-      observe() {}
-      disconnect() {}
-    }
-
-    await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
-      await withGlobal('MutationObserver', FakeMutationObserver as any, async () => {
-        const element$ = Promise.resolve(element);
-        const options$ = Promise.resolve({ rootMargin: '0px' });
-        await expectAsync(firstValue<boolean>(on('intersection', element$, options$))).toBeResolvedTo(
-          true
-        );
-      });
-    });
-  });
-
   it('stops when element is removed', async () => {
     let triggerMutation: (() => void) | null = null;
 
@@ -202,50 +174,6 @@ idescribe('onIntersection', () => {
       unsubscribe();
     });
   });
-
-  it('handles null element from promise', async () => {
-    class FakeIntersectionObserver {
-      constructor(_cb: (entries: IntersectionObserverEntry[]) => void) {}
-      observe() {}
-      disconnect() {}
-      unobserve() {}
-    }
-
-    await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
-      const values: boolean[] = [];
-      const unsubscribe = on('intersection', Promise.resolve(null as any)).subscribe(v => values.push(v));
-
-      await new Promise(r => setTimeout(r, 50));
-
-      // Should not emit with null element
-      expect(values).toEqual([]);
-      unsubscribe();
-    });
-  });
-
-  it('handles aborted signal before element resolution', async () => {
-    class FakeIntersectionObserver {
-      constructor(_cb: (entries: IntersectionObserverEntry[]) => void) {}
-      observe() {}
-      disconnect() {}
-      unobserve() {}
-    }
-
-    await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
-      const values: boolean[] = [];
-      const unsubscribe = on('intersection', Promise.resolve(element)).subscribe(
-        v => values.push(v)
-      );
-
-      unsubscribe();
-      await new Promise(r => setTimeout(r, 50));
-
-      // Should not emit when signal is aborted
-      expect(values).toEqual([]);
-      unsubscribe();
-    });
-  });
-
   it('handles MutationObserver unavailable', async () => {
     class FakeIntersectionObserver {
       constructor(private cb: (entries: IntersectionObserverEntry[]) => void) {}

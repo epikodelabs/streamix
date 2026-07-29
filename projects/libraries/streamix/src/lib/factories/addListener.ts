@@ -1,4 +1,3 @@
-import { isPromiseLike, type MaybePromise } from "../atoms";
 import type { Atom } from "../atoms/atom";
 import { createSharedSource } from "../utils/sharedSource";
 
@@ -12,8 +11,8 @@ import { createSharedSource } from "../utils/sharedSource";
  * @returns An atom that emits the event objects as they occur.
  */
 export function addListener<T extends Event = Event>(
-  target: MaybePromise<EventTarget>,
-  event: MaybePromise<string>,
+  target: EventTarget,
+  event: string,
   options?: AddEventListenerOptions | boolean
 ): Atom<T> {
   return createSharedSource<T>((push) => {
@@ -35,33 +34,15 @@ export function addListener<T extends Event = Event>(
       resolvedEvent = null;
     };
 
-    if (isPromiseLike(target) || isPromiseLike(event)) {
-      void (async () => {
-        resolvedTarget = isPromiseLike(target) ? await target : target;
-        resolvedEvent = isPromiseLike(event) ? await event : event;
+    resolvedTarget = target;
+    resolvedEvent = event;
 
-        if (cleaned) {
-          return;
-        }
+    listener = async (ev: Event) => {
+      if (cleaned) return;
+      await push(ev as T);
+    };
 
-        listener = async (ev: Event) => {
-          if (cleaned) return;
-          await push(ev as T);
-        };
-
-        resolvedTarget.addEventListener(resolvedEvent, listener, options);
-      })();
-    } else {
-      resolvedTarget = target;
-      resolvedEvent = event;
-
-      listener = async (ev: Event) => {
-        if (cleaned) return;
-        await push(ev as T);
-      };
-
-      resolvedTarget.addEventListener(resolvedEvent, listener, options);
-    }
+    resolvedTarget.addEventListener(resolvedEvent, listener, options);
 
     return cleanup;
   }, { name: "fromEvent" });

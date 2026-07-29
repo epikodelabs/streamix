@@ -1,4 +1,4 @@
-import { createPushOperator, type MaybePromise } from "../atoms";
+import { createPushOperator } from "../atoms";
 import { timer } from "../factories";
 import { normalizeError } from "../atoms";
 
@@ -9,7 +9,7 @@ import { normalizeError } from "../atoms";
  * @param period Time in milliseconds between each buffer flush.
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
-export function buffer<T>(period: MaybePromise<number>) {
+export function buffer<T>(period: number) {
   return createPushOperator<T, T[]>("buffer", (source, output) => {
     let buf: IteratorResult<T>[] = [];
 

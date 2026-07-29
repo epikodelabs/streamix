@@ -1,4 +1,3 @@
-import { isPromiseLike, type MaybePromise } from '../atoms';
 import { flow, type Atom } from '../atoms/atom';
 
 /**
@@ -14,13 +13,10 @@ import { flow, type Atom } from '../atoms/atom';
  * @param step - The amount to increment or decrement the value in each step.
  * @returns {Atom<number >} An atom that emits a sequence of numbers.
  */
-export function range(start: MaybePromise<number>, count: MaybePromise<number>, step: MaybePromise<number> = 1): Atom<number > {
+export function range(start: number, count: number, step: number = 1): Atom<number > {
   return flow<number >(async function* () {
-    const resolvedStart = isPromiseLike(start) ? await start : start;
-    const resolvedCount = isPromiseLike(count) ? await count : count;
-    const resolvedStep = isPromiseLike(step) ? await step : step;
-    for (let i = 0; i < resolvedCount; i++) {
-      yield resolvedStart + i * resolvedStep;
+    for (let i = 0; i < count; i++) {
+      yield start + i * step;
     }
   });
 }

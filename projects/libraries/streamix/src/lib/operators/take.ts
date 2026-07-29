@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../atoms";
+import { createOperator, DONE, NEXT, type Operator } from "../atoms";
 
 /**
  * Creates a stream operator that emits only the first `count` values from the source stream
@@ -14,25 +14,10 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
  * @param count The maximum number of values to take from the beginning of the stream.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const take = <T = any>(count: MaybePromise<number>) =>
+export const take = <T = any>(count: number) =>
   createOperator<T, T>("take", function (this: Operator, source) {
     let emitted = 0;
     let done = false;
-    let resolvedCount: number | undefined;
-
-    const getCount = (): MaybePromise<number> => {
-      if (resolvedCount !== undefined) {
-        return resolvedCount;
-      }
-      if (isPromiseLike(count)) {
-        return count.then((val) => {
-          resolvedCount = val;
-          return val;
-        });
-      }
-      resolvedCount = count;
-      return resolvedCount;
-    };
 
     return {
       next: async (): Promise<IteratorResult<T>> => {
@@ -47,10 +32,7 @@ export const take = <T = any>(count: MaybePromise<number>) =>
         }
 
         emitted++;
-
-        const countOr$ = getCount();
-        const limit = isPromiseLike(countOr$) ? await countOr$ : countOr$;
-        if (emitted > limit) {
+        if (emitted > count) {
           done = true;
           try {
             await source.return?.();

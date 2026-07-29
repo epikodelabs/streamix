@@ -1,4 +1,4 @@
-import { createSharedSource, isPromiseLike, type Atom, type MaybePromise } from "@epikodelabs/streamix";
+import { createSharedSource, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits `true` or `false` whenever a CSS media
@@ -8,7 +8,7 @@ import { createSharedSource, isPromiseLike, type Atom, type MaybePromise } from 
  * changes, or other media feature conditions.
  *
  * **Behavior:**
- * - Resolves the media query once on first subscription.
+ * - Reads the media query once on first subscription.
  * - Emits the initial match state on start.
  * - Emits on every media query change.
  * - Starts listening on first subscriber.
@@ -16,11 +16,11 @@ import { createSharedSource, isPromiseLike, type Atom, type MaybePromise } from 
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @param mediaQueryString A CSS media query string (or promise).
+ * @param mediaQueryString A CSS media query string.
  * @returns {Atom<boolean>} An atom emitting match state.
  */
 export function mediaQuery(
-  query: MaybePromise<string>
+  query: string
 ): Atom<boolean> {
   /* -------------------------------------------------- */
   /* Immediate environment check (required by tests)    */
@@ -57,45 +57,20 @@ export function mediaQuery(
       await push(value);
     };
 
-    if (isPromiseLike(query)) {
-      // Async path for promise query
-      void emit(false);
+    mql = window.matchMedia(query);
 
-      void (async () => {
-        const q = await query;
-        if (cleaned) return;
+    listener = async (e: MediaQueryListEvent) => {
+      if (cleaned) return;
+      await emit(e.matches);
+    };
 
-        mql = window.matchMedia(q);
-        await emit(mql.matches);
-
-        listener = async (e: MediaQueryListEvent) => {
-          if (cleaned) return;
-          await emit(e.matches);
-        };
-
-        if (typeof mql.addEventListener === 'function') {
-          mql.addEventListener('change', listener);
-        } else if (typeof (mql as any).addListener === 'function') {
-          (mql as any).addListener(listener);
-        }
-      })();
-    } else {
-      // Synchronous path for immediate query
-      mql = window.matchMedia(query);
-
-      listener = async (e: MediaQueryListEvent) => {
-        if (cleaned) return;
-        await emit(e.matches);
-      };
-
-      if (typeof mql.addEventListener === 'function') {
-        mql.addEventListener('change', listener);
-      } else if (typeof (mql as any).addListener === 'function') {
-        (mql as any).addListener(listener);
-      }
-
-      void emit(mql.matches);
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', listener);
+    } else if (typeof (mql as any).addListener === 'function') {
+      (mql as any).addListener(listener);
     }
+
+    void emit(mql.matches);
 
     return cleanup;
   }, { name: 'mediaQuery' });

@@ -89,35 +89,6 @@ describe("bufferCount", () => {
     expect(results).toEqual([]);
   });
 
-  it("should respect promised buffer sizes", async () => {
-    let resolveSize!: (value: number) => void;
-    const promisedSize = new Promise<number>((resolve) => {
-      resolveSize = resolve;
-    });
-
-    const buffered = pipe(source, bufferCount(promisedSize));
-    const results: number[][] = [];
-
-    const completed = (async () => {
-      for await (const value of iterate(buffered)) {
-        results.push(value);
-      }
-    })();
-
-    await new Promise<void>((resolve) => setTimeout(() => (resolveSize(2), resolve()), 0));
-
-    source.next(1);
-    source.next(2);
-    source.next(3);
-    source.next(4);
-    source.dispose();
-
-    await waitTick();
-
-    await completed;
-    expect(results).toEqual([[1, 2], [3, 4]]);
-  });
-
   it("should behave like identity wrapped in arrays for buffer count 1", async () => {
     const buffered = pipe(source, bufferCount(1));
     const results: number[][] = [];
@@ -135,22 +106,6 @@ describe("bufferCount", () => {
 
     await completed;
     expect(results).toEqual([[1], [2]]);
-  });
-
-  it("should fail gracefully if bufferSize promise rejects", async () => {
-    const errorMsg = "invalid size";
-    const buffered = pipe(source, bufferCount(Promise.reject(new Error(errorMsg))));
-    let capturedError;
-
-    try {
-      const it = iterate(buffered)[Symbol.asyncIterator]();
-      await it.next();
-    } catch (e) {
-      capturedError = e;
-    }
-
-    expect(capturedError).toBeDefined();
-    expect((capturedError as any).message).toBe(errorMsg);
   });
 
   it("should handle error in the middle of buffering without emitting partial buffer", async () => {

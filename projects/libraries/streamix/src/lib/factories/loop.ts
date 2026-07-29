@@ -17,13 +17,13 @@ import { flow, type Atom } from '../atoms/atom';
  * @returns {Atom<T>} An atom that emits the generated sequence of values.
  */
 export function loop<T = any>(
-  initialValue: MaybePromise<T>,
+  initialValue: T,
   condition: (value: T) => MaybePromise<boolean>,
   iterateFn: (value: T) => MaybePromise<T>
 ): Atom<T> {
   return flow<T>(
     async function* () {
-      let currentValue = isPromiseLike(initialValue) ? await initialValue : initialValue;
+      let currentValue = initialValue;
       while (true) {
         const shouldContinue = condition(currentValue);
         const continueValue = isPromiseLike(shouldContinue) ? await shouldContinue : shouldContinue;

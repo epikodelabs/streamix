@@ -52,27 +52,9 @@ describe('delay', () => {
     expect(results).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it('should respect promise-based delay inputs', async () => {
-    const source = from([1]);
-    const delay$ = Promise.resolve(10);
-
-    const delayedAtom = pipe(source, delay(delay$));
-    const startTime = Date.now();
-
-    const results: number[] = [];
-    for await (const value of iterate(delayedAtom)) {
-      results.push(value);
-    }
-
-    expect(results).toEqual([1]);
-    expect(Date.now() - startTime).toBeGreaterThanOrEqual(9);
-  });
-
   it('should treat undefined delay durations as immediate', async () => {
     const source = from([42]);
-    const delay$ = Promise.resolve<number | undefined>(undefined);
-
-    const delayedAtom = pipe(source, delay(delay$ as any));
+    const delayedAtom = pipe(source, delay(undefined as any));
     const startTime = Date.now();
 
     const results: number[] = [];

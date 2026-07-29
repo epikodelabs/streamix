@@ -1,4 +1,4 @@
-import { atom, createOperator, DONE, isPromiseLike, iterate, type MaybePromise, type Operator } from "../atoms";
+import { atom, createOperator, DONE, iterate, type Operator } from "../atoms";
 import { normalizeError } from "../atoms";
 
 /**
@@ -19,7 +19,7 @@ import { normalizeError } from "../atoms";
  * @param context The JavaScript task queue context to schedule emissions on.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotask" | "idle">) => {
+export const observeOn = <T = any>(context: "microtask" | "macrotask" | "idle") => {
   return createOperator<T, T>('observeOn', function (this: Operator, source) {
     const output = atom<T>();
     const outputIterator = iterate(output)[Symbol.asyncIterator]();
@@ -41,18 +41,49 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
       }
     };
 
-    void (async () => {
-      try {
-        const contextValue = isPromiseLike(context) ? await context : context;
-        const schedule = contextValue === 'microtask'
-          ? (fn: () => void) => {
-              let settled = false;
-              const cancel = () => {
-                if (settled) return;
-                settled = true;
+    const schedule = context === 'microtask'
+      ? (fn: () => void) => {
+          let settled = false;
+          const cancel = () => {
+            if (settled) return;
+            settled = true;
+            settlePending();
+          };
+          queueMicrotask(() => {
+            if (settled || stopped) return;
+            settled = true;
+            try {
+              fn();
+            } finally {
+              settlePending();
+            }
+          });
+          return cancel;
+        }
+      : context === 'macrotask'
+        ? (fn: () => void) => {
+            let settled = false;
+            const timeoutId = setTimeout(() => {
+              if (settled || stopped) return;
+              settled = true;
+              try {
+                fn();
+              } finally {
                 settlePending();
-              };
-              queueMicrotask(() => {
+              }
+            }, 0);
+
+            return () => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timeoutId);
+              settlePending();
+            };
+          }
+        : (fn: () => void) => {
+            let settled = false;
+            const fallback = () => {
+              const timeoutId = setTimeout(() => {
                 if (settled || stopped) return;
                 settled = true;
                 try {
@@ -60,73 +91,42 @@ export const observeOn = <T = any>(context: MaybePromise<"microtask" | "macrotas
                 } finally {
                   settlePending();
                 }
-              });
-              return cancel;
-            }
-          : contextValue === 'macrotask'
-            ? (fn: () => void) => {
-                let settled = false;
-                const timeoutId = setTimeout(() => {
-                  if (settled || stopped) return;
-                  settled = true;
-                  try {
-                    fn();
-                  } finally {
-                    settlePending();
-                  }
-                }, 0);
+              }, 0);
 
-                return () => {
-                  if (settled) return;
-                  settled = true;
-                  clearTimeout(timeoutId);
-                  settlePending();
-                };
-              }
-            : (fn: () => void) => {
-                let settled = false;
-                const fallback = () => {
-                  const timeoutId = setTimeout(() => {
-                    if (settled || stopped) return;
-                    settled = true;
-                    try {
-                      fn();
-                    } finally {
-                      settlePending();
-                    }
-                  }, 0);
-
-                  return () => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timeoutId);
-                    settlePending();
-                  };
-                };
-
-                if (typeof requestIdleCallback !== 'function') {
-                  return fallback();
-                }
-
-                const idleId = requestIdleCallback(() => {
-                  if (settled || stopped) return;
-                  settled = true;
-                  try {
-                    fn();
-                  } finally {
-                    settlePending();
-                  }
-                });
-
-                return () => {
-                  if (settled) return;
-                  settled = true;
-                  if (typeof cancelIdleCallback === 'function') {
-                    cancelIdleCallback(idleId);
-                  }
-                  settlePending();
-                };
+              return () => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeoutId);
+                settlePending();
               };
+            };
+
+            if (typeof requestIdleCallback !== 'function') {
+              return fallback();
+            }
+
+            const idleId = requestIdleCallback(() => {
+              if (settled || stopped) return;
+              settled = true;
+              try {
+                fn();
+              } finally {
+                settlePending();
+              }
+            });
+
+            return () => {
+              if (settled) return;
+              settled = true;
+              if (typeof cancelIdleCallback === 'function') {
+                cancelIdleCallback(idleId);
+              }
+              settlePending();
+            };
+          };
+
+    void (async () => {
+      try {
 
         while (true) {
           const result = await source.next();

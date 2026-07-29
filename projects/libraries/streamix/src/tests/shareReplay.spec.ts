@@ -33,20 +33,6 @@ describe('shareReplay', () => {
     expect(pulls).toBe(4);
   });
 
-  it('supports async buffer size', async () => {
-    const op = shareReplay<number>(Promise.resolve(2));
-    let next = 0;
-    const source: AsyncIterator<number> = {
-      next: async () => {
-        next++;
-        return next <= 2 ? NEXT(next) : DONE;
-      },
-    };
-
-    expect(await collect(op.apply(source as any))).toEqual([1, 2]);
-    expect(await collect(op.apply(emptySource<number>() as any))).toEqual([1, 2]);
-  });
-
   it('replays only the last buffered values in source order', async () => {
     const op = shareReplay<number>(2);
     let next = 0;

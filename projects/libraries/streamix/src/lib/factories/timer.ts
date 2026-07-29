@@ -1,4 +1,3 @@
-import { isPromiseLike, type MaybePromise } from '../atoms';
 import type { Atom } from '../atoms/atom';
 import { createSharedSource } from '../utils/sharedSource';
 
@@ -18,7 +17,7 @@ import { createSharedSource } from '../utils/sharedSource';
  * If not provided, it defaults to `delayMs`.
  * @returns {Atom<number>} An atom that emits incrementing numbers (0, 1, 2, ...).
  */
-export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromise<number>): Atom<number> {
+export function timer(delayMs: number = 0, intervalMs?: number): Atom<number> {
   return createSharedSource<number>(
     (push) => {
       let cancelled = false;
@@ -41,10 +40,8 @@ export function timer(delayMs: MaybePromise<number> = 0, intervalMs?: MaybePromi
       };
 
       const run = async () => {
-        const resolvedDelay = isPromiseLike(delayMs) ? await delayMs : delayMs;
-        const resolvedInterval = intervalMs !== undefined
-          ? (isPromiseLike(intervalMs) ? await intervalMs : intervalMs)
-          : resolvedDelay;
+        const resolvedDelay = delayMs;
+        const resolvedInterval = intervalMs ?? resolvedDelay;
 
         if (cancelled) return;
 

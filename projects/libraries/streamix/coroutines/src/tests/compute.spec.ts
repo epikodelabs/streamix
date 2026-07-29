@@ -64,22 +64,6 @@ idescribe("compute", () => {
     }
   });
 
-  it("should await promised parameters before computing", async () => {
-    const run = compute<number, number>((x: number) => x + 7);
-
-    let resolver: (value: number) => void;
-    const promiseParam = new Promise<number>((resolve) => {
-      resolver = resolve;
-    });
-
-    const pending = run(promiseParam);
-    setTimeout(() => resolver!(5), 10);
-    const result = await pending;
-
-    expect(result).toBe(12);
-    await run.dispose();
-  });
-
   it("should preserve helper snippets when building from a coroutine script", async () => {
     const run = computeScript<number, number>({
       helpers: ["function helperScale(x) { return x * 3; }"],

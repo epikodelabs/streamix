@@ -1,4 +1,3 @@
-import { isPromiseLike } from "@epikodelabs/streamix";
 import { createTaskPool } from "../worker/pool";
 import { buildCoroutineWorkerRuntime } from "../worker/runtimes";
 import { buildWorkerScript } from "../worker/script";
@@ -9,7 +8,7 @@ import type { CoroutineScript } from "../worker/types";
  */
 export interface ComputeRunner<T = any, R = any> {
   /** Submits input to the compute pool and resolves with the worker result. */
-  (params: T | Promise<T>): Promise<R>;
+  (params: T): Promise<R>;
   /** Terminates all workers in the pool and rejects queued work. */
   dispose: () => Promise<void>;
 }
@@ -49,9 +48,8 @@ export function compute<T = any, R = any>(
       }),
   });
 
-  const run = async (params: T | Promise<T>): Promise<R> => {
-    const resolved = isPromiseLike(params) ? await params : params;
-    return pool.run(resolved);
+  const run = async (params: T): Promise<R> => {
+    return pool.run(params);
   };
 
   run.dispose = () => pool.dispose();
@@ -81,9 +79,8 @@ export function computeScript<T = any, R = any>(
       }),
   });
 
-  const run = async (params: T | Promise<T>): Promise<R> => {
-    const resolved = isPromiseLike(params) ? await params : params;
-    return pool.run(resolved);
+  const run = async (params: T): Promise<R> => {
+    return pool.run(params);
   };
 
   run.dispose = () => pool.dispose();

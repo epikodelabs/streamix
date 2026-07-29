@@ -47,17 +47,6 @@ describe('debounce', () => {
     expect(emittedValues).toEqual([5]);
   });
 
-  it('should support promise-based duration', async () => {
-    const debouncedAtom = pipe(from([1, 2, 3]), debounce(Promise.resolve(10)));
-    const emittedValues: number[] = [];
-
-    for await (const value of iterate(debouncedAtom)) {
-      emittedValues.push(value);
-    }
-
-    expect(emittedValues).toEqual([3]);
-  });
-
   it('should flush on completion when duration is undefined', async () => {
     const debouncedAtom = pipe(from([1, 2, 3]), debounce(undefined as any));
     const emittedValues: number[] = [];

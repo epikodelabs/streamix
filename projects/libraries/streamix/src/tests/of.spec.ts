@@ -40,15 +40,4 @@ describe('of', () => {
     await delay();
     expect(emittedValues).toEqual([]);
   });
-
-  it('should resolve promised values before emitting', async () => {
-    const value$ = Promise.resolve('async_value');
-    const emittedValues: string[] = [];
-
-    const atom = of(value$);
-    atom.subscribe(v => { if (v !== undefined) emittedValues.push(v); });
-    await delay();
-
-    expect(emittedValues).toEqual(['async_value']);
-  });
 });

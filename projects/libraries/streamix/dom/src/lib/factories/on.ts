@@ -1,4 +1,4 @@
-import type { Atom, MaybePromise } from "@epikodelabs/streamix";
+import type { Atom } from "@epikodelabs/streamix";
 import { animationFrame } from "./animationFrame";
 import { battery, type BatteryState } from "./battery";
 import { fullscreen } from "./fullscreen";
@@ -34,20 +34,20 @@ export function on(type: 'fullscreen'): Atom<boolean>;
 export function on(type: 'idle', timeout?: number): Atom<IdleDeadline>;
 export function on(
   type: 'intersection',
-  element: MaybePromise<Element>,
-  options?: MaybePromise<IntersectionObserverInit>
+  element: Element,
+  options?: IntersectionObserverInit
 ): Atom<boolean>;
-export function on(type: 'mediaQuery', query: MaybePromise<string>): Atom<boolean>;
+export function on(type: 'mediaQuery', query: string): Atom<boolean>;
 export function on(
   type: 'mutation',
-  element: MaybePromise<Element>,
-  options?: MaybePromise<MutationObserverInit>
+  element: Element,
+  options?: MutationObserverInit
 ): Atom<MutationRecord[]>;
 export function on(type: 'network'): Atom<NetworkState>;
 export function on(type: 'orientation'): Atom<'portrait' | 'landscape'>;
 export function on(
   type: 'resize',
-  element: MaybePromise<HTMLElement>
+  element: HTMLElement
 ): Atom<{ width: number; height: number }>;
 export function on(type: 'viewportChange'): Atom<ViewportState>;
 export function on(type: 'visibilityChange'): Atom<DocumentVisibilityState>;
@@ -70,22 +70,22 @@ export function on(type: string, ...args: any[]): Atom<any> {
       return idle(args[0] as number | undefined);
     case 'intersection':
       return intersection(
-        args[0] as MaybePromise<Element>,
-        args[1] as MaybePromise<IntersectionObserverInit> | undefined
+        args[0] as Element,
+        args[1] as IntersectionObserverInit | undefined
       );
     case 'mediaQuery':
-      return mediaQuery(args[0] as MaybePromise<string>);
+      return mediaQuery(args[0] as string);
     case 'mutation':
       return mutation(
-        args[0] as MaybePromise<Element>,
-        args[1] as MaybePromise<MutationObserverInit> | undefined
+        args[0] as Element,
+        args[1] as MutationObserverInit | undefined
       );
     case 'network':
       return network();
     case 'orientation':
       return orientation();
     case 'resize':
-      return resize(args[0] as MaybePromise<HTMLElement>);
+      return resize(args[0] as HTMLElement);
     case 'viewportChange':
       return viewportChange();
     case 'visibilityChange':

@@ -67,46 +67,6 @@ idescribe('onResize', () => {
       }
     }, 0);
   });
-
-  it('does not observe when unsubscribed before promise resolves', async () => {
-    const originalObserver = (globalThis as any).ResizeObserver;
-
-    const observeSpy = jasmine.createSpy('observe');
-
-    class FakeResizeObserver {
-      constructor(_cb: (entries: ResizeObserverEntry[]) => void) {}
-      observe(el: HTMLElement) {
-        observeSpy(el);
-      }
-      disconnect() {}
-    }
-
-    (globalThis as any).ResizeObserver = FakeResizeObserver;
-
-    let resolveElement!: (el: HTMLElement) => void;
-    const element$ = new Promise<HTMLElement>((resolve) => {
-      resolveElement = resolve;
-    });
-
-    const values: any[] = [];
-    const unsubscribe = on('resize', element$).subscribe(v => values.push(v));
-
-    unsubscribe();
-
-    const div = document.createElement('div');
-    document.body.appendChild(div);
-
-    resolveElement(div);
-    await new Promise(resolve => setTimeout(resolve, 0));
-
-    expect(observeSpy).not.toHaveBeenCalled();
-    expect(values).toEqual([]);
-
-    document.body.removeChild(div);
-    if (originalObserver) (globalThis as any).ResizeObserver = originalObserver;
-    else delete (globalThis as any).ResizeObserver;
-  });
-
   it('should detect element resize changes', async () => {
     const div = document.createElement('div');
     div.style.width = '100px';
@@ -214,33 +174,6 @@ idescribe('onResize', () => {
 
     setTimeout(() => done(), 0);
   });
-
-  it('supports promise-based element resolution', async () => {
-    const div = document.createElement('div');
-    div.style.width = '40px';
-    div.style.height = '60px';
-    document.body.appendChild(div);
-
-    let resolveElement: (element: HTMLElement) => void;
-    const element$ = new Promise<HTMLElement>(resolve => {
-      resolveElement = resolve;
-    });
-
-    const values: any[] = [];
-    const unsubscribe = on('resize', element$!).subscribe(v => values.push(v));
-
-    resolveElement!(div);
-    await new Promise(resolve => setTimeout(resolve, 0));
-    await new Promise(requestAnimationFrame);
-    await new Promise(requestAnimationFrame);
-
-    expect(values.length).toBeGreaterThan(0);
-    expect(values[0].width).toBeGreaterThan(0);
-
-    unsubscribe();
-    document.body.removeChild(div);
-  });
-
   it('no-ops when ResizeObserver is unavailable', () => {
     const div = document.createElement('div');
     document.body.appendChild(div);
@@ -305,36 +238,6 @@ idescribe('onResize', () => {
     sub2();
     document.body.removeChild(div);
   });
-
-  it('handles null element from promise resolution', async () => {
-    const originalObserver = (globalThis as any).ResizeObserver;
-
-    const observeSpy = jasmine.createSpy('observe');
-
-    class FakeResizeObserver {
-      constructor(_cb: (entries: ResizeObserverEntry[]) => void) {}
-      observe(el: HTMLElement) {
-        observeSpy(el);
-      }
-      disconnect() {}
-    }
-
-    (globalThis as any).ResizeObserver = FakeResizeObserver;
-
-    const values: any[] = [];
-    const unsubscribe = on('resize', Promise.resolve(null as any)).subscribe(v => values.push(v));
-
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    expect(observeSpy).not.toHaveBeenCalled();
-    expect(values).toEqual([]);
-
-    unsubscribe();
-
-    if (originalObserver) (globalThis as any).ResizeObserver = originalObserver;
-    else delete (globalThis as any).ResizeObserver;
-  });
-
   it('handles teardown errors gracefully', async () => {
     const div = document.createElement('div');
     document.body.appendChild(div);

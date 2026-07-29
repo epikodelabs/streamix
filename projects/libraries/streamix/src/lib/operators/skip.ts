@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Operator } from "../atoms";
+import { createOperator, DONE, NEXT, type Operator } from "../atoms";
 
 /**
  * Creates a stream operator that skips the first specified number of values from the source stream.
@@ -14,22 +14,9 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
  * @param count The number of values to skip from the beginning of the stream.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
-export const skip = <T = any>(count: MaybePromise<number>) =>
+export const skip = <T = any>(count: number) =>
   createOperator<T, T>('skip', function (this: Operator, source) {
-    let remaining: number | undefined;
-    const getRemaining = (): MaybePromise<number> => {
-      if (remaining !== undefined) {
-        return remaining;
-      }
-      if (isPromiseLike(count)) {
-        return count.then((val) => {
-          remaining = val;
-          return val;
-        });
-      }
-      remaining = count;
-      return remaining;
-    };
+    let remaining = count;
 
     return {
       next: async () => {
@@ -37,10 +24,8 @@ export const skip = <T = any>(count: MaybePromise<number>) =>
           const result = await source.next();
           if (result.done) return DONE;
 
-          const remainingOr$ = getRemaining();
-          const currentRemaining = isPromiseLike(remainingOr$) ? await remainingOr$ : remainingOr$;
-          if (currentRemaining > 0) {
-            remaining = currentRemaining - 1;
+          if (remaining > 0) {
+            remaining--;
             // skip this value, continue loop
             continue;
           }

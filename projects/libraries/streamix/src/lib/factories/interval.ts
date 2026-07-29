@@ -1,4 +1,3 @@
-import type { MaybePromise } from '../atoms';
 import type { Atom } from '../atoms/atom';
 import { timer } from './timer';
 
@@ -14,6 +13,6 @@ import { timer } from './timer';
  * @param intervalMs The time in milliseconds between each emission.
  * @returns {Atom<number >} An atom that emits incrementing numbers (0, 1, 2, ...).
  */
-export function interval(intervalMs: MaybePromise<number>): Atom<number > {
+export function interval(intervalMs: number): Atom<number > {
   return timer(0, intervalMs);
 }

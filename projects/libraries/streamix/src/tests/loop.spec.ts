@@ -64,7 +64,7 @@ describe('loop', () => {
 
   it('should support promise-based condition and iterate functions', async () => {
     const atom = loop(
-      Promise.resolve(0),
+      0,
       async (value) => {
         await delay(1);
         return value < 2;

@@ -1,4 +1,3 @@
-import { isPromiseLike, type MaybePromise } from "../atoms";
 import { flow, type Atom } from "../atoms/atom";
 import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
 
@@ -16,24 +15,14 @@ import { toAsyncIterable, type PipeInput } from '../atoms/pipe';
  */
 export function retry<T = any>(
   factory: () => PipeInput<T>,
-  maxRetries: MaybePromise<number> = 3,
-  delay: MaybePromise<number> = 1000
+  maxRetries: number = 3,
+  delay: number = 1000
 ): Atom<T> {
   return flow<T>(async function* (signal?: AbortSignal) {
-    const resolvedMaxRetries = isPromiseLike(maxRetries) ? await maxRetries : maxRetries;
-    let resolvedDelayValue: number | undefined;
-
-    const resolveDelayValue = async () => {
-      if (resolvedDelayValue !== undefined) return resolvedDelayValue;
-      if (delay === undefined) return undefined;
-      resolvedDelayValue = isPromiseLike(delay) ? await delay : delay;
-      return resolvedDelayValue;
-    };
-
     let retryCount = 0;
     let lastError: Error | null = null;
 
-    while (retryCount <= resolvedMaxRetries) {
+    while (retryCount <= maxRetries) {
       let iterator: AsyncIterator<T> | null = null;
 
       try {
@@ -64,8 +53,7 @@ export function retry<T = any>(
         lastError = error instanceof Error ? error : new Error(String(error));
         retryCount++;
 
-        const resolvedDelay = await resolveDelayValue();
-        if (retryCount <= resolvedMaxRetries && resolvedDelay !== undefined && resolvedDelay > 0) {
+        if (retryCount <= maxRetries && delay !== undefined && delay > 0) {
           try {
             await new Promise<void>((resolve, reject) => {
               const onAbort = () => {
@@ -76,7 +64,7 @@ export function retry<T = any>(
               const id = setTimeout(() => {
                 signal?.removeEventListener("abort", onAbort);
                 resolve();
-              }, resolvedDelay);
+              }, delay);
 
               if (signal) {
                 signal.addEventListener("abort", onAbort, { once: true });

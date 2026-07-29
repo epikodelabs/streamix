@@ -1,4 +1,4 @@
-import { createSharedSource, isPromiseLike, type Atom, type MaybePromise } from "@epikodelabs/streamix";
+import { createSharedSource, type Atom } from "@epikodelabs/streamix";
 
 /**
  * Creates a reactive stream that emits arrays of `MutationRecord` objects
@@ -15,13 +15,13 @@ import { createSharedSource, isPromiseLike, type Atom, type MaybePromise } from 
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
  *
- * @param element The DOM element (or promise) to observe.
- * @param options Optional MutationObserver options (or promise).
+ * @param element The DOM element to observe.
+ * @param options Optional MutationObserver options.
  * @returns {Atom<MutationRecord[]>} An atom of mutation records.
  */
 export function mutation(
-  element: MaybePromise<Element>,
-  options?: MaybePromise<MutationObserverInit>
+  element: Element,
+  options?: MutationObserverInit
 ): Atom<MutationRecord[]> {
   return createSharedSource<MutationRecord[]>((push) => {
     let cleaned = false;
@@ -46,8 +46,8 @@ export function mutation(
     }
 
     void (async () => {
-      const resolvedElement = (isPromiseLike(element) ? await element : element) ?? null;
-      const resolvedOptions = isPromiseLike(options) ? await options : options;
+      const resolvedElement = element ?? null;
+      const resolvedOptions = options;
 
       if (cleaned || !resolvedElement) {
         return;

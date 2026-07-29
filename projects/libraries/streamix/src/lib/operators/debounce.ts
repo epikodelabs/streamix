@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
+import { createPushOperator } from "../atoms";
 import { normalizeError } from "../atoms";
 
 /**
@@ -13,7 +13,7 @@ import { normalizeError } from "../atoms";
  * @param duration The debounce duration in milliseconds.
  * @returns An Operator instance for use in a stream pipeline.
  */
-export function debounce<T = any>(duration: MaybePromise<number>) {
+export function debounce<T = any>(duration: number) {
   return createPushOperator<T>("debounce", (source, output) => {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let latestResult: IteratorResult<T> | undefined;
@@ -33,7 +33,7 @@ export function debounce<T = any>(duration: MaybePromise<number>) {
 
     void (async () => {
       try {
-        resolvedDuration = isPromiseLike(duration) ? await duration : duration;
+        resolvedDuration = duration;
 
         while (true) {
           const result = await source.next();

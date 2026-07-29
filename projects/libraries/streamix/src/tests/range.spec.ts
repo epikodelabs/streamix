@@ -65,13 +65,10 @@ describe("range", () => {
     expect(emittedValues.length).toBe(0);
   });
 
-  it("resolves promised parameters before emitting", async () => {
-    const start = Promise.resolve(2);
-    const count = Promise.resolve(3);
-    const step = Promise.resolve(5);
+  it("applies start, count, and step parameters directly", async () => {
     const emitted: number[] = [];
 
-    range(start, count, step).subscribe(v => { if (v !== undefined) emitted.push(v); });
+    range(2, 3, 5).subscribe(v => { if (v !== undefined) emitted.push(v); });
     await delay();
 
     expect(emitted).toEqual([2, 7, 12]);

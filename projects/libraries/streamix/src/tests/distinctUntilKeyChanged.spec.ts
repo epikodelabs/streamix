@@ -90,30 +90,6 @@ describe('distinctUntilKeyChanged', () => {
 
     expect(error).toEqual(new Error('Test Error'));
   });
-
-  it('should resolve promised keys before filtering values', async () => {
-    const atom = pipe(subject, distinctUntilKeyChanged(Promise.resolve('key')));
-    const results: any[] = [];
-
-    const consumption$ = (async () => {
-      for await (const value of iterate(atom)) {
-        results.push(value);
-      }
-    })();
-
-    subject.next({ key: 1, value: 'a' });
-    subject.next({ key: 1, value: 'b' });
-    subject.next({ key: 2, value: 'c' });
-    subject.dispose();
-
-    await consumption$;
-
-    expect(results).toEqual([
-      { key: 1, value: 'a' },
-      { key: 2, value: 'c' },
-    ]);
-  });
-
   it('should work with promise-based comparators', async () => {
     const comparator = (prev: number, curr: number) => Promise.resolve(prev === curr);
     const atom = pipe(subject, distinctUntilKeyChanged('key', comparator));

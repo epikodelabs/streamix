@@ -86,38 +86,4 @@ describe('sample', () => {
     expect(results).toEqual([2]);
   });
 
-  it('should work with promise-based periods', async () => {
-    const period$ = Promise.resolve(10);
-    const sampled = pipe(subject, sample(period$));
-    const results: number[] = [];
-
-    (async () => {
-      for await (const value of iterate(sampled)) {
-        results.push(value);
-      }
-    })();
-
-    subject.next(5);
-    await wait(15);
-    subject.next(6);
-    await wait(30);
-    subject.dispose();
-    await wait(20);
-
-    expect(results.length).toBeGreaterThan(0);
-    expect(results[results.length - 1]).toBe(6);
-  });
-
-  it('should forward period promise rejections as errors', async () => {
-    const sampled = pipe(subject, sample(Promise.reject(new Error('boom'))));
-
-    try {
-      for await (const _ of iterate(sampled)) {
-        void _;
-      }
-      fail('expected an error to be thrown');
-    } catch (err: any) {
-      expect(err.message).toBe('boom');
-    }
-  });
 });

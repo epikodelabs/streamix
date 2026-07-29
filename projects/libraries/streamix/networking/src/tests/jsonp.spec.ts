@@ -132,11 +132,11 @@ idescribe("jsonp", () => {
     expect(remainingCallbacks.length).toBe(0);
   });
 
-  it("builds URL with existing query params and promised callback name", async () => {
+  it("builds URL with existing query params and a custom callback name", async () => {
     const testData = { status: "ok" };
     const refs = setupJsonpMock(testData);
 
-    const stream = jsonp("https://example.com/service?existing=1", Promise.resolve("cbparam"));
+    const stream = jsonp("https://example.com/service?existing=1", "cbparam");
     const result = await firstValueFrom(stream);
 
     await new Promise<void>((resolve) => setTimeout(() => resolve(), 2));

@@ -1,4 +1,3 @@
-import { isPromiseLike, type MaybePromise } from '../atoms';
 import { flow, type Atom } from '../atoms/atom';
 
 /**
@@ -13,8 +12,8 @@ import { flow, type Atom } from '../atoms/atom';
  * @param value The single value to emit.
  * @returns {Atom<T>} A new atom that emits the value and then completes.
  */
-export function of<T = any>(value: MaybePromise<T>): Atom<T> {
+export function of<T = any>(value: T): Atom<T> {
   return flow<T>(async function* () {
-    yield isPromiseLike(value) ? await value : value;
+    yield value;
   });
 }

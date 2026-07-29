@@ -1,4 +1,4 @@
-import { createPushOperator, isPromiseLike, type MaybePromise } from "../atoms";
+import { createPushOperator } from "../atoms";
 import { normalizeError } from "../atoms";
 
 /**
@@ -13,7 +13,7 @@ import { normalizeError } from "../atoms";
  * @param period The time in milliseconds between each emission.
  * @returns An Operator instance for use in a stream's `pipe` method.
  */
-export const sample = <T = any>(period: MaybePromise<number>) =>
+export const sample = <T = any>(period: number) =>
   createPushOperator<T>('sample', (source, output) => {
     let lastValue: T | undefined;
     let hasValue = false;
@@ -39,7 +39,7 @@ export const sample = <T = any>(period: MaybePromise<number>) =>
 
     void (async () => {
       try {
-        resolvedPeriod = isPromiseLike(period) ? await period : period;
+        resolvedPeriod = period;
         startSampling();
 
         while (true) {
