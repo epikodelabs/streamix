@@ -25,6 +25,27 @@ idescribe("actor", () => {
   let actorCounter = 0;
 
   const nextActorName = () => `actor-${++actorCounter}`;
+  const waitForMainMessage = (
+    predicate: (message: ActorBusMessage<any>) => boolean,
+    timeoutMs = 200
+  ) =>
+    new Promise<ActorBusMessage<any>>((resolve, reject) => {
+      let unsubscribe = () => {};
+      const timeoutId = setTimeout(() => {
+        unsubscribe();
+        reject(new Error(`Timed out waiting for actor-bus message after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
+        if (!predicate(message)) {
+          return;
+        }
+
+        clearTimeout(timeoutId);
+        unsubscribe();
+        resolve(message);
+      });
+    });
 
   beforeAll(() => {
     originalWorker = (globalThis as any).Worker;
@@ -434,7 +455,6 @@ idescribe("actor", () => {
       expect(topic).toBe("echo");
       return payload.toUpperCase();
     });
-    const responses: string[] = [];
 
     async function behavior(msg: any, state: number, utils: any) {
       if (msg.kind === "actor-bus") {
@@ -447,18 +467,15 @@ idescribe("actor", () => {
     (globalThis as any).currentMainTask = behavior;
 
     const a = actor(nextActorName(), behavior, 0);
-    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
-      if (message.to === "main" && message.topic === "response") {
-        responses.push(message.payload);
-      }
-    });
     const unregister = registerActorRequestHandler("main", onRequest);
+    const response$ = waitForMainMessage(
+      (message) => message.to === "main" && message.topic === "response"
+    );
     main.outbox.send(a, "hello", "hello");
-    await new Promise(r => setTimeout(r, 20));
+    const response = await response$;
 
     expect(onRequest).toHaveBeenCalled();
-    expect(responses).toEqual(["HELLO"]);
-    unsubscribe();
+    expect(response.payload).toBe("HELLO");
     unregister();
     await main.outbox.stop(a);
   });
@@ -528,8 +545,6 @@ idescribe("actor", () => {
   });
 
   it("should route worker requests to named actor request handlers", async () => {
-    const responses: string[] = [];
-
     async function requesterBehavior(msg: any, state: number, utils: any) {
       if (msg.kind === "actor-bus" && msg.topic === "ask") {
         const response = await utils.outbox.request("responder", "greet", "hello");
@@ -546,22 +561,19 @@ idescribe("actor", () => {
 
     const requester = actor("requester", requesterBehavior, 0);
     const responder = actor("responder", responderBehavior, 0);
-    registerActorRequestHandler("responder", (topic: string, payload: string) => {
+    const unregister = registerActorRequestHandler("responder", (topic: string, payload: string) => {
       expect(topic).toBe("greet");
       return payload.toUpperCase();
     });
-    const unsubscribe = main.inbox.subscribe((message: ActorBusMessage<any>) => {
-      if (message.to === "main" && message.topic === "response") {
-        responses.push(message.payload);
-      }
-    });
-
+    const response$ = waitForMainMessage(
+      (message) => message.to === "main" && message.topic === "response"
+    );
     main.outbox.send(requester, "ask", undefined);
-    await new Promise(r => setTimeout(r, 20));
+    const response = await response$;
 
-    expect(responses).toEqual(["HELLO"]);
+    expect(response.payload).toBe("HELLO");
 
-    unsubscribe();
+    unregister();
     await Promise.all([main.outbox.stop(requester), main.outbox.stop(responder)]);
   });
 
