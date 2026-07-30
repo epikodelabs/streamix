@@ -1,8 +1,9 @@
 import {
-    flow,
-    isPromiseLike,
-    normalizeError,
-    type Atom,
+  flow,
+  isPromiseLike,
+  MaybePromise,
+  normalizeError,
+  type Atom,
 } from "@epikodelabs/streamix";
 
 /**

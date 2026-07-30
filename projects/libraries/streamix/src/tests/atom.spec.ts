@@ -515,6 +515,52 @@ describe('Atom System', () => {
       total.dispose();
     });
 
+    it('should track foreign atom-like dependencies via subscribe fallback', async () => {
+      let current = 1;
+      let previous = 1;
+      const subscribers = new Set<(current: number, previous: number) => void>();
+
+      const foreignAtom = {
+        type: 'atom' as const,
+        get value() { return current; },
+        get safeValue() { return current; },
+        get previous() { return previous; },
+        get disposed() { return false; },
+        get dirty() { return false; },
+        get error() { return undefined; },
+        subscribe(callback?: (current: number, previous: number) => void) {
+          if (!callback) {
+            return (() => {}) as any;
+          }
+
+          subscribers.add(callback);
+          return (() => {
+            subscribers.delete(callback);
+          }) as any;
+        },
+        onError() {
+          return (() => {}) as any;
+        },
+        [Symbol.asyncIterator]() {
+          throw new Error('not used in this test');
+        },
+      };
+
+      const doubled = derived(($: any) => $(foreignAtom) * 2);
+
+      expect(doubled.value).toBe(2);
+
+      previous = current;
+      current = 3;
+      for (const subscriber of Array.from(subscribers)) {
+        subscriber(current, previous);
+      }
+
+      expect(doubled.value).toBe(6);
+
+      doubled.dispose();
+    });
+
     it('should ignore stale promise when dependency changes', async () => {
       const source = atom(1);
 

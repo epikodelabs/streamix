@@ -1,6 +1,6 @@
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import type { Subscription } from '@epikodelabs/streamix';
-import { addListener, map, pipe, scope, tap, throttle } from '@epikodelabs/streamix';
+import { addListener, map, method, pipe, scope, tap, throttle } from '@epikodelabs/streamix';
 import { on } from '@epikodelabs/streamix/dom';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -112,7 +112,7 @@ export class AppComponent implements OnInit, OnDestroy {
     canvasRef!: ElementRef<HTMLCanvasElement>;
     private readonly appScope = scope<AppScopeShape>(() => ({
         weather: 'sunny' as Weather,
-        setWeather: (self: AppScopeShape) => (w: Weather) => { self.weather = w; },
+        setWeather: method((self: AppScopeShape, w: Weather) => { self.weather = w; }),
     }));
     get weather() { return this.appScope.weather; }
     private renderer!: THREE.WebGLRenderer;

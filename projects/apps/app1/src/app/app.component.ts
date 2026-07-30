@@ -1,6 +1,6 @@
 import { DecimalPipe } from '@angular/common';
 import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import { addListener, atomExpr, bufferCount, debounce, filter, finalize, interval, map, merge, pipe, range, scan, scope, tap, throttle } from '@epikodelabs/streamix';
+import { addListener, atomExpr, bufferCount, debounce, filter, finalize, interval, map, merge, method, pipe, range, scan, scope, tap, throttle } from '@epikodelabs/streamix';
 interface Metric {
     name: string;
     value: number;
@@ -490,15 +490,15 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         sliderA: this.sliderAValue,
         sliderB: this.sliderBValue,
         combined: (self: AppScopeShape) => (self.sliderA * self.sliderB) / 100,
-        emitClick: (self: AppScopeShape) => (label: string) => { self.clicks = label; },
-        updateStreamA: (self: AppScopeShape) => (value: number) => {
+        emitClick: method((self: AppScopeShape, label: string) => { self.clicks = label; }),
+        updateStreamA: method((self: AppScopeShape, value: number) => {
             this.sliderAValue = value;
             self.sliderA = value;
-        },
-        updateStreamB: (self: AppScopeShape) => (value: number) => {
+        }),
+        updateStreamB: method((self: AppScopeShape, value: number) => {
             this.sliderBValue = value;
             self.sliderB = value;
-        },
+        }),
     }));
     ngOnInit(): void {
         const clicksAtom = this.appScope.at('clicks');

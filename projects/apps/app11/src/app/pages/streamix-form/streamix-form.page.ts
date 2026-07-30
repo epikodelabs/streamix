@@ -30,7 +30,17 @@ export class StreamixFormPageComponent implements OnDestroy {
   readonly uiState = derived(($) => {
     const snapshot = $(this.form.state).completeValue as ProfileFormValue;
     const payload = $(this.submittedPayload);
-    return this.createUiState(snapshot, payload);
+    return this.createUiState({
+      snapshot,
+      submittedPayload: payload,
+      securityTouched: $(this.form.fields.security.touched),
+      securityIssues: $(this.form.fields.security.issues),
+      profileInvalid: $(this.form.fields.profile.invalid),
+      securityInvalid: $(this.form.fields.security.invalid),
+      addressInvalid: $(this.form.fields.address.invalid),
+      availabilityInvalid: $(this.form.fields.availability.invalid),
+      skillsInvalid: $(this.form.fields.skills.invalid),
+    });
   });
   private readonly stopUiState = this.uiState.subscribe(() => this.cdr.detectChanges());
 
@@ -75,10 +85,28 @@ export class StreamixFormPageComponent implements OnDestroy {
     return node ? fieldHint({ node, label: '', pendingHint }) : null;
   }
 
-  private createUiState(snapshot: ProfileFormValue, submittedPayload: string) {
-    const security = this.form.fields.security;
-    const touched = security.touched.value;
-    const passwordError = touched ? this.passwordError(security.issues.value) : null;
+  private createUiState({
+    snapshot,
+    submittedPayload,
+    securityTouched,
+    securityIssues,
+    profileInvalid,
+    securityInvalid,
+    addressInvalid,
+    availabilityInvalid,
+    skillsInvalid,
+  }: {
+    snapshot: ProfileFormValue;
+    submittedPayload: string;
+    securityTouched: boolean;
+    securityIssues: any;
+    profileInvalid: boolean;
+    securityInvalid: boolean;
+    addressInvalid: boolean;
+    availabilityInvalid: boolean;
+    skillsInvalid: boolean;
+  }) {
+    const passwordError = securityTouched ? this.passwordError(securityIssues) : null;
 
     return {
       completion: calculateCompletion(snapshot),
@@ -89,7 +117,13 @@ export class StreamixFormPageComponent implements OnDestroy {
       remainingBio: 240 - snapshot.profile.bio.length,
       remote: snapshot.availability.remote,
       submittedPayload,
-      validationSummary: this.validationSummary(),
+      validationSummary: this.validationSummary({
+        profileInvalid,
+        securityInvalid,
+        addressInvalid,
+        availabilityInvalid,
+        skillsInvalid,
+      }),
     };
   }
 
@@ -100,14 +134,25 @@ export class StreamixFormPageComponent implements OnDestroy {
       : null;
   }
 
-  private validationSummary(): readonly string[] {
-    const { fields } = this.form;
+  private validationSummary({
+    profileInvalid,
+    securityInvalid,
+    addressInvalid,
+    availabilityInvalid,
+    skillsInvalid,
+  }: {
+    profileInvalid: boolean;
+    securityInvalid: boolean;
+    addressInvalid: boolean;
+    availabilityInvalid: boolean;
+    skillsInvalid: boolean;
+  }): readonly string[] {
     const items: string[] = [];
-    if (fields.profile.invalid.value) items.push('Profile details need cleanup.');
-    if (fields.security.invalid.value) items.push('Passwords are incomplete or mismatched.');
-    if (fields.address.invalid.value) items.push('Address information is incomplete.');
-    if (fields.availability.invalid.value) items.push('Availability is outside the allowed range.');
-    if (fields.skills.invalid.value) items.push('At least one valid skill entry is required.');
+    if (profileInvalid) items.push('Profile details need cleanup.');
+    if (securityInvalid) items.push('Passwords are incomplete or mismatched.');
+    if (addressInvalid) items.push('Address information is incomplete.');
+    if (availabilityInvalid) items.push('Availability is outside the allowed range.');
+    if (skillsInvalid) items.push('At least one valid skill entry is required.');
     return items;
   }
 }

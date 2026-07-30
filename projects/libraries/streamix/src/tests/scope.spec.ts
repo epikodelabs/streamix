@@ -420,6 +420,26 @@ describe('Scope System', () => {
       expect((s as any)._pendingCount).toBe(0);
       s.dispose();
     });
+
+    it('should track passed-through readable loading atoms without crashing dependency watchers', async () => {
+      const pending = atom<string>();
+      const child = scope({ pending });
+      const parent = scope({
+        childLoading: child.at.loading,
+        summary: (self: any) => self.childLoading ? 'loading' : 'ready',
+      });
+
+      expect(parent.summary).toBe('loading');
+
+      pending.next('done');
+      await delay();
+
+      expect(parent.summary).toBe('ready');
+
+      parent.dispose();
+      child.dispose();
+      pending.dispose();
+    });
   });
 
   describe('dirty state', () => {

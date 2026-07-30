@@ -142,6 +142,18 @@ export interface Readable<T = any> {
 }
 
 /**
+ * Minimal reactive dependency contract accepted by derived formulas.
+ *
+ * This intentionally supports foreign/read-only atom-like sources that expose
+ * synchronous `.value` reads plus a `subscribe(...)` change channel, even if
+ * they are not full Streamix atoms.
+ */
+export interface DependencySource<T = any> {
+  readonly value: T;
+  subscribe(callback?: (current: T, previous: T) => MaybePromise): Subscription;
+}
+
+/**
  * Extracts the value type of an {@link Atom}.
  *
  * Useful when you want to name the type produced by a piped atom without
@@ -152,7 +164,7 @@ export interface Readable<T = any> {
  * type CombinedValue = AtomValue<typeof combined>; // [number, string]
  * ```
  */
-export type AtomValue<A> = A extends Atom<infer T> ? T : never;
+export type AtomValue<A> = A extends { value: infer T } ? T : never;
 
 /**
  * Writable atom returned by {@link atom}.
@@ -178,12 +190,12 @@ export interface Writable<T = any> extends Atom<T> {
  * `$(atom1, atom2)` destructures multiple tracked atoms.
  */
 export type DerivedScope = {
-  <A>(atom: Atom<A>): A;
-  <T extends Atom<any>[]>(...atoms: T): { [K in keyof T]: AtomValue<T[K]> };
+  <A>(atom: DependencySource<A>): A;
+  <T extends DependencySource<any>[]>(...atoms: T): { [K in keyof T]: AtomValue<T[K]> };
   /** Read an atom and register it as a dependency of the current derived computation. */
-  read<A>(atom: Atom<A>): A;
+  read<A>(atom: DependencySource<A>): A;
   /** Register closure or global-scope atoms and return them for destructuring. */
-  use<T extends Atom<any>[]>(...atoms: T): T extends [infer U] ? U : T; // Changed this
+  use<T extends DependencySource<any>[]>(...atoms: T): T extends [infer U] ? U : T;
 } & Record<string, unknown>;
 
 interface AtomNode {
@@ -356,13 +368,13 @@ export function getScheduler(): Scheduler { return currentScheduler; }
  * ───────────────────────────────────────────────────────────────────────────*/
 
 interface FormulaContext {
-  dependencies: Set<InternalAtomContainer>;
+  dependencies: Set<DependencySource<any>>;
 }
 
 const activeFormulaStack: FormulaContext[] = [];
 
 function pushFormulaContext(context?: FormulaContext): FormulaContext {
-  const ctx = context ?? { dependencies: new Set<InternalAtomContainer>() };
+  const ctx: FormulaContext = context ?? { dependencies: new Set<Atom<any>>() };
   activeFormulaStack.push(ctx);
   return ctx;
 }
@@ -380,10 +392,10 @@ export function getCurrentFormulaContext(): FormulaContext | null {
  * result and the set of atoms that were read. Useful for reactive renderers that
  * need to discover dependencies without manually walking every proxy layer.
  */
-export function trackDependencies<T>(fn: () => T): { result: T; dependencies: Set<Atom<any>> } {
+export function trackDependencies<T>(fn: () => T): { result: T; dependencies: Set<DependencySource<any>> } {
   const context = pushFormulaContext();
   try {
-    return { result: fn(), dependencies: context.dependencies as unknown as Set<Atom<any>> };
+    return { result: fn(), dependencies: context.dependencies };
   } finally {
     popFormulaContext();
   }
@@ -401,15 +413,15 @@ class EvaluationOwner {
   private atomViews = new WeakMap<Atom<any>, Atom<any>>();
 
   /** Read an atom and record it as a dependency of the active evaluation. */
-  read<A>(atom: Atom<A>): A {
+  read<A>(atom: DependencySource<A>): A {
     if (this.ctx) {
-      this.ctx.dependencies.add(atom as unknown as InternalAtomContainer);
+      this.ctx.dependencies.add(atom);
     }
     return atom.value;
   }
 
   /** Register closure or global-scope atoms and return them for destructuring. */
-  use<T extends Atom<any>[]>(...atoms: T): T extends [infer U] ? U : T {
+  use<T extends DependencySource<any>[]>(...atoms: T): T extends [infer U] ? U : T {
     atoms.forEach(a => this.read(a));
     // Return single atom if only one, otherwise return array
     return (atoms.length === 1 ? atoms[0] : atoms) as any;
@@ -428,8 +440,9 @@ class EvaluationOwner {
   /** Begin a new evaluation generation and return its context. */
   enter(): { context: FormulaContext; generation: number } {
     this.generation++;
-    this.ctx = { dependencies: new Set<InternalAtomContainer>() };
-    return { context: this.ctx, generation: this.generation };
+    const context: FormulaContext = { dependencies: new Set<Atom<any>>() };
+    this.ctx = context;
+    return { context, generation: this.generation };
   }
 
   /** True if the given context/generation is still the active evaluation. */
@@ -441,7 +454,7 @@ class EvaluationOwner {
    * End an evaluation and return its collected dependencies, or `null` if a
    * newer evaluation has already superseded it.
    */
-  leave(context: FormulaContext, generation: number): Set<InternalAtomContainer> | null {
+  leave(context: FormulaContext, generation: number): Set<DependencySource<any>> | null {
     if (!this.isCurrent(context, generation)) return null;
     this.ctx = null;
     return context.dependencies;
@@ -455,19 +468,19 @@ class EvaluationOwner {
 class DerivedScopeFacade {
   constructor(private owner: EvaluationOwner) {}
 
-  read<A>(atom: Atom<A>): A {
+  read<A>(atom: DependencySource<A>): A {
     return this.owner.read(atom);
   }
 
-  use<T extends Atom<any>[]>(...atoms: T): T extends [infer U] ? U : T {
+  use<T extends DependencySource<any>[]>(...atoms: T): T extends [infer U] ? U : T {
     return this.owner.use(...atoms);
   }
 
-  invoke<T extends Atom<any>>(first: T, ...rest: Atom<any>[]): AtomValue<T> | AtomValue<Atom<any>>[] {
+  invoke<T extends DependencySource<any>>(first: T, ...rest: DependencySource<any>[]): AtomValue<T> | AtomValue<DependencySource<any>>[] {
     if (rest.length === 0) {
       return this.owner.read(first) as AtomValue<T>;
     }
-    return [first, ...rest].map(a => this.owner.read(a)) as AtomValue<Atom<any>>[];
+    return [first, ...rest].map(a => this.owner.read(a)) as AtomValue<DependencySource<any>>[];
   }
 }
 
@@ -514,6 +527,14 @@ function createAtomRuntimeMeta(): AtomRuntimeMeta {
 
 function getAtomRuntimeMeta(atom: Atom<any>): AtomRuntimeMeta {
   return (atom as unknown as InternalAtomContainer)[META];
+}
+
+function tryGetAtomRuntimeMeta(atom: unknown): AtomRuntimeMeta | null {
+  if (atom === null || (typeof atom !== "object" && typeof atom !== "function")) {
+    return null;
+  }
+
+  return (atom as InternalAtomContainer)[META] ?? null;
 }
 
 export function asReadable<A>(atom: Atom<A>): Readable<A> {
@@ -680,17 +701,6 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
   };
 }
 
-// Dependency invalidation channel: separate from public subscriber broadcast.
-// Dependent atoms register here so they are marked dirty immediately when a
-// dependency changes, even in analog mode where public broadcasts are batched.
-function addAtomChangeHandler(atom: Atom<any>, handler: () => void): void {
-  getAtomRuntimeMeta(atom).changeHandlers.add(handler);
-}
-
-function removeAtomChangeHandler(atom: Atom<any>, handler: () => void): void {
-  getAtomRuntimeMeta(atom).changeHandlers.delete(handler);
-}
-
 function notifyChangeHandlers(atom: Atom<any>): void {
   const handlers = getAtomRuntimeMeta(atom).changeHandlers;
   for (const h of Array.from(handlers)) {
@@ -724,6 +734,29 @@ function notifyEmitHandlers(atom: Atom<any>): void {
   for (const h of Array.from(handlers)) {
     try { h(); } catch { /* suppress emit observers */ }
   }
+}
+
+function observeDependencyChange(dep: DependencySource<any>, handler: () => void): Subscription {
+  const meta = tryGetAtomRuntimeMeta(dep);
+  if (meta) {
+    meta.changeHandlers.add(handler);
+    return createSubscription(() => {
+      meta.changeHandlers.delete(handler);
+    });
+  }
+
+  if (typeof dep.subscribe === "function") {
+    const unsubscribe = dep.subscribe(() => handler());
+    return createSubscription(() => {
+      try {
+        return unsubscribe();
+      } catch {
+        return undefined;
+      }
+    });
+  }
+
+  return createSubscription(() => {});
 }
 
 type AtomSubscriber<T> = (current: T, previous: T) => MaybePromise;
@@ -1039,23 +1072,22 @@ export function atomFromIterator<T>(
 }
 
 function watchDependencies(
-  deps: Iterable<InternalAtomContainer>,
-  callback: (dep: InternalAtomContainer) => void
+  deps: Iterable<DependencySource<any>>,
+  callback: (dep: DependencySource<any>) => void
 ): () => void {
-  const handlers = new Map<InternalAtomContainer, () => void>();
+  const subscriptions = new Map<DependencySource<any>, Subscription>();
   for (const dep of deps) {
     const handler = () => {
       cleanup();
       callback(dep);
     };
-    addAtomChangeHandler(dep as any, handler);
-    handlers.set(dep, handler);
+    subscriptions.set(dep, observeDependencyChange(dep, handler));
   }
   function cleanup() {
-    for (const [dep, handler] of handlers) {
-      removeAtomChangeHandler(dep as any, handler);
+    for (const unsubscribe of subscriptions.values()) {
+      unsubscribe();
     }
-    handlers.clear();
+    subscriptions.clear();
   }
   return cleanup;
 }
@@ -1603,8 +1635,8 @@ export function derived<T>(...args: any[]): Atom<T> {
   let dirty = false;
 
   let instance!: Atom<T> & InternalAtomContainer;
-  const dependencies = new Set<InternalAtomContainer>();
-  const depSubscriptions = new Map<InternalAtomContainer, Subscription>();
+  const dependencies = new Set<DependencySource<any>>();
+  const depSubscriptions = new Map<DependencySource<any>, Subscription>();
 
   const latestAsync = createLatestAsyncCoordinator<T>();
   let asyncController: AbortController | undefined;
@@ -1646,8 +1678,9 @@ export function derived<T>(...args: any[]): Atom<T> {
     for (const dep of context.dependencies) {
       dependencies.add(dep);
 
-      if (dep[NODE]?.depth > maxDepth) {
-        maxDepth = dep[NODE].depth;
+      const depNode = (dep as Partial<InternalAtomContainer> as any)[NODE] as AtomNode | undefined;
+      if (depNode !== undefined && depNode.depth > maxDepth) {
+        maxDepth = depNode.depth;
       }
 
       if (depSubscriptions.has(dep)) continue;
@@ -1683,14 +1716,7 @@ export function derived<T>(...args: any[]): Atom<T> {
         instance[MARK_DIRTY]();
       };
 
-      addAtomChangeHandler(dep as any, handler);
-
-      depSubscriptions.set(
-        dep,
-        createSubscription(() => {
-          removeAtomChangeHandler(dep as any, handler);
-        }),
-      );
+      depSubscriptions.set(dep, observeDependencyChange(dep, handler));
     }
 
     node.depth = maxDepth + 1;

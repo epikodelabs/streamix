@@ -19,6 +19,7 @@ import {
   trackDependencies,
   Writable,
   type Atom,
+  type DependencySource,
   type Readable,
 } from "./atom";
 import {
@@ -84,12 +85,20 @@ function unwrapDynamicValue<T>(value: T | Atom<T>): T {
 
 type ScopeAtomReader = <T>(atom: Atom<T>) => T;
 
+function isRuntimeAtom(value: unknown): value is Atom<any> {
+  return isAtom(value) && typeof (value as Atom<any>).dispose === "function";
+}
+
 function createTrackedScope(scopeRef: Scope, reader: ScopeAtomReader): any {
   return new Proxy(scopeRef as any, {
     get(target, prop, receiver) {
       const resolved = target.at?.(prop);
-      if (isAtom(resolved)) {
+      if (isRuntimeAtom(resolved)) {
         return reader(resolved);
+      }
+
+      if (isAtomLike(resolved)) {
+        return resolved.value;
       }
 
       return Reflect.get(target, prop, receiver);
@@ -102,11 +111,29 @@ function createTrackedScope(scopeRef: Scope, reader: ScopeAtomReader): any {
     },
     apply(_target, _thisArg, argArray) {
       if (argArray.length > 1) {
-        return argArray.map((item) => (isAtom(item) ? reader(item) : item));
+        return argArray.map((item) => {
+          if (isRuntimeAtom(item)) {
+            return reader(item);
+          }
+
+          if (isAtomLike(item)) {
+            return item.value;
+          }
+
+          return item;
+        });
       }
 
       const [first] = argArray;
-      return isAtom(first) ? reader(first) : first;
+      if (isRuntimeAtom(first)) {
+        return reader(first);
+      }
+
+      if (isAtomLike(first)) {
+        return first.value;
+      }
+
+      return first;
     },
   });
 }
@@ -125,7 +152,7 @@ function evaluateExprMarker(
   if (isPipeExpr(marker)) return marker.fn(scopeRef as any, atoms);
   if (isFlowExpr(marker)) return marker.fn(scopeRef as any, atoms);
   if (isDynamicExpr(marker)) {
-    const initialDependencies = new Set<Atom<any>>();
+    const initialDependencies = new Set<DependencySource<any>>();
     const initialScope = createTrackedScope(scopeRef, <T>(atomInstance: Atom<T>) => {
       initialDependencies.add(atomInstance as Atom<any>);
       return atomInstance.value;
@@ -576,14 +603,19 @@ function defineScopeStateProperty(
   const descriptor: PropertyDescriptor = {
     get() {
       const activeItem = read(key);
-      if (activeItem && (typeof activeItem === "object" || typeof activeItem === "function")) {
-        if (activeItem.type === "atom") {
-          const formulaContext = getCurrentFormulaContext();
-          if (formulaContext) {
-            formulaContext.dependencies.add(activeItem);
-          }
-          return activeItem.value;
+      if (isRuntimeAtom(activeItem)) {
+        const formulaContext = getCurrentFormulaContext();
+        if (formulaContext) {
+          formulaContext.dependencies.add(activeItem as any);
         }
+        return activeItem.value;
+      }
+
+      if (isAtomLike(activeItem)) {
+        return activeItem.value;
+      }
+
+      if (activeItem && (typeof activeItem === "object" || typeof activeItem === "function")) {
         if (activeItem.type === "scope") return activeItem;
       }
       return activeItem;
