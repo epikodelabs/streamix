@@ -48,7 +48,10 @@
       "@epikodelabs/streamix": [
         "./projects/libraries/streamix/src/lib/index.ts"
       ]
-    }
+    },
+    "types": [
+      "jasmine"
+    ]
   },
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,
@@ -61,5 +64,3 @@
     "experimentalSpecifierResolution": "node"
   }
 }
-
-
