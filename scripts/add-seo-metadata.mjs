@@ -61,12 +61,6 @@ const PAGE_METADATA = {
     keywords: ['atom', 'reactive state', 'state management', 'observable', 'subscription', 'reactivity', 'typescript']
   },
 
-  'IOC.md': {
-    title: 'IoC Container - Dependency Injection Guide | streamix',
-    description: 'Use the streamix IoC container to register services, resolve dependencies, manage lifetimes, and clean up scoped resources.',
-    keywords: ['ioc', 'dependency injection', 'service container', 'tokens', 'lifetimes', 'resource cleanup', 'scoped services']
-  },
-
   'MIGRATION.md': {
     title: 'Migration Guide - Upgrading to streamix v3',
     description: 'Migrate from streamix v2 to v3 with practical mappings for atoms, flows, scopes, and updated coroutine APIs.',

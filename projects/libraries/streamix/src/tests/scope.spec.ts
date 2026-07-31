@@ -702,16 +702,6 @@ describe('Scope System', () => {
       expect(error).toHaveBeenCalled();
     });
 
-    it('should report container disposal failures', async () => {
-      const error = spyOn(console, 'error');
-      const s = scope({});
-      spyOn(s.container, 'dispose').and.returnValue(Promise.reject(new Error('container failed')));
-
-      s.dispose();
-      await delay();
-
-      expect(error).toHaveBeenCalled();
-    });
   });
 
   describe('analog mode', () => {

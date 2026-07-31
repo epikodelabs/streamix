@@ -7,7 +7,9 @@
   "lib": {
     "entryFile": "src/public-api.ts"
   },
-  "allowedNonPeerDependencies": ["@epikodelabs/streamix"]
+  "allowedNonPeerDependencies": [
+    "@epikodelabs/streamix"
+  ]
 }
 
 

@@ -1,11 +1,3 @@
-import {
-  createContainer,
-  globalContainer,
-  type Container,
-  type Factory,
-  type RegistrationOptions,
-  type Token,
-} from "../ioc/container";
 import { isAtom, isAtomLike } from "../utils/helpers";
 import {
   asReadable,
@@ -452,7 +444,6 @@ export interface Scope<T extends Record<string, any> = Record<string, any>> {
   cleanups: Set<() => void>;
   mode: "discrete" | "analog";
   parent: Scope | RootScope | null;
-  container: Container;
   readonly loading: boolean;
   readonly dirty: boolean;
   snapshot(): UnwrapSnapshotValues<T>;
@@ -503,30 +494,6 @@ export const setCurrentScope = (scope: Scope | null): Scope | null => {
   currentScope = scope;
   return previous;
 };
-
-/* ── IoC Helpers ──────────────────────────────────────────────────────────── */
-
-/**
- * Registers a dependency-injection provider on the current scope container.
- */
-export function provide<T>(token: Token<T>, factory: Factory<T>, options?: RegistrationOptions<T>): void {
-  const container = currentScope?.container ?? globalContainer;
-  container.register(token, factory, options);
-}
-
-/**
- * Resolves a dependency from the current scope container, falling back to the global container.
- */
-export function inject<T>(token: Token<T>): T {
-  return (currentScope?.container ?? globalContainer).resolve(token, currentScope);
-}
-
-/**
- * Resolves a dependency if it exists, returning `undefined` when it is not registered.
- */
-export function injectOptional<T>(token: Token<T>): T | undefined {
-  return (currentScope?.container ?? globalContainer).resolveOptional(token, currentScope);
-}
 
 /* ── Context Lifecycle Management ─────────────────────────────────────────── */
 
@@ -673,7 +640,6 @@ function createScopeInternal<T extends Record<string, any>>(
 ): ScopeReturn<T> {
   const parent = currentScope ?? getGlobalScope();
   const mode = resolveMode(options, parent);
-  const parentContainer = isScope(parent) ? parent.container : globalContainer;
   const evaluating = new Set<string | symbol>();
 
   const scopeCallable = function (first: any, ...rest: any[]) {
@@ -689,7 +655,6 @@ function createScopeInternal<T extends Record<string, any>>(
     cleanups: new Set(),
     mode,
     parent,
-    container: createContainer(parentContainer),
     loading: true,
     dirty: false,
     snapshot() {
@@ -1033,10 +998,6 @@ export function disposeScope(sc: Scope): void {
     }
   }
   sc.atoms.clear();
-
-  sc.container.dispose().catch((err) => {
-    console.error("[streamix] container disposal failed during scope disposal:", err);
-  });
 }
 
 /* ── Registry Linkage Handlers ───────────────────────────────────────────── */

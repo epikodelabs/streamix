@@ -1,6 +1,6 @@
 ## 🚀 Streamix and the Angular Ecosystem
 
-Streamix isn’t a lightweight wrapper around Angular primitives. It brings its own **comprehensive** implementation of reactive state (atoms + derived), scoped lifecycles, dependency injection, async resources, and more.
+Streamix isn’t a lightweight wrapper around Angular primitives. It brings its own **comprehensive** implementation of reactive state (atoms + derived), scoped lifecycles, async resources, and more.
 
 This creates **intentional overlap** with parts of Angular. Instead of blending in seamlessly, Streamix serves as a capable alternative you can use *instead of* certain Angular tools when it fits better.
 
@@ -16,7 +16,6 @@ However, it’s **not** a first-class Angular-native integration. Because it ove
 |--------------------------|-------------------------------|-------------------------------|-----|
 | Reactive state           | Signals + RxJS                | Atoms, derived, flow          | Overlapping |
 | Lifecycle & cleanup      | DestroyRef, OnDestroy         | Scopes + auto-disposal        | Manual bridge needed |
-| Dependency Injection     | Angular DI                    | Built-in IoC container        | Separate |
 | Async resources          | RxJS + switchMap              | flow() with auto-cancel       | Strong alternative |
 | Feature-scoped state     | Services + Signals            | Scopes                        | Excellent alternative |
 
@@ -31,7 +30,7 @@ However, it’s **not** a first-class Angular-native integration. Because it ove
 **What needs care:**
 - No automatic `DestroyRef` integration (call `scope.dispose()` yourself for now)
 - No official Signal interop yet
-- Own DI and networking layers (parallel to Angular’s)
+- Own networking layer (parallel to Angular’s)
 
 ### 🎯 Realistic Positioning
 

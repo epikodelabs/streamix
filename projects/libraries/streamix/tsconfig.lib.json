@@ -6,7 +6,30 @@
     "declarationMap": true,
     "inlineSources": true,
     "lib": ["dom", "dom.iterable", "es2022"],
-    "types": []
+    "types": [],
+    "paths": {
+      "@epikodelabs/streamix/aggregates": [
+        "./aggregates/src/lib/index.ts"
+      ],
+      "@epikodelabs/streamix/coroutines": [
+        "./coroutines/src/lib/index.ts"
+      ],
+      "@epikodelabs/streamix/dom": [
+        "./dom/src/lib/index.ts"
+      ],
+      "@epikodelabs/streamix/networking": [
+        "./networking/src/lib/index.ts"
+      ],
+      "@epikodelabs/streamix/forms": [
+        "./forms/src/lib/index.ts"
+      ],
+      "@epikodelabs/streamix/router": [
+        "./router/src/lib/index.ts"
+      ],
+      "@epikodelabs/streamix": [
+        "./src/lib/index.ts"
+      ]
+    }
   },
   "files": ["src/public-api.ts"],
   "exclude": ["**/*.spec.ts"]
