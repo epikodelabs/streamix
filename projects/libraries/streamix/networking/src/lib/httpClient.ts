@@ -43,9 +43,19 @@ export type HttpClient = {
   ): HttpStream<T>;
 };
 
+export type HttpClientOptions = {
+  baseUrl?: string | URL;
+  middlewares?: readonly Middleware[];
+};
+
 type HttpContextError = Error & {
   context?: Context;
   status?: number;
+};
+
+type NormalizedHttpClientOptions = {
+  baseUrl?: string;
+  middlewares: readonly Middleware[];
 };
 
 const cloneRequest = (
@@ -72,6 +82,27 @@ const withHeader = (
 };
 
 const methodOf = (context: Context): string => context.init.method ?? 'GET';
+
+const normalizeHttpClientOptions = (
+  options: readonly Middleware[] | HttpClientOptions | undefined,
+): NormalizedHttpClientOptions => {
+  if (Array.isArray(options)) {
+    return { middlewares: options };
+  }
+
+  return {
+    baseUrl: options?.baseUrl != null ? String(options.baseUrl) : undefined,
+    middlewares: options?.middlewares ?? [],
+  };
+};
+
+const resolveRequestUrl = (url: string, baseUrl?: string): string => {
+  if (baseUrl) {
+    return new URL(url, baseUrl).toString();
+  }
+
+  return url;
+};
 
 const prepareRequestInit = (init: RequestInit): RequestInit => {
   const headers = new Headers(init.headers);
@@ -204,8 +235,9 @@ export const useTimeout = (ms: number): Middleware =>
 // ─── Client ───────────────────────────────────────────────────────────────────
 
 export const createHttpClient = (
-  middlewares: readonly Middleware[] = [],
+  options: readonly Middleware[] | HttpClientOptions = [],
 ): HttpClient => {
+  const { baseUrl, middlewares } = normalizeHttpClientOptions(options);
   const defaultFetch = globalThis.fetch.bind(globalThis);
 
   const execute = async (context: Context): Promise<HttpResult> => {
@@ -240,7 +272,7 @@ export const createHttpClient = (
       : controller.signal;
 
     const context: Context = {
-      url,
+      url: resolveRequestUrl(url, baseUrl),
       init: { ...init, signal },
       fetch: defaultFetch,
     };
@@ -260,7 +292,10 @@ export const createHttpClient = (
   };
 
   return {
-    withDefaults: (...additional) => createHttpClient([...middlewares, ...additional]),
+    withDefaults: (...additional) => createHttpClient({
+      baseUrl,
+      middlewares: [...middlewares, ...additional],
+    }),
     request,
   };
 };

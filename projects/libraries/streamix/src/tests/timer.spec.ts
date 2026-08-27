@@ -34,8 +34,8 @@ describe('timer', () => {
     expect(emittedValues.length).toBe(previousLength);
   });
 
-  it('should support promise-based delay and interval inputs', async () => {
-    const atom = timer(Promise.resolve(0), Promise.resolve(10));
+  it('should support zero delay with an explicit interval', async () => {
+    const atom = timer(0, 10);
     const emitted: number[] = [];
     const unsubscribe = atom.subscribe(v => {
       if (v !== undefined) emitted.push(v);

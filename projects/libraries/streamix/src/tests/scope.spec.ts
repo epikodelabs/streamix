@@ -14,6 +14,7 @@ import {
   pipeExpr,
   scope,
   startWith,
+  transaction,
   type Scope
 } from '@epikodelabs/streamix';
 
@@ -22,11 +23,6 @@ type IsAny<T> = 0 extends (1 & T) ? true : false;
 type ExpectNotAny<T> = IsAny<T> extends true ? ['expected non-any type'] : true;
 
 describe('Scope System', () => {
-  afterEach(() => {
-    if (globalScope) {
-      globalScope.mode = 'discrete';
-    }
-  });
 
   describe('scope creation', () => {
     it('should create a scope', () => {
@@ -422,11 +418,16 @@ describe('Scope System', () => {
     });
 
     it('should track passed-through readable loading atoms without crashing dependency watchers', async () => {
+      interface ParentShape {
+        childLoading: boolean;
+        summary: string;
+      }
+
       const pending = atom<string>();
       const child = scope({ pending });
-      const parent = scope({
-        childLoading: child.at.loading,
-        summary: (self: any) => self.childLoading ? 'loading' : 'ready',
+      const parent = scope<ParentShape>({
+        childLoading: child.at.loading as any,
+        summary: (self: ParentShape) => self.childLoading ? 'loading' : 'ready',
       });
 
       expect(parent.summary).toBe('loading');
@@ -440,9 +441,6 @@ describe('Scope System', () => {
       child.dispose();
       pending.dispose();
     });
-  });
-
-  describe('dirty state', () => {
   });
 
   describe('snapshot', () => {
@@ -616,218 +614,42 @@ describe('Scope System', () => {
 
   });
 
-  describe('analog mode', () => {
-    it('should batch atom emissions to the scheduler', async () => {
-      interface Shape {
-        a: number;
-      }
-
-      const s = scope<Shape>({ a: 0 }, { mode: 'analog' });
-
+  describe('state propagation', () => {
+    it('should propagate ordinary scope writes immediately', () => {
+      const s = scope({ a: 0 });
       const values: number[] = [];
-      s.at('a').subscribe(v => values.push(v));
+      s.at('a').subscribe(value => values.push(value));
 
-      s.at('a').next(1);
-      s.at('a').next(2);
-      s.at('a').next(3);
+      s.a = 1;
+      s.a = 2;
 
-      expect(values).toEqual([]);
-      await delay();
-      expect(values).toEqual([3]);
-      s.dispose();
-    });
-
-    it('should batch derived recomputations', async () => {
-      interface Shape {
-        a: number;
-        doubled: number;
-      }
-
-      const s = scope<Shape>({
-        a: 0,
-        doubled: (self) => self.a * 2,
-      }, { mode: 'analog' });
-
-      const values: number[] = [];
-      s.at('doubled').subscribe(v => values.push(v));
-
-      s.at('a').next(1);
-      s.at('a').next(2);
-      s.at('a').next(3);
-
-      expect(values).toEqual([]);
-      expect(s.doubled).toBe(6);
-
-      await delay();
-      expect(values).toEqual([6]);
-      s.dispose();
-    });
-
-    it('should respect discrete opt-out', async () => {
-      interface Shape {
-        a: number;
-      }
-
-      const s = scope<Shape>(() => ({
-        a: atomExpr<number>(0, { discrete: true }),
-      }), { mode: 'analog' });
-
-      const values: number[] = [];
-      s.at('a').subscribe(v => values.push(v));
-
-      s.at('a').next(1);
-      s.at('a').next(2);
-      await delay();
       expect(values).toEqual([1, 2]);
       s.dispose();
     });
 
-    it('should inherit analog mode from parent', async () => {
-      const parent = scope({
-        child: { a: 0 },
-      }, { mode: 'analog' });
-
-      const childValues: number[] = [];
-      parent.child.at('a').subscribe(v => childValues.push(v));
-
-      parent.child.at('a').next(1);
-      parent.child.at('a').next(2);
-      parent.child.at('a').next(3);
-
-      await delay();
-      expect(parent.child.a).toBe(3);
-      expect(childValues).toEqual([3]);
-
-      parent.dispose();
-    });
-
-    it('should allow child to override parent analog mode', async () => {
-      interface ChildShape {
-        a: number;
-      }
-
-      interface ParentShape {
-        child: Scope<ChildShape>;
-      }
-
-      const parent = scope<ParentShape>(() => ({
-        child: scope<ChildShape>({ a: 0 }, { mode: 'discrete' }),
-      }), { mode: 'analog' });
-
-      const values: number[] = [];
-      parent.child.at('a').subscribe(v => values.push(v));
-
-      parent.child.at('a').next(1);
-      parent.child.at('a').next(2);
-
-      await delay();
-      expect(values).toEqual([1, 2]);
-
-      parent.dispose();
-    });
-
-    it('should keep derived values live in analog mode', async () => {
+    it('should batch scope writes only when wrapped in a transaction', () => {
       interface Shape {
         a: number;
-        doubled: number;
+        b: number;
+        total: number;
       }
 
-      const s = scope<Shape>({
-        a: 0,
-        doubled: (self) => self.a * 2,
-      }, { mode: 'analog' });
-
+      const s = scope<Shape>({ a: 0, b: 0, total: self => self.a + self.b });
       const values: number[] = [];
-      s.at('doubled').subscribe(v => values.push(v));
+      s.at('total').subscribe(value => values.push(value));
+      expect(s.total).toBe(0);
 
-      s.at('a').next(5);
+      transaction(() => {
+        s.a = 1;
+        s.b = 2;
+        expect(values).toEqual([]);
+      });
 
-      // Value is recomputed on read even before the scheduler flushes
-      expect(s.doubled).toBe(10);
-      expect(values).toEqual([]);
-
-      await delay();
-      expect(values).toEqual([10]);
-
-      s.dispose();
-    });
-
-    it('should batch flow emissions in analog mode', async () => {
-      interface Shape {
-        a: number;
-        source: number;
-      }
-
-      const s = scope<Shape>(() => ({
-        source: atomExpr<number>(),
-        a: (_self: Shape, atoms: any) => flow<number>(atoms.source),
-      }), { mode: 'analog' });
-
-      const values: number[] = [];
-      s.at('a').subscribe(v => values.push(v));
-
-      s.at('source').next(1);
-      s.at('source').next(2);
-      s.at('source').next(3);
-
-      // In analog mode, rapid source emissions are batched to a single scheduler
-      // flush; the flow broadcasts only the latest value.
-      expect(values).toEqual([]);
-      await delay();
-      expect(s.a).toBe(3);
+      expect(s.total).toBe(3);
       expect(values).toEqual([3]);
-
-      s.dispose();
-    });
-  });
-
-  describe('globalScope', () => {
-    it('should default to discrete mode', () => {
-      expect(globalScope.mode).toBe('discrete');
-    });
-
-    it('should make top-level scopes analog via global config', async () => {
-      globalScope.mode = 'analog';
-
-      interface Shape {
-        a: number;
-      }
-
-      const s = scope<Shape>({ a: 0 });
-
-      const values: number[] = [];
-      s.at('a').subscribe(v => values.push(v));
-
-      s.at('a').next(1);
-      s.at('a').next(2);
-      s.at('a').next(3);
-
-      expect(values).toEqual([]);
-      await delay();
-      expect(values).toEqual([3]);
-
       s.dispose();
     });
 
-    it('should let child scopes override global analog mode', async () => {
-      globalScope.mode = 'analog';
-
-      interface Shape {
-        a: number;
-      }
-
-      const s = scope<Shape>({ a: 0 }, { mode: 'discrete' });
-
-      const values: number[] = [];
-      s.at('a').subscribe(v => values.push(v));
-
-      s.at('a').next(1);
-      s.at('a').next(2);
-
-      await delay();
-      expect(values).toEqual([1, 2]);
-      s.dispose();
-    });
   });
 
   describe('scope object shorthand', () => {

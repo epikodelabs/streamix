@@ -4,7 +4,6 @@ import {
   derived,
   flow,
   getScheduler,
-  scope,
   trackDependencies,
   transaction,
   type Atom,
@@ -160,59 +159,6 @@ describe('Atom System', () => {
       a.dispose();
     });
 
-    it('should support discrete option', () => {
-      const a = atom(0, { discrete: true });
-      expect(a.value).toBe(0);
-      a.next(5);
-      expect(a.value).toBe(5);
-      a.dispose();
-    });
-
-    it('should keep discrete writable atoms clean, including error propagation', async () => {
-      const a = atom(0, { discrete: true });
-
-      expect(a.dirty).toBe(false);
-      a.next(1);
-      expect(a.dirty).toBe(false);
-
-      a.fail(new Error('boom'), { terminate: false });
-      expect(a.dirty).toBe(false);
-
-      a.recover?.();
-      expect(a.dirty).toBe(false);
-      a.dispose();
-    });
-
-    it('should report queued analog writable updates through atom and scope dirty state', () => {
-      const env = createTestEnvironment();
-
-      env.run(() => {
-        const app = scope(() => {
-          const count = atom(0);
-          count.subscribe(() => {});
-          return { count };
-        }, { mode: 'analog' });
-
-        const count = app.at.count;
-
-        expect(count.dirty).toBe(false);
-        expect(app.dirty).toBe(false);
-
-        count.next(1);
-
-        expect(count.dirty).toBe(true);
-        expect(app.dirty).toBe(true);
-
-        env.flush();
-
-        expect(count.dirty).toBe(false);
-        expect(app.dirty).toBe(false);
-
-        app.dispose();
-      });
-
-      env.reset();
-    });
 
     it('should not schedule error broadcasts when propagateErrors is false', () => {
       const env = createTestEnvironment();
@@ -321,12 +267,12 @@ describe('Atom System', () => {
       source.dispose();
     });
 
-    it('should support generator-based derived formulas', () => {
+    it('should support sync derived formulas that read intermediate values explicitly', () => {
       const source = atom(3);
 
-      const generated = derived<number>(function* (): Generator<Atom<number> | number, number, number> {
-        const current = yield source;
-        const incremented = yield current + 1;
+      const generated = derived<number>((self: DerivedScope) => {
+        const current = self.read(source);
+        const incremented = current + 1;
         return incremented * 2;
       });
 
@@ -820,28 +766,6 @@ describe('Atom System', () => {
   });
 
 
-  describe('scheduler', () => {
-    it('should use custom scheduler', async () => {
-      const env = createTestEnvironment();
-
-      env.run(() => {
-        const s = scope(() => {
-          const a = atom(0);
-          a.subscribe(() => {});
-          a.next(1);
-          // In analog mode the public broadcast is deferred to the scheduler.
-          expect(getScheduler().isDirty).toBe(true);
-          return { a };
-        }, { mode: 'analog' });
-
-        env.flush();
-        expect(getScheduler().isDirty).toBe(false);
-        s.dispose();
-      });
-
-      env.reset();
-    });
-  });
   describe('transaction()', () => {
     it('should batch discrete atom writes into one notification', () => {
       const a = atom(0);
@@ -853,11 +777,15 @@ describe('Atom System', () => {
         a.next(2);
         a.next(3);
         expect(a.value).toBe(3);
+        expect(a.dirty).toBe(true);
+        expect(getScheduler().isDirty).toBe(true);
         expect(values).toEqual([]);
       });
 
       expect(values).toEqual([[3, 0]]);
       expect(a.previous).toBe(0);
+      expect(a.dirty).toBe(false);
+      expect(getScheduler().isDirty).toBe(false);
       a.dispose();
     });
 

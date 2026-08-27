@@ -26,12 +26,25 @@ function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
 }
 
 function withFetch(fetch: typeof globalThis.fetch) {
-  return createHttpClient().withDefaults(
+  return createHttpClient({ baseUrl: 'https://api.test' }).withDefaults(
     useRequest((context) => ({ ...context, fetch })),
   );
 }
 
 describe('http client', () => {
+  it('resolves relative request URLs against the configured base URL', async () => {
+    const fetch = jasmine.createSpy('fetch').and.callFake(async (request: Request) => {
+      expect(request.url).toBe('https://api.test/relative');
+      return jsonResponse({ ok: true });
+    });
+
+    const client = createHttpClient({ baseUrl: 'https://api.test' }).withDefaults(
+      useRequest((context) => ({ ...context, fetch: fetch as typeof globalThis.fetch })),
+    );
+
+    expect(await collect(client.request('/relative', readJson))).toEqual([{ ok: true }]);
+  });
+
   it('binds the default fetch to globalThis', async () => {
     const originalFetch = globalThis.fetch;
     const boundFetch = jasmine.createSpy('fetch').and.callFake(function (this: typeof globalThis) {
@@ -145,9 +158,8 @@ describe('request transforms', () => {
       return jsonResponse({ ok: true });
     });
 
-    const client = createHttpClient().withDefaults(
+    const client = createHttpClient({ baseUrl: 'https://api.test' }).withDefaults(
       useRequest(
-        (context) => ({ ...context, url: new URL(context.url, 'https://api.test').toString() }),
         (context) => {
           const headers = new Headers(context.init.headers);
           headers.set('X-Step', 'one');
