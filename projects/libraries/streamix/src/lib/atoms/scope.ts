@@ -25,7 +25,7 @@ import {
   type FlowExpr,
   type PipeExpr,
 } from "./expr";
-import { getGlobalScope, isScope, resolveMode, type RootScope } from "./root";
+import { getGlobalScope, isScope, type RootScope } from "./root";
 import type { Subscription } from "./subscription";
 
 /* ── Internal expression markers for scope() ──────────────────────────────── */
@@ -318,19 +318,6 @@ type ScopeSetupCallback<TSelf, TScope, TResult extends ScopeSetupResult = ScopeS
   (self: TSelf, scope: TScope) => TResult;
 
 /**
- * Options that control how a scope batches and emits updates.
- */
-export type ScopeOptions = {
-  /**
-   * Notification mode for atoms created inside the scope.
-   *
-   * `discrete` emits synchronously. `analog` batches/coalesces updates until the
-   * scheduler flushes them.
-   */
-  mode?: "discrete" | "analog";
-};
-
-/**
  * Built-in atoms that every scope owns in addition to user-defined state.
  */
 export type ScopeReservedAtoms = {
@@ -433,7 +420,6 @@ export interface Scope<T extends Record<string, any> = Record<string, any>> {
   type: "scope";
   atoms: Set<Atom<any> | Scope>;
   cleanups: Set<() => void>;
-  mode: "discrete" | "analog";
   parent: Scope | RootScope | null;
   readonly loading: boolean;
   readonly dirty: boolean;
@@ -473,10 +459,6 @@ const emittedAtomsRegistry = new WeakSet<Atom<any>>();
  * Returns the scope currently being constructed or evaluated.
  */
 export const getCurrentScope = (): Scope | null => currentScope;
-/**
- * Returns the effective notification mode of a scope.
- */
-export const getScopeMode = (scope: Scope): "discrete" | "analog" => scope.mode ?? "discrete";
 /**
  * Replaces the active scope and returns the previous one.
  */
@@ -627,10 +609,8 @@ function defineScopeExtensionProperties(scopeRef: Scope, extensions: Record<stri
 function createScopeInternal<T extends Record<string, any>>(
   factory: (this: any, self: any) => any,
   setup?: (self: any, scope: any) => ScopeSetupResult,
-  options?: ScopeOptions,
 ): ScopeReturn<T> {
   const parent = currentScope ?? getGlobalScope();
-  const mode = resolveMode(options, parent);
   const evaluating = new Set<string | symbol>();
 
   const scopeCallable = function (first: any, ...rest: any[]) {
@@ -644,7 +624,6 @@ function createScopeInternal<T extends Record<string, any>>(
     type: "scope",
     atoms: new Set(),
     cleanups: new Set(),
-    mode,
     parent,
     loading: true,
     dirty: false,
@@ -804,8 +783,7 @@ export function scope<TConfig extends Record<string, any>, TSetup extends ScopeS
   setup: (
     self: ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>,
     scope: ScopeReturnFromConfig<UnwrapScopeValuesFromConfig<TConfig>>
-  ) => TSetup,
-  options?: ScopeOptions,
+  ) => TSetup
 ): ScopeWithSetup<ScopeReturnFromConfig<UnwrapScopeValuesFromConfig<TConfig>>, TSetup>;
 
 /**
@@ -816,24 +794,21 @@ export function scope<TConfig extends Record<string, any>, TSetup extends ScopeS
   setup: (
     self: ScopeSetupSelfFromConfig<Simplify<UnwrapScopeValuesFromConfig<TConfig>>>,
     scope: ScopeReturnFromConfig<UnwrapScopeValuesFromConfig<TConfig>>
-  ) => TSetup,
-  options?: ScopeOptions,
+  ) => TSetup
 ): ScopeWithSetup<ScopeReturnFromConfig<UnwrapScopeValuesFromConfig<TConfig>>, TSetup>;
 
 /**
  * Creates a scope from a config factory.
  */
 export function scope<TConfig extends Record<string, any>>(
-  definition: (this: Simplify<ScopeReturnFromConfig<UnwrapScopeValuesFromConfig<TConfig>>>) => TConfig,
-  options?: ScopeOptions
+  definition: (this: Simplify<ScopeReturnFromConfig<UnwrapScopeValuesFromConfig<TConfig>>>) => TConfig
 ): ScopeReturnFromConfig<UnwrapScopeValuesFromConfig<TConfig>>;
 
 /**
  * Creates a scope from a plain object definition.
  */
 export function scope<TConfig extends Record<string, any>>(
-  definition: TConfig,
-  options?: ScopeOptions
+  definition: TConfig
 ): ScopeReturnFromConfig<UnwrapScopeValuesFromConfig<TConfig>>;
 
 /**
@@ -845,16 +820,14 @@ export function scope<T extends Record<string, any>, TSetup extends ScopeSetupRe
     ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>,
     ScopeReturnFromConfig<Simplify<UnwrapScopeValues<ScopeOf<T>>>>,
     TSetup
-  >,
-  options?: ScopeOptions
+  >
 ): ScopeWithSetup<ScopeReturnFromConfig<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, TSetup>;
 
 /**
  * Creates a scope with an explicit normalized state shape.
  */
 export function scope<T extends Record<string, any>>(
-  definition: (this: ScopeReturnFromConfig<Simplify<UnwrapScopeValues<ScopeOf<T>>>>) => ScopeConfig<T>,
-  options?: ScopeOptions
+  definition: (this: ScopeReturnFromConfig<Simplify<UnwrapScopeValues<ScopeOf<T>>>>) => ScopeConfig<T>
 ): ScopeReturnFromConfig<Simplify<UnwrapScopeValues<ScopeOf<T>>>>;
 
 /**
@@ -866,16 +839,14 @@ export function scope<T extends Record<string, any>, TSetup extends ScopeSetupRe
     ScopeSetupSelf<Simplify<UnwrapScopeValues<ScopeOf<T>>>>,
     ScopeReturnFromConfig<Simplify<UnwrapScopeValues<ScopeOf<T>>>>,
     TSetup
-  >,
-  options?: ScopeOptions
+  >
 ): ScopeWithSetup<ScopeReturnFromConfig<Simplify<UnwrapScopeValues<ScopeOf<T>>>>, TSetup>;
 
 /**
  * Creates a scope with an explicit normalized state shape from an object definition.
  */
 export function scope<T extends Record<string, any>>(
-  definition: ScopeConfig<T>,
-  options?: ScopeOptions
+  definition: ScopeConfig<T>
 ): ScopeReturnFromConfig<Simplify<UnwrapScopeValues<ScopeOf<T>>>>;
 
 /**
@@ -883,19 +854,9 @@ export function scope<T extends Record<string, any>>(
  */
 export function scope(
   definition: any,
-  setupOrOptions?: ((self: any, scope: any) => ScopeSetupResult) | ScopeOptions,
-  options?: ScopeOptions,
+  setup?: (self: any, scope: any) => ScopeSetupResult,
 ): any {
   const isFactory = typeof definition === "function";
-  let setup: ((self: any, scope: any) => ScopeSetupResult) | undefined;
-  let resolvedOptions: ScopeOptions | undefined;
-
-  if (typeof setupOrOptions === "function") {
-    setup = setupOrOptions;
-    resolvedOptions = options;
-  } else {
-    resolvedOptions = setupOrOptions;
-  }
 
   return createScopeInternal(
     function (this: any) {
@@ -903,8 +864,7 @@ export function scope(
       const current = getCurrentScope() as Scope;
       return materializeState(current, source, new WeakMap());
     },
-    setup,
-    resolvedOptions
+    setup
   );
 }
 

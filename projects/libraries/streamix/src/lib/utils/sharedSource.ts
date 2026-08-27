@@ -5,9 +5,9 @@ import {
   type MaybePromise,
   type Subscription,
 } from "../atoms";
-import { ANALOG, normalizeError, type Atom, type Writable } from "../atoms/atom";
+import { normalizeError, type Atom, type Writable } from "../atoms/atom";
+import { ANALOG_DELIVERY } from "../atoms/delivery";
 import { DONE } from "../atoms/operator";
-import { getCurrentScope, getScopeMode } from "../atoms/scope";
 import { createSubscription } from "../atoms/subscription";
 import { cyclicBuffer, type CyclicBuffer, type CyclicBufferMode } from "../primitives/cyclicBuffer";
 
@@ -16,7 +16,7 @@ export type SharedSourceMode = CyclicBufferMode;
 export type SharedSourceOptions = {
   /** Stream name for debugging. */
   name?: string;
-  /** Explicit mode; if omitted, inferred from the current scope. */
+  /** Sequence delivery mode. Defaults to `discrete`. */
   mode?: SharedSourceMode;
   /** Ring buffer capacity per stream. Defaults to 1 in analog mode, 16 in discrete mode. */
   capacity?: number;
@@ -34,15 +34,10 @@ export function createSharedSource<T>(
   connect: (push: (value: T) => MaybePromise<void>) => MaybePromise<() => MaybePromise<void>>,
   options: SharedSourceOptions = {}
 ): Atom<T> {
-  const scope = getCurrentScope();
-  const inheritedMode = scope !== null ? getScopeMode(scope) : "discrete";
-  const mode: CyclicBufferMode = options.mode ?? inheritedMode;
+  const mode: CyclicBufferMode = options.mode ?? "discrete";
   const analog = mode === "analog";
   const capacity = options.capacity ?? (analog ? 1 : 16);
-  const stateAtom = atom<T>(
-    NO_INITIAL_VALUE,
-    mode === "discrete" && inheritedMode === "analog" ? { discrete: true } : undefined,
-  ) as Writable<T>;
+  const stateAtom = atom<T>(NO_INITIAL_VALUE) as Writable<T>;
   const baseDispose = stateAtom.dispose.bind(stateAtom);
 
   let buffer: CyclicBuffer<T> | null = null;
@@ -337,7 +332,7 @@ export function createSharedSource<T>(
       baseDispose();
   };
 
-  (instance as any)[ANALOG] = analog;
+  if (analog) (instance as any)[ANALOG_DELIVERY] = true;
 
   return instance as Atom<T>;
 }

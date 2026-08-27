@@ -1,4 +1,5 @@
-import { ANALOG, type Atom } from "./atom";
+import type { Atom } from "./atom";
+import { ANALOG_DELIVERY } from "./delivery";
 import type { MaybePromise } from "./operator";
 
 /**
@@ -28,7 +29,7 @@ export function iterate<T>(source: Atom<T> | AsyncIterable<T>): AsyncIterableIte
   }
 
   const atom = source as Atom<T>;
-  const conflate = (atom as any)[ANALOG] === true;
+  const conflate = (atom as any)[ANALOG_DELIVERY] === true;
 
   let initialized = false;
   let buffer: T[] = [];

@@ -1,5 +1,4 @@
 import {
-    ANALOG,
     createSharedSource,
     DONE,
     NEXT,
@@ -379,13 +378,4 @@ describe('createSharedSource', () => {
     source.dispose();
   });
 
-  it('marks analog flag when mode is analog', () => {
-    const source = createSharedSource<number>(() => () => {}, {
-      mode: 'analog',
-    });
-
-    expect((source as any)[ANALOG]).toBeTrue();
-
-    source.dispose();
-  });
 });

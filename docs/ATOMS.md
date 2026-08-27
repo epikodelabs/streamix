@@ -42,7 +42,7 @@ console.log(count.value); // 42
 
 ```
 
-* **Tip:** Pass `{ discrete: true }` in the options if you need every update (even duplicate values) to fire notifications to subscribers. This is perfect for event streams.
+Atoms propagate every write immediately. Use `transaction()` when several writes must become one reactive state transition.
 
 #### B. Derived Atoms (`derived`)
 
@@ -225,42 +225,26 @@ taskManager.dispose();
 
 ---
 
-## 4. Standard UI Optimization: Analog Mode
+## 4. Explicit Transactions
 
-By default, streamix operates in **Discrete Mode**, meaning every state change immediately and synchronously triggers updates. This is excellent for services, events, and testing, but can cause laggy performance or "screen flickering" in UI components due to rapid, consecutive rendering cycles.
-
-Always switch your UI-facing scopes to **Analog Mode** to automatically batch and coalesce changes on a microtask queue:
+Atoms and scopes have one state propagation model: ordinary writes propagate immediately. When several synchronous writes form one logical state change, wrap them in `transaction()`.
 
 ```ts
-// Ideal for React, Vue, or vanilla UI rendering
 const uiState = scope({
   firstName: "Jane",
   lastName: "Doe",
   fullName: self => `${self.firstName} ${self.lastName}`
-}, { mode: "analog" });
-
-// Modifying both properties only triggers exactly ONE UI update cycle at the end of the microtask:
-uiState.firstName = "John";
-uiState.lastName = "Smith";
-
-```
-### Explicit Transactions
-
-Analog mode is a property of a scope: it continuously coalesces rapid updates. A transaction is a property of an operation: it makes several synchronous writes one reactive state transition, even for otherwise discrete atoms.
-
-```ts
-const firstName = atom("Jane");
-const lastName = atom("Doe");
+});
 
 transaction(() => {
-  firstName.set("John");
-  lastName.set("Smith");
+  uiState.firstName = "John";
+  uiState.lastName = "Smith";
 });
 ```
 
-Inside the callback, `.value` reflects writes immediately. Subscribers and dependent `derived()` atoms are deferred until the outermost transaction commits. Multiple writes to the same atom collapse to the final value, while `previous` remains the value from before the transaction. Nested transactions join the outer transaction.
+Inside the callback, current values are readable immediately, but subscribers and dependent `derived()` atoms are deferred until the outermost transaction commits. Multiple writes to the same atom collapse to the final value, while `previous` remains the value from before the transaction. Nested transactions join the outer transaction.
 
-Transactions are synchronous and do not roll back state when the callback throws. If async work is required, resolve it first and commit the resulting state synchronously:
+Transactions are synchronous and do not roll back state when the callback throws. Resolve async work first, then commit the resulting state synchronously:
 
 ```ts
 const result = await loadProfile();
@@ -269,4 +253,11 @@ transaction(() => {
   profile.name = result.name;
   profile.email = result.email;
 });
+```
+
+Analog/discrete semantics belong to sequences, not state containers. For a flow, choose delivery explicitly when needed:
+
+```ts
+const positions = flow(pointerPositions(), { mode: "analog" }); // latest pending value matters
+const clicks = flow(clickEvents(), { mode: "discrete" });       // every event matters
 ```

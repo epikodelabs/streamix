@@ -4,11 +4,10 @@ import { iterate } from "./iterate";
 import { DONE, isPromiseLike, NEXT, type MaybePromise } from "./operator";
 
 import {
-  getCurrentScope,
-  getScopeMode,
   markAtomAsEmitted,
   registerWithCurrentScope,
 } from "./scope";
+import { ANALOG_DELIVERY } from "./delivery";
 import { createSubscription, type Subscription } from "./subscription";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -20,7 +19,6 @@ const META = Symbol("engine.meta");
 const MARK_DIRTY = Symbol("engine.markDirty");
 const FLUSH = Symbol("engine.flush");
 
-export const ANALOG = Symbol("engine.analog");
 export const NO_INITIAL_VALUE = Symbol("streamix.noInitialValue");
 
 /**
@@ -28,11 +26,6 @@ export const NO_INITIAL_VALUE = Symbol("streamix.noInitialValue");
  * atoms.
  */
 export interface AtomOptions {
-  /**
-   * Forces this atom to notify subscribers synchronously even when it is created
-   * inside an analog scope.
-   */
-  discrete?: boolean;
   /**
    * Soft subscriber limit used to detect likely leaks. The atom still works
    * after the limit, but the runtime may warn.
@@ -72,7 +65,7 @@ export interface Atom<T = any> {
   readonly previous: T;
   /** True after the atom has been disposed. */
   readonly disposed: boolean;
-  /** True when an analog update is queued but not flushed yet. */
+  /** True when reactive work is queued but not flushed yet. */
   readonly dirty: boolean;
   /** Last error captured by this atom, if any. */
   readonly error?: any;
@@ -174,7 +167,7 @@ interface AtomNode {
   version: number;
   queued: boolean;
   isResource: boolean;
-  isAnalog: boolean;
+  conflate: boolean;
   flush: () => void;
   flushing?: boolean;
 }
@@ -625,12 +618,12 @@ function createTrackedAtomView<A>(owner: EvaluationOwner, atom: Atom<A>): Atom<A
   return view as unknown as Atom<A>;
 }
 
-function finalizeAtomInstance<T extends Atom<any> & InternalAtomContainer>(instance: T, analog: boolean): T {
+function finalizeAtomInstance<T extends Atom<any> & InternalAtomContainer>(instance: T, conflate: boolean): T {
   Object.defineProperty(instance, "_onDispose", {
     get: () => instance[META].disposeHandlers,
     enumerable: false,
   });
-  (instance as any)[ANALOG] = analog;
+  if (conflate) (instance as any)[ANALOG_DELIVERY] = true;
   registerWithCurrentScope(instance as any);
   return instance;
 }
@@ -648,7 +641,7 @@ export function normalizeError(err: any): Error {
  *
  * @param conflate - If true, values emitted while a subscriber callback is still
  *   running are coalesced: only the latest pending value is delivered once the
- *   callback finishes. This is used in analog mode. If false, every emitted value
+ *   callback finishes. This is used by latest-value sequence delivery. If false, every emitted value
  *   is still delivered sequentially (callbacks are never re-entered), but no
  *   intermediate values are dropped.
  */
@@ -783,7 +776,7 @@ function observeDependencyChange(dep: DependencySource<any>, handler: () => void
 type AtomSubscriber<T> = (current: T, previous: T) => MaybePromise;
 
 interface AtomBaseConfig<T> {
-  analog: boolean;
+  conflate: boolean;
   maxSubscribers: number;
   node: AtomNode;
   getDisposed: () => boolean;
@@ -817,7 +810,7 @@ interface AtomBaseResult<T> {
 function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
   const meta = createAtomRuntimeMeta();
   const errorHandlers = new Set<(error: any) => void>();
-  const subs = createSubscriberSet<T>(errorHandlers, config.analog);
+  const subs = createSubscriberSet<T>(errorHandlers, config.conflate);
 
   const instance: Atom<T> & InternalAtomContainer = {
     type: "atom",
@@ -883,7 +876,7 @@ function createAtomBase<T>(config: AtomBaseConfig<T>): AtomBaseResult<T> {
   };
 
   return {
-    instance: finalizeAtomInstance(instance, config.analog),
+    instance: finalizeAtomInstance(instance, config.conflate),
     meta,
     errorHandlers,
     subs,
@@ -905,12 +898,11 @@ export interface AtomFromIteratorOptions<T> extends AtomOptions {
  * The source starts when the first subscriber attaches and is closed when the
  * atom is disposed. Values yielded by the iterable become atom emissions.
  */
-export function atomFromIterator<T>(
+function atomFromIteratorInternal<T>(
   source: AsyncIterable<T>,
-  options?: AtomFromIteratorOptions<T>
+  options: AtomFromIteratorOptions<T> | undefined,
+  conflate: boolean,
 ): Atom<T> {
-  const activeScope = getCurrentScope();
-  const analog = activeScope !== null && getScopeMode(activeScope) === "analog" && !options?.discrete;
   const maxSubscribers = options?.maxSubscribers ?? 1000;
 
   let current: T = options?.initialValue !== undefined ? options.initialValue : undefined as T;
@@ -993,7 +985,7 @@ export function atomFromIterator<T>(
           notifyEmitHandlers(instance as any);
           notifyChangeHandlers(instance);
 
-          if (analog) {
+          if (conflate) {
             if (subs.size > 0) instance[MARK_DIRTY]();
           } else {
             broadcast(current);
@@ -1016,7 +1008,7 @@ export function atomFromIterator<T>(
 
   const node: AtomNode = {
     depth: 0, version: 0, queued: false, flushing: false,
-    isResource: true, isAnalog: analog,
+    isResource: true, conflate,
     flush() {
       if (disposed || (!dirty && !hasNewValue) || node.flushing) return;
       node.flushing = true;
@@ -1030,7 +1022,7 @@ export function atomFromIterator<T>(
   };
 
   const base = createAtomBase<T>({
-    analog,
+    conflate,
     maxSubscribers,
     node,
     getDisposed: () => disposed,
@@ -1090,6 +1082,17 @@ export function atomFromIterator<T>(
   });
 
   return instance;
+}
+
+/**
+ * Creates a readable atom backed by an async iterable. Atom state itself has no
+ * analog/discrete delivery mode; every source value is observable.
+ */
+export function atomFromIterator<T>(
+  source: AsyncIterable<T>,
+  options?: AtomFromIteratorOptions<T>,
+): Atom<T> {
+  return atomFromIteratorInternal(source, options, false);
 }
 
 function watchDependencies(
@@ -1156,10 +1159,16 @@ function createLatestAsyncCoordinator<T>() {
  * flow() - Async Resource Node
  * ───────────────────────────────────────────────────────────────────────────*/
 
+export interface FlowOptions extends AtomOptions {
+  /** Sequence delivery mode. `discrete` preserves every emission; `analog` keeps the latest pending value. */
+  mode?: "discrete" | "analog";
+}
+
 export function flow<T>(
   source: AsyncIterable<T> | Iterable<T> | ((signal: AbortSignal) => AsyncIterable<T> | Iterable<T>),
-  options?: AtomOptions
+  options?: FlowOptions
 ): Atom<T> {
+  const { mode = "discrete", ...atomOptions } = options ?? {};
   let initialValue: T | undefined;
   let hasInitialValue = false;
 
@@ -1259,9 +1268,10 @@ export function flow<T>(
     }
   };
 
-  return atomFromIterator(
+  return atomFromIteratorInternal(
     iterable,
-    hasInitialValue ? { ...options, initialValue } : options
+    hasInitialValue ? { ...atomOptions, initialValue } : atomOptions,
+    mode === "analog",
   );
 }
 
@@ -1296,9 +1306,7 @@ export function atom<T = any>(
   initialValue?: T | typeof NO_INITIAL_VALUE,
   options?: AtomOptions
 ): Writable<T> {
-  const activeScope = getCurrentScope();
   const resolvedOptions = options;
-  const analog = activeScope !== null && getScopeMode(activeScope) === "analog" && !resolvedOptions?.discrete;
 
   const maxSubscribers = resolvedOptions?.maxSubscribers ?? 1000;
   const terminateOnError = resolvedOptions?.terminateOnError ?? false;
@@ -1349,14 +1357,14 @@ export function atom<T = any>(
 
   const node: AtomNode = {
     depth: 0, version: 0, queued: false, flushing: false,
-    isResource: false, isAnalog: analog,
+    isResource: false, conflate: false,
     flush() {
       if (disposed || node.flushing) return;
       
       node.flushing = true;
       try {
         // Clear before broadcasting so a write from a subscriber can queue a
-        // subsequent analog flush.
+        // subsequent transactional flush.
         setDirty(false);
         flushInternal();
       } finally {
@@ -1366,7 +1374,7 @@ export function atom<T = any>(
   };
 
   const base = createAtomBase<T>({
-    analog,
+    conflate: false,
     maxSubscribers,
     node,
     getDisposed: () => disposed,
@@ -1381,7 +1389,7 @@ export function atom<T = any>(
     getPrevious: () => previous,
     markDirty: () => {
       if (disposed || node.queued) return;
-      if (node.isAnalog) setDirty(true);
+      if (isTransactionActive()) setDirty(true);
       getScheduler().queueFlush(node);
     },
     onSubscribed: (_callback, unsubscribe) => {
@@ -1426,22 +1434,13 @@ export function atom<T = any>(
       markAtomAsEmitted(instance as any);
       notifyEmitHandlers(instance as any);
 
-      // Notify dependents immediately so derived atoms stay dirty-tracked
-      // regardless of whether public broadcasts are discrete or analog-batched.
+      // Dependents are notified immediately. During a transaction they queue
+      // their recomputation; otherwise derived state updates synchronously.
       notifyChangeHandlers(instance);
 
-      if (node.isAnalog || isTransactionActive()) {
-        // Analog and transactional writes share the scheduler boundary.
-        if (subs.size > 0) {
-          instance[MARK_DIRTY]();
-        }
+      if (isTransactionActive()) {
+        if (subs.size > 0) instance[MARK_DIRTY]();
       } else {
-        // Discrete: Immediate broadcast.
-        // Dependents are already queued by notifyChangeHandlers() above; there is
-        // no need to re-queue this node — flushInternal() would short-circuit on
-        // the Object.is(lastNotified, current) guard anyway, but getting here at
-        // all wastes a microtask per discrete emit.
-        node.queued = false;
         lastNotified = current;
         node.version++;
         broadcast();
@@ -1638,9 +1637,6 @@ export function derived<T>(...args: any[]): Atom<T> {
     computable.onInit(self);
   }
 
-  const activeScope = getCurrentScope();
-  const analog = activeScope !== null && getScopeMode(activeScope) === "analog" && !options?.discrete;
-
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   const terminateOnError = options?.terminateOnError ?? false;
   const propagateErrors = options?.propagateErrors ?? true;
@@ -1691,7 +1687,7 @@ export function derived<T>(...args: any[]): Atom<T> {
 
     notifyChangeHandlers(instance);
 
-    if (node.isAnalog || isTransactionActive() || transactionTouched) {
+    if (isTransactionActive() || transactionTouched) {
       notifyPending = true;
     } else if (subs.size > 0) {
       broadcast();
@@ -1714,7 +1710,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       const handler = () => {
         if (disposed) return;
 
-        if (!node.isAnalog && !isTransactionActive()) {
+        if (!isTransactionActive()) {
           if (!node.flushing && !running) {
             try {
               recompute();
@@ -1797,7 +1793,7 @@ export function derived<T>(...args: any[]): Atom<T> {
 
   const node: AtomNode = {
     depth: 0, version: 0, queued: false, flushing: false,
-    isResource: false, isAnalog: analog,
+    isResource: false, conflate: false,
     flush() {
       if (disposed || (!dirty && !notifyPending) || node.flushing) return;
       flushInternal();
@@ -1805,7 +1801,7 @@ export function derived<T>(...args: any[]): Atom<T> {
   };
 
   const base = createAtomBase<T>({
-    analog,
+    conflate: false,
     maxSubscribers,
     node,
     getDisposed: () => disposed,
