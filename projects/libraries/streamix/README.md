@@ -71,7 +71,7 @@ Atoms are the primary reactive primitive in streamix.
 
 If a value arrives later, omit the initial value from `atom<T>()`.
 
-Async `derived()` callbacks only track atoms read before the first `await`. Use `self.use(...)` or `self.read(...)` up front, or switch to `flow()` for async resources.
+`derived()` is synchronous by design. If the computation needs `await`, cancellation, or restart behavior, use `flow()` instead.
 
 Scopes group related atoms under a disposable lifecycle boundary.
 

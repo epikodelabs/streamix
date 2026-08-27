@@ -320,21 +320,18 @@ describe('Atom System', () => {
       source.dispose();
     });
 
-    it('should support generator-based derived formulas', async () => {
+    it('should support generator-based derived formulas', () => {
       const source = atom(3);
 
-      const generated = derived<number>(function* (): Generator<Atom<number> | Promise<number>, number, number> {
+      const generated = derived<number>(function* (): Generator<Atom<number> | number, number, number> {
         const current = yield source;
-        const incremented = yield Promise.resolve(current + 1);
+        const incremented = yield current + 1;
         return incremented * 2;
       });
 
-      expect(generated.value).toBeUndefined();
-      await delay();
       expect(generated.value).toBe(8);
 
       source.next(4);
-      await delay();
       expect(generated.value).toBe(10);
 
       source.dispose();
@@ -437,84 +434,6 @@ describe('Atom System', () => {
     });
 
 
-    it('should resolve async derived value from self.use atoms', async () => {
-      const source = atom(5);
-
-      const doubled = derived(async (self: DerivedScope) => {
-        const s = self.use(source);
-        await delay();
-        return s.value * 2;
-      });
-
-      expect(doubled.value).toBeUndefined();
-
-      await delay(15);
-      expect(doubled.value).toBe(10);
-
-      source.next(7);
-      await delay(15);
-      expect(doubled.value).toBe(14);
-
-      source.dispose();
-      doubled.dispose();
-    });
-
-    it('should track closure atoms across await with self.use()', async () => {
-      const a = atom(1);
-      const b = atom(2);
-
-      const d = derived(async (self: DerivedScope) => {
-        const [x, y] = self.use(a, b);
-        await delay(5);
-        return x.value + y.value;
-      });
-
-      expect(d.value).toBeUndefined();
-      await delay(10);
-      expect(d.value).toBe(3);
-
-      a.next(5);
-      expect(d.value).toBe(3); // old value until async recompute resolves
-      await delay(15);
-      expect(d.value).toBe(7);
-
-      b.next(10);
-      expect(d.value).toBe(7); // old value until async recompute resolves
-      await delay(15);
-      expect(d.value).toBe(15);
-
-      a.dispose();
-      b.dispose();
-      d.dispose();
-    });
-
-    it('should keep the stale async derived value readable while background revalidation runs', async () => {
-      const source = atom(1);
-
-      const total = derived(async (self: DerivedScope) => {
-        const current = self.use(source);
-        await delay(5);
-        return current.value * 10;
-      });
-
-      expect(total.value).toBeUndefined();
-      expect(total.dirty).toBe(false);
-      await delay(10);
-      expect(total.value).toBe(10);
-      expect(total.dirty).toBe(false);
-
-      source.next(2);
-      expect(total.dirty).toBe(true);
-      expect(total.value).toBe(10);
-
-      await delay(15);
-      expect(total.value).toBe(20);
-      expect(total.dirty).toBe(false);
-
-      source.dispose();
-      total.dispose();
-    });
-
     it('should track foreign atom-like dependencies via subscribe fallback', async () => {
       let current = 1;
       let previous = 1;
@@ -561,55 +480,6 @@ describe('Atom System', () => {
       doubled.dispose();
     });
 
-    it('should ignore stale promise when dependency changes', async () => {
-      const source = atom(1);
-
-      const asyncDerived = derived(async (self: DerivedScope) => {
-        const s = self.use(source);
-        const value = s.value;
-        return new Promise<number>(resolve => {
-          setTimeout(() => resolve(value * 10), 20);
-        });
-      });
-
-      expect(asyncDerived.value).toBeUndefined();
-
-      source.next(2);
-      await delay(30);
-      expect(asyncDerived.value).toBe(20);
-
-      source.dispose();
-      asyncDerived.dispose();
-    });
-
-    it('should preserve the last safe value after async derived rejection', async () => {
-      const source = atom(1);
-
-      const unstable = derived(async (self: DerivedScope) => {
-        const current = self.use(source).value;
-        await delay(5);
-
-        if (current > 1) {
-          throw 'async boom';
-        }
-
-        return current * 10;
-      });
-
-      expect(unstable.value).toBeUndefined();
-      await delay(15);
-      expect(unstable.value).toBe(10);
-
-      source.next(2);
-      await delay(15);
-
-      expect(() => unstable.value).toThrowError('async boom');
-      expect(unstable.safeValue).toBe(10);
-
-      source.dispose();
-      unstable.dispose();
-    });
-
     it('should notify onError subscribers immediately when a derived atom is already in error state', () => {
       const broken = derived(() => {
         throw new Error('boom');
@@ -626,24 +496,16 @@ describe('Atom System', () => {
       broken.dispose();
     });
 
-    it('should terminate async derived atoms on rejection when configured', async () => {
+    it('should reject promise-returning derived formulas and direct users to flow()', () => {
       const source = atom(1);
+      const broken = derived((async (self: DerivedScope) => self.read(source) * 2) as any);
 
-      const broken = derived(async (self: DerivedScope) => {
-        const current = self.use(source);
-        await delay(5);
-        if (current.value === 1) {
-          throw new Error('fatal async');
-        }
-        return current.value;
-      }, { terminateOnError: true });
+      expect(() => broken.value).toThrowError(
+        'derived() formulas must return synchronously. Use flow() for async work.'
+      );
 
-      expect(broken.value).toBeUndefined();
-      await delay(15);
-
-      expect(broken.disposed).toBe(true);
-      expect(() => broken.value).toThrowError('Atom has been disposed');
       source.dispose();
+      broken.dispose();
     });
 
     it('should expose derived subscriberCount as subscriptions change', () => {

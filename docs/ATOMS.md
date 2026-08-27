@@ -53,20 +53,9 @@ const fullName = derived($ => `${$(firstName)} ${$(lastName)}`);
 
 ```
 
-The `$` helper tracks dependencies dynamically. You can also use async functions—while a new promise is pending, the derived atom safely retains its last known `safeValue`.
+The `$` helper tracks dependencies dynamically.
 
-> ⚠️ **The Async Tracking Gotcha:** Async derived callbacks can only automatically track atoms read *before* the first `await` statement. To register late-stage dependencies, reference them up front using `$.use(...)`, `$.read(...)`, or a `void` expression:
-> ```ts
-> const total = derived(async $ => {
->   void $.price, $.tax; // Forces synchronous dependency tracking up front
->   await loadRates();
->   return $.price + $.tax;
-> });
-> 
-> ```
-> 
-> 
-> *If your computation involves complex async work, cancellation, or restarts, prefer `flow()` instead.*
+> `derived()` is intentionally synchronous. If the computation needs `await`, cancellation, or restart semantics, move that work into `flow()`.
 
 #### C. Flow Atoms (`flow`)
 
@@ -80,6 +69,15 @@ const ticks = flow(async function* (signal) {
   }
 });
 
+```
+
+For one-shot async recomputation, model it as a flow explicitly:
+
+```ts
+const total = flow(async function* () {
+  const rates = await loadRates();
+  yield price.value * rates.tax + tax.value;
+});
 ```
 ---
 

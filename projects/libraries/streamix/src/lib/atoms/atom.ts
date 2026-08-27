@@ -11,35 +11,6 @@ import {
 } from "./scope";
 import { createSubscription, type Subscription } from "./subscription";
 
-function promiseSource<T>(
-  promise: Promise<T>,
-  signal: AbortSignal,
-): AsyncIterator<T> {
-  let done = false;
-
-  return {
-    async next() {
-      if (done || signal.aborted) return DONE;
-
-      try {
-        const value = await promise;
-        if (signal.aborted) return DONE;
-
-        done = true;
-        return NEXT(value);
-      } catch (error) {
-        if (signal.aborted) return DONE;
-        throw error;
-      }
-    },
-
-    async return() {
-      done = true;
-      return DONE;
-    },
-  };
-}
-
 /* ─────────────────────────────────────────────────────────────────────────────
  * Architectural Symbols
  * ───────────────────────────────────────────────────────────────────────────*/
@@ -1567,17 +1538,10 @@ export type SyncOnly<T> = T extends PromiseLike<any> ? never : Awaited<T>;
  * Dependencies are tracked when the callback reads atoms through `self.read`,
  * `self.use`, or the callable shorthand `self(atom)`.
  *
- * Async callbacks only track atoms read before the first `await`. Capture
- * dependencies up front with `self.use(...)` / `self.read(...)`, or use
- * `flow()` when the computation is primarily async and cancellation-aware.
+ * `derived()` is intentionally synchronous. If the computation needs `await`,
+ * cancellation, or restart semantics, model it as a `flow()` instead.
  */
 export function derived<T>(fn: (self: DerivedScope) => SyncOnly<T>, options?: AtomOptions): Atom<T>;
-/**
- * Creates a readonly atom from an async computation.
- *
- * Dependencies must be read before the first `await` to be tracked.
- */
-export function derived<T>(fn: (self: DerivedScope) => Promise<T>, options?: AtomOptions): Atom<T>;
 /**
  * Creates a readonly atom from a generator-based computation.
  *
@@ -1591,9 +1555,8 @@ export function derived<T>(...args: any[]): Atom<T> {
   const first = args[0];
   const second = args[1];
 
-  // Handle the two supported overloads:
+  // Handle the supported overloads:
   // 1. derived((self) => T, options?)
-  // 2. derived((self) => Promise<T>, options?)
   if (typeof first === "function") {
     // Check if it's a class with compute method (for ComputableInstance)
     if (first.prototype && typeof first.prototype.compute === "function") {
@@ -1631,16 +1594,11 @@ export function derived<T>(...args: any[]): Atom<T> {
   let errorValue: any = undefined;
   let isErrorState = false;
   let notifyPending = false;
-  let isAsyncFormula = false;
   let dirty = false;
 
   let instance!: Atom<T> & InternalAtomContainer;
   const dependencies = new Set<DependencySource<any>>();
   const depSubscriptions = new Map<DependencySource<any>, Subscription>();
-
-  const latestAsync = createLatestAsyncCoordinator<T>();
-  let asyncController: AbortController | undefined;
-  let asyncReaderStarted = false;
 
   const setDirty = (next: boolean) => {
     if (dirty === next) return;
@@ -1688,14 +1646,6 @@ export function derived<T>(...args: any[]): Atom<T> {
       const handler = () => {
         if (disposed) return;
 
-        if (isAsyncFormula) {
-          // Async derived values follow stale-while-revalidate semantics:
-          // keep serving the current cached value, mark stale immediately,
-          // and let the queued flush start revalidation in the background.
-          instance[MARK_DIRTY]();
-          return;
-        }
-
         if (!node.isAnalog) {
           if (!node.flushing && !running) {
             try {
@@ -1721,103 +1671,34 @@ export function derived<T>(...args: any[]): Atom<T> {
 
     node.depth = maxDepth + 1;
   };
-
-  const startAsyncReader = () => {
-    if (asyncReaderStarted) return;
-    asyncReaderStarted = true;
-
-    void (async () => {
-      try {
-        while (!disposed) {
-          const result = await latestAsync.next();
-          if (disposed || result.done) break;
-
-          const event = result.value;
-
-          if (event.type === "value") {
-            isErrorState = false;
-            errorValue = undefined;
-            markAtomAsEmitted(instance as any);
-            notifyEmitHandlers(instance as any);
-            commitValue(event.value);
-            continue;
-          }
-
-          if (event.type === "error") {
-            errorValue = normalizeError(event.error);
-            isErrorState = true;
-
-            if (terminateOnError) {
-              instance.dispose();
-            } else if (propagateErrors && subs.size > 0) {
-              broadcast();
-            }
-          }
-        }
-      } finally {
-        asyncReaderStarted = false;
-      }
-    })();
-  };
-
-  const enqueueAsyncResult = (
-    promise: Promise<T>,
-    context: FormulaContext,
-    ownerGeneration: number,
-  ) => {
-    asyncController?.abort();
-    asyncController = new AbortController();
-
-    const source = promiseSource(promise, asyncController.signal);
-    latestAsync.addLatestSource(source);
-
-    promise
-      .finally(() => {
-        if (disposed || !owner.isCurrent(context, ownerGeneration)) return;
-
-        owner.leave(context, ownerGeneration);
-        processDependencies(context);
-      })
-      .catch(() => {});
-
-    startAsyncReader();
-  };
-
-  const compute = (): { result: T | Promise<T>; context: FormulaContext; generation: number } => {
+  const compute = (): { result: T; context: FormulaContext; generation: number } => {
     if (running) throw new Error("Circular dependency detected in derived()");
 
     running = true;
     const { context, generation } = owner.enter();
     pushFormulaContext(context);
-    let asyncResult = false;
 
     try {
-      const result = computable.compute(self) as T | Promise<T>;
+      const result = computable.compute(self);
+      if (isPromiseLike(result)) {
+        throw new Error("derived() formulas must return synchronously. Use flow() for async work.");
+      }
       initialized = true;
-      asyncResult = isPromiseLike(result);
-      isAsyncFormula = asyncResult;
       processDependencies(context);
-      return { result, context, generation };
+      return { result: result as T, context, generation };
     } finally {
       popFormulaContext();
       running = false;
-      if (!asyncResult) {
-        owner.leave(context, generation);
-      }
+      owner.leave(context, generation);
     }
   };
 
   const recompute = () => {
-    const { result: next, context, generation } = compute();
+    const { result: next } = compute();
     setDirty(false);
 
     isErrorState = false;
     errorValue = undefined;
-
-    if (isPromiseLike(next)) {
-      enqueueAsyncResult(Promise.resolve(next), context, generation);
-      return;
-    }
 
     commitValue(next);
   };
@@ -1868,15 +1749,11 @@ export function derived<T>(...args: any[]): Atom<T> {
 
       if (!initialized) {
         try {
-          const { result, context, generation } = compute();
-          if (isPromiseLike(result)) {
-            enqueueAsyncResult(Promise.resolve(result), context, generation);
-          } else {
-            current = result;
-            previous = current;
-            markAtomAsEmitted(instance as any);
-            notifyEmitHandlers(instance as any);
-          }
+          const { result } = compute();
+          current = result;
+          previous = current;
+          markAtomAsEmitted(instance as any);
+          notifyEmitHandlers(instance as any);
         } catch (err) {
           initialized = true;
           errorValue = normalizeError(err);
@@ -1928,9 +1805,6 @@ export function derived<T>(...args: any[]): Atom<T> {
       setDirty(false);
       getScheduler().remove(node);
       notifyPending = false;
-
-      asyncController?.abort();
-      void latestAsync.return();
 
       for (const sub of depSubscriptions.values()) sub();
       depSubscriptions.clear();

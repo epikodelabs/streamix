@@ -174,16 +174,7 @@ function evaluateExprMarker(
       if (seeded) {
         seeded = false;
         if (value && typeof (value as Promise<any>).then === "function") {
-          return Promise.resolve(value).then(
-            (resolvedValue) => {
-              attachInitialDependencies();
-              return unwrapDynamicValue(resolvedValue);
-            },
-            (error) => {
-              attachInitialDependencies();
-              throw error;
-            },
-          );
+          throw new Error("scope() derived callbacks must return synchronously. Use flowExpr()/flow() for async work.");
         }
         attachInitialDependencies();
         return unwrapDynamicValue(value as any);
@@ -191,7 +182,7 @@ function evaluateExprMarker(
 
       const inner = evaluateDynamic(createTrackedScope(scopeRef, derivedSelf.read.bind(derivedSelf)));
       if (inner && typeof (inner as Promise<any>).then === "function") {
-        return Promise.resolve(inner).then((resolvedValue) => unwrapDynamicValue(resolvedValue));
+        throw new Error("scope() derived callbacks must return synchronously. Use flowExpr()/flow() for async work.");
       }
       return unwrapDynamicValue(inner as any);
     });
@@ -258,7 +249,7 @@ type DefinedValue<Top extends Record<string, any>, T> =
   | DerivedExpr<T, Top>
   | PipeExpr<T, Top>
   | FlowExpr<T, Top>
-  | ((self: Top, atoms: DefinedAtomAccessor<Top>) => T | Promise<T> | Atom<T>);
+  | ((self: Top, atoms: DefinedAtomAccessor<Top>) => T | Atom<T>);
 
 type ScopeValue<T> =
   | T extends ScopeReturn<any> ? T

@@ -443,94 +443,6 @@ describe('Scope System', () => {
   });
 
   describe('dirty state', () => {
-    it('should be true while an async derived scope value is stale', async () => {
-      const s = scope({
-        price: 1,
-        tax: 2,
-        total: async (self: any) => {
-          void self.price, self.tax;
-          await delay(5);
-          return self.price + self.tax;
-        }
-      });
-
-      expect(s.dirty).toBe(false);
-      await delay(10);
-      expect(s.total).toBe(3);
-      expect(s.dirty).toBe(false);
-
-      s.price = 5;
-      expect(s.dirty).toBe(true);
-      expect(s.total).toBe(3);
-
-      await delay(15);
-      expect(s.total).toBe(7);
-      expect(s.dirty).toBe(false);
-
-      s.dispose();
-    });
-
-    it('should expose dirty through the backing dirty atom and subscribeTo', async () => {
-      const s = scope({
-        count: 1,
-        doubled: async (self: any) => {
-          void self.count;
-          await delay(5);
-          return self.count * 2;
-        }
-      });
-
-      const values: boolean[] = [];
-      const unsubscribe = s.subscribeTo('dirty', (value: boolean) => values.push(value));
-      const notifications: boolean[] = [];
-      const dirtySubscription = s.at.dirty.subscribe((value: boolean) => notifications.push(value));
-
-      await delay(10);
-      expect(s.at.dirty.value).toBe(false);
-      expect(s.at.dirty.safeValue).toBe(false);
-      expect(typeof (s.at.dirty as any).next).toBe('undefined');
-      expect(typeof (s.at.dirty as any).dispose).toBe('undefined');
-
-      s.count = 3;
-      expect(s.dirty).toBe(true);
-      expect(s.at.dirty.value).toBe(true);
-
-      await delay(15);
-      expect(s.dirty).toBe(false);
-      expect(s.at.dirty.value).toBe(false);
-      expect(values).toEqual([false, true, false]);
-      expect(notifications).toEqual([true, false]);
-
-      unsubscribe();
-      dirtySubscription();
-      s.dispose();
-    });
-
-    it('should reflect dirty nested scopes', async () => {
-      const child = scope({
-        count: 1,
-        doubled: async (self: any) => {
-          void self.count;
-          await delay(5);
-          return self.count * 2;
-        }
-      });
-
-      const parent = scope({ child });
-
-      await delay(10);
-      expect(parent.dirty).toBe(false);
-
-      child.count = 3;
-      expect(child.dirty).toBe(true);
-      expect(parent.dirty).toBe(true);
-
-      await delay(15);
-      expect(child.dirty).toBe(false);
-      expect(parent.dirty).toBe(false);
-
-      parent.dispose();
-    });
   });
 
   describe('snapshot', () => {
@@ -1153,55 +1065,26 @@ describe('Scope System', () => {
       s.dispose();
     });
 
-    it('should support async derivedExpr callbacks', async () => {
-      const s = scope({
+    it('should reject async shorthand derived callbacks and direct users to flowExpr()', () => {
+      expect(() => scope({
         count: 1,
-        doubled: async (self: any) => {
-          await delay(5);
-          return self.count * 2;
-        }
-      });
-
-      const typedValue: number = s.doubled;
-      expect(typedValue).toBeUndefined();
-
-      await delay(10);
-      expect(s.doubled).toBe(2);
-
-      s.count = 3;
-      await delay(15);
-      expect(s.doubled).toBe(6);
-
-      s.dispose();
+        doubled: (async (self: any) => self.count * 2) as any
+      })).toThrowError(
+        'scope() derived callbacks must return synchronously. Use flowExpr()/flow() for async work.'
+      );
     });
 
-    it('should recalculate async shorthand derived callbacks when post-await self dependencies change', async () => {
-      const s = scope({
+    it('should reject async shorthand derived callbacks even when dependencies are read up front', () => {
+      expect(() => scope({
         price: 1,
         tax: 2,
-        total: async (self: any) => {
+        total: (async (self: any) => {
           void self.price, self.tax;
-          await delay(5);
           return self.price + self.tax;
-        }
-      });
-
-      expect(s.total).toBeUndefined();
-
-      await delay(10);
-      expect(s.total).toBe(3);
-
-      s.price = 5;
-      expect(s.total).toBe(3);
-      await delay(15);
-      expect(s.total).toBe(7);
-
-      s.tax = 4;
-      expect(s.total).toBe(7);
-      await delay(15);
-      expect(s.total).toBe(9);
-
-      s.dispose();
+        }) as any
+      })).toThrowError(
+        'scope() derived callbacks must return synchronously. Use flowExpr()/flow() for async work.'
+      );
     });
 
     it('should support pipeExpr with self reference', async () => {
@@ -1310,23 +1193,21 @@ describe('Scope System', () => {
       s.dispose();
     });
 
-    it('should evaluate async shorthand derived callbacks only once during initialization', async () => {
+    it('should reject async shorthand derived callbacks during initialization', () => {
       let runs = 0;
 
-      const s = scope({
+      expect(() => scope({
         count: 1,
-        doubled: async (self: any) => {
+        doubled: (async (self: any) => {
           runs += 1;
-          await delay(5);
           return self.count * 2;
-        },
-      });
+        }) as any,
+      })).toThrowError(
+        'scope() derived callbacks must return synchronously. Use flowExpr()/flow() for async work.'
+      );
 
       expect(runs).toBe(1);
-      await delay(15);
-      expect(s.doubled).toBe(2);
       expect(runs).toBe(1);
-      s.dispose();
     });
 
     it('should seed shorthand dynamic dependencies from closure scope reads during initialization', async () => {
