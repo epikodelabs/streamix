@@ -96,9 +96,22 @@ const normalizeHttpClientOptions = (
   };
 };
 
+const getDefaultBaseUrl = (): string | undefined => {
+  if (typeof globalThis.location?.href === 'string' && globalThis.location.href.length > 0) {
+    return globalThis.location.href;
+  }
+
+  return 'http://localhost/';
+};
+
 const resolveRequestUrl = (url: string, baseUrl?: string): string => {
-  if (baseUrl) {
-    return new URL(url, baseUrl).toString();
+  try {
+    return new URL(url).toString();
+  } catch {
+    const resolvedBaseUrl = baseUrl ?? getDefaultBaseUrl();
+    if (resolvedBaseUrl) {
+      return new URL(url, resolvedBaseUrl).toString();
+    }
   }
 
   return url;
@@ -241,7 +254,7 @@ export const createHttpClient = (
   const defaultFetch = globalThis.fetch.bind(globalThis);
 
   const execute = async (context: Context): Promise<HttpResult> => {
-    const request = new Request(context.url, prepareRequestInit(context.init));
+    const request = new Request(resolveRequestUrl(context.url, baseUrl), prepareRequestInit(context.init));
     const response = await context.fetch(request);
 
     if (!response.ok) {
@@ -272,7 +285,7 @@ export const createHttpClient = (
       : controller.signal;
 
     const context: Context = {
-      url: resolveRequestUrl(url, baseUrl),
+      url,
       init: { ...init, signal },
       fetch: defaultFetch,
     };
