@@ -4,8 +4,8 @@ React apps can use streamix today. It is a TypeScript ESM library, so it can be
 imported from components, hooks, services, or event handlers.
 
 The caveat: streamix does not disappear into React's model. It brings its own
-atoms, scopes, cleanup, async pipelines, DOM sources, networking, and
-coroutines. React already has conventions for many of those jobs.
+atoms, scopes, cleanup, async pipelines, DOM sources, and networking. React
+already has conventions for many of those jobs.
 
 So the honest answer is:
 
@@ -21,7 +21,6 @@ streamix fits best when React owns the UI and streamix owns workflow logic:
 - event flows that are easier to express as pipelines
 - sequential async workflows
 - browser APIs that produce ongoing values
-- Web Worker or coroutine-style workloads
 - component-local orchestration with explicit cleanup
 - services that feed React at a controlled boundary
 
@@ -48,8 +47,6 @@ streamix overlaps with React and its ecosystem:
 | Lifecycle | `useEffect` cleanup | scopes and cleanup sets |
 | DOM events | JSX handlers and refs | `listen` and DOM sources |
 | Data fetching | loaders, TanStack Query, SWR, Suspense patterns | pipelines and networking |
-| Workers | browser workers and framework tooling | coroutines and actors |
-
 This does not make streamix incompatible. It means you need to decide which
 runtime owns each part of the problem.
 

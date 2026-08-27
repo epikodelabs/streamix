@@ -35,7 +35,6 @@ It is a strong fit for dashboards, interactive applications, and concurrency-hea
 ### Highlights
 
 * ⚛️ **Atoms and Scopes** for reactive state, dependency tracking, and disposal boundaries
-* 🧵 **Coroutines and Actors** for browser-side concurrency built on Web Workers
 * 🔄 **Pull-based flows** where work happens when downstream consumers ask for values
 * 🧩 **Familiar operators** such as `map`, `filter`, `switchMap`, `debounce`, and `scan`
 * ⏱️ **Async-iterator first design** that works naturally with `for await...of`
@@ -117,35 +116,6 @@ for await (const value of iterate(a)) {
 
 ---
 
-### 🧵 Coroutines and Actors
-
-Use `coroutine()` when you want a dedicated reusable worker for a task, and `compute()` when you want pooled throughput across many independent jobs.
-
-```typescript
-import { coroutine } from '@epikodelabs/streamix/coroutines';
-
-const hashScore = coroutine((text: string) => text.length * 100);
-
-async function main() {
-  const score = await hashScore.run('streamix');
-  console.log(score); // 800
-  await hashScore.dispose();
-}
-
-void main();
-```
-
-Coroutines support:
-
-* `coroutine()` for a dedicated reusable worker
-* `compute()` for pooled, high-throughput worker execution
-* `compose()` for worker-side pipeline fusion
-* `actor()` for long-lived stateful workers
-
-Actors provide isolated state, inbox and outbox messaging, and background coordination.
-
----
-
 ### 🔄 Flows
 
 Flows compose naturally through operators.
@@ -179,7 +149,6 @@ Flows are pull-based by default, which means work is performed only when values 
 projects/libraries/streamix/
 |-- src/           # Core runtime (atoms, scopes, operators)
 |-- aggregates/    # Aggregate operators
-|-- coroutines/    # Coroutines and actors
 |-- dom/           # DOM observation utilities
 `-- networking/    # HTTP client, WebSocket, JSONP
 ```

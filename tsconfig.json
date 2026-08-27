@@ -30,9 +30,6 @@
       "@epikodelabs/streamix/aggregates": [
         "./projects/libraries/streamix/aggregates/src/lib/index.ts"
       ],
-      "@epikodelabs/streamix/coroutines": [
-        "./projects/libraries/streamix/coroutines/src/lib/index.ts"
-      ],
       "@epikodelabs/streamix/dom": [
         "./projects/libraries/streamix/dom/src/lib/index.ts"
       ],

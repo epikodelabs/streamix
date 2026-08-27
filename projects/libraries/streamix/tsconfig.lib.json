@@ -5,14 +5,15 @@
     "declaration": true,
     "declarationMap": true,
     "inlineSources": true,
-    "lib": ["dom", "dom.iterable", "es2022"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "es2022"
+    ],
     "types": [],
     "paths": {
       "@epikodelabs/streamix/aggregates": [
         "./aggregates/src/lib/index.ts"
-      ],
-      "@epikodelabs/streamix/coroutines": [
-        "./coroutines/src/lib/index.ts"
       ],
       "@epikodelabs/streamix/dom": [
         "./dom/src/lib/index.ts"
@@ -31,6 +32,10 @@
       ]
     }
   },
-  "files": ["src/public-api.ts"],
-  "exclude": ["**/*.spec.ts"]
+  "files": [
+    "src/public-api.ts"
+  ],
+  "exclude": [
+    "**/*.spec.ts"
+  ]
 }

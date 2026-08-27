@@ -10,7 +10,6 @@
   "include": [
     "src/**/*.ts",
     "aggregates/**/*.ts",
-    "coroutines/**/*.ts",
     "dom/**/*.ts",
     "forms/**/*.ts",
     "networking/**/*.ts",

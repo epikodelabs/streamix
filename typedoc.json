@@ -2,7 +2,6 @@
   "entryPoints": [
     "projects/libraries/streamix/src/public-api.ts",
     "projects/libraries/streamix/aggregates/src/public-api.ts",
-    "projects/libraries/streamix/coroutines/src/public-api.ts",
     "projects/libraries/streamix/dom/src/public-api.ts",
     "projects/libraries/streamix/networking/src/public-api.ts"
   ],
@@ -10,8 +9,10 @@
   "out": "dist/api",
   "gitRemote": "origin",
   "gitRevision": "main",
-  "sourceLinkTemplate": "https://github.com/epikodelabs/streamix/blob/{gitRevision}/{path}#L{line}", 
-  "plugin": ["typedoc-plugin-markdown"],
+  "sourceLinkTemplate": "https://github.com/epikodelabs/streamix/blob/{gitRevision}/{path}#L{line}",
+  "plugin": [
+    "typedoc-plugin-markdown"
+  ],
   "theme": "markdown",
   "hideGenerator": true,
   "skipErrorChecking": false,
@@ -32,14 +33,11 @@
     }
   },
   "intentionallyNotExported": [
-    "Actor",
     "DefinedValue",
     "FormulaContext",
     "Method",
-    "Coroutine",
     "CoroutineDefinitionRest",
     "ScopeOf",
-    "TaskRunner",
     "UnwrapSnapshotValues",
     "WithLatestInput",
     "AtomNode",
@@ -47,7 +45,9 @@
     "Observer",
     "WorkerUtilsCompatibility"
   ],
-  "sort": ["source-order"],
+  "sort": [
+    "source-order"
+  ],
   "kindSortOrder": [
     "Document",
     "Project",
@@ -84,5 +84,3 @@
     "*"
   ]
 }
-
-

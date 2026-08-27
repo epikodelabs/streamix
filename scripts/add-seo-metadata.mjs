@@ -31,18 +31,6 @@ const PAGE_METADATA = {
     keywords: ['introduction', 'getting started', 'tutorial', 'basics', 'reactive streams', 'javascript']
   },
 
-  'COROUTINES.md': {
-    title: 'Coroutines - Background Task Processing | streamix',
-    description: 'Learn how to use coroutines in streamix to run CPU-heavy work in Web Workers without blocking the main thread.',
-    keywords: ['coroutines', 'web workers', 'background tasks', 'async', 'multi-threading', 'worker pools']
-  },
-  
-  'ACTORS.md': {
-    title: 'Actors - Bidirectional Worker Messaging | streamix',
-    description: 'Use actors for bidirectional worker-to-main-thread messaging with full control over worker lifecycle.',
-    keywords: ['actors', 'actors model', 'messaging', 'concurrency', 'web workers', 'bidirectional communication']
-  },
-
   'GENERATORS.md': {
     title: 'Generators - Iterator Protocol | streamix',
     description: 'Explore how streamix uses JavaScript generators and the iterator protocol for efficient async operations.',
@@ -63,8 +51,8 @@ const PAGE_METADATA = {
 
   'MIGRATION.md': {
     title: 'Migration Guide - Upgrading to streamix v3',
-    description: 'Migrate from streamix v2 to v3 with practical mappings for atoms, flows, scopes, and updated coroutine APIs.',
-    keywords: ['migration', 'upgrade guide', 'v2 to v3', 'atoms', 'flows', 'scopes', 'breaking changes', 'coroutines']
+    description: 'Migrate from streamix v2 to v3 with practical mappings for atoms, flows, scopes, and updated APIs.',
+    keywords: ['migration', 'upgrade guide', 'v2 to v3', 'atoms', 'flows', 'scopes', 'breaking changes']
   },
 
   // =================================================================
@@ -191,8 +179,6 @@ function generateKeywords(content, title, customKeywords = []) {
   const keywords = new Set();
 
   // Add technology-specific keywords based on content
-  if (content.includes('coroutine')) keywords.add('coroutines');
-  if (content.includes('actor')) keywords.add('actors');
   if (content.includes('stream')) keywords.add('streams');
   if (content.includes('reactive')) keywords.add('reactive programming');
   if (content.includes('generator')) keywords.add('generators');

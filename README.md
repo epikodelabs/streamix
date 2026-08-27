@@ -52,12 +52,12 @@ streamix/
 │   │   └── streamix/           # Core npm package (@epikodelabs/streamix)
 │   │       ├── src/            # Flows, atoms, scopes, operators
 │   │       ├── aggregates/     # Aggregate operators (average, min/max, etc.)
-│   │       ├── coroutines/     # Web Worker coroutines & actors
 │   │       ├── dom/            # DOM observation utilities
 │   │       ├── networking/     # HTTP client, WebSocket, JSONP
 │   │       └── presentation.gif
 │   └── apps/
-│       ├── app1 .. app8/       # Demo & test applications
+│       ├── app1, app3, app4, app5, app9, app10, app11
+│       │                       # Demo & test applications
 ├── docs/                       # VitePress documentation source
 ├── scripts/                    # Build, SEO, and docs automation
 ├── dist/                       # Build output & VitePress site
@@ -116,7 +116,6 @@ The static site is output to `dist/.vitepress/dist/`.
 |---------|------|-------------|
 | `@epikodelabs/streamix` | `projects/libraries/streamix/src` | Core reactive flows |
 | `@epikodelabs/streamix/aggregates` | `projects/libraries/streamix/aggregates` | Aggregate operators |
-| `@epikodelabs/streamix/coroutines` | `projects/libraries/streamix/coroutines` | Web Worker utilities |
 | `@epikodelabs/streamix/dom` | `projects/libraries/streamix/dom` | DOM observers |
 | `@epikodelabs/streamix/networking` | `projects/libraries/streamix/networking` | HTTP / WebSocket |
 

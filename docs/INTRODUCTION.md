@@ -119,36 +119,6 @@ The pipeline completes after the first emitted value.
 
 ---
 
-## Coroutines
-
-Offload heavy work to Web Workers without losing composability.
-
-```ts
-import { actor, coroutine, main } from '@epikodelabs/streamix/coroutines';
-
-// Run a function in one dedicated worker
-const square = coroutine(function square(value: number) {
-  return value * value;
-});
-const result = await square.run(7); // 49
-await square.dispose();
-
-// Long-lived stateful worker
-const counter = actor('counter', (msg: { topic: string; payload?: { amount?: number } }, state: number) => {
-  if (msg.topic === 'inc') return state + (msg.payload?.amount ?? 1);
-  return state;
-}, 0);
-
-main.outbox.send(counter, 'inc', { amount: 1 });
-const one = await main.outbox.request(counter, 'inc', { amount: 0 }); // 1
-const two = await main.outbox.request(counter, 'inc', { amount: 1 }); // 2
-await main.outbox.stop(counter);
-```
-
-Worker functions are serialized and run in isolation, so they must be self-contained. streamix APIs are not available inside Web Workers.
-
----
-
 ## HTTP client
 
 ```ts

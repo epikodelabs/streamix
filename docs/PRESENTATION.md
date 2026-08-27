@@ -30,8 +30,6 @@ Most reactive libraries push values eagerly. streamix does the opposite:
 
 - **[Introduction](/)** — core concepts, operators, factories, and custom operators
 - **[Atoms](/ATOMS)** — reactive state primitives
-- **[Coroutines](/COROUTINES)** — Web Worker task runners and pipelines
-- **[Actors](/ACTORS)** — long-lived stateful workers with messaging
 - **[Generators](/GENERATORS)** — iterator protocol and async iteration
 - **[Angular](/ANGULAR)** and **[React](/REACT)** integrations
 
