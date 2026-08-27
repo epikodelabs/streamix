@@ -1,56 +1,23 @@
 import {
   createHttpClient,
-  Middleware,
-  readArrayBuffer,
-  readBase64Chunk,
-  readBinaryChunk,
-  readBlob,
-  readChunks,
-  readCsvChunk,
-  readFull,
   readJson,
-  readJsonChunk,
-  readNdjsonChunk,
   readStatus,
-  readText,
-  readTextChunk,
-  useAccept,
-  useBase,
-  useCustom,
   useFallback,
-  useHeader,
   useLogger,
   useOauth,
-  useParams,
-  useRedirect,
+  useRequest,
   useRetry,
   useTimeout,
-  type Context
+  type Context,
 } from '@epikodelabs/streamix/networking';
 
-/* -------------------------------------------------- */
-/* Helpers                                            */
-/* -------------------------------------------------- */
-
 async function collect<T>(stream: AsyncIterable<T>): Promise<T[]> {
-  if (!stream) {
-    throw new Error('collect() was called with undefined. A middleware likely failed during initialization.');
-  }
-  const out: T[] = [];
-  for await (const v of stream) out.push(v);
-  return out;
+  const values: T[] = [];
+  for await (const value of stream) values.push(value);
+  return values;
 }
 
-function mockFetchSequence(responses: Array<(req?: Request) => Promise<Response>>) {
-  let i = 0;
-  return jasmine.createSpy('fetch').and.callFake((req: Request) => {
-    const fn = responses[i++];
-    if (!fn) throw new Error('Unexpected fetch call');
-    return fn(req);
-  });
-}
-
-function jsonResponse(data: any, init: Partial<ResponseInit> = {}) {
+function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(data), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
@@ -58,979 +25,276 @@ function jsonResponse(data: any, init: Partial<ResponseInit> = {}) {
   });
 }
 
-function clientWithFetch(fetch: Function) {
+function withFetch(fetch: typeof globalThis.fetch) {
   return createHttpClient().withDefaults(
-    useCustom(fetch),
-    useBase('http://test.local'),
+    useRequest((context) => ({ ...context, fetch })),
   );
 }
 
-function createMockReadableStream(chunks: Uint8Array[]) {
-  let index = 0;
-  return new ReadableStream({
-    pull(controller) {
-      if (index < chunks.length) {
-        controller.enqueue(chunks[index++]);
-      } else {
-        controller.close();
-      }
-    },
-  });
-}
-
-/* ================================================== */
-/* 1. Basic Functionality & HTTP Methods              */
-/* ================================================== */
-
-describe('httpClient', () => {
-  it('streams parsed JSON response', async () => {
-    const fetch = mockFetchSequence([async () => jsonResponse({ ok: true })]);
-
-    const client = clientWithFetch(fetch);
-    const values = await collect(client.get('/test', readJson));
-
-    expect(values).toEqual([{ ok: true }]);
-  });
-
-  it('parses status metadata', async () => {
-    const fetch = mockFetchSequence([
-      async () => new Response(null, { status: 204, statusText: 'No Content' }),
-    ]);
-
-    const client = clientWithFetch(fetch);
-    const values = await collect(client.get('/status', readStatus));
-
-    expect(values[0].status).toBe(204);
-    expect(values[0].statusText).toBe('No Content');
-  });
-
-  it('supports POST requests', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.method).toBe('POST');
-      const body = await req.json();
-      expect(body).toEqual({ data: 'test' });
-      return jsonResponse({ success: true });
+describe('http client', () => {
+  it('binds the default fetch to globalThis', async () => {
+    const originalFetch = globalThis.fetch;
+    const boundFetch = jasmine.createSpy('fetch').and.callFake(function (this: typeof globalThis) {
+      expect(this).toBe(globalThis);
+      return Promise.resolve(jsonResponse({ ok: true }));
     });
 
-    const client = clientWithFetch(fetch);
-    await collect(client.post('/create', { body: { data: 'test' } }, readJson));
+    (globalThis as typeof globalThis & { fetch: typeof globalThis.fetch }).fetch =
+      boundFetch as typeof globalThis.fetch;
+
+    try {
+      const client = createHttpClient();
+      expect(await collect(client.request('/bound', readJson))).toEqual([{ ok: true }]);
+    } finally {
+      (globalThis as typeof globalThis & { fetch: typeof globalThis.fetch }).fetch = originalFetch;
+    }
   });
 
-  it('supports PUT requests', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.method).toBe('PUT');
-      return jsonResponse({ updated: true });
+  it('uses request() as the only HTTP operation', async () => {
+    const fetch = jasmine.createSpy('fetch').and.callFake(async (request: Request) => {
+      expect(request.method).toBe('POST');
+      expect(await request.text()).toBe('{"ok":true}');
+      return jsonResponse({ created: true });
     });
 
-    const client = clientWithFetch(fetch);
-    await collect(client.put('/update', { body: { id: 1 } }, readJson));
+    const client = withFetch(fetch as typeof globalThis.fetch);
+    const values = await collect(client.request('/items', readJson, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: true }),
+    }));
+
+    expect(values).toEqual([{ created: true }]);
   });
 
-  it('supports PATCH requests', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.method).toBe('PATCH');
-      return jsonResponse({ patched: true });
-    });
-
-    const client = clientWithFetch(fetch);
-    await collect(client.patch('/partial', { body: { field: 'value' } }, readJson));
-  });
-
-  it('supports DELETE requests', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.method).toBe('DELETE');
-      return jsonResponse({ deleted: true });
-    });
-
-    const client = clientWithFetch(fetch);
-    await collect(client.delete('/item/1', {}, readJson));
-  });
-
-  it('handles parser as second argument', async () => {
-    const fetch = mockFetchSequence([async () => jsonResponse({ ok: true })]);
-
-    const client = clientWithFetch(fetch);
-    const values = await collect(client.get('/test', readJson));
-
-    expect(values).toEqual([{ ok: true }]);
-  });
-
-  it('handles options and parser as separate arguments', async () => {
-    const fetch = mockFetchSequence([async () => jsonResponse({ ok: true })]);
-
-    const client = clientWithFetch(fetch);
-    const values = await collect(client.get('/test', { headers: { 'X-Custom': 'value' } }, readJson));
-
-    expect(values).toEqual([{ ok: true }]);
-  });
-
-  it('uses readStatus as default parser', async () => {
-    const fetch = mockFetchSequence([async () => new Response(null, { status: 200 })]);
-
-    const client = clientWithFetch(fetch);
-    const values = await collect(client.get('/test', {}));
-
-    expect(values[0].status).toBe(200);
-  });
-
-  it('handles FormData body', async () => {
-    const formData = new FormData();
-    formData.append('key', 'value');
-
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      const body = await req.text();
-      expect(body).toContain('key');
+  it('does not inject default headers or serialize bodies', async () => {
+    const fetch = jasmine.createSpy('fetch').and.callFake(async (request: Request) => {
+      expect(request.headers.get('Content-Type')).toBeNull();
+      expect(await request.text()).toBe('raw-body');
       return jsonResponse({ ok: true });
     });
 
-    const client = clientWithFetch(fetch);
-    await collect(client.post('/form', { body: formData }, readJson));
+    const client = withFetch(fetch as typeof globalThis.fetch);
+    await collect(client.request('/raw', readJson, { method: 'POST', body: 'raw-body' }));
   });
 
-  it('handles URLSearchParams body', async () => {
-    const params = new URLSearchParams();
-    params.append('key', 'value');
-
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      const body = await req.text();
-      expect(body).toContain('key=value');
+  it('passes native RequestInit through unchanged', async () => {
+    const fetch = jasmine.createSpy('fetch').and.callFake(async (request: Request) => {
+      expect(request.credentials).toBe('include');
+      expect(request.cache).toBe('no-store');
+      expect(request.headers.get('X-Test')).toBe('1');
       return jsonResponse({ ok: true });
     });
 
-    const client = clientWithFetch(fetch);
-    await collect(client.post('/params', { body: params }, readJson));
+    const client = withFetch(fetch as typeof globalThis.fetch);
+    await collect(client.request('/native', readJson, {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'X-Test': '1' },
+    }));
   });
 
-  it('handles withCredentials option', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.credentials).toBe('include');
-      return jsonResponse({ ok: true });
-    });
-
-    const client = clientWithFetch(fetch);
-    await collect(client.get('/secure', { withCredentials: true }, readJson));
+  it('throws for non-ok responses', async () => {
+    const client = withFetch(async () => new Response('nope', { status: 500 }));
+    await expectAsync(collect(client.request('/error', readJson))).toBeRejectedWithError(/HTTP Error/);
   });
 
-  it('handles absolute HTTP URLs', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.url).toBe('http://example.com/test');
-      return jsonResponse({ ok: true });
-    });
-
-    const client = createHttpClient().withDefaults(useCustom(fetch));
-    await collect(client.get('http://example.com/test', readJson));
+  it('parses status only when readStatus is selected explicitly', async () => {
+    const client = withFetch(async () => new Response(null, { status: 204, statusText: 'No Content' }));
+    const [status] = await collect(client.request('/status', readStatus));
+    expect(status.status).toBe(204);
+    expect(status.statusText).toBe('No Content');
   });
 
-  it('handles absolute HTTPS URLs', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.url).toBe('https://example.com/test');
-      return jsonResponse({ ok: true });
-    });
-
-    const client = createHttpClient().withDefaults(useCustom(fetch));
-    await collect(client.get('https://example.com/test', readJson));
-  });
-
-  it('throws on non-ok response', async () => {
-    const fetch = mockFetchSequence([async () => new Response('fail', { status: 500 })]);
-
-    const client = clientWithFetch(fetch);
-
-    await expectAsync(collect(client.get('/error', readJson))).toBeRejectedWithError(/HTTP Error/);
-  });
-
-  it('aborts request stream', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(
-      async () =>
-        new Promise((_r, reject) => setTimeout(() => reject({ name: 'AbortError' }), 10)),
+  it('aborts the underlying request', async () => {
+    const fetch = jasmine.createSpy('fetch').and.callFake((request: Request) =>
+      new Promise<Response>((_resolve, reject) => {
+        request.signal.addEventListener('abort', () => reject(request.signal.reason), { once: true });
+      }),
     );
 
-    const client = clientWithFetch(fetch);
-    const stream = client.get('/abort', readJson);
-
+    const client = withFetch(fetch as typeof globalThis.fetch);
+    const stream = client.request('/abort', readJson);
     stream.abort();
-
     await expectAsync(collect(stream)).toBeRejected();
   });
 
-  it('handles null body', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.body).toBeNull();
-      return jsonResponse({ ok: true });
-    });
-
-    const client = clientWithFetch(fetch);
-    await collect(client.post('/null-body', { body: null }, readJson));
-  });
-
-  it('handles undefined body', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.body).toBeNull();
-      return jsonResponse({ ok: true });
-    });
-
-    const client = clientWithFetch(fetch);
-    await collect(client.post('/undefined-body', {}, readJson));
-  });
-
-  it('handles absolute URL without base middleware', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.url).toBe('https://external.api/data');
-      return jsonResponse({ external: true });
-    });
-
-    const client = createHttpClient().withDefaults(useCustom(fetch));
-    await collect(client.get('https://external.api/data', readJson));
-  });
-
-  it('uses the current browser origin instead of forcing localhost when appending params', async () => {
-    const originalDocumentDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'document');
-    const canRedefineDocument =
-      !originalDocumentDescriptor || originalDocumentDescriptor.configurable;
-    const baseUriSpy =
-      !canRedefineDocument && typeof document !== 'undefined'
-        ? spyOnProperty(document, 'baseURI', 'get').and.returnValue('https://app.test/dashboard')
-        : null;
-
-    if (canRedefineDocument) {
-      Object.defineProperty(globalThis, 'document', {
-        configurable: true,
-        value: { baseURI: 'https://app.test/dashboard' },
+  it('combines caller cancellation with stream cancellation', async () => {
+    const caller = new AbortController();
+    let seenSignal: AbortSignal | undefined;
+    const fetch = jasmine.createSpy('fetch').and.callFake((request: Request) => {
+      seenSignal = request.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        request.signal.addEventListener('abort', () => reject(request.signal.reason), { once: true });
       });
-    }
-
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.url).toBe('https://app.test/items?page=2&filter=new');
-      return jsonResponse({ ok: true });
     });
 
-    try {
-      const client = createHttpClient().withDefaults(useCustom(fetch));
-      await collect(client.get('/items', { params: { page: '2', filter: 'new' } }, readJson));
-    } finally {
-      baseUriSpy?.and.callThrough();
-      if (canRedefineDocument) {
-        if (originalDocumentDescriptor) {
-          Object.defineProperty(globalThis, 'document', originalDocumentDescriptor);
-        } else {
-          delete (globalThis as any).document;
-        }
-      }
-    }
+    const client = withFetch(fetch as typeof globalThis.fetch);
+    const pending = collect(client.request('/abort', readJson, { signal: caller.signal }));
+    caller.abort();
+    await expectAsync(pending).toBeRejected();
+    expect(seenSignal?.aborted).toBeTrue();
   });
 });
 
-/* ================================================== */
-/* 2. Middleware                                      */
-/* ================================================== */
-
-describe('middleware', () => {
-  it('applies base URL and headers', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.url).toBe('https://api.test/users');
-      expect(req.headers.get('Accept')).toBe('application/json');
-      expect(req.headers.get('X-Test')).toBe('1');
+describe('request transforms', () => {
+  it('composes pure transforms in order', async () => {
+    const fetch = jasmine.createSpy('fetch').and.callFake(async (request: Request) => {
+      expect(request.url).toBe('https://api.test/users');
+      expect(request.headers.get('X-Step')).toBe('one-two');
       return jsonResponse({ ok: true });
     });
 
     const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('https://api.test'),
-      useAccept('application/json'),
-      useHeader('X-Test', '1'),
+      useRequest(
+        (context) => ({ ...context, url: new URL(context.url, 'https://api.test').toString() }),
+        (context) => {
+          const headers = new Headers(context.init.headers);
+          headers.set('X-Step', 'one');
+          return { ...context, init: { ...context.init, headers } };
+        },
+        (context) => {
+          const headers = new Headers(context.init.headers);
+          headers.set('X-Step', `${headers.get('X-Step')}-two`);
+          return { ...context, init: { ...context.init, headers }, fetch: fetch as typeof globalThis.fetch };
+        },
+      ),
     );
 
-    await collect(client.get('/users', readJson));
+    await collect(client.request('/users', readJson));
   });
 
-  it('adds query parameters', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.url).toContain('a=1');
-      expect(req.url).toContain('b=2');
+  it('keeps derived clients immutable', async () => {
+    const requests: Request[] = [];
+    const fetch = jasmine.createSpy('fetch').and.callFake(async (request: Request) => {
+      requests.push(request);
       return jsonResponse({ ok: true });
     });
 
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useParams({ a: '1', b: '2' }),
+    const root = createHttpClient().withDefaults(
+      useRequest((context) => ({ ...context, fetch: fetch as typeof globalThis.fetch })),
+    );
+    const authenticated = root.withDefaults(
+      useRequest((context) => {
+        const headers = new Headers(context.init.headers);
+        headers.set('Authorization', 'Bearer token');
+        return { ...context, init: { ...context.init, headers } };
+      }),
     );
 
-    await collect(client.get('/test', readJson));
+    await collect(root.request('/root', readJson));
+    await collect(authenticated.request('/auth', readJson));
+
+    expect(requests[0].headers.get('Authorization')).toBeNull();
+    expect(requests[1].headers.get('Authorization')).toBe('Bearer token');
   });
+});
 
-  it('merges query parameters from middleware and options', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.url).toContain('a=1');
-      expect(req.url).toContain('b=2');
-      expect(req.url).toContain('c=3');
-      return jsonResponse({ ok: true });
-    });
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useParams({ a: '1', b: '2' }),
-    );
-
-    await collect(client.get('/test', { params: { c: '3' } }, readJson));
-  });
-
-  it('logs requests and responses', async () => {
+describe('execution middleware', () => {
+  it('logs request and response', async () => {
     const logs: string[] = [];
-    const logger = (msg: string) => logs.push(msg);
-
-    const fetch = mockFetchSequence([async () => jsonResponse({ ok: true })]);
-
     const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useLogger(logger),
+      useRequest((context) => ({ ...context, fetch: async () => jsonResponse({ ok: true }) })),
+      useLogger((message) => logs.push(message)),
     );
 
-    await collect(client.get('/log', readJson));
-
-    expect(logs.length).toBe(2);
-    expect(logs[0]).toContain('Request: GET');
-    expect(logs[1]).toContain('Response: 200');
+    await collect(client.request('/log', readJson, { method: 'PATCH' }));
+    expect(logs[0]).toContain('PATCH /log');
+    expect(logs[1]).toContain('200');
   });
 
-  it('logs with default console.log', async () => {
-    const logSpy = spyOn(console, 'log').and.stub();
-
-    const fetch = mockFetchSequence([async () => jsonResponse({ ok: true })]);
-
+  it('returns fallback streams explicitly', async () => {
     const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useLogger(),
+      useRequest((context) => ({ ...context, fetch: async () => new Response('bad', { status: 500 }) })),
+      useFallback(async function* () { yield { fallback: true }; }),
     );
 
-    await collect(client.get('/log', readJson));
-
-    expect(logSpy).toHaveBeenCalledTimes(2);
+    expect(await collect(client.request('/fallback', readJson))).toEqual([{ fallback: true }]);
   });
 
-  it('throws timeout error', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      return new Promise((_, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Should have been aborted')), 1000);
-        req.signal.addEventListener('abort', () => {
-          clearTimeout(timeout);
-          reject(new DOMException('Aborted', 'AbortError'));
-        });
-      });
-    });
-
+  it('retries failures', async () => {
+    let attempts = 0;
     const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useTimeout(10),
-    );
-
-    await expectAsync(collect(client.get('/slow', readJson))).toBeRejectedWithError(/timed out/);
-  });
-
-  it('clears timeout on successful request', async () => {
-    const fetch = mockFetchSequence([async () => jsonResponse({ ok: true })]);
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useTimeout(1000),
-    );
-
-    const values = await collect(client.get('/fast', readJson));
-    expect(values).toEqual([{ ok: true }]);
-  });
-
-  it('catches and handles errors', async () => {
-    const fetch = mockFetchSequence([async () => Promise.reject(new Error('Network error'))]);
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useFallback((error, context) => {
-        context.data = (async function* () {
-          yield { error: error.message };
-        })() as any;
-        return context;
-      }),
-    );
-
-    const values = await collect(client.get('/fail', readJson));
-    expect(values[0].error).toBe('Network error');
-  });
-
-  beforeEach(() => {
-    spyOn(console, 'warn').and.callFake(() => {}); // no need to store if you don't assert on it
-  });
-
-  it('retries failed request', async () => {
-    const fetch = mockFetchSequence([
-      async () => Promise.reject(new Error('fail')),
-      async () => jsonResponse({ ok: true }),
-    ]);
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useRetry(1, 1),
-    );
-
-    const values = await collect(client.get('/retry', readJson));
-
-    expect(values).toEqual([{ ok: true }]);
-    expect(fetch).toHaveBeenCalledTimes(2);
-  });
-
-  it('respects shouldRetry function', async () => {
-    const fetch = mockFetchSequence([async () => Promise.reject(new Error('No retry'))]);
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useRetry(3, 1, (error) => error.message !== 'No retry'),
-    );
-
-    await expectAsync(collect(client.get('/no-retry', readJson))).toBeRejectedWithError('No retry');
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it('adds authorization header', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.headers.get('Authorization')).toBe('Bearer token1');
-      return jsonResponse({ ok: true });
-    });
-
-    const getToken = jasmine.createSpy().and.resolveTo('token1');
-    const refreshToken = jasmine.createSpy().and.resolveTo('token2');
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useOauth({ getToken, refreshToken }),
-    );
-
-    await collect(client.get('/secure', readJson));
-  });
-
-  it('refreshes token on 401 when shouldRetry returns true', async () => {
-    const fetch = mockFetchSequence([
-      async () => new Response(null, { status: 401 }),
-      async () => jsonResponse({ ok: true }),
-    ]);
-
-    const getToken = jasmine.createSpy().and.resolveTo('token1');
-    const refreshToken = jasmine.createSpy().and.resolveTo('token2');
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useOauth({ getToken, refreshToken, shouldRetry: () => true }),
-      useFallback((_error, context) => {
-        context.data = (async function* () {
-          yield { error: 'Handled' };
-        })() as any;
-        return context;
-      }),
-    );
-
-    await collect(client.get('/secure', readJson));
-    expect(refreshToken).toHaveBeenCalled();
-  });
-
-  it('refreshes token on 401 without requiring fallback middleware', async () => {
-    const fetch = mockFetchSequence([
-      async (req?: Request) => {
-        expect(req?.headers.get('Authorization')).toBe('Bearer token1');
-        return new Response(null, { status: 401, statusText: 'Unauthorized' });
-      },
-      async (req?: Request) => {
-        expect(req?.headers.get('Authorization')).toBe('Bearer token2');
-        return jsonResponse({ ok: true });
-      },
-    ]);
-
-    const getToken = jasmine.createSpy().and.resolveTo('token1');
-    const refreshToken = jasmine.createSpy().and.resolveTo('token2');
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useOauth({ getToken, refreshToken, shouldRetry: () => true }),
-    );
-
-    const values = await collect(client.get('/secure', readJson));
-
-    expect(values).toEqual([{ ok: true }]);
-    expect(refreshToken).toHaveBeenCalledTimes(1);
-    expect(fetch).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not refresh token when shouldRetry returns false', async () => {
-    const fetch = mockFetchSequence([
-      async () => new Response(null, { status: 401 }),
-    ]);
-
-    const getToken = jasmine.createSpy().and.resolveTo('token1');
-    const refreshToken = jasmine.createSpy().and.resolveTo('token2');
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useOauth({
-        getToken,
-        refreshToken,
-        shouldRetry: () => false,
-      }),
-    );
-
-    await expectAsync(collect(client.get('/secure', readJson))).toBeRejectedWithError(/HTTP Error/);
-    expect(refreshToken).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it('follows various redirects', async () => {
-    const statuses = [301, 302, 303, 307, 308];
-    for (const status of statuses) {
-      const fetch = mockFetchSequence([
-        async () => new Response(null, { status, headers: { Location: '/next' } }),
-        async (req?: Request) => {
-          if (status === 303) expect(req?.method).toBe('GET');
+      useRequest((context) => ({
+        ...context,
+        fetch: async () => {
+          attempts++;
+          if (attempts < 3) throw new Error('retry');
           return jsonResponse({ ok: true });
         },
-      ]);
-
-      const client = createHttpClient().withDefaults(
-        useCustom(fetch),
-        useBase('http://test.local'),
-        useRedirect(),
-      );
-
-      const values = await collect(client.get('/start', readJson));
-      expect(values).toEqual([{ ok: true }]);
-    }
-  });
-
-  it('throws on too many redirects', async () => {
-    const fetch = mockFetchSequence([
-      async () => new Response(null, { status: 302, headers: { Location: '/1' } }),
-      async () => new Response(null, { status: 302, headers: { Location: '/2' } }),
-      async () => new Response(null, { status: 302, headers: { Location: '/3' } }),
-    ]);
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useRedirect(2),
+      })),
+      useRetry(2, 0),
     );
 
-    await expectAsync(collect(client.get('/loop', readJson))).toBeRejectedWithError(/Too many redirects/);
+    expect(await collect(client.request('/retry', readJson))).toEqual([{ ok: true }]);
+    expect(attempts).toBe(3);
   });
 
-  it('throws on missing Location header', async () => {
-    const fetch = mockFetchSequence([
-      async () =>
-        new Response(null, {
-          status: 302,
-          headers: new Headers({ 'Content-Type': 'text/plain' }),
-        }),
-    ]);
-
-    const detectRedirects: Middleware = (next) => async (context) => {
-      const result = await next(context);
-      if (result instanceof Response) {
-        return {
-          ...context,
-          ok: result.ok,
-          status: result.status,
-          statusText: result.statusText,
-          redirectTo: result.headers.get('Location') || undefined,
-          parser: context.parser,
-          fetch: context.fetch,
-        } as Context;
-      }
-      return result;
-    };
-
+  it('honors retry predicates', async () => {
+    let attempts = 0;
     const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      detectRedirects,
-      useBase('http://test.local'),
-      useRedirect(),
+      useRequest((context) => ({ ...context, fetch: async () => { attempts++; throw new Error('stop'); } })),
+      useRetry(3, 0, () => false),
     );
 
-    await expectAsync(collect(client.get('/bad-redirect', readJson))).toBeRejectedWithError(/Location/);
+    await expectAsync(collect(client.request('/retry', readJson))).toBeRejectedWithError('stop');
+    expect(attempts).toBe(1);
   });
 
-  it('chains multiple middlewares correctly', async () => {
-    const logs: string[] = [];
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.url).toContain('https://api.test');
-      expect(req.headers.get('Accept')).toBe('application/json');
-      expect(req.headers.get('X-Custom')).toBe('header-value');
+  it('refreshes OAuth tokens after 401', async () => {
+    const authorizations: Array<string | null> = [];
+    const fetch = jasmine.createSpy('fetch').and.callFake(async (request: Request) => {
+      authorizations.push(request.headers.get('Authorization'));
+      return authorizations.length === 1
+        ? new Response('unauthorized', { status: 401 })
+        : jsonResponse({ ok: true });
+    });
+
+    const client = createHttpClient().withDefaults(
+      useRequest((context) => ({ ...context, fetch: fetch as typeof globalThis.fetch })),
+      useOauth({
+        getToken: async () => 'token-1',
+        refreshToken: async () => 'token-2',
+      }),
+    );
+
+    expect(await collect(client.request('/secure', readJson))).toEqual([{ ok: true }]);
+    expect(authorizations).toEqual(['Bearer token-1', 'Bearer token-2']);
+  });
+
+  it('times requests out', async () => {
+    const fetch = jasmine.createSpy('fetch').and.callFake((request: Request) =>
+      new Promise<Response>((_resolve, reject) => {
+        request.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      }),
+    );
+
+    const client = createHttpClient().withDefaults(
+      useRequest((context) => ({ ...context, fetch: fetch as typeof globalThis.fetch })),
+      useTimeout(1),
+    );
+
+    await expectAsync(collect(client.request('/slow', readJson))).toBeRejectedWithError(/timed out/);
+  });
+
+  it('exposes native redirect behavior instead of custom redirect middleware', async () => {
+    const fetch = jasmine.createSpy('fetch').and.callFake(async (request: Request) => {
+      expect(request.redirect).toBe('manual');
       return jsonResponse({ ok: true });
     });
 
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('https://api.test'),
-      useAccept('application/json'),
-      useHeader('X-Custom', 'header-value'),
-      useLogger((msg) => logs.push(msg)),
-      useParams({ key: 'value' }),
-    );
-
-    await collect(client.get('/test', readJson));
-
-    expect(logs.length).toBe(2);
-    expect(fetch).toHaveBeenCalled();
+    const client = withFetch(fetch as typeof globalThis.fetch);
+    await collect(client.request('/redirect', readJson, { redirect: 'manual' }));
   });
 
-  it('applies middleware in correct order', async () => {
-    const order: string[] = [];
-
-    const middleware1 = (next: any) => async (ctx: Context) => {
-      order.push('1-before');
-      const result = await next(ctx);
-      order.push('1-after');
-      return result;
-    };
-
-    const middleware2 = (next: any) => async (ctx: Context) => {
-      order.push('2-before');
-      const result = await next(ctx);
-      order.push('2-after');
-      return result;
-    };
-
-    const fetch = mockFetchSequence([async () => {
-      order.push('fetch');
-      return jsonResponse({ ok: true });
-    }]);
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      middleware1,
-      middleware2,
-    );
-
-    await collect(client.get('/order', readJson));
-
-    expect(order).toEqual(['1-before', '2-before', 'fetch', '2-after', '1-after']);
-  });
-
-  it('preserves context custom properties through middleware', async () => {
-    const customMiddleware = (next: any) => async (ctx: Context) => {
-      ctx['customProperty'] = 'custom-value';
-      return await next(ctx);
-    };
-
-    const verifyMiddleware = (next: any) => async (ctx: Context) => {
-      expect(ctx['customProperty']).toBe('custom-value');
-      return await next(ctx);
-    };
-
-    const fetch = mockFetchSequence([async () => jsonResponse({ ok: true })]);
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      customMiddleware,
-      verifyMiddleware,
-    );
-
-    await collect(client.get('/custom', readJson));
-  });
-
-  it('handles empty params in useParams', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      expect(req.url).toBe('http://test.local/test');
-      return jsonResponse({ ok: true });
+  it('lets transforms replace fetch without a dedicated helper', async () => {
+    const customFetch = jasmine.createSpy('fetch').and.resolveTo(jsonResponse({ custom: true }));
+    const transform = (context: Context): Context => ({
+      ...context,
+      fetch: customFetch as typeof globalThis.fetch,
     });
 
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useParams({}),
-    );
-
-    await collect(client.get('/test', readJson));
-  });
-
-  describe('middlewares', () => {
-    it('does not override absolute URLs in useBase', async () => {
-      const context: Context = {
-        url: 'https://api.remote/resource',
-        method: 'GET',
-        headers: {},
-        parser: readStatus,
-      } as Context;
-
-      const next = jasmine.createSpy('next').and.resolveTo(context);
-      await useBase('http://test.local')(next)(context);
-      const appliedContext = next.calls.mostRecent().args[0];
-      expect(appliedContext.url).toBe('https://api.remote/resource');
-    });
-
-    it('throws after exhausting retries in useRetry', async () => {
-      const context: Context = {
-        url: 'http://retry.test',
-        method: 'GET',
-        headers: {},
-        parser: readStatus,
-      } as Context;
-
-      const next = jasmine.createSpy('next').and.callFake(async () => {
-        throw new Error('retry failure');
-      });
-      await expectAsync(useRetry(1, 0)(next)(context)).toBeRejectedWithError('retry failure');
-      expect(next).toHaveBeenCalledTimes(2);
-    });
-
-    it('errors when redirect location is not a string', async () => {
-      const context: Context = {
-        url: 'http://redirect.test',
-        method: 'GET',
-        headers: {},
-        parser: readStatus,
-      } as Context;
-
-      const middleware = useRedirect();
-      const next = jasmine.createSpy('next').and.resolveTo({
-        ...context,
-        redirectTo: 123,
-        status: 301,
-      });
-
-      await expectAsync(middleware(next)(context)).toBeRejectedWithError(/missing Location header/);
-    });
-  });
-
-  it('distinguishes user abort from timeout', async () => {
-    const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
-      return new Promise((_, reject) => {
-        req.signal.addEventListener('abort', () => {
-          reject(new DOMException('Aborted', 'AbortError'));
-        });
-      });
-    });
-
-    const client = createHttpClient().withDefaults(
-      useCustom(fetch),
-      useBase('http://test.local'),
-      useTimeout(10000), // long timeout so it never fires
-    );
-
-    const stream = client.get('/user-abort', readJson);
-    stream.abort();
-
-    // With the bug, this would be rejected with "Request timed out..."
-    // After the fix, it preserves the original DOMException message
-    await expectAsync(collect(stream)).toBeRejectedWithError(/Aborted/);
-  });
-});
-
-/* ================================================== */
-/* 3. Parsers & Streaming                             */
-/* ================================================== */
-
-describe('parsers', () => {
-  let warnSpy: jasmine.Spy;
-
-  beforeEach(() => {
-    warnSpy = spyOn(console, 'warn').and.callFake(() => {});  // Silences all warnings
-  });
-
-  afterEach(() => {
-    warnSpy.calls.reset();
-  });
-
-  it('parses text response', async () => {
-    const fetch = mockFetchSequence([async () => new Response('Hello World', { status: 200 })]);
-
-    const client = clientWithFetch(fetch);
-    const values = await collect(client.get('/text', readText));
-
-    expect(values).toEqual(['Hello World']);
-  });
-
-  it('parses ArrayBuffer response', async () => {
-    const data = new Uint8Array([1, 2, 3]);
-    const fetch = mockFetchSequence([async () => new Response(data, { status: 200 })]);
-
-    const client = clientWithFetch(fetch);
-    const values = await collect(client.get('/binary', readArrayBuffer));
-
-    expect(values[0]).toBeInstanceOf(ArrayBuffer);
-  });
-
-  it('parses Blob response', async () => {
-    const fetch = mockFetchSequence([async () => new Response('blob data', { status: 200 })]);
-
-    const client = clientWithFetch(fetch);
-    const values = await collect(client.get('/blob', readBlob));
-
-    expect(values[0]).toBeInstanceOf(Blob);
-  });
-
-  it('throws error when response body is not readable', async () => {
-    const response = new Response(null);
-    Object.defineProperty(response, 'body', { value: null });
-
-    await expectAsync((async () => {
-      for await (const _ of readChunks()(response)) { /* no-op */ }
-    })()).toBeRejectedWithError(/not readable/);
-  });
-
-  it('parses text chunks', async () => {
-    const encoder = new TextEncoder();
-    const chunks = [encoder.encode('Hello'), encoder.encode(' World')];
-
-    const response = new Response(createMockReadableStream(chunks), {
-      headers: { 'Content-Type': 'text/plain' },
-    });
-
-    const values = await collect(readChunks()(response));
-
-    expect(values.length).toBeGreaterThan(0);
-    expect(values[values.length - 1].done).toBeTrue();
-  });
-
-  it('parses NDJSON chunks', async () => {
-    const encoder = new TextEncoder();
-    const chunks = [encoder.encode('{"a":1}\n{"b":2}\n')];
-
-    const response = new Response(createMockReadableStream(chunks), {
-      headers: { 'Content-Type': 'application/x-ndjson' },
-    });
-
-    const values = await collect(readChunks<any>(readNdjsonChunk)(response));
-
-    const dataChunks = values.filter((v) => !v.done);
-    expect(dataChunks.length).toBe(2);
-  });
-
-  it('parses binary chunks', async () => {
-    const chunks = [new Uint8Array([1, 2, 3])];
-
-    const response = new Response(createMockReadableStream(chunks), {
-      headers: { 'Content-Type': 'application/octet-stream' },
-    });
-
-    const values = await collect(readChunks<Uint8Array>(readBinaryChunk)(response));
-
-    expect(values[0].chunk).toBeInstanceOf(Uint8Array);
-  });
-
-  it('calculates progress with Content-Length', async () => {
-    const encoder = new TextEncoder();
-    const data = encoder.encode('Hello');
-    const chunks = [data];
-
-    const response = new Response(createMockReadableStream(chunks), {
-      headers: { 'Content-Type': 'text/plain', 'Content-Length': String(data.length) },
-    });
-
-    const values = await collect(readChunks()(response));
-
-    expect(values[values.length - 1].progress).toBe(1);
-  });
-
-  it('handles chunks without Content-Length', async () => {
-    const encoder = new TextEncoder();
-    const chunks = [encoder.encode('Hello')];
-
-    const response = new Response(createMockReadableStream(chunks));
-
-    const values = await collect(readChunks()(response));
-    expect(values.length).toBeGreaterThan(0);
-  });
-
-  it('parses JSON chunks with custom parser', async () => {
-    const encoder = new TextEncoder();
-    const chunks = [encoder.encode('{"test": true}')];
-
-    const response = new Response(createMockReadableStream(chunks), {
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    const values = await collect(readChunks<any>(readJsonChunk)(response));
-
-    expect(values[0].chunk.test).toBeTrue();
-  });
-
-  it('handles invalid JSON/NDJSON chunks gracefully', () => {
-    expect(readJsonChunk('invalid json')).toBeNull();
-    expect(readNdjsonChunk('invalid json')).toBeNull();
-  });
-
-  it('converts chunks to Base64', () => {
-    const chunk = new Uint8Array([72, 101, 108, 108, 111]);
-    expect(readBase64Chunk(chunk)).toBe('SGVsbG8=');
-  });
-
-  it('parses CSV chunks', () => {
-    const csvData = 'name,age\nJohn,30\nJane,25';
-    expect(readCsvChunk(csvData)).toEqual([
-      ['name', 'age'],
-      ['John', '30'],
-      ['Jane', '25'],
-    ]);
-  });
-
-  it('decodes binary and string payloads with readTextChunk', () => {
-    const encoder = new TextEncoder();
-    const binaryChunk = encoder.encode('decoded text');
-
-    expect(readTextChunk(binaryChunk)).toBe('decoded text');
-    expect(readTextChunk('literal string')).toBe('literal string');
-  });
-
-  it('treats unknown readTextChunk inputs as empty strings', () => {
-    expect(readTextChunk(null)).toBe('');
-    expect(readTextChunk(123)).toBe('');
-  });
-
-  it('reads full response body', async () => {
-    const encoder = new TextEncoder();
-    const chunks = [encoder.encode('Hello'), encoder.encode(' World')];
-
-    const response = new Response(createMockReadableStream(chunks));
-
-    const values = await collect(readFull(response));
-
-    expect(values[0]).toBeInstanceOf(Uint8Array);
-    const text = new TextDecoder().decode(values[0]);
-    expect(text).toBe('Hello World');
-  });
-
-  it('throws when readFull cannot access the response body', async () => {
-    const response = new Response(null);
-    Object.defineProperty(response, 'body', { value: null });
-
-    await expectAsync(collect(readFull(response))).toBeRejectedWithError(/not readable/);
-  });
-
-  it('handles parser errors in stream', async () => {
-    const fetch = mockFetchSequence([async () => new Response('invalid json', { status: 200 })]);
-
-    const client = clientWithFetch(fetch);
-
-    await expectAsync(collect(client.get('/bad-json', readJson))).toBeRejected();
-  });
-
-  it('propagates errors through stream', async () => {
-    const errorParser = async function* () {
-      throw new Error('Parser error');
-    };
-
-    const fetch = mockFetchSequence([async () => jsonResponse({ ok: true })]);
-
-    const client = clientWithFetch(fetch);
-
-    await expectAsync(collect(client.get('/error-parser', {}, errorParser))).toBeRejectedWithError('Parser error');
+    const client = createHttpClient().withDefaults(useRequest(transform));
+    expect(await collect(client.request('/custom', readJson))).toEqual([{ custom: true }]);
   });
 });

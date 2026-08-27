@@ -244,3 +244,29 @@ uiState.firstName = "John";
 uiState.lastName = "Smith";
 
 ```
+### Explicit Transactions
+
+Analog mode is a property of a scope: it continuously coalesces rapid updates. A transaction is a property of an operation: it makes several synchronous writes one reactive state transition, even for otherwise discrete atoms.
+
+```ts
+const firstName = atom("Jane");
+const lastName = atom("Doe");
+
+transaction(() => {
+  firstName.set("John");
+  lastName.set("Smith");
+});
+```
+
+Inside the callback, `.value` reflects writes immediately. Subscribers and dependent `derived()` atoms are deferred until the outermost transaction commits. Multiple writes to the same atom collapse to the final value, while `previous` remains the value from before the transaction. Nested transactions join the outer transaction.
+
+Transactions are synchronous and do not roll back state when the callback throws. If async work is required, resolve it first and commit the resulting state synchronously:
+
+```ts
+const result = await loadProfile();
+
+transaction(() => {
+  profile.name = result.name;
+  profile.email = result.email;
+});
+```

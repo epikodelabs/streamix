@@ -274,7 +274,7 @@ class DefaultScheduler implements Scheduler {
   }
 
   flush(): void {
-    if (this.isFlushing) return;
+    if (this.isFlushing || isTransactionActive()) return;
     this.isFlushing = true;
 
     try {
@@ -332,6 +332,56 @@ let currentScheduler: Scheduler = new DefaultScheduler();
 
 export function setScheduler(scheduler: Scheduler): void { currentScheduler = scheduler; }
 export function getScheduler(): Scheduler { return currentScheduler; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Transactions
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+let transactionDepth = 0;
+const transactionFinalizers = new Set<() => void>();
+
+function isTransactionActive(): boolean {
+  return transactionDepth > 0;
+}
+
+function finalizeAfterTransaction(callback: () => void): void {
+  transactionFinalizers.add(callback);
+}
+
+/**
+ * Groups synchronous atom writes into one reactive state transition.
+ *
+ * Writes are visible synchronously through `.value`, but subscriber delivery and
+ * dependent recomputation are deferred until the outermost transaction commits.
+ * Nested transactions join the outer transaction. Errors do not roll state back:
+ * queued changes are committed before the original error is rethrown.
+ *
+ * Async callbacks are intentionally unsupported. Resolve async work first, then
+ * apply its result inside a synchronous transaction.
+ */
+export function transaction<T>(fn: () => T extends PromiseLike<any> ? never : T): T {
+  transactionDepth++;
+
+  try {
+    const result = fn() as T;
+    if (isPromiseLike(result)) {
+      throw new TypeError("transaction() callback must be synchronous");
+    }
+    return result;
+  } finally {
+    transactionDepth--;
+
+    if (transactionDepth === 0) {
+      try {
+        currentScheduler.flush();
+      } finally {
+        const finalizers = Array.from(transactionFinalizers);
+        transactionFinalizers.clear();
+        for (const finalize of finalizers) finalize();
+      }
+    }
+  }
+}
 
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -1269,6 +1319,7 @@ export function atom<T = any>(
   let errorValue: any = undefined;
   let isErrorState = false;
   let dirty = false;
+  let transactionTouched = false;
 
   let instance!: Writable<T> & InternalAtomContainer;
   const subscriptions = new Set<Subscription>();
@@ -1362,7 +1413,15 @@ export function atom<T = any>(
       if (disposed) return;
       if (isErrorState) { isErrorState = false; errorValue = undefined; }
 
-      previous = current;
+      if (isTransactionActive()) {
+        if (!transactionTouched) {
+          previous = current;
+          transactionTouched = true;
+          finalizeAfterTransaction(() => { transactionTouched = false; });
+        }
+      } else if (!transactionTouched) {
+        previous = current;
+      }
       current = value;
       markAtomAsEmitted(instance as any);
       notifyEmitHandlers(instance as any);
@@ -1371,8 +1430,8 @@ export function atom<T = any>(
       // regardless of whether public broadcasts are discrete or analog-batched.
       notifyChangeHandlers(instance);
 
-      if (node.isAnalog) {
-        // Analog: Defer public broadcast to scheduler flush
+      if (node.isAnalog || isTransactionActive()) {
+        // Analog and transactional writes share the scheduler boundary.
         if (subs.size > 0) {
           instance[MARK_DIRTY]();
         }
@@ -1595,6 +1654,7 @@ export function derived<T>(...args: any[]): Atom<T> {
   let isErrorState = false;
   let notifyPending = false;
   let dirty = false;
+  let transactionTouched = false;
 
   let instance!: Atom<T> & InternalAtomContainer;
   const dependencies = new Set<DependencySource<any>>();
@@ -1617,13 +1677,21 @@ export function derived<T>(...args: any[]): Atom<T> {
   const commitValue = (next: T) => {
     if (Object.is(current, next)) return;
 
-    previous = current;
+    if (isTransactionActive()) {
+      if (!transactionTouched) {
+        previous = current;
+        transactionTouched = true;
+        finalizeAfterTransaction(() => { transactionTouched = false; });
+      }
+    } else if (!transactionTouched) {
+      previous = current;
+    }
     current = next;
     node.version++;
 
     notifyChangeHandlers(instance);
 
-    if (node.isAnalog) {
+    if (node.isAnalog || isTransactionActive() || transactionTouched) {
       notifyPending = true;
     } else if (subs.size > 0) {
       broadcast();
@@ -1646,7 +1714,7 @@ export function derived<T>(...args: any[]): Atom<T> {
       const handler = () => {
         if (disposed) return;
 
-        if (!node.isAnalog) {
+        if (!node.isAnalog && !isTransactionActive()) {
           if (!node.flushing && !running) {
             try {
               recompute();

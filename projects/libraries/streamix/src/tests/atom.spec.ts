@@ -6,6 +6,7 @@ import {
   getScheduler,
   scope,
   trackDependencies,
+  transaction,
   type Atom,
   type DerivedScope,
 } from '@epikodelabs/streamix';
@@ -841,4 +842,88 @@ describe('Atom System', () => {
       env.reset();
     });
   });
+  describe('transaction()', () => {
+    it('should batch discrete atom writes into one notification', () => {
+      const a = atom(0);
+      const values: Array<[number, number]> = [];
+      a.subscribe((current, previous) => values.push([current, previous]));
+
+      transaction(() => {
+        a.next(1);
+        a.next(2);
+        a.next(3);
+        expect(a.value).toBe(3);
+        expect(values).toEqual([]);
+      });
+
+      expect(values).toEqual([[3, 0]]);
+      expect(a.previous).toBe(0);
+      a.dispose();
+    });
+
+    it('should defer derived recomputation until commit', () => {
+      const left = atom(1);
+      const right = atom(2);
+      const total = derived(() => left.value + right.value);
+      const values: number[] = [];
+      total.subscribe(value => values.push(value));
+
+      expect(total.value).toBe(3);
+
+      transaction(() => {
+        left.set(10);
+        right.set(20);
+        expect(values).toEqual([]);
+      });
+
+      expect(total.value).toBe(30);
+      expect(values).toEqual([30]);
+      left.dispose();
+      right.dispose();
+      total.dispose();
+    });
+
+    it('should merge nested transactions into the outer commit', () => {
+      const a = atom(0);
+      const b = atom(0);
+      const snapshots: Array<[number, number]> = [];
+      const combined = derived(() => [a.value, b.value] as [number, number]);
+      combined.subscribe(value => snapshots.push(value));
+      void combined.value;
+
+      transaction(() => {
+        a.set(1);
+        transaction(() => {
+          b.set(2);
+        });
+        expect(snapshots).toEqual([]);
+      });
+
+      expect(snapshots).toEqual([[1, 2]]);
+      a.dispose();
+      b.dispose();
+      combined.dispose();
+    });
+
+    it('should commit writes before rethrowing an error', () => {
+      const a = atom(0);
+      const values: number[] = [];
+      a.subscribe(value => values.push(value));
+
+      expect(() => transaction(() => {
+        a.set(1);
+        throw new Error('boom');
+      })).toThrow(new Error('boom'));
+
+      expect(a.value).toBe(1);
+      expect(values).toEqual([1]);
+      a.dispose();
+    });
+
+    it('should reject async callbacks at runtime when type checking is bypassed', () => {
+      const callback = (async () => 1) as any;
+      expect(() => transaction(callback)).toThrowError(TypeError, 'transaction() callback must be synchronous');
+    });
+  });
+
 });

@@ -1,6 +1,17 @@
-import { firstValueFrom, iterate } from "@epikodelabs/streamix";
 import { jsonp } from "@epikodelabs/streamix/networking";
 import { idescribe } from "./env.spec";
+
+async function firstValueFrom<T>(stream: AsyncIterable<T>): Promise<T> {
+  const iterator = stream[Symbol.asyncIterator]();
+  const result = await iterator.next();
+
+  if (result.done) {
+    throw new Error('Stream completed without emitting a value');
+  }
+
+  await iterator.return?.(undefined);
+  return result.value;
+}
 
 idescribe("jsonp", () => {
   let originalHeadAppend: typeof document.head.appendChild;
@@ -111,7 +122,7 @@ idescribe("jsonp", () => {
     const refs = setupJsonpMock(testData);
 
     const stream = jsonp<typeof testData>("https://example.com/data");
-    const iterator = iterate(stream)[Symbol.asyncIterator]();
+    const iterator = stream[Symbol.asyncIterator]();
 
     const value$ = iterator.next();
     await iterator.return?.(undefined); // Early close
@@ -146,6 +157,3 @@ idescribe("jsonp", () => {
     expect(refs.removedScript).toBe(refs.appendedScript);
   });
 });
-
-
-
