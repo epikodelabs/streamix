@@ -1,6 +1,7 @@
 import {
   createPushOperator,
   isPromiseLike,
+  isStreamLike,
   type Stream
 } from '../abstractions';
 import { fromAny } from '../converters';
@@ -67,13 +68,38 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
 
         if (abortController.signal.aborted) return;
 
-        const auxIterators = resolvedInputs.map((input) =>
-          fromAny(input as any)[Symbol.asyncIterator]() as AsyncIterator<unknown>
-        );
-        const latestValues = new Array(auxIterators.length).fill(undefined);
-        const hasValue = new Array(auxIterators.length).fill(false);
-        const sourceIndex = auxIterators.length;
+        const latestValues = new Array(resolvedInputs.length).fill(undefined);
+        const hasValue = new Array(resolvedInputs.length).fill(false);
+        const auxIterators: AsyncIterator<unknown>[] = [];
+        const auxSlots: number[] = [];
 
+        const isIterableInput = (input: unknown) => {
+          if (input == null || typeof input === 'string') return false;
+          const candidate = input as any;
+          return typeof candidate[Symbol.asyncIterator] === 'function'
+            || typeof candidate[Symbol.iterator] === 'function';
+        };
+
+        // Plain values (including promise-resolved values) are already "latest".
+        // Stream/iterable auxiliaries stay live in the coordinator. Crucially, we
+        // do not await their first emission: a source that completes while an
+        // auxiliary never emits must still complete the combined stream.
+        resolvedInputs.forEach((input, slot) => {
+          if (!isStreamLike(input) && !isIterableInput(input)) {
+            latestValues[slot] = input;
+            hasValue[slot] = true;
+            return;
+          }
+
+          auxSlots.push(slot);
+          auxIterators.push(
+            fromAny(input as any)[Symbol.asyncIterator]() as AsyncIterator<unknown>
+          );
+        });
+
+        if (abortController.signal.aborted) return;
+
+        const sourceIndex = auxIterators.length;
         runner = createAsyncCoordinator<unknown>([
           ...auxIterators,
           source as AsyncIterator<unknown>
@@ -103,8 +129,9 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = any[]>(
           }
 
           if (event.type === "value") {
-            latestValues[event.sourceIndex] = event.value;
-            hasValue[event.sourceIndex] = true;
+            const slot = auxSlots[event.sourceIndex];
+            latestValues[slot] = event.value;
+            hasValue[slot] = true;
           }
         }
 
