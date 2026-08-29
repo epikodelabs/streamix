@@ -14,33 +14,34 @@ import { createOperator, DONE, normalizeError, type MaybePromise, type Operator 
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const finalize = <T = any>(callback: () => MaybePromise<void>) => {
-
-  let finalized = false;
-  let completed = false;
-  let finalization$: Promise<void> | null = null;
-
-  const doFinalize = async () => {
-    if (!finalized) {
-      finalized = true;
-      completed = true;
-
-      if (!finalization$) {
-        finalization$ = (async () => {
-          try {
-            await callback?.();
-          } catch {
-            // Swallow errors to avoid affecting downstream consumers
-          }
-        })();
-      }
-
-      await finalization$;
-    } else if (finalization$) {
-      await finalization$;
-    }
-  };
-
   return createOperator<T, T>("finalize", function (this: Operator, source) {
+    // Per-iterator state: the operator object itself is reusable across pipes,
+    // so completion flags must not be shared between separate streams.
+    let finalized = false;
+    let completed = false;
+    let finalization$: Promise<void> | null = null;
+
+    const doFinalize = async () => {
+      if (!finalized) {
+        finalized = true;
+        completed = true;
+
+        if (!finalization$) {
+          finalization$ = (async () => {
+            try {
+              await callback?.();
+            } catch {
+              // Swallow errors to avoid affecting downstream consumers
+            }
+          })();
+        }
+
+        await finalization$;
+      } else if (finalization$) {
+        await finalization$;
+      }
+    };
+
     const iterator: AsyncIterator<T> = {
       async next() {
         if (completed) {

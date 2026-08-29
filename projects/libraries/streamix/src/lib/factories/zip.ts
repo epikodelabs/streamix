@@ -23,39 +23,39 @@ export function zip<T extends readonly unknown[] = any[]>(
     );
     const runner = createAsyncCoordinator<T[number]>(iterators);
 
-    try {
-      while (true) {
-        const tuple = new Array(iterators.length);
-        const seen = new Set<number>();
-        let isComplete = false;
+    // Per-source FIFO buffers: a source may emit several values while its
+    // partners have not emitted yet; those values must be retained and paired
+    // in order rather than discarded.
+    const buffers: T[number][][] = iterators.map(() => []);
+    const done = iterators.map(() => false);
 
-        while (seen.size < iterators.length) {
+    try {
+      outer: while (true) {
+        // Wait until every source has a buffered value, or a completed source
+        // drains its buffer (which ends the zip: it can no longer be paired).
+        while (!buffers.every(buffer => buffer.length > 0)) {
+          if (done.some((isDone, i) => isDone && buffers[i].length === 0)) {
+            break outer;
+          }
+
           const result = await runner.next();
           if (result.done) {
-            isComplete = true;
-            break;
+            break outer;
           }
 
           const event = result.value;
-          if (seen.has(event.sourceIndex)) continue;
-
           if (event.type === 'error') {
             throw normalizeError(event.error);
           }
           if (event.type === 'complete') {
-            isComplete = true;
-            break;
+            done[event.sourceIndex] = true;
+            continue;
           }
 
-          tuple[event.sourceIndex] = event.value;
-          seen.add(event.sourceIndex);
+          buffers[event.sourceIndex].push(event.value);
         }
 
-        if (isComplete) {
-          break;
-        }
-
-        yield tuple as unknown as T;
+        yield buffers.map(buffer => buffer.shift()) as unknown as T;
       }
     } finally {
       await runner.return?.();

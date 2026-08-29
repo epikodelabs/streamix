@@ -83,10 +83,21 @@ const withHeader = (
 
 const methodOf = (context: Context): string => context.init.method ?? 'GET';
 
+// Aborted requests (caller cancellation / consumer teardown) must surface
+// immediately instead of burning through the retry backoff schedule.
+const isRetryableError = (error: unknown): boolean =>
+  (error as Error | undefined)?.name !== 'AbortError';
+
+// `Array.isArray` alone cannot narrow `readonly Middleware[]` out of a union
+// (readonly arrays are not assignable to `any[]`), so a custom guard is needed.
+const isMiddlewareList = (
+  value: readonly Middleware[] | HttpClientOptions | undefined,
+): value is readonly Middleware[] => Array.isArray(value);
+
 const normalizeHttpClientOptions = (
   options: readonly Middleware[] | HttpClientOptions | undefined,
 ): NormalizedHttpClientOptions => {
-  if (Array.isArray(options)) {
+  if (isMiddlewareList(options)) {
     return { middlewares: options };
   }
 
@@ -110,7 +121,13 @@ const resolveRequestUrl = (url: string, baseUrl?: string): string => {
   } catch {
     const resolvedBaseUrl = baseUrl ?? getDefaultBaseUrl();
     if (resolvedBaseUrl) {
-      return new URL(url, resolvedBaseUrl).toString();
+      // Conventional base-URL joining: a relative path extends the base path
+      // (baseUrl 'https://api.test/v1' + 'users' → 'https://api.test/v1/users').
+      // Plain RFC 3986 resolution would discard the '/v1' segment.
+      return new URL(
+        url.replace(/^\/+/, ''),
+        resolvedBaseUrl.replace(/\/+$/, '') + '/',
+      ).toString();
     }
   }
 
@@ -179,7 +196,7 @@ export const useOauth = ({
 export const useRetry = (
   maxRetries = 3,
   backoffBase = 1000,
-  shouldRetry: (error: unknown, context: Context) => boolean = () => true,
+  shouldRetry: (error: unknown, context: Context) => boolean = isRetryableError,
 ): Middleware =>
   (next) => async (context) => {
     for (let retry = 0; ; retry++) {
@@ -258,6 +275,10 @@ export const createHttpClient = (
     const response = await context.fetch(request);
 
     if (!response.ok) {
+      // Cancel the error body so the connection is released back to the
+      // keep-alive pool instead of being held until the body drains or GC.
+      void response.body?.cancel().catch(() => {});
+
       const error = new Error(
         `${LOG_PREFIX} HTTP Error: ${response.status} ${response.statusText} for ${request.method} ${request.url}`,
       ) as HttpContextError;
@@ -290,14 +311,35 @@ export const createHttpClient = (
       fetch: defaultFetch,
     };
 
-    const resultPromise = run(context);
-    const stream = flow<T>(async function* () {
-      const result = await resultPromise;
-      if (result.kind === 'data') {
-        yield* result.data as AsyncIterable<T>;
-        return;
+    // Start the transport eagerly so abort/timeout wiring is live before the
+    // first consumer attaches. Only the first iteration consumes this run;
+    // re-iterations start a fresh fetch instead of sharing (and exhausting)
+    // a single Response body.
+    let initialRun: Promise<HttpResult> | null = run(context);
+    initialRun.catch(() => { /* avoid unhandled rejection when nobody iterates */ });
+
+    const stream = flow<T>(async function* (consumerSignal) {
+      // Tie consumer cancellation (for-await break, early return, or a
+      // flow restart) to the request so in-flight fetches are aborted.
+      const onConsumerAbort = () => controller.abort(abortError());
+      consumerSignal?.addEventListener('abort', onConsumerAbort, { once: true });
+
+      try {
+        const resultPromise = initialRun ?? run(context);
+        initialRun = null;
+
+        const result = await resultPromise;
+        if (result.kind === 'data') {
+          yield* result.data as AsyncIterable<T>;
+          return;
+        }
+        yield* parser(result.response);
+      } catch (error) {
+        if (consumerSignal?.aborted) return;
+        throw error;
+      } finally {
+        consumerSignal?.removeEventListener('abort', onConsumerAbort);
       }
-      yield* parser(result.response);
     }) as HttpStream<T>;
 
     stream.abort = () => controller.abort(abortError());

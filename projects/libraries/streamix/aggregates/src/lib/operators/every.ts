@@ -40,6 +40,11 @@ export const every = <T = any>(
           const passes = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
           if (!passes) {
             emitted = true;
+            // Short-circuit: close the still-suspended source instead of
+            // abandoning it mid-stream.
+            try {
+              await source.return?.();
+            } catch {}
             return NEXT(false);
           }
         }

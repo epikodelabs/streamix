@@ -52,9 +52,26 @@ export function resize(
         width = Math.round(entry.contentRect.width);
         height = Math.round(entry.contentRect.height);
       } else {
+        // Derive the content box for the initial (observer-less) emit so it
+        // matches what the observer's own first callback will report: the
+        // border-box rect minus padding and border widths.
         const rect = resolvedElement.getBoundingClientRect();
-        width = Math.round(rect.width);
-        height = Math.round(rect.height);
+        const style = typeof getComputedStyle === "function"
+          ? getComputedStyle(resolvedElement)
+          : null;
+        const edge = (name: string): number =>
+          style ? parseFloat(style.getPropertyValue(name)) || 0 : 0;
+
+        width = Math.round(
+          rect.width
+          - edge("padding-left") - edge("padding-right")
+          - edge("border-left-width") - edge("border-right-width")
+        );
+        height = Math.round(
+          rect.height
+          - edge("padding-top") - edge("padding-bottom")
+          - edge("border-top-width") - edge("border-bottom-width")
+        );
       }
 
       await push({ width, height });

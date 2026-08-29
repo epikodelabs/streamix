@@ -19,7 +19,14 @@ export async function* responseBytes(response: Response): ByteSource {
       if (value) yield value;
     }
   } finally {
-    reader.releaseLock();
+    // Cancel rather than merely release: when the consumer stops early
+    // (return/throw propagation), cancel() stops the underlying download
+    // instead of leaving it running to completion in the background.
+    try {
+      await reader.cancel();
+    } catch {
+      // Body already fully read or already errored.
+    }
   }
 }
 

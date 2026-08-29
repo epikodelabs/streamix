@@ -71,6 +71,10 @@ export function iterate<T>(source: Atom<T> | AsyncIterable<T>): AsyncIterableIte
 
     finish = () => {
       if (done) return;
+      // Remove ourselves from the atom's dispose handlers: iteration can end
+      // (return()/error) long before the atom is disposed, and every finished
+      // iterator left here would otherwise leak until the atom's disposal.
+      (atom as any)._onDispose?.delete(finish);
       const cleanup = unsubscribe();
       if (errorUnsubscribe) {
         errorUnsubscribe();

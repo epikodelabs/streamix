@@ -46,7 +46,7 @@
     "@angular-eslint/eslint-plugin-template": "^22.1.0",
     "@angular/cli": "^22.1.0",
     "@angular/compiler-cli": "^22.1.0",
-    "@epikodelabs/testify": "^1.0.36",
+    "@epikodelabs/testify": "^1.0.42",
     "@epikodelabs/typegen": "^1.0.13",
     "@types/jasmine": "^6.0.0",
     "@types/markdown-it": "^14.1.2",

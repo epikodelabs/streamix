@@ -45,13 +45,18 @@ export function race<T extends readonly unknown[] = any[]>(
         }
 
         // 2. Identify the winner from the first real value or completion.
+        //    Losers are cancelled in the background: removeSource() detaches
+        //    (and prunes queued events for) the loser synchronously, while its
+        //    return() teardown may block on in-flight work. Awaiting that
+        //    teardown here would delay the winner's first emission until the
+        //    slowest loser unwinds.
         if (!hasWinner) {
           hasWinner = true;
-          await Promise.all(
+          void Promise.all(
             iterators.map((_, idx) =>
               idx !== event.sourceIndex ? runner.removeSource(idx) : undefined
             )
-          );
+          ).catch(() => {});
         }
 
         // Loser events queued before the winner was selected are pruned by removeSource().

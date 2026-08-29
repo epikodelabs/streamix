@@ -137,8 +137,14 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = readonly 
             return;
           }
 
-          // Disregard control signals
-          if (ev.type !== 'value') {
+          // Completion control signals
+          if (ev.type === 'complete') {
+            if (ev.sourceIndex === sourceIndex) {
+              // The primary source completed: the output completes regardless
+              // of auxiliary streams (which may stay open indefinitely).
+              break;
+            }
+            // An auxiliary completed: keep its latest value and keep mirroring.
             continue;
           }
 

@@ -56,15 +56,20 @@ export const expand = <T = any>(
       const stream = from(normalized);
       const iterator = stream[Symbol.asyncIterator]() as AsyncIterator<T>;
 
+      const children: QueueItem[] = [];
       while (true) {
         const child = await iterator.next();
         if (child.done) break;
-        const item = { result: child, depth: depth + 1 };
-        if (options.traversal === 'breadth') {
-          queue.push(item);
-        } else {
-          queue.unshift(item);
-        }
+        children.push({ result: child, depth: depth + 1 });
+      }
+
+      if (options.traversal === 'breadth') {
+        queue.push(...children);
+      } else {
+        // Depth-first: children are explored before pending siblings. Inserting
+        // the whole batch at the front keeps left-to-right order within it,
+        // which single-item unshifting would reverse.
+        queue.unshift(...children);
       }
     };
 
@@ -82,8 +87,7 @@ export const expand = <T = any>(
           }
 
           if (queue.length > 0) {
-            const item =
-              options.traversal === 'breadth' ? queue.shift()! : queue.pop()!;
+            const item = queue.shift()!;
             await enqueueChildren(item.result.value, item.depth);
             return NEXT(item.result.value);
           }

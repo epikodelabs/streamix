@@ -25,6 +25,16 @@ export const take = <T = any>(count: number) =>
           return DONE;
         }
 
+        // Covers count <= 0 and post-limit pulls: close the source without
+        // requesting another value.
+        if (emitted >= count) {
+          done = true;
+          try {
+            await source.return?.();
+          } catch {}
+          return DONE;
+        }
+
         const result = await source.next();
         if (result.done) {
           done = true;
@@ -32,12 +42,13 @@ export const take = <T = any>(count: number) =>
         }
 
         emitted++;
-        if (emitted > count) {
+        if (emitted >= count) {
+          // The count is satisfied by this value: complete immediately instead
+          // of pulling (and discarding) one more value from the source.
           done = true;
           try {
             await source.return?.();
           } catch {}
-          return DONE;
         }
 
         return NEXT(result.value);

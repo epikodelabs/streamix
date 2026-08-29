@@ -19,6 +19,11 @@ import { createSharedSource, type Atom } from "@epikodelabs/streamix";
 export function animationFrame(): Atom<number> {
   return createSharedSource<number>((push) => {
     let cleaned = false;
+    // Declared before the SSR guard: `cleanup` closes over these bindings, so
+    // they must be initialized before `cleanup` can ever run (a TDZ access
+    // would otherwise throw in non-browser environments).
+    let rafId: number | null = null;
+    let cancelFrame: ((id: any) => void) | null = null;
 
     const cleanup = () => {
       if (cleaned) return;
@@ -35,9 +40,7 @@ export function animationFrame(): Atom<number> {
       return cleanup;
     }
 
-    let rafId: number | null = null;
     let lastTime = 0;
-    let cancelFrame: ((id: any) => void) | null = null;
 
     const hasRaf = typeof (globalThis as any).requestAnimationFrame === "function";
     const raf: (cb: FrameRequestCallback) => number =

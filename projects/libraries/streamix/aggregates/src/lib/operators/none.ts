@@ -37,6 +37,11 @@ export const none = <T = any>(
 
           if (passes) {
             evaluated = true;
+            // Short-circuit: close the still-suspended source instead of
+            // abandoning it mid-stream.
+            try {
+              await source.return?.();
+            } catch {}
             return NEXT(false);
           }
         }

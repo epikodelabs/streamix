@@ -38,15 +38,18 @@ export function switchMap<T = any, R = any>(
     let currentInner: { token: object; it: AsyncIterator<R> } | null = null;
     let inputCompleted = false;
     let currentInnerToken: object | null = null;
+    let pendingProjections = 0;
     let index = 0;
     let stopped = false;
 
     /**
      * Checks if the overall operator should complete.
-     * Only completes if the source is done AND no inner stream is active.
+     * Only completes if the source is done, no inner stream is active, and no
+     * promise-based projection is still resolving. A pending projection has
+     * not created its inner iterator yet, so it is invisible to `currentInner`.
      */
     const checkComplete = () => {
-      if (inputCompleted && !currentInner) {
+      if (inputCompleted && !currentInner && pendingProjections === 0) {
         output.dispose();
       }
     };
@@ -101,12 +104,15 @@ export function switchMap<T = any, R = any>(
 
       if (isPromiseLike(projected)) {
         const capturedToken = token;
+        pendingProjections++;
         Promise.resolve(projected).then(
           (normalized) => {
+            pendingProjections--;
             if (stopped || capturedToken !== currentInnerToken) return;
             subscribeToInner(from<R>(normalized as any), capturedToken);
           },
           (err) => {
+            pendingProjections--;
             if (stopped || capturedToken !== currentInnerToken) return;
             output.fail(normalizeError(err));
           }

@@ -32,6 +32,7 @@ export function intersection(
     let mo: MutationObserver | null = null;
     let lastValue: boolean | undefined;
     let hasEmitted = false;
+    let paused = false;
 
     const emit = async (value: boolean) => {
       if (cleaned || value === lastValue) return;
@@ -78,10 +79,15 @@ export function intersection(
         return rect.top < window.innerHeight && rect.bottom > 0;
       };
 
-      io = new IntersectionObserver(async (entries) => {
-        await emit(entries[0]?.isIntersecting ?? false);
-      }, resolvedOptions);
-      io.observe(el);
+      const observe = () => {
+        io?.disconnect();
+        io = new IntersectionObserver(async (entries) => {
+          await emit(entries[0]?.isIntersecting ?? false);
+        }, resolvedOptions);
+        io.observe(el);
+      };
+
+      observe();
 
       if (!hasEmitted) {
         void emit(computeInitial(el));
@@ -89,8 +95,22 @@ export function intersection(
 
       if (typeof MutationObserver !== "undefined") {
         mo = new MutationObserver(() => {
+          if (cleaned) return;
+
           if (!document.body.contains(el)) {
-            cleanup();
+            // The element left the DOM (a framework may detach and re-attach
+            // it, e.g. list recycling). Pause observation instead of tearing
+            // the shared source down while subscribers are still attached.
+            paused = true;
+            try {
+              io?.disconnect();
+            } catch {}
+            return;
+          }
+
+          if (paused) {
+            paused = false;
+            observe();
           }
         });
         mo.observe(document.body, { childList: true, subtree: true });

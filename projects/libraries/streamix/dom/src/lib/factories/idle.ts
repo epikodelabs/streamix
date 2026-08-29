@@ -39,8 +39,10 @@ export function idle(timeout?: number): Atom<IdleDeadline> {
       }
     };
 
-    // SSR / non-browser guard
-    if (typeof setTimeout !== "function") {
+    // SSR / non-browser guard: without a browser idle concept there is
+    // nothing meaningful to emit, and the setTimeout fallback would spin a
+    // perpetual timer loop that keeps a Node event loop alive.
+    if (typeof window === "undefined" || typeof setTimeout !== "function") {
       return cleanup;
     }
 

@@ -365,13 +365,16 @@ export function transaction<T>(fn: () => T extends PromiseLike<any> ? never : T)
     transactionDepth--;
 
     if (transactionDepth === 0) {
-      try {
-        currentScheduler.flush();
-      } finally {
-        const finalizers = Array.from(transactionFinalizers);
-        transactionFinalizers.clear();
-        for (const finalize of finalizers) finalize();
-      }
+      // Reset per-atom transaction flags before flushing. Subscriber callbacks
+      // invoked during the commit flush may write atoms or trigger derived
+      // recomputations; with the flags still set, those writes would skip
+      // `previous` updates and derived commits would defer to notifyPending
+      // without a queued flush, dropping the emission entirely.
+      const finalizers = Array.from(transactionFinalizers);
+      transactionFinalizers.clear();
+      for (const finalize of finalizers) finalize();
+
+      currentScheduler.flush();
     }
   }
 }
@@ -651,8 +654,7 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
   type Subscriber = {
     callback: Callback;
     busy: boolean;
-    hasPending: boolean;
-    pending: { current: T; previous: T } | undefined;
+    pending: Array<{ current: T; previous: T }>;
   };
 
   const subs = new Map<Callback, Subscriber>();
@@ -660,55 +662,67 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
   const finish = (sub: Subscriber): void => {
     if (!subs.has(sub.callback)) return;
     sub.busy = false;
-    while (sub.hasPending) {
-      const { current, previous } = sub.pending!;
-      sub.hasPending = false;
-      sub.pending = undefined;
-      invoke(sub, current, previous);
-    }
+    const queued = sub.pending.shift();
+    if (queued !== undefined) invoke(sub, queued);
   };
 
-  const invoke = (sub: Subscriber, current: T, previous: T): void => {
+  const invoke = (sub: Subscriber, initial: { current: T; previous: T }): void => {
     sub.busy = true;
-    sub.hasPending = false;
-    sub.pending = undefined;
+    let queued = initial;
 
-    try {
-      const result = sub.callback(current, previous);
-      if (isPromiseLike(result)) {
-        Promise.resolve(result).then(
-          () => finish(sub),
-          err => {
-            const e = normalizeError(err);
-            for (const h of Array.from(errorHandlers)) try { h(e); } catch {}
-            finish(sub);
-          }
-        );
-      } else {
-        finish(sub);
+    while (queued !== undefined) {
+      if (!subs.has(sub.callback)) {
+        sub.busy = false;
+        sub.pending.length = 0;
+        return;
       }
-    } catch (err) {
-      const e = normalizeError(err);
-      for (const h of Array.from(errorHandlers)) try { h(e); } catch {}
-      finish(sub);
+
+      const { current, previous } = queued;
+      queued = undefined;
+
+      try {
+        const result = sub.callback(current, previous);
+        if (isPromiseLike(result)) {
+          // Async callback: delivery resumes from finish() once the promise
+          // settles, so values emitted meanwhile queue up in `pending`.
+          Promise.resolve(result).then(
+            () => finish(sub),
+            err => {
+              const e = normalizeError(err);
+              for (const h of Array.from(errorHandlers)) try { h(e); } catch {}
+              finish(sub);
+            }
+          );
+          return;
+        }
+      } catch (err) {
+        const e = normalizeError(err);
+        for (const h of Array.from(errorHandlers)) try { h(e); } catch {}
+      }
+
+      // Drain synchronously emitted follow-up values iteratively so feedback
+      // loops (a subscriber writing the same atom) cannot grow the stack.
+      queued = sub.pending.shift();
     }
+
+    sub.busy = false;
   };
 
   return {
     get size() { return subs.size; },
     add(callback: Callback) {
-      subs.set(callback, { callback, busy: false, hasPending: false, pending: undefined });
+      subs.set(callback, { callback, busy: false, pending: [] });
     },
     delete(callback: Callback) { subs.delete(callback); },
     clear() { subs.clear(); },
     has(callback: Callback) { return subs.has(callback); },
     broadcast(current: T, previous: T) {
       for (const sub of Array.from(subs.values())) {
-        if (conflate && sub.busy) {
-          sub.hasPending = true;
-          sub.pending = { current, previous };
+        if (sub.busy) {
+          if (conflate) sub.pending.length = 0;
+          sub.pending.push({ current, previous });
         } else {
-          invoke(sub, current, previous);
+          invoke(sub, { current, previous });
         }
       }
     }
@@ -1639,7 +1653,6 @@ export function derived<T>(...args: any[]): Atom<T> {
 
   const maxSubscribers = options?.maxSubscribers ?? 1000;
   const terminateOnError = options?.terminateOnError ?? false;
-  const propagateErrors = options?.propagateErrors ?? true;
 
   let current!: T;
   let previous!: T;
@@ -1750,6 +1763,12 @@ export function derived<T>(...args: any[]): Atom<T> {
       initialized = true;
       processDependencies(context);
       return { result: result as T, context, generation };
+    } catch (err) {
+      // Subscribe the dependencies observed before the failure so a later
+      // change can trigger a recovery recompute instead of leaving the atom
+      // stuck in its initial error state with no subscriptions at all.
+      processDependencies(context);
+      throw err;
     } finally {
       popFormulaContext();
       running = false;
@@ -1783,8 +1802,10 @@ export function derived<T>(...args: any[]): Atom<T> {
       notifyPending = false;
       if (terminateOnError) {
         instance.dispose();
-      } else if (propagateErrors) {
-        broadcast();
+      } else {
+        // Report the error through the error channel instead of re-broadcasting
+        // the stale last value, which would surface as a duplicate emission.
+        for (const h of errorHandlers) try { h(errorValue); } catch {}
       }
     } finally {
       node.flushing = false;
@@ -1822,6 +1843,7 @@ export function derived<T>(...args: any[]): Atom<T> {
           initialized = true;
           errorValue = normalizeError(err);
           isErrorState = true;
+          for (const h of errorHandlers) try { h(errorValue); } catch {}
           if (terminateOnError) {
             instance.dispose();
             throw errorValue;
@@ -1834,6 +1856,7 @@ export function derived<T>(...args: any[]): Atom<T> {
         } catch (err) {
           errorValue = normalizeError(err);
           isErrorState = true;
+          for (const h of errorHandlers) try { h(errorValue); } catch {}
           if (terminateOnError) {
             instance.dispose();
             throw errorValue;

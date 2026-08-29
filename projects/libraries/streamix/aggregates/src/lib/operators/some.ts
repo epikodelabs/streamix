@@ -41,6 +41,11 @@ export const some = <T = any>(
           const predicateResult = predicate(result.value, index++);
           if (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) {
             evaluated = true;
+            // Short-circuit: close the still-suspended source instead of
+            // abandoning it mid-stream.
+            try {
+              await source.return?.();
+            } catch {}
             return NEXT(true);
           }
         }

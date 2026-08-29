@@ -24,6 +24,12 @@ export const audit = <T = any>(duration: number) =>
     const flush = () => {
       if (!bufferedResult) return;
 
+      // Flush can also run on completion while the timer is still scheduled;
+      // cancel it so no stray timer outlives the stream.
+      if (timerId !== undefined) {
+        clearTimeout(timerId);
+      }
+
       output.push(bufferedResult.value!);
 
       bufferedResult = undefined;

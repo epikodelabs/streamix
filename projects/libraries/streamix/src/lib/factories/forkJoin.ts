@@ -49,6 +49,10 @@ export function forkJoin<R extends readonly unknown[] = any[]>(
   return flow<R >(async function* () {
     const normalizedSources = sources.length === 1 && Array.isArray(sources[0]) ? sources[0] : sources;
 
+    // No sources: complete without emitting (RxJS forkJoin returns EMPTY for
+    // an empty source list rather than emitting `[]`).
+    if (normalizedSources.length === 0) return;
+
     const results = new Array(normalizedSources.length);
     const hasValue = new Array(normalizedSources.length).fill(false);
     const iterators = normalizedSources.map((source: any) =>
