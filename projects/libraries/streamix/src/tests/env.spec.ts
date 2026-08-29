@@ -1,8 +1,6 @@
 // Environment detection
-const isNode =
-  typeof process !== "undefined" &&
-  process.versions != null &&
-  process.versions.node != null;
+const nodeProcess = typeof process !== "undefined" ? process : undefined;
+const isNode = nodeProcess != null && nodeProcess.versions?.node != null;
 
 const isBrowser =
   typeof window !== "undefined" &&

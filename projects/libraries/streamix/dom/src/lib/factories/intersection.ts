@@ -15,8 +15,14 @@ import {
  * - Emits the current intersection state whenever it changes.
  * - Starts observing on first subscriber.
  * - Stops observing when the last subscriber unsubscribes.
+ * - If the element temporarily leaves the DOM (e.g. framework list recycling),
+ *   observation pauses and resumes when it is re-attached.
  * - Safe to import and subscribe in SSR (no-op).
  * - Fully compatible with async iteration.
+ *
+ * The first emission is a synchronous heuristic that checks the viewport rect
+ * only; it ignores `options.root`, `rootMargin`, and horizontal position. The
+ * `IntersectionObserver` corrects the value on its first callback (next frame).
  *
  * @param element The DOM element to observe.
  * @param options Optional IntersectionObserver options.

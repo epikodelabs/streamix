@@ -29,16 +29,19 @@ export const exhaustMap = <T = any, R = any>(
     let innerIterator: AsyncIterator<R> | null = null;
     let isSourceDone = false;
 
-    const drainBufferedOuterValues = (): IteratorResult<T> | null => {
+    // Discards outer values that were buffered while an inner stream was
+    // running: exhaustMap ignores them by definition. Returns without a value;
+    // the only observable effects are the drain and the done flag.
+    const discardBufferedOuterValues = (): void => {
       const tryNext = (source as any).__tryNext as undefined | (() => IteratorResult<T> | null);
-      if (!tryNext) return null;
+      if (!tryNext) return;
 
       while (true) {
         const r = tryNext.call(source);
-        if (!r) return null;
+        if (!r) return;
         if (r.done) {
           isSourceDone = true;
-          return null;
+          return;
         }
       }
     };
@@ -54,8 +57,7 @@ export const exhaustMap = <T = any, R = any>(
             }
 
             innerIterator = null;
-            const buffered = drainBufferedOuterValues();
-            if (buffered) return buffered as any;
+            discardBufferedOuterValues();
             if (isSourceDone) return DONE;
             continue;
           }

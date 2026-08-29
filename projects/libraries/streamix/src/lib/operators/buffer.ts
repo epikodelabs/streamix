@@ -5,6 +5,10 @@ import { normalizeError } from "../atoms";
 /**
  * Buffers values from the source stream and emits them as arrays every `period` milliseconds.
  *
+ * Windows that contain no values are not emitted: a silent period produces no
+ * empty-array emission. (RxJS `bufferTime` emits `[]` for empty windows; use
+ * the flush timing itself only if you do not rely on empty windows.)
+ *
  * @template T The type of the values in the source stream.
  * @param period Time in milliseconds between each buffer flush.
  * @returns An Operator instance for use in a stream's `pipe` method.

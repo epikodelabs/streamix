@@ -5,9 +5,7 @@ import { normalizeError } from "../atoms";
  * Creates a stream operator that emits the most recent value from the source stream
  * only after a specified duration has passed without another new value.
  *
- * Values that are superseded before the timeout fires are forwarded to the output
- * with `dropped: true` so that backpressure is released without surfacing them as
- * real emissions.
+ * Values that are superseded before the timeout fires are simply not emitted.
  *
  * @template T The type of the values in the source and output streams.
  * @param duration The debounce duration in milliseconds.

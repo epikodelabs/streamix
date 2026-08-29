@@ -19,7 +19,7 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 
 async function drain<T>(source: any): Promise<T[]> {
   const values: T[] = [];
-  for await (const value of iterate(source)) {
+  for await (const value of iterate(source) as AsyncIterable<T>) {
     values.push(value);
   }
   return values;
@@ -176,7 +176,7 @@ describe('regression: factory fixes', () => {
 
     const started = Date.now();
     const values: string[] = [];
-    for await (const value of iterate(race(fast(), slow()))) {
+    for await (const value of iterate(race(fast(), slow()) as AsyncIterable<string>)) {
       values.push(value);
       break;
     }

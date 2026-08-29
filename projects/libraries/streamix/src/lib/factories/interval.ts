@@ -10,6 +10,10 @@ import { timer } from './timer';
  * value every `intervalMs` milliseconds. It is analogous to `setInterval` but
  * as an asynchronous atom.
  *
+ * Note: because this is `timer(0, …)`, the first value (0) is emitted
+ * immediately rather than after one period — unlike RxJS `interval`, whose
+ * first tick arrives after `intervalMs`.
+ *
  * @param intervalMs The time in milliseconds between each emission.
  * @returns {Atom<number >} An atom that emits incrementing numbers (0, 1, 2, ...).
  */

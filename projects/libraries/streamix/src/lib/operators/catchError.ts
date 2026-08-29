@@ -5,15 +5,12 @@ import { normalizeError } from "../atoms";
  * Creates a stream operator that catches errors from the source stream and handles them.
  *
  * This operator listens for errors from the upstream source. When the first error is
- * caught, it invokes a provided `handler` callback, yields a single dropped result
- * for that error, and then completes on the following pull, preventing the error
- * from propagating further down the pipeline.
+ * caught, it invokes a provided `handler` callback and then completes on the following
+ * pull, preventing the error from propagating further down the pipeline.
  *
  * - **Error Handling:** The `handler` is executed only for the first error encountered.
- * - **Dropped Signal:** The first handled error is yielded with `dropped: true` so
- *   backpressure is released and downstream operators can observe the suppressed error.
- * - **Completion:** After that dropped signal, the operator completes, terminating
- *   the stream's flow.
+ * - **Completion:** After the handler runs, the operator completes, terminating
+ *   the stream's flow. No value is emitted for the suppressed error.
  * - **Subsequent Errors:** Any errors after the first will be re-thrown.
  *
  * This is useful for error-handling strategies where you want to perform a specific

@@ -14,7 +14,9 @@ import { createSharedSource } from '../utils/sharedSource';
  * @param delayMs - The time in milliseconds to wait before emitting the first value (0).
  * If 0, the first value is emitted immediately (in the next microtask).
  * @param intervalMs - The time in milliseconds between subsequent emissions.
- * If not provided, it defaults to `delayMs`.
+ * If not provided, it defaults to `delayMs`, which means `timer(100)` keeps
+ * emitting every 100 ms indefinitely. (RxJS `timer(due)` emits once and
+ * completes; use `take(1)` for that behavior here.)
  * @returns {Atom<number>} An atom that emits incrementing numbers (0, 1, 2, ...).
  */
 export function timer(delayMs: number = 0, intervalMs?: number): Atom<number> {

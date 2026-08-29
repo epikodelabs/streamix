@@ -2,10 +2,8 @@
 /**
  * Indicates whether the current runtime is Node.js.
  */
-const isNode =
-  typeof process !== "undefined" &&
-  process.versions != null &&
-  process.versions.node != null;
+const nodeProcess = typeof process !== "undefined" ? process : undefined;
+const isNode = nodeProcess != null && nodeProcess.versions?.node != null;
 
 /**
  * Indicates whether the current runtime is a browser with a `document`.

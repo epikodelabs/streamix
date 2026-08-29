@@ -12,8 +12,7 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
  * - A **single value**: Only values that are strictly equal (`===`) to this value are included.
  * - An **array of values**: Only values that are present in this array are included.
  *
- * Values that do not pass the filter are yielded with `dropped: true` so that
- * backpressure is released and downstream operators can observe suppressed emissions.
+ * Values that do not pass the filter are simply not emitted downstream.
  *
  * @template T The type of the values in the stream.
  * @param predicateOrValue The filtering criterion. Can be a predicate function, a single value, or an array of values.

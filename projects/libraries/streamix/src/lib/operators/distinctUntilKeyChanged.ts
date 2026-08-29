@@ -6,8 +6,7 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
  *
  * This operator is a specialized version of `distinctUntilChanged`. It checks for
  * uniqueness based on the value of a single property (`key`). Consecutive values
- * where the key has not changed are yielded with `dropped: true` so that backpressure
- * is released and downstream operators can observe suppressed emissions.
+ * where the key has not changed are simply not emitted downstream.
  *
  * @template T The type of the objects in the stream. Must extend `object`.
  * @template K The key of the property to check for changes.

@@ -9,6 +9,11 @@ import { normalizeError } from "../atoms";
  * The subject does not replay values for late subscribers; they receive only values
  * emitted after they subscribe.
  *
+ * **Timing caveat:** the internal subject drops values that are produced before
+ * the first subscriber attaches. Subscribe (or start iterating) synchronously
+ * after applying the operator; values produced while zero consumers are
+ * attached cannot be recovered.
+ *
  * @template T Value type in the shared stream.
  * @returns An operator that can be inserted into a pipeline to share the source.
  */
@@ -71,6 +76,9 @@ export function share<T = any>() {
       return baseReturn ? baseReturn(value) : DONE;
     };
 
+    // Note: throw() intentionally does not release the shared subscription.
+    // An injected error may be recoverable, so the consumer can keep iterating;
+    // only return() is a definitive teardown.
     (outputIterator as any).throw = async (err: any) => {
       const error = normalizeError(err);
       if (baseThrow) return baseThrow(error);

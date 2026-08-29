@@ -4,9 +4,7 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
  * Creates a stream operator that emits values from the source stream only if
  * they are different from the previous value.
  *
- * Consecutive duplicate values are yielded with `dropped: true` so that
- * backpressure is released and downstream operators can observe the suppressed
- * emissions without treating them as real values.
+ * Consecutive duplicate values are simply not emitted downstream.
  *
  * @template T The type of the values in the stream.
  * @param comparator An optional function that compares the previous and current values.

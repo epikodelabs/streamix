@@ -6,9 +6,8 @@ import { normalizeError } from "../atoms";
  * at most once per specified duration.
  *
  * Each incoming value is stored as the "latest"; a timer emits that latest value
- * when the duration elapses. All values that arrive between timer ticks and are
- * ultimately superseded are forwarded with `dropped: true` so that backpressure
- * is released without surfacing them as real emissions.
+ * when the duration elapses. Values that arrive between timer ticks and are
+ * superseded before the timer fires are simply not emitted.
  *
  * @template T The type of the values in the stream.
  * @param duration The time in milliseconds to wait before emitting the latest value.

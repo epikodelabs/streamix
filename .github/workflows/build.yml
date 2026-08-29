@@ -29,8 +29,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Build streamix
-        run: npm run build streamix
+        run: npm run build:packages
 
       - name: Test
         run: npm test

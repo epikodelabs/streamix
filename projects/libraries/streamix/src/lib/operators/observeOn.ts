@@ -15,6 +15,11 @@ import { normalizeError } from "../atoms";
  * - `"macrotask"`: Emits the value in the next event loop cycle using `setTimeout(0)`.
  * - `"idle"`: Emits the value when the browser is idle using `requestIdleCallback`.
  *
+ * **Timing caveat:** values that the source produces before the downstream
+ * consumer attaches its first subscription are dropped. Start consuming the
+ * piped stream synchronously (or pair with `shareReplay` when replay is
+ * needed).
+ *
  * @template T The type of the values in the source and output streams.
  * @param context The JavaScript task queue context to schedule emissions on.
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.

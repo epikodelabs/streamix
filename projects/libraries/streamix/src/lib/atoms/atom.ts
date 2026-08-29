@@ -41,7 +41,8 @@ export interface AtomOptions {
   terminateOnError?: boolean;
   /**
    * Controls whether subscriber/source errors are rethrown after error handlers
-   * run.
+   * run. Applies to writable atoms and flow-backed sources; `derived()` always
+   * records errors and reports them through `onError` handlers.
    */
   propagateErrors?: boolean;
 }
@@ -668,7 +669,7 @@ function createSubscriberSet<T>(errorHandlers: Set<(error: any) => void>, confla
 
   const invoke = (sub: Subscriber, initial: { current: T; previous: T }): void => {
     sub.busy = true;
-    let queued = initial;
+    let queued: { current: T; previous: T } | undefined = initial;
 
     while (queued !== undefined) {
       if (!subs.has(sub.callback)) {

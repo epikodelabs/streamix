@@ -20,8 +20,8 @@ import { createAsyncCoordinator } from "../utils";
  * Important semantics:
  * - Buffering: values are buffered until the notifier emits, then flushed in order
  * - Notifier completion without emission: if the notifier completes without
- *   emitting, buffered values are discarded and the operator will not forward
- *   any buffered values (it simply waits for the source to continue/complete).
+ *   emitting, the gate can never open. Buffered values are discarded, the
+ *   source is torn down, and the operator completes immediately.
  * - Error propagation: any error from the notifier or source is propagated to
  *   the output (the operator records the error and terminates the output
  *   iterator accordingly).

@@ -7,11 +7,13 @@ import { createAsyncCoordinator } from "../utils";
  * Take values from the source until a notifier emits.
  *
  * This operator forwards values from the source stream until the notifier
- * emits its first value or completes. Once the notifier emits, the operator
- * completes immediately and unsubscribes from the source.
+ * emits its first value. Once the notifier emits, the operator completes
+ * immediately and unsubscribes from the source.
  *
  * Important semantics:
  * - If notifier emits before any source values, no source values are emitted
+ * - If the notifier completes without ever emitting, the operator keeps
+ *   mirroring the source (only an emission triggers the stop)
  * - If source completes before notifier emits, operator completes normally
  * - Errors from either source or notifier are propagated
  *

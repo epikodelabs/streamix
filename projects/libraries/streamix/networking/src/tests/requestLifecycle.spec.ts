@@ -2,8 +2,6 @@ import {
   createHttpClient,
   readJson,
   useRetry,
-  type Context,
-  type HttpResult,
   type Middleware,
 } from '@epikodelabs/streamix/networking';
 
