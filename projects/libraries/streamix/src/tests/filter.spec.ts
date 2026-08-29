@@ -71,6 +71,18 @@ describe('filter', () => {
     expect(results).toEqual([2, 4]);
   });
 
+  it('should accept readonly arrays without losing the source value type', async () => {
+    const allowed = [2, 4] as const;
+    const atom = pipe(from([1, 2, 3, 4]), filter<number>(allowed));
+
+    const results: number[] = [];
+    for await (const value of iterate(atom)) {
+      results.push(value);
+    }
+
+    expect(results).toEqual([2, 4]);
+  });
+
   it('should allow filtering by single value', async () => {
     const atom = pipe(from([1, 2, 3]), filter(2));
 

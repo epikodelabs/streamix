@@ -22,10 +22,13 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, NEXT, type Oper
 export function filter<T>(
   predicateOrValue: (value: T, index: number) => MaybePromise<boolean>
 ): Operator<T, T>;
+export function filter<T>(predicateOrValue: readonly T[]): Operator<T, T>;
 export function filter<T>(predicateOrValue: T): Operator<T, T>;
-export function filter<T>(predicateOrValue: T[]): Operator<T, T>;
 export function filter<T = any>(
-  predicateOrValue: ((value: T, index: number) => MaybePromise<boolean>) | T | T[]
+  predicateOrValue:
+    | ((value: T, index: number) => MaybePromise<boolean>)
+    | T
+    | readonly T[]
 ) {
   return createOperator<T, T>('filter', function (this: Operator, source) {
     let index = 0;

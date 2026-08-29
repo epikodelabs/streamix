@@ -1,4 +1,4 @@
-import { from } from '@epikodelabs/streamix';
+import { from, iterate, pipe, take } from '@epikodelabs/streamix';
 
 async function collect<T>(input: any): Promise<T[]> {
   const values: T[] = [];
@@ -163,6 +163,27 @@ describe('fromAny', () => {
   it('should handle array with promise elements', async () => {
     const values = await collect<number>([Promise.resolve(10), 20, 30]);
     expect(values).toEqual([10, 20, 30]);
+  });
+
+  it('does not prefetch past downstream take()', async () => {
+    const seen: number[] = [];
+
+    async function* source() {
+      seen.push(1);
+      yield 1;
+      seen.push(2);
+      yield 2;
+      seen.push(3);
+      yield 3;
+    }
+
+    const values: number[] = [];
+    for await (const value of iterate(pipe(from(source()), take(2)))) {
+      values.push(value);
+    }
+
+    expect(values).toEqual([1, 2]);
+    expect(seen).toEqual([1, 2]);
   });
 
   it('should stream async iterables before they complete', async () => {

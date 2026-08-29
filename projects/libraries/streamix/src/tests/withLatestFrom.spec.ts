@@ -266,6 +266,31 @@ describe('withLatestFrom', () => {
     expect(results).toEqual([[1, 'A']]);
   });
 
+  it('completes when the source completes before an auxiliary emits', async () => {
+    const never: AsyncIterable<string> = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => new Promise<IteratorResult<string>>(() => {}),
+          return: async () => ({ done: true, value: undefined as any }),
+        };
+      },
+    };
+
+    const atom = pipe(from([1, 2]), withLatestFrom(never));
+    const values = await Promise.race([
+      (async () => {
+        const result: Array<[number, string]> = [];
+        for await (const value of iterate(atom)) result.push(value);
+        return result;
+      })(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('timed out')), 50)
+      ),
+    ]);
+
+    expect(values).toEqual([]);
+  });
+
   it('should fail when an auxiliary promise rejects during setup', async () => {
     const atom = pipe(from([1]), withLatestFrom(Promise.reject(new Error('aux setup failed')) as any));
 

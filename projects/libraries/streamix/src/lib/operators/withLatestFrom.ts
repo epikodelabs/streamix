@@ -2,6 +2,7 @@ import { createPushOperator, isPromiseLike, normalizeError, type Operator } from
 import type { Atom } from '../atoms/atom';
 import { toAsyncIterable } from '../atoms/pipe';
 import { createAsyncCoordinator } from '../utils';
+import { isAtomLike } from '../utils/helpers';
 
 /**
  * Auxiliary input accepted by {@link withLatestFrom}. The scalar branch is guarded
@@ -76,45 +77,41 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = readonly 
         // Post-await safety guard
         if (abortController.signal.aborted) return;
 
-        // 2. Initialize iterators and track baseline structural dimensions
-        const auxIterators = resolvedAux.map((input) =>
-          toAsyncIterable(input as any)[Symbol.asyncIterator]() as AsyncIterator<T | R[number]>
-        );
-        const latestValues = new Array(auxIterators.length).fill(undefined);
-        const hasValue = new Array(auxIterators.length).fill(false);
+        // 2. Plain values (including promise-resolved plain values) are already
+        // "latest". Live atoms/iterables remain coordinated with the source.
+        // Never await the first value of a live auxiliary here: the primary
+        // source must still be able to complete if an auxiliary never emits.
+        const latestValues = new Array(resolvedAux.length).fill(undefined);
+        const hasValue = new Array(resolvedAux.length).fill(false);
+        const auxIterators: AsyncIterator<T | R[number]>[] = [];
+        const auxSlots: number[] = [];
+
+        const isLiveAuxiliary = (input: unknown): boolean => {
+          if (isAtomLike(input)) return true;
+          if (input == null || typeof input === 'string') return false;
+          const candidate = input as any;
+          return typeof candidate[Symbol.asyncIterator] === 'function'
+            || typeof candidate[Symbol.iterator] === 'function';
+        };
+
+        resolvedAux.forEach((input, slot) => {
+          if (!isLiveAuxiliary(input)) {
+            latestValues[slot] = input;
+            hasValue[slot] = true;
+            return;
+          }
+
+          auxSlots.push(slot);
+          auxIterators.push(
+            toAsyncIterable(input as any)[Symbol.asyncIterator]() as AsyncIterator<T | R[number]>
+          );
+        });
 
         if (abortController.signal.aborted) return;
 
-        // 3. Prepare auxiliary values before the source can win the race.
-        //
-        // - For push-based sources (e.g. createAsyncPushable), attach the source
-        //   immediately so that emissions that arrive before any auxiliary has a
-        //   value are dropped. We only do a synchronous pre-drain of auxiliaries
-        //   to avoid dropping source emissions when the auxiliary is synchronous.
-        // - For pull-based sources (e.g. from([])), pre-pull each auxiliary fully
-        //   before attaching the source. This prevents the synchronous source from
-        //   completing before the auxiliaries have produced their first value.
-        const sourceIsPush = typeof (source as any).push === 'function';
-
-        if (sourceIsPush) {
-          for (let i = 0; i < auxIterators.length; i++) {
-            const r = (auxIterators[i] as any).__tryNext?.();
-            if (r && !r.done) {
-              latestValues[i] = r.value;
-              hasValue[i] = true;
-            }
-          }
-        } else {
-          for (let i = 0; i < auxIterators.length; i++) {
-            const r = await auxIterators[i].next();
-            if (r.done) continue;
-            latestValues[i] = r.value;
-            hasValue[i] = true;
-          }
-          if (abortController.signal.aborted) return;
-        }
-
-        // 4. Build coordinate multiplexer mapping across source and side channels.
+        // 3. Coordinate live auxiliaries and the primary source concurrently.
+        // Auxiliaries are registered first, preserving deterministic ordering
+        // for synchronous sources without blocking on silent auxiliaries.
         runner = createAsyncCoordinator<T | R[number]>([
           ...auxIterators,
           source as AsyncIterator<T | R[number]>
@@ -157,9 +154,12 @@ export function withLatestFrom<T = any, R extends readonly unknown[] = readonly 
             continue;
           }
 
-          // Case B: Event originates from an auxiliary/side channel stream
-          latestValues[ev.sourceIndex] = ev.value;
-          hasValue[ev.sourceIndex] = true;
+          // Case B: Event originates from an auxiliary/side channel stream.
+          // Scalar auxiliaries have no coordinator slot, so map back to the
+          // original argument position before updating the latest snapshot.
+          const slot = auxSlots[ev.sourceIndex];
+          latestValues[slot] = ev.value;
+          hasValue[slot] = true;
         }
 
         // 7. Loop closed cleanly without error triggers -> Complete pipeline execution

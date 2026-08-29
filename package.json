@@ -21,7 +21,8 @@
     "docs:fix-api-links": "node scripts/fix-typedoc-links.mjs",
     "docs:seo": "node scripts/add-seo-metadata.mjs",
     "docs:build": "npm run docs:prepare && npm run docs:generate && npm run docs:fix-api-links && npm run docs:seo && vitepress build dist && npm run docs:rewrite",
-    "docs:rewrite": "node scripts/rewrite-vitepress-base.mjs"
+    "docs:rewrite": "node scripts/rewrite-vitepress-base.mjs",
+    "postbuild": "node scripts/fix-dist-package-ignore.mjs"
   },
   "dependencies": {
     "@angular/animations": "^22.1.0",
@@ -46,7 +47,7 @@
     "@angular-eslint/eslint-plugin-template": "^22.1.0",
     "@angular/cli": "^22.1.0",
     "@angular/compiler-cli": "^22.1.0",
-    "@epikodelabs/testify": "^1.0.42",
+    "@epikodelabs/testify": "^1.0.41",
     "@epikodelabs/typegen": "^1.0.13",
     "@types/jasmine": "^6.0.0",
     "@types/markdown-it": "^14.1.2",

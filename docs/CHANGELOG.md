@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Restored emission-only atom iteration so `share`, `startWith` pipelines, and notifier-first operators do not replay mutable atom state; iterator teardown is now tested using an actual emission.
+
 ## 2.0.49
 
 Normalized all catch/rejection errors to Error instances

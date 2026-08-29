@@ -1,6 +1,18 @@
-import { createAsyncPushable, EMPTY, firstValueFrom, flow, from, iterate, lastValueFrom } from '@epikodelabs/streamix';
+import { atom, createAsyncPushable, EMPTY, firstValueFrom, flow, from, iterate, lastValueFrom } from '@epikodelabs/streamix';
 
 describe('iterate', () => {
+  it('releases atom dispose hooks when an iterator is returned early', async () => {
+    const source = atom<number>();
+    const iterator = iterate(source);
+
+    const first = iterator.next();
+    source.next(42);
+    expect(await first).toEqual({ done: false, value: 42 });
+
+    await iterator.return?.();
+    expect((source as any)._onDispose.size).toBe(0);
+  });
+
   it('should get first value from the stream', async () => {
     const first = await firstValueFrom(from([1, 2, 3]));
     expect(first).toBe(1);

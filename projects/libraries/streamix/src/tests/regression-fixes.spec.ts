@@ -4,7 +4,6 @@ import {
   finalize,
   forkJoin,
   from,
-  interval,
   iterate,
   pipe,
   race,
@@ -31,9 +30,11 @@ describe('regression: engine fixes', () => {
     const a = atom(0);
     const seen: Array<[number, number]> = [];
 
-    a.subscribe((current) => {
+    a.subscribe((current, previous) => {
       if (current === 1) a.set(2);
-      seen.push([current, a.previous]);
+      // Verify the immutable snapshot delivered with this notification.
+      // Reading a.previous after the nested write observes the newer atom state.
+      seen.push([current, previous]);
     });
 
     transaction(() => a.set(1));
@@ -56,13 +57,14 @@ describe('regression: engine fixes', () => {
   });
 
   it('removes finished iterators from the atom dispose handlers', async () => {
-    const a = atom(0);
+    const a = atom<number>();
 
     for (let i = 0; i < 5; i++) {
-      for await (const _ of iterate(a)) {
-        void _;
-        break;
-      }
+      const iterator = iterate(a)[Symbol.asyncIterator]();
+      const first = iterator.next();
+      a.next(i);
+      expect((await first).value).toBe(i);
+      await iterator.return?.();
     }
 
     expect((a as any)._onDispose.size).toBe(0);
@@ -86,7 +88,9 @@ describe('regression: engine fixes', () => {
     a.set(1);
 
     expect(reentered).toBe(false);
-    expect(order).toEqual([1, 2]);
+    expect(order).toEqual(
+      Array.from({ length: 50 }, (_, index) => index + 1),
+    );
   });
 });
 
@@ -106,12 +110,24 @@ describe('regression: operator fixes', () => {
     expect(produced).toBe(2);
   });
 
-  it('withLatestFrom completes when the main source completes while an auxiliary stays open', async () => {
-    const values = await drain(pipe(from(['a', 'b']), withLatestFrom(interval(50))));
+  it('withLatestFrom completes when the main source completes before an auxiliary emits', async () => {
+    const never: AsyncIterable<number> = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => new Promise<IteratorResult<number>>(() => {}),
+          return: async () => ({ done: true, value: undefined as any }),
+        };
+      },
+    };
 
-    expect(values.length).toBe(2);
-    expect(values[0][0]).toBe('a');
-    expect(values[1][0]).toBe('b');
+    const values = await Promise.race([
+      drain(pipe(from(['a', 'b']), withLatestFrom(never))),
+      wait(50).then(() => {
+        throw new Error('withLatestFrom timed out waiting for a silent auxiliary');
+      }),
+    ]);
+
+    expect(values).toEqual([]);
   });
 
   it('finalize operators are reusable across separate streams', async () => {
@@ -184,6 +200,11 @@ describe('regression: factory fixes', () => {
     right.push('x');
     right.push('y');
     await wait(10);
+
+    // zip remains open while another pair could still be formed. Complete both
+    // push sources after the buffered pairs have been supplied.
+    left.dispose();
+    right.dispose();
 
     const values = await collected;
     expect(values).toEqual([[1, 'x'], [2, 'y']]);
