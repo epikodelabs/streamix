@@ -25,14 +25,27 @@ export function from<T = any>(source: MaybePromise<AsyncIterable<T> | Iterable<T
       }
     } finally {
       if (iterator.return) {
-        try {
-          await iterator.return();
-        } catch {
-          // ignore
-        }
+        await iterator.return();
       }
     }
   }
 
-  return createStream<T>("from", generator);
+  const stream = createStream<T>("from", generator);
+
+  // `from()` is fundamentally pull-based. Iterating it (directly or through
+  // pull operators such as `take`) must therefore pull the wrapped iterable
+  // only when downstream asks for another value.
+  //
+  // createStream() intentionally fans a generator run out through a Subject for
+  // subscription/multicast semantics. That producer loop can advance before an
+  // AsyncIterator consumer has pulled the buffered value, which is correct for
+  // push subscriptions but would make `from(source).pipe(take(n))` observe
+  // source value n + 1 before `take` gets a chance to close upstream.
+  //
+  // Preserve createStream's subscription behaviour, but expose the source
+  // generator directly for AsyncIterator consumption so iterator cancellation
+  // reaches the original iterable without prefetching.
+  stream[Symbol.asyncIterator] = () => generator();
+
+  return stream;
 }
