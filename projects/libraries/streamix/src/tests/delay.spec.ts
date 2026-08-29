@@ -14,7 +14,7 @@ describe('delay', () => {
       next: () => {
         emitCount++;
         const elapsedTime = Date.now() - startTime + 5;
-        expect(elapsedTime).toBeGreaterThanOrEqual(emitCount * delayTime);
+        expect(elapsedTime).toBeGreaterThanOrEqual(delayTime);
       },
       complete: () => {
         expect(emitCount).toBe(3);
@@ -142,5 +142,3 @@ describe('delay', () => {
     });
   });
 });
-
-

@@ -40,6 +40,15 @@ export const take = <T = any>(count: MaybePromise<number>) =>
           return DONE;
         }
 
+        const countOrPromise = getCount();
+        const limit = isPromiseLike(countOrPromise) ? await countOrPromise : countOrPromise;
+
+        if (limit <= 0) {
+          done = true;
+          await source.return?.();
+          return DONE;
+        }
+
         const result = await source.next();
         if (result.done) {
           done = true;
@@ -48,18 +57,9 @@ export const take = <T = any>(count: MaybePromise<number>) =>
 
         emitted++;
 
-        const countOrPromise = getCount();
-        const limit = isPromiseLike(countOrPromise) ? await countOrPromise : countOrPromise;
-        if (emitted > limit) {
-          done = true;
-          try {
-            await source.return?.();
-          } catch {}
-          return DONE;
-        }
-
         if (emitted === limit) {
           done = true;
+          await source.return?.();
         }
 
         return NEXT(result.value);
