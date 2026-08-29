@@ -253,6 +253,20 @@ describe('httpClient', () => {
     await expectAsync(collect(stream)).toBeRejected();
   });
 
+  it('reissues the request when the same stream is consumed again', async () => {
+    const fetch = mockFetchSequence([
+      async () => jsonResponse({ run: 1 }),
+      async () => jsonResponse({ run: 2 }),
+    ]);
+
+    const client = clientWithFetch(fetch);
+    const stream = client.get('/repeat', readJson);
+
+    expect(await collect(stream)).toEqual([{ run: 1 }]);
+    expect(await collect(stream)).toEqual([{ run: 2 }]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('handles null body', async () => {
     const fetch = jasmine.createSpy('fetch').and.callFake(async (req: Request) => {
       expect(req.body).toBeNull();
@@ -1012,6 +1026,33 @@ describe('parsers', () => {
     Object.defineProperty(response, 'body', { value: null });
 
     await expectAsync(collect(readFull(response))).toBeRejectedWithError(/not readable/);
+  });
+
+  it('cancels chunk readers when iteration ends early', async () => {
+    const cancel = jasmine.createSpy('cancel').and.resolveTo(undefined);
+    const releaseLock = jasmine.createSpy('releaseLock');
+    const reader = {
+      read: jasmine.createSpy('read').and.resolveTo({ value: new Uint8Array([1]), done: false }),
+      cancel,
+      releaseLock,
+    };
+    const response = new Response(null, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
+
+    Object.defineProperty(response, 'body', {
+      configurable: true,
+      value: {
+        getReader: () => reader,
+      },
+    });
+
+    const iterator = readChunks()(response)[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.return?.();
+
+    expect(cancel).toHaveBeenCalled();
+    expect(releaseLock).toHaveBeenCalled();
   });
 
   it('handles parser errors in stream', async () => {

@@ -51,6 +51,27 @@ describe('take', () => {
       }
     });
   });
+
+  it('should stop without pulling an extra source value once the limit is reached', async () => {
+    const seen: number[] = [];
+
+    async function* source() {
+      seen.push(1);
+      yield 1;
+      seen.push(2);
+      yield 2;
+      seen.push(3);
+      yield 3;
+    }
+
+    const values: number[] = [];
+    for await (const value of from(source()).pipe(take(2))) {
+      values.push(value);
+    }
+
+    expect(values).toEqual([1, 2]);
+    expect(seen).toEqual([1, 2]);
+  });
 });
 
 

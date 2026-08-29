@@ -232,6 +232,25 @@ describe('switchMap', () => {
     setTimeout(() => subject.complete(), 150);
   });
 
+  it('should wait for a promised projection to resolve before completing the output', (done) => {
+    const results: number[] = [];
+    const switched = from([1]).pipe(
+      switchMap(() =>
+        new Promise<number[]>((resolve) => {
+          setTimeout(() => resolve([1, 2, 3]), 50);
+        })
+      )
+    );
+
+    switched.subscribe({
+      next: (value) => results.push(value),
+      complete: () => {
+        expect(results).toEqual([1, 2, 3]);
+        done();
+      }
+    });
+  });
+
   it('should handle rapid switching correctly', (done) => {
     const subject = createSubject<number>();
     const results: number[] = [];

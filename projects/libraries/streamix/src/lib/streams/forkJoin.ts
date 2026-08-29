@@ -49,6 +49,9 @@ export function forkJoin<T = any, R extends readonly unknown[] = any[]>(
 ): Stream<T[]> {
   async function* generator() {
     const normalizedSources = sources.length === 1 && Array.isArray(sources[0]) ? sources[0] : sources;
+    if (normalizedSources.length === 0) {
+      return;
+    }
 
     const results = new Array(normalizedSources.length);
     const hasValue = new Array(normalizedSources.length).fill(false);

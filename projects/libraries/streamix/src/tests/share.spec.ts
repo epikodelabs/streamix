@@ -1,4 +1,4 @@
-import { createStream, createSubject, share } from '@epikodelabs/streamix';
+import { createStream, createSubject, from, share } from '@epikodelabs/streamix';
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -150,5 +150,40 @@ describe('share', () => {
     // Iterator should be done
     const nextResult = await iterator.next();
     expect(nextResult.done).toBe(true);
+  });
+
+  it('should not lose synchronous source values for the first subscriber', async () => {
+    const shared = from([1, 2, 3]).pipe(share());
+    const values: number[] = [];
+
+    for await (const value of shared) {
+      values.push(value);
+    }
+
+    expect(values).toEqual([1, 2, 3]);
+  });
+
+  it('should disconnect the source when the last subscriber throws', async () => {
+    let returned = 0;
+    let yielded = false;
+
+    const sourceIterator: AsyncIterator<number> = {
+      async next() {
+        if (yielded) {
+          return new Promise<IteratorResult<number>>(() => {});
+        }
+        yielded = true;
+        return { done: false as const, value: 1 };
+      },
+      async return() {
+        returned++;
+        return { done: true as const, value: undefined };
+      }
+    };
+
+    const iterator = share<number>().apply(sourceIterator);
+    expect((await iterator.next()).value).toBe(1);
+    await expectAsync(iterator.throw?.(new Error('stop'))).toBeRejectedWithError('stop');
+    expect(returned).toBe(1);
   });
 });

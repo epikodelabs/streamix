@@ -68,14 +68,30 @@ export function onIntersection(
 
     let io: IntersectionObserver | null = null;
     let mo: MutationObserver | null = null;
-    let hasEmitted = false;
+    let observing = false;
+
+    const startObserving = () => {
+      if (done || observing || !document.body.contains(el)) return;
+      io ??= new IntersectionObserver((entries) => {
+        emit(entries[0]?.isIntersecting ?? false);
+      }, resolvedOptions);
+      io.observe(el);
+      observing = true;
+      emit(computeInitial());
+    };
+
+    const stopObserving = () => {
+      if (!observing) return;
+      try {
+        io?.disconnect();
+      } catch {}
+      observing = false;
+    };
 
     const stop = () => {
       if (done) return;
       done = true;
-      try {
-        io?.disconnect();
-      } catch {}
+      stopObserving();
       try {
         mo?.disconnect();
       } catch {}
@@ -91,21 +107,14 @@ export function onIntersection(
       );
 
     try {
-      io = new IntersectionObserver((entries) => {
-        hasEmitted = true;
-        emit(entries[0]?.isIntersecting ?? false);
-      }, resolvedOptions);
-
-      io.observe(el);
-
-      if (!hasEmitted) {
-        emit(computeInitial());
-      }
+      startObserving();
 
       if (typeof MutationObserver !== "undefined") {
         mo = new MutationObserver(() => {
-          if (!document.body.contains(el)) {
-            stop();
+          if (document.body.contains(el)) {
+            startObserving();
+          } else {
+            stopObserving();
           }
         });
         mo.observe(document.body, { childList: true, subtree: true });

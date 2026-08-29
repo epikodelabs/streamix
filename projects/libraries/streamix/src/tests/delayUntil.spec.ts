@@ -72,12 +72,14 @@ describe("delayUntil", () => {
     const conditionStream = createSubject<any>();
 
     const emittedValues: number[] = [];
+    let completed = false;
     const delayedStream = sourceStream.pipe(delayUntil(conditionStream));
 
     await new Promise<void>((resolve, reject) => {
       delayedStream.subscribe({
         next: (value) => emittedValues.push(value),
         complete: () => {
+          completed = true;
           try {
             expect(emittedValues).toEqual([]);
             resolve();
@@ -89,9 +91,12 @@ describe("delayUntil", () => {
       });
 
       conditionStream.complete(); // closes gate without emitting
-      sourceStream.next(1);
-      sourceStream.next(2);
-      sourceStream.complete();
+      setTimeout(() => {
+        expect(completed).toBeFalse();
+        sourceStream.next(1);
+        sourceStream.next(2);
+        sourceStream.complete();
+      }, 0);
     });
   });
 

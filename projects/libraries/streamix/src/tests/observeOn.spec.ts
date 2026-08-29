@@ -158,6 +158,25 @@ describe('observeOn', () => {
     expect(values).toEqual([1, 2]);
     expect(setTimeoutSpy).toHaveBeenCalled();
   });
+
+  it('should buffer scheduled values even if the first pull happens later', async () => {
+    const iterator = createStream('late-pull', async function* () {
+      yield 1;
+      yield 2;
+      yield 3;
+    }).pipe(observeOn('macrotask'))[Symbol.asyncIterator]();
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const values: number[] = [];
+    while (true) {
+      const result = await iterator.next();
+      if (result.done) break;
+      values.push(result.value);
+    }
+
+    expect(values).toEqual([1, 2, 3]);
+  });
 });
 
 

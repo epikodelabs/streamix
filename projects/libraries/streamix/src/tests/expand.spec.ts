@@ -176,6 +176,22 @@ describe('expand', () => {
 
     expect(result).toEqual([0, 10, 1, 11]);
   });
+
+  it('should use true depth-first traversal when requested', async () => {
+    const graph: Record<string, string[]> = {
+      A: ['B', 'C'],
+      B: ['D'],
+      C: [],
+      D: [],
+    };
+
+    const result: string[] = [];
+    for await (const value of from(['A']).pipe(expand((node) => graph[node], { traversal: 'depth' }))) {
+      result.push(value);
+    }
+
+    expect(result).toEqual(['A', 'B', 'D', 'C']);
+  });
 });
 
 

@@ -29,6 +29,38 @@ export function onResize(
   let resolvedElement: HTMLElement | null = null;
   let observer: ResizeObserver | null = null;
 
+  const readContentBox = (element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    if (typeof getComputedStyle !== 'function') {
+      return {
+        width: Math.max(0, Math.round(rect.width)),
+        height: Math.max(0, Math.round(rect.height)),
+      };
+    }
+
+    const styles = getComputedStyle(element);
+    const parse = (value: string) => {
+      const parsed = Number.parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const horizontal =
+      parse(styles.paddingLeft) +
+      parse(styles.paddingRight) +
+      parse(styles.borderLeftWidth) +
+      parse(styles.borderRightWidth);
+    const vertical =
+      parse(styles.paddingTop) +
+      parse(styles.paddingBottom) +
+      parse(styles.borderTopWidth) +
+      parse(styles.borderBottomWidth);
+
+    return {
+      width: Math.max(0, Math.round(rect.width - horizontal)),
+      height: Math.max(0, Math.round(rect.height - vertical)),
+    };
+  };
+
   /* -------------------------------------------------- */
   /* Helpers                                            */
   /* -------------------------------------------------- */
@@ -50,9 +82,9 @@ export function onResize(
       width = Math.round(entry.contentRect.width);
       height = Math.round(entry.contentRect.height);
     } else {
-      const rect = resolvedElement.getBoundingClientRect();
-      width = Math.round(rect.width);
-      height = Math.round(rect.height);
+      const contentBox = readContentBox(resolvedElement);
+      width = contentBox.width;
+      height = contentBox.height;
     }
 
     subject.next({ width, height });
@@ -98,7 +130,9 @@ export function onResize(
     if (!active) return;
     active = false;
 
-    observer?.disconnect();
+    try {
+      observer?.disconnect();
+    } catch {}
     observer = null;
     resolvedElement = null;
   };

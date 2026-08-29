@@ -122,6 +122,23 @@ describe('some', () => {
 
     expect(completed).toBe(true);
   });
+
+  it('should close the source when it short-circuits to true', async () => {
+    let returnCalls = 0;
+    const sourceIterator: AsyncIterator<number> = {
+      async next() {
+        return { done: false as const, value: 3 };
+      },
+      async return() {
+        returnCalls++;
+        return { done: true as const, value: undefined };
+      },
+    };
+
+    const iterator = some((value: number) => value > 2).apply(sourceIterator);
+    expect(await iterator.next()).toEqual({ done: false, value: true });
+    expect(returnCalls).toBe(1);
+  });
 });
 
 

@@ -15,33 +15,32 @@ import { normalizeError } from "../utils/helpers";
  * @returns An `Operator` instance that can be used in a stream's `pipe` method.
  */
 export const finalize = <T = any>(callback: () => MaybePromise<void>) => {
-
-  let finalized = false;
-  let completed = false;
-  let finalizationPromise: Promise<void> | null = null;
-
-  const doFinalize = async () => {
-    if (!finalized) {
-      finalized = true;
-      completed = true;
-
-      if (!finalizationPromise) {
-        finalizationPromise = (async () => {
-          try {
-            await callback?.();
-          } catch {
-            // Swallow errors to avoid affecting downstream consumers
-          }
-        })();
-      }
-
-      await finalizationPromise;
-    } else if (finalizationPromise) {
-      await finalizationPromise;
-    }
-  };
-
   return createOperator<T, T>("finalize", function (this: Operator, source) {
+    let finalized = false;
+    let completed = false;
+    let finalizationPromise: Promise<void> | null = null;
+
+    const doFinalize = async () => {
+      if (!finalized) {
+        finalized = true;
+        completed = true;
+
+        if (!finalizationPromise) {
+          finalizationPromise = (async () => {
+            try {
+              await callback?.();
+            } catch {
+              // Swallow errors to avoid affecting downstream consumers
+            }
+          })();
+        }
+
+        await finalizationPromise;
+      } else if (finalizationPromise) {
+        await finalizationPromise;
+      }
+    };
+
     const iterator: AsyncIterator<T> = {
       async next() {
         if (completed) {

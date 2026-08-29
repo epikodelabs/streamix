@@ -1,4 +1,4 @@
-import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
+import { createOperator, isPromiseLike, type MaybePromise, type Operator } from '../abstractions';
 
 /**
  * Creates a stream operator that immediately throws an error with the provided message.
@@ -15,12 +15,9 @@ import { createOperator, DONE, isPromiseLike, type MaybePromise, type Operator }
  * @returns An `Operator` instance that creates a stream which errors upon its first request.
  */
 export const throwError = <T = any>(message: MaybePromise<string>) =>
-  createOperator<T, never>('throwError', function (this: Operator, source) {
-
+  createOperator<T, never>('throwError', function (this: Operator) {
     return {
       next: async () => {
-        const result = await source.next();
-        if (result.done) return DONE as any;
         throw new Error(isPromiseLike(message) ? await message : message);
       }
     };

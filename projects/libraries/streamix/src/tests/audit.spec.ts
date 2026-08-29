@@ -109,6 +109,25 @@ describe('audit', () => {
 
     input.error(new Error('Test Error'));
   });
+
+  it('should clear the pending timeout when completion flushes the buffered value', (done) => {
+    const clearTimeoutSpy = spyOn(globalThis, 'clearTimeout').and.callThrough();
+    const auditedStream = input.pipe(audit(100));
+    const receivedValues: number[] = [];
+
+    auditedStream.subscribe({
+      next: (value: any) => receivedValues.push(value),
+      complete: () => {
+        expect(receivedValues).toEqual([1]);
+        expect(clearTimeoutSpy).toHaveBeenCalled();
+        done();
+      },
+      error: done.fail,
+    });
+
+    input.next(1);
+    setTimeout(() => input.complete(), 10);
+  });
 });
 
 

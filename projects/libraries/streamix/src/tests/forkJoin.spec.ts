@@ -97,6 +97,20 @@ describe('forkJoin', () => {
 
     expect(results).toEqual([[1, 'x']]);
   });
+
+  it('should complete without emitting when called with no sources', async () => {
+    const results: any[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      forkJoin().subscribe({
+        next: (value) => results.push(value),
+        complete: resolve,
+        error: reject,
+      });
+    });
+
+    expect(results).toEqual([]);
+  });
 });
 
 

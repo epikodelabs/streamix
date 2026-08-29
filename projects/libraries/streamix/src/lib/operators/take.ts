@@ -58,6 +58,10 @@ export const take = <T = any>(count: MaybePromise<number>) =>
           return DONE;
         }
 
+        if (emitted === limit) {
+          done = true;
+        }
+
         return NEXT(result.value);
       }
     };

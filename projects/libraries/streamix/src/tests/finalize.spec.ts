@@ -42,7 +42,7 @@ describe("finalize", () => {
     });
   });
 
-  it("should only call finalizer once even if multiple subscriptions end", (done) => {
+  it("should call the finalizer once per subscription", (done) => {
     const called: number[] = [];
     const stream = createStream("test", async function* () {
       yield 1;
@@ -58,7 +58,7 @@ describe("finalize", () => {
         finalStream.subscribe({
           next: () => {},
           complete: () => {
-            expect(called).toEqual([1]);
+            expect(called).toEqual([1, 1]);
             done();
           }
         });
@@ -171,12 +171,9 @@ describe("finalize", () => {
     expect(finalizers).toEqual(["finalized"]);
   });
 
-  it("should call finalizer once across sequential subscriptions", (done) => {
+  it("should rerun the finalizer across sequential subscriptions", (done) => {
     const finalizers: string[] = [];
-    let resolveFirst!: () => void;
-    const firstFinalized = new Promise<void>((resolve) => {
-      resolveFirst = resolve;
-    });
+    let finalizeCalls = 0;
 
     const stream = createStream("test", async function* (signal) {
       let counter = 0;
@@ -187,8 +184,8 @@ describe("finalize", () => {
     });
 
     const finalStream = stream.pipe(finalize(() => {
+      finalizeCalls++;
       finalizers.push("finalized");
-      resolveFirst();
     }));
 
     let firstSubscription!: ReturnType<typeof finalStream.subscribe>;
@@ -199,15 +196,16 @@ describe("finalize", () => {
       error: (err) => fail(err)
     });
 
-    firstFinalized.then(() => {
+    setTimeout(() => {
       finalStream.subscribe({
         complete: () => {
-          expect(finalizers).toEqual(["finalized"]);
+          expect(finalizers).toEqual(["finalized", "finalized"]);
+          expect(finalizeCalls).toBe(2);
           done();
         },
         error: (err) => fail(err)
       });
-    });
+    }, 30);
   });
 
   it("should keep source errors even when finalizer throws", (done) => {

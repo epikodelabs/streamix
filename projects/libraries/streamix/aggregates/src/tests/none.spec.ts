@@ -70,4 +70,21 @@ describe('none', () => {
 
     expect(results).toEqual([false]);
   });
+
+  it('should close the source when it short-circuits to false', async () => {
+    let returnCalls = 0;
+    const sourceIterator: AsyncIterator<number> = {
+      async next() {
+        return { done: false as const, value: 6 };
+      },
+      async return() {
+        returnCalls++;
+        return { done: true as const, value: undefined };
+      },
+    };
+
+    const iterator = none((value: number) => value > 5).apply(sourceIterator);
+    expect(await iterator.next()).toEqual({ done: false, value: false });
+    expect(returnCalls).toBe(1);
+  });
 });

@@ -2,8 +2,9 @@ import { onResize } from "@epikodelabs/streamix/dom";
 import { idescribe } from "./env.spec";
 
 idescribe('onResize', () => {
-  it('prefers entry.contentRect and rounds values', (done) => {
+  it('uses content-box sizing for the initial emission and entry updates', (done) => {
     const originalObserver = (globalThis as any).ResizeObserver;
+    const originalGetComputedStyle = globalThis.getComputedStyle;
 
     let callback: ((entries: ResizeObserverEntry[]) => void) | null = null;
     const observeSpy = jasmine.createSpy('observe');
@@ -25,19 +26,31 @@ idescribe('onResize', () => {
 
     const div = document.createElement('div');
     document.body.appendChild(div);
+    div.style.padding = '4px 3px';
+    div.style.borderStyle = 'solid';
+    div.style.borderWidth = '1px 2px';
 
     const originalRect = div.getBoundingClientRect.bind(div);
-    (div as any).getBoundingClientRect = () => ({ width: 10.4, height: 20.6 } as any);
+    (div as any).getBoundingClientRect = () => ({ width: 20.4, height: 32.6 } as any);
+    (globalThis as any).getComputedStyle = () =>
+      ({
+        paddingTop: '4px',
+        paddingRight: '3px',
+        paddingBottom: '4px',
+        paddingLeft: '3px',
+        borderTopWidth: '1px',
+        borderRightWidth: '2px',
+        borderBottomWidth: '1px',
+        borderLeftWidth: '2px',
+      }) as CSSStyleDeclaration;
 
     const values: any[] = [];
     const sub = onResize(div).subscribe(v => values.push(v));
 
     setTimeout(() => {
       try {
-        // Initial emit() uses getBoundingClientRect
-        expect(values[0]).toEqual({ width: 10, height: 21 });
+        expect(values[0]).toEqual({ width: 10, height: 23 });
 
-        // Next emit uses entry.contentRect
         callback?.([{ contentRect: { width: 99.9, height: 0.1 } } as any]);
 
         setTimeout(() => {
@@ -51,6 +64,7 @@ idescribe('onResize', () => {
             sub.unsubscribe();
             done.fail(err);
           } finally {
+            (globalThis as any).getComputedStyle = originalGetComputedStyle;
             (div as any).getBoundingClientRect = originalRect;
             document.body.removeChild(div);
             if (originalObserver) (globalThis as any).ResizeObserver = originalObserver;
@@ -59,6 +73,7 @@ idescribe('onResize', () => {
         }, 0);
       } catch (err: any) {
         sub.unsubscribe();
+        (globalThis as any).getComputedStyle = originalGetComputedStyle;
         (div as any).getBoundingClientRect = originalRect;
         document.body.removeChild(div);
         if (originalObserver) (globalThis as any).ResizeObserver = originalObserver;
@@ -356,15 +371,7 @@ idescribe('onResize', () => {
     const sub = onResize(div).subscribe();
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    // Errors in cleanup will propagate from stop() which is not wrapped in try-catch
-    let didThrow = false;
-    try {
-      sub.unsubscribe();
-    } catch (e) {
-      didThrow = true;
-    }
-    
-    expect(didThrow).toBe(true);
+    expect(() => sub.unsubscribe()).not.toThrow();
 
     disconnectSpy.and.callThrough();
     document.body.removeChild(div);

@@ -31,13 +31,22 @@ import { createAsyncPushable, normalizeError } from "../utils";
  * ```
  */
 export function switchMap<T = any, R = any>(
-  project: (value: T, index: number) => Stream<R> | MaybePromise<R> | Array<R>
+  project: (
+    value: T,
+    index: number
+  ) =>
+    | Stream<R>
+    | MaybePromise<R | Stream<R> | Array<R> | Iterable<R> | AsyncIterable<R>>
+    | Array<R>
+    | Iterable<R>
+    | AsyncIterable<R>
 ) {
   return createOperator<T, R>("switchMap", function (this: Operator, source) {
     const output = createAsyncPushable<R>();
     const outputIterator = output;
 
     let currentInner: { token: object; it: AsyncIterator<R> } | null = null;
+    let pendingInnerToken: object | null = null;
     let inputCompleted = false;
     let currentInnerToken: object | null = null;
     let index = 0;
@@ -48,7 +57,7 @@ export function switchMap<T = any, R = any>(
      * Only completes if the source is done AND no inner stream is active.
      */
     const checkComplete = () => {
-      if (inputCompleted && !currentInner) {
+      if (inputCompleted && !currentInner && !pendingInnerToken) {
         output.complete();
       }
     };
@@ -65,6 +74,9 @@ export function switchMap<T = any, R = any>(
       }
 
       const it = innerStream[Symbol.asyncIterator]() as AsyncIterator<R>;
+      if (pendingInnerToken === token) {
+        pendingInnerToken = null;
+      }
       currentInner = { token, it };
 
       void (async () => {
@@ -103,6 +115,7 @@ export function switchMap<T = any, R = any>(
 
       if (isPromiseLike(projected)) {
         const capturedToken = token;
+        pendingInnerToken = capturedToken;
         Promise.resolve(projected).then(
           (normalized) => {
             if (stopped || capturedToken !== currentInnerToken) return;
@@ -110,10 +123,14 @@ export function switchMap<T = any, R = any>(
           },
           (err) => {
             if (stopped || capturedToken !== currentInnerToken) return;
+            if (pendingInnerToken === capturedToken) {
+              pendingInnerToken = null;
+            }
             output.error(normalizeError(err));
           }
         );
       } else {
+        pendingInnerToken = null;
         subscribeToInner(fromAny<R>(projected as any), token);
       }
     };
@@ -182,6 +199,7 @@ export function switchMap<T = any, R = any>(
 
     (outputIterator as any).return = async () => {
       stopped = true;
+      pendingInnerToken = null;
       restoreSourcePush();
       try {
         try {
@@ -199,6 +217,7 @@ export function switchMap<T = any, R = any>(
     (outputIterator as any).throw = async (err: any) => {
       const error = normalizeError(err);
       stopped = true;
+      pendingInnerToken = null;
       restoreSourcePush();
       try {
         try {

@@ -50,6 +50,11 @@ export function share<T = any>() {
 
   return createOperator<T, T>('share', function (this: Operator, source) {
     if (!shared) shared = createSubject<T>();
+    const outputIterator = shared[Symbol.asyncIterator]();
+    const baseReturn = outputIterator.return?.bind(outputIterator);
+    const baseThrow = outputIterator.throw?.bind(outputIterator);
+    subscriberCount++;
+
     if (!isConnected) {
       connect(source);
     } else if (typeof source.return === "function") {
@@ -58,11 +63,6 @@ export function share<T = any>() {
       // otherwise they remain subscribed and can backpressure the shared source.
       Promise.resolve(source.return()).catch(() => {});
     }
-
-    subscriberCount++;
-    const outputIterator = shared[Symbol.asyncIterator]();
-    const baseReturn = outputIterator.return?.bind(outputIterator);
-    const baseThrow = outputIterator.throw?.bind(outputIterator);
 
     (outputIterator as any).return = async (value?: any) => {
       subscriberCount--;
@@ -74,6 +74,10 @@ export function share<T = any>() {
 
     (outputIterator as any).throw = async (err: any) => {
       const error = normalizeError(err);
+      subscriberCount--;
+      if (subscriberCount === 0 && isConnected) {
+        disconnect();
+      }
       if (baseThrow) return baseThrow(error);
       throw error;
     };

@@ -125,6 +125,23 @@ describe('every', () => {
 
     expect(completed).toBe(true);
   });
+
+  it('should close the source when it short-circuits to false', async () => {
+    let returnCalls = 0;
+    const sourceIterator: AsyncIterator<number> = {
+      async next() {
+        return { done: false as const, value: -1 };
+      },
+      async return() {
+        returnCalls++;
+        return { done: true as const, value: undefined };
+      },
+    };
+
+    const iterator = every((value: number) => value > 0).apply(sourceIterator);
+    expect(await iterator.next()).toEqual({ done: false, value: false });
+    expect(returnCalls).toBe(1);
+  });
 });
 
 

@@ -141,13 +141,22 @@ idescribe('onIntersection', () => {
     });
   });
 
-  it('stops when element is removed', async () => {
+  it('pauses while detached and resumes when the element is reattached', async () => {
     let triggerMutation: (() => void) | null = null;
+    let intersectionCallback: ((entries: IntersectionObserverEntry[]) => void) | null = null;
+    const observeSpy = jasmine.createSpy('observe');
+    const disconnectSpy = jasmine.createSpy('disconnect');
 
     class FakeIntersectionObserver {
-      constructor(_cb: (entries: IntersectionObserverEntry[]) => void) {}
-      observe() {}
-      disconnect() {}
+      constructor(cb: (entries: IntersectionObserverEntry[]) => void) {
+        intersectionCallback = cb;
+      }
+      observe() {
+        observeSpy();
+      }
+      disconnect() {
+        disconnectSpy();
+      }
       unobserve() {}
     }
 
@@ -163,18 +172,26 @@ idescribe('onIntersection', () => {
 
     await withGlobal('IntersectionObserver', FakeIntersectionObserver as any, async () => {
       await withGlobal('MutationObserver', FakeMutationObserver as any, async () => {
-        const completed: boolean[] = [];
+        const values: boolean[] = [];
         const subscription = onIntersection(element).subscribe({
-          complete: () => completed.push(true),
+          next: (value) => values.push(value),
         });
 
+        intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry]);
         document.body.removeChild(element);
         triggerMutation?.();
+        await new Promise((r) => setTimeout(r, 0));
+
+        document.body.appendChild(element);
+        triggerMutation?.();
+        intersectionCallback?.([{ isIntersecting: false } as IntersectionObserverEntry]);
 
         await new Promise((r) => setTimeout(r, 0));
         subscription.unsubscribe();
 
-        expect(completed.length).toBeGreaterThan(0);
+        expect(values).toEqual([true, false]);
+        expect(disconnectSpy).toHaveBeenCalled();
+        expect(observeSpy.calls.count()).toBeGreaterThan(1);
       });
     });
   });

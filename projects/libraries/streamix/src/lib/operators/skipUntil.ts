@@ -35,10 +35,9 @@ export function skipUntil<T = any, N = any>(
 ): Operator<T, T> {
   return createOperator<T, T>("skipUntil", function (source: AsyncIterator<T>) {
     const notifierIt = fromAny(notifier)[Symbol.asyncIterator]();
-    const runner = createAsyncCoordinator<T | N>([source, notifierIt]);
+    const runner = createAsyncCoordinator<T | N>([notifierIt, source]);
 
     let gateOpened = false;
-    let droppingBacklog = false;
     let isDone = false;
 
     const handleEvent = (event: any): IteratorResult<T> | null => {
@@ -48,7 +47,7 @@ export function skipUntil<T = any, N = any>(
       }
 
       if (event.type === 'complete') {
-        if (event.sourceIndex === 0) {
+        if (event.sourceIndex === 1) {
           isDone = true;
           return DONE;
         }
@@ -56,22 +55,15 @@ export function skipUntil<T = any, N = any>(
         return null;
       }
 
-      if (event.sourceIndex === 1) {
+      if (event.sourceIndex === 0) {
         // Notifier emitted: open the gate
         if (!gateOpened) {
           gateOpened = true;
-          droppingBacklog = !!(source as any).__hasBufferedValues?.();
         }
         return null;
       }
 
-      // Source value (sourceIndex === 0)
-      if (gateOpened && droppingBacklog) {
-        // Drop values that were already buffered before the gate opened.
-        droppingBacklog = !!(source as any).__hasBufferedValues?.();
-        return null;
-      }
-
+      // Source value (sourceIndex === 1)
       if (gateOpened) {
         return NEXT(event.value);
       }

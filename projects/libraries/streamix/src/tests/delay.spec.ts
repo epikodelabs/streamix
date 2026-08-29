@@ -114,6 +114,33 @@ describe('delay', () => {
       complete: () => done.fail('should error before completing'),
     });
   });
+
+  it('should shift each emission by the delay without serializing source timing', (done) => {
+    const stream = createStream('timed-source', async function* () {
+      yield 'a';
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      yield 'b';
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      yield 'c';
+    });
+
+    const timestamps: number[] = [];
+    const start = Date.now();
+
+    stream.pipe(delay(100)).subscribe({
+      next: () => {
+        timestamps.push(Date.now() - start);
+      },
+      complete: () => {
+        expect(timestamps.length).toBe(3);
+        expect(timestamps[0]).toBeGreaterThanOrEqual(90);
+        expect(timestamps[1] - timestamps[0]).toBeLessThan(60);
+        expect(timestamps[2] - timestamps[1]).toBeLessThan(60);
+        done();
+      },
+      error: done.fail,
+    });
+  });
 });
 
 

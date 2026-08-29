@@ -24,6 +24,9 @@ export const audit = <T = any>(duration: MaybePromise<number>) =>
 
     const flush = () => {
       if (!bufferedResult) return;
+      if (timerId) {
+        clearTimeout(timerId);
+      }
 
       output.push(bufferedResult.value!);
 

@@ -110,7 +110,7 @@ describe("buffer", () => {
   });
 
   it("should emit empty arrays if no values are received in the interval", async () => {
-    const duration = 100;
+    const duration = 50;
     const buffered = source.pipe(buffer(duration));
     const results: number[][] = [];
 
@@ -120,11 +120,11 @@ describe("buffer", () => {
       }
     })();
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 120));
     subject.complete();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(results).toEqual([]);
+    expect(results).toEqual([[], []]);
   });
 
   it("should cleanup when iterator is closed early via return()", async () => {

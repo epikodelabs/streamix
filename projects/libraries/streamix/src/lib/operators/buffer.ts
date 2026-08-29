@@ -15,9 +15,8 @@ export function buffer<T = any>(period: MaybePromise<number>) {
 
     let completed = false;
 
-    const flush = () => {
-      if (buf.length === 0) return;
-
+    const flush = (emitEmpty = false) => {
+      if (buf.length === 0 && !emitEmpty) return;
       const values = buf.map((e) => e.value!);
       output.push(values);
       buf = [];
@@ -41,7 +40,7 @@ export function buffer<T = any>(period: MaybePromise<number>) {
     };
 
     const flushAndComplete = () => {
-      flush();
+      flush(false);
       if (!completed) {
         completed = true;
         output.complete();
@@ -56,7 +55,7 @@ export function buffer<T = any>(period: MaybePromise<number>) {
     };
 
     intervalSubscription = timer(period, period).subscribe({
-      next: () => flush(),
+      next: () => flush(true),
       error: (err) => fail(err),
       complete: () => flushAndComplete(),
     });

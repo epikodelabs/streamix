@@ -172,4 +172,29 @@ describe('skipUntil', () => {
     await flushMicrotasks();
     expect(receivedError).toBe(expectedError);
   });
+
+  it('should forward values pushed after the gate opens even if older source values were skipped', async () => {
+    const source$ = createSubject<number>();
+    const notifier$ = createSubject<boolean>();
+    const result: number[] = [];
+
+    const promise = new Promise<void>((resolve, reject) => {
+      source$.pipe(skipUntil(notifier$)).subscribe({
+        next: val => result.push(val),
+        complete: resolve,
+        error: reject
+      });
+    });
+
+    source$.next(1);
+    source$.next(2);
+    notifier$.next(true);
+    source$.next(3);
+    source$.complete();
+    notifier$.complete();
+
+    await promise;
+    await flushMicrotasks();
+    expect(result).toEqual([3]);
+  });
 });

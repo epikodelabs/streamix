@@ -57,6 +57,22 @@ type HttpContextError = Error & {
   status?: number;
 };
 
+type RequestState = {
+  abortController: AbortController;
+  promise: Promise<Context>;
+};
+
+const createAbortError = () =>
+  new DOMException('The operation was aborted.', 'AbortError');
+
+const cancelReadableBody = async (response?: Response | null) => {
+  const body = response?.body as ReadableStream | null | undefined;
+  if (!body || body.locked) return;
+  try {
+    await body.cancel();
+  } catch {}
+};
+
 /**
  * A middleware function that transforms a {@link Context} before the request
  * is sent or after the response is received.
@@ -486,6 +502,7 @@ export const createHttpClient = (): HttpClient => {
         }
 
         if (!response.ok) {
+          await cancelReadableBody(response);
           const error = new Error(
             `${LOG_PREFIX} HTTP Error: ${response.status} ${response.statusText} for ${method} ${url}`,
           ) as HttpContextError;
@@ -507,51 +524,76 @@ export const createHttpClient = (): HttpClient => {
     optionsOrParser?: HttpOptions | ParserFunction<T>,
     maybeParser?: ParserFunction<T>,
   ): HttpStream<T> => {
-    const abortController = new AbortController();
-
     const isParser = typeof optionsOrParser === 'function';
 
     const options: HttpOptions = isParser ? {} : optionsOrParser || {};
     const parser: ParserFunction<T> = isParser
       ? (optionsOrParser as ParserFunction<T>)
       : (maybeParser ?? (readStatus as ParserFunction<T>));
+    let pendingInitialState: RequestState | null = null;
+    let activeState: RequestState | null = null;
+    let abortReason: unknown = null;
 
-    const context: Context = {
-      url,
-      method,
-      headers: { ...defaultHeaders, ...options.headers },
-      body: options.body,
-      params: options.params,
-      credentials: options.withCredentials ? 'include' : 'same-origin',
-      signal: abortController.signal,
-      fetch: globalThis.fetch.bind(globalThis),
-      parser,
+    const createRequestState = (): RequestState => {
+      const abortController = new AbortController();
+      if (abortReason) {
+        abortController.abort(abortReason);
+      }
+
+      const context: Context = {
+        url,
+        method,
+        headers: { ...defaultHeaders, ...options.headers },
+        body: options.body,
+        params: options.params,
+        credentials: options.withCredentials ? 'include' : 'same-origin',
+        signal: abortController.signal,
+        fetch: globalThis.fetch.bind(globalThis),
+        parser,
+      };
+
+      return {
+        abortController,
+        promise: chainMiddleware(middlewares)(async (ctx) => ctx)(context),
+      };
     };
 
-    const promise = chainMiddleware(middlewares)(async (ctx) => ctx)(context);
+    pendingInitialState = createRequestState();
 
     // No replay buffer: the stream yields directly from the response parser.
     // If fallback middleware set `context.data`, we use that instead.
     const stream = createStream<T>('httpData', async function* (signal) {
+      const state = pendingInitialState ?? createRequestState();
+      pendingInitialState = null;
+      activeState = state;
+      let parserIterator: AsyncIterator<T> | null = null;
+      let currentResponse: Response | undefined;
+      let aborted = false;
+
       const abortStreamRequest = () => {
-        abortController.abort(
-          new DOMException('The operation was aborted.', 'AbortError'),
-        );
+        aborted = true;
+        const reason = createAbortError();
+        abortReason = reason;
+        state.abortController.abort(reason);
       };
 
       if (signal?.aborted) {
         abortStreamRequest();
-        return;
       }
 
       signal?.addEventListener('abort', abortStreamRequest, { once: true });
 
       try {
-        const ctx = await promise;
+        const ctx = await state.promise;
 
         // Fallback middleware may have provided data directly
         if (ctx.data) {
-          yield* ctx.data;
+          parserIterator = ctx.data[Symbol.asyncIterator]() as AsyncIterator<T>;
+          while (true) {
+            const result = await parserIterator.next();
+            if (result.done) break;
+            yield result.value;
+          }
           return;
         }
 
@@ -559,16 +601,32 @@ export const createHttpClient = (): HttpClient => {
           return;
         }
 
-        yield* ctx.parser(ctx.response);
+        currentResponse = ctx.response;
+        parserIterator = ctx.parser(ctx.response)[Symbol.asyncIterator]() as AsyncIterator<T>;
+        while (true) {
+          const result = await parserIterator.next();
+          if (result.done) break;
+          yield result.value;
+        }
       } finally {
         signal?.removeEventListener('abort', abortStreamRequest);
+        try {
+          await parserIterator?.return?.();
+        } catch {}
+        if (aborted) {
+          await cancelReadableBody(currentResponse);
+        }
+        if (activeState === state) {
+          activeState = null;
+        }
       }
     }) as HttpStream<T>;
 
     stream.abort = () => {
-      abortController.abort(
-        new DOMException('The operation was aborted.', 'AbortError'),
-      );
+      const reason = createAbortError();
+      abortReason = reason;
+      pendingInitialState?.abortController.abort(reason);
+      activeState?.abortController.abort(reason);
     };
 
     return stream;
@@ -693,52 +751,67 @@ export const readChunks = <T = Uint8Array>(
 
     const reader = response.body.getReader();
     const contentType = response.headers.get('Content-Type') || '';
+    let fullyRead = false;
 
     let buffer = '';
     const decoder = new TextDecoder(getEncoding(contentType));
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      if (value) {
-        loaded += value.length;
-        const progress = totalSize ? loaded / totalSize : 0.5;
-
-        let parsedChunk;
-
-        if (contentType.includes('text') || contentType.includes('json')) {
-          const chunkText = decoder.decode(value, { stream: true });
-
-          if (contentType.includes('x-ndjson')) {
-            buffer += chunkText;
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-              if (line.trim()) {
-                try {
-                  parsedChunk = chunkParser(line);
-                  yield { chunk: parsedChunk, progress, done: false };
-                } catch (error) {
-                  logWarning('Invalid NDJSON line', line, error);
-                }
-              }
-            }
-            continue;
-          }
-
-          parsedChunk = chunkParser(chunkText);
-        } else {
-          parsedChunk = chunkParser(value);
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          fullyRead = true;
+          break;
         }
 
-        yield {
-          chunk: parsedChunk,
-          progress,
-          done: false,
-        };
+        if (value) {
+          loaded += value.length;
+          const progress = totalSize ? loaded / totalSize : 0.5;
+
+          let parsedChunk;
+
+          if (contentType.includes('text') || contentType.includes('json')) {
+            const chunkText = decoder.decode(value, { stream: true });
+
+            if (contentType.includes('x-ndjson')) {
+              buffer += chunkText;
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                if (line.trim()) {
+                  try {
+                    parsedChunk = chunkParser(line);
+                    yield { chunk: parsedChunk, progress, done: false };
+                  } catch (error) {
+                    logWarning('Invalid NDJSON line', line, error);
+                  }
+                }
+              }
+              continue;
+            }
+
+            parsedChunk = chunkParser(chunkText);
+          } else {
+            parsedChunk = chunkParser(value);
+          }
+
+          yield {
+            chunk: parsedChunk,
+            progress,
+            done: false,
+          };
+        }
       }
+    } finally {
+      if (!fullyRead) {
+        try {
+          await reader.cancel();
+        } catch {}
+      }
+      try {
+        reader.releaseLock();
+      } catch {}
     }
 
     yield {
@@ -838,15 +911,30 @@ export const readFull: ParserFunction<Uint8Array> = async function* (
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalLength = 0;
+  let fullyRead = false;
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        fullyRead = true;
+        break;
+      }
 
-    if (value) {
-      chunks.push(value);
-      totalLength += value.length;
+      if (value) {
+        chunks.push(value);
+        totalLength += value.length;
+      }
     }
+  } finally {
+    if (!fullyRead) {
+      try {
+        await reader.cancel();
+      } catch {}
+    }
+    try {
+      reader.releaseLock();
+    } catch {}
   }
 
   const accumulatedData = new Uint8Array(totalLength);

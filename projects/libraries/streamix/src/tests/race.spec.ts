@@ -239,6 +239,48 @@ describe('race', () => {
     expect(results.length).toBe(1);
     expect([1, 2]).toContain(results[0]);
   });
+
+  it('does not wait for loser cleanup before emitting the winner', async () => {
+    let resolveLoserReturn!: () => void;
+    let loserReturnCalls = 0;
+
+    const winner = from([1]);
+    const loser = {
+      type: 'stream',
+      name: 'slow-loser',
+      pipe: winner.pipe,
+      subscribe: winner.subscribe,
+      query: winner.query,
+      toArray: winner.toArray,
+      [Symbol.asyncIterator]() {
+        return {
+          async next() {
+            return new Promise<IteratorResult<number>>(() => {});
+          },
+          async return() {
+            loserReturnCalls++;
+            await new Promise<void>((resolve) => {
+              resolveLoserReturn = resolve;
+            });
+            return { done: true as const, value: undefined };
+          },
+        };
+      },
+    } as any;
+
+    const values: number[] = [];
+    const done = (async () => {
+      for await (const value of race(winner, loser)) {
+        values.push(value);
+      }
+    })();
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(values).toEqual([1]);
+    expect(loserReturnCalls).toBe(1);
+    resolveLoserReturn();
+    await done;
+  });
 });
 
 

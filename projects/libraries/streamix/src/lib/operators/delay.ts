@@ -13,6 +13,17 @@ import { normalizeError } from '../utils/helpers';
  */
 export function delay<T = any>(ms: MaybePromise<number>) {
   return createPushOperator<T>('delay', (source, output) => {
+    let stopped = false;
+    let inputCompleted = false;
+    let pending = 0;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+
+    const completeIfReady = () => {
+      if (!stopped && inputCompleted && pending === 0 && !output.completed()) {
+        output.complete();
+      }
+    };
+
     void (async () => {
       try {
         const resolvedMs = isPromiseLike(ms) ? await ms : ms;
@@ -21,19 +32,43 @@ export function delay<T = any>(ms: MaybePromise<number>) {
           const result = await source.next();
           if (result.done) break;
 
-          if (resolvedMs !== undefined) {
-            await new Promise((resolve) => setTimeout(resolve, resolvedMs));
+          if (resolvedMs === undefined) {
+            output.push(result.value!);
+            continue;
           }
 
-          output.push(result.value!);
+          pending++;
+          const value = result.value!;
+          const timer = setTimeout(() => {
+            timers.delete(timer);
+            pending--;
+
+            if (!stopped) {
+              output.push(value);
+            }
+
+            completeIfReady();
+          }, resolvedMs);
+
+          timers.add(timer);
         }
       } catch (err) {
-        output.error(normalizeError(err));
+        if (!stopped) {
+          output.error(normalizeError(err));
+        }
       } finally {
-        if (!output.completed()) output.complete();
+        inputCompleted = true;
+        completeIfReady();
       }
     })();
 
-    return () => {};
+    return () => {
+      stopped = true;
+      for (const timer of timers) {
+        clearTimeout(timer);
+      }
+      timers.clear();
+      pending = 0;
+    };
   });
 }

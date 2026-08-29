@@ -16,23 +16,32 @@ describe('throwError', () => {
     });
   });
 
-  it('should complete without error if the source is empty', (done) => {
+  it('should error immediately even if the source is empty', (done) => {
     const stream = from([]).pipe(throwError('Never thrown'));
-    let completeCalled = false;
 
     stream.subscribe({
       next: () => {
         fail('Expected no values to be emitted');
       },
       error: (err) => {
-        fail(`Expected no error, but got: ${err}`);
-      },
-      complete: () => {
-        completeCalled = true;
-        expect(completeCalled).toBe(true);
+        expect(err).toEqual(jasmine.any(Error));
+        expect(err.message).toBe('Never thrown');
         done();
       }
     });
+  });
+
+  it('should not consume the source before throwing', async () => {
+    const seen: number[] = [];
+
+    async function* source() {
+      seen.push(1);
+      yield 1;
+    }
+
+    const iterator = from(source()).pipe(throwError('Boom!'))[Symbol.asyncIterator]();
+    await expectAsync(iterator.next()).toBeRejectedWithError('Boom!');
+    expect(seen).toEqual([]);
   });
 });
 

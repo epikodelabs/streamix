@@ -46,6 +46,7 @@ export function delayUntil<T = any, N = any>(
     let gateOpened = false;
     let isDone = false;
     let sourceCompleted = false;
+    let notifierCompletedWithoutEmission = false;
 
     /**
      * Internal logic to handle events from the runner.
@@ -71,8 +72,7 @@ export function delayUntil<T = any, N = any>(
           // Notifier completed without ever emitting - discard buffer
           if (!gateOpened) {
             buffer.length = 0;
-            isDone = true;
-            return DONE;
+            notifierCompletedWithoutEmission = true;
           }
           return null;
         }
@@ -82,7 +82,9 @@ export function delayUntil<T = any, N = any>(
         if (gateOpened) {
           // Gate is open - forward immediately
           return NEXT(event.value);
-        } else {
+        }
+
+        if (!notifierCompletedWithoutEmission) {
           // Gate is closed - buffer
           buffer.push(event.value);
         }
@@ -90,6 +92,7 @@ export function delayUntil<T = any, N = any>(
         // Notifier emitted - open the gate (even if it's the first and only emission)
         if (!gateOpened) {
           gateOpened = true;
+          notifierCompletedWithoutEmission = false;
           // Immediately try to flush one buffered value
           return iterator.flushOne!();
         }
@@ -113,7 +116,7 @@ export function delayUntil<T = any, N = any>(
           }
 
           // 2. If source completed and gate opened, but buffer is empty, we're done
-          if (sourceCompleted && gateOpened && buffer.length === 0) {
+          if (sourceCompleted && (gateOpened || notifierCompletedWithoutEmission) && buffer.length === 0) {
             isDone = true;
             return DONE;
           }
@@ -146,7 +149,7 @@ export function delayUntil<T = any, N = any>(
         }
 
         // 2. If source completed and gate opened, but buffer is empty
-        if (sourceCompleted && gateOpened && buffer.length === 0) {
+        if (sourceCompleted && (gateOpened || notifierCompletedWithoutEmission) && buffer.length === 0) {
           isDone = true;
           return DONE;
         }

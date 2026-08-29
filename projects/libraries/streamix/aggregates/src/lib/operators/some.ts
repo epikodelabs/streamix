@@ -41,6 +41,9 @@ export const some = <T = any>(
           const predicateResult = predicate(result.value, index++);
           if (isPromiseLike(predicateResult) ? await predicateResult : predicateResult) {
             evaluated = true;
+            try {
+              await source.return?.();
+            } catch {}
             return NEXT(true);
           }
         }

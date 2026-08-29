@@ -40,6 +40,9 @@ export const every = <T = any>(
           const passes = isPromiseLike(predicateResult) ? await predicateResult : predicateResult;
           if (!passes) {
             emitted = true;
+            try {
+              await source.return?.();
+            } catch {}
             return NEXT(false);
           }
         }

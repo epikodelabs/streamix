@@ -37,6 +37,9 @@ export const none = <T = any>(
 
           if (passes) {
             evaluated = true;
+            try {
+              await source.return?.();
+            } catch {}
             return NEXT(false);
           }
         }
