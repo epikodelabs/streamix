@@ -1,38 +1,26 @@
-# App 3 — Cartoon Landscape
+# app3
 
-Interactive 3D cartoon landscape built with **Three.js** and animated via **streamix** reactive streams.
+`app3` is a streamix-driven Brownian motion visualization rendered with Angular.
 
-## Features
+## What it shows
 
-- **Three.js scene** — low-poly cartoon hills, trees, flowers, clouds, and a glowing sun
-- **Weather toggle** — switch between ☀️ sunshine and 🌧️ rain
-- **streamix `onAnimationFrame`** — render loop driven by reactive animation frames
-- **streamix `atom`** — weather state as a reactive atom
-- **streamix `onResize`** — canvas resize via ResizeObserver stream
-- **streamix `fromEvent` + `throttle` + `map`** — mouse parallax camera shift
-- **OrbitControls** — click and drag to orbit the camera around the scene
-- **Dynamic effects** — rain particles, sun pulse, cloud drift, tree sway, flower bounce
+- A particle swarm updated from `animationFrame` events
+- Viewport resize handling through `@epikodelabs/streamix/dom`
+- Collision resolution, elastic edge bouncing, drag, and random motion
+- Manual change detection paired with a small streamix scope for lifecycle cleanup
 
-## Scene elements
+## Key files
 
-| Element | Style |
-|---------|-------|
-| Hills | Low-poly `MeshToonMaterial` spheres, cel-shaded |
-| Trees | Cylinder trunks + stacked cone foliage |
-| Flowers | Tiny colored spheres scattered across the ground |
-| Clouds | Clusters of white spheres drifting slowly |
-| Sun | Yellow sphere with glow halo and radiating rays |
-| Rain | `THREE.Points` particle system with 2,000 droplets |
+- [`src/app/app.component.ts`](./src/app/app.component.ts): particle simulation, DOM event streams, and rendering
 
-## Running
+## Run
 
 ```bash
 npx ng serve app3
 ```
 
-Then open `http://localhost:4202` (port may vary).
+## Build
 
-## Weather modes
-
-- **Sunshine** — bright blue sky, visible sun, flowers perked up, green grass
-- **Rain** — gray sky, rain particles falling, trees sway in wind, flowers droop
+```bash
+npx ng build app3 --configuration development
+```

@@ -1,6 +1,6 @@
-# app9
+# app2
 
-`app9` is a custom reactive wizard demo built on `@epikodelabs/streamix` scopes plus a local renderer.
+`app2` is a custom reactive wizard demo built on `@epikodelabs/streamix` scopes plus a local renderer.
 
 ## What it shows
 
@@ -18,11 +18,11 @@
 ## Run
 
 ```bash
-npx ng serve app9
+npx ng serve app2
 ```
 
 ## Build
 
 ```bash
-npx ng build app9 --configuration development
+npx ng build app2 --configuration development
 ```

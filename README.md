@@ -56,7 +56,7 @@ streamix/
 │   │       ├── networking/     # HTTP client, WebSocket, JSONP
 │   │       └── presentation.gif
 │   └── apps/
-│       ├── app1, app3, app4, app5, app9, app10, app11
+│       ├── app1, app2, app3, app4, app5
 │       │                       # Demo & test applications
 ├── docs/                       # VitePress documentation source
 ├── scripts/                    # Build, SEO, and docs automation
