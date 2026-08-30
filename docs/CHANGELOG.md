@@ -1,19 +1,42 @@
 # Changelog
 
-## Unreleased
+## 3.0.1
 
-### Fixed
+The v3 rewrite. The subject-centric streaming API gives way to a three-part model — **atoms** for values, **flows** for sequences, **scopes** for ownership — with the async-iterator foundation carried over from 2.x.
 
-- Restored emission-only atom iteration so `share`, `startWith` pipelines, and notifier-first operators do not replay mutable atom state; iterator teardown is now tested using an actual emission.
+- **Atoms**: `atom()`, `derived()`, and `flow()` as the reactive primitives, with synchronous reads, subscriptions, and async iteration.
+- **Scopes**: `scope()` groups state behind plain properties with computed fields, `method()` actions, disposal boundaries, and snapshot support.
+- **Transactions**: `transaction()` batches several writes into one reactive update.
+- **Piping is a function**: `pipe(source, ...operators)` replaces the v2 `.pipe()` method chaining. Sources can be atoms, flows, or any async iterable; results are atoms.
+- **Removed**: the `Stream`/`Subject`/`ReplaySubject`/`BehaviorSubject` surface and its factory functions.
+- **Externalized**: coroutines, router, and forms moved to sibling packages — `@epikodelabs/coroutines`, `@epikodelabs/waypoint`, and `@epikodelabs/forms` — all compatible with v3.
+- **Retained entry points**: `aggregates`, `dom`, and `networking` continue to ship from the core package.
+- A [v2 → v3 migration guide](https://epikodelabs.github.io/streamix/MIGRATION) covers the mapping.
+
+## 2.0.53
+
+Fixed lifecycle, cancellation, timing, and error handling across take, delay, finalize, from, withLatestFrom, and merge.
+
+## 2.0.52
+
+Fixed `filter(...)` TypeScript inference by adding overloads so predicate callbacks are no longer misread as literal function values, and updated the React infinite-scroll example to use an explicit event parameter.
+
+## 2.0.51
+
+Fixed package publishing by removing the generated `dist/streamix/.npmignore` file that excluded secondary entry point `package.json` files from the npm tarball.
+
+## 2.0.50
+
+Fixed iterator lifecycle, async coordination, and transport behavior across the v2 line.
 
 ## 2.0.49
 
 Normalized all catch/rejection errors to Error instances
 
-- Apply normalizeError(err) across
+- Apply err instanceof Error ? err : new Error(String(err)) across
   abstractions, operators, streams, subjects, utils, converters, and primitives.
 - Add normalizeError helper in utils/helpers.ts and use it where imports allow.
-- Remove dead streams/fromAtom.ts (imported missing ../atoms/atom, not exported).
+- Remove a dead, unexported stream adapter with a broken import.
 
 ## 2.0.48
 
@@ -62,14 +85,14 @@ Fixed iterator-lifecycle regressions in `fromAny`, `share`, `subject`, and `sema
 
 Performance optimizations and resource cleanup improvements:
 
-- **`stream.ts`** вЂ” Eliminated per-emission array allocation in `pipeSourceThrough` by hoisting the receivers array instead of recreating it on every `getReceivers()` call.
-- **`coordinator.ts`** вЂ” Optimized `allDone()` from O(n) to O(1) by tracking an `activeCount` counter, and simplified `getActiveSourceCount()` to a constant-time return.
-- **`replaySubject.ts`** вЂ” Replaced O(n) `Array.prototype.shift()` with a circular buffer for bounded replay capacity, making all buffer operations O(1).
-- **`map`, `filter`, `scan`, `groupBy`** вЂ” Added `return()` and `throw()` propagation to source iterators, preventing resource leaks when downstream consumers cancel iteration early.
-- **`switchMap.ts`** вЂ” Fixed potential unhandled promise rejection when cancelling previous inner streams; now catches async `return()` rejections properly.
-- **`combineLatest.ts`** вЂ” Removed unnecessary `[...latestValues]` spread on every emission, yielding the mutable array directly and saving an allocation per event.
-- **`mergeMap.ts`** вЂ” Added optional `bufferSize` parameter (default: `Infinity`) to cap the source-value queue when the concurrency limit is reached, preventing unbounded memory growth with fast producers.
-- **`httpClient.ts`** вЂ” Fixed O(nВІ) `Uint8Array` growth in `readFull` by accumulating chunks and copying each exactly once into a final buffer.
+- **`stream.ts`** — Eliminated per-emission array allocation in `pipeSourceThrough` by hoisting the receivers array instead of recreating it on every `getReceivers()` call.
+- **`coordinator.ts`** — Optimized `allDone()` from O(n) to O(1) by tracking an `activeCount` counter, and simplified `getActiveSourceCount()` to a constant-time return.
+- **`replaySubject.ts`** — Replaced O(n) `Array.prototype.shift()` with a circular buffer for bounded replay capacity, making all buffer operations O(1).
+- **`map`, `filter`, `scan`, `groupBy`** — Added `return()` and `throw()` propagation to source iterators, preventing resource leaks when downstream consumers cancel iteration early.
+- **`switchMap.ts`** — Fixed potential unhandled promise rejection when cancelling previous inner streams; now catches async `return()` rejections properly.
+- **`combineLatest.ts`** — Removed unnecessary `[...latestValues]` spread on every emission, yielding the mutable array directly and saving an allocation per event.
+- **`mergeMap.ts`** — Added optional `bufferSize` parameter (default: `Infinity`) to cap the source-value queue when the concurrency limit is reached, preventing unbounded memory growth with fast producers.
+- **`httpClient.ts`** — Fixed O(n²) `Uint8Array` growth in `readFull` by accumulating chunks and copying each exactly once into a final buffer.
 
 ## 2.0.39
 
@@ -87,19 +110,19 @@ Added support for `dropped` iterator results: public iteration skips them, while
 
 Refactored `Stream`, `Subject`, `ReplaySubject`, and `BehaviorSubject` to use dual generic parameters for input and output types, enabling robust type inference through operator chains and subscriptions. Updated all `subscribe` and `query` method signatures to reflect the correct output type, ensuring type safety and better developer experience. All stream and subject factory functions and instance methods now preserve and expose accurate types throughout pipelines.
 
-### 2.0.32
+## 2.0.32
 
 Removed tracing package/module and related runtime/tracer code. Cleaned core stream internals from metadata, timestamps, counters, ids, temporary shims, and legacy hook-based compatibility paths. Reworked operator internals to coordinator-based flow.
 
-### 2.0.31
+## 2.0.31
 
 Refactored tracing module architecture for better separation of concerns: split into `core` (abstractions), `runtime` (hooks integration), and `tracer` (implementation). Added `unregisterRuntimeHooks()` for cleanup, new `emitted` event for value emission tracking, and improved trace correlation in sampling/debouncing operators (`audit`, `debounce`, `sample`, `throttle`, `delayWhile`, `delayUntil`, `share`, `shareReplay`). Fixed subscription cleanup in React docs examples. Updated README with monorepo structure documentation.
 
-### 2.0.30
+## 2.0.30
 
 Subjects were tightened again around async-iterator backpressure, the `takeUntil`/`skipUntil`/`delayUntil` operators now mirror the iterator-first lifecycle so cancellation and cleanup behave predictably. The scheduler was removed in favor of direct task coordination.
 
-### 2.0.29
+## 2.0.29
 
 Rewrote subjects internals to guard async-iterator backpressure and avoid races; all subjects are sync; deferred iterator processing to avoid notifier/source races. Fixed several unsubscribe and race issues in subject/operator chains that caused flaky tests.
 
@@ -113,7 +136,7 @@ Global scheduler for improved task coordination across streams and operators. Fi
 
 ## 2.0.23
 
-BREAKING: Fixed AsyncIterator protocol compliance across all stream operators: All operators now follow the standard pattern: while (true) в†’ check completion в†’ process в†’ return
+BREAKING: Fixed AsyncIterator protocol compliance across all stream operators: All operators now follow the standard pattern: while (true) → check completion → process → return
 
 ## 2.0.22
 
@@ -181,7 +204,7 @@ Fully refactored all built-in operators, replacing complex subscription manageme
 
 ## 1.0.20
 
-Operators in a pipeline were applied left to right вЂ” the first operator wrapped the source, followed by the next, and so on. Now operators are applied in reverse order, from right to left вЂ” the last operator wraps the source first. Streamix now includes many new built-in operators, enabling richer stream manipulation out of the box. `createMapper` method receives both input and output streams.
+Operators in a pipeline were applied left to right — the first operator wrapped the source, followed by the next, and so on. Now operators are applied in reverse order, from right to left — the last operator wraps the source first. Streamix now includes many new built-in operators, enabling richer stream manipulation out of the box. `createMapper` method receives both input and output streams.
 
 ## 1.0.18
 
@@ -189,7 +212,7 @@ The `Subscription` type has been enhanced with two new methods: `listen` and `va
 
 ## 1.0.16
 
-Streamix now features pull-based subjects, allowing subscribers to independently pull values at their own pace rather than receiving pushed emissions. This ensures that late subscribers can access past values without missing emissions, improving backpressure handling and memory efficiency. Subscriptions are now fully independent, preventing one subscriberвЂ™s lifecycle from affecting others. Additionally, pull-based subjects support async iteration (`for await...of`), making them more flexible for asynchronous workflows while enhancing error propagation and buffer management.
+Streamix now features pull-based subjects, allowing subscribers to independently pull values at their own pace rather than receiving pushed emissions. This ensures that late subscribers can access past values without missing emissions, improving backpressure handling and memory efficiency. Subscriptions are now fully independent, preventing one subscriber's lifecycle from affecting others. Additionally, pull-based subjects support async iteration (`for await...of`), making them more flexible for asynchronous workflows while enhancing error propagation and buffer management.
 
 ## 1.0.14
 
@@ -253,7 +276,7 @@ Streamix 0.1.11 introduces several improvements and bug fixes, including simplif
 
 ## 0.1.8
 
-Streamix 0.1.8 introduces several key improvements and bug fixes, including enhanced stream handling with non-blocking operators like `withLatestFrom()`, better error propagation by passing errors as events rather than emmissions, removal of unnecessary awaitments for callbacks except finalization, and updates to the version number.
+Streamix 0.1.8 introduces several key improvements and bug fixes, including enhanced stream handling with non-blocking operators like `withLatestFrom()`, better error propagation by passing errors as events rather than emissions, removal of unnecessary awaits for callbacks except finalization, and updates to the version number.
 
 ## 0.1.7
 
@@ -271,8 +294,6 @@ Streamix 0.1.5 introduces several key improvements and bug fixes, enhancing perf
 
 Initial version released.
 
-## 0.1.1
-
 ## 0.0.11
 
 Streamix 0.0.11 introduces several improvements, including enhanced stream efficiency with optimized processing algorithms and a new API for better integration with existing applications. Additionally, performance bottlenecks were addressed through refactoring and code optimization techniques.
@@ -281,15 +302,15 @@ Streamix 0.0.11 introduces several improvements, including enhanced stream effic
 
 Re Streamix 0.0.10: Implemented streams reimplementing, corrections applied, and operators now use an init function for initialization on stream emission.
 
-## v0.0.9
+## 0.0.9
 
-In version v0.0.9, Streamix introduced several key improvements: support for chunking with a `delayMs` parameter allowing for more flexible data streaming, an operator init method enhancing functionality, and corrections to the subscription methods ensuring proper behavior. The release also eliminated unnecessary methods like 'clone' and 'shared', improving performance by reducing overhead. Chunk creation was optimized based on the outer stream's operations, preventing unnecessary pipelining which enhances efficiency. Additionally, default values for 'delayMs' provide a starting point for developers.
+In version 0.0.9, Streamix introduced several key improvements: support for chunking with a `delayMs` parameter allowing for more flexible data streaming, an operator init method enhancing functionality, and corrections to the subscription methods ensuring proper behavior. The release also eliminated unnecessary methods like 'clone' and 'shared', improving performance by reducing overhead. Chunk creation was optimized based on the outer stream's operations, preventing unnecessary pipelining which enhances efficiency. Additionally, default values for 'delayMs' provide a starting point for developers.
 
-## v0.0.8
+## 0.0.8
 
 Streamix v0.0.8 introduces several improvements, including the introduction of hooks for subscribers, an async processing callback, and the addition of a parallel method to handle concurrency. The `chunk` class was enhanced with a `source` property in its onEmission parameter. The `emit` signature was corrected, and various internal hook methods were updated, such as adding ownership tracking using weak references. Additionally, the binding function always returns a promise, improving reliability. Performance optimizations include removing redundant stream hooks and implementing cleanup methods for define operators.
 
-## v0.0.7
+## 0.0.7
 
 In version v0.0.7 of Streamix, several improvements and bug fixes were implemented. Key changes include introducing new hooks like `defaultIfEmpty`, enhancing operator functionality with `bufferCount` and `compute` operators, refining the logic for subjects to use `next` methods, removing unnecessary code such as stream clone within a pipeline, and fixing issues related to emit methods and parameter usage. Additionally, there are corrections to operator implementations, including simplifying the subject logic, ensuring proper error handling with `catch` operators, and improving test cases for better reliability. The release also addresses performance considerations by moving stream complete into settimeout and optimizing the use of promises.
 
