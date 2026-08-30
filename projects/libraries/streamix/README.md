@@ -1,6 +1,6 @@
 # streamix
 
-Reactive streams built on async generators.
+Reactive streams built on async iterators.
 
 Small bundle. Pull-based execution. Familiar operator API. Hot subjects when a producer needs to push.
 

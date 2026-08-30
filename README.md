@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Reactive streams built on async generators.</strong><br>
+  <strong>Reactive streams built on async iterators.</strong><br>
   Small bundle. Pull-based execution. Familiar operator API.
 </p>
 

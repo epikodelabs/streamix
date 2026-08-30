@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.53
+
+Fixed lifecycle, cancellation, timing, and error handling across take, delay, finalize, from, withLatestFrom, and merge.
+
 ## 2.0.52
 
 Fixed `filter(...)` TypeScript inference by adding overloads so predicate callbacks are no longer misread as literal function values, and updated the React infinite-scroll example to use an explicit event parameter.
