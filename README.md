@@ -1,7 +1,7 @@
 <br>
 
 <p align="center">
-  <img src="https://epikodelabs.github.io/streamix/LOGO.png" alt="streamix Logo" width="420">
+  <img src="https://raw.githubusercontent.com/epikodelabs/epikodelabs.github.io/refs/heads/main/streamix/LOGO.png" alt="streamix Logo" width="420">
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@
     <img src="https://img.shields.io/npm/dt/@epikodelabs%2Fstreamix.svg?style=flat-square&color=0ea5e9" alt="Total Downloads">
   </a>
   <a href="https://github.com/epikodelabs/streamix">
-    <img src="https://epikodelabs.github.io/streamix/bundle-size.svg?style=flat-square" alt="Bundle Size">
+    <img src="https://github.com/epikodelabs/epikodelabs.github.io/blob/main/streamix/bundle-size.svg" alt="Bundle Size">
   </a>
   <a href="https://github.com/epikodelabs/streamix/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg?style=flat-square" alt="License">
