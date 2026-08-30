@@ -30,7 +30,7 @@ jobs:
         run: npm ci
 
       - name: Build library
-        run: npm run build streamix
+        run: npm run build
 
       - name: Calculate gzipped bundle size
         id: gzip
