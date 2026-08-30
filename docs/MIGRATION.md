@@ -36,11 +36,43 @@ For feature state, use **scopes**:
 ```ts
 const app = scope({
   count: 0,
-  doubled: self => self.count * 2,
+  doubled: (self: any) => self.count * 2,
 });
 
 app.count = 5;
 app.dispose();
+```
+
+### Pipelines: Method Chaining → `pipe()` Function
+
+v2 piped through a method on the source. v3 moves piping into a standalone function — **the source comes first, followed by any number of operators**:
+
+```ts
+// v2 (old)
+const doubled = count.pipe(map(v => v * 2), filter(v => v > 10));
+
+// v3 (new)
+const doubled = pipe(count, map(v => v * 2), filter(v => v > 10));
+```
+
+What carries over and what changes:
+
+* **Operators are unchanged.** `map`, `filter`, `switchMap`, `take`, and the rest keep their names and behavior — only the call shape moved.
+* **The source can be an atom, a flow, or any async iterable** — not just subjects.
+* **The result is an `Atom`.** You can still `subscribe(...)` and `for await ... of` it, and you additionally get a synchronous `.value` read.
+* **Sources no longer have a `.pipe` method.** Every pipeline starts at the `pipe()` function.
+* **Up to 16 operators keep full type inference**; beyond that the result falls back to `Atom<any>`. Split long chains or pre-group them with `compose()`.
+
+For reusable chains, compose operators once and apply them to any source:
+
+```ts
+const searchPipeline = compose(
+  debounce(300),
+  distinctUntilChanged(),
+  switchMap(search)
+);
+
+const results = pipe(query, searchPipeline);
 ```
 
 ---
@@ -51,11 +83,14 @@ app.dispose();
 |-----------------------------|--------------------------------|
 | `createBehaviorSubject`     | `atom(initial)`                |
 | `createSubject`             | `atom()` or flow (for events)  |
-| `.next(value)`              | `.set(value)`                  |
+| `.next(value)`              | unchanged — `.set(value)` added as an alias |
 | `.pipe(...)` (method)       | `pipe(source, ...)`            |
 | Computed streams            | `derived()`                    |
 | Async resources             | `flow()`                       |
 | Manual cleanup              | `scope()` + `.dispose()`       |
+| Coroutines                  | `@epikodelabs/coroutines`      |
+| Router                      | `@epikodelabs/waypoint`        |
+| Forms                       | `@epikodelabs/forms`           |
 
 ---
 
@@ -71,9 +106,8 @@ app.dispose();
 
 4. **Group State with Scopes** (recommended for features)
 
-5. **Update Coroutines**  
-   `processTask()` → `run()`  
-   `finalize()` → `dispose()`
+5. **Coroutines, Router, and Forms Are Now Separate Packages**  
+   These areas were externalized and are compatible with streamix v3: concurrency moved to `@epikodelabs/coroutines` (workers, structured task ownership, channels, actors), routing to `@epikodelabs/waypoint`, and forms to `@epikodelabs/forms`. Install the one you need alongside streamix. For simple async resources, stay in core and use `flow()` — it gives you cancellation via `AbortSignal` and cleanup tied to atom disposal.
 
 ---
 
@@ -84,7 +118,7 @@ app.dispose();
 const counter = scope({
   count: 0,
   doubled: self => self.count * 2,
-  increment: method((self) => {
+  increment: method((self: any) => {
     self.count += 1;
   }),
 });
@@ -96,7 +130,7 @@ const form = scope({
   email: "",
   password: "",
   isValid: self => self.email.includes("@") && self.password.length >= 8,
-  submit: method((self) => {
+  submit: method((self: any) => {
     if (!self.isValid) return;
     // submit form
   }),
@@ -107,7 +141,7 @@ const form = scope({
 ```ts
 const user = scope({
   userId: "",
-  profile: self => {
+  profile: (self: any) => {
     const userId = self.userId;
 
     return flow(async function* (signal) {

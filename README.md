@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Reactive flows built on async generators.</strong><br>
+  <strong>Reactive flows built on async iterators.</strong><br>
   Small bundle. Pull-based execution. Familiar operator API.
 </p>
 
@@ -22,13 +22,6 @@
   <a href="https://github.com/epikodelabs/streamix/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg?style=flat-square" alt="License">
   </a>
-</p>
-
-
-<br>
-
-<p align="center">
-  <img src="https://epikodelabs.github.io/streamix/presentation.gif" alt="streamix presentation" width="100%">
 </p>
 
 ---
@@ -56,8 +49,11 @@ streamix/
 │   │       ├── networking/     # HTTP client, WebSocket, JSONP
 │   │       └── presentation.gif
 │   └── apps/
-│       ├── app1, app2, app3, app4, app5
-│       │                       # Demo & test applications
+│       ├── app1/              # Stream monitor — live operator demos
+│       ├── app2/              # Reactive wizard — scopes + custom renderer
+│       ├── app3/              # Brownian motion — animationFrame + Angular
+│       ├── app4/              # Travel blog — scroll-driven DOM animations
+│       └── app5/              # HTTP client — networking demos
 ├── docs/                       # VitePress documentation source
 ├── scripts/                    # Build, SEO, and docs automation
 ├── dist/                       # Build output & VitePress site
@@ -121,11 +117,25 @@ The static site is output to `dist/.vitepress/dist/`.
 
 ---
 
+## 🌍 Ecosystem
+
+Some former companion modules now live as separate packages, compatible with streamix v3:
+
+| Package | Purpose |
+|---------|---------|
+| `@epikodelabs/coroutines` | Workers, structured task ownership, channels, actors |
+| `@epikodelabs/waypoint` | Server-authorized routing for Angular |
+| `@epikodelabs/forms` | Reactive form engine for TypeScript |
+
+---
+
 ## 🛠️ Scripts Reference
 
 | Script | What it does |
 |--------|--------------|
 | `npm run build` | Build the Angular/library workspace |
+| `npm run typecheck` | Type-check the workspace with `tsc --noEmit` |
+| `npm run lint` | Lint with ESLint (`lint:fix` to auto-fix) |
 | `npm test` | Run the testify test suite |
 | `npm run jasmine` | Run tests headlessly in Chrome |
 | `npm run docs:build` | Full docs pipeline (prepare → generate → build) |

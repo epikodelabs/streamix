@@ -45,7 +45,7 @@ streamix overlaps with React and its ecosystem:
 | Local UI state | `useState`, `useReducer`, external stores | atoms and derived atoms |
 | Subscriptions | `useSyncExternalStore` | atom subscriptions and async iterables |
 | Lifecycle | `useEffect` cleanup | scopes and cleanup sets |
-| DOM events | JSX handlers and refs | `listen` and DOM sources |
+| DOM events | JSX handlers and refs | `addListener` and DOM event sources |
 | Data fetching | loaders, TanStack Query, SWR, Suspense patterns | pipelines and networking |
 This does not make streamix incompatible. It means you need to decide which
 runtime owns each part of the problem.

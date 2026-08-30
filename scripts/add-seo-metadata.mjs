@@ -7,7 +7,7 @@ const distRoot = path.join(repoRoot, 'dist');
 // Configuration
 const SITE_URL = 'https://epikodelabs.github.io/streamix';
 const SITE_NAME = 'streamix';
-const SITE_DESCRIPTION = 'Reactive streams built on async generators. Small bundle, pull-based execution, and a familiar operator API.';
+const SITE_DESCRIPTION = 'Reactive streams built on async iterators. Small bundle, pull-based execution, and a familiar operator API.';
 const DEFAULT_IMAGE = `${SITE_URL}/LOGO.png`;
 const COMPANY_NAME_VARIANTS = ['Epikode', 'EpikodeLabs', 'Epikode Labs'];
 
@@ -18,7 +18,7 @@ const PAGE_METADATA = {
   // =================================================================
   'index.md': {
     title: 'streamix - Reactive Streams for JavaScript',
-    description: 'Reactive streams built on async generators. Small bundle, pull-based execution, and a familiar operator API.',
+    description: 'Reactive streams built on async iterators. Small bundle, pull-based execution, and a familiar operator API.',
     keywords: ['reactive', 'streams', 'async generators', 'javascript', 'typescript', 'reactive programming']
   },
 
@@ -72,7 +72,7 @@ const PAGE_METADATA = {
 
   'PRESENTATION.md': {
     title: 'Presentation - Visual Introduction to streamix',
-    description: 'A visual introduction to streamix: pull-based reactive streams built on async generators, with links to the full documentation.',
+    description: 'A visual introduction to streamix: pull-based reactive streams built on async iterators, with links to the full documentation.',
     keywords: ['presentation', 'showcase', 'visual introduction', 'reactive streams', 'async generators', 'streamix']
   },
 

@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Reactive flows built on async generators.</strong><br>
+  <strong>Reactive flows built on async iterators.</strong><br>
   Small bundle. Pull-based execution. Familiar operator API.
 </p>
 
@@ -36,6 +36,7 @@ It is a strong fit for dashboards, interactive applications, and concurrency-hea
 
 * ⚛️ **Atoms and Scopes** for reactive state, dependency tracking, and disposal boundaries
 * 🔄 **Pull-based flows** where work happens when downstream consumers ask for values
+* 🔁 **Transactions** that batch several writes into one reactive update
 * 🧩 **Familiar operators** such as `map`, `filter`, `switchMap`, `debounce`, and `scan`
 * ⏱️ **Async-iterator first design** that works naturally with `for await...of`
 * 🌐 **Optional add-ons** for HTTP, WebSocket, and DOM-focused helpers
@@ -158,7 +159,7 @@ projects/libraries/streamix/
 ## 📚 Documentation
 
 * [Full Documentation](https://epikodelabs.github.io/streamix)
-* [Migration Guide: v2 to v3](./MIGRATION)
+* [Migration Guide: v2 to v3](https://epikodelabs.github.io/streamix/MIGRATION)
 * [Medium: A Generator-Driven, Pull-Based Reactive Core](https://medium.com/p/a1eb9e7ce1d7)
 * [Medium: streamix vs redux-saga](https://medium.com/p/0bfc206ad41c)
 

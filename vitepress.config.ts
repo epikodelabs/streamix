@@ -45,13 +45,11 @@ export default defineConfig({
           text: 'Documentation',
           items: [
             { text: 'Getting Started', link: '/' },
-            { text: 'Pricing', link: '/PRICING' },
-            { text: 'Changelog', link: '/CHANGELOG' },
             { text: 'Atoms', link: '/ATOMS' },
             { text: 'Generators', link: '/GENERATORS' },
+            { text: 'Migration', link: '/MIGRATION' },
             { text: 'Angular', link: '/ANGULAR' },
             { text: 'React', link: '/REACT' },
-            { text: 'Presentation', link: '/PRESENTATION' }
           ]
         },
         {

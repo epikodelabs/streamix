@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Reactive flows built on async generators.</strong>
+  <strong>Reactive flows built on async iterators.</strong>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
   </a>
 </p>
 
-streamix is a reactive flows library built on async generators. It gives you synchronous state reads, composable derived values, lifecycle-aware scopes, and flows that work naturally with modern TypeScript.
+streamix is a reactive flows library built on async iterators. It gives you synchronous state reads, composable derived values, lifecycle-aware scopes, and flows that work naturally with modern TypeScript.
 
 ```bash
 npm install @epikodelabs/streamix
@@ -66,6 +66,8 @@ for await (const item of valid) {
   console.log(item);
 }
 ```
+
+> **Pipe signature:** `pipe()` is a standalone function — the source comes first, followed by any number of operators: `pipe(source, op1, op2, ...)`. The source can be an atom, a flow, or any async iterable. This replaces the v2 method-chaining style (`source.pipe(op1, op2)`); the pipeline reads left-to-right and returns a new atom. Up to 16 operators keep full type inference — beyond that, the result falls back to `Atom<any>`. See the [migration guide](MIGRATION.md) for the full v2 → v3 mapping.
 
 Full catalog: `audit`, `buffer`, `bufferCount`, `bufferUntil`, `bufferWhile`, `catchError`, `concatMap`, `debounce`, `defaultIfEmpty`, `delay`, `delayUntil`, `distinctUntilChanged`, `distinctUntilKeyChanged`, `endWith`, `exhaustMap`, `expand`, `filter`, `finalize`, `first`, `fork`, `groupBy`, `ignoreElements`, `last`, `map`, `mergeMap`, `observeOn`, `partition`, `reduce`, `sample`, `scan`, `select`, `shareReplay`, `skip`, `skipUntil`, `skipWhile`, `slidingPair`, `startWith`, `switchMap`, `take`, `takeUntil`, `takeWhile`, `tap`, `throttle`, `throwError`, `toArray`, `withLatestFrom`.
 
