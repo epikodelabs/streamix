@@ -36,14 +36,12 @@
     "DefinedValue",
     "FormulaContext",
     "Method",
-    "CoroutineDefinitionRest",
     "ScopeOf",
     "UnwrapSnapshotValues",
     "WithLatestInput",
     "AtomNode",
     "ForkHandlerResult",
-    "Observer",
-    "WorkerUtilsCompatibility"
+    "Observer"
   ],
   "sort": [
     "source-order"

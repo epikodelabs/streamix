@@ -28,18 +28,20 @@
 
 ## ✨ What is streamix?
 
-**streamix** is a lightweight reactive runtime for TypeScript and JavaScript built around async generators and pull-based execution.
+**streamix** is a lightweight reactive runtime for TypeScript and JavaScript, built around async iterators and pull-based execution.
 
-It is a strong fit for dashboards, interactive applications, and concurrency-heavy browser workloads where you want reactive state, explicit lifecycles, and a more direct mental model than traditional push-only stream systems.
+Most reactive libraries push values at you whether you asked for them or not. streamix turns that around: values are computed when you request them, state reads are synchronous, and every subscription has a clear lifecycle. The result feels closer to ordinary `async/await` than to a stream framework — while keeping the composability of one.
+
+That makes it a good fit for dashboards, interactive applications, and concurrency-heavy browser work: places where you want reactive state, explicit lifecycles, and a mental model you can hold in your head.
 
 ### Highlights
 
-* ⚛️ **Atoms and Scopes** for reactive state, dependency tracking, and disposal boundaries
-* 🔄 **Pull-based flows** where work happens when downstream consumers ask for values
-* 🔁 **Transactions** that batch several writes into one reactive update
-* 🧩 **Familiar operators** such as `map`, `filter`, `switchMap`, `debounce`, and `scan`
-* ⏱️ **Async-iterator first design** that works naturally with `for await...of`
-* 🌐 **Optional add-ons** for HTTP, WebSocket, and DOM-focused helpers
+* ⚛️ **Atoms and scopes** — reactive state with dependency tracking and real disposal boundaries
+* 🔄 **Pull-based flows** — work happens only when downstream consumers ask for values
+* 🔁 **Transactions** — group several writes into a single reactive update
+* 🧩 **Familiar operators** — `map`, `filter`, `switchMap`, `debounce`, `scan`, and 40+ more
+* ⏱️ **Async-iterator first** — everything plays naturally with `for await...of`
+* 📦 **Small footprint** — one package, tree-shakeable, `sideEffects: false`
 
 ---
 
@@ -47,13 +49,9 @@ It is a strong fit for dashboards, interactive applications, and concurrency-hea
 
 ```bash
 npm install @epikodelabs/streamix
-```
-
-```bash
+# or
 yarn add @epikodelabs/streamix
-```
-
-```bash
+# or
 pnpm add @epikodelabs/streamix
 ```
 
@@ -61,19 +59,20 @@ pnpm add @epikodelabs/streamix
 
 ## 🧠 Core Concepts
 
-### ⚛️ Atoms and Scopes
+### ⚛️ Atoms: state that reads like a variable
 
-Atoms are the primary reactive primitive in streamix.
+An atom is a reactive value. Read it synchronously, write to it, subscribe to it, or consume it as an async iterable — whichever fits the code you're writing.
 
-* `atom(initial?)` creates a writable reactive value
-* `derived()` creates a computed reactive value
-* `flow()` creates a flow-backed reactive value
+* `atom(initial)` creates a writable value you can read right away
+* `atom<T>()` creates one whose value arrives later
+* `derived()` creates a computed value that recalculates when its dependencies change
+* `flow()` wraps async work — with cancellation and cleanup built in
 
-If a value arrives later, omit the initial value from `atom<T>()`.
+`derived()` is synchronous by design. If a computation needs `await`, cancellation, or restart behavior, that's a job for `flow()`.
 
-`derived()` is synchronous by design. If the computation needs `await`, cancellation, or restart behavior, use `flow()` instead.
+### 🧭 Scopes: state with a lifecycle
 
-Scopes group related atoms under a disposable lifecycle boundary.
+A scope groups related atoms behind plain properties and disposes of everything when you're done. Reading and writing feel like ordinary object access — the reactivity is underneath.
 
 ```typescript
 import { scope } from '@epikodelabs/streamix';
@@ -91,35 +90,14 @@ const app = scope<{
 app.count = 5;
 app.events = 'hello';
 
-console.log(app.doubled);
+console.log(app.doubled); // 10
 
 app.dispose();
 ```
 
-**🔁 Async iteration with `iterate()`:**
+### 🔄 Flows: sequences through familiar operators
 
-```typescript
-import { atom, iterate } from '@epikodelabs/streamix';
-
-const a = atom(0);
-
-for await (const value of iterate(a)) {
-  console.log(value);
-}
-```
-
-**🧱 Writable and initialized atoms:**
-
-| Need | API |
-| ---- | --- |
-| Value that arrives later | `atom<T>()` |
-| Value with an initial state | `atom(initial)` |
-
----
-
-### 🔄 Flows
-
-Flows compose naturally through operators.
+Flows model sequences of values over time — events, timers, requests, generators. Compose them with the operator API you already know:
 
 ```typescript
 import { pipe, take } from '@epikodelabs/streamix';
@@ -140,32 +118,63 @@ for await (const msg of launchSequence) {
 }
 ```
 
-Flows are pull-based by default, which means work is performed only when values are consumed.
+Because flows are pull-based, nothing runs until you iterate — an infinite generator piped through `take(5)` computes exactly five values.
 
----
+### 🔁 Subscribing and iterating
 
-## 📁 Monorepo Structure
+Atoms are async iterables. Use `iterate()` to consume one as a stream of updates:
 
-```text
-projects/libraries/streamix/
-|-- src/           # Core runtime (atoms, scopes, operators)
-|-- aggregates/    # Aggregate operators
-|-- dom/           # DOM observation utilities
-`-- networking/    # HTTP client, WebSocket, JSONP
+```typescript
+import { atom, iterate } from '@epikodelabs/streamix';
+
+const a = atom(0);
+
+for await (const value of iterate(a)) {
+  console.log(value);
+}
 ```
 
+When several writes should land as one update, wrap them in `transaction()` — subscribers and derived values see a single consistent change.
+
 ---
 
-## 📚 Documentation
+## 📚 Entry Points
 
-* [Full Documentation](https://epikodelabs.github.io/streamix)
-* [Migration Guide: v2 to v3](https://epikodelabs.github.io/streamix/MIGRATION)
-* [Medium: A Generator-Driven, Pull-Based Reactive Core](https://medium.com/p/a1eb9e7ce1d7)
-* [Medium: streamix vs redux-saga](https://medium.com/p/0bfc206ad41c)
+Everything ships from one package. A few focused add-ons live alongside the core:
+
+| Entry point | What you get |
+| ----------- | ------------ |
+| `@epikodelabs/streamix` | Atoms, scopes, flows, operators |
+| `@epikodelabs/streamix/aggregates` | `average`, `min`/`max`, `sum`, and friends |
+| `@epikodelabs/streamix/dom` | DOM observers — `on('animationFrame')`, `mediaQuery`, `intersection`, … |
+| `@epikodelabs/streamix/networking` | HTTP client, WebSocket, JSONP |
+
+---
+
+## 🌍 Ecosystem
+
+Some capabilities live in sibling packages, all compatible with streamix v3:
+
+| Package | Purpose |
+|---------|---------|
+| `@epikodelabs/coroutines` | Workers, structured task ownership, channels, actors |
+| `@epikodelabs/waypoint` | Server-authorized routing for Angular |
+| `@epikodelabs/forms` | Reactive form engine for TypeScript |
+
+---
+
+## 📖 Documentation
+
+* [Full documentation](https://epikodelabs.github.io/streamix)
+* [Migration guide: v2 → v3](https://epikodelabs.github.io/streamix/MIGRATION)
+* [A Generator-Driven, Pull-Based Reactive Core](https://medium.com/p/a1eb9e7ce1d7) — design deep-dive
+* [streamix vs redux-saga](https://medium.com/p/0bfc206ad41c) — comparison
 
 ---
 
 ## 💬 Community
+
+We'd love to hear what you build.
 
 * Give the [public docs repo](https://github.com/epikodelabs/epikodelabs.github.io) a star if streamix helps you
 * Join [GitHub Discussions](https://github.com/orgs/epikodelabs/discussions) for questions and ideas

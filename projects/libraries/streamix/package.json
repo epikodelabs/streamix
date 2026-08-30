@@ -21,9 +21,7 @@
     "types/",
     "aggregates/",
     "dom/",
-    "forms/",
     "networking/",
-    "router/",
     "CHANGELOG.md"
   ],
   "type": "module",
@@ -33,6 +31,5 @@
     "type": "git",
     "url": "https://github.com/epikodelabs/streamix.git"
   },
-  "author": "Oleksii Shepel",
-  "email": "oleksii.shepel@outlook.com"
+  "author": "Oleksii Shepel <oleksii.shepel@outlook.com>"
 }

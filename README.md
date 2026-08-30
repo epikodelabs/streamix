@@ -28,11 +28,26 @@
 
 ## 🧭 About This Repository
 
-This is the **streamix solution repository** — a monorepo that contains the core reactive flows library, optional add-on modules, demo applications, documentation sources, and build tooling.
+This is the **streamix solution repository** — the monorepo where the library is built. It holds the core reactive flows package, its optional add-ons, five demo applications, the documentation sources, and the tooling that ties them together.
 
-If you are looking for the library documentation and API reference, see:
-- **[Library README](./projects/libraries/streamix/README.md)** — package-level install and usage
-- **[Live Documentation](https://epikodelabs.github.io/streamix)** — full docs site
+A taste of what lives here:
+
+```ts
+import { interval, map, pipe, take } from '@epikodelabs/streamix';
+
+const ticks = pipe(interval(1000), map(n => `tick ${n}`), take(5));
+for await (const t of ticks) console.log(t);
+```
+
+**Just want to use streamix?** You don't need this repo — the library installs from npm:
+
+```bash
+npm install @epikodelabs/streamix
+```
+
+Start with the **[library README](./projects/libraries/streamix/README.md)** for install and core concepts, or the **[live documentation](https://epikodelabs.github.io/streamix)** for guides and the full API reference.
+
+**Want to contribute, explore the demos, or build from source?** Read on.
 
 ---
 
@@ -46,8 +61,7 @@ streamix/
 │   │       ├── src/            # Flows, atoms, scopes, operators
 │   │       ├── aggregates/     # Aggregate operators (average, min/max, etc.)
 │   │       ├── dom/            # DOM observation utilities
-│   │       ├── networking/     # HTTP client, WebSocket, JSONP
-│   │       └── presentation.gif
+│   │       └── networking/     # HTTP client, WebSocket, JSONP
 │   └── apps/
 │       ├── app1/              # Stream monitor — live operator demos
 │       ├── app2/              # Reactive wizard — scopes + custom renderer
@@ -65,44 +79,26 @@ streamix/
 
 ## 🚀 Quick Start for Contributors
 
-### Prerequisites
-
-- Node.js (LTS recommended)
-- npm or pnpm
-
-### Install dependencies
+You'll need Node.js (LTS recommended) and npm.
 
 ```bash
+# Install dependencies
 npm install
-```
 
-### Build the library
-
-```bash
+# Build the library
 npm run build
-```
 
-### Run tests
-
-```bash
+# Run the test suite (or `npm run jasmine:coverage` for coverage)
 npm test
-# or with coverage
-npm run jasmine:coverage
-```
 
-### Serve a demo app
-
-```bash
+# Serve a demo app
 ng serve app1
-```
 
-### Build documentation
-
-```bash
+# Build the documentation site
 npm run docs:build
 ```
 
-The static site is output to `dist/.vitepress/dist/`.
+The static site lands in `dist/.vitepress/dist/`.
 
 ---
 
@@ -138,6 +134,7 @@ Some former companion modules now live as separate packages, compatible with str
 | `npm run lint` | Lint with ESLint (`lint:fix` to auto-fix) |
 | `npm test` | Run the testify test suite |
 | `npm run jasmine` | Run tests headlessly in Chrome |
+| `npm run pack:check` | Dry-run `npm pack` against the built package |
 | `npm run docs:build` | Full docs pipeline (prepare → generate → build) |
 | `npm run docs:prepare` | Copy markdown & assets into `dist/` |
 | `npm run clean` | Auto-fix ESLint issues |
@@ -146,6 +143,8 @@ Some former companion modules now live as separate packages, compatible with str
 ---
 
 ## 💬 Community & Feedback
+
+We'd love to hear what you build.
 
 - ⭐ Star the [public docs repo](https://github.com/epikodelabs/epikodelabs.github.io) if streamix helps you.
 - Join [GitHub Discussions](https://github.com/orgs/epikodelabs/discussions).
