@@ -38,12 +38,12 @@
     "zone.js": "^0.16.2"
   },
   "devDependencies": {
-    "@angular/build": "^22.1.0",
     "@angular-eslint/eslint-plugin": "^22.1.0",
     "@angular-eslint/eslint-plugin-template": "^22.1.0",
+    "@angular/build": "^22.1.0",
     "@angular/cli": "^22.1.0",
     "@angular/compiler-cli": "^22.1.0",
-    "@epikodelabs/testify": "^1.0.51",
+    "@epikodelabs/testify": "^1.0.52",
     "@types/jasmine": "^6.0.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^26.1.2",
@@ -67,6 +67,13 @@
   "type": "module",
   "sideEffects": false,
   "overrides": {
-    "shell-quote": "^1.8.4"
+    "shell-quote": "^1.8.4",
+    "fast-uri": "3.1.5",
+    "hono": "4.12.34",
+    "istanbul-api": {
+      "js-yaml": "3.15.1"
+    },
+    "js-yaml": "4.3.1",
+    "postcss": "8.5.23"
   }
 }
