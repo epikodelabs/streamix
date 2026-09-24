@@ -136,7 +136,17 @@ export class RendererScheduler {
         }
 
         this.dirtyFlags[id] = false;
-        this.bindings[id]?.();
+
+        try {
+          this.bindings[id]?.();
+        } catch (error) {
+          // Report and continue: one failing consumer must not delay the
+          // other queued bindings or leak the error out of the frame
+          // callback. Its own emissions mark it dirty again; it is
+          // deliberately not re-marked here, which would retry (and
+          // re-throw) every frame while the failure persists.
+          console.error(`sx renderer binding ${id} flush failed.`, error);
+        }
       }
 
       this.dirtyIds.length = 0;

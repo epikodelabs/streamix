@@ -5,7 +5,7 @@ import {
 } from '../lib/render-scheduler';
 
 class ManualFrameScheduler implements RenderScheduler {
-  private callback?: () => void;
+  callback?: () => void;
 
   schedule(callback: () => void): CancelRender {
     this.callback = callback;
@@ -54,6 +54,30 @@ idescribe('RendererScheduler', () => {
     const second = scheduler.register(() => {});
 
     expect(second.id).toBe(id);
+  });
+
+  it('isolates a throwing callback and still flushes other bindings', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    spyOn(console, 'error');
+
+    const calls: string[] = [];
+    const a = scheduler.register(() => {
+      calls.push('a');
+      throw new Error('boom');
+    });
+    const b = scheduler.register(() => calls.push('b'));
+
+    a.markDirty();
+    b.markDirty();
+
+    expect(() => frame.flush()).not.toThrow();
+
+    expect(calls).toEqual(['a', 'b']);
+    expect(console.error).toHaveBeenCalledTimes(1);
+
+    // The failed binding is deliberately not retried on the next frame.
+    expect(frame.callback).toBeUndefined();
   });
 });
 import { idescribe } from '../../../src/tests/env.spec';

@@ -188,7 +188,18 @@ export class SxBindingTable {
       }
 
       this.rendered[slot] = next;
-      write(next);
+
+      try {
+        write(next);
+      } catch (error) {
+        // One failing writer must not strand sibling slots in the same
+        // flush. The slot keeps its previous rendered value so the next
+        // emission retries the write; it is deliberately not retried on a
+        // timer, which would re-throw every frame while the failure
+        // persists.
+        this.rendered[slot] = previous;
+        console.error(`sx binding slot ${slot} write failed.`, error);
+      }
     }
 
     this.dirtySlots.length = 0;

@@ -5,22 +5,28 @@ import {
   inject,
 } from '@angular/core';
 
-import type {
-  SxBindingTable,
-} from './binding-table';
+/**
+ * Teardown returned by a compiler-generated sx setup.
+ *
+ * `SxBindingTable` satisfies this contract, as does the `{ destroy() {} }`
+ * object emitted for compiled structural blocks.
+ */
+export interface SxTeardown {
+  destroy(): void;
+}
 
 export type SxCompiledViewSetup<T> = (
   host: Element,
   context: T,
-) => SxBindingTable;
+) => SxTeardown;
 
 /**
- * Installs a compiler-generated sx binding table for the current component.
+ * Installs a compiler-generated sx setup for the current component.
  *
  * Intended for generated code. It uses only public Angular lifecycle APIs:
  *
  * - setup is deferred until the component DOM exists;
- * - the returned binding table is destroyed with the component;
+ * - the returned teardown handle is destroyed with the component;
  * - Angular change detection is not involved in subsequent sx updates.
  *
  * @internal
@@ -32,7 +38,7 @@ export function ɵinstallSxCompiledView<T>(
   const host = inject<ElementRef<Element>>(ElementRef).nativeElement;
   const destroyRef = inject(DestroyRef);
 
-  let table: SxBindingTable | undefined;
+  let teardown: SxTeardown | undefined;
   let destroyed = false;
 
   afterNextRender(() => {
@@ -40,12 +46,12 @@ export function ɵinstallSxCompiledView<T>(
       return;
     }
 
-    table = setup(host, context);
+    teardown = setup(host, context);
   });
 
   destroyRef.onDestroy(() => {
     destroyed = true;
-    table?.destroy();
-    table = undefined;
+    teardown?.destroy();
+    teardown = undefined;
   });
 }

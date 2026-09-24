@@ -20,11 +20,13 @@ component source lifecycle insertion
                  ↓
 afterNextRender()
                  ↓
-binding table installed
+setup runs and returns a teardown handle
+(the binding table, or a `{ destroy() {} }`
+object for structural blocks)
                  ↓
 DestroyRef.onDestroy()
                  ↓
-binding table destroyed
+teardown handle destroyed
 ```
 
 `ɵinstallSxCompiledView` uses public Angular APIs only: `ElementRef`,

@@ -124,6 +124,49 @@ idescribe('SxBindingTable', () => {
     table.destroy();
   });
 
+  it('isolates a throwing slot writer and flushes sibling slots', () => {
+    const frame = new ManualFrameScheduler();
+    const scheduler = new RendererScheduler(frame);
+    const table = createBindingTable(2, scheduler);
+    spyOn(console, 'error');
+
+    const count = atom(1);
+    const label = atom('a');
+
+    const text = document.createTextNode('');
+    const span = document.createElement('span');
+
+    table.bind(0, count, value => {
+      if (value === 2) {
+        throw new Error('write failed');
+      }
+      text.textContent = String(value);
+    });
+    table.bind(1, label, value => {
+      span.textContent = String(value);
+    });
+
+    count.set(2);
+    label.set('b');
+
+    frame.flush();
+
+    expect(text.textContent).toBe('1');
+    expect(span.textContent).toBe('b');
+    expect(console.error).toHaveBeenCalledTimes(1);
+
+    // The slot keeps its previous rendered value, so a later emission
+    // retries the write.
+    count.set(3);
+
+    frame.flush();
+
+    expect(text.textContent).toBe('3');
+    expect(console.error).toHaveBeenCalledTimes(1);
+
+    table.destroy();
+  });
+
   it('rejects invalid slots', () => {
     const table = createBindingTable(1);
     const source = atom(1);
