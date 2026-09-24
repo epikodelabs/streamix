@@ -13,18 +13,24 @@ describe('parseSxTemplate', () => {
 
 
   it('computes whitespace-independent element paths', () => {
-    const parsed = parseSxTemplate(`
+    const template = `
       <section>
         text
         <span [sx.text]="count"></span>
         <div><input [sx.value]="name"></div>
       </section>
-    `);
+    `;
+    const parsed = parseSxTemplate(template);
 
     expect(parsed.nodePaths['node0']).toEqual([0]);
     expect(parsed.nodePaths['node1']).toEqual([0, 0]);
     expect(parsed.nodePaths['node2']).toEqual([0, 1]);
     expect(parsed.nodePaths['node3']).toEqual([0, 1, 0]);
+
+    const spanOf = (attribute: string) => {
+      const start = template.indexOf(attribute);
+      return { start, end: start + attribute.length };
+    };
 
     expect(parsed.plan.bindings).toEqual([
       {
@@ -32,6 +38,7 @@ describe('parseSxTemplate', () => {
         kind: 'text',
         node: 'node1',
         source: 'count',
+        span: spanOf('[sx.text]="count"'),
       },
       {
         slot: 1,
@@ -39,6 +46,7 @@ describe('parseSxTemplate', () => {
         node: 'node3',
         source: 'name',
         name: 'value',
+        span: spanOf('[sx.value]="name"'),
       },
     ]);
   });
@@ -57,6 +65,46 @@ describe('parseSxTemplate', () => {
       }
       <span [sx.text]="count"></span>
     `)).toThrowError(/structural\/template blocks/i);
+  });
+
+  it('treats ng-container as transparent when computing element paths', () => {
+    const parsed = parseSxTemplate(`
+      <div></div>
+      <ng-container><span [sx.text]="count"></span></ng-container>
+      <p></p>
+    `);
+
+    expect(parsed.nodePaths['node1']).toEqual([1]);
+    expect(parsed.nodePaths['node2']).toEqual([2]);
+  });
+
+  it('rejects structural directive siblings that shift element paths', () => {
+    expect(() => parseSxTemplate(`
+      <div *ngIf="visible"></div>
+      <span [sx.text]="count"></span>
+    `)).toThrowError(/structural\/template blocks/i);
+  });
+
+  it('rejects custom structural directive siblings', () => {
+    expect(() => parseSxTemplate(`
+      <span [sx.text]="count"></span>
+      <header *appUnless="cond"></header>
+    `)).toThrowError(/structural\/template blocks/i);
+  });
+
+  it('rejects content projection next to sx bindings', () => {
+    expect(() => parseSxTemplate(`
+      <span [sx.text]="count"></span>
+      <ng-content></ng-content>
+    `)).toThrowError(/structural\/template blocks/i);
+  });
+
+  it('does not reject sx bindings for control-flow text in attribute values', () => {
+    const parsed = parseSxTemplate(
+      `<span [sx.text]="count" title="@if (visible) { ... }"></span>`,
+    );
+
+    expect(parsed.plan.size).toBe(1);
   });
 
 });

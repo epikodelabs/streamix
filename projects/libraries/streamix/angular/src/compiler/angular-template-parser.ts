@@ -1,6 +1,7 @@
 import {
+  TmplAstBoundText,
   TmplAstElement,
-  TmplAstTemplate,
+  TmplAstText,
   parseTemplate,
   type ParseSourceSpan,
   type TmplAstNode,
@@ -10,13 +11,17 @@ import {
   createBindingPlan,
   type SxBindingKind,
   type SxBindingPlan,
+  type SxSourceSpan,
 } from './binding-plan';
+
+export type { SxSourceSpan } from './binding-plan';
 
 export interface SxTemplateBinding {
   readonly kind: SxBindingKind;
   readonly node: string;
   readonly source: string;
   readonly name?: string;
+  readonly span: SxSourceSpan;
 }
 
 /**
@@ -29,6 +34,7 @@ export type SxElementPath = readonly number[];
 
 export interface ParsedSxTemplate {
   readonly plan: SxBindingPlan;
+  readonly bindingSpans: readonly SxSourceSpan[];
   readonly nodes: readonly string[];
   readonly nodePaths: Readonly<Record<string, SxElementPath>>;
 }
@@ -36,18 +42,27 @@ export interface ParsedSxTemplate {
 interface WalkState {
   readonly template: string;
   readonly bindings: SxTemplateBinding[];
+  readonly bindingSpans: SxSourceSpan[];
   readonly nodes: string[];
   readonly nodePaths: Record<string, number[]>;
+  readonly strict: boolean;
   nextNode: number;
 }
+
+const DYNAMIC_TOPOLOGY_ERROR =
+  'Direct sx bindings require a static element topology: Angular ' +
+  'structural/template blocks, structural directives (*ngIf), and content ' +
+  'projection are not yet supported by the static-node compiler. Compile ' +
+  'dynamic structure with the sx structural compiler stage.';
 
 /**
  * Parses an Angular template and extracts Streamix `sx` bindings.
  *
  * Direct node acquisition currently requires a static element topology.
- * `sx` bindings nested under Angular structural/template nodes are rejected so
- * generated code never relies on an unstable DOM path. Structural sx lowering
- * is a separate compiler stage.
+ * Any dynamic topology in the same template — structural directives, built-in
+ * control-flow blocks, content projection — can shift `Element.children`
+ * indices, so it is rejected at the AST level rather than parsed into
+ * silently wrong paths. Structural sx lowering is a separate compiler stage.
  */
 export function parseSxTemplate(
   template: string,
@@ -61,13 +76,13 @@ export function parseSxTemplate(
     throw new Error(parsed.errors.map(error => error.toString()).join('\n'));
   }
 
-  assertStaticSxTopology(template);
-
   const state: WalkState = {
     template,
     bindings: [],
+    bindingSpans: [],
     nodes: [],
     nodePaths: {},
+    strict: containsSxBinding(parsed.nodes, template),
     nextNode: 0,
   };
 
@@ -75,25 +90,10 @@ export function parseSxTemplate(
 
   return {
     plan: createBindingPlan(state.bindings),
+    bindingSpans: state.bindingSpans,
     nodes: state.nodes,
     nodePaths: state.nodePaths,
   };
-}
-
-function assertStaticSxTopology(template: string): void {
-  if (!/\[sx\.[^\]]+\]/.test(template)) {
-    return;
-  }
-
-  // Angular 17+ built-in control flow is represented by dedicated AST node
-  // classes (for example TmplAstIfBlock), not TmplAstTemplate. Direct sx
-  // bindings currently use compile-time Element.children paths, so any
-  // dynamic topology in the same template can invalidate those paths.
-  if (/@(if|for|switch|defer)\b/.test(template)) {
-    throw new Error(
-      'Direct sx bindings inside templates with Angular structural/template blocks are not yet supported by the static-node compiler. Compile dynamic structure with the sx structural compiler stage.',
-    );
-  }
 }
 
 function walkStaticChildren(
@@ -103,7 +103,7 @@ function walkStaticChildren(
 ): void {
   let elementIndex = 0;
 
-  for (const node of nodes) {
+  for (const node of flattenTransparentContainers(nodes)) {
     if (node instanceof TmplAstElement) {
       const path = [...parentPath, elementIndex++];
       visitElement(node, state, path);
@@ -111,14 +111,40 @@ function walkStaticChildren(
       continue;
     }
 
-    if (node instanceof TmplAstTemplate) {
-      if (containsSxBinding(node.children, state.template)) {
-        throw new Error(
-          'Direct sx bindings inside structural/template blocks are not yet supported by the static-node compiler. Compile the structural block with sxAtom in the structural compiler stage.',
-        );
-      }
+    // Anything that is not a plain element or inert text — structural
+    // directives, built-in control-flow blocks, content projection, and any
+    // node class this compiler does not know — can change the runtime element
+    // topology. Reject it instead of walking past a wrong path.
+    if (state.strict && !isInertText(node)) {
+      throw new Error(DYNAMIC_TOPOLOGY_ERROR);
     }
   }
+}
+
+/**
+ * `ng-container` renders no element: its children join the parent's element
+ * sequence, so they are spliced into the sibling list before paths are
+ * computed.
+ */
+function flattenTransparentContainers(
+  nodes: readonly TmplAstNode[],
+): TmplAstNode[] {
+  const flattened: TmplAstNode[] = [];
+
+  for (const node of nodes) {
+    if (node instanceof TmplAstElement && node.name === 'ng-container') {
+      flattened.push(...flattenTransparentContainers(node.children));
+    } else {
+      flattened.push(node);
+    }
+  }
+
+  return flattened;
+}
+
+/** Text-only nodes never appear in `Element.children`, so they are inert. */
+function isInertText(node: TmplAstNode): boolean {
+  return node instanceof TmplAstText || node instanceof TmplAstBoundText;
 }
 
 function visitElement(
@@ -148,36 +174,46 @@ function visitElement(
     );
 
     if (binding) {
-      state.bindings.push(binding);
+      const span = {
+        start: input.sourceSpan.start.offset,
+        end: input.sourceSpan.end.offset,
+      };
+
+      state.bindings.push({ ...binding, span });
+      state.bindingSpans.push(span);
     }
   }
 }
 
-function containsSxBinding(
-  nodes: readonly TmplAstNode[],
-  template: string,
-): boolean {
-  for (const node of nodes) {
-    if (node instanceof TmplAstElement) {
-      for (const input of node.inputs) {
-        const raw = sourceText(template, input.sourceSpan);
-        if (extractPublicBindingName(raw)?.startsWith('sx.')) {
-          return true;
-        }
-      }
+/**
+ * Deep sx-binding detection. Structural blocks (`@if` branches, `@for`
+ * bodies, `@switch` cases) store their children in version-specific shapes,
+ * so this walks object values generically instead of enumerating node
+ * classes that change across Angular versions.
+ */
+function containsSxBinding(node: unknown, template: string): boolean {
+  if (Array.isArray(node)) {
+    return node.some(child => containsSxBinding(child, template));
+  }
 
-      if (containsSxBinding(node.children, template)) {
-        return true;
-      }
-    } else if (
-      node instanceof TmplAstTemplate &&
-      containsSxBinding(node.children, template)
-    ) {
+  if (!node || typeof node !== 'object') {
+    return false;
+  }
+
+  const record = node as {
+    inputs?: readonly { sourceSpan: ParseSourceSpan }[];
+  };
+
+  for (const input of record.inputs ?? []) {
+    const raw = sourceText(template, input.sourceSpan);
+    if (extractPublicBindingName(raw)?.startsWith('sx.')) {
       return true;
     }
   }
 
-  return false;
+  return Object.values(record).some(
+    value => value !== record.inputs && containsSxBinding(value, template),
+  );
 }
 
 function sourceText(template: string, span: ParseSourceSpan): string {
@@ -223,7 +259,7 @@ function classifyBinding(
   publicName: string,
   node: string,
   source: string,
-): SxTemplateBinding | undefined {
+): Omit<SxTemplateBinding, 'span'> | undefined {
   if (publicName === 'sx.text') {
     return { kind: 'text', node, source };
   }

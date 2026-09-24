@@ -25,15 +25,19 @@ export function transformSxTemplate(
   }
 
   let transformed = template;
-  const matches = Array.from(
-    transformed.matchAll(/\s+\[sx(?:\.[^\]]+)\]\s*=\s*"[^"]*"/g),
-  ).reverse();
 
-  for (const match of matches) {
-    const start = match.index!;
+  // Cut by the parser-recorded attribute offsets rather than a regex so both
+  // quote styles are removed exactly and sx-looking text content is never
+  // touched. Cuts run back-to-front so earlier offsets stay valid.
+  const spans = [...parsed.bindingSpans].sort((a, b) => b.start - a.start);
+
+  for (const span of spans) {
+    let start = span.start;
+    while (start > 0 && /\s/.test(transformed[start - 1])) {
+      start--;
+    }
     transformed =
-      transformed.slice(0, start) +
-      transformed.slice(start + match[0].length);
+      transformed.slice(0, start) + transformed.slice(span.end);
   }
 
   return { template: transformed, parsed };

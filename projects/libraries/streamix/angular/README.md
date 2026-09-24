@@ -203,9 +203,12 @@ const node1 = host.children[0].children[0] as Element;
 ```
 
 The path uses `Element.children`, so whitespace/text nodes do not affect the
-indices. `sx` bindings inside structural Angular templates are deliberately
-rejected by this static compiler path; those need the upcoming compiled
-structural renderer rather than an unstable DOM path.
+indices. `ng-container` is treated as transparent — its children join the
+parent's element sequence. Any dynamic topology in the same template —
+structural directives such as `*ngIf` (even as siblings without `sx` bindings),
+built-in control-flow blocks, or content projection — is deliberately rejected
+by this static compiler path; those need the upcoming compiled structural
+renderer rather than an unstable DOM path.
 
 
 ## Compiled structural blocks

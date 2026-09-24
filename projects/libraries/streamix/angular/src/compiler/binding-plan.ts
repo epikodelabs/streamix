@@ -5,12 +5,20 @@ export type SxBindingKind =
   | 'class'
   | 'style';
 
+/** Offsets of an sx attribute within the original template source. */
+export interface SxSourceSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
 export interface SxBindingPlanEntry {
   readonly slot: number;
   readonly kind: SxBindingKind;
   readonly node: string;
   readonly source: string;
   readonly name?: string;
+  /** Present when the entry was extracted from a parsed template. */
+  readonly span?: SxSourceSpan;
 }
 
 /**
