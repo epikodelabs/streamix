@@ -39,6 +39,12 @@
       ],
       "@epikodelabs/streamix": [
         "./projects/libraries/streamix/src/lib/index.ts"
+      ],
+      "@epikodelabs/streamix/angular": [
+        "./projects/libraries/streamix/angular/src/lib/index.ts"
+      ],
+      "@epikodelabs/streamix/angular/compiler": [
+        "./projects/libraries/streamix/angular/src/compiler/public-api.ts"
       ]
     },
     "types": [

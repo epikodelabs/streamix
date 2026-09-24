@@ -1,6 +1,7 @@
 {
   "entryPoints": [
     "projects/libraries/streamix/src/public-api.ts",
+    "projects/libraries/streamix/angular/src/public-api.ts",
     "projects/libraries/streamix/aggregates/src/public-api.ts",
     "projects/libraries/streamix/dom/src/public-api.ts",
     "projects/libraries/streamix/networking/src/public-api.ts"

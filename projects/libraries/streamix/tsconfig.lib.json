@@ -23,6 +23,12 @@
       ],
       "@epikodelabs/streamix": [
         "./src/lib/index.ts"
+      ],
+      "@epikodelabs/streamix/angular": [
+        "./angular/src/lib/index.ts"
+      ],
+      "@epikodelabs/streamix/angular/compiler": [
+        "./angular/src/compiler/public-api.ts"
       ]
     }
   },

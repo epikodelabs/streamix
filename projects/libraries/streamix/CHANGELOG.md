@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Fixed compiled Angular renderer validation issues: scheduler slot-reuse stale flushes, unsafe compiler source expressions, and generated `.sx.ts` companion naming; added focused regression tests.
+- Hardened the compiled Angular renderer with latest-value-wins scheduling, stale-rebind protection, duplicate keyed-collection diagnostics, DOM identity and cleanup tests, plus claim-free scalar/coalescing/keyed benchmark harnesses.
+- Replaced the transitional structural HTML factory with compiler-generated DOM creation and direct interpolation updaters for `sxAtom` value/keyed blocks; generated structural code no longer parses HTML at runtime.
+- Added compiled `sxAtom` structural blocks: direct value blocks and keyed collection DOM ranges, compiler microsyntax parsing, keyed reuse/moves, and structural code emission without Angular view change detection.
+- Removed the compiled-view `data-sx`/`querySelector` bridge for static templates; the compiler now emits whitespace-independent direct element paths and rejects structural bindings until structural lowering is available.
+- Added compiled-view lifecycle/build integration: generated `*.sx.ts` setup modules, deterministic per-component build payloads, `afterNextRender` setup, and `DestroyRef` cleanup through public Angular APIs.
+- Added the first `sx` application build-transform core: removes `sx` bindings from Angular ownership, emits stable host-node markers, and generates component binding-table setup code without private Ivy APIs.
+- Added Angular-template parsing for the `sx` compiler path using `@angular/compiler`, with stable node IDs, dotted binding classification, source-expression preservation, and deterministic binding-table emission.
+- Added compiler-generated `sx` binding-table runtime: preallocated integer slots, one scheduler entry per compiled view, direct `ɵsx*` DOM instructions, and the `@epikodelabs/streamix/angular/compiler` binding-plan emitter.
+- Simplified the Angular renderer template API to the `sx` namespace: `[sx.text]`, `[sx.<property>]`, `[sx.attr.<name>]`, `[sx.class.<name>]`, and `[sx.style.<property>]`; removed the verbose public `sxPropName`, `sxAttrName`, `sxClassName`, and `sxStyleName` APIs.
+- Expanded `@epikodelabs/streamix/angular` with a shared integer-indexed dirty-binding scheduler and direct `sxProp`, `sxAttr`, `sxClass`, and `sxStyle` bindings; all direct bindings now share one animation-frame flush.
+- Added `@epikodelabs/streamix/angular` with compiler-ready direct text bindings, the `sxText` Angular directive, frame-coalesced rendering, and an optimized keyed `*sxAtom` structural bridge.
+
 ## 3.0.1
 
 The v3 rewrite. The subject-centric streaming API gives way to a three-part model — **atoms** for values, **flows** for sequences, **scopes** for ownership — with the async-iterator foundation carried over from 2.x.

@@ -5,9 +5,11 @@
   },
   "include": [
     "src/tests/**/*.spec.ts",
+    "angular/src/tests/**/*.spec.ts",
     "aggregates/src/tests/**/*.spec.ts",
     "dom/src/tests/**/*.spec.ts",
     "networking/src/tests/**/*.spec.ts",
-    "src/**/*.d.ts"
+    "src/**/*.d.ts",
+    "angular/src/compiler/**/*.spec.ts"
   ]
 }

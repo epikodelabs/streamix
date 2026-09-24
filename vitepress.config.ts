@@ -8,6 +8,16 @@ export default defineConfig({
 
   cleanUrls: true,
 
+  vite: {
+    build: {
+      rolldownOptions: {
+        checks: {
+          pluginTimings: false
+        }
+      }
+    }
+  },
+
   themeConfig: {
     nav: [
       { text: 'Home', link: '/' },

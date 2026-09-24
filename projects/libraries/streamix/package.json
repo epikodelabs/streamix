@@ -19,6 +19,7 @@
   "files": [
     "fesm2022/",
     "types/",
+    "angular/",
     "aggregates/",
     "dom/",
     "networking/",
@@ -31,5 +32,17 @@
     "type": "git",
     "url": "https://github.com/epikodelabs/streamix.git"
   },
-  "author": "Oleksii Shepel <oleksii.shepel@outlook.com>"
+  "author": "Oleksii Shepel <oleksii.shepel@outlook.com>",
+  "peerDependencies": {
+    "@angular/core": "^22.1.0",
+    "@angular/compiler": "^22.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@angular/core": {
+      "optional": true
+    },
+    "@angular/compiler": {
+      "optional": true
+    }
+  }
 }

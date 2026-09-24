@@ -3,17 +3,16 @@ import { isAtom } from "../utils/helpers";
 import { iterate } from "./iterate";
 import { DONE, isPromiseLike, NEXT, type MaybePromise } from "./operator";
 
+import { ANALOG_DELIVERY } from "./delivery";
 import {
   markAtomAsEmitted,
   registerWithCurrentScope,
 } from "./scope";
-import { ANALOG_DELIVERY } from "./delivery";
 import { createSubscription, type Subscription } from "./subscription";
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * Architectural Symbols
  * ───────────────────────────────────────────────────────────────────────────*/
-
 const NODE = Symbol("engine.node");
 const META = Symbol("engine.meta");
 const MARK_DIRTY = Symbol("engine.markDirty");

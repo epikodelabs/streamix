@@ -9,9 +9,11 @@
   },
   "include": [
     "src/**/*.ts",
+    "angular/**/*.ts",
     "aggregates/**/*.ts",
     "dom/**/*.ts",
     "networking/**/*.ts",
-    "tests/**src/**/*.ts"
+    "tests/**src/**/*.ts",
+    "angular/src/compiler/**/*.ts"
   ]
 }
