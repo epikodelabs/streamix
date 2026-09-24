@@ -4,6 +4,15 @@ import type {
 } from '@epikodelabs/streamix';
 
 import {
+  equalClass,
+  equalText,
+  writeAttribute,
+  writeClass,
+  writeProperty,
+  writeStyle,
+  writeText,
+} from './binding-writers';
+import {
   rendererScheduler,
   type RendererScheduler,
   type ScheduledBinding,
@@ -96,12 +105,8 @@ export function bindText(
 ): DirectBinding {
   return bindDirect(source, {
     read: current => current.value,
-    write: value => {
-      target.textContent = value == null ? '' : String(value);
-    },
-    equal: (previous, next) =>
-      (previous == null ? '' : String(previous)) ===
-      (next == null ? '' : String(next)),
+    write: writeText(target),
+    equal: equalText,
   }, options);
 }
 
@@ -116,9 +121,7 @@ export function bindProperty<T>(
 ): DirectBinding {
   return bindDirect(source, {
     read: current => current.value,
-    write: value => {
-      (target as Record<string, unknown>)[property] = value;
-    },
+    write: writeProperty(target, property),
   }, options);
 }
 
@@ -136,14 +139,7 @@ export function bindAttribute(
 ): DirectBinding {
   return bindDirect(source, {
     read: current => current.value,
-    write: value => {
-      if (value == null || value === false) {
-        target.removeAttribute(attribute);
-        return;
-      }
-
-      target.setAttribute(attribute, value === true ? '' : String(value));
-    },
+    write: writeAttribute(target, attribute),
   }, options);
 }
 
@@ -158,10 +154,8 @@ export function bindClass(
 ): DirectBinding {
   return bindDirect(source, {
     read: current => current.value,
-    write: value => {
-      target.classList.toggle(className, Boolean(value));
-    },
-    equal: (previous, next) => Boolean(previous) === Boolean(next),
+    write: writeClass(target, className),
+    equal: equalClass,
   }, options);
 }
 
@@ -178,13 +172,6 @@ export function bindStyle(
 ): DirectBinding {
   return bindDirect(source, {
     read: current => current.value,
-    write: value => {
-      if (value == null || value === false) {
-        target.style.removeProperty(property);
-        return;
-      }
-
-      target.style.setProperty(property, String(value));
-    },
+    write: writeStyle(target, property),
   }, options);
 }

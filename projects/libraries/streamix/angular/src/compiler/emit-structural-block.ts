@@ -1,6 +1,9 @@
 import {
   compileSxBlockTemplate,
 } from './block-template-compiler';
+import {
+  indent,
+} from './codegen';
 import type {
   SxStructuralPlanEntry,
 } from './structural-plan';
@@ -101,18 +104,4 @@ function emitRangeAndInstance(
     `${inner}context,`,
     `${pad});`,
   ].join('\n');
-}
-
-function indent(
-  source: string,
-  spaces: number,
-): string {
-  if (!source) return '';
-
-  const prefix = ' '.repeat(spaces);
-
-  return source
-    .split('\n')
-    .map(line => `${prefix}${line}`)
-    .join('\n');
 }

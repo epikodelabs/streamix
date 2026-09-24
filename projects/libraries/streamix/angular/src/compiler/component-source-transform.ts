@@ -1,3 +1,7 @@
+import {
+  emitLifecycleInitializer,
+} from './emit-component-module';
+
 export interface SxComponentSourceTransformOptions {
   readonly setupImportPath: string;
   readonly setupName?: string;
@@ -54,13 +58,12 @@ export function installSxLifecycleIntoComponentSource(
   const insertion =
     classMatch.index + classMatch[0].length;
 
-  const initializer = [
-    ``,
-    `  private readonly ɵsx = ɵinstallSxCompiledView(`,
-    `    this,`,
-    `    ${setupName},`,
-    `  );`,
-  ].join('\n');
+  // One source of truth for the initializer: the emit-component-module
+  // helper the build adapter also uses, re-indented for the class body.
+  const initializer = `\n${emitLifecycleInitializer(setupName)
+    .split('\n')
+    .map(line => `  ${line}`)
+    .join('\n')}`;
 
   return {
     source:

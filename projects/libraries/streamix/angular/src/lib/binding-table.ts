@@ -4,6 +4,15 @@ import type {
 } from '@epikodelabs/streamix';
 
 import {
+  equalClass,
+  equalText,
+  writeAttribute,
+  writeClass,
+  writeProperty,
+  writeStyle,
+  writeText,
+} from './binding-writers';
+import {
   rendererScheduler,
   type RendererScheduler,
   type ScheduledBinding,
@@ -243,16 +252,7 @@ export function ɵsxText(
   target: Node,
   source: DependencySource<unknown>,
 ): void {
-  table.bind(
-    slot,
-    source,
-    value => {
-      target.textContent = value == null ? '' : String(value);
-    },
-    (previous, next) =>
-      (previous == null ? '' : String(previous)) ===
-      (next == null ? '' : String(next)),
-  );
+  table.bind(slot, source, writeText(target), equalText);
 }
 
 /**
@@ -267,9 +267,7 @@ export function ɵsxProperty<T>(
   property: string,
   source: DependencySource<T>,
 ): void {
-  table.bind(slot, source, value => {
-    (target as Record<string, unknown>)[property] = value;
-  });
+  table.bind(slot, source, writeProperty(target, property));
 }
 
 /**
@@ -284,14 +282,7 @@ export function ɵsxAttribute(
   attribute: string,
   source: DependencySource<unknown>,
 ): void {
-  table.bind(slot, source, value => {
-    if (value == null || value === false) {
-      target.removeAttribute(attribute);
-      return;
-    }
-
-    target.setAttribute(attribute, value === true ? '' : String(value));
-  });
+  table.bind(slot, source, writeAttribute(target, attribute));
 }
 
 /**
@@ -306,14 +297,7 @@ export function ɵsxClass(
   className: string,
   source: DependencySource<unknown>,
 ): void {
-  table.bind(
-    slot,
-    source,
-    value => {
-      target.classList.toggle(className, Boolean(value));
-    },
-    (previous, next) => Boolean(previous) === Boolean(next),
-  );
+  table.bind(slot, source, writeClass(target, className), equalClass);
 }
 
 /**
@@ -328,12 +312,5 @@ export function ɵsxStyle(
   property: string,
   source: DependencySource<unknown>,
 ): void {
-  table.bind(slot, source, value => {
-    if (value == null || value === false) {
-      target.style.removeProperty(property);
-      return;
-    }
-
-    target.style.setProperty(property, String(value));
-  });
+  table.bind(slot, source, writeStyle(target, property));
 }

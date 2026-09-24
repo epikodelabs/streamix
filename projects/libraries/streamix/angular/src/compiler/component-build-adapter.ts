@@ -1,5 +1,6 @@
 import {
   emitLifecycleInitializer,
+  emitRuntimeImportHeader,
 } from './emit-component-module';
 import {
   transformAngularComponentTemplate,
@@ -73,14 +74,7 @@ function emitComponentModuleFromSetup(
   setup: string,
 ): string {
   return [
-    `import {`,
-    `  createBindingTable,`,
-    `  ɵsxAttribute,`,
-    `  ɵsxClass,`,
-    `  ɵsxProperty,`,
-    `  ɵsxStyle,`,
-    `  ɵsxText,`,
-    `} from '@epikodelabs/streamix/angular';`,
+    emitRuntimeImportHeader(),
     ``,
     setup,
     ``,

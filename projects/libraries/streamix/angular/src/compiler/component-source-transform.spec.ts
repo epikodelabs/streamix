@@ -28,7 +28,7 @@ export class CounterComponent {
       "import { ɵsetupSxBindings } from \"./counter.component.ts.sx\";",
     );
     expect(result.source).toContain(
-      'private readonly ɵsx = ɵinstallSxCompiledView(',
+      'protected readonly ɵsx = ɵinstallSxCompiledView(',
     );
   });
 

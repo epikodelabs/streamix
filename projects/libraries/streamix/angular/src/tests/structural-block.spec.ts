@@ -4,10 +4,12 @@ import {
 
 import {
   ɵcreateSxKeyedBlock,
-  ɵcreateSxStaticBlock,
   ɵcreateSxValueBlock,
-  ɵupdateSxStaticBlock,
 } from '../lib';
+import {
+  ɵcreateSxStaticBlock,
+  ɵupdateSxStaticBlock,
+} from '../lib/static-block';
 
 idescribe('sx structural runtime', () => {
   it('creates and destroys a direct value block', () => {

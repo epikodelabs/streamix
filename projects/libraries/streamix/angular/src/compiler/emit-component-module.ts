@@ -13,6 +13,24 @@ export interface SxComponentModuleOptions {
 const DEFAULT_RUNTIME_IMPORT = '@epikodelabs/streamix/angular';
 
 /**
+ * Emits the runtime import header shared by every generated setup module.
+ */
+export function emitRuntimeImportHeader(
+  runtimeImport: string = DEFAULT_RUNTIME_IMPORT,
+): string {
+  return [
+    `import {`,
+    `  createBindingTable,`,
+    `  ɵsxAttribute,`,
+    `  ɵsxClass,`,
+    `  ɵsxProperty,`,
+    `  ɵsxStyle,`,
+    `  ɵsxText,`,
+    `} from ${JSON.stringify(runtimeImport)};`,
+  ].join('\n');
+}
+
+/**
  * Emits a complete generated module containing the direct binding setup.
  *
  * The setup module imports only the compiler/runtime primitives required by
@@ -23,20 +41,11 @@ export function emitComponentModule(
   parsed: ParsedSxTemplate,
   options: SxComponentModuleOptions = {},
 ): string {
-  const runtimeImport =
-    options.runtimeImport ?? DEFAULT_RUNTIME_IMPORT;
   const setupName =
     options.setupName ?? 'ɵsetupSxBindings';
 
   return [
-    `import {`,
-    `  createBindingTable,`,
-    `  ɵsxAttribute,`,
-    `  ɵsxClass,`,
-    `  ɵsxProperty,`,
-    `  ɵsxStyle,`,
-    `  ɵsxText,`,
-    `} from ${JSON.stringify(runtimeImport)};`,
+    emitRuntimeImportHeader(options.runtimeImport),
     ``,
     emitComponentSetup(parsed, setupName),
     ``,

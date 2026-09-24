@@ -1,4 +1,7 @@
 import {
+  indent,
+} from './codegen';
+import {
   emitStructuralBlock,
 } from './emit-structural-block';
 import type {
@@ -38,16 +41,4 @@ export function emitStructuralModule(
     `}`,
     ``,
   ].join('\n');
-}
-
-function indent(
-  source: string,
-  spaces: number,
-): string {
-  const prefix = ' '.repeat(spaces);
-
-  return source
-    .split('\n')
-    .map(line => `${prefix}${line}`)
-    .join('\n');
 }

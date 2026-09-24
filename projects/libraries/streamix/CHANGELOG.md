@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Streamlined the Angular package: removed the dead compiler view/binding-table emitters and the four unexported single-binding directives, demoted the transitional static HTML block factory from the public API, unified the duplicated DOM write/equal closures behind one internal writers module, shared the generated-code helpers (runtime import header, indent), and consolidated the lifecycle initializer on a single `protected` emitter.
 - Hardened the compiled-view lifecycle and scheduler failure isolation: the setup contract now returns a teardown handle (satisfied by binding tables and compiled structural blocks) that `DestroyRef` destroys with the component, and throwing writers no longer strand sibling slots or leak errors out of the animation-frame flush.
 - Fixed compiler static-topology correctness holes: sx attributes are stripped by parser source spans (both quote styles, never text content), `ng-container` is transparent when computing element paths, and structural directives, built-in control-flow blocks, and content projection are rejected at the AST level whenever direct sx bindings exist.
 - Fixed compiled Angular renderer validation issues: scheduler slot-reuse stale flushes, unsafe compiler source expressions, and generated `.sx.ts` companion naming; added focused regression tests.
