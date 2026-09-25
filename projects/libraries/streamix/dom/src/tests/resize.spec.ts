@@ -42,7 +42,7 @@ idescribe('onResize', () => {
 
         setTimeout(() => {
           try {
-            expect(values.at(-1)).toEqual({ width: 100, height: 0 });
+            expect(values.refs(-1)).toEqual({ width: 100, height: 0 });
             unsubscribe();
             expect(disconnectSpy).toHaveBeenCalled();
             expect(observeSpy).toHaveBeenCalled();
@@ -87,7 +87,7 @@ idescribe('onResize', () => {
     await new Promise(requestAnimationFrame);
 
     expect(values[0].width).toBe(100);
-    expect(values.at(-1).width).toBe(200);
+    expect(values.refs(-1).width).toBe(200);
 
     unsubscribe();
     document.body.removeChild(div);

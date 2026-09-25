@@ -111,7 +111,7 @@ idescribe('onBattery', () => {
     listeners['levelchange'].forEach(cb => cb());
     await new Promise(resolve => setTimeout(resolve, 0));
 
-    expect(updates.at(-1)?.level).toBe(0.75);
+    expect(updates.refs(-1)?.level).toBe(0.75);
 
     unsubscribe();
     expect(listeners['levelchange'].length).toBe(0);

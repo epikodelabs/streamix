@@ -501,7 +501,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         }),
     }));
     ngOnInit(): void {
-        const clicksAtom = this.appScope.at('clicks');
+        const clicksAtom = this.appScope.refs('clicks');
         const bufferUnsubscribe = pipe(clicksAtom, bufferCount(5)).subscribe((batch: string[]) => {
             this.batches.unshift(batch);
             if (this.batches.length > 8)
@@ -510,7 +510,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewInit {
         });
         this.appScope.cleanups.add(() => bufferUnsubscribe());
 
-        const unsubscribe = this.appScope.at('combined').subscribe(v => {
+        const unsubscribe = this.appScope.refs('combined').subscribe(v => {
             this.combinedValue = v;
             this.cdr.detectChanges();
         });

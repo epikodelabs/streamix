@@ -1,8 +1,8 @@
 import {
-  jsonWebSocketCodec,
-  textWebSocketCodec,
-  webSocket,
-  type WebSocketCodec,
+    jsonWebSocketCodec,
+    textWebSocketCodec,
+    webSocket,
+    type WebSocketCodec,
 } from '@epikodelabs/streamix/networking';
 import { idescribe } from './env.spec';
 
@@ -294,7 +294,7 @@ idescribe('webSocket', () => {
     try {
       const stream = webSocket<any>('ws://test-default', { codec: jsonWebSocketCodec });
       const iterator = stream[Symbol.asyncIterator]();
-      const ws = MockWebSocket.instances.at(-1)!;
+      const ws = MockWebSocket.instances.refs(-1)!;
 
       setTimeout(() => {
         ws.triggerMessage({ ok: true });
