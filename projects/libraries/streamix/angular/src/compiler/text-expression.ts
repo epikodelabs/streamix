@@ -1,4 +1,4 @@
-import type { SxDependencySourceResolver } from './source-resolution';
+import type { SxReactiveSourceResolver } from './source-resolution';
 
 export type SxTextExpressionMode =
   | 'direct'
@@ -74,7 +74,7 @@ const ALLOWED_BARE_IDENTIFIERS = new Set([
  */
 export function analyzeSxTextInterpolation(
   interpolationSource: string,
-  isDependencySource?: SxDependencySourceResolver,
+  resolveReactiveSource?: SxReactiveSourceResolver,
 ): SxTextExpressionAnalysis | undefined {
   const match = /^\s*\{\{([\s\S]*?)\}\}\s*$/.exec(interpolationSource);
   const authoredExpression = match?.[1]?.trim();
@@ -85,7 +85,7 @@ export function analyzeSxTextInterpolation(
 
   const normalized = normalizeSourceTransparentExpression(
     authoredExpression,
-    isDependencySource,
+    resolveReactiveSource,
   );
   const expression = normalized.expression;
 
@@ -167,9 +167,9 @@ export function rewriteSxTextExpression(
 
 function normalizeSourceTransparentExpression(
   expression: string,
-  isDependencySource?: SxDependencySourceResolver,
+  resolveReactiveSource?: SxReactiveSourceResolver,
 ): { expression: string; changed: boolean } {
-  if (!isDependencySource) {
+  if (!resolveReactiveSource) {
     return { expression, changed: false };
   }
 
@@ -212,14 +212,14 @@ function normalizeSourceTransparentExpression(
       const path = match?.[1];
 
       if (path) {
-        const source = longestDependencySourcePrefix(path, isDependencySource);
-        if (source) {
+        const resolved = longestReactiveSourcePrefix(path, resolveReactiveSource);
+        if (resolved) {
           replacements.push({
             start: index,
-            end: index + source.length,
-            text: `${source}.value`,
+            end: index + resolved.valuePath.length,
+            text: `${resolved.sourcePath}.value`,
           });
-          index += source.length;
+          index += resolved.valuePath.length;
           continue;
         }
 
@@ -246,16 +246,17 @@ function normalizeSourceTransparentExpression(
   return { expression: normalized, changed: true };
 }
 
-function longestDependencySourcePrefix(
+function longestReactiveSourcePrefix(
   path: string,
-  isDependencySource: SxDependencySourceResolver,
-): string | undefined {
+  resolveReactiveSource: SxReactiveSourceResolver,
+): { valuePath: string; sourcePath: string } | undefined {
   const segments = path.split('.');
 
   for (let count = segments.length; count >= 1; count -= 1) {
-    const candidate = segments.slice(0, count).join('.');
-    if (isDependencySource(candidate)) {
-      return candidate;
+    const valuePath = segments.slice(0, count).join('.');
+    const sourcePath = resolveReactiveSource(valuePath);
+    if (sourcePath) {
+      return { valuePath, sourcePath };
     }
   }
 

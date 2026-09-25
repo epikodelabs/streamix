@@ -18,7 +18,11 @@ import {
   extractComponentSourcePath,
   extractDirectValueSource,
 } from './text-expression';
-import type { SxDependencySourceResolver } from './source-resolution';
+import {
+  adaptDependencySourceResolver,
+  type SxDependencySourceResolver,
+  type SxReactiveSourceResolver,
+} from './source-resolution';
 
 export type { SxSourceSpan } from './binding-plan';
 
@@ -48,6 +52,8 @@ export interface ParseSxTemplateOptions {
    * Compile-time source classifier supplied by the component TypeScript build
    * adapter. Runtime duck typing is intentionally not used.
    */
+  readonly resolveReactiveSource?: SxReactiveSourceResolver;
+  /** @deprecated Prefer `resolveReactiveSource`. */
   readonly isDependencySource?: SxDependencySourceResolver;
 }
 
@@ -69,7 +75,7 @@ interface WalkState {
   readonly nodes: string[];
   readonly nodePaths: Record<string, number[]>;
   readonly strict: boolean;
-  readonly isDependencySource?: SxDependencySourceResolver;
+  readonly resolveReactiveSource?: SxReactiveSourceResolver;
   nextNode: number;
 }
 
@@ -194,6 +200,9 @@ export function parseSxTemplate(
     throw new Error(parsed.errors.map(error => error.toString()).join('\n'));
   }
 
+  const resolveReactiveSource = options.resolveReactiveSource ??
+    adaptDependencySourceResolver(options.isDependencySource);
+
   const state: WalkState = {
     template,
     bindings: [],
@@ -204,9 +213,9 @@ export function parseSxTemplate(
     strict: containsCompiledBinding(
       parsed.nodes,
       template,
-      options.isDependencySource,
+      resolveReactiveSource,
     ),
-    isDependencySource: options.isDependencySource,
+    resolveReactiveSource,
     nextNode: 0,
   };
 
@@ -320,9 +329,7 @@ function visitElement(
       ? extractComponentSourcePath(expression)
       : undefined;
     const transparentSource = transparentPath &&
-      state.isDependencySource?.(transparentPath)
-        ? transparentPath
-        : undefined;
+      state.resolveReactiveSource?.(transparentPath);
     const source = explicitSource ?? transparentSource;
 
     if (!source) {
@@ -358,7 +365,7 @@ function visitElement(
       const raw = sourceText(state.template, child.sourceSpan);
       const analysis = analyzeSxTextInterpolation(
         raw,
-        state.isDependencySource,
+        state.resolveReactiveSource,
       );
 
       if (analysis) {
@@ -416,11 +423,11 @@ function visitElement(
 function containsCompiledBinding(
   node: unknown,
   template: string,
-  isDependencySource?: SxDependencySourceResolver,
+  resolveReactiveSource?: SxReactiveSourceResolver,
 ): boolean {
   if (Array.isArray(node)) {
     return node.some(child =>
-      containsCompiledBinding(child, template, isDependencySource)
+      containsCompiledBinding(child, template, resolveReactiveSource)
     );
   }
 
@@ -451,8 +458,8 @@ function containsCompiledBinding(
           ? extractComponentSourcePath(expression)
           : undefined;
         const source = explicitSource ?? (
-          transparentPath && isDependencySource?.(transparentPath)
-            ? transparentPath
+          transparentPath
+            ? resolveReactiveSource?.(transparentPath)
             : undefined
         );
 
@@ -469,7 +476,7 @@ function containsCompiledBinding(
       const child = node.children[0];
       if (child instanceof TmplAstBoundText) {
         const raw = sourceText(template, child.sourceSpan);
-        if (analyzeSxTextInterpolation(raw, isDependencySource)) {
+        if (analyzeSxTextInterpolation(raw, resolveReactiveSource)) {
           return true;
         }
       }
@@ -479,7 +486,7 @@ function containsCompiledBinding(
   const record = node as Record<string, unknown>;
   return Object.values(record).some(
     value => value !== (record as { inputs?: unknown }).inputs &&
-      containsCompiledBinding(value, template, isDependencySource),
+      containsCompiledBinding(value, template, resolveReactiveSource),
   );
 }
 

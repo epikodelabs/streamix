@@ -114,8 +114,8 @@ function Counter() {
     doubled: (self) => self.count * 2,
   }));
 
-  const [count, setCount] = useWritable(state.at.count);
-  const doubled = useIterable(state.at.doubled);
+  const [count, setCount] = useWritable(state.refs.count);
+  const doubled = useIterable(state.refs.doubled);
 
   return (
     <button onClick={() => setCount(count + 1)}>

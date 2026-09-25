@@ -15,8 +15,9 @@ export interface SxBuildTransformResult {
 /**
  * Build-tool-facing sx transform.
  *
- * `options.isDependencySource` should be backed by the component TypeScript
- * checker when source-transparent templates are enabled.
+ * `options.resolveReactiveSource` should be backed by the component TypeScript
+ * checker when source-transparent templates are enabled. It may map a value-first
+ * Scope path such as `model.count` to `model.refs.count`.
  */
 export function transformAngularComponentTemplate(
   template: string,

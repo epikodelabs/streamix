@@ -33,6 +33,30 @@ describe('Scope System', () => {
       s.dispose();
     });
 
+    it('should expose value-first state through recursive refs', () => {
+      const s = scope({
+        count: 1,
+        user: {
+          name: 'Ada',
+          length: 4,
+        },
+      });
+
+      expect(s.count).toBe(1);
+      expect(s.refs.count.value).toBe(1);
+      expect(s.user.name).toBe('Ada');
+      expect(s.refs.user.name.value).toBe('Ada');
+      expect(s.refs.user.length.value).toBe(4);
+      expect(s.refs('count')).toBe(s.refs.count);
+
+      s.refs.count.set(2);
+      s.refs.user.name.set('Grace');
+
+      expect(s.count).toBe(2);
+      expect(s.user.name).toBe('Grace');
+      s.dispose();
+    });
+
     it('should merge factory return values', () => {
       interface Shape {
         count: number;
@@ -205,7 +229,7 @@ describe('Scope System', () => {
       await delay();
 
       expect(s.createdAt).toBe(updatedAt);
-      expect(s.at('createdAt').value).toBe(updatedAt);
+      expect(s.refs('createdAt').value).toBe(updatedAt);
       s.dispose();
     });
   });
@@ -379,9 +403,9 @@ describe('Scope System', () => {
       }));
 
       expect(s.loading).toBe(true);
-      expect(hasAtomEmitted(s.at('pending'))).toBe(false);
+      expect(hasAtomEmitted(s.refs('pending'))).toBe(false);
 
-      s.at('pending').dispose();
+      s.refs('pending').dispose();
       await delay();
 
       expect(s.loading).toBe(false);
@@ -426,7 +450,7 @@ describe('Scope System', () => {
       const pending = atom<string>();
       const child = scope({ pending });
       const parent = scope<ParentShape>({
-        childLoading: child.at.loading as any,
+        childLoading: child.refs.loading as any,
         summary: (self: ParentShape) => self.childLoading ? 'loading' : 'ready',
       });
 
@@ -538,12 +562,12 @@ describe('Scope System', () => {
 
       const s = scope<Shape>({ a: 0, b: 0 });
 
-      expect(s.at('a').disposed).toBe(false);
-      expect(s.at('b').disposed).toBe(false);
+      expect(s.refs('a').disposed).toBe(false);
+      expect(s.refs('b').disposed).toBe(false);
 
       s.dispose();
-      expect(s.at('a').disposed).toBe(true);
-      expect(s.at('b').disposed).toBe(true);
+      expect(s.refs('a').disposed).toBe(true);
+      expect(s.refs('b').disposed).toBe(true);
     });
 
     it('should dispose nested scopes recursively', () => {
@@ -562,9 +586,9 @@ describe('Scope System', () => {
         },
       });
 
-      expect(parent.child.grandchild.at('x').disposed).toBe(false);
+      expect(parent.child.grandchild.refs('x').disposed).toBe(false);
       parent.dispose();
-      expect(parent.child.grandchild.at('x').disposed).toBe(true);
+      expect(parent.child.grandchild.refs('x').disposed).toBe(true);
       source.dispose();
     });
 
@@ -618,7 +642,7 @@ describe('Scope System', () => {
     it('should propagate ordinary scope writes immediately', () => {
       const s = scope({ a: 0 });
       const values: number[] = [];
-      s.at('a').subscribe(value => values.push(value));
+      s.refs('a').subscribe(value => values.push(value));
 
       s.a = 1;
       s.a = 2;
@@ -636,7 +660,7 @@ describe('Scope System', () => {
 
       const s = scope<Shape>({ a: 0, b: 0, total: self => self.a + self.b });
       const values: number[] = [];
-      s.at('total').subscribe(value => values.push(value));
+      s.refs('total').subscribe(value => values.push(value));
       expect(s.total).toBe(0);
 
       transaction(() => {
@@ -659,8 +683,8 @@ describe('Scope System', () => {
       expect(s.type).toBe('scope');
       expect(s.name).toBe('test');
       expect(s.count).toBe(0);
-      expect(s.at('name').value).toBe('test');
-      expect(s.at('count').value).toBe(0);
+      expect(s.refs('name').value).toBe('test');
+      expect(s.refs('count').value).toBe(0);
       s.dispose();
     });
 
@@ -673,8 +697,8 @@ describe('Scope System', () => {
       await delay();
       expect(s.name).toBe('updated');
       expect(s.count).toBe(5);
-      expect(s.at('name').value).toBe('updated');
-      expect(s.at('count').value).toBe(5);
+      expect(s.refs('name').value).toBe('updated');
+      expect(s.refs('count').value).toBe(5);
       s.dispose();
     });
 
@@ -769,11 +793,11 @@ describe('Scope System', () => {
         count: 0
       });
 
-      expect(s.at('count').disposed).toBe(false);
-      expect(s.user.at('name').disposed).toBe(false);
+      expect(s.refs('count').disposed).toBe(false);
+      expect(s.user.refs('name').disposed).toBe(false);
       s.dispose();
-      expect(s.at('count').disposed).toBe(true);
-      expect(s.user.at('name').disposed).toBe(true);
+      expect(s.refs('count').disposed).toBe(true);
+      expect(s.user.refs('name').disposed).toBe(true);
     });
 
     it('should subscribe to shorthand atoms via subscribeTo', async () => {
@@ -1478,7 +1502,7 @@ describe('Scope System', () => {
 
       // Source updates should not affect disposed atom
       source.next(42);
-      expect(s.at('a').safeValue).toBe(0);
+      expect(s.refs('a').safeValue).toBe(0);
       expect(() => s.a).toThrow();
 
       source.dispose();

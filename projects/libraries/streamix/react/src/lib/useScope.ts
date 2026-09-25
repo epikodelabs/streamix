@@ -22,8 +22,8 @@ import { cancelDeferredDispose, deferDispose } from "./internal/deferredDispose"
  *     doubled: (self) => self.count * 2,
  *   }));
  *
- *   const count = useIterable(state.at.count);
- *   const doubled = useIterable(state.at.doubled);
+ *   const count = useIterable(state.refs.count);
+ *   const doubled = useIterable(state.refs.doubled);
  *
  *   return (
  *     <button onClick={() => { state.count = count + 1; }}>

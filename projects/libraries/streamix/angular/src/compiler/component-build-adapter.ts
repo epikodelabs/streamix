@@ -5,8 +5,15 @@ import {
 import {
   transformAngularComponentTemplate,
 } from './build-transform';
-import { createDependencySourcePathResolver } from './source-resolution';
-import type { SxDependencySourceResolver } from './source-resolution';
+import {
+  adaptDependencySourceResolver,
+  combineReactiveSourceResolvers,
+  createDependencySourcePathResolver,
+  createReactiveSourcePathResolver,
+  createScopeValuePathResolver,
+  type SxDependencySourceResolver,
+  type SxReactiveSourceResolver,
+} from './source-resolution';
 
 export interface SxComponentBuildInput {
   readonly componentPath: string;
@@ -16,12 +23,19 @@ export interface SxComponentBuildInput {
    * TypeScript-checker-backed resolver for source-transparent template syntax.
    * Prefer this in real builder integrations.
    */
+  readonly resolveReactiveSource?: SxReactiveSourceResolver;
+  /** @deprecated Prefer `resolveReactiveSource`. */
   readonly isDependencySource?: SxDependencySourceResolver;
-  /**
-   * Convenience metadata for adapters that have already discovered the exact
-   * DependencySource property paths for this component.
-   */
+  /** Standalone DependencySource property paths. */
   readonly dependencySourcePaths?: readonly string[];
+  /** Explicit value-path -> reactive-source-path metadata. */
+  readonly reactiveSourcePaths?: Readonly<Record<string, string>>;
+  /**
+   * Scope value members grouped by Scope path. For example
+   * `{ model: ['count', 'user.name'] }` maps to
+   * `model.refs.count` and `model.refs.user.name`.
+   */
+  readonly scopeValuePaths?: Readonly<Record<string, readonly string[]>>;
 }
 
 export interface SxGeneratedFile {
@@ -51,16 +65,24 @@ export interface SxComponentBuildOutput {
 export function compileSxComponent(
   input: SxComponentBuildInput,
 ): SxComponentBuildOutput {
-  const isDependencySource = input.isDependencySource ?? (
+  const resolveReactiveSource = combineReactiveSourceResolvers(
+    input.resolveReactiveSource,
+    input.reactiveSourcePaths
+      ? createReactiveSourcePathResolver(input.reactiveSourcePaths)
+      : undefined,
+    input.scopeValuePaths
+      ? createScopeValuePathResolver(input.scopeValuePaths)
+      : undefined,
     input.dependencySourcePaths
       ? createDependencySourcePathResolver(input.dependencySourcePaths)
-      : undefined
+      : undefined,
+    adaptDependencySourceResolver(input.isDependencySource),
   );
 
   const transformed = transformAngularComponentTemplate(
     input.template,
     input.templatePath ?? input.componentPath,
-    { isDependencySource },
+    { resolveReactiveSource },
   );
 
   if (transformed.bindingCount === 0) {

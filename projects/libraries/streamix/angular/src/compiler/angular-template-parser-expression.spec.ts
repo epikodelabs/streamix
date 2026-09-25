@@ -147,3 +147,53 @@ describe('sx source expression diagnostics', () => {
     expect(parsed.plan.size).toBe(0);
   });
 });
+
+describe('scope refs source transparency', () => {
+  const resolveReactiveSource = (path: string) => ({
+    'scoped.count': 'scoped.refs.count',
+    'scoped.price': 'scoped.refs.price',
+    'scoped.busy': 'scoped.refs.busy',
+  } as Record<string, string>)[path];
+
+  it('maps value-first scope expressions to refs-backed dependencies', () => {
+    const parsed = parseSxTemplate(
+      '<span>{{ scoped.count * scoped.price }}</span>',
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(parsed.plan.bindings).toEqual([
+      jasmine.objectContaining({
+        kind: 'text-expression-node',
+        source: 'scoped.refs.count.value * scoped.refs.price.value',
+        dependencies: ['scoped.refs.count', 'scoped.refs.price'],
+      }),
+    ]);
+    expect(parsed.bindingEdits).toEqual([
+      jasmine.objectContaining({
+        replacement: '{{ scoped.refs.count.value * scoped.refs.price.value }}',
+      }),
+    ]);
+  });
+
+  it('maps native scope-value bindings to the matching refs source', () => {
+    const parsed = parseSxTemplate(
+      '<button [disabled]="scoped.busy">Save</button>',
+      'inline.html',
+      { resolveReactiveSource },
+    );
+
+    expect(parsed.plan.bindings).toEqual([
+      jasmine.objectContaining({
+        kind: 'property',
+        source: 'scoped.refs.busy',
+        name: 'disabled',
+      }),
+    ]);
+    expect(parsed.bindingEdits).toEqual([
+      jasmine.objectContaining({
+        replacement: '[disabled]="scoped.refs.busy.value"',
+      }),
+    ]);
+  });
+});

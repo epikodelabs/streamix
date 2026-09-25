@@ -57,6 +57,29 @@ bindings the build adapter can classify:
 <button [disabled]="busy.value"></button>
 ```
 
+### Scope values
+
+Streamix scopes stay value-first in component code:
+
+```ts
+model.count       // number
+model.refs.count  // Writable<number>
+```
+
+Templates stay value-first too:
+
+```html
+<span>{{ model.count }}</span>
+<button [disabled]="model.busy">Save</button>
+<p>{{ model.count * model.price }}</p>
+```
+
+The TypeScript-aware resolver maps those value paths to their reactive backing
+refs (`model.count` -> `model.refs.count`). The generated browser bindings
+subscribe to `refs`; the Angular SSR/hydration fallback reads `.value` from the
+ref internally. `refs` mirrors nested scope state recursively, so
+`model.user.name` can map to `model.refs.user.name`.
+
 ## Expressions
 
 Source-transparent interpolation extends to expressions:
@@ -237,29 +260,41 @@ installSxLifecycleIntoComponentSource(...)
 emitComponentModule(...)
 ```
 
-Source-transparent syntax requires compile-time source metadata. A real builder
-should supply `isDependencySource(path)` from its component TypeScript checker:
+Source-transparent syntax requires compile-time reactive-path metadata. A real
+builder should supply `resolveReactiveSource(path)` from its component
+TypeScript checker:
 
 ```ts
 compileSxComponent({
   componentPath,
   template,
-  isDependencySource(path) {
-    return componentTypeChecker.isDependencySource(path);
+  resolveReactiveSource(path) {
+    // Standalone atom/readable:
+    if (componentTypeChecker.isDependencySource(path)) return path;
+
+    // Value-first Scope member:
+    return componentTypeChecker.scopeRefPath(path);
+    // e.g. model.count -> model.refs.count
   },
 });
 ```
 
-For adapters that already discovered exact paths, `dependencySourcePaths` is a
-convenience input:
+Adapters with already-discovered metadata can use the convenience inputs:
 
 ```ts
 compileSxComponent({
   componentPath,
   template,
-  dependencySourcePaths: ['count', 'busy', 'label', 'active', 'opacity'],
+  dependencySourcePaths: ['count', 'busy'],
+  scopeValuePaths: {
+    model: ['count', 'price', 'busy', 'user.name'],
+  },
 });
 ```
+
+For unusual model layouts, `reactiveSourcePaths` accepts an explicit value-path
+to source-path map. The legacy `isDependencySource` classifier remains accepted
+for standalone sources, but cannot express value-first Scope members.
 
 This metadata is compile-time only. It is never emitted as a runtime source
 classifier.

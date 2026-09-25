@@ -92,8 +92,19 @@ app.events = 'hello';
 
 console.log(app.doubled); // 10
 
+// Scope properties stay value-first. Reach for `refs` only when you need the
+// reactive backing object itself.
+app.refs.count.set(6);
+app.refs.count.subscribe(value => console.log(value));
+
+console.log(app.count); // 6
+
 app.dispose();
 ```
+
+`scope.refs` mirrors nested scope state recursively: `app.user.name` is the
+plain value, while `app.refs.user.name` is its writable/readable Streamix ref.
+Dynamic lookup remains available as `app.refs('count')`.
 
 ### 🔄 Flows: sequences through familiar operators
 

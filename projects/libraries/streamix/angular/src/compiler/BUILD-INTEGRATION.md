@@ -5,7 +5,7 @@ The build contract has five responsibilities:
 ```text
 Angular component TypeScript
         ↓
-TypeScript checker discovers DependencySource property paths
+TypeScript checker resolves value paths to reactive source paths
         ↓
 Angular component template
         ↓
@@ -34,8 +34,9 @@ DestroyRef.onDestroy() -> teardown.destroy()
 ## Source transparency
 
 The template compiler must not decide at runtime whether an arbitrary object is
-a Streamix source. A real builder supplies compile-time source metadata from its
-component TypeScript checker through `isDependencySource(path)`.
+a Streamix source. A real builder supplies compile-time path metadata through
+`resolveReactiveSource(path)`. The resolver returns the DependencySource path
+backing the authored value path.
 
 Example authored template:
 
@@ -44,8 +45,8 @@ Example authored template:
 <button [disabled]="busy"></button>
 ```
 
-When the checker proves `count` and `busy` are `DependencySource`s, the Angular
-SSR/hydration fallback becomes:
+When the checker resolves `count` and `busy` to themselves as standalone
+DependencySources, the Angular SSR/hydration fallback becomes:
 
 ```html
 <span>{{ count.value }}</span>
@@ -55,13 +56,27 @@ SSR/hydration fallback becomes:
 while the generated browser setup subscribes directly to `ctx.count` and
 `ctx.busy`.
 
-`compileSxComponent()` accepts either:
+A value-first Scope uses the same contract:
 
-- `isDependencySource(path)` — preferred for a real TypeScript-aware builder;
-- `dependencySourcePaths` — convenience metadata when the adapter already has
-  the exact source-path set.
+```html
+{{ model.count * model.price }}
+```
 
-Ordinary Angular values are not rewritten.
+can resolve to dependencies `model.refs.count` and `model.refs.price`. The
+Angular fallback reads `model.refs.count.value` / `model.refs.price.value`,
+while authored component and template code remains `model.count` / `model.price`.
+
+`compileSxComponent()` accepts:
+
+- `resolveReactiveSource(path)` — preferred TypeScript-aware resolver;
+- `dependencySourcePaths` — standalone source convenience metadata;
+- `scopeValuePaths` — exact value-first Scope members, mapped through `refs`;
+- `reactiveSourcePaths` — explicit value-path -> source-path mappings.
+
+For example, `model.count` may resolve to `model.refs.count`, while `count` may
+resolve to `count`. Ordinary Angular values return `undefined` and are not
+rewritten. The legacy `isDependencySource(path)` classifier is still accepted
+for standalone sources.
 
 ## Sanitization boundary
 
@@ -136,7 +151,9 @@ compiled structural renderer.
 - `transformAngularComponentTemplate()` — low-level template/fallback transform;
 - `emitComponentModule()` — generated direct-binding module;
 - `installSxLifecycleIntoComponentSource()` — conservative class-source bridge;
-- `createDependencySourcePathResolver()` — convenience source metadata adapter.
+- `createDependencySourcePathResolver()` — standalone source metadata adapter.
+- `createScopeValuePathResolver()` — value-first Scope -> recursive `refs` mapping.
+- `createReactiveSourcePathResolver()` — explicit value/source path mapping.
 
 The source bridge is intentionally not a general TypeScript rewriter. A real
 Angular CLI/Vite/esbuild adapter can replace only that discovery/insertion layer

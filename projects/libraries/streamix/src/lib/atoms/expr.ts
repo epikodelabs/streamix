@@ -1,5 +1,5 @@
 import { type Atom, type AtomOptions } from "./atom";
-import { ScopeAtoms } from "./scope";
+import { ScopeRefGraph } from "./scope";
 
 export const ATOM_EXPR = Symbol("streamix.atomExpr");
 export const DERIVED_EXPR = Symbol("streamix.derivedExpr");
@@ -23,25 +23,25 @@ export interface AtomExpr<T = any> {
  */
 export interface DerivedExpr<T = any, Self = any> {
   [DERIVED_EXPR]: true;
-  fn: (self: Self, atoms: ScopeAtoms<Self>) => T;
+  fn: (self: Self, refs: ScopeRefGraph<Self>) => T;
 }
 
 /**
  * Scope-definition marker for an atom produced from the current scope state and
- * raw atom graph.
+ * reactive ref graph.
  */
 export interface PipeExpr<T = any, Self = any> {
   [PIPE_EXPR]: true;
-  fn: (self: Self, atoms: ScopeAtoms<Self>) => Atom<T>;
+  fn: (self: Self, refs: ScopeRefGraph<Self>) => Atom<T>;
 }
 
 /**
  * Scope-definition marker for a flow-backed atom produced from the current
- * scope state and raw atom graph.
+ * scope state and reactive ref graph.
  */
 export interface FlowExpr<T = any, Self = any> {
   [FLOW_EXPR]: true;
-  fn: (self: Self, atoms: ScopeAtoms<Self>) => Atom<T>;
+  fn: (self: Self, refs: ScopeRefGraph<Self>) => Atom<T>;
 }
 
 export function isAtomExpr(value: any): value is AtomExpr {
@@ -80,7 +80,7 @@ export function atomExpr<T>(initialValue?: T, options?: AtomOptions): AtomExpr<T
  * this marker is useful when a more explicit definition is desired.
  */
 export function derivedExpr<TReturn, Self = any>(
-  fn: (self: Self, atoms: ScopeAtoms<Self>) => TReturn,
+  fn: (self: Self, refs: ScopeRefGraph<Self>) => TReturn,
 ): DerivedExpr<TReturn, Self> {
   return { [DERIVED_EXPR]: true, fn };
 }
@@ -88,14 +88,14 @@ export function derivedExpr<TReturn, Self = any>(
 /**
  * Marks a scope field as an atom produced by a pipe-style expression.
  */
-export function pipeExpr<T, Self = any>(fn: (self: Self, atoms: ScopeAtoms<Self>) => Atom<T>): PipeExpr<T, Self> {
+export function pipeExpr<T, Self = any>(fn: (self: Self, refs: ScopeRefGraph<Self>) => Atom<T>): PipeExpr<T, Self> {
   return { [PIPE_EXPR]: true, fn };
 }
 
 /**
  * Marks a scope field as an atom produced by a flow-style expression.
  */
-export function flowExpr<T, Self = any>(fn: (self: Self, atoms: ScopeAtoms<Self>) => Atom<T>): FlowExpr<T, Self> {
+export function flowExpr<T, Self = any>(fn: (self: Self, refs: ScopeRefGraph<Self>) => Atom<T>): FlowExpr<T, Self> {
   return { [FLOW_EXPR]: true, fn };
 }
 

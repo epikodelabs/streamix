@@ -34,3 +34,21 @@ describe('compileSxComponent', () => {
     expect(result.transformedTemplate).toContain('{{ count.value }}');
   });
 });
+
+describe('scope value metadata', () => {
+  it('accepts value-first Scope member metadata and binds through refs', () => {
+    const result = compileSxComponent({
+      componentPath: 'src/app/counter.component.ts',
+      template: '<button [disabled]="scoped.busy">{{ scoped.count * 2 }}</button>',
+      scopeValuePaths: {
+        scoped: ['busy', 'count'],
+      },
+    });
+
+    expect(result.bindingCount).toBe(2);
+    expect(result.transformedTemplate).toContain('[disabled]="scoped.refs.busy.value"');
+    expect(result.transformedTemplate).toContain('{{ scoped.refs.count.value * 2 }}');
+    expect(result.generatedModule?.contents).toContain('ctx.scoped.refs.busy');
+    expect(result.generatedModule?.contents).toContain('[ctx.scoped.refs.count]');
+  });
+});
