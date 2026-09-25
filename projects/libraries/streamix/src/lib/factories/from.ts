@@ -110,7 +110,20 @@ export function from<R = any>(
     let done = false;
     let asyncIterator: AsyncIterator<R> | undefined;
 
-    return {
+    const resolveSynchronousArray = (): boolean => {
+      if (resolved) return !error && !asyncSource;
+      if (!Array.isArray(value) || value.some(isPromiseLike)) return false;
+
+      items.push(...value as R[]);
+      resolved = true;
+      pendingResolution = Promise.resolve();
+      return true;
+    };
+
+    const iterator: AsyncIterator<R> & {
+      __tryNext?: () => IteratorResult<R> | null;
+      __hasBufferedValues?: () => boolean;
+    } = {
       async next(): Promise<IteratorResult<R>> {
         await resolveItems();
         if (error) throw error;
@@ -125,12 +138,31 @@ export function from<R = any>(
         done = true;
         return { value: undefined as any, done: true };
       },
+      __tryNext(): IteratorResult<R> | null {
+        if (!resolveSynchronousArray()) return null;
+        if (done) return { value: undefined as any, done: true };
+        if (index < items.length) {
+          return { value: items[index++], done: false };
+        }
+        done = true;
+        return { value: undefined as any, done: true };
+      },
+      __hasBufferedValues(): boolean {
+        // This flag means values are already buffered by the iterator, not
+        // merely that a synchronous iterable *could* produce another value.
+        // `__tryNext()` is the capability probe used by the coordinator for
+        // synchronous sequences. Treating all remaining iterable items as
+        // backlog breaks gating operators such as skipUntil.
+        return false;
+      },
       async return(value?: any) {
         done = true;
         await asyncIterator?.return?.();
         return value !== undefined ? { value, done: true } : { value: undefined as any, done: true };
       },
-    } as AsyncIterator<R>;
+    };
+
+    return iterator;
   };
 
   return innerFlow;

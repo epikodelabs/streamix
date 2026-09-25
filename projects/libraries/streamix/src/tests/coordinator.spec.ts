@@ -163,6 +163,28 @@ describe('createAsyncCoordinator', () => {
     expect(await coordinator.next()).toEqual(DONE);
   });
 
+  it('falls back to async next when a synchronous fast path has no value yet', async () => {
+    const deferred = createDeferred<IteratorResult<number>>();
+    const source: AsyncIterator<number> & {
+      __tryNext: () => IteratorResult<number> | null;
+    } = {
+      __tryNext: () => null,
+      next: () => deferred.promise,
+      return: async () => DONE,
+    };
+
+    const coordinator = createAsyncCoordinator([source], { syncDrain: true });
+    const next = coordinator.next();
+
+    deferred.resolve(NEXT(7));
+
+    expect(await next).toEqual(
+      NEXT({ type: 'value', value: 7, sourceIndex: 0 })
+    );
+
+    await coordinator.return?.();
+  });
+
   it('ignores invalid removals and reports completion for invalid indices', async () => {
     const coordinator = createAsyncCoordinator<number>();
 

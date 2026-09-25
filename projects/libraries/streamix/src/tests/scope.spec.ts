@@ -647,7 +647,7 @@ describe('Scope System', () => {
       s.a = 1;
       s.a = 2;
 
-      expect(values).toEqual([1, 2]);
+      expect(values).toEqual([0, 1, 2]);
       s.dispose();
     });
 
@@ -666,11 +666,11 @@ describe('Scope System', () => {
       transaction(() => {
         s.a = 1;
         s.b = 2;
-        expect(values).toEqual([]);
+        expect(values).toEqual([0]);
       });
 
       expect(s.total).toBe(3);
-      expect(values).toEqual([3]);
+      expect(values).toEqual([0, 3]);
       s.dispose();
     });
 
@@ -941,7 +941,8 @@ describe('Scope System', () => {
       });
 
       await delay();
-      expect(s.ticks).toBe(2);
+      // startWith(1) emits first, then the stateful source replays its current 0.
+      expect(s.ticks).toBe(0);
 
       source.next(5);
       await delay();
@@ -1471,7 +1472,8 @@ describe('Scope System', () => {
       });
 
       await delay();
-      expect(s.results).toBe(2);
+      // The pipeline sees startWith(1), then the source Atom replays 0.
+      expect(s.results).toBe(0);
       expect(s.ticks).toBe(0);
 
       source.next(5);

@@ -61,9 +61,20 @@ describe('regression: engine fixes', () => {
 
     for (let i = 0; i < 5; i++) {
       const iterator = iterate(a)[Symbol.asyncIterator]();
-      const first = iterator.next();
-      a.next(i);
-      expect((await first).value).toBe(i);
+
+      if (i === 0) {
+        const first = iterator.next();
+        a.next(i);
+        expect((await first).value).toBe(i);
+      } else {
+        // Stateful iteration replays the current value first. Consume that
+        // replay, then verify the iterator also observes the next write.
+        expect((await iterator.next()).value).toBe(i - 1);
+        const next = iterator.next();
+        a.next(i);
+        expect((await next).value).toBe(i);
+      }
+
       await iterator.return?.();
     }
 

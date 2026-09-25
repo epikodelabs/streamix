@@ -141,6 +141,11 @@ export function createAsyncCoordinator<T = any>(
   const pendingPulls: boolean[] = sources.map(() => false);
   const originalPushHandlers: Array<(() => void) | undefined> = [];
   const wiredPushHandlers: Array<(() => void) | undefined> = [];
+  // Sources that expose `__onPush` are push-driven: if their synchronous
+  // `__tryNext()` has nothing yet, the push hook will wake the coordinator.
+  // Sources that only expose `__tryNext()` use it as a fast path and still
+  // need an ordinary async `next()` fallback (for example a pending Promise).
+  const pushDriven: boolean[] = sources.map(source => "__onPush" in (source as any));
 
   let waitingResolve: ((v: any) => void) | null = null;
   let isDraining = false;
@@ -317,23 +322,40 @@ export function createAsyncCoordinator<T = any>(
   function drainOneSource(i: number) {
     if (!sourceList[i] || completed[i] || iteratorReturned) return;
 
+    // Never synchronously drain past an outstanding async pull. The active
+    // `next()` has already reserved the next source value; draining a later
+    // buffered value here would let it overtake that reserved value. Remember
+    // that another pull is needed and let `pullAsync()` continue in order.
+    if (pulling[i]) {
+      pendingPulls[i] = true;
+      return;
+    }
+
     const src: any = sourceList[i];
 
     if (src.__tryNext) {
       try {
         const r = src.__tryNext();
-        if (!r) return;
-        if (r.done) {
-          markSourceComplete(i);
-          pushEvent({ type: "complete", sourceIndex: i }, i);
-        } else {
-          pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
+        if (r) {
+          if (r.done) {
+            markSourceComplete(i);
+            pushEvent({ type: "complete", sourceIndex: i }, i);
+          } else {
+            pushEvent({ type: "value", value: r.value, sourceIndex: i }, i);
+          }
+          return;
         }
       } catch (err) {
         markSourceComplete(i);
         pushEvent({ type: "error", error: normalizeError(err), sourceIndex: i }, i);
+        return;
       }
-      return;
+
+      // `__tryNext()` is a synchronous fast path. For explicitly push-driven
+      // iterators, a null result means their `__onPush` hook will wake us when
+      // a value arrives. Other iterators still need an ordinary async pull so
+      // promises, timers, and async generators cannot be stranded.
+      if (pushDriven[i]) return;
     }
 
     pendingPulls[i] = true;
@@ -503,12 +525,14 @@ export function createAsyncCoordinator<T = any>(
         completed[index] = false;
         pulling[index] = false;
         pendingPulls[index] = false;
+        pushDriven[index] = "__onPush" in (source as any);
       } else {
         index = sourceList.length;
         sourceList.push(source);
         completed.push(false);
         pulling.push(false);
         pendingPulls.push(false);
+        pushDriven.push("__onPush" in (source as any));
       }
       activeCount++;
 

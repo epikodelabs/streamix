@@ -27,11 +27,14 @@ export function takeUntil<T = any, N = any>(
 ): Operator<T, T> {
   return createOperator<T, T>("takeUntil", function (source: AsyncIterator<T>) {
     const notifierIt = from(notifier)[Symbol.asyncIterator]();
+    // Subscribe/drain the notifier first. If both sides already have a
+    // synchronous value available (for example two stateful Atoms), takeUntil
+    // must observe the notifier before subscribing to the source.
     const runner = createAsyncCoordinator<T | N>([
-      source as AsyncIterator<T | N>,
-      notifierIt as AsyncIterator<T | N>
+      notifierIt as AsyncIterator<T | N>,
+      source as AsyncIterator<T | N>
     ]);
-    const SOURCE_INDEX = 0;
+    const SOURCE_INDEX = 1;
 
     let isDone = false;
 
