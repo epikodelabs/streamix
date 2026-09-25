@@ -9,7 +9,6 @@ import {
 } from '@angular/core';
 import type { DependencySource } from '@epikodelabs/streamix';
 
-import { ɵinstallSxAngularZone } from './angular-zone';
 import {
   bindText,
   type DirectBinding,
@@ -27,10 +26,6 @@ import {
   standalone: true,
 })
 export class SxTextDirective implements OnChanges, OnDestroy {
-  constructor() {
-    ɵinstallSxAngularZone();
-  }
-
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
   private binding?: DirectBinding;
 

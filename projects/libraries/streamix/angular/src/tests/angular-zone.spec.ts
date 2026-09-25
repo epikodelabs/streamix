@@ -1,5 +1,8 @@
 import {
+  EnvironmentInjector,
   NgZone,
+  createEnvironmentInjector,
+  runInInjectionContext,
 } from '@angular/core';
 import {
   TestBed,
@@ -14,25 +17,20 @@ import {
   rendererScheduler,
 } from '../lib/render-scheduler';
 
-import {
-  ensureAngularTestEnvironment,
-} from './angular-test-environment';
+import { useAngularTestEnvironment } from './angular-test-environment';
 import { idescribe } from '../../../src/tests/env.spec';
-
-ensureAngularTestEnvironment();
-
 idescribe('sx Angular zone integration', () => {
+  useAngularTestEnvironment();
   afterEach(() => {
     rendererScheduler.flushNow();
     rendererScheduler.setScheduler(animationFrameRenderScheduler);
-    TestBed.resetTestingModule();
   });
 
   it('does not resolve NgZone unless zone scheduling was explicitly enabled', () => {
     let ngZoneFactoryCalls = 0;
-
-    TestBed.configureTestingModule({
-      providers: [
+    const parent = TestBed.inject(EnvironmentInjector);
+    const injector = createEnvironmentInjector(
+      [
         {
           provide: NgZone,
           useFactory: () => {
@@ -41,13 +39,17 @@ idescribe('sx Angular zone integration', () => {
           },
         },
       ],
-    });
+      parent,
+    );
 
-    TestBed.runInInjectionContext(() => {
-      expect(() => ɵinstallSxAngularZone()).not.toThrow();
-    });
-
-    expect(ngZoneFactoryCalls).toBe(0);
+    try {
+      runInInjectionContext(injector, () => {
+        expect(() => ɵinstallSxAngularZone()).not.toThrow();
+      });
+      expect(ngZoneFactoryCalls).toBe(0);
+    } finally {
+      injector.destroy();
+    }
   });
 
   it('installs outside-zone scheduling when a zoned project opts in', () => {
@@ -57,24 +59,26 @@ idescribe('sx Angular zone integration', () => {
         outsideCalls += 1;
         return callback();
       },
-    };
+    } as NgZone;
 
-    TestBed.configureTestingModule({
-      providers: [
-        provideSxZoneScheduling(),
+    const parent = TestBed.inject(EnvironmentInjector);
+    const injector = createEnvironmentInjector(
+      [
         { provide: NgZone, useValue: zone },
+        provideSxZoneScheduling(),
       ],
-    });
+      parent,
+    );
 
-    TestBed.runInInjectionContext(() => {
-      ɵinstallSxAngularZone();
-    });
+    try {
+      const binding = rendererScheduler.register(() => {});
+      binding.markDirty();
 
-    const binding = rendererScheduler.register(() => {});
-    binding.markDirty();
+      expect(outsideCalls).toBeGreaterThan(0);
 
-    expect(outsideCalls).toBeGreaterThan(0);
-
-    binding.destroy();
+      binding.destroy();
+    } finally {
+      injector.destroy();
+    }
   });
 });

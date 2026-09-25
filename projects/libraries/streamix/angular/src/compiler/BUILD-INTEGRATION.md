@@ -22,7 +22,11 @@ parse / classify Streamix bindings
         ↓
 component source lifecycle insertion
         ↓
-ɵinstallSxCompiledView(this, ɵsetupSxBindings)
+__sxRefs = ɵinstallSxSourceReferences(this, [...])
+        ↓
+ɵinstallSxCompiledView(this, ɵsetupSxBindings, {
+  sourceReferences: __sxRefs,
+})
         ↓
 afterNextRender() (browser only)
         ↓
@@ -78,6 +82,71 @@ resolve to `count`. Ordinary Angular values return `undefined` and are not
 rewritten. The legacy `isDependencySource(path)` classifier is still accepted
 for standalone sources.
 
+## Source-reference replacement
+
+The compiler also derives the top-level component fields whose **identity** is
+consumed by generated Streamix bindings. For example:
+
+```ts
+class CounterComponent {
+  count = atom(1);
+
+  replace(next: Writable<number>) {
+    this.count = next;
+  }
+}
+```
+
+with:
+
+```html
+<span>{{ count }}</span>
+```
+
+emits a component-local `__sxRefs` registry through
+`ɵinstallSxSourceReferences(this, ["count"])`. The compiled view subscribes to
+that registry. Streamix installs a narrow instance accessor for the
+compiler-selected plain field, and a different source identity synchronously:
+
+```text
+this.count = next
+  -> destroy old Streamix binding table
+  -> unsubscribe old source / invalidate queued renderer work
+  -> create the generated setup against the new source
+  -> render the new source's current value
+```
+
+This path does **not** use Angular signals, `ChangeDetectorRef`, a template
+event, or an Angular change-detection pass. It is compiler-owned source
+reference reactivity, not general object observation. Only top-level fields
+selected from the generated binding plan are observed.
+
+Value changes inside the source still use the normal Streamix subscription and
+renderer scheduler. Replacing a value-first Scope root similarly rebuilds the
+bindings that resolve through its `refs` mirror.
+
+Structural `*sx` participates in the same bridge without requiring direct DOM
+lowering. For a simple source field such as:
+
+```html
+<span *sx="source as value">{{ value }}</span>
+```
+
+the build transform adds the compiler-only microsyntax link:
+
+```html
+<span *sx="source as value; sourceRef: __sxRefs.source">{{ value }}</span>
+```
+
+Angular desugars that link to `sxSourceRef`. The directive subscribes to the
+component-local reference cell, so `this.source = next` calls the directive's
+rebind path directly and synchronously. Authored templates never contain or
+manage `__sxRefs` themselves.
+
+Complex structural source expressions are intentionally not instrumented by
+this bridge yet; the first pass is limited to simple top-level component fields
+whose identity can be observed unambiguously.
+
 ## Sanitization boundary
 
 Automatic lowering is limited to bindings that are safe to write directly.
@@ -121,6 +190,10 @@ Zone usage is configuration-controlled, not inferred.
 
 Zoneless Angular is the default path: `NgZone` is not resolved or called.
 
+Pure compiled Streamix views do not resolve `ChangeDetectorRef`. The lifecycle
+bridge opts into it only when the binding plan contains a hybrid
+`angular-invalidate` slot whose expression remains Angular-owned.
+
 A Zone.js-backed application opts into outside-zone scheduling with:
 
 ```ts
@@ -130,10 +203,11 @@ providers: [
 ]
 ```
 
-`provideSxZoneScheduling()` is the Streamix-side configuration marker. This
-avoids using `NgZone.isInAngularZone()` as a proxy for application
-configuration and avoids treating global Zone.js presence as evidence that the
-current Angular app is zone-backed.
+`provideSxZoneScheduling()` installs the Streamix environment initializer that
+resolves `NgZone` for a zone-backed application. No directive or compiled view
+probes for `NgZone`. This avoids using `NgZone.isInAngularZone()` as a proxy for
+application configuration and avoids treating global Zone.js presence as
+evidence that the current Angular app is zone-backed.
 
 ## Static node paths
 
@@ -150,6 +224,7 @@ compiled structural renderer.
 - `compileSxComponent()` — per-component transform payload;
 - `transformAngularComponentTemplate()` — low-level template/fallback transform;
 - `emitComponentModule()` — generated direct-binding module;
+- `emitSourceReferenceInitializer()` — generated component reference registry;
 - `installSxLifecycleIntoComponentSource()` — conservative class-source bridge;
 - `createDependencySourcePathResolver()` — standalone source metadata adapter.
 - `createScopeValuePathResolver()` — value-first Scope -> recursive `refs` mapping.

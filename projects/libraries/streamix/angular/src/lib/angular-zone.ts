@@ -1,8 +1,8 @@
 import {
-  InjectionToken,
   NgZone,
   inject,
-  type Provider,
+  provideEnvironmentInitializer,
+  type EnvironmentProviders,
 } from '@angular/core';
 
 import {
@@ -13,29 +13,17 @@ import {
 const configuredZones = new WeakSet<object>();
 
 /**
- * Explicit application-level opt-in for Zone.js-backed Angular applications.
- *
- * Zoneless Angular is the default in modern Angular and must not resolve or use
- * NgZone merely because Zone.js happens to exist on the page. A zoned project
- * enables this provider next to its zone-backed Angular configuration.
- */
-export const SX_ZONE_SCHEDULING = new InjectionToken<boolean>(
-  'SX_ZONE_SCHEDULING',
-  {
-    providedIn: 'root',
-    factory: () => false,
-  },
-);
-
-/**
  * Enables outside-NgZone scheduling for a Zone.js-backed Angular application.
- * Do not install this provider in zoneless applications.
+ *
+ * Streamix never probes for NgZone from directives or compiled views. Installing
+ * this provider is the explicit declaration that the application wants zone
+ * scheduling. The environment initializer is the only place NgZone is resolved.
  */
-export function provideSxZoneScheduling(): Provider {
-  return {
-    provide: SX_ZONE_SCHEDULING,
-    useValue: true,
-  };
+export function provideSxZoneScheduling(): EnvironmentProviders {
+  return provideEnvironmentInitializer(() => {
+    const zone = inject(NgZone);
+    ɵconfigureSxAngularZone(zone);
+  });
 }
 
 /**
@@ -55,23 +43,9 @@ export function ɵconfigureSxAngularZone(zone: NgZone): void {
 }
 
 /**
- * Injection-context convenience used by directives and compiler-installed
- * views.
- *
- * This deliberately does not try to infer zone configuration from
- * `NgZone.isInAngularZone()` or the presence of global Zone.js. Zoneless apps
- * can legitimately load Zone.js for another library/application. NgZone is
- * resolved only when the application explicitly opted into sx zone scheduling.
+ * Legacy internal hook retained so previously generated/runtime code remains
+ * source-compatible. Zone installation is now provider-driven and this hook is
+ * intentionally inert: zoneless applications never resolve NgZone implicitly.
  * @internal
  */
-export function ɵinstallSxAngularZone(): void {
-  const enabled = inject(SX_ZONE_SCHEDULING);
-  if (!enabled) {
-    return;
-  }
-
-  const zone = inject(NgZone, { optional: true });
-  if (zone) {
-    ɵconfigureSxAngularZone(zone);
-  }
-}
+export function ɵinstallSxAngularZone(): void {}

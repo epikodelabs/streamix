@@ -181,9 +181,10 @@ bootstrapApplication(AppComponent, {
 });
 ```
 
-`provideSxZoneScheduling()` is the configuration marker. Without it, the
-Streamix Angular adapter never resolves `NgZone`, even if Zone.js is present on
-the page for another application or library.
+`provideSxZoneScheduling()` installs an environment initializer that resolves
+`NgZone` and configures the renderer once for that application. Without this
+provider, Streamix runtime paths never resolve `NgZone`, even if Zone.js is
+present on the page for another application or library.
 
 ```text
 pure Streamix binding
@@ -241,6 +242,27 @@ slot 3 -> text expression -> [count, price]
 
 One component table has one shared scheduler registration. Repeated source
 emissions mark integer slots dirty; a frame flush visits only those slots.
+
+The compiler also records top-level component fields that hold reactive source
+identities. Replacing one of those plain fields is a Streamix notification path
+in compiled views:
+
+```ts
+this.count = anotherAtom;
+```
+
+The generated `__sxRefs` bridge synchronously tears down the old Streamix setup
+and recreates it against the new source. No Angular signal,
+`ChangeDetectorRef`, template event, or Angular change-detection pass is used
+for that rebind. Pure compiled views do not resolve `ChangeDetectorRef`; only
+hybrid expressions that remain Angular-owned opt into local Angular
+invalidation.
+
+Simple structural `*sx` sources use the same field registry. The compiler adds
+a hidden `sourceRef: __sxRefs.<field>` microsyntax entry, and the directive
+rebinds directly when the component field identity changes. Authored templates
+remain `*sx="source as value"`; the extra input exists only in transformed
+compiler output.
 
 Generated setup uses static `Element.children` paths. There are no `data-sx`
 markers or `querySelector()` calls in the compiled hot path.

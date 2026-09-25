@@ -29,11 +29,12 @@ describe('outside-Angular renderer scheduling', () => {
     const delegate = new ManualScheduler();
     let depth = 0;
     let registrationsOutside = 0;
-    let executionsOutside = 0;
+    let boundaryEntries = 0;
 
     const scheduler = createOutsideAngularRenderScheduler(
       {
         runOutsideAngular<T>(callback: () => T): T {
+          boundaryEntries += 1;
           depth += 1;
           try {
             return callback();
@@ -45,23 +46,25 @@ describe('outside-Angular renderer scheduling', () => {
       {
         schedule(callback) {
           if (depth > 0) registrationsOutside += 1;
-          return delegate.schedule(() => {
-            callback();
-            if (depth > 0) executionsOutside += 1;
-          });
+          return delegate.schedule(callback);
         },
       },
     );
 
     const renderer = new RendererScheduler(scheduler);
     let flushes = 0;
-    const binding = renderer.register(() => { flushes += 1; });
+    let flushDepth = 0;
+    const binding = renderer.register(() => {
+      flushDepth = depth;
+      flushes += 1;
+    });
 
     binding.markDirty();
     delegate.flush();
 
     expect(registrationsOutside).toBe(1);
-    expect(executionsOutside).toBe(1);
+    expect(boundaryEntries).toBe(2);
+    expect(flushDepth).toBeGreaterThan(0);
     expect(flushes).toBe(1);
   });
 

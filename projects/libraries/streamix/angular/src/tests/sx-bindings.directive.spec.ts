@@ -8,16 +8,12 @@ import {
   SxPropertyBindingsDirective,
   SxStyleBindingsDirective,
 } from '../lib/sx-bindings.directive';
+import { useAngularTestEnvironment } from './angular-test-environment';
+import { idescribe } from '../../../src/tests/env.spec';
 import { SxTextDirective } from '../lib/sx-text.directive';
 
-
-import {
-  ensureAngularTestEnvironment,
-} from './angular-test-environment';
-
-ensureAngularTestEnvironment();
-
 idescribe('sx dotted binding syntax', () => {
+  useAngularTestEnvironment();
   @Component({
     standalone: true,
     imports: [
@@ -66,4 +62,3 @@ idescribe('sx dotted binding syntax', () => {
     expect(button.style.opacity).toBe('1');
   });
 });
-import { idescribe } from '../../../src/tests/env.spec';

@@ -8,15 +8,20 @@ import { atom } from '@epikodelabs/streamix';
 import {
   rendererScheduler,
 } from '../lib/render-scheduler';
+import {
+  ɵinstallSxSourceReferences,
+} from '../lib/source-reference';
 import { SxDirective } from '../lib/sx.directive';
 
-import {
-  ensureAngularTestEnvironment,
-} from './angular-test-environment';
+import { useAngularTestEnvironment } from './angular-test-environment';
 
-ensureAngularTestEnvironment();
+describe('SxDirective', () => {
+  useAngularTestEnvironment();
+  it('accepts Angular empty structural marker for collection microsyntax', () => {
+    const marker: SxDirective<{ id: number }>['sx'] = '';
+    expect(marker).toBe('');
+  });
 
-idescribe('SxDirective', () => {
   afterEach(() => {
     rendererScheduler.flushNow();
   });
@@ -70,28 +75,40 @@ idescribe('SxDirective', () => {
     @Component({
       standalone: true,
       imports: [SxDirective],
-      template: '<span *sx="source as value">{{ value }}</span>',
+      changeDetection: ChangeDetectionStrategy.OnPush,
+      template: `
+        <span *sx="source as value; sourceRef: __sxRefs.source">{{ value }}</span>
+      `,
     })
     class HostComponent {
       source = atom('first');
+      readonly replacement = atom('second');
+      readonly __sxRefs = ɵinstallSxSourceReferences(this, ['source']);
     }
 
     const fixture = TestBed.createComponent(HostComponent);
     fixture.detectChanges();
 
     const first = fixture.componentInstance.source;
-    const second = atom('second');
+    const second = fixture.componentInstance.replacement;
 
     first.set('stale');
-    fixture.componentInstance.source = second;
-    fixture.detectChanges();
-    rendererScheduler.flushNow();
 
-    expect(fixture.nativeElement.textContent.trim()).toBe('second');
+    // This is the compiler-generated source-reference path: a plain field
+    // assignment notifies sx directly. No signal, ChangeDetectorRef, event, or
+    // Angular change-detection pass participates in the rebind.
+    fixture.componentInstance.source = second;
+
+    expect(fixture.nativeElement.querySelector('span').textContent.trim()).toBe('second');
+    expect(first.subscriberCount).toBe(0);
+    expect(second.subscriberCount).toBe(1);
+
+    rendererScheduler.flushNow();
+    expect(fixture.nativeElement.querySelector('span').textContent.trim()).toBe('second');
 
     first.set('ignored');
     rendererScheduler.flushNow();
-    expect(fixture.nativeElement.textContent.trim()).toBe('second');
+    expect(fixture.nativeElement.querySelector('span').textContent.trim()).toBe('second');
   });
 
   it('reuses keyed collection views across reorder and updates context', () => {
@@ -179,4 +196,3 @@ idescribe('SxDirective', () => {
     expect(fixture.componentInstance.count.subscriberCount).toBe(0);
   });
 });
-import { idescribe } from '../../../src/tests/env.spec';

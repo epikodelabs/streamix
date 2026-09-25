@@ -2,6 +2,7 @@ export * from './compiled-block-helpers';
 export * from './compiled-block';
 export * from './structural-block';
 export * from './compiled-view';
+export * from './source-reference';
 export * from './binding-table';
 export * from './direct-binding';
 export * from './render-scheduler';

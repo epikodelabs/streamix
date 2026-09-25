@@ -2,16 +2,12 @@ import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { atom } from '@epikodelabs/streamix';
 
+import { useAngularTestEnvironment } from './angular-test-environment';
+import { idescribe } from '../../../src/tests/env.spec';
 import { SxTextDirective } from '../lib/sx-text.directive';
 
-
-import {
-  ensureAngularTestEnvironment,
-} from './angular-test-environment';
-
-ensureAngularTestEnvironment();
-
 idescribe('SxTextDirective', () => {
+  useAngularTestEnvironment();
   @Component({
     standalone: true,
     imports: [SxTextDirective],
@@ -52,4 +48,3 @@ idescribe('SxTextDirective', () => {
     expect(source.subscriberCount).toBe(0);
   });
 });
-import { idescribe } from '../../../src/tests/env.spec';
