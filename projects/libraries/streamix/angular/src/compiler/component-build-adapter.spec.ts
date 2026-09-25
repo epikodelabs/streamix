@@ -13,6 +13,12 @@ describe('compileSxComponent', () => {
     });
 
     expect(result.bindingCount).toBe(2);
+    expect(result.sourceReferenceFields).toEqual(['count', 'disabled']);
+    expect(result.lifecycleInitializer).toContain('[\"count\",\"disabled\"]');
+    expect(result.requiresAngularInvalidation).toBeFalse();
+    expect(result.lifecycleInitializer).toContain(
+      'sourceReferences: this.__sxRefs',
+    );
     expect(result.transformedTemplate).not.toContain('[sx.text]');
     expect(result.transformedTemplate).toContain('[textContent]="count.value"');
     expect(result.transformedTemplate).toContain('[disabled]="disabled.value"');
@@ -30,8 +36,41 @@ describe('compileSxComponent', () => {
     });
 
     expect(result.bindingCount).toBe(2);
+    expect(result.sourceReferenceFields).toEqual(['busy', 'count']);
+    expect(result.lifecycleInitializer).toContain('[\"busy\",\"count\"]');
+    expect(result.lifecycleInitializer).toContain(
+      'sourceReferences: this.__sxRefs',
+    );
     expect(result.transformedTemplate).toContain('[disabled]="busy.value"');
     expect(result.transformedTemplate).toContain('{{ count.value }}');
+  });
+  it('links simple structural sx sources to compiler-owned source-reference cells', () => {
+    const result = compileSxComponent({
+      componentPath: 'src/app/host.component.ts',
+      template: '<span *sx="source as value">{{ value }}</span>',
+    });
+
+    expect(result.bindingCount).toBe(0);
+    expect(result.generatedModule).toBeUndefined();
+    expect(result.sourceReferenceFields).toEqual(['source']);
+    expect(result.transformedTemplate).toContain(
+      '*sx="source as value; sourceRef: __sxRefs.source"',
+    );
+    expect(result.lifecycleInitializer).toContain('public readonly __sxRefs');
+    expect(result.lifecycleInitializer).not.toContain('ɵinstallSxCompiledView');
+  });
+
+  it('opts into Angular invalidation only for hybrid expressions', () => {
+    const result = compileSxComponent({
+      componentPath: 'src/app/counter.component.ts',
+      template: '<span>{{ count.value * multiplier }}</span>',
+    });
+
+    expect(result.sourceReferenceFields).toEqual(['count']);
+    expect(result.requiresAngularInvalidation).toBeTrue();
+    expect(result.lifecycleInitializer).toContain(
+      'angularInvalidation: true',
+    );
   });
 });
 
@@ -46,6 +85,11 @@ describe('scope value metadata', () => {
     });
 
     expect(result.bindingCount).toBe(2);
+    expect(result.sourceReferenceFields).toEqual(['scoped']);
+    expect(result.lifecycleInitializer).toContain('[\"scoped\"]');
+    expect(result.lifecycleInitializer).toContain(
+      'sourceReferences: this.__sxRefs',
+    );
     expect(result.transformedTemplate).toContain('[disabled]="scoped.refs.busy.value"');
     expect(result.transformedTemplate).toContain('{{ scoped.refs.count.value * 2 }}');
     expect(result.generatedModule?.contents).toContain('ctx.scoped.refs.busy');

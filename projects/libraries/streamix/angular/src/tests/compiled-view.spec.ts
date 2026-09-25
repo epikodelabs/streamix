@@ -7,17 +7,38 @@ import {
 
 import {
   createBindingTable,
+  rendererScheduler,
   ɵinstallSxCompiledView,
+  ɵinstallSxSourceReferences,
 } from '../lib';
 
+import { useAngularTestEnvironment } from './angular-test-environment';
+import { idescribe } from '../../../src/tests/env.spec';
 
-import {
-  ensureAngularTestEnvironment,
-} from './angular-test-environment';
+class TestSource<T> {
+  private readonly subscribers = new Set<(value: T) => void>();
 
-ensureAngularTestEnvironment();
+  constructor(public value: T) {}
+
+  subscribe(callback: (value: T) => void): () => void {
+    this.subscribers.add(callback);
+    return () => this.subscribers.delete(callback);
+  }
+
+  set(value: T): void {
+    this.value = value;
+    for (const subscriber of [...this.subscribers]) {
+      subscriber(value);
+    }
+  }
+
+  get subscriberCount(): number {
+    return this.subscribers.size;
+  }
+}
 
 idescribe('ɵinstallSxCompiledView', () => {
+  useAngularTestEnvironment();
   it('can be invoked from a component injection context', async () => {
     let setups = 0;
 
@@ -77,6 +98,78 @@ idescribe('ɵinstallSxCompiledView', () => {
     expect(destroyed).toBe(1);
   });
 
+  it('rebinds a replaced plain source field without Angular change detection', async () => {
+    @Component({
+      standalone: true,
+      template: '<span></span>',
+    })
+    class HostComponent {
+      source = new TestSource('first');
+      readonly replacement = new TestSource('second');
+      readonly __sxRefs = ɵinstallSxSourceReferences(this, ['source']);
+
+      constructor() {
+        ɵinstallSxCompiledView(
+          this,
+          (host, context) => {
+            const table = createBindingTable(1);
+            const span = host.querySelector('span')!;
+
+            table.bind(
+              0,
+              context.source,
+              value => {
+                span.textContent = value;
+              },
+            );
+
+            return table;
+          },
+          {
+            sourceReferences: this.__sxRefs,
+          },
+        );
+      }
+    }
+
+    const fixture = TestBed.createComponent(HostComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const component = fixture.componentInstance;
+    const first = component.source;
+    const second = component.replacement;
+    const span = fixture.nativeElement.querySelector('span') as HTMLSpanElement;
+
+    expect(span.textContent).toBe('first');
+    expect(first.subscriberCount).toBe(1);
+    expect(second.subscriberCount).toBe(0);
+
+    // Queue work from the old source, then replace the source identity through
+    // a plain assignment. No signal, markForCheck(), detectChanges(), or event
+    // is involved in the rebind path.
+    first.set('stale');
+    component.source = second;
+
+    expect(span.textContent).toBe('second');
+    expect(first.subscriberCount).toBe(0);
+    expect(second.subscriberCount).toBe(1);
+
+    rendererScheduler.flushNow();
+    expect(span.textContent).toBe('second');
+
+    first.set('ignored');
+    rendererScheduler.flushNow();
+    expect(span.textContent).toBe('second');
+
+    second.set('third');
+    rendererScheduler.flushNow();
+    expect(span.textContent).toBe('third');
+
+    fixture.destroy();
+    expect(second.subscriberCount).toBe(0);
+  });
+
   it('skips setup when the component is destroyed before the first render', async () => {
     let setups = 0;
 
@@ -103,4 +196,3 @@ idescribe('ɵinstallSxCompiledView', () => {
     expect(setups).toBe(0);
   });
 });
-import { idescribe } from '../../../src/tests/env.spec';

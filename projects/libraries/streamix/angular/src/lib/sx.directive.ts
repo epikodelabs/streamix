@@ -2,9 +2,7 @@ import {
   Directive,
   EmbeddedViewRef,
   Input,
-  OnChanges,
   OnDestroy,
-  SimpleChanges,
   TemplateRef,
   ViewContainerRef,
   inject,
@@ -18,6 +16,9 @@ import {
   rendererScheduler,
   type ScheduledBinding,
 } from './render-scheduler';
+import type {
+  SxSourceReference,
+} from './source-reference';
 
 export type SxTrackByFunction<T> = (index: number, item: T) => unknown;
 
@@ -39,8 +40,18 @@ interface CollectionView<T> {
 }
 
 type PendingRender<T> =
-  | { kind: 'value'; value: T | undefined; generation: number }
-  | { kind: 'collection'; value: Iterable<T> | undefined; generation: number };
+  | {
+      kind: 'value';
+      value: T | undefined;
+      generation: number;
+      source: DependencySource<unknown>;
+    }
+  | {
+      kind: 'collection';
+      value: Iterable<T> | undefined;
+      generation: number;
+      source: DependencySource<unknown>;
+    };
 
 /**
  * Angular structural bridge for Streamix-compatible sources.
@@ -64,7 +75,7 @@ type PendingRender<T> =
   selector: '[sx]',
   standalone: true,
 })
-export class SxDirective<T = unknown> implements OnChanges, OnDestroy {
+export class SxDirective<T = unknown> implements OnDestroy {
   private readonly templateRef =
     inject<TemplateRef<SourceContext<T>>>(TemplateRef);
   private readonly viewContainerRef = inject(ViewContainerRef);
@@ -75,43 +86,131 @@ export class SxDirective<T = unknown> implements OnChanges, OnDestroy {
   private destroyed = false;
   private bindingGeneration = 0;
   private boundSource?: DependencySource<unknown>;
+  private boundMode: 'value' | 'collection' | undefined;
+  private boundInput: unknown = UNSET_INPUT;
+  private boundTrackBy: SxTrackByFunction<T> | undefined;
 
   private valueViewRef?: EmbeddedViewRef<SourceContext<T>>;
   private renderedValue: unknown = UNSET;
 
   private collectionViews: CollectionView<T>[] = [];
 
+  private sxInput: SxMicrosyntaxInput<T> | null | undefined;
+  private sxOfInput: SourceInput<Iterable<T>> | null | undefined;
+  private sxTrackByInput: SxTrackByFunction<T> | undefined;
+  private sourceReferenceUnsubscribe?: Subscription;
+
+  /**
+   * Structural directives must reconcile their primary input when Angular
+   * writes it. Waiting for a later lifecycle hook leaves a window where a
+   * replaced source is still subscribed and an already-queued old emission
+   * can render.
+   */
   @Input()
-  sx: SourceInput<T> | null | undefined;
+  set sx(value: SxMicrosyntaxInput<T> | null | undefined) {
+    if (Object.is(this.sxInput, value)) return;
+    this.sxInput = value;
+    this.reconcileBinding();
+  }
+
+  get sx(): SxMicrosyntaxInput<T> | null | undefined {
+    return this.sxInput;
+  }
 
   @Input()
-  sxOf: SourceInput<Iterable<T>> | null | undefined;
+  set sxOf(value: SourceInput<Iterable<T>> | null | undefined) {
+    if (Object.is(this.sxOfInput, value)) return;
+    this.sxOfInput = value;
+    this.reconcileBinding();
+  }
+
+  get sxOf(): SourceInput<Iterable<T>> | null | undefined {
+    return this.sxOfInput;
+  }
 
   @Input()
-  sxTrackBy?: SxTrackByFunction<T>;
+  set sxTrackBy(value: SxTrackByFunction<T> | undefined) {
+    if (this.sxTrackByInput === value) return;
+    this.sxTrackByInput = value;
+    this.reconcileBinding();
+  }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (!changes['sx'] && !changes['sxOf'] && !changes['sxTrackBy']) {
+  get sxTrackBy(): SxTrackByFunction<T> | undefined {
+    return this.sxTrackByInput;
+  }
+
+  /**
+   * Compiler-only source-reference channel.
+   *
+   * Authored templates never need to provide this input. The build transform
+   * adds it to simple `*sx` microsyntax so a plain component-field assignment
+   * can rebind the directive without Angular change detection.
+   *
+   * @internal
+   */
+  @Input()
+  set sxSourceRef(reference: SxSourceReference<unknown> | null | undefined) {
+    this.sourceReferenceUnsubscribe?.();
+    this.sourceReferenceUnsubscribe = undefined;
+
+    if (!reference) {
       return;
     }
 
-    if (this.sxOf !== undefined && this.sxOf !== null) {
-      this.bindCollection(this.sxOf);
+    this.sourceReferenceUnsubscribe = reference.subscribe(source => {
+      if (this.destroyed) {
+        return;
+      }
+
+      if (this.boundMode === 'collection' ||
+          (this.sxOfInput !== undefined && this.sxOfInput !== null)) {
+        this.sxOfInput = source as SourceInput<Iterable<T>>;
+      } else {
+        this.sxInput = source as SxMicrosyntaxInput<T>;
+      }
+
+      this.reconcileBinding();
+    });
+  }
+
+  private reconcileBinding(): void {
+    const collectionMode = this.sxOfInput !== undefined && this.sxOfInput !== null;
+    const mode = collectionMode ? 'collection' : 'value';
+    const input = collectionMode ? this.sxOfInput : this.sxInput;
+    const trackByChanged = collectionMode && this.boundTrackBy !== this.sxTrackByInput;
+
+    if (
+      this.boundMode === mode &&
+      this.boundInput === input &&
+      !trackByChanged
+    ) {
       return;
     }
 
-    this.bindValue(this.sx);
+    this.boundMode = mode;
+    this.boundInput = input;
+    this.boundTrackBy = this.sxTrackByInput;
+
+    if (collectionMode) {
+      this.bindCollection(this.sxOfInput);
+    } else {
+      this.bindValue(this.sxInput);
+    }
   }
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    this.sourceReferenceUnsubscribe?.();
+    this.sourceReferenceUnsubscribe = undefined;
     this.unbind();
     this.scheduledRender?.destroy();
     this.scheduledRender = undefined;
+    this.boundInput = UNSET_INPUT;
+    this.boundMode = undefined;
     this.clearAllViews();
   }
 
-  private bindValue(source: SourceInput<T> | null | undefined): void {
+  private bindValue(source: SxMicrosyntaxInput<T> | null | undefined): void {
     this.unbind();
     this.clearCollectionViews();
     const generation = this.bindingGeneration;
@@ -124,13 +223,18 @@ export class SxDirective<T = unknown> implements OnChanges, OnDestroy {
         if (this.boundSource !== source) {
           return;
         }
-        this.schedule({ kind: 'value', value, generation });
+        this.schedule({
+          kind: 'value',
+          value,
+          generation,
+          source: source as DependencySource<unknown>,
+        });
       });
 
       return;
     }
 
-    this.renderValue(source === null ? undefined : source);
+    this.renderValue(source === null ? undefined : source as T | undefined);
   }
 
   private bindCollection(
@@ -148,7 +252,12 @@ export class SxDirective<T = unknown> implements OnChanges, OnDestroy {
         if (this.boundSource !== source) {
           return;
         }
-        this.schedule({ kind: 'collection', value, generation });
+        this.schedule({
+          kind: 'collection',
+          value,
+          generation,
+          source: source as DependencySource<unknown>,
+        });
       });
 
       return;
@@ -160,7 +269,8 @@ export class SxDirective<T = unknown> implements OnChanges, OnDestroy {
   private schedule(render: PendingRender<T>): void {
     if (
       this.destroyed ||
-      render.generation !== this.bindingGeneration
+      render.generation !== this.bindingGeneration ||
+      render.source !== this.boundSource
     ) {
       return;
     }
@@ -175,7 +285,8 @@ export class SxDirective<T = unknown> implements OnChanges, OnDestroy {
         if (
           !pending ||
           this.destroyed ||
-          pending.generation !== this.bindingGeneration
+          pending.generation !== this.bindingGeneration ||
+          pending.source !== this.boundSource
         ) {
           return;
         }
@@ -369,7 +480,16 @@ export class SxDirective<T = unknown> implements OnChanges, OnDestroy {
 
 export type SourceInput<T> = DependencySource<T> | T;
 
+/**
+ * Angular structural-directive primary input. Collection microsyntax such as
+ * `*sx="let item of items"` desugars with an empty-string `sx` marker plus
+ * the actual collection expression on `sxOf`. Keep that Angular-only marker
+ * out of the framework-agnostic SourceInput<T> contract.
+ */
+export type SxMicrosyntaxInput<T> = SourceInput<T> | '';
+
 const UNSET = Symbol('streamix.angular.sx.unset');
+const UNSET_INPUT = Symbol('streamix.angular.sx.unsetInput');
 
 function identityTrackBy<T>(_index: number, item: T): unknown {
   return item;
@@ -449,7 +569,7 @@ function updateCollectionContext<T>(
 }
 
 function isDependencySource<T>(
-  value: SourceInput<T> | null | undefined,
+  value: unknown,
 ): value is DependencySource<T> {
   return !!value &&
     typeof value === 'object' &&

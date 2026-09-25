@@ -4,6 +4,7 @@ import type {
 import {
   emitComponentSetup,
 } from './emit-component-setup';
+import { SX_SOURCE_REFERENCES_FIELD } from './generated-names';
 
 export interface SxComponentModuleOptions {
   readonly runtimeImport?: string;
@@ -69,13 +70,65 @@ export function emitComponentModule(
  * The helper returns void; the field exists only to execute setup in Angular's
  * injection context.
  */
-export function emitLifecycleInitializer(
-  setupName = 'ɵsetupSxBindings',
+export interface SxLifecycleInitializerOptions {
+  readonly sourceReferences?: readonly string[];
+  readonly angularInvalidation?: boolean;
+}
+
+/**
+ * Generated per-component source-reference registry.
+ *
+ * The field is public because compiler-rewritten structural microsyntax reads
+ * `__sxRefs.<field>` from the Angular template. Authored code does not need to
+ * reference it.
+ */
+export function emitSourceReferenceInitializer(
+  sourceReferences: readonly string[],
 ): string {
   return [
+    `public readonly ${SX_SOURCE_REFERENCES_FIELD} = ɵinstallSxSourceReferences(`,
+    `  this,`,
+    `  ${JSON.stringify(sourceReferences)},`,
+    `);`,
+  ].join('\n');
+}
+
+export function emitLifecycleInitializer(
+  setupName = 'ɵsetupSxBindings',
+  options: SxLifecycleInitializerOptions = {},
+): string {
+  const sourceReferences = options.sourceReferences ?? [];
+  const lines: string[] = [];
+
+  if (sourceReferences.length > 0) {
+    lines.push(emitSourceReferenceInitializer(sourceReferences));
+    lines.push('');
+  }
+
+  lines.push(
     `protected readonly ɵsx = ɵinstallSxCompiledView(`,
     `  this,`,
     `  ${setupName},`,
-    `);`,
-  ].join('\n');
+  );
+
+  const needsOptions =
+    sourceReferences.length > 0 ||
+    options.angularInvalidation === true;
+
+  if (needsOptions) {
+    lines.push(`  {`);
+
+    if (sourceReferences.length > 0) {
+      lines.push(`    sourceReferences: this.${SX_SOURCE_REFERENCES_FIELD},`);
+    }
+
+    if (options.angularInvalidation) {
+      lines.push(`    angularInvalidation: true,`);
+    }
+
+    lines.push(`  },`);
+  }
+
+  lines.push(`);`);
+  return lines.join('\n');
 }

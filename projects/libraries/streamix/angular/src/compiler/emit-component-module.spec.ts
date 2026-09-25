@@ -4,6 +4,7 @@ import {
 import {
   emitComponentModule,
   emitLifecycleInitializer,
+  emitSourceReferenceInitializer,
 } from './emit-component-module';
 
 describe('emitComponentModule', () => {
@@ -32,5 +33,30 @@ describe('emitComponentModule', () => {
     expect(emitLifecycleInitializer()).toContain(
       'ɵsetupSxBindings',
     );
+  });
+
+  it('emits source-reference observation and optional Angular invalidation metadata', () => {
+    const code = emitLifecycleInitializer(
+      'ɵsetupSxBindings',
+      {
+        sourceReferences: ['count', 'busy'],
+        angularInvalidation: true,
+      },
+    );
+
+    expect(code).toContain(
+      'ɵinstallSxSourceReferences(',
+    );
+    expect(code).toContain('[\"count\",\"busy\"]');
+    expect(code).toContain('sourceReferences: this.__sxRefs');
+    expect(code).toContain('angularInvalidation: true');
+  });
+
+  it('emits a standalone source-reference registry for structural-only components', () => {
+    const code = emitSourceReferenceInitializer(['source']);
+
+    expect(code).toContain('public readonly __sxRefs');
+    expect(code).toContain('ɵinstallSxSourceReferences');
+    expect(code).toContain('[\"source\"]');
   });
 });

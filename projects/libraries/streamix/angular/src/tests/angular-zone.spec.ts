@@ -17,18 +17,13 @@ import {
   rendererScheduler,
 } from '../lib/render-scheduler';
 
-import {
-  ensureAngularTestEnvironment,
-} from './angular-test-environment';
+import { useAngularTestEnvironment } from './angular-test-environment';
 import { idescribe } from '../../../src/tests/env.spec';
-
-ensureAngularTestEnvironment();
-
 idescribe('sx Angular zone integration', () => {
+  useAngularTestEnvironment();
   afterEach(() => {
     rendererScheduler.flushNow();
     rendererScheduler.setScheduler(animationFrameRenderScheduler);
-    TestBed.resetTestingModule();
   });
 
   it('does not resolve NgZone unless zone scheduling was explicitly enabled', () => {
