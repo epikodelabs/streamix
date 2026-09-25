@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "testify --headless --browser chrome",
     "test:watch": "testify --browser chrome",
+    "test:install-browser": "node scripts/install-test-browser.mjs chromium",
     "watch": "ng build --watch --configuration development",
     "jasmine": "testify --headless --browser chrome",
     "jasmine:coverage": "testify --headless --browser chrome --coverage",
