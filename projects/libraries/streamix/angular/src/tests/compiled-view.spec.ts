@@ -2,6 +2,10 @@ import {
   Component,
 } from '@angular/core';
 import {
+  createSubscription,
+  type Subscription,
+} from '@epikodelabs/streamix';
+import {
   TestBed,
 } from '@angular/core/testing';
 
@@ -20,9 +24,11 @@ class TestSource<T> {
 
   constructor(public value: T) {}
 
-  subscribe(callback: (value: T) => void): () => void {
+  subscribe(callback: (value: T) => void): Subscription {
     this.subscribers.add(callback);
-    return () => this.subscribers.delete(callback);
+    return createSubscription(() => {
+      this.subscribers.delete(callback);
+    });
   }
 
   set(value: T): void {
