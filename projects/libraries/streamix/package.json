@@ -1,16 +1,16 @@
 {
   "name": "@epikodelabs/streamix",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "Pull-based reactive streams with async iterators",
-  "license": "AGPL-3.0-or-later",
+  "license": "MIT",
   "keywords": [
-    "RxJS-like APIs",
     "reactive programming",
-    "streams",
-    "atoms",
-    "scopes",
-    "iterators",
-    "operators"
+    "RxJS syntax",
+    "data flows",
+    "atomicity",
+    "scopability",
+    "async iterators",
+    "async operators"
   ],
   "dependencies": {
     "tslib": "^2.8.1"
@@ -23,6 +23,8 @@
     "aggregates/",
     "dom/",
     "networking/",
+    "react/",
+    "vue/",
     "CHANGELOG.md"
   ],
   "type": "module",

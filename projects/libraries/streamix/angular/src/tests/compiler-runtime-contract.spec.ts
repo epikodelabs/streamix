@@ -48,8 +48,14 @@ function compileEmittedSetup(
 
   expect(start).toBeGreaterThanOrEqual(0);
 
-  const bodyStart = moduleText.indexOf('{', start);
-  expect(bodyStart).toBeGreaterThan(start);
+  // The setup signature contains callback types/defaults such as
+  // `() => {}`. Do not treat a brace from the parameter list as the
+  // function body. Generated setup functions always terminate the signature
+  // with a standalone `) {` line.
+  const bodyMarker = '\n) {';
+  const bodyMarkerStart = moduleText.indexOf(bodyMarker, start);
+  expect(bodyMarkerStart).toBeGreaterThan(start);
+  const bodyStart = bodyMarkerStart + bodyMarker.length - 1;
 
   const body = moduleText
     .slice(bodyStart + 1, moduleText.trimEnd().lastIndexOf('}'))

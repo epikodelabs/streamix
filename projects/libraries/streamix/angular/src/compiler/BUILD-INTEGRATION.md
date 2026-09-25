@@ -130,10 +130,11 @@ providers: [
 ]
 ```
 
-`provideSxZoneScheduling()` is the Streamix-side configuration marker. This
-avoids using `NgZone.isInAngularZone()` as a proxy for application
-configuration and avoids treating global Zone.js presence as evidence that the
-current Angular app is zone-backed.
+`provideSxZoneScheduling()` installs the Streamix environment initializer that
+resolves `NgZone` for a zone-backed application. No directive or compiled view
+probes for `NgZone`. This avoids using `NgZone.isInAngularZone()` as a proxy for
+application configuration and avoids treating global Zone.js presence as
+evidence that the current Angular app is zone-backed.
 
 ## Static node paths
 

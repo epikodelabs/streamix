@@ -6,7 +6,6 @@ import {
   inject,
 } from '@angular/core';
 
-import { ɵinstallSxAngularZone } from './angular-zone';
 
 /**
  * Teardown returned by a compiler-generated sx setup.
@@ -38,7 +37,6 @@ export function ɵinstallSxCompiledView<T>(
   context: T,
   setup: SxCompiledViewSetup<T>,
 ): void {
-  ɵinstallSxAngularZone();
   const host = inject<ElementRef<Element>>(ElementRef).nativeElement;
   const destroyRef = inject(DestroyRef);
   const changeDetectorRef = inject(ChangeDetectorRef);
