@@ -4,8 +4,8 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
-    "build": "ng build streamix",
-    "build:packages": "ng build streamix",
+    "build": "node scripts/build.mjs",
+    "build:packages": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "testify --headless --browser chrome",
     "test:watch": "testify --browser chrome",
